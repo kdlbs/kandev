@@ -121,7 +121,7 @@ used a tooltip. Its renders are now wrapped.
 
 ### Commands
 
-```
+```text
 pnpm --filter @kandev/web test -- components/editors/ components/task/file-editor-panel   37 passed
 pnpm run i18n:check                                                                        6/6 gates pass
 pnpm run lint                                                                              0 problems

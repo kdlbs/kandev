@@ -51,18 +51,20 @@ Adjacent contracts this design consumes but does not own:
   the write, so an unwritable path is rejected at preflight rather than after the person has chosen a
   resolution.
 - **agentctl upload handlers** (new, `server/api/workspace_upload.go`) registered beside the existing
-  workspace routes in `server.go`: `POST /workspace/file/upload-preflight` taking a JSON path list
-  and returning conflicts, and `POST /workspace/file/upload` taking the multipart body. The upload
-  handler bounds the request with `http.MaxBytesReader`, parses the multipart form, and streams the
-  file part into `WriteFileStream`. It owns the HTTP status mapping for oversize, containment,
-  missing-resolution, and IO failures.
+  workspace routes in `server.go`: `POST /api/v1/workspace/file/upload-preflight` taking a JSON path
+  list and returning conflicts, and `POST /api/v1/workspace/file/upload` taking the multipart body.
+  The upload handler bounds the request with `http.MaxBytesReader`, reads metadata with
+  `multipart.Reader`, and streams the file part into `WriteFileStream`. It uses a bounded temporary
+  file only when a caller sends the file part before its metadata. It owns the HTTP status mapping for
+  oversize, containment, missing-resolution, and IO failures.
 - **`Client.UploadWorkspaceFile`** (new, `internal/agent/runtime/agentctl/client_workspace_upload.go`)
   mirrors `MaterializeAttachment`: an `io.Pipe`, a goroutine writing the multipart body, the
   long-running HTTP client, and a bounded error-body read.
 - **Workspace file HTTP handlers** (new, `internal/task/handlers/workspace_file_http_handlers.go`)
   expose `POST /api/v1/task-sessions/:id/workspace/files`. They authenticate through `authn.FromGin`,
-  resolve the session to an agentctl client through the lifecycle manager, and stream each multipart
-  part straight into `UploadWorkspaceFile`. Registered next to `RegisterProcessRoutes`.
+  resolve the session to an agentctl client through the lifecycle manager, stage one bounded file part
+  so its declared size is checked before forwarding, and stream the staged file into
+  `UploadWorkspaceFile`. Registered next to `RegisterProcessRoutes`.
 
 ### Frontend
 
@@ -78,8 +80,8 @@ Adjacent contracts this design consumes but does not own:
   paths. A picker folder selection carries `webkitRelativePath`; a flat multi-file pick yields bare
   names. Both normalize to the same `{ file, relativePath }` list so the hook and the dialog see one
   shape.
-- **`hooks/use-file-operations.ts`** re-exports upload alongside the existing download so both panels
-  acquire it from one place.
+- **`components/task/use-file-upload-entry-points.tsx`** owns upload state and mounts the same flow for
+  both Files-panel entry points. File operations keep the existing CRUD and download responsibilities.
 - **`components/task/file-browser-toolbar.tsx`** turns the create control into a menu.
 - **`components/task/file-context-menu.tsx`** adds the folder upload item.
 - **`components/editors/monaco/monaco-editor-toolbar.tsx`** and
@@ -89,9 +91,10 @@ Adjacent contracts this design consumes but does not own:
 
 ## Data and contracts
 
-### Preflight: `POST .../workspace/files/preflight`
+### Preflight routes
 
-JSON, at both the backend and agentctl layers.
+The backend route is `POST /api/v1/task-sessions/:id/workspace/files/preflight`. It forwards JSON to
+the agentctl route `POST /api/v1/workspace/file/upload-preflight`.
 
 ```json
 { "dir": "fixtures", "repo": "", "paths": ["a.json", "nested/b.json"] }
@@ -107,9 +110,10 @@ Response `200`:
 collision in one call. A path that fails containment is reported as an error rather than a conflict,
 so it never reaches the resolution dialog.
 
-### Upload: `POST .../workspace/files`
+### Upload routes
 
-Multipart form.
+The backend route is `POST /api/v1/task-sessions/:id/workspace/files`. It forwards a multipart form to
+the agentctl route `POST /api/v1/workspace/file/upload`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -192,8 +196,9 @@ file that can display a download button is already loaded and already under the 
 
 Uploaded content lands in the task workspace on disk and has no database representation. There is no
 migration, no retention policy, and no restart behavior: a file that finished writing is an ordinary
-workspace file from that moment on, indistinguishable from one the agent wrote. Collision handling
-means the feature never destroys an existing file, so no undo record is required.
+workspace file from that moment on, indistinguishable from one the agent wrote. Collision handling is
+explicit: **Replace** can overwrite an existing file, while **Keep both** and **Skip** preserve it. The
+workspace has no undo record, so the UI keeps **Keep both** as the safe default.
 
 ## Security
 
@@ -211,8 +216,9 @@ load-bearing control:
   attachment upload guard.
 - Request bodies are bounded by `http.MaxBytesReader` before parsing, so an oversize body cannot be
   used to exhaust memory.
-- Content is streamed through `io.Pipe` and `io.Copy` at every hop. Nothing calls `io.ReadAll` and
-  nothing base64-encodes, which also keeps memory flat for large files.
+- Content is streamed through `io.Pipe` and `io.Copy` at every network hop. Metadata and error bodies
+  use bounded reads, and no layer base64-encodes file content. This keeps memory bounded for large
+  files.
 
 This capability does not widen the workspace trust boundary. The task workspace is already fully
 writable by the agent running in it, so upload adds a new route to a capability that exists, under

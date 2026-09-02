@@ -36,6 +36,7 @@ import {
 } from "./file-browser-hooks";
 import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
 import { useFileUploadEntryPoints } from "./use-file-upload-entry-points";
+import { FileUploadStatusList } from "./file-upload-status-list";
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
 import { computeMoveTargets, getVisiblePaths, moveNodesInTree } from "./file-tree-utils";
 import { useFileTreeReveal } from "./file-tree-reveal";
@@ -595,6 +596,7 @@ export function FileBrowser({
           onUploadFilesHere={sessionId ? handleUploadHere : undefined}
           showTouchActions={showTouchActions}
         />
+        <FileUploadStatusList uploads={upload.uploads} />
         {upload.elements}
       </div>
     </FileTreeEditorProvider>

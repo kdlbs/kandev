@@ -2,6 +2,7 @@ package process
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -61,7 +62,7 @@ func TestWriteFileStreamSymlinkedDirRejected(t *testing.T) {
 	dir, wt := setupTestDir(t)
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("create symlink: %v", err)
 	}
 
 	_, _, err := wt.WriteFileStream("link/escaped.txt", UploadResolutionNone, strings.NewReader("payload"))
@@ -124,6 +125,18 @@ func TestWriteFileStreamResolutions(t *testing.T) {
 		got, _ := os.ReadFile(filepath.Join(dir, "taken.txt"))
 		if string(got) != "incoming" {
 			t.Errorf("content = %q, want incoming", got)
+		}
+	})
+
+	t.Run("replace refuses a directory", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		if err := os.Mkdir(filepath.Join(dir, "taken.txt"), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+
+		_, _, err := wt.WriteFileStream("taken.txt", UploadResolutionReplace, strings.NewReader("incoming"))
+		if err == nil || !strings.Contains(err.Error(), "is a directory") {
+			t.Fatalf("expected directory rejection, got %v", err)
 		}
 	})
 
@@ -237,6 +250,42 @@ func TestWriteFileStreamNotifiesChange(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected a workspace change notification")
+	}
+}
+
+func TestWriteFileStreamConcurrentKeepBothUsesUniqueNames(t *testing.T) {
+	dir, wt := setupTestDir(t)
+	writeFile(t, dir, "taken.txt", "original")
+
+	const uploads = 8
+	type uploadResult struct {
+		path string
+		err  error
+	}
+	results := make(chan uploadResult, uploads)
+	for i := 0; i < uploads; i++ {
+		go func(i int) {
+			path, _, err := wt.WriteFileStream(
+				"taken.txt",
+				UploadResolutionKeepBoth,
+				strings.NewReader(fmt.Sprintf("incoming-%d", i)),
+			)
+			results <- uploadResult{path: path, err: err}
+		}(i)
+	}
+	seen := map[string]bool{}
+	for i := 0; i < uploads; i++ {
+		result := <-results
+		if result.err != nil {
+			t.Fatalf("concurrent upload: %v", result.err)
+		}
+		if seen[result.path] {
+			t.Fatalf("duplicate final path %q", result.path)
+		}
+		seen[result.path] = true
+	}
+	if len(seen) != uploads {
+		t.Fatalf("got %d uploaded paths, want %d: %v", len(seen), uploads, seen)
 	}
 }
 

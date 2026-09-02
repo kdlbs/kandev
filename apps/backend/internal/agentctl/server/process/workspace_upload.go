@@ -111,17 +111,44 @@ func (wt *WorkspaceTracker) WriteFileStream(
 		return "", 0, fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	// Resolve the conflict and pick the final name under the same barrier as the
-	// write, so two concurrent keep-both uploads cannot choose the same slot.
-	targetRel, targetReq, err := resolveUploadTarget(path.root, path.rel, reqPath, resolution)
+	tmpRel, tmp, err := createUploadTemp(path.root, dir)
 	if err != nil {
 		return "", 0, err
+	}
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = path.root.Remove(tmpRel)
 	}
 
-	written, err := writeRootedFileAtomically(path.root, dir, targetRel, src)
+	written, err := io.Copy(tmp, src)
 	if err != nil {
+		cleanup()
+		return "", 0, fmt.Errorf("failed to write upload: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return "", 0, fmt.Errorf("failed to flush upload: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = path.root.Remove(tmpRel)
+		return "", 0, fmt.Errorf("failed to close upload: %w", err)
+	}
+
+	// Re-check and place the staged file under a real tracker lock. This lock
+	// covers only metadata and rename, not the unbounded source read above.
+	wt.mutationMu.Lock()
+	targetRel, targetReq, err := resolveUploadTarget(path.root, path.rel, reqPath, resolution)
+	if err != nil {
+		wt.mutationMu.Unlock()
+		_ = path.root.Remove(tmpRel)
 		return "", 0, err
 	}
+	if err := path.root.Rename(tmpRel, targetRel); err != nil {
+		wt.mutationMu.Unlock()
+		_ = path.root.Remove(tmpRel)
+		return "", 0, fmt.Errorf("failed to place upload: %w", err)
+	}
+	wt.mutationMu.Unlock()
 
 	notifyRel := wt.mutationNotificationPath(filepath.Join(filepath.Dir(path.safe), filepath.Base(targetRel)))
 	wt.notifyFileChange(notifyRel, types.FileOpCreate)
@@ -137,7 +164,7 @@ func resolveUploadTarget(
 	reqPath string,
 	resolution UploadResolution,
 ) (string, string, error) {
-	_, err := root.Stat(rel)
+	info, err := root.Stat(rel)
 	switch {
 	case os.IsNotExist(err):
 		// Destination is free; the resolution is irrelevant.
@@ -148,6 +175,9 @@ func resolveUploadTarget(
 
 	switch resolution {
 	case UploadResolutionReplace:
+		if info.IsDir() {
+			return "", "", fmt.Errorf("cannot replace destination: %s is a directory", reqPath)
+		}
 		return rel, reqPath, nil
 	case UploadResolutionKeepBoth:
 		freeRel, err := nextFreeUploadName(root, rel)
@@ -185,40 +215,6 @@ func replaceLastSegment(reqPath, name string) string {
 		return name
 	}
 	return reqPath[:idx+1] + name
-}
-
-// writeRootedFileAtomically streams src to a temporary file in dir and renames
-// it onto targetRel. Every failure path removes the temporary file, so neither a
-// partial destination nor a stray artifact survives an error.
-func writeRootedFileAtomically(root *os.Root, dir, targetRel string, src io.Reader) (int64, error) {
-	tmpRel, tmp, err := createUploadTemp(root, dir)
-	if err != nil {
-		return 0, err
-	}
-
-	cleanup := func() {
-		_ = tmp.Close()
-		_ = root.Remove(tmpRel)
-	}
-
-	written, err := io.Copy(tmp, src)
-	if err != nil {
-		cleanup()
-		return 0, fmt.Errorf("failed to write upload: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		cleanup()
-		return 0, fmt.Errorf("failed to flush upload: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = root.Remove(tmpRel)
-		return 0, fmt.Errorf("failed to close upload: %w", err)
-	}
-	if err := root.Rename(tmpRel, targetRel); err != nil {
-		_ = root.Remove(tmpRel)
-		return 0, fmt.Errorf("failed to place upload: %w", err)
-	}
-	return written, nil
 }
 
 // createUploadTemp opens a uniquely named temporary file inside dir through the

@@ -202,6 +202,72 @@ test.describe("Mobile file viewer panel", () => {
     await expect(viewer.getByText("Binary file")).toBeVisible();
   });
 
+  test("binary viewer exposes a touch-sized download control", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+    const binary = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]);
+    const { session, filePath } = await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile FV Binary Download",
+      options: { extension: "bin", content: binary },
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    await session.fileTreeNode(filePath).tap();
+    const viewer = testPage.getByTestId("mobile-file-viewer-panel");
+    await expect(viewer).toBeVisible({ timeout: 5_000 });
+
+    const downloadControl = viewer.getByRole("button", { name: "Download file" });
+    await expect(downloadControl).toBeVisible();
+    const box = await downloadControl.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    expect(box?.width).toBeGreaterThanOrEqual(44);
+
+    const download = testPage.waitForEvent("download");
+    await downloadControl.tap();
+    const saved = await download;
+    const target = path.join(backend.tmpDir, "mobile-file-download.bin");
+    await saved.saveAs(target);
+    expect(fs.readFileSync(target)).toEqual(binary);
+  });
+
+  test("Files upload menu keeps its actions touch-sized", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+    await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile FV Upload Menu",
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    const createMenu = testPage.getByTestId("files-create-menu");
+    const triggerBox = await createMenu.boundingBox();
+    expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+    expect(triggerBox?.width).toBeGreaterThanOrEqual(44);
+    await createMenu.tap();
+
+    const uploadFiles = testPage.getByRole("menuitem", { name: "Upload files" });
+    const uploadFolder = testPage.getByRole("menuitem", { name: "Upload folder" });
+    await expect(uploadFiles).toBeVisible();
+    await expect(uploadFolder).toBeVisible();
+    expect((await uploadFiles.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect((await uploadFolder.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  });
+
   test("viewer panel keeps a visible close action and supports scrolling large files", async ({
     testPage,
     apiClient,

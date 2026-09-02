@@ -43,6 +43,7 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
         repositoryId={props.repositoryId}
         repositoryName={props.repo}
         enableComments={props.enableComments}
+        onDownload={props.onDownload}
         onTogglePreview={props.onToggleMarkdownPreview}
       />
     );

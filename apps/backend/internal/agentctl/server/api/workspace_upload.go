@@ -3,7 +3,10 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -23,9 +26,13 @@ const maxWorkspaceUploadBytes int64 = taskmodels.MaxMessageAttachmentBytes
 // itself, matching the allowance the attachment endpoint already makes.
 const workspaceUploadRequestSlack int64 = 4 * 1024 * 1024
 
-// workspaceUploadMultipartMemory bounds the in-memory portion of the parsed
-// form. The file part streams from disk beyond this.
-const workspaceUploadMultipartMemory int64 = 16 << 20
+const (
+	workspaceUploadPreflightBodyLimit = 1 << 20
+	workspaceUploadMaxPaths           = 4096
+	workspaceUploadMaxPathBytes       = 4096
+)
+
+var errWorkspaceUploadTooLarge = errors.New("workspace upload exceeds maximum size")
 
 type uploadPreflightRequest struct {
 	Dir   string   `json:"dir"`
@@ -46,9 +53,33 @@ type workspaceUploadResponse struct {
 // handleUploadPreflight reports which of the requested destinations already
 // exist, so the caller can resolve every conflict before sending any bytes.
 func (s *Server) handleUploadPreflight(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, workspaceUploadPreflightBodyLimit)
 	var req uploadPreflightRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		status := http.StatusBadRequest
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		c.JSON(status, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if len(req.Paths) > workspaceUploadMaxPaths {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "too many upload paths"})
+		return
+	}
+	if len(req.Dir) > workspaceUploadMaxPathBytes || len(req.Repo) > workspaceUploadMaxPathBytes {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "upload directory is too long"})
+		return
+	}
+	for _, uploadPath := range req.Paths {
+		if len(uploadPath) > workspaceUploadMaxPathBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "upload path is too long"})
+			return
+		}
+	}
+	if len(req.Paths) == 0 {
+		c.JSON(http.StatusOK, uploadPreflightResponse{Conflicts: []process.UploadConflict{}})
 		return
 	}
 
@@ -73,67 +104,286 @@ func (s *Server) handleUploadPreflight(c *gin.Context) {
 // handleFileUpload streams one multipart file part into the workspace.
 func (s *Server) handleFileUpload(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxWorkspaceUploadBytes+workspaceUploadRequestSlack)
-	if err := c.Request.ParseMultipartForm(workspaceUploadMultipartMemory); err != nil {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "upload request is too large"})
-		return
-	}
-
-	declaredSize, err := strconv.ParseInt(strings.TrimSpace(c.Request.FormValue("size_bytes")), 10, 64)
-	if err != nil || declaredSize < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "size_bytes is required"})
-		return
-	}
-	if declaredSize > maxWorkspaceUploadBytes {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file exceeds the maximum upload size"})
-		return
-	}
-
-	resolution, err := process.ParseUploadResolution(c.Request.FormValue("resolution"))
+	multipartReader, err := c.Request.MultipartReader()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart upload is required"})
 		return
 	}
 
-	relativePath := strings.TrimSpace(c.Request.FormValue("relative_path"))
-	if relativePath == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "relative_path is required"})
+	parsed, parseErr := parseWorkspaceUploadMultipart(multipartReader)
+	if parsed != nil {
+		defer parsed.cleanup()
+	}
+	if parseErr != nil {
+		c.JSON(parseErr.status, gin.H{"error": parseErr.message})
 		return
 	}
-
-	scopedPath, err := s.scopedUploadPath(c.Request.FormValue("repo"), c.Request.FormValue("dir"), relativePath)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if parsed.staged != nil {
+		if _, err := parsed.staged.file.Seek(0, io.SeekStart); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "workspace upload failed"})
+			return
+		}
+		parsed.source = parsed.staged.file
 	}
-
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
+	if parsed.source == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file part is required"})
 		return
 	}
-	if fileHeader.Size != declaredSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "size_bytes does not match the uploaded file"})
-		return
-	}
-
-	src, err := fileHeader.Open()
+	response, err := s.writeWorkspaceUploadPart(c, parsed.fields, parsed.source)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file part could not be read"})
 		return
 	}
-	defer func() { _ = src.Close() }()
+	c.JSON(http.StatusCreated, response)
+}
 
-	writtenPath, written, err := s.procMgr.GetWorkspaceTracker().WriteFileStream(scopedPath, resolution, src)
+type workspaceUploadParseError struct {
+	status  int
+	message string
+}
+
+func (e workspaceUploadParseError) Error() string { return e.message }
+
+type parsedWorkspaceUpload struct {
+	fields       workspaceUploadFields
+	source       io.Reader
+	sourceCloser io.Closer
+	staged       *stagedWorkspaceUpload
+}
+
+func (p *parsedWorkspaceUpload) cleanup() {
+	if p == nil {
+		return
+	}
+	if p.sourceCloser != nil {
+		_ = p.sourceCloser.Close()
+	}
+	if p.staged != nil {
+		p.staged.cleanup()
+	}
+}
+
+func parseWorkspaceUploadMultipart(reader *multipart.Reader) (*parsedWorkspaceUpload, *workspaceUploadParseError) {
+	parsed := &parsedWorkspaceUpload{}
+	for {
+		part, nextErr := reader.NextPart()
+		if errors.Is(nextErr, io.EOF) {
+			return parsed, nil
+		}
+		if nextErr != nil {
+			if isMultipartSizeError(nextErr) {
+				return parsed, &workspaceUploadParseError{status: http.StatusRequestEntityTooLarge, message: "upload request is too large"}
+			}
+			return parsed, &workspaceUploadParseError{status: http.StatusBadRequest, message: "invalid multipart upload"}
+		}
+		if part.FileName() == "" {
+			if parseErr := parseWorkspaceUploadField(part, &parsed.fields); parseErr != nil {
+				return parsed, parseErr
+			}
+			continue
+		}
+		if part.FormName() != "file" || parsed.source != nil || parsed.staged != nil {
+			_ = part.Close()
+			return parsed, &workspaceUploadParseError{status: http.StatusBadRequest, message: "exactly one file part is required"}
+		}
+		if !parsed.fields.allFieldsSeen() {
+			staged, stageErr := stageWorkspaceUploadPart(part)
+			_ = part.Close()
+			if stageErr != nil {
+				if errors.Is(stageErr, errWorkspaceUploadTooLarge) || isMultipartSizeError(stageErr) {
+					return parsed, &workspaceUploadParseError{status: http.StatusRequestEntityTooLarge, message: "file exceeds the maximum upload size"}
+				}
+				return parsed, &workspaceUploadParseError{status: http.StatusInternalServerError, message: "workspace upload failed"}
+			}
+			parsed.staged = staged
+			continue
+		}
+		parsed.source = part
+		parsed.sourceCloser = part
+		return parsed, nil
+	}
+}
+
+func parseWorkspaceUploadField(part *multipart.Part, fields *workspaceUploadFields) *workspaceUploadParseError {
+	value, readErr := readWorkspaceUploadField(part)
+	_ = part.Close()
+	if readErr != nil {
+		return &workspaceUploadParseError{status: http.StatusBadRequest, message: "invalid upload metadata"}
+	}
+	fields.set(part.FormName(), value)
+	return nil
+}
+
+func isMultipartSizeError(err error) bool {
+	var maxErr *http.MaxBytesError
+	return errors.As(err, &maxErr)
+}
+
+type workspaceUploadFields struct {
+	dir            string
+	repo           string
+	relativePath   string
+	resolution     string
+	declaredSize   int64
+	hasSize        bool
+	seenDir        bool
+	seenRepo       bool
+	seenPath       bool
+	seenResolution bool
+	seenSize       bool
+}
+
+func (f *workspaceUploadFields) set(name, value string) {
+	switch name {
+	case "dir":
+		f.dir = value
+		f.seenDir = true
+	case "repo":
+		f.repo = value
+		f.seenRepo = true
+	case "relative_path":
+		f.relativePath = value
+		f.seenPath = true
+	case "resolution":
+		f.resolution = value
+		f.seenResolution = true
+	case "size_bytes":
+		f.seenSize = true
+		if parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
+			f.declaredSize = parsed
+			f.hasSize = true
+		}
+	}
+}
+
+func (f workspaceUploadFields) allFieldsSeen() bool {
+	return f.seenDir && f.seenRepo && f.seenPath && f.seenResolution && f.seenSize
+}
+
+func (f workspaceUploadFields) validate() (process.UploadResolution, error) {
+	if strings.TrimSpace(f.relativePath) == "" {
+		return process.UploadResolutionNone, errors.New("relative_path is required")
+	}
+	if len(f.relativePath) > workspaceUploadMaxPathBytes || len(f.dir) > workspaceUploadMaxPathBytes || len(f.repo) > workspaceUploadMaxPathBytes {
+		return process.UploadResolutionNone, errors.New("upload path is too long")
+	}
+	if !f.hasSize || f.declaredSize < 0 {
+		return process.UploadResolutionNone, errors.New("size_bytes is required")
+	}
+	if f.declaredSize > maxWorkspaceUploadBytes {
+		return process.UploadResolutionNone, errors.New("file exceeds the maximum upload size")
+	}
+	resolution, err := process.ParseUploadResolution(f.resolution)
 	if err != nil {
-		s.respondUploadError(c, scopedPath, err)
-		return
+		return process.UploadResolutionNone, err
 	}
+	return resolution, nil
+}
 
-	c.JSON(http.StatusCreated, workspaceUploadResponse{
+const workspaceUploadFieldLimit int64 = workspaceUploadMaxPathBytes + 128
+
+func readWorkspaceUploadField(part *multipart.Part) (string, error) {
+	data, err := io.ReadAll(io.LimitReader(part, workspaceUploadFieldLimit+1))
+	if err != nil {
+		return "", err
+	}
+	if int64(len(data)) > workspaceUploadFieldLimit {
+		return "", errors.New("upload metadata is too long")
+	}
+	return string(data), nil
+}
+
+type boundedWorkspaceUploadReader struct {
+	part     io.Reader
+	expected int64
+	read     int64
+}
+
+type stagedWorkspaceUpload struct {
+	file *os.File
+	path string
+}
+
+func stageWorkspaceUploadPart(part io.Reader) (*stagedWorkspaceUpload, error) {
+	tmp, err := os.CreateTemp("", "kandev-workspace-upload-")
+	if err != nil {
+		return nil, fmt.Errorf("create upload staging file: %w", err)
+	}
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}
+	written, err := io.Copy(tmp, io.LimitReader(part, maxWorkspaceUploadBytes+1))
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("stage upload: %w", err)
+	}
+	if written > maxWorkspaceUploadBytes {
+		cleanup()
+		return nil, errWorkspaceUploadTooLarge
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("rewind upload staging file: %w", err)
+	}
+	return &stagedWorkspaceUpload{file: tmp, path: tmp.Name()}, nil
+}
+
+func (s *Server) writeWorkspaceUploadPart(c *gin.Context, fields workspaceUploadFields, src io.Reader) (*workspaceUploadResponse, error) {
+	resolution, validateErr := fields.validate()
+	if validateErr != nil {
+		if fields.declaredSize > maxWorkspaceUploadBytes {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file exceeds the maximum upload size"})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": validateErr.Error()})
+		}
+		return nil, validateErr
+	}
+	scopedPath, scopeErr := s.scopedUploadPath(fields.repo, fields.dir, fields.relativePath)
+	if scopeErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": scopeErr.Error()})
+		return nil, scopeErr
+	}
+	writtenPath, written, writeErr := s.procMgr.GetWorkspaceTracker().WriteFileStream(
+		scopedPath,
+		resolution,
+		&boundedWorkspaceUploadReader{part: src, expected: fields.declaredSize},
+	)
+	if writeErr != nil {
+		s.respondUploadError(c, scopedPath, writeErr)
+		return nil, writeErr
+	}
+	return &workspaceUploadResponse{
 		Path:              writtenPath,
 		SizeBytes:         written,
 		ResolutionApplied: string(resolution),
-	})
+	}, nil
+}
+
+func (s *stagedWorkspaceUpload) cleanup() {
+	if s == nil || s.file == nil {
+		return
+	}
+	_ = s.file.Close()
+	_ = os.Remove(s.path)
+}
+
+func (r *boundedWorkspaceUploadReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	remaining := r.expected - r.read
+	if remaining < int64(len(p)) {
+		p = p[:remaining+1]
+	}
+	n, err := r.part.Read(p)
+	r.read += int64(n)
+	if r.read > r.expected {
+		return n, errors.New("size_bytes does not match uploaded content")
+	}
+	if errors.Is(err, io.EOF) && r.read != r.expected {
+		return n, errors.New("size_bytes does not match uploaded content")
+	}
+	return n, err
 }
 
 // respondUploadError maps a write failure onto a status that tells the caller
@@ -161,6 +411,7 @@ func isUploadRequestError(err error) bool {
 		"outside the workspace",
 		"invalid path",
 		"is a directory",
+		"size_bytes does not match",
 	} {
 		if strings.Contains(msg, marker) {
 			return true

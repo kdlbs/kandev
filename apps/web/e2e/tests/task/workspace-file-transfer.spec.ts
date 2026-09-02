@@ -41,7 +41,7 @@ async function openFilesPanel(
   return session;
 }
 
-function seedRepo(backend: { tmpDir: string }, files: Record<string, string>) {
+function seedRepo(backend: { tmpDir: string }, files: Record<string, string | Buffer>) {
   const git = new GitHelper(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
@@ -203,9 +203,7 @@ test.describe("Workspace file transfer", () => {
     backend,
   }) => {
     seedRepo(backend, {
-      "archive.zip": Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x01, 0x02, 0xff, 0xfe]).toString(
-        "binary",
-      ),
+      "archive.zip": Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x01, 0x02, 0xff, 0xfe]),
     });
 
     const session = await openFilesPanel(

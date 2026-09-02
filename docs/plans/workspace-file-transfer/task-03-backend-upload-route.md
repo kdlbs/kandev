@@ -35,8 +35,8 @@ authenticated session-scoped HTTP route that uses it.
 - `POST /api/v1/task-sessions/:id/workspace/files` and
   `POST /api/v1/task-sessions/:id/workspace/files/preflight` in a new
   `internal/task/handlers/workspace_file_http_handlers.go`, authenticating through `authn.FromGin`,
-  resolving the session to an agentctl client through the lifecycle manager, and streaming
-  `fileHeader.Open()` straight into the client method.
+  resolving the session to an agentctl client through the lifecycle manager, and forwarding a bounded
+  temporary file after the declared size is checked.
 - Registration beside `taskhandlers.RegisterProcessRoutes` in `backendapp/helpers.go`.
 - The per-file cap is `models.MaxMessageAttachmentBytes`.
 
@@ -55,8 +55,8 @@ authenticated session-scoped HTTP route that uses it.
   the resolution so an unresolved existing destination still surfaces as `409`.
 - A single file above the attachment limit is rejected with a size-specific status, and one request
   carries one file so a rejection does not affect other files in a selection.
-- No layer calls `io.ReadAll` and nothing is base64-encoded; bytes stream from the multipart part
-  through to agentctl.
+- Network bodies are streamed and bounded. Metadata and error responses use limited reads, and
+  nothing is base64-encoded; file bytes do not enter a whole-file memory buffer.
 
 ## Verification
 
@@ -113,7 +113,8 @@ mark this task `done` and update its checkbox in `plan.md`.
   stays distinguishable from a failure.
 - `POST /api/v1/task-sessions/:id/workspace/files` and `.../files/preflight` in new
   `internal/task/handlers/workspace_file_http_handlers.go`, guarded by the existing
-  `denySessionAccess` and resolving the client through `execution.GetAgentCtlClient()`.
+  `denySessionAccess` and resolving the client through `execution.AcquireAgentCtlClient()` after
+  bounded file validation.
 - `RegisterProcessRoutes` now returns `*ProcessHandlers` so `helpers.go` can register the workspace
   routes beside it without constructing a second handler set.
 - The upload handler validates `size_bytes` against the actual part size and caps at

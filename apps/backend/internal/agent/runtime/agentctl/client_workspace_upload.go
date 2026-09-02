@@ -90,31 +90,10 @@ func (c *Client) UploadWorkspaceFile(
 		return nil, fmt.Errorf("upload size exceeds maximum")
 	}
 
-	pipeReader, pipeWriter := io.Pipe()
-	multipartWriter := multipart.NewWriter(pipeWriter)
-	go func() {
-		if err := writeWorkspaceUploadMultipart(multipartWriter, upload, content); err != nil {
-			_ = pipeWriter.CloseWithError(err)
-			return
-		}
-		_ = pipeWriter.Close()
-	}()
-
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		c.baseURL+"/api/v1/workspace/file/upload",
-		pipeReader,
-	)
+	resp, err := c.doMultipartRequest(ctx, c.baseURL+"/api/v1/workspace/file/upload", func(writer *multipart.Writer) error {
+		return writeWorkspaceUploadMultipart(writer, upload, content)
+	})
 	if err != nil {
-		_ = pipeReader.Close()
-		return nil, fmt.Errorf("create workspace upload request: %w", err)
-	}
-	req.Header.Set("Content-Type", multipartWriter.FormDataContentType())
-
-	resp, err := c.longRunningHTTPClient.Do(req)
-	if err != nil {
-		_ = pipeReader.Close()
 		return nil, fmt.Errorf("upload workspace file: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()

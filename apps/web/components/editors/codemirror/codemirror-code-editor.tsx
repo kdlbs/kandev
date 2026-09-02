@@ -175,7 +175,7 @@ function CodeMirrorDownloadButton({ onDownload }: { onDownload?: () => void }) {
           variant="ghost"
           onClick={onDownload}
           aria-label={t("editors:downloadFile")}
-          className="h-8 w-8 p-0 cursor-pointer"
+          className="h-11 w-11 p-0 cursor-pointer sm:h-8 sm:w-8"
         >
           <IconDownload className="h-4 w-4" />
         </Button>

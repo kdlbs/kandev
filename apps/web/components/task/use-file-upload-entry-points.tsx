@@ -21,6 +21,7 @@ export function useFileUploadEntryPoints(sessionId: string | null) {
   const filesInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const destinationRef = useRef<string>("");
+  const pickerSessionRef = useRef<string | null>(sessionId);
   const [, setPickerOpen] = useState(false);
 
   const { uploads, conflicts, uploadFiles, resolveConflicts, cancelConflicts } =
@@ -48,24 +49,29 @@ export function useFileUploadEntryPoints(sessionId: string | null) {
     [t, toast],
   );
 
-  const openPicker = useCallback((mode: UploadPickerMode, destination: string) => {
-    destinationRef.current = destination;
-    const input = mode === "folder" ? folderInputRef.current : filesInputRef.current;
-    if (!input) return;
-    // Reset first, or picking the same file twice in a row fires no change event.
-    input.value = "";
-    setPickerOpen(true);
-    input.click();
-  }, []);
+  const openPicker = useCallback(
+    (mode: UploadPickerMode, destination: string) => {
+      destinationRef.current = destination;
+      pickerSessionRef.current = sessionId;
+      const input = mode === "folder" ? folderInputRef.current : filesInputRef.current;
+      if (!input) return;
+      // Reset first, or picking the same file twice in a row fires no change event.
+      input.value = "";
+      setPickerOpen(true);
+      input.click();
+    },
+    [sessionId],
+  );
 
   const handlePicked = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = event.target.files;
       setPickerOpen(false);
       if (!files || files.length === 0) return;
+      if (pickerSessionRef.current !== sessionId) return;
       report(await uploadFiles(destinationRef.current, files));
     },
-    [uploadFiles, report],
+    [sessionId, uploadFiles, report],
   );
 
   const handleResolve = useCallback(

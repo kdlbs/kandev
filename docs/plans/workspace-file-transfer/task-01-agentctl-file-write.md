@@ -42,7 +42,7 @@ agentctl routes over them. This is the bottom of the upload stack; nothing above
   an error, never a silent overwrite.
 - `WorkspaceTracker.CheckUploadConflicts`, resolving a candidate path list through the same rules and
   reporting which already exist. A containment failure is an error, not a conflict.
-- `POST /workspace/file/upload-preflight` (JSON) and `POST /workspace/file/upload` (multipart) in a
+- `POST /api/v1/workspace/file/upload-preflight` (JSON) and `POST /api/v1/workspace/file/upload` (multipart) in a
   new `server/api/workspace_upload.go`, registered beside the existing workspace file routes. The
   upload route is bounded by `http.MaxBytesReader` and streams the `file` part.
 - Status mapping: `413` oversize, `409` unresolved existing destination, `400` containment rejection
@@ -138,7 +138,7 @@ paths and any `..` component outright. The containment test caught this.
 
 ### Commands
 
-```
+```text
 go test ./internal/agentctl/server/process -run 'TestWriteFileStream|TestCheckUploadConflicts'  ok (16 subtests)
 go test ./internal/agentctl/server/api -run 'TestHandleFileUpload|TestHandleUploadPreflight'    ok (10 tests)
 go test ./internal/agentctl/server/process ./internal/agentctl/server/api                       ok

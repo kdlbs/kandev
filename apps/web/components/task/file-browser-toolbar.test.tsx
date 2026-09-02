@@ -207,5 +207,11 @@ describe("FileBrowserToolbar create menu", () => {
     fireEvent.click(menuTrigger);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Upload folder" }));
     await waitFor(() => expect(onUploadFiles).toHaveBeenCalledWith("folder"));
+
+    onUploadFiles.mockClear();
+    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
+    fireEvent.click(menuTrigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Upload files" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledWith("files"));
   });
 });

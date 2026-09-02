@@ -4,7 +4,6 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import type { WebSocketClient } from "@/lib/ws/client";
 import { createFile, deleteFile, renameFile, requestFileContent } from "@/lib/ws/workspace-files";
 import { triggerFileDownload } from "@/lib/utils/file-download";
-import { useFileUpload } from "@/hooks/use-file-upload";
 import { useToast } from "@/components/toast-provider";
 
 type ToastFn = ReturnType<typeof useToast>["toast"];
@@ -122,19 +121,10 @@ export function useFileOperations(sessionId: string | null) {
     [sessionId, t, toast, unknownError],
   );
 
-  // Upload is acquired here so both Files panels pick it up from one place,
-  // beside the download they already share.
-  const upload = useFileUpload(sessionId);
-
   return {
     createFile: handleCreateFile,
     deleteFile: handleDeleteFile,
     renameFile: handleRenameFile,
     downloadFile: handleDownloadFile,
-    uploadFiles: upload.uploadFiles,
-    uploads: upload.uploads,
-    uploadConflicts: upload.conflicts,
-    resolveUploadConflicts: upload.resolveConflicts,
-    cancelUploadConflicts: upload.cancelConflicts,
   };
 }

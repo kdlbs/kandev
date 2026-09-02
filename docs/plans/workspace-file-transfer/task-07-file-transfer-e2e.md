@@ -32,8 +32,9 @@ integration evidence the user-facing requirements need.
 
 ## Scope
 
-- A new `apps/web/e2e/tests/task/workspace-file-transfer.spec.ts` covering four scenarios: flat
-  upload, conflict resolution, folder upload, and download from the unpreviewable-file screen.
+- A new `apps/web/e2e/tests/task/workspace-file-transfer.spec.ts` covering five scenarios: flat
+  upload, conflict resolution, cancel, folder upload, and download from the unpreviewable-file
+  screen.
 - `setInputFiles` against the hidden inputs rather than simulating an OS dialog.
 
 ## Exclusions
@@ -54,7 +55,7 @@ integration evidence the user-facing requirements need.
 ## Verification
 
 ```bash
-cd apps/web && pnpm e2e:raw -- e2e/tests/task/workspace-file-transfer.spec.ts
+cd apps/web && pnpm e2e:raw e2e/tests/task/workspace-file-transfer.spec.ts
 ```
 
 ## Files likely touched

@@ -35,7 +35,7 @@ function ChoiceGroup({
   onChange,
 }: {
   labels: Record<ConflictChoice, string>;
-  value: ConflictChoice;
+  value?: ConflictChoice;
   ariaLabel: string;
   onChange: (choice: ConflictChoice) => void;
 }) {
@@ -48,7 +48,7 @@ function ChoiceGroup({
           variant={value === choice ? "default" : "outline"}
           aria-pressed={value === choice}
           className={cn(
-            "h-8 cursor-pointer px-2 text-xs",
+            "min-h-11 h-8 cursor-pointer px-2 text-xs sm:min-h-8",
             choice === REPLACE && "hover:text-destructive",
           )}
           onClick={() => onChange(choice)}
@@ -94,6 +94,12 @@ export function FileUploadConflictDialog({
     [choices],
   );
 
+  const applyToAllChoice = useMemo(() => {
+    if (paths.length === 0) return KEEP_BOTH;
+    const first = choiceFor(paths[0]);
+    return paths.every((path) => choiceFor(path) === first) ? first : undefined;
+  }, [paths, choiceFor]);
+
   const handleConfirm = useCallback(() => {
     onResolve(new Map(paths.map((path) => [path, choices.get(path) ?? KEEP_BOTH])));
     setChoices(new Map());
@@ -120,7 +126,7 @@ export function FileUploadConflictDialog({
           </span>
           <ChoiceGroup
             labels={labels}
-            value={KEEP_BOTH}
+            value={applyToAllChoice}
             ariaLabel={t("task:uploadConflictApplyToAll")}
             onChange={(choice) => setChoices(new Map(paths.map((path) => [path, choice])))}
           />
@@ -143,10 +149,18 @@ export function FileUploadConflictDialog({
         </ul>
 
         <DialogFooter>
-          <Button variant="outline" className="cursor-pointer" onClick={handleCancel}>
+          <Button
+            variant="outline"
+            className="min-h-11 cursor-pointer sm:min-h-9"
+            onClick={handleCancel}
+          >
             {t("common:cancel")}
           </Button>
-          <Button variant="default" className="cursor-pointer" onClick={handleConfirm}>
+          <Button
+            variant="default"
+            className="min-h-11 cursor-pointer sm:min-h-9"
+            onClick={handleConfirm}
+          >
             {t("task:uploadConflictConfirm")}
           </Button>
         </DialogFooter>

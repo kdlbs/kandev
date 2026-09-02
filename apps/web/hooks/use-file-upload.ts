@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import {
   preflightWorkspaceUpload,
   uploadWorkspaceFile,
@@ -44,34 +52,106 @@ export type UploadFilesResult = {
   uploaded: UploadedWorkspaceFile[];
   cancelled: boolean;
   failed: number;
+  skipped: string[];
 };
 
 type PendingBatch = {
+  id: number;
+  sessionId: string;
   dir: string;
   repo?: string;
   entries: UploadSelectionEntry[];
+  skipped: string[];
   resolve: (result: UploadFilesResult) => void;
 };
 
 type ItemPatcher = (id: string, patch: Partial<UploadItem>) => void;
 
-const EMPTY_RESULT: UploadFilesResult = { uploaded: [], cancelled: false, failed: 0 };
-const CANCELLED_RESULT: UploadFilesResult = { uploaded: [], cancelled: true, failed: 0 };
+const EMPTY_RESULT: UploadFilesResult = { uploaded: [], cancelled: false, failed: 0, skipped: [] };
+const CANCELLED_RESULT: UploadFilesResult = {
+  uploaded: [],
+  cancelled: true,
+  failed: 0,
+  skipped: [],
+};
 
-function itemId(destinationPath: string, index: number): string {
-  return `${index}:${destinationPath}`;
+function failedUploadResult(failed: number, skipped: string[]): UploadFilesResult {
+  return { uploaded: [], cancelled: false, failed, skipped };
 }
 
-function buildUploadItems(dir: string, entries: UploadSelectionEntry[]): UploadItem[] {
-  return entries.map((entry, index) => {
+function handleEmptyUploadSelection(
+  dir: string,
+  skipped: string[],
+  batchId: number,
+  setUploads: Dispatch<SetStateAction<UploadItem[]>>,
+): UploadFilesResult {
+  if (skipped.length === 0) return EMPTY_RESULT;
+  setUploads(buildUploadItems(batchId, dir, [], skipped));
+  return failedUploadResult(skipped.length, skipped);
+}
+
+function markBatchFailed(
+  batchId: number,
+  message: string | undefined,
+  setUploads: Dispatch<SetStateAction<UploadItem[]>>,
+) {
+  setUploads((prev) =>
+    prev.map((item) =>
+      item.id.startsWith(`${batchId}:`) && item.status !== "failed"
+        ? { ...item, status: "failed", error: message }
+        : item,
+    ),
+  );
+}
+
+function useSessionChangeReset(
+  sessionId: string | null,
+  pendingRef: MutableRefObject<PendingBatch | null>,
+  activeBatchRef: MutableRefObject<PendingBatch | null>,
+  setConflicts: Dispatch<SetStateAction<PendingConflicts | null>>,
+  setUploads: Dispatch<SetStateAction<UploadItem[]>>,
+) {
+  const previousSessionRef = useRef(sessionId);
+  useEffect(() => {
+    if (previousSessionRef.current === sessionId) return;
+    previousSessionRef.current = sessionId;
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    activeBatchRef.current = null;
+    setConflicts(null);
+    setUploads([]);
+    if (pending) {
+      pending.resolve({ ...CANCELLED_RESULT, skipped: pending.skipped });
+    }
+  }, [sessionId, pendingRef, activeBatchRef, setConflicts, setUploads]);
+}
+
+function itemId(batchId: number, destinationPath: string, index: number): string {
+  return `${batchId}:${index}:${destinationPath}`;
+}
+
+function buildUploadItems(
+  batchId: number,
+  dir: string,
+  entries: UploadSelectionEntry[],
+  skipped: string[],
+): UploadItem[] {
+  const entryItems = entries.map((entry, index) => {
     const destinationPath = joinDestination(dir, entry.relativePath);
     return {
-      id: itemId(destinationPath, index),
+      id: itemId(batchId, destinationPath, index),
       relativePath: entry.relativePath,
       destinationPath,
       status: "pending" as const,
     };
   });
+  const skippedItems = skipped.map((relativePath, index) => ({
+    id: `${batchId}:skipped:${index}:${relativePath}`,
+    relativePath,
+    destinationPath: joinDestination(dir, relativePath),
+    status: "failed" as const,
+  }));
+  return [...entryItems, ...skippedItems];
 }
 
 function destinationIndex(dir: string, entries: UploadSelectionEntry[]): Map<string, string> {
@@ -82,23 +162,77 @@ function destinationIndex(dir: string, entries: UploadSelectionEntry[]): Map<str
   return byDestination;
 }
 
+function preflightBatch(
+  sessionId: string,
+  dir: string,
+  repo: string | undefined,
+  entries: UploadSelectionEntry[],
+) {
+  return preflightWorkspaceUpload({
+    sessionId,
+    dir,
+    repo,
+    paths: entries.map((entry) => entry.relativePath),
+  });
+}
+
+function parkUploadBatch({
+  batch,
+  found,
+  dir,
+  entries,
+  pendingRef,
+  setConflicts,
+  setUploads,
+}: {
+  batch: PendingBatch;
+  found: UploadConflict[];
+  dir: string;
+  entries: UploadSelectionEntry[];
+  pendingRef: MutableRefObject<PendingBatch | null>;
+  setConflicts: Dispatch<SetStateAction<PendingConflicts | null>>;
+  setUploads: Dispatch<SetStateAction<UploadItem[]>>;
+}): Promise<UploadFilesResult> {
+  const conflicting = new Set(found.map((conflict) => conflict.path));
+  setUploads((prev) =>
+    prev.map((item) =>
+      conflicting.has(item.destinationPath) ? { ...item, status: "blocked" } : item,
+    ),
+  );
+  return new Promise<UploadFilesResult>((resolve) => {
+    pendingRef.current = { ...batch, resolve };
+    setConflicts({ conflicts: found, byDestination: destinationIndex(dir, entries) });
+  });
+}
+
 /**
  * Upload each surviving file in the batch, one request per file so a rejection
  * of one does not fail the rest.
  */
-async function performUploads(
-  sessionId: string,
-  batch: PendingBatch,
-  choices: Map<string, ConflictChoice>,
-  patch: ItemPatcher,
-  drop: (id: string) => void,
-): Promise<UploadFilesResult> {
+async function performUploads({
+  sessionId,
+  batch,
+  choices,
+  patch,
+  drop,
+  isActive,
+}: {
+  sessionId: string;
+  batch: PendingBatch;
+  choices: Map<string, ConflictChoice>;
+  patch: ItemPatcher;
+  drop: (id: string) => void;
+  isActive: () => boolean;
+}): Promise<UploadFilesResult> {
   const uploaded: UploadedWorkspaceFile[] = [];
-  let failed = 0;
+  let failed = batch.skipped.length;
 
   for (const [index, entry] of batch.entries.entries()) {
+    if (!isActive()) {
+      return { uploaded, cancelled: true, failed, skipped: batch.skipped };
+    }
     const destinationPath = joinDestination(batch.dir, entry.relativePath);
-    const id = itemId(destinationPath, index);
+    const id = itemId(batch.id, destinationPath, index);
     const choice = choices.get(destinationPath);
 
     if (choice === "skip") {
@@ -127,7 +261,7 @@ async function performUploads(
     }
   }
 
-  return { uploaded, cancelled: false, failed };
+  return { uploaded, cancelled: !isActive(), failed, skipped: batch.skipped };
 }
 
 /**
@@ -143,6 +277,9 @@ export function useFileUpload(sessionId: string | null) {
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [conflicts, setConflicts] = useState<PendingConflicts | null>(null);
   const pendingRef = useRef<PendingBatch | null>(null);
+  const activeBatchRef = useRef<PendingBatch | null>(null);
+  const nextBatchIdRef = useRef(0);
+  useSessionChangeReset(sessionId, pendingRef, activeBatchRef, setConflicts, setUploads);
 
   const patchItem = useCallback<ItemPatcher>((id, patch) => {
     setUploads((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
@@ -154,48 +291,68 @@ export function useFileUpload(sessionId: string | null) {
 
   const runBatch = useCallback(
     (batch: PendingBatch, choices: Map<string, ConflictChoice>) =>
-      sessionId
-        ? performUploads(sessionId, batch, choices, patchItem, dropItem)
-        : Promise.resolve(EMPTY_RESULT),
-    [sessionId, patchItem, dropItem],
+      performUploads({
+        sessionId: batch.sessionId,
+        batch,
+        choices,
+        patch: patchItem,
+        drop: dropItem,
+        isActive: () => activeBatchRef.current?.id === batch.id,
+      }),
+    [patchItem, dropItem],
   );
 
   const uploadFiles = useCallback(
     async (dir: string, files: ArrayLike<File>, repo?: string): Promise<UploadFilesResult> => {
       if (!sessionId) return EMPTY_RESULT;
-      const { entries } = normalizeUploadSelection(files);
-      if (entries.length === 0) return EMPTY_RESULT;
+      const { entries, skipped } = normalizeUploadSelection(files);
+      if (activeBatchRef.current) {
+        return failedUploadResult(entries.length + skipped.length, skipped);
+      }
+      if (entries.length === 0)
+        return handleEmptyUploadSelection(dir, skipped, ++nextBatchIdRef.current, setUploads);
 
-      setUploads(buildUploadItems(dir, entries));
-      const batch: PendingBatch = { dir, repo, entries, resolve: () => {} };
+      const batch: PendingBatch = {
+        id: ++nextBatchIdRef.current,
+        sessionId,
+        dir,
+        repo,
+        entries,
+        skipped,
+        resolve: () => {},
+      };
+      activeBatchRef.current = batch;
+      setUploads(buildUploadItems(batch.id, dir, entries, skipped));
 
       let found: UploadConflict[];
       try {
-        found = await preflightWorkspaceUpload({
-          sessionId,
-          dir,
-          repo,
-          paths: entries.map((entry) => entry.relativePath),
-        });
+        found = await preflightBatch(sessionId, dir, repo, entries);
       } catch (error) {
         const message = error instanceof Error ? error.message : undefined;
-        setUploads((prev) => prev.map((item) => ({ ...item, status: "failed", error: message })));
-        return { uploaded: [], cancelled: false, failed: entries.length };
+        markBatchFailed(batch.id, message, setUploads);
+        if (activeBatchRef.current?.id === batch.id) activeBatchRef.current = null;
+        return failedUploadResult(entries.length + skipped.length, skipped);
       }
 
-      if (found.length === 0) return runBatch(batch, new Map());
+      if (activeBatchRef.current?.id !== batch.id) {
+        return { ...CANCELLED_RESULT, skipped: batch.skipped };
+      }
 
-      const conflicting = new Set(found.map((conflict) => conflict.path));
-      setUploads((prev) =>
-        prev.map((item) =>
-          conflicting.has(item.destinationPath) ? { ...item, status: "blocked" } : item,
-        ),
-      );
+      if (found.length === 0) {
+        const result = await runBatch(batch, new Map());
+        if (activeBatchRef.current?.id === batch.id) activeBatchRef.current = null;
+        return result;
+      }
 
       // Park the batch and hand control to the dialog. Nothing has been written.
-      return new Promise<UploadFilesResult>((resolve) => {
-        pendingRef.current = { ...batch, resolve };
-        setConflicts({ conflicts: found, byDestination: destinationIndex(dir, entries) });
+      return parkUploadBatch({
+        batch,
+        found,
+        dir,
+        entries,
+        pendingRef,
+        setConflicts,
+        setUploads,
       });
     },
     [sessionId, runBatch],
@@ -208,7 +365,9 @@ export function useFileUpload(sessionId: string | null) {
       pendingRef.current = null;
       setConflicts(null);
       if (!batch) return;
-      batch.resolve(await runBatch(batch, choices));
+      const result = await runBatch(batch, choices);
+      if (activeBatchRef.current?.id === batch.id) activeBatchRef.current = null;
+      batch.resolve(result);
     },
     [runBatch],
   );
@@ -219,7 +378,8 @@ export function useFileUpload(sessionId: string | null) {
     pendingRef.current = null;
     setConflicts(null);
     setUploads([]);
-    batch?.resolve(CANCELLED_RESULT);
+    if (activeBatchRef.current?.id === batch?.id) activeBatchRef.current = null;
+    batch?.resolve({ ...CANCELLED_RESULT, skipped: batch.skipped });
   }, []);
 
   const clearUploads = useCallback(() => setUploads([]), []);

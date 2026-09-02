@@ -11,6 +11,8 @@ const REPLACE_LABEL = "Replace";
 const SKIP_LABEL = "Skip";
 const UPLOAD_LABEL = "Upload";
 const APPLY_TO_ALL = "Apply to all";
+const NOT_PRESSED = "false";
+const ARIA_PRESSED = "aria-pressed";
 const A_TXT = "fixtures/a.txt";
 const B_TXT = "fixtures/b.txt";
 
@@ -86,18 +88,32 @@ describe("FileUploadConflictDialog", () => {
     expect(choices.get(B_TXT)).toBe("skip");
   });
 
+  it("does not show an apply-to-all choice when per-file choices differ", () => {
+    renderDialog([A_TXT, B_TXT]);
+
+    clickIn(A_TXT, REPLACE_LABEL);
+
+    const applyGroup = screen.getByRole("group", { name: APPLY_TO_ALL });
+    expect(
+      within(applyGroup).getByRole("button", { name: KEEP_BOTH_LABEL }).getAttribute(ARIA_PRESSED),
+    ).toBe(NOT_PRESSED);
+    expect(
+      within(applyGroup).getByRole("button", { name: REPLACE_LABEL }).getAttribute(ARIA_PRESSED),
+    ).toBe(NOT_PRESSED);
+  });
+
   it("marks the active choice for assistive technology", () => {
     renderDialog([A_TXT]);
 
     const group = screen.getByRole("group", { name: A_TXT });
     expect(
-      within(group).getByRole("button", { name: KEEP_BOTH_LABEL }).getAttribute("aria-pressed"),
+      within(group).getByRole("button", { name: KEEP_BOTH_LABEL }).getAttribute(ARIA_PRESSED),
     ).toBe("true");
 
     clickIn(A_TXT, SKIP_LABEL);
-    expect(
-      within(group).getByRole("button", { name: SKIP_LABEL }).getAttribute("aria-pressed"),
-    ).toBe("true");
+    expect(within(group).getByRole("button", { name: SKIP_LABEL }).getAttribute(ARIA_PRESSED)).toBe(
+      "true",
+    );
   });
 
   it("reports cancellation without resolving anything", () => {

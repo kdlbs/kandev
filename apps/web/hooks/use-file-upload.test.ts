@@ -75,6 +75,49 @@ describe("useFileUpload with no conflicts", () => {
     expect(preflightWorkspaceUpload).not.toHaveBeenCalled();
     expect(uploadWorkspaceFile).not.toHaveBeenCalled();
   });
+
+  it("reports skipped selections instead of dropping them", async () => {
+    const { result } = renderHook(() => useFileUpload("sess-1"));
+    const invalid = new File(["bytes"], "evil.txt");
+    Object.defineProperty(invalid, "webkitRelativePath", { value: "../evil.txt" });
+
+    let outcome: Awaited<ReturnType<typeof result.current.uploadFiles>> | undefined;
+    await act(async () => {
+      outcome = await result.current.uploadFiles("", [file(A_TXT), invalid]);
+    });
+
+    expect(outcome?.skipped).toEqual(["../evil.txt"]);
+    expect(outcome?.failed).toBe(1);
+    expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1);
+    expect(result.current.uploads.find((item) => item.relativePath === "../evil.txt")?.status).toBe(
+      "failed",
+    );
+  });
+
+  it("does not overlap a second batch with an active upload", async () => {
+    let releaseFirst!: () => void;
+    uploadWorkspaceFile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () => resolve({ path: A_TXT, size_bytes: 5 });
+        }),
+    );
+    const { result } = renderHook(() => useFileUpload("sess-1"));
+
+    let first!: Promise<Awaited<ReturnType<typeof result.current.uploadFiles>>>;
+    await act(async () => {
+      first = result.current.uploadFiles("", [file(A_TXT)]);
+      await Promise.resolve();
+    });
+    const second = await result.current.uploadFiles("", [file(B_TXT)]);
+    expect(second.failed).toBe(1);
+    expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseFirst();
+      await first;
+    });
+  });
 });
 
 describe("useFileUpload conflict flow", () => {
@@ -196,5 +239,52 @@ describe("useFileUpload failure isolation", () => {
     expect(uploadWorkspaceFile).not.toHaveBeenCalled();
     expect(outcome?.failed).toBe(2);
     expect(result.current.uploads.every((u) => u.status === "failed")).toBe(true);
+  });
+
+  it("cancels a parked batch when the session changes", async () => {
+    preflightWorkspaceUpload.mockResolvedValue([{ path: `${FIXTURES}/${A_TXT}`, is_dir: false }]);
+    const { result, rerender } = renderHook(({ sessionId }) => useFileUpload(sessionId), {
+      initialProps: { sessionId: "sess-1" },
+    });
+
+    let outcome: Awaited<ReturnType<typeof result.current.uploadFiles>> | undefined;
+    act(() => {
+      void result.current.uploadFiles(FIXTURES, [file(A_TXT)]).then((value) => (outcome = value));
+    });
+    await waitFor(() => expect(result.current.conflicts).not.toBeNull());
+
+    rerender({ sessionId: "sess-2" });
+
+    await waitFor(() => expect(outcome?.cancelled).toBe(true));
+    expect(result.current.conflicts).toBeNull();
+    expect(uploadWorkspaceFile).not.toHaveBeenCalled();
+  });
+
+  it("stops an active batch when the session changes", async () => {
+    let releaseFirst!: () => void;
+    uploadWorkspaceFile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () => resolve({ path: A_TXT, size_bytes: 5 });
+        }),
+    );
+    const { result, rerender } = renderHook(({ sessionId }) => useFileUpload(sessionId), {
+      initialProps: { sessionId: "sess-1" },
+    });
+
+    let outcome!: Promise<Awaited<ReturnType<typeof result.current.uploadFiles>>>;
+    await act(async () => {
+      outcome = result.current.uploadFiles("", [file(A_TXT), file(B_TXT)]);
+      await waitFor(() => expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1));
+    });
+
+    rerender({ sessionId: "sess-2" });
+    await act(async () => {
+      releaseFirst();
+      await outcome;
+    });
+
+    await expect(outcome).resolves.toMatchObject({ cancelled: true });
+    expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1);
   });
 });

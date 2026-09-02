@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
-import { FileEditorContent } from "./file-editor-content";
+import { FileEditorContent, type FileEditorContentProps } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
 import { FileBinaryViewer } from "./file-binary-viewer";
 import { useAppStore } from "@/components/state-provider";
@@ -81,6 +81,60 @@ function useOpenFileDownload(fileKey: string, path: string): (() => void) | unde
     if (!hasFile) return undefined;
     return () => triggerFileDownload({ fileName: path, content, isBinary });
   }, [hasFile, path, content, isBinary]);
+}
+
+function useLoadedFileDownload(
+  hasFile: boolean,
+  originalHash: string,
+  path: string,
+  content: string,
+  isBinary: boolean,
+): (() => void) | undefined {
+  return useMemo(
+    () =>
+      hasFile && originalHash
+        ? () => triggerFileDownload({ fileName: path, content, isBinary })
+        : undefined,
+    [hasFile, originalHash, path, content, isBinary],
+  );
+}
+
+type FileEditorPanelActions = Pick<
+  ReturnType<typeof useFileEditors>,
+  "handleFileChange" | "saveFile" | "deleteFile" | "applyRemoteUpdate"
+>;
+
+function useFileEditorPanelActions({
+  path,
+  repo,
+  fileKey,
+  markdownPreview,
+  updateFileState,
+  actions,
+}: {
+  path: string;
+  repo: string | undefined;
+  fileKey: string;
+  markdownPreview: boolean;
+  updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
+  actions: FileEditorPanelActions;
+}) {
+  const { handleFileChange, saveFile, deleteFile, applyRemoteUpdate } = actions;
+  const onChange = useCallback(
+    (newContent: string) => handleFileChange(path, newContent, repo),
+    [handleFileChange, path, repo],
+  );
+  const onSave = useCallback(() => saveFile(path, repo), [saveFile, path, repo]);
+  const onReloadFromAgent = useCallback(
+    () => applyRemoteUpdate(path, repo),
+    [applyRemoteUpdate, path, repo],
+  );
+  const onDelete = useCallback(() => deleteFile(path, repo), [deleteFile, path, repo]);
+  const onToggleMarkdownPreview = useCallback(
+    () => updateFileState(fileKey, { markdownPreview: !markdownPreview }),
+    [updateFileState, fileKey, markdownPreview],
+  );
+  return { onChange, onSave, onReloadFromAgent, onDelete, onToggleMarkdownPreview };
 }
 
 function StaticFilePanel({
@@ -272,6 +326,7 @@ function useFileEditorBuffer(fileKey: string) {
   );
   const isBinary = useDockviewStore((s) => s.openFiles.get(fileKey)?.isBinary ?? false);
   const originalContent = useDockviewStore((s) => s.openFiles.get(fileKey)?.originalContent ?? "");
+  const originalHash = useDockviewStore((s) => s.openFiles.get(fileKey)?.originalHash ?? "");
   const markdownPreview = useDockviewStore(
     (s) => s.openFiles.get(fileKey)?.markdownPreview ?? false,
   );
@@ -282,6 +337,7 @@ function useFileEditorBuffer(fileKey: string) {
     hasRemoteUpdate,
     isBinary,
     originalContent,
+    originalHash,
     markdownPreview,
   };
 }
@@ -301,6 +357,52 @@ function LoadingFilePanel() {
   );
 }
 
+type LoadedFilePanelProps = {
+  category: FileCategory;
+  fileKey: string;
+  path: string;
+  worktreePath: string | undefined;
+  sessionId: string | null;
+  taskId: string | null;
+  repositoryId: string | undefined;
+  repositoryName: string | undefined;
+  editorProps: FileEditorContentProps;
+};
+
+function LoadedFilePanel({
+  category,
+  fileKey,
+  path,
+  worktreePath,
+  sessionId,
+  taskId,
+  repositoryId,
+  repositoryName,
+  editorProps,
+}: LoadedFilePanelProps) {
+  if (category !== "text") {
+    return (
+      <StaticFilePanel
+        category={category}
+        fileKey={fileKey}
+        path={path}
+        worktreePath={worktreePath}
+        sessionId={sessionId}
+        taskId={taskId}
+        repositoryId={repositoryId}
+        repositoryName={repositoryName}
+      />
+    );
+  }
+  return (
+    <PanelRoot>
+      <PanelBody padding={false} scroll={false}>
+        <FileEditorContent {...editorProps} />
+      </PanelBody>
+    </PanelRoot>
+  );
+}
+
 export const FileEditorPanel = memo(function FileEditorPanel({
   panelId,
   params,
@@ -309,8 +411,16 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   const repo = params.repo as string | undefined;
   const fileKey = buildRepoScopedItemId(path, repo);
 
-  const { hasFile, content, isDirty, hasRemoteUpdate, isBinary, originalContent, markdownPreview } =
-    useFileEditorBuffer(fileKey);
+  const {
+    hasFile,
+    content,
+    isDirty,
+    hasRemoteUpdate,
+    isBinary,
+    originalContent,
+    originalHash,
+    markdownPreview,
+  } = useFileEditorBuffer(fileKey);
   const setFileState = useDockviewStore((s) => s.setFileState);
   const updateFileState = useDockviewStore((s) => s.updateFileState);
 
@@ -334,77 +444,63 @@ export const FileEditorPanel = memo(function FileEditorPanel({
     updateFileState,
   });
 
-  const onChange = useCallback(
-    (newContent: string) => handleFileChange(path, newContent, repo),
-    [handleFileChange, path, repo],
-  );
-  const onSave = useCallback(() => saveFile(path, repo), [saveFile, path, repo]);
-  const onReloadFromAgent = useCallback(
-    () => applyRemoteUpdate(path, repo),
-    [applyRemoteUpdate, path, repo],
-  );
-  const onDelete = useCallback(() => deleteFile(path, repo), [deleteFile, path, repo]);
-  // The editor already holds the loaded buffer, so download it from memory
-  // rather than refetching. Binary content stays base64 for triggerFileDownload.
-  const onDownload = useMemo(
-    () => (hasFile ? () => triggerFileDownload({ fileName: path, content, isBinary }) : undefined),
-    [hasFile, path, content, isBinary],
-  );
-  const onToggleMarkdownPreview = useCallback(
-    () => updateFileState(fileKey, { markdownPreview: !markdownPreview }),
-    [updateFileState, fileKey, markdownPreview],
-  );
+  const { onChange, onSave, onReloadFromAgent, onDelete, onToggleMarkdownPreview } =
+    useFileEditorPanelActions({
+      path,
+      repo,
+      fileKey,
+      markdownPreview,
+      updateFileState,
+      actions: {
+        handleFileChange,
+        saveFile,
+        deleteFile,
+        applyRemoteUpdate,
+      },
+    });
+  const onDownload = useLoadedFileDownload(hasFile, originalHash, path, content, isBinary);
 
-  if (!hasFile) {
+  if (!hasFile || !originalHash) {
     return <LoadingFilePanel />;
   }
 
   const worktreePath = getSessionWorkspacePath(activeSession);
   const repositoryId = activeSession?.repository_id ?? undefined;
   const category = resolveFileCategory(isBinary, path);
-  if (category !== "text") {
-    return (
-      <StaticFilePanel
-        category={category}
-        fileKey={fileKey}
-        path={path}
-        worktreePath={worktreePath}
-        sessionId={activeSessionId}
-        taskId={activeTaskId}
-        repositoryId={repositoryId}
-        repositoryName={repo}
-      />
-    );
-  }
-
   const isMarkdown = isMarkdownFile(path);
 
   return (
-    <PanelRoot>
-      <PanelBody padding={false} scroll={false}>
-        <FileEditorContent
-          path={path}
-          content={content}
-          originalContent={originalContent}
-          isDirty={isDirty}
-          hasRemoteUpdate={hasRemoteUpdate}
-          vcsDiff={vcsDiff}
-          isSaving={savingFiles.has(fileKey)}
-          sessionId={activeSessionId || undefined}
-          taskId={activeTaskId}
-          repositoryId={repositoryId}
-          worktreePath={worktreePath}
-          repo={repo}
-          enableComments={!!activeSessionId}
-          markdownPreview={isMarkdown ? markdownPreview : false}
-          onToggleMarkdownPreview={isMarkdown ? onToggleMarkdownPreview : undefined}
-          onChange={onChange}
-          onSave={onSave}
-          onReloadFromAgent={onReloadFromAgent}
-          onDelete={onDelete}
-          onDownload={onDownload}
-        />
-      </PanelBody>
-    </PanelRoot>
+    <LoadedFilePanel
+      category={category}
+      fileKey={fileKey}
+      path={path}
+      worktreePath={worktreePath}
+      sessionId={activeSessionId}
+      taskId={activeTaskId}
+      repositoryId={repositoryId}
+      repositoryName={repo}
+      editorProps={{
+        path,
+        content,
+        originalContent,
+        isDirty,
+        hasRemoteUpdate,
+        vcsDiff,
+        isSaving: savingFiles.has(fileKey),
+        sessionId: activeSessionId || undefined,
+        taskId: activeTaskId,
+        repositoryId,
+        worktreePath,
+        repo,
+        enableComments: !!activeSessionId,
+        markdownPreview: isMarkdown ? markdownPreview : false,
+        onToggleMarkdownPreview: isMarkdown ? onToggleMarkdownPreview : undefined,
+        onChange,
+        onSave,
+        onReloadFromAgent,
+        onDelete,
+        onDownload,
+      }}
+    />
   );
 });

@@ -40,7 +40,8 @@ is the machinery both depend on.
 - `apps/web/hooks/use-file-upload.ts` returning
   `{ uploadFiles(dir, selection), uploads, conflicts, resolveConflicts, cancel }`, with per-file
   status `pending | uploading | ready | failed` plus `blocked` for a conflict awaiting a decision.
-- Upload exported from `use-file-operations.ts` so both panels acquire it from one place.
+- Upload state is owned by `use-file-upload-entry-points.tsx`, which mounts one flow for both
+  Files-panel entry points. `use-file-operations.ts` keeps CRUD and download calls.
 - Optimistic insertion with `insertNodeInTree`, replaced with the server-reported path on success and
   removed on failure.
 
@@ -116,7 +117,8 @@ results, then mark this task `done` and update its checkbox in `plan.md`.
 - `hooks/use-file-upload.ts` owns the two-phase flow. The batch is parked in a promise while the
   dialog decides; `resolveConflicts` applies per-file choices and `cancelConflicts` resolves with
   `cancelled: true` having uploaded nothing.
-- Upload is re-exported from `use-file-operations.ts` so both panels acquire it from one place.
+- Upload state is mounted by `use-file-upload-entry-points.tsx`, so both Files-panel entry points
+  share one flow while `use-file-operations.ts` remains focused on CRUD and download calls.
 
 **Cancel is proven, not assumed.** `uploadWorkspaceFile` is asserted never-called after a cancel,
 including for the file in the selection that had no conflict. That is the assertion that forbids the

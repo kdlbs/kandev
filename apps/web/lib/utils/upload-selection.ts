@@ -24,7 +24,7 @@ export type UploadSelection = {
  * keeps a malformed pick from costing a round trip.
  */
 function sanitizeRelativePath(raw: string): string | null {
-  const normalized = raw.replace(/\\/g, "/").trim();
+  const normalized = raw.replace(/\\/g, "/");
   if (!normalized || normalized.startsWith("/")) return null;
 
   const segments: string[] = [];

@@ -67,10 +67,10 @@ the silent default.
 
 - New `apps/backend/internal/agentctl/server/api/workspace_upload.go`, registered beside the existing
   workspace file routes in `server.go`:
-  - `POST /workspace/file/upload-preflight`, JSON in and out.
-  - `POST /workspace/file/upload`, multipart, structured like `handleMaterializeAttachment`: bound the
-    body with `http.MaxBytesReader`, parse the form, validate the declared size, stream the `file`
-    part into `WriteFileStream`.
+  - `POST /api/v1/workspace/file/upload-preflight`, JSON in and out.
+  - `POST /api/v1/workspace/file/upload`, multipart, structured like `handleMaterializeAttachment`:
+    bound the body with `http.MaxBytesReader`, read metadata with `multipart.Reader`, validate the
+    declared size, and stream the `file` part into `WriteFileStream`.
 - Status mapping: `413` oversize, `409` unresolved existing destination, `400` containment rejection
   or size mismatch, `500` IO.
 
@@ -84,8 +84,8 @@ the silent default.
   `POST /api/v1/task-sessions/:id/workspace/files` and
   `POST /api/v1/task-sessions/:id/workspace/files/preflight`. Authenticate through `authn.FromGin` as
   `AttachmentHandlers.owner` does, resolve the session to an agentctl client through the lifecycle
-  manager as `RegisterProcessRoutes` does, and stream `fileHeader.Open()` straight into the client
-  method.
+  manager as `RegisterProcessRoutes` does, and stage the bounded file part before forwarding it to the
+  client method.
 - Register beside `taskhandlers.RegisterProcessRoutes` in
   `apps/backend/internal/backendapp/helpers.go`.
 
@@ -116,8 +116,9 @@ existing download already has, and attachments set the HTTP precedent.
   `{ uploadFiles(dir, selection), uploads, conflicts, resolveConflicts, cancel }`. Per-file status
   uses the `pending | uploading | ready | failed` vocabulary already in
   `components/task/chat/file-attachment.ts`, plus `blocked` for a conflict awaiting a decision.
-- Export upload from `apps/web/hooks/use-file-operations.ts` so `files-panel.tsx` and
-  `task-files-panel.tsx` pick it up from one place, next to the existing `onDownloadFile`.
+- Keep upload state in `apps/web/components/task/use-file-upload-entry-points.tsx`, which mounts one
+  flow for both Files-panel entry points. `use-file-operations.ts` remains the owner of CRUD and
+  download calls.
 - On success, insert with `insertNodeInTree` as `handleCreateFileSubmit` already does, using the
   server-reported path; on failure, remove the optimistic node and toast.
 
@@ -173,8 +174,10 @@ existing download already has, and attachments set the HTTP precedent.
 ### Internationalization
 
 New keys in `apps/web/src/locales/en/task.json`: `uploadFiles`, `uploadFolder`, `uploadFilesHere`,
-`uploading`, `uploadComplete`, `failedToUploadFile`, `fileTooLarge`,
-`uploadConflictTitle`, `uploadConflictBody`, `replace`, `keepBoth`, `skip`, `applyToAll`. New
+`uploadComplete_one`, `uploadComplete_other`, `uploadedTo`, `failedToUploadFile`,
+`uploadPartiallyFailed_one`, `uploadPartiallyFailed_other`, `uploadConflictTitle_one`,
+`uploadConflictTitle_other`, `uploadConflictBody`, `uploadConflictApplyToAll`, `uploadConflictKeepBoth`,
+`uploadConflictReplace`, `uploadConflictSkip`, `uploadConflictConfirm`. New
 `downloadFile` in `apps/web/src/locales/en/editors.json`. `newFile` and `task:download` already
 exist.
 
