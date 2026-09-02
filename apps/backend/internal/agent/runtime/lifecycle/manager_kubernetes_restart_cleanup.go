@@ -159,11 +159,7 @@ func persistedKubernetesCleanupMetadata(
 		strings.TrimSpace(row.ExecutorID) == "" {
 		return nil, errors.New("persisted Kubernetes runtime row identity is incomplete")
 	}
-	metadata := cloneKubernetesMetadata(row.Metadata)
+	metadata := overlayCurrentKubernetesConnectionMetadata(row.Metadata, currentConfigValues, currentConfig)
 	metadata["executor_id"] = strings.TrimSpace(row.ExecutorID)
-	for _, key := range kubernetesConnectionMetadataKeys {
-		metadata[key] = currentConfigValues[key]
-	}
-	metadata[MetadataKeyKubernetesExecutorConfigHash] = kubernetesConfigHash(currentConfig)
 	return metadata, nil
 }

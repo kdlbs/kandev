@@ -58,27 +58,48 @@ func (m *Manager) kubernetesRefreshStatusInstance(
 	if execution == nil || execution.RuntimeName != agentruntime.RuntimeKubernetes {
 		return instance, nil
 	}
+	metadata, err := m.currentKubernetesConnectionMetadata(ctx, instance.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	instance.Metadata = metadata
+	return instance, nil
+}
+
+func (m *Manager) currentKubernetesConnectionMetadata(
+	ctx context.Context,
+	metadata map[string]interface{},
+) (map[string]interface{}, error) {
 	reader, ok := m.runningWriter.(kubernetesExecutorReader)
-	executorID := strings.TrimSpace(getMetadataString(instance.Metadata, "executor_id"))
+	executorID := strings.TrimSpace(getMetadataString(metadata, "executor_id"))
 	if !ok || executorID == "" {
-		return instance, nil
+		return metadata, nil
 	}
 	current, err := reader.GetExecutor(ctx, executorID)
 	if err != nil {
-		return nil, fmt.Errorf("load current Kubernetes executor %q for refresh: %w", executorID, err)
+		return nil, fmt.Errorf("load current Kubernetes executor %q: %w", executorID, err)
 	}
 	if current == nil || current.Type != models.ExecutorTypeKubernetes {
 		return nil, fmt.Errorf("current executor %q is not a Kubernetes executor", executorID)
 	}
 	config, err := kubeexecutor.ParseExecutorConfig(current.Config)
 	if err != nil {
-		return nil, fmt.Errorf("parse current Kubernetes executor %q for refresh: %w", executorID, err)
+		return nil, fmt.Errorf("parse current Kubernetes executor %q: %w", executorID, err)
 	}
+	return overlayCurrentKubernetesConnectionMetadata(metadata, current.Config, config), nil
+}
+
+func overlayCurrentKubernetesConnectionMetadata(
+	metadata map[string]interface{},
+	configValues map[string]string,
+	config kubeexecutor.ExecutorConfig,
+) map[string]interface{} {
+	resolved := cloneKubernetesMetadata(metadata)
 	for _, key := range kubernetesConnectionMetadataKeys {
-		instance.Metadata[key] = current.Config[key]
+		resolved[key] = configValues[key]
 	}
-	instance.Metadata[MetadataKeyKubernetesExecutorConfigHash] = kubernetesConfigHash(config)
-	return instance, nil
+	resolved[MetadataKeyKubernetesExecutorConfigHash] = kubernetesConfigHash(config)
+	return resolved
 }
 
 func (m *Manager) applyTrackedRemoteRefresh(

@@ -25,11 +25,11 @@ func (r *KubernetesExecutor) StopInstance(ctx context.Context, instance *Executo
 	unlock := r.lockInstance(instance.InstanceID)
 	defer unlock()
 
-	session := r.closeKubernetesSession(instance.InstanceID)
+	r.closeKubernetesSession(instance.InstanceID)
 	if !force && !shouldRunExecutorCleanup(instance.StopReason) {
 		return nil
 	}
-	runtime, err := r.kubernetesCleanupRuntime(instance, session)
+	runtime, err := r.kubernetesCleanupRuntime(instance)
 	if err != nil {
 		return err
 	}
@@ -52,10 +52,9 @@ func (r *KubernetesExecutor) StopInstance(ctx context.Context, instance *Executo
 	return deleteKubernetesResources(deleteCtx, runtime.resources, recorded, identity)
 }
 
-func (r *KubernetesExecutor) closeKubernetesSession(instanceID string) *kubernetesSession {
+func (r *KubernetesExecutor) closeKubernetesSession(instanceID string) {
 	session := r.takeSession(instanceID)
 	_ = closeKubernetesSessionResources(session)
-	return session
 }
 
 func closeKubernetesSessionResources(session *kubernetesSession) error {
@@ -93,11 +92,7 @@ func (r *KubernetesExecutor) Close() error {
 
 func (r *KubernetesExecutor) kubernetesCleanupRuntime(
 	instance *ExecutorInstance,
-	session *kubernetesSession,
 ) (*kubernetesRuntimeClient, error) {
-	if session != nil && session.runtime != nil {
-		return session.runtime, nil
-	}
 	if r.clientFactory == nil {
 		return nil, errors.New("kubernetes lifecycle: cleanup client factory is not configured")
 	}

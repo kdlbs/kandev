@@ -2224,6 +2224,13 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		StopReason:           reason,
 		AgentStopFailed:      agentStopFailed,
 	}
+	if execution.RuntimeName == executor.NameKubernetes {
+		metadata, resolveErr := m.currentKubernetesConnectionMetadata(ctx, runtimeInstance.Metadata)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve current Kubernetes cleanup connection: %w", resolveErr)
+		}
+		runtimeInstance.Metadata = metadata
+	}
 	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
 		// During shutdown the runtime instance may already be stopping or
 		// absent. Only surface this at WARN outside shutdown.
