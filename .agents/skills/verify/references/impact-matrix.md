@@ -2,7 +2,13 @@
 
 Collect `base...HEAD`, staged, unstaged, and untracked paths. Deduplicate the
 union, then run every matching row. Prefer package/suite targets over
-individual test names so changed dependents remain covered.
+individual test names so changed dependents remain covered. For an
+`apps/backend/**` path, the path match alone does not select the dialect or
+event-bus rows below: the file path proves nothing, so also inspect what the
+diff TOUCHES — `ALTER TABLE`, `CREATE INDEX`, a `dialect.IsPostgres` branch, a
+table-rebuild/cutover migration, SQLite-only `rowid`/JSON/date syntax, a
+changed event-bus subscriber, or a type assertion on `event.Data` — and apply
+the matching row(s) whenever a predicate hits.
 
 When the planner supplies a last verified SHA and a `/commit` hook receipt,
 read [hook-evidence.md](hook-evidence.md). Eligible hook evidence removes the
