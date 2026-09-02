@@ -234,8 +234,17 @@ func TestParentWakeReconciler_RedeliversAfterSameSecondReopenAndRecomplete(t *te
 	if err := handler.Tick(ctx); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
-	if got := len(dispatcher.Calls()); got != 2 {
-		t.Fatalf("LOST WAKE NOT RECOVERABLE: same-second reopen+recomplete must still be redelivered, got %d dispatches: %#v", got, dispatcher.Calls())
+	callsAfter := dispatcher.Calls()
+	if got := len(callsAfter); got != 2 {
+		t.Fatalf("LOST WAKE NOT RECOVERABLE: same-second reopen+recomplete must still be redelivered, got %d dispatches: %#v", got, callsAfter)
+	}
+	// A second HandleTrigger call reaching the fake proves nothing on its
+	// own: production's Dispatcher.HandleTriggerHandled reports a swallowed
+	// (already-applied) dispatch as accepted too, so a fake that only counts
+	// calls cannot distinguish redelivery from the exact swallow this test
+	// exists to catch. Distinct operation ids are the only observable proof.
+	if callsAfter[1].opID == callsAfter[0].opID {
+		t.Fatalf("second delivery reused the first operation id %q; the engine's permanent operation ledger would swallow it as already-applied", callsAfter[1].opID)
 	}
 
 	// Once real time moves past the generation's second, the deferred
@@ -265,10 +274,12 @@ type raceDispatcher struct {
 	svc     *service.Service
 	childID string
 	calls   int
+	opIDs   []string
 }
 
-func (d *raceDispatcher) HandleTrigger(context.Context, string, engine.Trigger, any, string) error {
+func (d *raceDispatcher) HandleTrigger(_ context.Context, _ string, _ engine.Trigger, _ any, opID string) error {
 	d.calls++
+	d.opIDs = append(d.opIDs, opID)
 	if d.calls == 1 {
 		d.svc.ExecSQL(d.t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, d.childID)
 		d.svc.ExecSQL(d.t, `UPDATE tasks SET state = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, d.childID)
@@ -309,6 +320,15 @@ func TestParentWakeReconciler_ReopenDuringDispatchWindowIsRedelivered(t *testing
 	}
 	if dispatcher.calls != 2 {
 		t.Fatalf("LOST WAKE: reopen landing in the scan's still-open second during dispatch produced no further dispatch, got %d calls", dispatcher.calls)
+	}
+	// A dispatch reaching the fake proves nothing about production, where
+	// the same trip through engine.HandleTrigger happens whether or not the
+	// engine's operation ledger actually ran new actions: a swallowed
+	// (already-applied) dispatch and a genuinely delivered one both call
+	// HandleTrigger once. Only distinct operation ids prove tick 2 was not
+	// silently swallowed as a repeat of tick 1.
+	if dispatcher.opIDs[0] == dispatcher.opIDs[1] {
+		t.Fatalf("second delivery reused the first operation id %q; the engine's permanent operation ledger would swallow it as already-applied", dispatcher.opIDs[1])
 	}
 }
 

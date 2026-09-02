@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -98,6 +99,12 @@ func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 func (h *ParentWakeReconciler) reconcileOne(
 	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, referenceInstant time.Time,
 ) {
+	// No dispatcher wired means there is nothing to admit: bail out before
+	// IncrementWakeDeliverySeq below, which otherwise bumps the counter for
+	// an attempt that was never going anywhere.
+	if svc.engineDispatcher == nil {
+		return
+	}
 	if err := svc.guardAgentStatus(ctx, c.AssigneeAgentProfileID); err != nil {
 		svc.recordWakeAssigneeUnresolved(c.ParentTaskID, err.Error())
 		return
@@ -126,7 +133,17 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey, c.NewestChildUpdatedAt)
+	deliverySeq, err := svc.repo.IncrementWakeDeliverySeq(ctx, c.ParentTaskID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: increment delivery sequence failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+
+	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey, deliverySeq)
 	accepted, err := svc.dispatchEngineTriggerForRecovery(
 		ctx,
 		c.ParentTaskID,
@@ -259,11 +276,19 @@ func (h *ParentWakeReconciler) recordReceipt(
 	svc.recordWakeEmitted(c.ParentTaskID, operationID)
 }
 
-// wakeOperationID includes the child set's newest-update generation: two
-// completions of the same terminal child set otherwise hash identically, and
-// the engine's permanent operation ledger would treat the second as already
-// applied.
-func wakeOperationID(parentTaskID, childSetKey, generation string) string {
-	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + childSetKey + "\x00" + generation))
+// wakeOperationID includes deliverySeq (IncrementWakeDeliverySeq), a
+// per-parent counter bumped once for every admitted dispatch attempt.
+// tasks.updated_at has only one-second resolution, so two genuinely distinct
+// deliveries landing in the same wall-clock second would hash identically on
+// child set + generation alone, and the engine's permanent operation ledger
+// would treat the second as already applied. Trading a stable, replayable id
+// for a counter that never repeats means a dispatch that is admitted but
+// whose receipt then fails to persist before the next tick's sweep gets a
+// fresh id (and therefore a fresh, possibly duplicate, engine dispatch) on
+// retry rather than one that could collide with a different, later delivery
+// — ListStuckParents' own admission predicate remains the dedup gate for the
+// common case where nothing changed.
+func wakeOperationID(parentTaskID, childSetKey string, deliverySeq int64) string {
+	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + childSetKey + "\x00" + strconv.FormatInt(deliverySeq, 10)))
 	return fmt.Sprintf("task_children_completed:%s:%s", parentTaskID, hex.EncodeToString(sum[:]))
 }
