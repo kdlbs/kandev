@@ -1,6 +1,6 @@
 ---
 created: 2026-09-02
-status: draft
+status: in-progress
 requirements:
   - REQ-OFFICE-STEP-ENTRY-DISPATCH-002
   - REQ-OFFICE-STEP-ENTRY-DISPATCH-003
@@ -189,20 +189,82 @@ both dispatchers.
 
 ## Work orders
 
-- [ ] [Task 01: Ownership declaration for step-entry action kinds](task-01-ownership-declaration.md)
-- [ ] [Task 02: Persist the allocated marker position set](task-02-marker-positions.md)
-- [ ] [Task 03: Converge dispatch onto the ledger dispatcher](task-03-ledger-ownership.md)
-- [ ] [Task 04: Terminal skipped marker state](task-04-skipped-marker-state.md)
-- [ ] [Task 05: Marker reclaim path](task-05-marker-reclaim.md)
-- [ ] [Task 06: Startup step-entry recovery scan](task-06-recovery-scan.md)
-- [ ] [Task 07: Task-scoped turn-completion serialization](task-07-task-scoped-turn-completion.md)
-- [ ] [Task 08: Entry-triggered runs bypass coalescing](task-08-coalescing-exclusion.md)
-- [ ] [Task 09: Discarded step-entry action diagnostics](task-09-discard-diagnostics.md)
-- [ ] [Task 10: Participant fan-out reporting](task-10-fanout-reporting.md)
+- [x] [Task 01: Ownership declaration for step-entry action kinds](task-01-ownership-declaration.md)
+- [x] [Task 02: Persist the allocated marker position set](task-02-marker-positions.md)
+- [x] [Task 03: Converge dispatch onto the ledger dispatcher](task-03-ledger-ownership.md)
+- [ ] [Task 04: Terminal skipped marker state](task-04-skipped-marker-state.md) — deferred, see below
+- [ ] [Task 05: Marker reclaim path](task-05-marker-reclaim.md) — deferred, see below
+- [ ] [Task 06: Startup step-entry recovery scan](task-06-recovery-scan.md) — deferred, see below
+- [ ] [Task 07: Task-scoped turn-completion serialization](task-07-task-scoped-turn-completion.md) — deferred, see below
+- [ ] [Task 08: Entry-triggered runs bypass coalescing](task-08-coalescing-exclusion.md) — deferred, see below
+- [ ] [Task 09: Discarded step-entry action diagnostics](task-09-discard-diagnostics.md) — deferred, see below
+- [ ] [Task 10: Participant fan-out reporting](task-10-fanout-reporting.md) — deferred, see below
+
+### Bounded-scope decision (2026-09-02)
+
+This Build round completed Tasks 01-03 only — the ownership declaration, the
+persisted marker-position set, and ledger convergence of `clear_decisions` /
+`queue_run_for_each_participant` (including the AC-002.10 abandon-remainder
+stop rule) — and stopped there rather than attempting all ten work orders in
+one pass. Tasks 01-03 are the fix for the actual reported production defect
+(office-default's Review/Approval steps double-dispatching per round); Tasks
+04-10 add durability/observability/serialization hardening on top of a
+now-correct dispatch path, each independently shippable and independently
+tested against its own AC set. Attempting all ten with full TDD rigor,
+migration coverage, and the full DoD gauntlet in one continuous session
+was judged out of reasonable scope; splitting at the 01-03 boundary keeps the
+delivered slice coherent (every AC in REQ-002 that's addressed is fully
+addressed, nothing half-wired) and leaves 04-10 exactly as scoped by their
+existing work-order files for a follow-up round. No frozen requirement or
+system-design content changed to justify this boundary — it is a delivery
+sequencing choice, not a scope reduction of the spec itself.
+
+Within Task 02, "unconditional entry allocation" (extending allocation to
+every write chokepoint, not just the existing `on_turn_complete`
+ResultHolder-gated route in `workflow_store.go`/`applyTransition`) was also
+narrowed: allocation stays on that one existing route. That route is exactly
+where the production bug manifests (Review/Approval steps entered via
+`on_turn_complete`), so the fix lands regardless. Other routes (manual step
+move via `finalizeStepEnter`, WIP-promotion, workflow-switch) do not get an
+allocated entry this round; a marker-bearing action reaching
+`Engine.DispatchStepEntry` with `markerEntryID == 0` on those routes falls
+back to the pre-convergence unprotected direct-execution path, unchanged from
+today. Extending allocation to those routes is folded into Task 04's
+remaining scope (terminal `skipped` state depends on knowing the full
+declared position set on every route, which unconditional allocation would
+provide).
+
+Two pre-existing tests from an earlier build round
+(`TestProcessOnEnter_ClearDecisionsFailure_BlocksSubsequentOnEnterActions` and
+the renamed `TestProcessOnEnter_ClearDecisionsFailure_DoesNotBlockEarlierAutoStart`,
+both in `step_entry_dispatch_test.go`) were updated during this round: the
+first to match the ledger-side abort log line
+(`dispatchEngineOwnedOnEnterAction`'s "DispatchStepEntry: marker-bearing
+on_enter action failed") now that `clear_decisions` executes exclusively
+through the ledger; the second inverted its assertion (auto-start now *does*
+launch despite a same-entry `clear_decisions` failure) because the system
+design's own "Out of scope: Ordering between actions owned by different
+dispatchers" section states this cross-owner ordering was never a guarantee
+this initiative provides — `auto_start_agent` is marker-owned and
+`clear_decisions` is ledger-owned, and the two dispatch independently with no
+barrier between them.
 
 ## Verification results
 
-Pending.
+- `go build ./...`, `go vet ./...` — clean.
+- `gofmt -l` on every changed file — clean.
+- `golangci-lint run ./... --new-from-rev=646ff0063f5656ad2f0358fb9e01e39378ac113f` — 0 issues.
+- `go test ./internal/orchestrator/... ./internal/backendapp/...` — all pass.
+- `go test ./...` (full backend suite) — all pass except pre-existing,
+  unrelated failures in `internal/worktree`, `internal/launcher`,
+  `internal/agentctl/server/{process,config,api}`,
+  `internal/agent/{managedruntime,runtime/lifecycle,settings/controller}`,
+  `internal/common/config`, `internal/task/{service,handlers}`,
+  `internal/system/storage/workspaces` — all traced to this macOS sandbox's
+  `/var` -> `/private/var` symlink tripping a symlinked-path safety check in
+  each package's `t.TempDir()`-based tests; confirmed unrelated to this
+  change (none of those packages import `internal/task/repository/sqlite`,
+  `internal/workflow/engine`, or `internal/orchestrator`'s step-entry code).
 
 ## Risks
 

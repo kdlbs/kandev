@@ -2714,29 +2714,20 @@ func (s *Service) maybySwitchSessionForProfile(
 // Extracted from processOnEnter to keep that function's cognitive
 // complexity within the repo's lint threshold.
 //
-// AC-C2: if clear_decisions fails, no further on_enter action for this step
-// entry may execute — stale decision rows plus a fresh participant fan-out
-// could otherwise satisfy wait_for_quorum without every current-round
-// participant actually voting. The loop stops entirely (not just further
-// engine-owned actions) the moment that happens.
-//
-// AC-F1: a caller that loses a *live* claim on an engine-owned position
-// (dispatchEngineOwnedOnEnterAction's abandon=true) must abandon the entry
-// the same way — it does not skip to a later position, because that later
-// action could execute while the winner is still committing an earlier
-// one (e.g. enqueueing queue_run_for_each_participant's fan-out before the
-// winner's clear_decisions delete commits). This is a normal outcome, not
-// a fault, so the loop stops silently (no WARNING/ERROR) rather than via
-// AC-C2's error-logged abort.
+// The ledger-owned kinds (clear_decisions, queue_run_for_each_participant,
+// queue_run, run_code_review, ensure_participant_seat) are entirely absent
+// from this loop's dispatch — engine.DispatchStepEntry owns all five,
+// including the AC-OFFICE-STEP-ENTRY-DISPATCH-002.10 stop rule for the two
+// marker-bearing ones. This function only ever runs the session-shaped
+// kinds, none of which can abort the sequence, so it has no abort path of
+// its own.
 type onEnterDispatchResult struct {
 	hasAutoStart bool
-	aborted      bool
 }
 
-func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, entryID int64, isPassthrough, hasPlanMode bool) onEnterDispatchResult {
+func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, isPassthrough, hasPlanMode bool) onEnterDispatchResult {
 	result := onEnterDispatchResult{}
-dispatchLoop:
-	for i, action := range step.Events.OnEnter {
+	for _, action := range step.Events.OnEnter {
 		switch action.Type {
 		case wfmodels.OnEnterEnablePlanMode:
 			// Skip plan mode for passthrough — CLI manages its own state.
@@ -2752,36 +2743,20 @@ dispatchLoop:
 		case wfmodels.OnEnterResetAgentContext, wfmodels.OnEnterConfigureSession:
 			// Already handled earlier in processOnEnter (context reset must run
 			// before auto_start_agent; session config runs right after it).
-		case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant:
-			abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, i, entryID)
-			if abandon {
-				s.logger.Debug("processOnEnter: lost a live claim to a concurrent dispatch of this step entry, abandoning remaining on_enter actions",
-					zap.String("workflow_id", step.WorkflowID),
-					zap.String("step_id", step.ID),
-					zap.String("task_id", taskID),
-					zap.String("action_type", string(action.Type)),
-				)
-				result.aborted = true
-				break dispatchLoop
-			}
-			if failed && action.Type == wfmodels.OnEnterClearDecisions {
-				s.logger.Error("processOnEnter: clear_decisions failed, aborting remaining on_enter actions for step entry",
-					zap.String("workflow_id", step.WorkflowID),
-					zap.String("step_id", step.ID),
-					zap.String("task_id", taskID),
-					zap.String("cause", cause),
-				)
-				result.aborted = true
-				break dispatchLoop
-			}
-		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview, wfmodels.OnEnterEnsureParticipantSeat:
-			// Session-independent, ledger-owned: engine.DispatchStepEntry
-			// (internal/workflow/engine/entrydispatch.go) dispatches these
-			// synchronously after commit via every step-transition writer
-			// (Repository.dispatchStepEntry in step_entry_dispatch.go).
-			// processOnEnter must not also dispatch them here or they would
-			// run twice — see docs/specs/workflow-on-enter-action-dispatch/spec.md.
-			// This is a known, recognized type, not the AC-A6 default warning case.
+		case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant,
+			wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview, wfmodels.OnEnterEnsureParticipantSeat:
+			// Session-independent, ledger-owned (AC-OFFICE-STEP-ENTRY-DISPATCH-002.1):
+			// engine.DispatchStepEntry (internal/workflow/engine/entrydispatch.go)
+			// dispatches every one of these synchronously after commit via
+			// every step-transition writer (Repository.dispatchStepEntry in
+			// step_entry_dispatch.go) — clear_decisions and
+			// queue_run_for_each_participant with marker CAS protection via
+			// (*Service).ExecuteMarkerBearingStepEntryAction, the other three
+			// unprotected (never marker-bearing). processOnEnter must not
+			// also dispatch any of them here or they would run twice — see
+			// docs/specs/office/system-design/step-entry-dispatch-convergence.md.
+			// This is a known, recognized set of types, not the AC-A6 default
+			// warning case.
 		default:
 			// AC-A6: a genuinely unrecognized on_enter action type. Warn
 			// instead of silently discarding it — this is the exact failure
@@ -2796,13 +2771,16 @@ dispatchLoop:
 	return result
 }
 
-// processOnEnter processes the on_enter events for a step after transitioning to it.
-// entryID is the workflow_step_entries row allocated for this step-entry by
-// the write site that persisted the transition (0 when no entry was
-// allocated for this call path — see finalizeStepEnter's call site). Only a
-// non-zero entryID lets the engine-owned on_enter cases below dispatch;
-// this is this Build round's E1-only scope boundary, not a general
-// precondition of the marker CAS mechanism itself.
+// processOnEnter processes the on_enter events for a step after transitioning
+// to it. entryID is the workflow_step_entries row allocated for this
+// step-entry by the write site that persisted the transition (0 when no
+// entry was allocated for this call path — see finalizeStepEnter's call
+// site); it is retained on this signature for callers/tests, but this
+// function no longer dispatches through it itself — every ledger-owned
+// kind, marker-bearing or not, now runs exactly once via
+// engine.DispatchStepEntry (Repository.dispatchStepEntry's call chain),
+// entirely outside processOnEnter. See
+// docs/specs/office/system-design/step-entry-dispatch-convergence.md.
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, entryID int64, sourceStep *wfmodels.WorkflowStep) {
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
@@ -2863,10 +2841,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// auto-start prompt is dispatched. It never switches or creates a tab.
 	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
 
-	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, entryID, isPassthrough, hasPlanMode)
-	if dispatchResult.aborted {
-		return
-	}
+	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, isPassthrough, hasPlanMode)
 
 	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched)
 }
@@ -3111,26 +3086,40 @@ func (s *Service) handleWorkflowEntryPromptError(
 	s.publishSessionWaitingEvent(ctx, taskID, session.ID, step.ID, session)
 }
 
-// dispatchEngineOwnedOnEnterAction executes an engine-owned on_enter action
+// ExecuteMarkerBearingStepEntryAction satisfies
+// engine.MarkerBearingStepEntryExecutor — the ledger dispatcher's hook
+// (Engine.DispatchStepEntry) for executing clear_decisions and
+// queue_run_for_each_participant with marker CAS protection
+// (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3/.4). action and step are already
+// engine-compiled by the time DispatchStepEntry's loop reaches this call, so
+// unlike the pre-convergence marker dispatcher this needs no
+// engine.CompileOnEnterAction step of its own.
+func (s *Service) ExecuteMarkerBearingStepEntryAction(
+	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int, markerEntryID int64,
+) (abandon bool, err error) {
+	abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, position, markerEntryID)
+	if failed {
+		if cause == "" {
+			cause = "step entry marker-bearing action failed"
+		}
+		return abandon, errors.New(cause)
+	}
+	return abandon, nil
+}
+
+// dispatchEngineOwnedOnEnterAction executes a marker-bearing on_enter action
 // once for this step-entry. The marker CAS prevents duplicate execution.
 func (s *Service) dispatchEngineOwnedOnEnterAction(
-	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, action wfmodels.OnEnterAction, position int, entryID int64,
+	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int, entryID int64,
 ) (abandon, failed bool, cause string) {
-	if entryID == 0 {
-		return false, false, ""
-	}
-	compiled, ok := engine.CompileOnEnterAction(action)
-	if !ok {
-		return false, false, ""
-	}
-	callback := s.engineOnEnterCallback(action.Type)
+	callback := s.engineOnEnterCallback(action.Kind)
 	if callback == nil {
 		return false, false, ""
 	}
 	operationID := fmt.Sprintf("step_entry:%d:%d", entryID, position)
-	claimed, err := s.repo.ClaimStepEntryMarker(ctx, entryID, position, string(action.Type), operationID, time.Now())
+	claimed, err := s.repo.ClaimStepEntryMarker(ctx, entryID, position, string(action.Kind), operationID, time.Now())
 	if err != nil {
-		s.logger.Error("processOnEnter: claim step entry marker failed",
+		s.logger.Error("DispatchStepEntry: claim step entry marker failed",
 			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.Int64("entry_id", entryID), zap.Int("position", position))
 		return false, true, err.Error()
@@ -3150,8 +3139,8 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 		}
 	}
 
-	if action.Type == wfmodels.OnEnterClearDecisions {
-		if handled, atomicFailed, atomicCause := s.dispatchClearDecisionsAtomic(ctx, taskID, step, entryID, position); handled {
+	if action.Kind == engine.ActionClearDecisions {
+		if handled, atomicFailed, atomicCause := s.dispatchClearDecisionsAtomic(ctx, taskID, step.ID, entryID, position); handled {
 			return false, atomicFailed, atomicCause
 		}
 	}
@@ -3159,19 +3148,19 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 	in := engine.ActionInput{
 		Trigger:     engine.TriggerOnEnter,
 		State:       engine.MachineState{TaskID: taskID, CurrentStepID: step.ID, WorkflowID: step.WorkflowID},
-		Step:        engine.StepSpec{ID: step.ID, WorkflowID: step.WorkflowID, Name: step.Name, Position: step.Position},
-		Action:      compiled,
+		Step:        step,
+		Action:      action,
 		OperationID: operationID,
 	}
 	state, execCause := stepentry.MarkerDone, ""
 	if _, execErr := callback.Execute(ctx, in); execErr != nil {
 		state, execCause = stepentry.MarkerFailed, execErr.Error()
-		s.logger.Error("processOnEnter: engine-owned on_enter action failed",
+		s.logger.Error("DispatchStepEntry: marker-bearing on_enter action failed",
 			zap.Error(execErr), zap.String("task_id", taskID), zap.String("step_id", step.ID),
-			zap.String("action_type", string(action.Type)))
+			zap.String("action_kind", string(action.Kind)))
 	}
 	if err := s.repo.CompleteStepEntryMarker(ctx, entryID, position, state, execCause, time.Now()); err != nil {
-		s.logger.Error("processOnEnter: complete step entry marker failed",
+		s.logger.Error("DispatchStepEntry: complete step entry marker failed",
 			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.Int64("entry_id", entryID), zap.Int("position", position))
 	}
@@ -3197,33 +3186,33 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 // transaction rolled back — neither the delete nor the marker update
 // committed, so the marker is left in_progress, which is precisely AC-B6's
 // invariant (in_progress proves the delete did not commit). No compensating
-// write is attempted; returning failed=true is enough to trigger AC-C2's
-// abort in dispatchOnEnterActions.
+// write is attempted; returning failed=true is enough to trigger the
+// AC-OFFICE-STEP-ENTRY-DISPATCH-002.10 stop rule in Engine.DispatchStepEntry.
 func (s *Service) dispatchClearDecisionsAtomic(
-	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, entryID int64, position int,
+	ctx context.Context, taskID, stepID string, entryID int64, position int,
 ) (handled, failed bool, cause string) {
 	if _, ok := s.engineDecisions.(*workflowadapters.DecisionAdapter); !ok {
 		return false, false, ""
 	}
-	if _, err := s.repo.ClearStepDecisionsAndCompleteMarker(ctx, taskID, step.ID, entryID, position, time.Now()); err != nil {
-		s.logger.Error("processOnEnter: atomic clear_decisions failed",
-			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
+	if _, err := s.repo.ClearStepDecisionsAndCompleteMarker(ctx, taskID, stepID, entryID, position, time.Now()); err != nil {
+		s.logger.Error("DispatchStepEntry: atomic clear_decisions failed",
+			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", stepID),
 			zap.Int64("entry_id", entryID), zap.Int("position", position))
 		return true, true, err.Error()
 	}
 	return true, false, ""
 }
 
-// engineOnEnterCallback returns the Phase 2 callback for an engine-owned
+// engineOnEnterCallback returns the Phase 2 callback for a marker-bearing
 // on_enter action kind. The returned callback's Execute reports its own
 // ErrActionNotYetWired when the required adapter isn't wired (kanban-only
 // deployments) — that surfaces as a failed marker with a clear cause rather
 // than a silent no-op, matching AC-A6's "never discard" intent.
-func (s *Service) engineOnEnterCallback(t wfmodels.OnEnterActionType) engine.ActionCallback {
-	switch t {
-	case wfmodels.OnEnterClearDecisions:
+func (s *Service) engineOnEnterCallback(kind engine.ActionKind) engine.ActionCallback {
+	switch kind {
+	case engine.ActionClearDecisions:
 		return engine.ClearDecisionsCallback{Decisions: s.engineDecisions}
-	case wfmodels.OnEnterQueueRunForEachParticipant:
+	case engine.ActionQueueRunForEachParticipant:
 		return engine.QueueRunForEachParticipantCallback{Adapter: s.engineRunQueue, Participants: s.engineParticipants}
 	default:
 		return nil

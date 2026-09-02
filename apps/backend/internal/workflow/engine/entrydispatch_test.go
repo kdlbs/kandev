@@ -188,7 +188,7 @@ func TestDispatchStepEntry_ExcludesSessionShapedKinds(t *testing.T) {
 	}
 	e := New(&fakeEntryDispatchStore{step: step}, registry)
 
-	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1")
+	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1", 0)
 
 	require.Len(t, results, 1, "only the session-independent action should be attempted")
 	assert.Equal(t, ActionClearDecisions, results[0].Kind)
@@ -216,7 +216,7 @@ func TestDispatchStepEntry_ContinuesAfterOneActionFails(t *testing.T) {
 	}
 	e := New(&fakeEntryDispatchStore{step: step}, registry)
 
-	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1")
+	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1", 0)
 
 	require.Len(t, results, 2, "both declared actions must be attempted despite the first failing")
 	assert.Equal(t, ActionClearDecisions, results[0].Kind)
@@ -230,7 +230,7 @@ func TestDispatchStepEntry_NoDeclaredActionsIsNoop(t *testing.T) {
 	step := StepSpec{ID: "step-1"}
 	e := New(&fakeEntryDispatchStore{step: step}, MapRegistry{})
 
-	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1")
+	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1", 0)
 
 	assert.Empty(t, results)
 }
@@ -256,7 +256,7 @@ func TestDispatchStepEntry_RepeatedParticipantSeatRoleDispatchesOnce(t *testing.
 	}
 	e := New(&fakeEntryDispatchStore{step: step}, registry)
 
-	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1")
+	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1", 0)
 
 	require.Len(t, results, 1, "the repeated declaration for the same role must not be dispatched a second time")
 	assert.Len(t, seen, 1)
@@ -282,8 +282,104 @@ func TestDispatchStepEntry_DistinctParticipantSeatRolesBothDispatch(t *testing.T
 	}
 	e := New(&fakeEntryDispatchStore{step: step}, registry)
 
-	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1")
+	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1", 0)
 
 	require.Len(t, results, 2)
 	assert.Len(t, seen, 2)
+}
+
+// fakeMarkerExecutor is a MarkerBearingStepEntryExecutor test double that
+// returns canned (abandon, err) pairs per ActionKind, and records every call
+// it received so a test can assert both what ran and in what order.
+type fakeMarkerExecutor struct {
+	outcomes map[ActionKind]struct {
+		abandon bool
+		err     error
+	}
+	calls []struct {
+		Kind          ActionKind
+		Position      int
+		MarkerEntryID int64
+	}
+}
+
+func (f *fakeMarkerExecutor) ExecuteMarkerBearingStepEntryAction(
+	_ context.Context, _ string, _ StepSpec, action Action, position int, markerEntryID int64,
+) (bool, error) {
+	f.calls = append(f.calls, struct {
+		Kind          ActionKind
+		Position      int
+		MarkerEntryID int64
+	}{action.Kind, position, markerEntryID})
+	outcome := f.outcomes[action.Kind]
+	return outcome.abandon, outcome.err
+}
+
+// TestDispatchStepEntry_MarkerBearingFailureAbandonsRemainingSequence covers
+// AC-OFFICE-STEP-ENTRY-DISPATCH-002.10: when a marker-bearing action fails,
+// no later position in the same entry's sequence — marker-bearing or not —
+// may run, because it could depend on state the failed action never actually
+// produced (e.g. a participant fan-out reading decisions clear_decisions
+// never cleared).
+func TestDispatchStepEntry_MarkerBearingFailureAbandonsRemainingSequence(t *testing.T) {
+	var seen []ActionInput
+	failure := errors.New("boom")
+	executor := &fakeMarkerExecutor{outcomes: map[ActionKind]struct {
+		abandon bool
+		err     error
+	}{
+		ActionClearDecisions: {err: failure},
+	}}
+	registry := MapRegistry{
+		ActionEnsureParticipantSeat: entryRecordingCallback{inputs: &seen},
+	}
+	step := StepSpec{
+		ID: "step-1",
+		Events: map[Trigger][]Action{
+			TriggerOnEnter: {
+				{Kind: ActionClearDecisions},
+				{Kind: ActionEnsureParticipantSeat, EnsureParticipantSeat: &EnsureParticipantSeatAction{Role: "reviewer"}},
+			},
+		},
+	}
+	e := New(&fakeEntryDispatchStore{step: step}, registry, WithMarkerBearingStepEntryExecutor(executor))
+
+	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1", 42)
+
+	require.Len(t, results, 1, "the position after the failed marker-bearing action must not run")
+	assert.Equal(t, ActionClearDecisions, results[0].Kind)
+	assert.ErrorIs(t, results[0].Err, failure)
+	assert.Empty(t, seen, "ensure_participant_seat must not have been dispatched")
+	require.Len(t, executor.calls, 1)
+	assert.Equal(t, 0, executor.calls[0].Position)
+	assert.Equal(t, int64(42), executor.calls[0].MarkerEntryID)
+}
+
+// TestDispatchStepEntry_MarkerBearingAbandonStopsSequenceWithoutRecordingResult
+// covers the abandon (claim-loss) branch of the same stop rule: a concurrent
+// dispatch already owns the marker, which is a normal race outcome, not a
+// failure, so no StepEntryActionResult is recorded for the abandoned
+// position — but the sequence still stops.
+func TestDispatchStepEntry_MarkerBearingAbandonStopsSequenceWithoutRecordingResult(t *testing.T) {
+	executor := &fakeMarkerExecutor{outcomes: map[ActionKind]struct {
+		abandon bool
+		err     error
+	}{
+		ActionClearDecisions: {abandon: true},
+	}}
+	step := StepSpec{
+		ID: "step-1",
+		Events: map[Trigger][]Action{
+			TriggerOnEnter: {
+				{Kind: ActionClearDecisions},
+				{Kind: ActionQueueRunForEachParticipant},
+			},
+		},
+	}
+	e := New(&fakeEntryDispatchStore{step: step}, MapRegistry{}, WithMarkerBearingStepEntryExecutor(executor))
+
+	results := e.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-1", "entry-1", 42)
+
+	assert.Empty(t, results, "an abandoned claim records no result and stops the sequence")
+	require.Len(t, executor.calls, 1, "the position after the abandoned claim must not be attempted")
 }
