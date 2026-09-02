@@ -43,13 +43,13 @@ const createTablesSQL = `
 		path TEXT NOT NULL DEFAULT '',
 		interval_seconds INTEGER NOT NULL DEFAULT 300,
 		poll_enabled INTEGER NOT NULL DEFAULT 1,
-		last_synced_at DATETIME,
+		last_synced_at TIMESTAMP,
 		last_ok INTEGER NOT NULL DEFAULT 0,
 		last_error TEXT NOT NULL DEFAULT '',
 		last_warnings TEXT NOT NULL DEFAULT '[]',
 		last_hash TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS office_config_sync_manifest (
 		workspace_id TEXT NOT NULL,
@@ -57,7 +57,7 @@ const createTablesSQL = `
 		entity_key TEXT NOT NULL,
 		entity_id TEXT NOT NULL,
 		source_path TEXT NOT NULL DEFAULT '',
-		updated_at DATETIME NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		PRIMARY KEY (workspace_id, kind, entity_key)
 	);
 	CREATE INDEX IF NOT EXISTS idx_office_config_sync_manifest_entity
