@@ -145,6 +145,15 @@ type RetryCanceller interface {
 	CancelPendingRetriesForTask(ctx context.Context, taskID string) error
 }
 
+// ProjectBudgetEvaluator evaluates project-scoped budget policies for a
+// destination project. Wired to costs.CostService.EvaluateProjectBudget so
+// reassigning a task into a project re-checks that project's policies —
+// otherwise a notify_only threshold crossed purely by moving historical
+// spend (not a new cost event or agent launch) would never fire an alert.
+type ProjectBudgetEvaluator interface {
+	EvaluateProjectBudget(ctx context.Context, workspaceID, projectID string) error
+}
+
 // RunResolver resolves the originating office run id for a task, used
 // to attribute the task_status_changed activity row back to the run
 // that produced the transition. Optional dependency — when nil, the
@@ -361,6 +370,7 @@ type DashboardService struct {
 	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver      RunResolver                     // optional; nil means status-change activity rows have no run_id
+	projectBudget    ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	// officeSessionIdentity gates RecordAgentDecision's use of the caller's
 	// own session id. Defaults false (zero value); set via
 	// SetOfficeSessionIdentity, wired from features.officeSessionIdentity.
@@ -478,6 +488,13 @@ func (s *DashboardService) SetRetryCanceller(c RetryCanceller) {
 // rows are logged with an empty run_id.
 func (s *DashboardService) SetRunResolver(r RunResolver) {
 	s.runResolver = r
+}
+
+// SetProjectBudgetEvaluator wires the seam used to re-evaluate a
+// destination project's budget policies on task reassignment. Optional;
+// when unset, UpdateTaskProjectID does not check budgets.
+func (s *DashboardService) SetProjectBudgetEvaluator(e ProjectBudgetEvaluator) {
+	s.projectBudget = e
 }
 
 // LogTaskStateChange records a task state transition for Office tasks before
