@@ -51,8 +51,10 @@ const (
 // doubles that do not exercise this scan stay compatible.
 type officeDecisionCandidateLister interface {
 	ListOfficeDecisionWaitCandidates(
-		ctx context.Context, quietSince time.Time,
-	) ([]models.OfficeDecisionWaitCandidate, error)
+		ctx context.Context,
+		quietSince time.Time,
+		after *models.OfficeDecisionWaitCursor,
+	) ([]models.OfficeDecisionWaitCandidate, *models.OfficeDecisionWaitCursor, error)
 }
 
 // officeRunInFlightReader answers whether a task still has a queued or claimed
@@ -71,7 +73,9 @@ type officeRunInFlightReader interface {
 // nothing and counts every evaluation as skipped, rather than reporting
 // tasks it cannot prove are idle.
 func (s *Service) SetOfficeRunInFlightReader(reader officeRunInFlightReader) {
+	s.officeStallDependenciesMu.Lock()
 	s.officeRunInFlight = reader
+	s.officeStallDependenciesMu.Unlock()
 }
 
 // officeDecisionWaitingKey identifies one observation for dedupe purposes.
@@ -84,7 +88,8 @@ func officeDecisionWaitingKey(taskID, stepID string) string {
 
 // detectOfficeDecisionWaitingOnce is the per-tick scan, called from the
 // idle-session reaper's existing ticker alongside reclaimStuckSignalSessionsOnce
-// rather than owning a second background goroutine.
+// rather than owning a second background goroutine. It walks bounded keyset
+// pages until the scan budget expires or the candidate set is complete.
 func (s *Service) detectOfficeDecisionWaitingOnce(ctx context.Context) {
 	lister, ok := s.repo.(officeDecisionCandidateLister)
 	if !ok {
@@ -92,31 +97,50 @@ func (s *Service) detectOfficeDecisionWaitingOnce(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
-	candidates, err := lister.ListOfficeDecisionWaitCandidates(ctx, now.Add(-officeDecisionWaitingThreshold))
-	if err != nil {
-		officeStallSkipped(officeStallSkipCandidateListFailed)
-		s.logger.Warn("office stall watchdog: listing decision-wait candidates failed; tick skipped",
-			zap.Error(err))
-		return
-	}
 	scanCtx, cancel := context.WithTimeout(ctx, stuckSignalScanBudget)
 	defer cancel()
-	live := make(map[string]struct{}, len(candidates))
-	for i, candidate := range candidates {
+	live := make(map[string]struct{})
+	var cursor *models.OfficeDecisionWaitCursor
+	scanned := 0
+	for {
 		if scanCtx.Err() != nil {
-			s.logger.Warn("office stall watchdog: decision-wait scan budget exceeded; deferring remaining candidates to the next tick",
-				zap.Int("candidates_scanned", i),
-				zap.Int("candidates_deferred", len(candidates)-i))
-			// No prune: `live` is incomplete for a scan cut short here, and
-			// pruning against it would re-report tasks this tick never
-			// reached. Mirrors reclaimStuckSignalSessionsOnce.
+			s.logOfficeDecisionScanBudgetExceeded(scanned)
 			return
 		}
-		if s.evaluateOfficeDecisionWaiting(scanCtx, candidate, now) {
-			live[officeDecisionWaitingKey(candidate.TaskID, candidate.StepID)] = struct{}{}
+		candidates, next, err := lister.ListOfficeDecisionWaitCandidates(
+			scanCtx, now.Add(-officeDecisionWaitingThreshold), cursor,
+		)
+		if err != nil {
+			if scanCtx.Err() != nil {
+				s.logOfficeDecisionScanBudgetExceeded(scanned)
+				return
+			}
+			officeStallSkipped(officeStallSkipCandidateListFailed)
+			s.logger.Warn("office stall watchdog: listing decision-wait candidates failed; tick skipped",
+				zap.Error(err))
+			return
 		}
+		for _, candidate := range candidates {
+			if scanCtx.Err() != nil {
+				s.logOfficeDecisionScanBudgetExceeded(scanned)
+				return
+			}
+			scanned++
+			if s.evaluateOfficeDecisionWaiting(scanCtx, candidate, now) {
+				live[officeDecisionWaitingKey(candidate.TaskID, candidate.StepID)] = struct{}{}
+			}
+		}
+		if next == nil || len(candidates) == 0 {
+			break
+		}
+		cursor = next
 	}
 	s.pruneOfficeDecisionWaiting(live)
+}
+
+func (s *Service) logOfficeDecisionScanBudgetExceeded(scanned int) {
+	s.logger.Warn("office stall watchdog: decision-wait scan budget exceeded; deferring remaining candidates to the next tick",
+		zap.Int("candidates_scanned", scanned))
 }
 
 // evaluateOfficeDecisionWaiting applies the remaining predicate to one
@@ -148,7 +172,7 @@ func (s *Service) evaluateOfficeDecisionWaiting(
 	if !s.officeStepAwaitsDecision(ctx, candidate) {
 		return false
 	}
-	reader := s.officeRunInFlight
+	_, _, reader := s.officeStallDependencies()
 	if reader == nil {
 		officeStallSkipped(officeStallSkipRunReaderUnwired)
 		return false
@@ -172,15 +196,16 @@ func (s *Service) evaluateOfficeDecisionWaiting(
 func (s *Service) officeStepAwaitsDecision(
 	ctx context.Context, candidate models.OfficeDecisionWaitCandidate,
 ) bool {
-	if s.engineParticipants == nil {
+	participantsStore, decisionsStore, _ := s.officeStallDependencies()
+	if participantsStore == nil {
 		officeStallSkipped(officeStallSkipParticipantStore)
 		return false
 	}
-	if s.engineDecisions == nil {
+	if decisionsStore == nil {
 		officeStallSkipped(officeStallSkipDecisionStore)
 		return false
 	}
-	participants, err := s.engineParticipants.ListStepParticipants(ctx, candidate.StepID, candidate.TaskID)
+	participants, err := participantsStore.ListStepParticipants(ctx, candidate.StepID, candidate.TaskID)
 	if err != nil {
 		officeStallSkipped(officeStallSkipParticipantReadFailed)
 		return false
@@ -188,7 +213,7 @@ func (s *Service) officeStepAwaitsDecision(
 	if !hasDecidingSeat(participants) {
 		return false
 	}
-	decisions, err := s.engineDecisions.ListStepDecisions(ctx, candidate.TaskID, candidate.StepID)
+	decisions, err := decisionsStore.ListStepDecisions(ctx, candidate.TaskID, candidate.StepID)
 	if err != nil {
 		officeStallSkipped(officeStallSkipDecisionReadFailed)
 		return false

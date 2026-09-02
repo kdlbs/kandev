@@ -678,6 +678,9 @@ type Service struct {
 	// reported once. Pruned against the live candidate set at the end of
 	// every complete scan.
 	officeDecisionWaiting sync.Map
+	// officeStallDependenciesMu protects detector dependencies that are wired
+	// after Service.Start while the idle reaper can already read them.
+	officeStallDependenciesMu sync.RWMutex
 	// officeRunInFlight answers whether a task still has a queued or claimed
 	// run, the decision-waiting detector's false-positive guard. Nil until
 	// wired (SetOfficeRunInFlightReader); the detector reports nothing and
@@ -1123,6 +1126,16 @@ type Service struct {
 	ciAutomationCancel  context.CancelFunc
 	ciAutomationStopped bool
 	ciAutomationWorkers sync.WaitGroup
+}
+
+func (s *Service) officeStallDependencies() (
+	engine.ParticipantStore,
+	engine.DecisionStore,
+	officeRunInFlightReader,
+) {
+	s.officeStallDependenciesMu.RLock()
+	defer s.officeStallDependenciesMu.RUnlock()
+	return s.engineParticipants, s.engineDecisions, s.officeRunInFlight
 }
 
 type RouteAction string
@@ -1837,14 +1850,18 @@ func (s *Service) SetEngineRunQueue(adapter engine.RunQueueAdapter) {
 
 // SetEngineParticipantStore wires the engine's ParticipantStore.
 func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
+	s.officeStallDependenciesMu.Lock()
 	s.engineParticipants = store
+	s.officeStallDependenciesMu.Unlock()
 	s.engineOptions = append(s.engineOptions, engine.WithParticipantStore(store))
 	s.reinitWorkflowEngine()
 }
 
 // SetEngineDecisionStore wires the engine's DecisionStore.
 func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
+	s.officeStallDependenciesMu.Lock()
 	s.engineDecisions = store
+	s.officeStallDependenciesMu.Unlock()
 	s.engineOptions = append(s.engineOptions, engine.WithDecisionStore(store))
 	s.reinitWorkflowEngine()
 }

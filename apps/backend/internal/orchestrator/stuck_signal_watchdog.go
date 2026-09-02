@@ -152,8 +152,22 @@ func (s *Service) reconcileWaitingStuckSignalSessionIfDue(ctx context.Context, s
 	}
 	switch stuckSignalDispositionFor(task, session, signal) {
 	case stuckSignalSurfaceOnly:
-		s.surfaceOfficeStalledSignal(task, session, signal, stuckSignalGateWaiting, now)
-		return false
+		guard := s.lockCancelInFlightGuard(session.ID)
+		defer guard.release()
+		if s.isCancelInFlight(session.ID) {
+			return true
+		}
+		latest, latestSignal, stillPending := s.stuckSignalWaitingStillPending(ctx, session.ID, signal)
+		if !stillPending {
+			return true
+		}
+		latestTask, err := s.repo.GetTask(ctx, latest.TaskID)
+		if err != nil || latestTask == nil ||
+			stuckSignalDispositionFor(latestTask, latest, latestSignal) != stuckSignalSurfaceOnly {
+			return true
+		}
+		s.surfaceOfficeStalledSignal(latestTask, latest, latestSignal, stuckSignalGateWaiting, now)
+		return true
 	case stuckSignalReclaimable:
 	default:
 		return false
@@ -163,7 +177,7 @@ func (s *Service) reconcileWaitingStuckSignalSessionIfDue(ctx context.Context, s
 	if s.isCancelInFlight(session.ID) {
 		return true
 	}
-	_, stillPending := s.stuckSignalWaitingStillPending(ctx, session.ID, signal.StepID)
+	_, _, stillPending := s.stuckSignalWaitingStillPending(ctx, session.ID, signal)
 	if !stillPending {
 		return true
 	}
@@ -171,16 +185,20 @@ func (s *Service) reconcileWaitingStuckSignalSessionIfDue(ctx context.Context, s
 	return true
 }
 
-func (s *Service) stuckSignalWaitingStillPending(ctx context.Context, sessionID, stepID string) (*models.TaskSession, bool) {
+func (s *Service) stuckSignalWaitingStillPending(
+	ctx context.Context,
+	sessionID string,
+	expected models.PendingStepCompletionSignal,
+) (*models.TaskSession, models.PendingStepCompletionSignal, bool) {
 	latest, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || latest == nil || latest.State != models.TaskSessionStateWaitingForInput {
-		return nil, false
+		return nil, models.PendingStepCompletionSignal{}, false
 	}
 	signal, ok := models.LoadPendingStepSignal(latest.Metadata)
-	if !ok || signal.StepID != stepID {
-		return nil, false
+	if !ok || officeStalledSignalKey(sessionID, signal) != officeStalledSignalKey(sessionID, expected) {
+		return nil, models.PendingStepCompletionSignal{}, false
 	}
-	return latest, true
+	return latest, signal, true
 }
 
 // reclaimStuckSignalSessionIfDue filters a single session against the

@@ -40,9 +40,20 @@ func stampTaskQuiet(t *testing.T, repo *Repository, taskID string, at time.Time)
 
 func candidateIDs(t *testing.T, repo *Repository, quietSince time.Time) []string {
 	t.Helper()
-	rows, err := repo.ListOfficeDecisionWaitCandidates(context.Background(), quietSince)
-	if err != nil {
-		t.Fatalf("ListOfficeDecisionWaitCandidates: %v", err)
+	var (
+		rows   []models.OfficeDecisionWaitCandidate
+		cursor *models.OfficeDecisionWaitCursor
+	)
+	for {
+		page, next, err := repo.ListOfficeDecisionWaitCandidates(context.Background(), quietSince, cursor)
+		if err != nil {
+			t.Fatalf("ListOfficeDecisionWaitCandidates: %v", err)
+		}
+		rows = append(rows, page...)
+		if next == nil {
+			break
+		}
+		cursor = next
 	}
 	ids := make([]string, 0, len(rows))
 	for _, row := range rows {

@@ -242,6 +242,39 @@ func TestReclaimStuckSignalSessionsOnce_SurfacesOfficeTaskAtWaitingGate(t *testi
 	assertOfficeStallNotActedOn(t, repo, "t1", "s1", "step1")
 }
 
+// The waiting gate receives a session snapshot from the active-session scan.
+// A replacement signal on the same step must not inherit the old signal's age
+// while the detector is between that scan and its report.
+func TestReconcileWaitingStuckSignalSessionIfDue_SkipsReplacedSignal(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, officeStallStepGetter(), newMockTaskRepo())
+	oldSignal := seedOfficeStrandedSignal(t, svc, repo, "t1", "s1", "step1", models.TaskSessionStateWaitingForInput)
+	newSignal := models.PendingStepCompletionSignal{
+		StepID:     oldSignal.StepID,
+		Source:     models.StepCompletionSourceAgent,
+		SignaledAt: time.Now().UTC(),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, newSignal); err != nil {
+		t.Fatalf("replace pending signal: %v", err)
+	}
+
+	snapshot := &models.TaskSession{
+		ID:     "s1",
+		TaskID: "t1",
+		State:  models.TaskSessionStateWaitingForInput,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyPendingStepCompletion: oldSignal,
+		},
+	}
+	before := officeStrandedCount(stuckSignalGateWaiting)
+	svc.reconcileWaitingStuckSignalSessionIfDue(ctx, snapshot, time.Now().UTC())
+	if got := officeStrandedCount(stuckSignalGateWaiting) - before; got != 0 {
+		t.Fatalf("stranded-signal counter delta = %d, want 0", got)
+	}
+}
+
 // AC-001.5: a still-stranded signal is reported once, not on every tick.
 func TestReclaimStuckSignalSessionsOnce_SurfacesOfficeSignalOncePerSignal(t *testing.T) {
 	ctx := context.Background()

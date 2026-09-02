@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"expvar"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Doubles for the decision-waiting detector. Each can be told to fail, because
@@ -182,6 +186,79 @@ func TestDetectOfficeDecisionWaitingOnce_SurfacesWaitingTask(t *testing.T) {
 		t.Fatalf("run reader called %d times, want 1", runs.calls)
 	}
 	assertOfficeDecisionNotActedOn(t, repo, "t1", "step1", decisions, queue)
+}
+
+// A bounded page must not make the oldest candidates a permanent exclusion
+// list. Every candidate past the first page still needs one evaluation during
+// a scan pass.
+func TestDetectOfficeDecisionWaitingOnce_ProcessesCandidatesBeyondFirstPage(t *testing.T) {
+	const candidateCount = 201
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-000", "s-seed", "step1")
+	seedDecisionWaitingTask(t, repo, "task-000", "step1")
+	for i := 1; i < candidateCount; i++ {
+		taskID := fmt.Sprintf("task-%03d", i)
+		now := time.Now().UTC()
+		if err := repo.CreateTask(context.Background(), &taskmodels.Task{
+			ID:             taskID,
+			WorkspaceID:    "ws1",
+			WorkflowID:     "wf1",
+			WorkflowStepID: "step1",
+			Title:          taskID,
+			State:          v1.TaskStateInProgress,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}); err != nil {
+			t.Fatalf("create task %s: %v", taskID, err)
+		}
+		seedDecisionWaitingTask(t, repo, taskID, "step1")
+	}
+	svc := decisionWaitingService(t, repo,
+		&stallParticipantStore{participants: decidingSeat()}, &stallDecisionStore{},
+		&stallRunReader{})
+
+	before := officeDecisionWaitingCount()
+	svc.detectOfficeDecisionWaitingOnce(context.Background())
+
+	if got := officeDecisionWaitingCount() - before; got != candidateCount {
+		t.Fatalf("decision-waiting counter delta = %d, want %d", got, candidateCount)
+	}
+	if _, seen := svc.officeDecisionWaiting.Load(officeDecisionWaitingKey("task-200", "step1")); !seen {
+		t.Fatal("candidate beyond the first page was not evaluated")
+	}
+}
+
+// The Office dependency readers are wired after Service.Start. The detector
+// can run during that interval, so late wiring and detector reads must be race
+// free.
+func TestOfficeDecisionWaitingLateRunReaderWiringIsRaceFree(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskWithoutSession(t, repo, "t1", "step1")
+	seedDecisionWaitingTask(t, repo, "t1", "step1")
+	svc := decisionWaitingService(t, repo,
+		&stallParticipantStore{participants: decidingSeat()}, &stallDecisionStore{},
+		&stallRunReader{})
+	ctx := context.Background()
+
+	const iterations = 1000
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < iterations; i++ {
+			svc.detectOfficeDecisionWaitingOnce(ctx)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		close(start)
+		for i := 0; i < iterations; i++ {
+			svc.SetOfficeRunInFlightReader(&stallRunReader{inFlight: i%2 == 0})
+		}
+	}()
+	wg.Wait()
 }
 
 // AC-002.2: the false-positive guard. A task with a claimed run is being

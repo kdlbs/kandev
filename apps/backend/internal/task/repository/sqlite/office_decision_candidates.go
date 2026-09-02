@@ -9,17 +9,17 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// officeDecisionWaitScanLimit bounds one enumeration. The detector runs on the
-// idle reaper's tick and does per-candidate follow-up reads, so an unbounded
-// result set would let a large parked backlog stretch a single tick past the
-// scan budget. Ordering is oldest-first, so a truncated scan drops the
-// freshest candidates — the ones most likely to resolve on their own — and the
-// next tick still sees whatever it missed.
+// officeDecisionWaitScanLimit bounds one page. The detector runs on the idle
+// reaper's tick and does per-candidate follow-up reads, so an unbounded result
+// set would let a large parked backlog stretch a single tick past the scan
+// budget. Keyset pagination lets one tick continue with later rows until that
+// budget expires.
 const officeDecisionWaitScanLimit = 200
 
 // ListOfficeDecisionWaitCandidates returns Office tasks that sit at a workflow
 // step carrying a decision-required seat and have not been touched since
-// quietSince.
+// quietSince. Pass after to continue after a previous ordered page. The return
+// cursor is nil when the result set is complete.
 //
 // This is deliberately only the cheap, indexable half of the
 // decision-waiting predicate (REQ-OFFICE-STALL-VISIBILITY-002). It does not
@@ -43,11 +43,20 @@ const officeDecisionWaitScanLimit = 200
 // finds. The exact anchor is task_step_transitions.occurred_at, which has no
 // read API yet; tightening to it is a follow-up, not a correction.
 func (r *Repository) ListOfficeDecisionWaitCandidates(
-	ctx context.Context, quietSince time.Time,
-) ([]models.OfficeDecisionWaitCandidate, error) {
+	ctx context.Context,
+	quietSince time.Time,
+	after *models.OfficeDecisionWaitCursor,
+) ([]models.OfficeDecisionWaitCandidate, *models.OfficeDecisionWaitCursor, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListOfficeDecisionWaitCandidates")
 	defer span.End()
 
+	cursorPredicate := ""
+	args := []interface{}{quietSince}
+	if after != nil {
+		cursorPredicate = `
+		  AND (t.updated_at > ? OR (t.updated_at = ? AND t.id > ?))`
+		args = append(args, after.UpdatedAt, after.UpdatedAt, after.TaskID)
+	}
 	query := fmt.Sprintf(`
 		SELECT t.id, t.workflow_step_id, t.updated_at
 		FROM tasks t
@@ -55,6 +64,7 @@ func (r *Repository) ListOfficeDecisionWaitCandidates(
 		  AND COALESCE(t.workflow_step_id, '') != ''
 		  AND t.state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
 		  AND t.updated_at < ?
+		%s
 		  AND %s
 		  AND %s
 		  AND EXISTS (
@@ -63,17 +73,25 @@ func (r *Repository) ListOfficeDecisionWaitCandidates(
 			  AND p.decision_required = 1
 			  AND (COALESCE(p.task_id, '') = '' OR p.task_id = t.id)
 		  )
-		ORDER BY t.updated_at ASC
+		ORDER BY t.updated_at ASC, t.id ASC
 		LIMIT %d
 	`,
+		cursorPredicate,
 		isFromOfficeProjection("t"),
 		excludeConfigModePredicate(r.ro.DriverName(), "t.metadata"),
 		officeDecisionWaitScanLimit,
 	)
 
 	var out []models.OfficeDecisionWaitCandidate
-	if err := r.ro.SelectContext(ctx, &out, r.ro.Rebind(query), quietSince); err != nil {
-		return nil, fmt.Errorf("list office decision-wait candidates: %w", err)
+	if err := r.ro.SelectContext(ctx, &out, r.ro.Rebind(query), args...); err != nil {
+		return nil, nil, fmt.Errorf("list office decision-wait candidates: %w", err)
 	}
-	return out, nil
+	if len(out) == officeDecisionWaitScanLimit {
+		last := out[len(out)-1]
+		return out, &models.OfficeDecisionWaitCursor{
+			UpdatedAt: last.UpdatedAt,
+			TaskID:    last.TaskID,
+		}, nil
+	}
+	return out, nil, nil
 }
