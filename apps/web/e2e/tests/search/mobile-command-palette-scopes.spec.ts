@@ -67,9 +67,9 @@ test("@search the palette scope strip wraps below the field on a phone", async (
   expect(titleBox.width).toBeGreaterThan(60);
 });
 
-// @covers AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.1, AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.2,
-// AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.3, AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.4,
-// AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.8
+// @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.1, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.2,
+// AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.3, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.4,
+// AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.8
 test("@search archived task results keep their cues and title space on a phone", async ({
   testPage,
   apiClient,

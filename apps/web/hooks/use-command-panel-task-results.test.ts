@@ -99,7 +99,7 @@ describe("useInlineTaskSearchEffect", () => {
     expect(setTaskResults).not.toHaveBeenCalledWith([]);
   });
 
-  // @covers AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.5
+  // @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.5
   it("uses archived_at instead of terminal state for the active task preview", async () => {
     const archivedInProgress = task("archived-in-progress", "Archived in progress", {
       state: "IN_PROGRESS",
@@ -116,7 +116,7 @@ describe("useInlineTaskSearchEffect", () => {
     await waitFor(() => expect(setTaskResults).toHaveBeenCalledWith([unarchivedCompleted]));
   });
 
-  // @covers AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.6
+  // @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.6
   it("ranks archived matches after non-archived matches by archived_at", async () => {
     const archivedInProgress = task("archived-in-progress", "Archived in progress", {
       state: "IN_PROGRESS",
@@ -135,7 +135,7 @@ describe("useInlineTaskSearchEffect", () => {
     );
   });
 
-  it("pages past archived matches before applying the result limit", async () => {
+  it("queries active matches before a bounded archived fallback page", async () => {
     const archivedTasks = Array.from({ length: 20 }, (_, index) =>
       task(`archived-${index}`, `Archived ${index}`, {
         archived_at: `2026-08-24T09:${String(index).padStart(2, "0")}:00Z`,
@@ -144,12 +144,13 @@ describe("useInlineTaskSearchEffect", () => {
     const unarchivedTask = task("unarchived-match", "Unarchived match", {
       state: "COMPLETED",
     });
-    listTasksByWorkspace.mockImplementation((_workspaceId: string, params: { page?: number }) =>
-      Promise.resolve(
-        params.page === 1
-          ? { tasks: archivedTasks, total: 21 }
-          : { tasks: [unarchivedTask], total: 21 },
-      ),
+    listTasksByWorkspace.mockImplementation(
+      (_workspaceId: string, params: { onlyArchived?: boolean }) =>
+        Promise.resolve(
+          params.onlyArchived
+            ? { tasks: archivedTasks, total: 10_000 }
+            : { tasks: [unarchivedTask], total: 1 },
+        ),
     );
     const setTaskResults = vi.fn();
 
@@ -159,5 +160,16 @@ describe("useInlineTaskSearchEffect", () => {
       expect(setTaskResults).toHaveBeenCalledWith([unarchivedTask, ...archivedTasks.slice(0, 4)]),
     );
     expect(listTasksByWorkspace).toHaveBeenCalledTimes(2);
+    expect(listTasksByWorkspace.mock.calls[0][1]).toEqual({
+      query: "match",
+      page: 1,
+      pageSize: 5,
+    });
+    expect(listTasksByWorkspace.mock.calls[1][1]).toEqual({
+      query: "match",
+      page: 1,
+      pageSize: 4,
+      onlyArchived: true,
+    });
   });
 });

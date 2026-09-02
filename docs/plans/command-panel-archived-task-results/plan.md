@@ -2,9 +2,9 @@
 created: 2026-09-02
 status: complete
 requirements:
-  - REQ-UI-COMMAND-PANEL-ARCHIVED-TASKS-001
+  - REQ-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001
 system_design:
-  - ../../specs/ui/system-design/command-panel-archived-task-results.md
+  - ../../specs/tasks/system-design/command-panel-archived-task-results.md
 legacy_specs: []
 ---
 
@@ -39,7 +39,7 @@ One work order owns this vertical UI change and its focused desktop and phone ev
 
 Update `apps/web/hooks/use-command-panel-task-results.ts`. Use `task.archived_at == null` for the unarchived preview and `task.archived_at != null` for search-result grouping.
 
-Page through the archived search response while fewer than the requested number of non-archived matches has been collected, or until the response total is exhausted. Then use the current stable sort behavior. Non-archived matches remain first, backend order stays intact within each group, and the display limit is applied after grouping.
+Request page one of the default unarchived search results with the display limit. If fewer rows are returned, request only archived matches with the remaining limit and concatenate the two groups. Non-archived matches remain first, backend order stays intact within each group, and the search performs at most two requests.
 
 Add hook cases for an archived in-progress task and an unarchived terminal task.
 
@@ -67,10 +67,10 @@ This change replaces one icon and one badge. It does not change composition, nav
 
 | Acceptance criteria | Evidence |
 | --- | --- |
-| `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.1` to `.4` | Component tests cover the badge, icon, accessible label, and muted semantic classes. |
-| `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.5` and `.6` | Hook tests prove `archived_at` classification and ordering, including a later page with an unarchived match. |
-| `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.7` | A component test invokes the existing selection callback for an archived result. |
-| `AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.8` | Desktop and phone Playwright tests cover visible cues, title space, and overflow. |
+| `AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.1` to `.4` | Component tests cover the badge, icon, accessible label, and muted semantic classes. |
+| `AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.5` and `.6` | Hook tests prove `archived_at` classification and ordering, including bounded active and archived requests. |
+| `AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.7` | A component test invokes the existing selection callback for an archived result. |
+| `AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.8` | Desktop and phone Playwright tests cover visible cues, title space, and overflow. |
 
 ## E2E tests
 
@@ -93,10 +93,10 @@ Extend `apps/web/e2e/tests/search/mobile-command-palette-scopes.spec.ts`. Assert
 - GREEN specification lint: `python3 scripts/lint-spec-files.py --all` - passed.
 - GREEN whitespace check: `git diff --check -- docs/specs docs/plans apps/web` - passed.
 - GREEN rendered evidence: disposable managed E2E capture produced validated 1440x900 desktop and 393x852 phone PNGs; the temporary capture spec was removed and the assets remain ignored for PR publication.
-- Review remediation: search results now page through the existing task-list response before grouping and applying the display limit. A regression covers archived first-page results followed by an unarchived match.
+- Review remediation: search results now use a bounded active-then-archived fallback through the existing task-list API. A regression covers a large archived total without issuing more than two requests.
 
 ## Risks
 
-- The task-list API paginates before the command panel groups archive results. The hook must collect enough pages before applying its display limit.
+- The task-list API returns one archive mode per request. The hook must query unarchived matches before using an archived fallback so archive ordering is correct without an unbounded request waterfall.
 - Row opacity can hide the selected state. The implementation must use semantic muted colors instead.
 - The archived badge must replace the workflow-step badge so phone title space does not decrease.

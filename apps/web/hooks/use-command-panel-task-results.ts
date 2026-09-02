@@ -66,42 +66,33 @@ async function fetchActiveTasks(query: ActiveTaskQuery): Promise<Task[]> {
   return tasks.slice(0, resultLimit);
 }
 
-/** Task search results, archived matches last. */
+/** Task search results, with archived matches fetched only as a fallback. */
 async function fetchMatchingTasks(
   workspaceId: string,
   query: string,
   resultLimit: number,
   signal: AbortSignal,
 ): Promise<Task[]> {
-  const pageSize = Math.max(resultLimit, TASK_SCOPE_PAGE_SIZE);
-  const firstPage = await listTasksByWorkspace(
+  const activeResponse = await listTasksByWorkspace(
     workspaceId,
-    { query, page: 1, pageSize, includeArchived: true },
+    { query, page: 1, pageSize: resultLimit },
     { init: { signal } },
   );
-  const tasks = [...(firstPage.tasks ?? [])];
-  let total = firstPage.total ?? tasks.length;
-  let unarchivedCount = tasks.filter((task) => task.archived_at == null).length;
-  let page = 1;
+  const activeTasks = (activeResponse.tasks ?? []).filter((task) => task.archived_at == null);
+  if (activeTasks.length >= resultLimit) return activeTasks.slice(0, resultLimit);
 
-  // The API applies pagination before returning rows. Continue until the
-  // non-archived group is full or every matching row has been collected.
-  while (tasks.length < total && unarchivedCount < resultLimit) {
-    page += 1;
-    const nextPage = await listTasksByWorkspace(
-      workspaceId,
-      { query, page, pageSize, includeArchived: true },
-      { init: { signal } },
-    );
-    const nextTasks = nextPage.tasks ?? [];
-    if (nextTasks.length === 0) break;
-    tasks.push(...nextTasks);
-    total = nextPage.total ?? total;
-    unarchivedCount += nextTasks.filter((task) => task.archived_at == null).length;
-  }
-
-  tasks.sort((a, b) => (a.archived_at != null ? 1 : 0) - (b.archived_at != null ? 1 : 0));
-  return tasks.slice(0, resultLimit);
+  const archivedResponse = await listTasksByWorkspace(
+    workspaceId,
+    {
+      query,
+      page: 1,
+      pageSize: resultLimit - activeTasks.length,
+      onlyArchived: true,
+    },
+    { init: { signal } },
+  );
+  const archivedTasks = (archivedResponse.tasks ?? []).filter((task) => task.archived_at != null);
+  return [...activeTasks, ...archivedTasks].slice(0, resultLimit);
 }
 
 export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {

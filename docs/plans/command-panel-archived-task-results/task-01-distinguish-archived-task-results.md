@@ -6,18 +6,18 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-UI-COMMAND-PANEL-ARCHIVED-TASKS-001
+  - REQ-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001
 acceptance_criteria:
-  - AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.1
-  - AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.2
-  - AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.3
-  - AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.4
-  - AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.5
-  - AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.6
-  - AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.7
-  - AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.8
+  - AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.1
+  - AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.2
+  - AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.3
+  - AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.4
+  - AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.5
+  - AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.6
+  - AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.7
+  - AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.8
 system_design:
-  - ../../specs/ui/system-design/command-panel-archived-task-results.md
+  - ../../specs/tasks/system-design/command-panel-archived-task-results.md
 ---
 
 # Task 01: Distinguish Archived Task Results
@@ -29,7 +29,7 @@ Use authoritative archive state for command-panel search ordering and result pre
 ## In scope
 
 - Replace terminal-state archive inference with `archived_at`.
-- Page through archived search results before applying the command-panel display limit.
+- Fetch unarchived search results first, then request only the remaining archived matches.
 - Add the archived label, archive icon, accessible label, and muted semantic colors.
 - Preserve non-archived activity icons, workflow badges, result selection, and navigation.
 - Add focused hook, component, desktop, and phone tests.
@@ -43,7 +43,7 @@ Use authoritative archive state for command-panel search ordering and result pre
 ## Acceptance
 
 - Archived results use an **Archived** badge, archive icon, accessible label, and muted semantic colors.
-- Non-archived terminal tasks keep normal task presentation, and archived matches sort after non-archived matches even when the active match is on a later API page.
+- Non-archived terminal tasks keep normal task presentation, and archived matches sort after non-archived matches with at most one active request and one archived fallback request.
 - Desktop and phone results remain readable, selectable, and free of document-level horizontal overflow.
 
 ## Verification
@@ -87,8 +87,8 @@ None. The task-list response and shared task-state icon already provide the requ
 
 ## Inputs
 
-- `REQ-UI-COMMAND-PANEL-ARCHIVED-TASKS-001`.
-- `docs/specs/ui/system-design/command-panel-archived-task-results.md`.
+- `REQ-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001`.
+- `docs/specs/tasks/system-design/command-panel-archived-task-results.md`.
 - Existing command-panel search, activity-icon, and mobile-scope tests.
 
 ## Results
@@ -100,4 +100,4 @@ None. The task-list response and shared task-state icon already provide the requ
 - GREEN phone E2E: the same cues remain visible, title space remains usable, and document-level horizontal overflow is absent.
 - GREEN typecheck, targeted ESLint, i18n checks, specification lint, and diff whitespace checks passed.
 - Rendered evidence: disposable managed capture produced validated 1440x900 desktop and 393x852 phone PNGs; the capture spec was removed before staging.
-- Review remediation: the hook now follows later task-list pages before applying the result limit; a regression covers archived first-page rows followed by an unarchived match. The mobile E2E fixture only seeds the archived task queried by that test.
+- Review remediation: the hook now queries active results before a bounded archived fallback; a regression covers a large archived total without extra pages. The mobile E2E fixture only seeds the archived task queried by that test.

@@ -254,9 +254,9 @@ describe("command panel task activity icon edge cases", () => {
 });
 
 describe("command panel archived task results", () => {
-  // @covers AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.1, AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.2,
-  // AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.3, AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.4,
-  // AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.5
+  // @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.1, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.2,
+  // AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.3, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.4,
+  // AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.5
   it("uses archived_at for the archive cues instead of terminal state", () => {
     const archivedInProgress = task("archived-in-progress", "Archived in progress", {
       state: "IN_PROGRESS",
@@ -288,7 +288,7 @@ describe("command panel archived task results", () => {
     expect(screen.getByRole("img", { name: "Archived" })).toBeTruthy();
   });
 
-  // @covers AC-UI-COMMAND-PANEL-ARCHIVED-TASKS-001.7
+  // @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.7
   it("keeps archived result selection on the existing row action", () => {
     const archivedTask = task("archived-task", "Archived task", {
       state: "IN_PROGRESS",
