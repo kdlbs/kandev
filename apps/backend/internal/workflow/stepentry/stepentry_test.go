@@ -94,6 +94,16 @@ func TestOwnershipTableMatchesDesign(t *testing.T) {
 	if len(cases) != 10 {
 		t.Fatalf("expected exactly 10 classified kinds (the design's table), got %d", len(cases))
 	}
+	// Checking cases against ownershipTable one direction (above) does not
+	// catch an entry added to ownershipTable that this test's own literal
+	// was never updated to include — both maps could still have the same
+	// size by coincidence, or the production table could simply be larger.
+	// Comparing lengths directly closes that gap: this test has direct
+	// access to the private table (same package), so a classified kind this
+	// test doesn't know about fails loudly here instead of silently passing.
+	if len(ownershipTable) != len(cases) {
+		t.Fatalf("ownershipTable has %d classified kinds but this test only checks %d — a kind was added to the production table without updating this test", len(ownershipTable), len(cases))
+	}
 }
 
 // TestOwnershipTableUnclassifiedKind asserts an unknown kind is classified by

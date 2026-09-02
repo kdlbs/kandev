@@ -1,7 +1,7 @@
 ---
 id: "02-marker-positions"
 title: "Persist the allocated marker position set"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-ownership-declaration"]
 plan: "plan.md"
@@ -94,4 +94,24 @@ Task 01, which owns the declaration the position set is computed from.
 
 ## Results
 
-Pending.
+Shipped in Build round 1 (`92755673f` + `02f5a1b1e`), with two subsequent
+hardening rounds. `workflow_step_entries.marker_positions` was added via an
+idempotent `ADD COLUMN` migration; `BuildPendingAllocation` computes the ordered
+marker-bearing position set from the ownership declaration and
+`allocateStepEntryIfPending` persists it inside the same transaction as the entry
+row. Testing round 1 found the atomicity guarantee (AC-008.1) and the
+allocation-failure ERROR log (AC-008.3) were untested; Build round 2
+(`1ee2eb149`) closed both with a SQLite trigger-based fault injection between the
+delete and marker-complete steps, and an ERROR log at both error-return sites in
+`allocateStepEntryIfPending`, each verified discriminating by temporarily
+reintroducing the defect. Testing round 2 found the Postgres counterpart of the
+`marker_positions` ADD COLUMN had no replay test; closed directly (additive gap)
+via `cd9c7f6aa` with a SQLite legacy-replay test plus an env-gated Postgres
+counterpart (Postgres itself unexercised in this environment — `KANDEV_TEST_POSTGRES_DSN`
+unset, declared gap). Review round 1 found `BuildPendingAllocation`'s raw-list
+indexing could desync from `DispatchStepEntry`'s compiled-list indexing whenever
+an earlier action fails to compile; Build round 3 (`9c27351f2`) closed this via a
+new `Action.DeclaredPosition` field set at compile time and used by the claim
+path instead of a loop index, plus a regression test.
+Verification: `go test ./internal/task/repository/sqlite/... ./internal/workflow/stepentry/...
+./internal/orchestrator/...` passes, including `-race`.
