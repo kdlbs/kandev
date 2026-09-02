@@ -65,14 +65,8 @@ func (h *ParentWakeReconciler) Tick(ctx context.Context) error {
 
 // reconcile sweeps for stuck parents and re-delivers a wake for any whose
 // last-delivered receipt no longer matches their current child set.
-//
-// referenceInstant is captured once, before ListStuckParents runs, and
-// threaded through to every candidate's recordReceipt call in this tick. See
-// recordReceipt for why the reference must predate the scan rather than be
-// re-read at commit time.
 func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 	svc := h.scheduler.svc
-	referenceInstant := time.Now().UTC()
 
 	candidates, err := svc.repo.ListStuckParents(ctx, RunReasonTaskChildrenCompleted, maxWakeReconcilePerTick)
 	if err != nil {
@@ -88,7 +82,7 @@ func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 			return
 		}
 		svc.recordWakeCandidate(c.ParentTaskID)
-		h.reconcileOne(ctx, svc, c, referenceInstant)
+		h.reconcileOne(ctx, svc, c)
 	}
 }
 
@@ -97,7 +91,7 @@ func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 // dispatch and again before recording the receipt. This keeps a child update
 // from making an old candidate look delivered for the new generation.
 func (h *ParentWakeReconciler) reconcileOne(
-	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, referenceInstant time.Time,
+	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate,
 ) {
 	// No dispatcher wired means there is nothing to admit: bail out before
 	// IncrementWakeDeliverySeq below, which otherwise bumps the counter for
@@ -163,7 +157,7 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	h.recordReceipt(ctx, svc, c, operationID, referenceInstant)
+	h.recordReceipt(ctx, svc, c, operationID)
 }
 
 // buildPayload assembles the typed payload expected by the workflow engine's
@@ -198,40 +192,12 @@ func (h *ParentWakeReconciler) buildPayload(
 	return engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, nil
 }
 
-// childGenerationSecondLayout matches the text format
-// sqlite.StuckParentCandidate.NewestChildUpdatedAt is always rendered in —
-// dialect.SecondPrecisionText, whole-second resolution, no sub-second
-// component — regardless of which database backs the query. Do not compare
-// against a raw tasks.updated_at value read any other way; only the
-// dialect-normalized text is guaranteed to match this layout on Postgres.
-const childGenerationSecondLayout = "2006-01-02 15:04:05"
-
 // recordReceipt stores the operation-backed receipt after the workflow engine
 // accepts the trigger. The engine owns run admission and can fan out to more
 // than one target, so a single delivered run id cannot represent this wake.
-//
-// It refuses to persist a receipt whose child_generation names a wall-clock
-// second that had not yet closed as of referenceInstant: this generation only
-// has one-second resolution (see dialect.SecondPrecisionText), so a
-// reopen+recomplete landing anywhere in that still-open second would write
-// the identical string, making the reopen indistinguishable from the
-// generation already on file.
-// referenceInstant must be captured once, before the candidate scan
-// (reconcile), and passed in here rather than re-read as "now" at commit
-// time: only an instant that predates the scan guarantees the scanned
-// second was already closed when the scan ran, so no write racing the scan
-// and this call could still land in it. Skipping the write leaves the
-// candidate re-checked on the next tick, once the reference instant has
-// advanced past the open second.
 func (h *ParentWakeReconciler) recordReceipt(
-	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, operationID string, referenceInstant time.Time,
+	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, operationID string,
 ) {
-	if c.NewestChildUpdatedAt >= referenceInstant.Format(childGenerationSecondLayout) {
-		h.logger.Debug("wake sweep: deferred receipt for still-open generation second",
-			zap.String("parent_task_id", c.ParentTaskID))
-		return
-	}
-
 	tx, err := svc.repo.Writer().BeginTxx(ctx, nil)
 	if err != nil {
 		if ctx.Err() != nil {
