@@ -181,6 +181,8 @@ test.describe("Plan checkpointing — rewind UI", () => {
     await session.openRewind();
     await expectRevisionCount(session, 1);
     await expect(session.revisionRow(1).getByTestId("plan-revision-current-badge")).toBeVisible();
+    // Char count is a version-metadata signal computed server-side from content.
+    await expect(session.revisionRow(1).getByTestId("plan-revision-char-count")).toBeVisible();
   });
 
   test("two agent writes within coalesce window: remain one revision", async ({
@@ -208,6 +210,9 @@ test.describe("Plan checkpointing — rewind UI", () => {
 
     await session.openRewind();
     await expectRevisionCount(session, 1);
+    // A coalesced write updates the existing revision, so created_at != updated_at
+    // and the "edited" hint should surface on the merged row.
+    await expect(session.revisionRow(1).getByTestId("plan-revision-coalesced-hint")).toBeVisible();
   });
 
   test("two agent writes across coalesce window: produce two revisions", async ({

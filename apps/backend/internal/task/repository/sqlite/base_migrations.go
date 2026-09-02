@@ -345,6 +345,13 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 
+	// Workflow step display snapshot on plan revisions, same pattern as
+	// author_name: the step a task was on when the revision was written.
+	// Pre-existing revisions get empty strings, matching the fresh-DB default.
+	r.migrate.Apply("task_plan_revisions.workflow_step_id", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
+
 	return nil
 }
 

@@ -729,6 +729,8 @@ func registerRoutes(p routeParams) {
 	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
+	// Stamps each plan revision with the task's workflow step at write time.
+	planService.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: p.services.Workflow})
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
@@ -1861,6 +1863,9 @@ func registerMCPAndDebugRoutes(
 	if p.devMode {
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
+		if p.dbPool != nil {
+			db.RegisterWriterPoolStats(p.dbPool)
+		}
 	}
 }
 

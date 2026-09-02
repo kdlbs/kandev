@@ -5,16 +5,20 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/skillslug"
 	"github.com/kandev/kandev/internal/office/configloader"
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -34,6 +38,7 @@ var retiredDefaultSkillReplacements = map[string]string{
 	"kandev-task-comment":  "kandev-task-ops",
 	"kandev-tasks":         "kandev-task-ops",
 	"kandev-team":          "kandev-team-admin",
+	"memory":               "kandev-memory",
 }
 
 // SystemSkillSpec is the parsed view of a single embedded SKILL.md
@@ -61,6 +66,18 @@ type SystemSyncRepo interface {
 	UpdateSkill(ctx context.Context, skill *models.Skill) error
 	DeleteSkill(ctx context.Context, id string) error
 
+	// ListNonSystemSkills returns every user/provider-imported row
+	// (is_system = false) in the workspace. Used by the bundled-insert
+	// slug-conflict pre-check (AC-003.3) and the user-skill slug
+	// normalization pass (AC-003.8/AC-003.9).
+	ListNonSystemSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
+
+	// NormalizeSkillSlug atomically changes a non-system skill's slug and
+	// rewrites all matching agent desired_skills references. It returns
+	// false when the row no longer matches the supplied identity, which
+	// means another writer already handled or removed it.
+	NormalizeSkillSlug(ctx context.Context, workspaceID, skillID, oldSlug, newSlug string) (bool, error)
+
 	// Agent-profile access used to scrub a deleted system skill's ID
 	// out of every agent_profiles.skill_ids JSON array in the same
 	// workspace, so retiring a bundled skill doesn't leave dangling
@@ -72,10 +89,44 @@ type SystemSyncRepo interface {
 // SyncReport summarises one sync pass across all workspaces. The
 // startup caller surfaces this as a single log line so operators can
 // see exactly which slugs landed where after a kandev upgrade.
+//
+// Every per-workspace list is sorted lexicographically by slug; the
+// scoped `<workspace_id>:<slug>` entries in the aggregate report are
+// sorted by workspace ID then slug (AC-003.5).
 type SyncReport struct {
 	Inserted []string
 	Updated  []string
 	Removed  []string
+
+	// Blocked lists retired system skills whose configured replacement
+	// was not found in this workspace this pass (e.g. its insert was
+	// withheld by a slug conflict). The retired row is left in place
+	// rather than deleted, so no agent silently loses the capability
+	// (AC-003.1); a later pass retries once the conflict resolves.
+	Blocked []string
+
+	// Normalized lists user-skill slugs rewritten from a well-formed
+	// but non-canonical form to their canonical kandev-prefixed form,
+	// as "<old>->new>" entries (AC-003.8).
+	Normalized []string
+
+	// Conflicted lists slugs left untouched because normalizing (or
+	// inserting a bundled row) would collide with another row's
+	// current slug (AC-003.3/AC-003.9).
+	Conflicted []string
+}
+
+// workspaceSyncLocks serializes SyncSystemSkills passes per
+// workspace. SyncSystemSkills has multiple concurrent call sites in
+// one process (lazy per-workspace sync, startup sync, config import,
+// etc.); a pass that can't acquire the lock waits rather than
+// skipping, so two concurrent passes over the same workspace never
+// interleave their insert/retire/normalize phases (AC-003.7).
+var workspaceSyncLocks sync.Map // map[string]*sync.Mutex
+
+func lockForWorkspace(wsID string) *sync.Mutex {
+	v, _ := workspaceSyncLocks.LoadOrStore(wsID, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // SyncSystemSkills idempotently reconciles the office_skills table
@@ -112,45 +163,123 @@ func SyncSystemSkills(
 
 	var report SyncReport
 	for _, wsID := range workspaceIDs {
-		ins, upd, rem, err := syncWorkspace(ctx, repo, wsID, bundledBySlug)
+		result, err := syncWorkspace(ctx, repo, wsID, bundledBySlug, log)
 		if err != nil {
 			log.Error("system skill sync failed for workspace",
 				zap.String("workspace_id", wsID), zap.Error(err))
 			continue
 		}
-		report.Inserted = append(report.Inserted, scope(wsID, ins)...)
-		report.Updated = append(report.Updated, scope(wsID, upd)...)
-		report.Removed = append(report.Removed, scope(wsID, rem)...)
+		report.Inserted = append(report.Inserted, scope(wsID, result.Inserted)...)
+		report.Updated = append(report.Updated, scope(wsID, result.Updated)...)
+		report.Removed = append(report.Removed, scope(wsID, result.Removed)...)
+		report.Blocked = append(report.Blocked, scope(wsID, result.Blocked)...)
+		report.Normalized = append(report.Normalized, scope(wsID, result.Normalized)...)
+		report.Conflicted = append(report.Conflicted, scope(wsID, result.Conflicted)...)
 	}
+	sort.Strings(report.Inserted)
+	sort.Strings(report.Updated)
+	sort.Strings(report.Removed)
+	sort.Strings(report.Blocked)
+	sort.Strings(report.Normalized)
+	sort.Strings(report.Conflicted)
 	log.Info("system skills synced",
 		zap.Int("workspaces", len(workspaceIDs)),
 		zap.Int("bundled", len(specs)),
 		zap.Strings("inserted", report.Inserted),
 		zap.Strings("updated", report.Updated),
 		zap.Strings("removed", report.Removed),
+		zap.Strings("blocked", report.Blocked),
+		zap.Strings("normalized", report.Normalized),
+		zap.Strings("conflicted", report.Conflicted),
 	)
 	return report, nil
 }
 
-// syncWorkspace handles one workspace. Returns the (insert, update,
-// remove) slug lists for the report. Errors propagate; the caller
-// logs and continues to the next workspace so one bad row doesn't
-// gate the rest.
+// workspaceSyncResult carries one workspace's sync outcome between
+// syncWorkspace's phases and back to SyncSystemSkills, which scopes
+// each list into the aggregate SyncReport.
+type workspaceSyncResult struct {
+	Inserted   []string
+	Updated    []string
+	Removed    []string
+	Blocked    []string
+	Normalized []string
+	Conflicted []string
+}
+
+// syncWorkspace handles one workspace: reconcile bundled system
+// skills (insert/update), retire orphaned system rows, then normalize
+// non-canonical user-skill slugs. Errors propagate; the caller logs
+// and continues to the next workspace so one bad row doesn't gate the
+// rest. Holds the per-workspace lock for the whole pass so concurrent
+// SyncSystemSkills call sites never interleave these phases
+// (AC-003.7).
 func syncWorkspace(
 	ctx context.Context,
 	repo SystemSyncRepo,
 	wsID string,
 	bundled map[string]SystemSkillSpec,
-) (inserted, updated, removed []string, err error) {
+	log *logger.Logger,
+) (workspaceSyncResult, error) {
+	mu := lockForWorkspace(wsID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	var result workspaceSyncResult
+
 	existing, err := repo.ListSystemSkills(ctx, wsID)
 	if err != nil {
-		return nil, nil, nil, err
+		return result, err
 	}
 	existingBySlug := make(map[string]*models.Skill, len(existing))
 	for _, s := range existing {
 		existingBySlug[s.Slug] = s
 	}
 
+	nonSystem, err := repo.ListNonSystemSkills(ctx, wsID)
+	if err != nil {
+		return result, fmt.Errorf("list non-system skills: %w", err)
+	}
+	nonSystemBySlug := make(map[string]*models.Skill, len(nonSystem))
+	for _, s := range nonSystem {
+		nonSystemBySlug[s.Slug] = s
+	}
+
+	if err := reconcileBundledSkills(ctx, repo, wsID, bundled, existingBySlug, nonSystemBySlug, &result); err != nil {
+		return result, err
+	}
+	if err := retireOrphanedSystemSkills(ctx, repo, wsID, bundled, existingBySlug, &result); err != nil {
+		return result, err
+	}
+	if err := normalizeUserSkillSlugs(ctx, repo, wsID, nonSystem, existingBySlug, nonSystemBySlug, &result, log); err != nil {
+		return result, err
+	}
+
+	sort.Strings(result.Inserted)
+	sort.Strings(result.Updated)
+	sort.Strings(result.Removed)
+	sort.Strings(result.Blocked)
+	sort.Strings(result.Normalized)
+	sort.Strings(result.Conflicted)
+	return result, nil
+}
+
+// reconcileBundledSkills walks the bundled spec set in sorted order,
+// inserting missing rows and updating drifted ones. A bundled slug
+// not yet present as a system row but already held by a non-system
+// row is skipped and recorded as a conflict rather than inserted
+// (AC-003.3); the CreateSkill unique-constraint fallback below covers
+// the same outcome for the race between this pre-check and the
+// insert.
+func reconcileBundledSkills(
+	ctx context.Context,
+	repo SystemSyncRepo,
+	wsID string,
+	bundled map[string]SystemSkillSpec,
+	existingBySlug map[string]*models.Skill,
+	nonSystemBySlug map[string]*models.Skill,
+	result *workspaceSyncResult,
+) error {
 	// Walk bundled slugs in sorted order so log output is stable.
 	slugs := make([]string, 0, len(bundled))
 	for slug := range bundled {
@@ -162,12 +291,20 @@ func syncWorkspace(
 		spec := bundled[slug]
 		cur, ok := existingBySlug[slug]
 		if !ok {
+			if _, taken := nonSystemBySlug[slug]; taken {
+				result.Conflicted = append(result.Conflicted, slug)
+				continue
+			}
 			row := newSystemSkillRow(wsID, spec)
 			if err := repo.CreateSkill(ctx, row); err != nil {
-				return inserted, updated, removed, fmt.Errorf("insert %s: %w", slug, err)
+				if isSlugUniqueConstraintErr(err) {
+					result.Conflicted = append(result.Conflicted, slug)
+					continue
+				}
+				return fmt.Errorf("insert %s: %w", slug, err)
 			}
 			existingBySlug[slug] = row
-			inserted = append(inserted, slug)
+			result.Inserted = append(result.Inserted, slug)
 			continue
 		}
 		if systemSkillUpToDate(cur, spec) {
@@ -175,37 +312,162 @@ func syncWorkspace(
 		}
 		applySystemSkillUpdate(cur, spec)
 		if err := repo.UpdateSkill(ctx, cur); err != nil {
-			return inserted, updated, removed, fmt.Errorf("update %s: %w", slug, err)
+			return fmt.Errorf("update %s: %w", slug, err)
 		}
-		updated = append(updated, slug)
+		result.Updated = append(result.Updated, slug)
 	}
+	return nil
+}
 
-	for slug, cur := range existingBySlug {
+// retireOrphanedSystemSkills deletes system rows whose slug is no
+// longer in the bundle. A retirement with a configured replacement
+// (retiredDefaultSkillReplacements) only proceeds once that
+// replacement row actually exists in this workspace: deleting the
+// retired row first would strand every agent that referenced it with
+// no rewritten reference (AC-003.1). When the replacement is missing
+// this pass (e.g. its insert was withheld by a slug conflict above),
+// the retired row is left in place and reported as blocked so a later
+// pass can retry once the conflict resolves.
+//
+// A retired row is removed from existingBySlug along with the DB row:
+// normalizeUserSkillSlugs runs after this pass and treats existingBySlug
+// as the set of slugs currently taken, so a stale entry for a slug this
+// same pass just freed would report a false conflict for a user skill
+// that could otherwise normalize onto it.
+func retireOrphanedSystemSkills(
+	ctx context.Context,
+	repo SystemSyncRepo,
+	wsID string,
+	bundled map[string]SystemSkillSpec,
+	existingBySlug map[string]*models.Skill,
+	result *workspaceSyncResult,
+) error {
+	// The map is a snapshot, but the order of retirement still matters when
+	// one retired slug names another as its replacement. Walk it in a stable
+	// order so the outcome does not depend on Go's map iteration seed.
+	slugs := make([]string, 0, len(existingBySlug))
+	for slug := range existingBySlug {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		cur, present := existingBySlug[slug]
+		if !present {
+			continue
+		}
 		if _, kept := bundled[slug]; kept {
 			continue
 		}
-		if replacement := replacementSystemSkill(existingBySlug, slug); replacement != nil {
+		replacementSlug, hasReplacement := retiredDefaultSkillReplacements[slug]
+		if hasReplacement {
+			if _, bundledReplacement := bundled[replacementSlug]; !bundledReplacement {
+				result.Blocked = append(result.Blocked, slug)
+				continue
+			}
+			replacement, found := existingBySlug[replacementSlug]
+			if !found {
+				result.Blocked = append(result.Blocked, slug)
+				continue
+			}
 			if err := replaceSkillOnAgents(ctx, repo, wsID, cur, replacement); err != nil {
-				return inserted, updated, removed, fmt.Errorf("replace %s: %w", slug, err)
+				return fmt.Errorf("replace %s: %w", slug, err)
 			}
 		}
 		if err := repo.DeleteSkill(ctx, cur.ID); err != nil {
-			return inserted, updated, removed, fmt.Errorf("delete %s: %w", slug, err)
+			return fmt.Errorf("delete %s: %w", slug, err)
 		}
 		if err := detachSkillFromAgents(ctx, repo, wsID, cur.ID); err != nil {
-			return inserted, updated, removed, fmt.Errorf("detach %s: %w", slug, err)
+			return fmt.Errorf("detach %s: %w", slug, err)
 		}
-		removed = append(removed, slug)
+		delete(existingBySlug, slug)
+		result.Removed = append(result.Removed, slug)
 	}
-	return inserted, updated, removed, nil
+	return nil
 }
 
-func replacementSystemSkill(skills map[string]*models.Skill, retiredSlug string) *models.Skill {
-	replacementSlug, ok := retiredDefaultSkillReplacements[retiredSlug]
-	if !ok {
-		return nil
+// normalizeUserSkillSlugs rewrites a well-formed but non-canonical
+// user/provider skill slug to its canonical kandev-prefixed form
+// (AC-003.8). The row ID is preserved, so skill_ids needs no
+// rewrite — only slug-keyed desired_skills references are updated. A
+// not-well-formed slug (a legacy artifact predating write-time
+// validation) is left untouched and logged, never normalized
+// (AC-003.9). A normalized value already held by another row is left
+// untouched on both sides and logged as a conflict.
+//
+// The repository performs the row rename and agent-reference rewrite in
+// one transaction. This prevents a concurrent writer from claiming the
+// canonical slug after the snapshot and leaving references pointed at a
+// different row, while also preserving retryability after a failed write.
+func normalizeUserSkillSlugs(
+	ctx context.Context,
+	repo SystemSyncRepo,
+	wsID string,
+	nonSystem []*models.Skill,
+	existingBySlug map[string]*models.Skill,
+	nonSystemBySlug map[string]*models.Skill,
+	result *workspaceSyncResult,
+	log *logger.Logger,
+) error {
+	taken := make(map[string]bool, len(existingBySlug)+len(nonSystemBySlug))
+	for slug := range existingBySlug {
+		taken[slug] = true
 	}
-	return skills[replacementSlug]
+	for slug := range nonSystemBySlug {
+		taken[slug] = true
+	}
+
+	for _, row := range nonSystem {
+		if skillslug.Canonical(row.Slug) {
+			continue
+		}
+		if !skillslug.WellFormed(row.Slug) {
+			log.Warn("system skill sync: leaving not-well-formed user skill slug untouched",
+				zap.String("workspace_id", wsID), zap.String("skill_id", row.ID), zap.String("slug", row.Slug))
+			continue
+		}
+		normalized := skillslug.Normalize(row.Slug)
+		if taken[normalized] {
+			log.Warn("system skill sync: leaving conflicting user skill slug unnormalized",
+				zap.String("workspace_id", wsID), zap.String("skill_id", row.ID),
+				zap.String("slug", row.Slug), zap.String("normalized_slug", normalized))
+			result.Conflicted = append(result.Conflicted, row.Slug)
+			continue
+		}
+		oldSlug := row.Slug
+		changed, err := repo.NormalizeSkillSlug(ctx, wsID, row.ID, oldSlug, normalized)
+		if err != nil {
+			if isSlugUniqueConstraintErr(err) {
+				result.Conflicted = append(result.Conflicted, oldSlug)
+				continue
+			}
+			return fmt.Errorf("normalize slug %s: %w", oldSlug, err)
+		}
+		if !changed {
+			continue
+		}
+		taken[normalized] = true
+		result.Normalized = append(result.Normalized, oldSlug+"->"+normalized)
+	}
+	return nil
+}
+
+// isSlugUniqueConstraintErr reports whether err is a UNIQUE constraint
+// violation for a skill slug. SQLite's driver requires string matching,
+// while pgx exposes a typed SQLSTATE 23505 error. The PostgreSQL
+// constraint-name check avoids treating an unrelated duplicate (for
+// example, a primary-key collision) as a slug conflict.
+func isSlugUniqueConstraintErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" &&
+			(pgErr.ConstraintName == "" || pgErr.ConstraintName == "office_skills_workspace_id_slug_key")
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") ||
+		strings.Contains(msg, "constraint failed: UNIQUE")
 }
 
 func replaceSkillOnAgents(
@@ -273,13 +535,22 @@ func systemSkillUpToDate(cur *models.Skill, spec SystemSkillSpec) bool {
 		cur.SystemVersion == spec.Version
 }
 
+// replaceJSONArrayValue rewrites every occurrence of oldValue to
+// newValue in a JSON-array-encoded agent_profiles column, also
+// de-duplicating and dropping empties. raw may also be a legacy
+// comma-separated value (see ParseDesiredSlugs in injection.go, which
+// reads both formats); a legacy value is parsed the same way and, if
+// changed, re-encoded as the canonical JSON-array form — this is how
+// a legacy desired_skills column migrates format the next time a
+// rename or replacement touches one of its entries. An unchanged
+// legacy value is left exactly as found (no unnecessary rewrite).
 func replaceJSONArrayValue(raw, oldValue, newValue string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "null" {
 		return raw, false
 	}
-	var values []string
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+	values, ok := parseJSONOrLegacyCSVArray(raw)
+	if !ok {
 		return raw, false
 	}
 	out := make([]string, 0, len(values))
@@ -307,6 +578,28 @@ func replaceJSONArrayValue(raw, oldValue, newValue string) (string, bool) {
 		return raw, false
 	}
 	return string(encoded), true
+}
+
+// parseJSONOrLegacyCSVArray parses raw as a JSON string array, falling
+// back to splitting it as a legacy comma-separated value when raw
+// isn't a JSON array. Mirrors ParseDesiredSlugs's format detection
+// (injection.go) so both readers of these columns agree on what
+// counts as "legacy". Returns ok=false only for malformed JSON input
+// (a corrupt column stays a safe no-op for the caller).
+func parseJSONOrLegacyCSVArray(raw string) ([]string, bool) {
+	if strings.HasPrefix(raw, "[") {
+		var values []string
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return nil, false
+		}
+		return values, true
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = strings.TrimSpace(p)
+	}
+	return out, true
 }
 
 // removeIDFromJSONArray parses a JSON-array string, removes every

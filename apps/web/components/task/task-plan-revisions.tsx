@@ -8,16 +8,15 @@ import { Badge } from "@kandev/ui/badge";
 import { toast } from "@/lib/toast/sonner";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatPreciseTime } from "@/lib/utils";
+import { formatNumber } from "@/lib/i18n/formats";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { WorkflowStepMessageBadge } from "./chat/messages/workflow-step-message-badge";
 import { PlanRevisionPreviewDialog } from "./task-plan-preview-dialog";
 import { PlanRevisionDiffDialog } from "./task-plan-diff-dialog";
 import { RevertConfirmDialog } from "./task-plan-revert-confirm-dialog";
-import {
-  RevisionInlineConfirmation,
-  RevisionRestoreAction,
-} from "./task-plan-revision-restore-actions";
+import { TaskPlanRevisionRow } from "./task-plan-revision-row";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -385,19 +384,25 @@ function RevisionList({
   return (
     <ul className="divide-y">
       {revisions.map((rev, i) => (
-        <RevisionRow
+        <TaskPlanRevisionRow
           key={rev.id}
           revision={rev}
           isCurrent={i === 0}
           isSaving={isSaving}
-          agentName={agentName}
           rowConfirmTarget={rowConfirmTarget}
           isFinePointer={isFinePointer}
           onRevertRequest={onRevertRequest}
           onRevertCancel={onRevertCancel}
           onRevert={onRevert}
-          onRowClick={onRowClick}
-        />
+        >
+          <RevisionRowBody
+            revision={rev}
+            previousRevision={revisions[i + 1] ?? null}
+            isCurrent={i === 0}
+            agentName={agentName}
+            onRowClick={onRowClick}
+          />
+        </TaskPlanRevisionRow>
       ))}
     </ul>
   );
@@ -431,75 +436,34 @@ function RevisionAuthor({
   );
 }
 
-type RevisionRowProps = {
-  revision: TaskPlanRevision;
-  isCurrent: boolean;
-  isSaving: boolean;
-  agentName: string | null;
-  rowConfirmTarget: TaskPlanRevision | null;
-  isFinePointer: boolean;
-  onRevertRequest: (revision: TaskPlanRevision) => void;
-  onRevertCancel: () => void;
-  onRevert: (revision: TaskPlanRevision) => Promise<void>;
-  onRowClick: (rev: TaskPlanRevision) => void;
-};
-
-function RevisionRow({
-  revision,
-  isCurrent,
-  isSaving,
-  agentName,
-  rowConfirmTarget,
-  isFinePointer,
-  onRevertRequest,
-  onRevertCancel,
-  onRevert,
-  onRowClick,
-}: RevisionRowProps) {
-  return (
-    <li
-      className="px-3 py-2.5 hover:bg-accent/30"
-      data-testid="plan-revision-row"
-      data-revision-id={revision.id}
-      data-revision-number={revision.revision_number}
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        <RevisionRowBody
-          revision={revision}
-          isCurrent={isCurrent}
-          agentName={agentName}
-          onRowClick={onRowClick}
-        />
-        <RevisionRestoreAction
-          revision={revision}
-          isCurrent={isCurrent}
-          isSaving={isSaving}
-          rowConfirmTarget={rowConfirmTarget}
-          isFinePointer={isFinePointer}
-          onRevertRequest={onRevertRequest}
-          onRevertCancel={onRevertCancel}
-          onRevert={onRevert}
-        />
-      </div>
-      <RevisionInlineConfirmation
-        revision={revision}
-        isCurrent={isCurrent}
-        isSaving={isSaving}
-        isFinePointer={isFinePointer}
-        rowConfirmTarget={rowConfirmTarget}
-        onRevertCancel={onRevertCancel}
-        onRevert={onRevert}
-      />
-    </li>
-  );
+/** Signed, thousands-separated delta string ("+1,234" / "−40,612"), or null
+ * when either side's character count is unknown or unchanged. Uses U+2212
+ * (minus sign) rather than a hyphen for the negative case, matching the
+ * design's typographic minus. */
+function formatContentDelta(
+  current: number | undefined,
+  previous: number | undefined,
+): string | null {
+  if (current === undefined || previous === undefined) return null;
+  const delta = current - previous;
+  if (delta === 0) return null;
+  const magnitude = formatNumber(Math.abs(delta));
+  return delta > 0 ? `+${magnitude}` : `−${magnitude}`;
 }
 
 function RevisionRowBody({
   revision,
+  previousRevision,
   isCurrent,
   agentName,
   onRowClick,
-}: Pick<RevisionRowProps, "revision" | "isCurrent" | "agentName" | "onRowClick">) {
+}: {
+  revision: TaskPlanRevision;
+  previousRevision: TaskPlanRevision | null;
+  isCurrent: boolean;
+  agentName: string | null;
+  onRowClick: (revision: TaskPlanRevision) => void;
+}) {
   const { t } = useTranslation();
   // Force re-render every 30s so the precise timestamp ("5m ago", "Today,
   // 14:32", …) refreshes as the revision ages — `formatPreciseTime` derives
@@ -510,6 +474,11 @@ function RevisionRowBody({
     return () => clearInterval(id);
   }, []);
   const timestamp = formatPreciseTime(revision.updated_at);
+  const delta = formatContentDelta(revision.content_length, previousRevision?.content_length);
+  // A coalesced write bumps updated_at without changing created_at (the
+  // original write's timestamp), so a mismatch means this row absorbed a
+  // later edit rather than being written once.
+  const wasCoalesced = revision.updated_at !== revision.created_at;
 
   return (
     <button
@@ -530,9 +499,45 @@ function RevisionRowBody({
             {t("task:current")}
           </Badge>
         )}
+        {revision.workflow_step_id && (
+          <WorkflowStepMessageBadge
+            workflow={{
+              stepId: revision.workflow_step_id,
+              stepName: revision.workflow_step_name,
+              stepColor: revision.workflow_step_color,
+            }}
+            size="xs"
+            tooltipI18nKey="task:planRevisionWorkflowStepTooltip"
+          />
+        )}
       </div>
-      <div className="text-[11px] text-muted-foreground mt-1" data-testid="plan-revision-time">
-        {timestamp}
+      <div
+        className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5 flex-wrap"
+        data-testid="plan-revision-time"
+      >
+        <span>{timestamp}</span>
+        {revision.content_length !== undefined && (
+          <span data-testid="plan-revision-char-count">
+            {t("task:planRevisionCharCount", {
+              count: revision.content_length,
+              formatted: formatNumber(revision.content_length),
+            })}
+          </span>
+        )}
+        {delta && (
+          <span
+            className={
+              delta.startsWith("+") ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
+            }
+            data-testid="plan-revision-delta"
+            title={t("task:planRevisionDeltaTooltip", { delta })}
+          >
+            {delta}
+          </span>
+        )}
+        {wasCoalesced && (
+          <span data-testid="plan-revision-coalesced-hint">{t("task:planRevisionEdited")}</span>
+        )}
       </div>
       {revision.revert_of_revision_id && (
         <div
