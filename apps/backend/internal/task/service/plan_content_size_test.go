@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // fixedSizeASCIIContent returns content of exactly n bytes, built from ASCII
@@ -178,11 +178,10 @@ func TestPlanService_ContentSizeCeiling_RejectionPersistsNothing(t *testing.T) {
 	}
 }
 
-// TestPlanService_ContentSizeCeiling_Ordering pins AC-001.5: the ceiling is
-// evaluated after the task-id presence check (a request missing both is
-// reported as missing task_id) but before authorization, so an oversized
-// write for an inaccessible task is refused for size without ever reaching
-// the authorizer.
+// TestPlanService_ContentSizeCeiling_Ordering pins AC-001.5: the task-id and
+// access checks run before the size response, so an oversized write for a
+// missing or inaccessible task does not expose the storage constraint. The
+// size check still runs before plan storage and the per-task write lock.
 func TestPlanService_ContentSizeCeiling_Ordering(t *testing.T) {
 	oversized := fixedSizeASCIIContent(MaxPlanContentBytes + 1)
 
@@ -194,7 +193,37 @@ func TestPlanService_ContentSizeCeiling_Ordering(t *testing.T) {
 		}
 	})
 
-	t.Run("size check runs before authorization", func(t *testing.T) {
+	t.Run("missing task takes precedence over an oversized write", func(t *testing.T) {
+		svc, _, _ := createTestPlanService(t)
+
+		_, err := svc.CreatePlan(context.Background(), CreatePlanRequest{
+			TaskID:  "missing-task",
+			Content: oversized,
+		})
+		if !errors.Is(err, repoerrors.ErrTaskNotFound) {
+			t.Fatalf("expected repoerrors.ErrTaskNotFound, got %v", err)
+		}
+		if errors.Is(err, ErrPlanContentTooLarge) {
+			t.Fatalf("missing task must not expose the size constraint: %v", err)
+		}
+	})
+
+	t.Run("UpdatePlan also preserves missing task precedence", func(t *testing.T) {
+		svc, _, _ := createTestPlanService(t)
+
+		_, err := svc.UpdatePlan(context.Background(), UpdatePlanRequest{
+			TaskID:  "missing-task",
+			Content: oversized,
+		})
+		if !errors.Is(err, repoerrors.ErrTaskNotFound) {
+			t.Fatalf("expected repoerrors.ErrTaskNotFound, got %v", err)
+		}
+		if errors.Is(err, ErrPlanContentTooLarge) {
+			t.Fatalf("missing task must not expose the size constraint: %v", err)
+		}
+	})
+
+	t.Run("authorization runs before the size response", func(t *testing.T) {
 		svc, _, repo := createTestPlanService(t)
 		ctx := context.Background()
 		seedTask(t, ctx, repo, "task-1")
@@ -206,19 +235,20 @@ func TestPlanService_ContentSizeCeiling_Ordering(t *testing.T) {
 		})
 
 		_, err := svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-1", Content: oversized})
-		assertPlanContentTooLarge(t, err, MaxPlanContentBytes+1)
-		if authorizerCalled {
-			t.Fatal("authorizer was called for an oversized write; the size check must run first")
+		if err == nil || err.Error() != "caller cannot access this task" {
+			t.Fatalf("expected authorization error, got %v", err)
+		}
+		if !authorizerCalled {
+			t.Fatal("authorizer was not called before evaluating an oversized write")
 		}
 	})
 }
 
 // TestPlanService_ContentSizeCeiling_NoLockContention pins the second half of
 // AC-001.5: an oversized write must not wait behind another write's per-task
-// lock, because the check reads no stored state and needs no serialization.
-// Uses synctest: the size check fires before locks.acquire, so on the
-// success path the spawned goroutine finishes near-instantly under fake
-// time instead of the test paying the full 2-second real-time budget.
+// lock, because the admission check reads no plan state and needs no
+// serialization.
+// Uses synctest so the test remains deterministic without a wall-clock wait.
 func TestPlanService_ContentSizeCeiling_NoLockContention(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		svc, _, repo := createTestPlanService(t)
@@ -234,10 +264,11 @@ func TestPlanService_ContentSizeCeiling_NoLockContention(t *testing.T) {
 			done <- err
 		}()
 
+		synctest.Wait()
 		select {
 		case err := <-done:
 			assertPlanContentTooLarge(t, err, MaxPlanContentBytes+1)
-		case <-time.After(2 * time.Second):
+		default:
 			t.Fatal("oversized write blocked behind the task's write lock")
 		}
 	})

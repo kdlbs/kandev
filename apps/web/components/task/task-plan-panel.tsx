@@ -6,7 +6,8 @@ import { PlanPanelHeader } from "./task-plan-panel-header";
 import dynamic from "@/lib/routing/client-dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { useTaskPlan, type PlanSaveError } from "@/hooks/domains/session/use-task-plan";
+import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
+import { usePlanDraft } from "@/hooks/domains/session/use-plan-draft";
 import { TaskPlanSaveErrorBanner } from "./task-plan-save-error-banner";
 import { useAppStore } from "@/components/state-provider";
 import { PlanSelectionPopover } from "./plan-selection-popover";
@@ -23,7 +24,6 @@ import { usePlanFindShortcut } from "./use-plan-find-shortcut";
 import { usePlanSelection } from "./use-plan-selection";
 import { Trans, useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
-import type { TaskPlan } from "@/lib/types/http";
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -38,9 +38,6 @@ const PlanEditor = dynamic(
     ),
   },
 );
-
-/** Debounce delay for auto-saving plan content (ms) */
-const AUTO_SAVE_DELAY = 1500;
 
 type TaskPlanPanelProps = {
   taskId: string | null;
@@ -85,7 +82,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     handleEmptyStateClick,
     hasUnsavedChanges,
     attemptSave,
-  } = usePlanDraft(plan, isSaving, { savePlan, editorWrapperRef, taskId, saveError });
+  } = usePlanDraft({ plan, isSaving, savePlan, editorWrapperRef, taskId, saveError });
   const commentState = usePlanComments(activeSessionId);
   const selectionState = usePlanSelection(activeSessionId, commentState);
 
@@ -378,145 +375,6 @@ function PlanSelectionPopoverWrapper({
       onDelete={onDelete}
     />
   );
-}
-
-type UsePlanDraftOptions = {
-  savePlan: (content: string, title?: string) => Promise<TaskPlan | null>;
-  editorWrapperRef: React.RefObject<HTMLDivElement | null>;
-  taskId: string | null;
-  saveError: PlanSaveError | null;
-};
-
-/** Draft content, editor key, focus tracking, and auto-save. Exported for direct unit testing of the autosave-suppression behavior. */
-export function usePlanDraft(
-  plan: { content?: string; title?: string } | null | undefined,
-  isSaving: boolean,
-  { savePlan, editorWrapperRef, taskId, saveError }: UsePlanDraftOptions,
-) {
-  const [draftContent, setDraftContent] = useState(plan?.content ?? "");
-  const draftContentRef = useRef(draftContent);
-  const [editorKey, setEditorKey] = useState(0);
-  const lastPlanContentRef = useRef<string | undefined>(undefined);
-  const isExternalUpdateRef = useRef(false);
-  const [isEditorFocused, setIsEditorFocused] = useState(false);
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Content of the most recent (auto- or explicit-) save attempt, so the
-  // autosave effect never resubmits a draft that was just rejected. `null`
-  // suppresses nothing, so a panel that has attempted no save never blocks
-  // its first autosave.
-  const lastAttemptContentRef = useRef<string | null>(null);
-  // Single entry point for dispatching a savePlan call, used by both the
-  // autosave timer and the explicit Ctrl/Cmd+S shortcut, so a rejection from
-  // either path always leaves the ref holding exactly what was rejected.
-  // Assigned before the request goes out, not from the promise's
-  // continuation: setTaskPlanSaving(false) in savePlan's finally fires
-  // before this continuation runs, so writing it here would lose that race
-  // with the very re-render it is meant to guard.
-  const attemptSave = useCallback(
-    (content: string, title?: string) => {
-      lastAttemptContentRef.current = content;
-      return savePlan(content, title).then((saved) => {
-        // Two attempts can overlap (an explicit save racing an in-flight
-        // autosave). Only clear the ref if it still holds THIS attempt's own
-        // content: otherwise an earlier-started attempt resolving after a
-        // later-started one was rejected would erase the later attempt's
-        // suppression and re-arm autosave on its still-rejected content.
-        if (saved && lastAttemptContentRef.current === content) {
-          lastAttemptContentRef.current = null;
-        }
-        return saved;
-      });
-    },
-    [savePlan],
-  );
-
-  // Reset on task change: a suppressed attempt for the previous task must
-  // not silently block the first autosave for the next one.
-  useEffect(() => {
-    lastAttemptContentRef.current = null;
-  }, [taskId]);
-
-  const handleEmptyStateClick = useCallback(() => {
-    const el = editorWrapperRef.current?.querySelector(".ProseMirror");
-    if (el) (el as HTMLElement).focus();
-  }, [editorWrapperRef]);
-
-  // Track focus state
-  useEffect(() => {
-    const checkFocus = () => {
-      const wrapper = editorWrapperRef.current;
-      if (!wrapper) return;
-      setIsEditorFocused(wrapper.contains(document.activeElement));
-    };
-    document.addEventListener("focusin", checkFocus);
-    document.addEventListener("focusout", checkFocus);
-    checkFocus();
-    return () => {
-      document.removeEventListener("focusin", checkFocus);
-      document.removeEventListener("focusout", checkFocus);
-    };
-  }, [editorWrapperRef]);
-
-  useEffect(() => {
-    draftContentRef.current = draftContent;
-  }, [draftContent]);
-
-  // Sync from external plan updates
-  useEffect(() => {
-    const prevContent = lastPlanContentRef.current;
-    const newContent = plan?.content;
-    lastPlanContentRef.current = newContent;
-    if (newContent !== prevContent) {
-      const resolved = newContent ?? "";
-      if (resolved === draftContentRef.current) return;
-      isExternalUpdateRef.current = true;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing external plan data to local editor state
-      setDraftContent(resolved);
-      setEditorKey((k) => k + 1);
-    }
-  }, [plan?.content]);
-
-  // Auto-save with debounce
-  useEffect(() => {
-    if (isExternalUpdateRef.current) {
-      isExternalUpdateRef.current = false;
-      return;
-    }
-    const hasChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
-    if (!hasChanges || isSaving) return;
-    // Suppress resubmitting content a save attempt was just rejected for —
-    // otherwise a rejected draft resubmits every AUTO_SAVE_DELAY for as long
-    // as the panel stays open and the draft is unchanged. Scoped to a size
-    // rejection specifically (AC-003.4's "such a rejection" chains back to
-    // AC-003.1's ceiling rejection): a transient transport/server failure
-    // must keep retrying so an unchanged draft still saves once the backend
-    // recovers, instead of staying silently unsaved until the user edits it.
-    if (saveError?.kind === "content-too-large" && draftContent === lastAttemptContentRef.current) {
-      return;
-    }
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(() => {
-      autoSaveTimerRef.current = null;
-      attemptSave(draftContent, plan?.title);
-    }, AUTO_SAVE_DELAY);
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-        autoSaveTimerRef.current = null;
-      }
-    };
-  }, [draftContent, plan, isSaving, attemptSave, saveError]);
-
-  const hasUnsavedChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
-  return {
-    draftContent,
-    attemptSave,
-    setDraftContent,
-    editorKey,
-    isEditorFocused,
-    handleEmptyStateClick,
-    hasUnsavedChanges,
-  };
 }
 
 type SaveShortcutOptions = {

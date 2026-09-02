@@ -44,12 +44,8 @@ artifact is the plan, not the MCP or browser surface that submits it.
 
 ## Prior art
 
-**Wiki leg — DID NOT RUN, tool unreachable.** Retrieval was impossible on all
-three tiers: `obsidian-wiki` and `qmd` are not on `PATH`, no `qmd` MCP tool is
-registered in this session, and the configured vault directory itself returns
-`Operation not permitted` under macOS Documents-folder protection, so the
-`grep` fallback could not run either. No wiki content was consulted; this is a
-skipped leg, not an empty result.
+**Wiki leg — DID NOT RUN, tool unreachable.** The wiki retrieval tools were not
+available in this environment. No wiki content was consulted.
 
 **Vendor leg — DID NOT RUN, tool unreachable.** The `saas-kb` MCP server and its
 `search_fsm_docs` tool are not registered in this session, so the `ai_sdlc`
@@ -110,11 +106,19 @@ degrades every session launched against it.
   for exceeding the ceiling, it shall leave the plan HEAD row unchanged, append no
   revision, coalesce into no revision, and publish no plan-created, plan-updated,
   or revision-created event.
-- **AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.5:** The system shall evaluate the ceiling
-  after checking that a task identifier was supplied, before authorizing the
-  caller against the target task, and before acquiring that task's write lock. A
-  rejected write shall perform no database read and shall not wait behind another
-  write for the same task.
+- **AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.5:** The system shall check that a task
+  identifier was supplied and authorize the caller before returning a size-limit
+  response. For an oversized write, it shall establish that the target task
+  exists before returning the size-limit response, so a missing or inaccessible
+  task returns `not_found` without storage-constraint details. After these checks,
+  the ceiling shall be evaluated before reading plan storage or acquiring that
+  task's write lock. A rejected write shall not read the plan or wait behind
+  another write for the same task.
+
+  This preserves `AC-TASKS-DOCUMENTS-001.2`: a plan write for a missing task
+  returns `not_found`, creates no plan data, and exposes no storage-constraint
+  details. The existence check above is not a plan-row read and does not change
+  the normal foreign-key race handling in the write transaction.
 - **AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.6:** The system shall decide the ceiling
   from the submitted content alone. When two plan writes for the same task are in
   flight, the outcome of the ceiling check for each shall be independent of their
@@ -122,8 +126,10 @@ degrades every session launched against it.
   apply to each write individually and shall not accumulate across writes or
   across a task's revision history.
 - **AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.7:** When a caller resubmits content that
-  was rejected for exceeding the ceiling, the system shall reject it identically
-  and shall retain no per-caller or per-task state from the earlier rejection.
+  was rejected for exceeding the ceiling, the backend shall evaluate it as a new
+  write and reject it identically. The backend shall retain no per-caller or
+  per-task admission state from the earlier rejection. A client may keep local
+  UI state to avoid retrying unchanged content.
 - **AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.8:** When submitted plan content is at or
   below the ceiling, including empty content where the write path already accepts
   it, the system shall handle the write exactly as it does today, with unchanged

@@ -15,7 +15,7 @@ owners:
 ## Purpose and boundaries
 
 This design adds one admission rule to the plan write path: content above a fixed
-byte ceiling is refused before any storage work happens. It changes no coalescing
+byte ceiling is refused before plan storage work happens. It changes no coalescing
 rule, no revision numbering, no truncation threshold, and no read path. The
 truncation guard and this ceiling never both fire on one write: an oversized write
 is refused before truncation is evaluated, and a write that passes the ceiling is
@@ -58,10 +58,19 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (Pl
     if req.TaskID == "" {
         return PlanWriteResult{}, ErrTaskIDRequired
     }
-    if err := checkPlanContentSize(req.Content); err != nil {   // new
+    if err := s.authorize(ctx, req.TaskID); err != nil {
         return PlanWriteResult{}, err
     }
-    if err := s.authorize(ctx, req.TaskID); err != nil {
+    if len(req.Content) > MaxPlanContentBytes {
+        task, err := s.repo.GetTask(ctx, req.TaskID)
+        if err != nil {
+            return PlanWriteResult{}, err
+        }
+        if task == nil {
+            return PlanWriteResult{}, repoerrors.ErrTaskNotFound
+        }
+    }
+    if err := checkPlanContentSize(req.Content); err != nil {   // new
         return PlanWriteResult{}, err
     }
     release := s.locks.acquire(req.TaskID)
@@ -69,29 +78,28 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (Pl
 }
 ```
 
-`UpdatePlan` takes the same three lines in the same position.
+`UpdatePlan` uses the same validation helper. The helper runs authorization first.
+For an oversized request it then confirms task existence before returning the size
+error. This preserves the accepted task-document contract: a write for a missing
+task returns `not_found` and does not expose storage constraints. The extra lookup
+does not read the plan row and is only needed for an oversized request; normal
+writes keep their existing access path.
 
-The ordering in `AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.5` is deliberate. The check
-is a pure function of the request, so it needs no database read and must not
-happen behind the per-task lock: an oversized write that queued for the lock would
-let a flood of them serialize ahead of legitimate writes, which is the resource
-problem this capability exists to prevent. Placing it before `authorize` leaks
-nothing, because the response depends only on the submitted byte count and is
-identical whether or not the target task exists or is visible to the caller, and
-because the ceiling is published in the tool descriptions anyway. Placing it after
-the `TaskID` check keeps the existing "which argument was wrong" precedence: a
-request missing a task identifier is reported that way even if it is also
-oversized.
+The ordering in `AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.5` is deliberate. Task ID
+and access checks retain their existing precedence, including the rule that a
+missing task returns `not_found` without storage details. The size check then runs
+before any plan-row read and before the per-task lock: an oversized write that
+queued for the lock would let a flood of them serialize ahead of legitimate writes.
+The task existence preflight is not plan storage work and does not serialize with
+other plan writes.
 
-Because the decision reads no stored state, two concurrent writes for the same
-task cannot influence each other's outcome and the check needs no lock of its own
-(`AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.6`). Returning before any repository call
-is also what gives
-`AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.4` for free: `upsertPlan` never runs, so no
-HEAD row is touched, no revision is written or coalesced, and the event publishing
-that `CreatePlan`/`UpdatePlan` perform after `upsertPlan` returns is never reached.
-The check holds no state between calls, so a resubmission is judged fresh
-(`AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.7`).
+The content decision itself reads no stored plan state, so two concurrent writes
+for the same task cannot influence each other's size outcome and the size check
+needs no lock of its own (`AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.6`). When the
+request is rejected, `upsertPlan` never runs, so no HEAD row is touched, no
+revision is written or coalesced, and no event is published
+(`AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.4`). The backend holds no admission state
+between calls, so a resubmission is judged fresh (`AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.7`).
 
 ## The constant and the unit
 
@@ -104,11 +112,6 @@ An exported constant in `internal/task/service`, matching `maxUserStateBodyBytes
 in `internal/plugins/user_state_handlers.go` in both value and reasoning. It is
 not read from configuration, environment, or a runtime feature toggle
 (`AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-001.11`).
-
-Measured against the local instance database, 256 KiB is roughly 2.1x the largest
-plan HEAD ever stored there (122,215 bytes), 1.65x the largest revision (158,393
-bytes), and about 21x the 12,000-byte handover injection budget. It rejects
-nothing that instance has legitimately held while bounding a single write's cost.
 
 The unit is **bytes**, via `len(content)`, not runes. This differs on purpose from
 `planTruncationDetected`, which counts runes because it reasons about how much of
@@ -309,7 +312,7 @@ the backend, and here it never decides anything.
 that matters most, because the plain reading of the autosave effect is wrong and the
 failure mode is the exact resource problem this capability exists to prevent.
 
-The effect's dependency array is `[draftContent, plan, isSaving, savePlan]`, and `isSaving` is
+The effect's dependency array is `[draftContent, plan, isSaving, attemptSave, saveError, taskId]`, and `isSaving` is
 not inert. `savePlan` sets it true before its `await` and false in its `finally`, so every
 attempt flips it twice and re-runs the effect twice. The `false → true` run returns early on the
 `isSaving` guard; the `true → false` run finds `hasChanges` still true — a failed save never
@@ -331,15 +334,20 @@ save never suppresses its first autosave. The ordering is part of the rule:
 - The autosave effect refuses to arm a timer while `draftContent` is identical to that ref.
   With the existing `hasChanges` and `isSaving` guards, this is what makes `003.4` true.
 - A successful save clears it to `null`.
-- A task change clears it too, through the second reset effect in detail 4. That is why
-  `usePlanDraft` gains a `taskId` parameter it does not have today.
-- An explicit user-requested save clears it and proceeds unconditionally. That is `003.4`'s
-  "or the user explicitly requests a save", and it is the user's escape hatch from a
-  suppressed autosave. The explicit path is `useSaveShortcut` (Ctrl/Cmd+S), which is a
-  SIBLING hook called at the panel level, not inside `usePlanDraft` — so `usePlanDraft` must
-  return a clear function for it to call. There are exactly two `savePlan` call sites in the
-  panel today, the autosave timer and this shortcut; the shortcut is the one that must
-  bypass the guard.
+- A task change clears it too. `usePlanDraft` receives `taskId`, resets the
+  attempt ref, and replaces the local draft with that task's stored content (or
+  an empty string) before the autosave effect can run. This is required even
+  when both tasks have no plan, because their `plan?.content` values are both
+  `undefined`.
+- A generic save failure does not suppress unchanged content. The hook receives
+  the save-scoped error and suppresses only a matching `content-too-large`
+  rejection; transport or server failures can retry after the saving state
+  returns to idle.
+- An explicit user-requested save proceeds unconditionally. That is `003.4`'s
+  "or the user explicitly requests a save", and it is the user's escape hatch
+  from a suppressed autosave. The explicit path and the autosave timer both use
+  the hook's `attemptSave` entry point, while only the autosave effect applies
+  the suppression guard.
 - It is a ref rather than state on purpose: assigning it must not itself re-run the effect.
 
 Two consequences to state rather than let Build discover. The guard is on content identity,
@@ -361,20 +369,14 @@ A, switch to B, and A's banner is displayed against B's plan.
 
 Three rules, and together they are `003.8`:
 
-- **Reset on task change.** TWO effects, one per hook, because the two pieces of state do
-  not live in the same file and no single effect can reach both. `useTaskPlan`
-  (`hooks/domains/session/use-task-plan.ts`) clears `saveError` in an effect keyed on
-  `taskId`. `usePlanDraft` (`components/task/task-plan-panel.tsx`) clears the last-attempt
-  ref from detail 3 in its own effect keyed on `taskId` — which means **`usePlanDraft` gains
-  a `taskId` parameter**: its signature today is
-  `usePlanDraft(plan, isSaving, savePlan, editorWrapperRef)` and it cannot see the id at
-  all. Do not try to clear the ref from the hook that owns `saveError`; it is a closure
-  variable in another module. `taskId` is nullable, and a change to no task at all is a
-  change like any other: the rejection stops being displayed then too. The two effects are
-  independent — neither reads what the other writes — so their relative order does not
-  matter and they need no coordination. The sequence counter is deliberately *not* reset,
-  because it only ever needs to be monotonic and restarting it could let a task-A attempt
-  tie a task-B attempt's number.
+- **Reset on task change.** `useTaskPlan` (`hooks/domains/session/use-task-plan.ts`)
+  clears `saveError` in an effect keyed on `taskId`. `usePlanDraft`
+  (`hooks/domains/session/use-plan-draft.ts`) resets its last-attempt ref and
+  synchronizes the local editor draft in an effect keyed on `taskId`. The sync
+  marks the render as external so it cannot autosave the previous task's draft,
+  including when both tasks have no plan. `taskId` is nullable, and a change to
+  no task is a change like any other. The sequence counter is deliberately *not*
+  reset, because it only needs to stay monotonic.
 - **Discard stale results.** `savePlan` compares the `taskId` it was invoked for against a
   **`currentTaskIdRef` that the hook assigns on every render**, and writes `saveError` only
   while the two are equal; otherwise it drops the result. The ref is load-bearing, not
@@ -388,6 +390,10 @@ Three rules, and together they are `003.8`:
   be wrong in exactly the window it exists to cover. Its initial value is the first render's
   `taskId`, so it is never `undefined` when a continuation reads it. This covers what the
   reset effect cannot — a write for task A that fails *after* the switch to task B.
+- A task ID can appear again after an A → B → A switch. The hook therefore
+  increments a task-instance generation synchronously when `taskId` changes;
+  each attempt captures that generation, and a continuation must match both the
+  current task ID and the current generation before it can set `saveError`.
 - **Latest started attempt wins.** `savePlan` takes a monotonically increasing sequence
   number from a ref at the top of each attempt — the ref starts at 0 and is incremented
   before the number is read, so the first attempt is 1 and 0 is never a live attempt — and
@@ -396,10 +402,6 @@ Three rules, and together they are `003.8`:
   two writes in flight the first to finish clears it while the second is still running, and
   completion order carries no information about which attempt is more recent. Ordering by
   start is decided by a counter this code owns rather than inferred from a flag it does not.
-
-Overlap is uncommon — it takes an explicit save racing an in-flight autosave, since the
-autosave effect will not start a second attempt while `isSaving` is true — but that is a
-reason to write the rule down, not to leave it rediscovered.
 
 `003.5` is deliberately worded around *when* the rejection clears rather than its outcome:
 `savePlan` clears its error state at the top, before the request goes out, so a displayed
@@ -440,11 +442,10 @@ failure is shown — follows from detail 2's decide-once classification. A test 
   reset both pieces of state and drop a stale attempt's continuation, so it does solve the TASK
   half of `003.8`. Not chosen because it does not touch the ATTEMPT half: two writes in flight
   for the SAME task share one key and one mount, so the sequence ref is required either way,
-  and once it exists, resetting two named pieces of state beats remounting the panel and
-  re-running its load effects on every task switch. An earlier draft rejected this on the
-  grounds that it would discard an unsaved draft; **that premise was false and is corrected**.
-  `PlanEditor` is already keyed ``key={`${taskId}-${state.editorKey}`}`` and the plan-sync
-  effect already replaces the draft on every task switch.
+  and once it exists, resetting the named state and the draft in a task-aware
+  sync beats remounting the panel and re-running its load effects on every task
+  switch. `PlanEditor` is already keyed ``key={`${taskId}-${state.editorKey}`}``;
+  the draft hook now resets its local value even when both plans are absent.
 
 ## Testing
 
@@ -455,8 +456,10 @@ Backend, in `internal/task/service`:
 - Rejection persists nothing: HEAD unchanged, revision count unchanged, no event
   published on the bus.
 - Ordering: an oversized request with an empty `TaskID` returns
-  `ErrTaskIDRequired`; an oversized request for a task the caller cannot access
-  returns the size error, and the authorizer is never called.
+  `ErrTaskIDRequired`; an oversized request for a missing task returns
+  `not_found` without size details; an inaccessible task is rejected by the
+  authorizer before the size response; and an oversized write for a valid task
+  does not wait behind its plan lock.
 - No lock contention: an oversized write returns while another write for the same
   task holds the lock.
 - `RevertPlan` restores an above-ceiling stored revision successfully.
@@ -501,8 +504,10 @@ Frontend, all with fake timers where a debounce is involved:
   of them. This is the regression the shared `error` slot would otherwise ship, so it is
   the case that must not be dropped for being awkward to set up.
 - `task-plan-panel` (`003.8`): reject a save on task A, change `taskId` to task B, and
-  assert the rejection is no longer displayed. Separately, resolve a *task A* rejection
-  after the switch and assert nothing is displayed for task B.
+  assert the rejection is no longer displayed. With no plan on either task, assert
+  the local draft resets to empty and no autosave sends task A's rejected draft to
+  task B. Separately, resolve a *task A* rejection after the switch and assert
+  nothing is displayed for task B.
 - `use-task-plan` (`003.8`): with two saves in flight, resolve the earlier-started one
   last and assert the later-started one's outcome is what remains displayed.
 - `use-task-plan` (`003.8`, stale-task discarding): this test must be written so it FAILS
@@ -517,8 +522,8 @@ limit from the rejection rather than mirroring it. If a later change reintroduce
 constant it needs a UTF-8-versus-UTF-16 measurement test, because `draft.length` under-reports
 every non-ASCII document and Kandev ships zh-cn, zh-hk, zh-tw and pt-pt.
 
-E2E is not required. The user-visible surface is one error string in an existing
-panel with no new route, navigation, or multi-step flow, and the component test
-above covers it; the enforcement itself is backend behavior better pinned by the
-service tests. Provoking it would require driving a 256 KiB document through the
-editor, which is slow and brittle for what it proves.
+The PR includes focused desktop and mobile E2E checks. The mobile case is
+important because the plan panel has a separate touch entry point and must keep
+the same rejection, draft-retention, and recovery behavior. E2E checks cover the
+browser/WebSocket boundary that unit tests cannot exercise; service and hook tests
+remain the precise checks for admission ordering and state ownership.

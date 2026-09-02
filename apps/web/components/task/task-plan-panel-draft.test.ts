@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { usePlanDraft } from "./task-plan-panel";
 import type { PlanSaveError } from "@/hooks/domains/session/use-task-plan";
+import { usePlanDraft } from "@/hooks/domains/session/use-plan-draft";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -12,6 +12,7 @@ vi.mock("@/components/state-provider", () => ({
 const AUTO_SAVE_DELAY = 1500;
 const REJECTED_CONTENT = "rejected content";
 const TASK_1 = "task-1";
+const TASK_2 = "task-2";
 // Autosave suppression only applies to a size rejection (AC-003.4's "such a
 // rejection" chains back to AC-003.1's ceiling rejection); every suppression
 // test in this file simulates one via this classified saveError.
@@ -20,6 +21,7 @@ const SIZE_REJECTION: PlanSaveError = {
   limit: 262144,
   submitted: 300000,
 };
+const GENERIC_REJECTION: PlanSaveError = { kind: "generic", message: "temporary failure" };
 
 type DraftPlan = { content?: string; title?: string } | null;
 type DraftProps = {
@@ -33,17 +35,20 @@ function renderDraft(
   plan: DraftPlan,
   savePlan: (content: string, title?: string) => Promise<unknown>,
   taskId: string | null = TASK_1,
+  saveError: PlanSaveError | null = SIZE_REJECTION,
 ) {
   const editorWrapperRef = { current: null };
   return renderHook(
     ({ plan: p, isSaving, taskId: id, saveError = null }: DraftProps) =>
-      usePlanDraft(p, isSaving, {
-        savePlan: savePlan as unknown as Parameters<typeof usePlanDraft>[2]["savePlan"],
+      usePlanDraft({
+        plan: p,
+        isSaving,
+        savePlan,
         editorWrapperRef,
         taskId: id,
         saveError,
       }),
-    { initialProps: { plan, isSaving: false, taskId, saveError: null } as DraftProps },
+    { initialProps: { plan, isSaving: false, taskId, saveError } as DraftProps },
   );
 }
 
@@ -85,7 +90,7 @@ describe("usePlanDraft autosave suppression (AC-003.4)", () => {
     act(() => {
       result.current.setDraftContent("oversized content");
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
 
     // First debounce fires the initial (rejected) attempt.
     await act(async () => {
@@ -116,7 +121,7 @@ describe("usePlanDraft autosave suppression (AC-003.4)", () => {
     act(() => {
       result.current.setDraftContent(REJECTED_CONTENT);
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY);
       await Promise.resolve();
@@ -128,7 +133,7 @@ describe("usePlanDraft autosave suppression (AC-003.4)", () => {
     act(() => {
       result.current.setDraftContent("a different, shorter draft");
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY);
       await Promise.resolve();
@@ -144,7 +149,7 @@ describe("usePlanDraft autosave suppression (AC-003.4)", () => {
     act(() => {
       result.current.setDraftContent(REJECTED_CONTENT);
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY);
       await Promise.resolve();
@@ -227,7 +232,7 @@ describe("usePlanDraft explicit save (Ctrl/Cmd+S) interactions (AC-003.3/003.4)"
     act(() => {
       result.current.setDraftContent(REJECTED_CONTENT);
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
     expect(result.current.hasUnsavedChanges).toBe(true);
 
     await act(async () => {
@@ -257,7 +262,7 @@ describe("usePlanDraft explicit save (Ctrl/Cmd+S) interactions (AC-003.3/003.4)"
     act(() => {
       result.current.setDraftContent(REJECTED_CONTENT);
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY);
       await Promise.resolve();
@@ -301,7 +306,7 @@ describe("usePlanDraft autosave suppression reset (AC-003.4)", () => {
     act(() => {
       result.current.setDraftContent("content that will save");
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY);
       await Promise.resolve();
@@ -313,13 +318,13 @@ describe("usePlanDraft autosave suppression reset (AC-003.4)", () => {
     // draft exactly — same as the real flow, where a successful save's
     // result flows back through the store before the next edit.
     const updatedPlan = { content: "content that will save" };
-    rerender({ plan: updatedPlan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan: updatedPlan, isSaving: false, taskId: TASK_1, saveError: null });
 
     // A further, real edit re-diverges the draft from the plan.
     act(() => {
       result.current.setDraftContent("content that will save again");
     });
-    rerender({ plan: updatedPlan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan: updatedPlan, isSaving: false, taskId: TASK_1, saveError: null });
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY);
       await Promise.resolve();
@@ -327,30 +332,60 @@ describe("usePlanDraft autosave suppression reset (AC-003.4)", () => {
     expect(savePlan).toHaveBeenCalledTimes(2);
   });
 
-  it("resets suppression when the task changes", async () => {
+  it("resets the draft and suppression when switching between tasks without plans", async () => {
     const savePlan = vi.fn().mockResolvedValue(null);
-    const plan = { content: "" };
+    const plan = null;
     const { result, rerender } = renderDraft(plan, savePlan, TASK_1);
 
     act(() => {
       result.current.setDraftContent(REJECTED_CONTENT);
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY);
       await Promise.resolve();
     });
     expect(savePlan).toHaveBeenCalledTimes(1);
 
-    // Switch tasks; the new task's plan sync effect would normally replace
-    // draftContent too, but this test only pins that the suppression ref
-    // itself resets so a same-content autosave on the new task is not
-    // silently blocked by the previous task's rejection.
-    rerender({ plan: { content: "" }, isSaving: false, taskId: "task-2" });
-    act(() => {
-      result.current.setDraftContent(REJECTED_CONTENT);
+    // Switch to a task with no plan. The previous task's rejected draft must
+    // not remain visible or get sent to the new task.
+    rerender({ plan: null, isSaving: false, taskId: TASK_2, saveError: null });
+    expect(result.current.draftContent).toBe("");
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY * 3);
+      await Promise.resolve();
     });
-    rerender({ plan: { content: "" }, isSaving: false, taskId: "task-2" });
+    expect(savePlan).toHaveBeenCalledTimes(1);
+
+    // A new edit on task B is the only event that may arm its autosave.
+    act(() => {
+      result.current.setDraftContent("task B content");
+    });
+    rerender({ plan: null, isSaving: false, taskId: TASK_2, saveError: null });
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY);
+      await Promise.resolve();
+    });
+    expect(savePlan).toHaveBeenCalledTimes(2);
+    expect(savePlan).toHaveBeenLastCalledWith("task B content", undefined);
+  });
+
+  it("retries unchanged content after a generic failure", async () => {
+    const savePlan = vi.fn().mockResolvedValue(null);
+    const plan = { content: "" };
+    const { result, rerender } = renderDraft(plan, savePlan, TASK_1, SIZE_REJECTION);
+
+    act(() => {
+      result.current.setDraftContent("temporarily unavailable");
+    });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY);
+      await Promise.resolve();
+    });
+    expect(savePlan).toHaveBeenCalledTimes(1);
+
+    await settleSaveRoundTrip(rerender, plan, TASK_1, GENERIC_REJECTION);
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY);
       await Promise.resolve();

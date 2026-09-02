@@ -514,12 +514,11 @@ func TestPlanWriteTools_DescribeContentCeiling(t *testing.T) {
 	for _, name := range []string{"create_task_plan_kandev", "update_task_plan_kandev"} {
 		tool, ok := tools[name]
 		require.Truef(t, ok, "%s not registered", name)
-		// The ceiling is stated on the "content" parameter's own schema
-		// description, not the tool-level Description, so marshal the whole
-		// tool the way a client would see it rather than checking one field.
-		raw, err := json.Marshal(tool.Tool)
-		require.NoError(t, err)
-		assert.Containsf(t, string(raw), "262,144", "%s does not state the byte ceiling anywhere in its schema", name)
+		contentSchema, ok := tool.Tool.InputSchema.Properties["content"].(map[string]any)
+		require.Truef(t, ok, "%s content property is not a JSON schema object", name)
+		description, ok := contentSchema["description"].(string)
+		require.Truef(t, ok, "%s content property has no description", name)
+		assert.Containsf(t, description, "262,144", "%s content property does not state the byte ceiling", name)
 	}
 }
 

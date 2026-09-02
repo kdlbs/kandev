@@ -88,7 +88,7 @@ export function PlanPanelHeader({
         setIsImplementing(false);
       }
     },
-    [draftContent, hasUnsavedChanges, implementDisabled, implementPlan, plan, attemptSave],
+    [attemptSave, draftContent, hasUnsavedChanges, implementDisabled, implementPlan, plan],
   );
 
   return (
