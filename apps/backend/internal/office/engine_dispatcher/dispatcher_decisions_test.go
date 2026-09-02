@@ -364,17 +364,18 @@ func TestDispatcher_RecordDecision_ForeignSessionFallsBackToUnresolvable(t *test
 
 // TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable
 // covers the other session_unresolvable case: a supplied session that
-// belongs to the right task but is in a terminal (non-active) state. Table
-// covers every terminal state; exhaustiveness against the full
-// TaskSessionState set is proved once, per-state, by
-// TestIsTaskLookupActiveSessionState.
+// belongs to the right task but is not in an active state. The table is
+// derived from taskmodels.AllTaskSessionStates filtered by
+// !IsTaskLookupActiveSessionState, so it cannot fall out of sync with the
+// active-state set the same way the removed hand-written switch could.
 func TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable(t *testing.T) {
-	terminalStates := []taskmodels.TaskSessionState{
-		taskmodels.TaskSessionStateCompleted,
-		taskmodels.TaskSessionStateFailed,
-		taskmodels.TaskSessionStateCancelled,
+	var nonActiveStates []taskmodels.TaskSessionState
+	for _, state := range taskmodels.AllTaskSessionStates {
+		if !taskmodels.IsTaskLookupActiveSessionState(state) {
+			nonActiveStates = append(nonActiveStates, state)
+		}
 	}
-	for _, state := range terminalStates {
+	for _, state := range nonActiveStates {
 		t.Run(string(state), func(t *testing.T) {
 			eng := &fakeEngine{decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1"}}
 			sessions := &fakeSessions{
@@ -391,8 +392,11 @@ func TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable(t *tes
 			if err != nil {
 				t.Fatalf("RecordDecision: %v, want success (session_unresolvable, not an error)", err)
 			}
+			if !eng.decisionCalled {
+				t.Fatal("engine RecordParticipantDecision not invoked")
+			}
 			if eng.decisionSession != "" {
-				t.Errorf("session id = %q, want blank: terminal session must not be forwarded", eng.decisionSession)
+				t.Errorf("session id = %q, want blank: non-active session must not be forwarded", eng.decisionSession)
 			}
 		})
 	}
