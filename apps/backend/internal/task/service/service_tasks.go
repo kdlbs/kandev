@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
@@ -78,6 +79,7 @@ type pendingTaskTitleSetter interface {
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
+	runtime     agentruntime.Runtime
 	// terminal records the session state observed when the cleanup snapshot was
 	// taken. It is retained for snapshot compatibility, but it must never
 	// suppress a non-not-found runtime stop failure.
@@ -2816,6 +2818,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 			target := taskStopTarget{
 				sessionID:   running.SessionID,
 				executionID: strings.TrimSpace(running.AgentExecutionID),
+				runtime:     running.Runtime,
 				terminal:    isCleanableSessionState(sessionStates[running.SessionID]),
 			}
 			targets = append(targets, target)
@@ -2883,6 +2886,7 @@ func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []tas
 		targets = append(targets, taskStopTarget{
 			sessionID:   strings.TrimSpace(running.SessionID),
 			executionID: strings.TrimSpace(running.AgentExecutionID),
+			runtime:     running.Runtime,
 		})
 	}
 	return targets
@@ -2906,6 +2910,9 @@ func mergeTaskStopTargets(live, snapshot []taskStopTarget) []taskStopTarget {
 		key := target.sessionID + "\x00" + target.executionID
 		if index, exists := seen[key]; exists {
 			targets[index].terminal = targets[index].terminal || target.terminal
+			if targets[index].runtime == "" {
+				targets[index].runtime = target.runtime
+			}
 			return
 		}
 		seen[key] = len(targets)

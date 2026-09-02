@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { waitForStableActiveSession } from "../../helpers/session-store";
 
 const fsExists = (p: string) => existsSync(p);
 
@@ -140,6 +141,95 @@ test.describe("Multi-session UX", () => {
     await expect(session.sessionTabBySessionId(secondary.session_id)).toBeVisible({
       timeout: 10_000,
     });
+  });
+
+  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.2
+  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.3
+  test("preserves pending plan comments across session switches", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, session } = await createTaskAndNavigate(
+      testPage,
+      apiClient,
+      seedData,
+      "Plan comment session task",
+    );
+    const { sessions: primarySessions } = await apiClient.listTaskSessions(task.id);
+    const primarySessionId = primarySessions[0]?.id;
+    if (!primarySessionId) throw new Error("expected a primary session");
+    await apiClient.wsRequest("task.plan.create", {
+      task_id: task.id,
+      title: "Plan",
+      content: "## Plan\n\nKeep this primary-session step",
+      created_by: "user",
+    });
+
+    await session.openNewSessionDialog();
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.filter((item) => DONE_STATES.includes(item.state)).length;
+        },
+        { timeout: 60_000, message: "Waiting for the secondary session" },
+      )
+      .toBe(2);
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const secondarySessionId = sessions.find((item) => item.id !== primarySessionId)?.id;
+    if (!secondarySessionId) throw new Error("expected a secondary session");
+
+    const primaryTab = session.sessionTabBySessionId(primarySessionId);
+    const secondaryTab = session.sessionTabBySessionId(secondarySessionId);
+    await expect(primaryTab).toBeVisible({ timeout: 10_000 });
+    await expect(secondaryTab).toBeVisible({ timeout: 10_000 });
+    await primaryTab.click();
+    await waitForStableActiveSession(testPage, primarySessionId);
+
+    const planToggle = session.activeChat().getByTestId("plan-mode-toggle-button");
+    await expect(planToggle).toBeVisible({ timeout: 10_000 });
+    await expect(planToggle).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
+    await planToggle.click();
+    await expect(session.planPanel.getByText("Keep this primary-session step")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const editor = session.planPanel.locator(".ProseMirror");
+    await editor.click();
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+a`);
+    await testPage.keyboard.press(`${modifier}+Shift+c`);
+
+    const commentText = "Preserve this exact feedback";
+    const textarea = testPage.locator('textarea[placeholder="Add your comment or instruction..."]');
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await textarea.fill(commentText);
+    await testPage.getByRole("button", { name: "Add", exact: true }).click();
+
+    const badge = session.planPanel.locator(".comment-badge[data-comment-id]");
+    await expect(badge).toHaveCount(1);
+
+    await secondaryTab.click();
+    await waitForStableActiveSession(testPage, secondarySessionId);
+    await expect(badge).toHaveCount(0);
+    await testPage.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+
+    await primaryTab.click();
+    await waitForStableActiveSession(testPage, primarySessionId);
+    await expect(badge).toHaveCount(1, { timeout: 10_000 });
+    await badge.locator("svg").click();
+    await expect(textarea).toHaveValue(commentText);
   });
 
   // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-001.6

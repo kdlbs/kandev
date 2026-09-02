@@ -280,6 +280,8 @@ type mockRepository struct {
 	getTaskFunc                    func(ctx context.Context, id string) (*models.Task, error)
 	getTaskEnvironmentFunc         func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	getExecutorRunningFunc         func(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	hasExecutorRunningFunc         func(ctx context.Context, sessionID string) (bool, error)
 	createTaskEnvironmentRepoErr   error
 	finalizeTaskEnvironmentErr     error
 	createTaskSessionFunc          func(ctx context.Context, session *models.TaskSession) error
@@ -1128,6 +1130,9 @@ func (m *mockRepository) ListExecutorsRunning(ctx context.Context) ([]*models.Ex
 	return nil, nil
 }
 func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
+	if m.getExecutorRunningFunc != nil {
+		return m.getExecutorRunningFunc(ctx, sessionID)
+	}
 	if running, ok := m.executorsRunning[sessionID]; ok {
 		return running, nil
 	}
@@ -1137,6 +1142,9 @@ func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, s
 	return nil
 }
 func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
+	if m.hasExecutorRunningFunc != nil {
+		return m.hasExecutorRunningFunc(ctx, sessionID)
+	}
 	if m.executorsRunning != nil {
 		_, ok := m.executorsRunning[sessionID]
 		return ok, nil

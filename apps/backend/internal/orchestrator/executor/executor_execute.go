@@ -101,16 +101,12 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in
-// containers or remote sandboxes (Docker variants + Sprites). These are the
-// same executors that need explicitly configured remote credentials and the
-// kandev-managed feature branch propagated through env metadata.
+// containers or remote sandboxes (Docker variants, Sprites, and Kubernetes).
+// These are the same executors that need explicitly configured remote
+// credentials and the kandev-managed feature branch propagated through env
+// metadata.
 func isContainerizedExecutor(executorType string) bool {
-	switch models.ExecutorType(executorType) {
-	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
-		return true
-	default:
-		return false
-	}
+	return models.IsContainerizedExecutorType(models.ExecutorType(executorType))
 }
 
 // executorNeedsResolvedCredentials reports whether an executor runs the agent
@@ -1159,6 +1155,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if session.TaskID != task.ID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	if strings.TrimSpace(executorID) == "" {
+		// PrepareSession already persisted the selected executor. Launch calls
+		// that omit the option must retain that selection so the authoritative
+		// connection config reaches lifecycle instead of falling back to the
+		// workspace default (or an empty config).
+		executorID = strings.TrimSpace(session.ExecutorID)
+	}
 	if opts.McpMode == "" {
 		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
 		if err != nil {
@@ -1173,7 +1176,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		opts.McpProfile = &profileContext
 	}
 
-	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
+	}
 	if running != nil && running.ExecutionProfileID != "" &&
 		running.ExecutionProfileID != agentProfileID {
 		if running.AgentExecutionID != "" {
@@ -1212,7 +1218,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// execution was lost (e.g. backend restart). The full LaunchAgent path below
 	// will create a new execution and lifecycle.persistExecutorRunning will
 	// overwrite the stale row.
-	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
+	hasRunning, hasRunningErr := e.repo.HasExecutorRunningRow(ctx, sessionID)
+	if hasRunningErr != nil {
+		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
+	}
 	if hasRunning {
 		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
 		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {

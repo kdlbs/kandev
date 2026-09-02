@@ -34,7 +34,12 @@ func (s *ReviewChangeSource) UncommittedFiles(ctx context.Context, sessionID str
 	if err != nil {
 		return nil, err
 	}
-	status, err := execution.GetAgentCtlClient().GetGitStatus(ctx)
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return nil, fmt.Errorf("session %s workspace is not ready", sessionID)
+	}
+	status, err := client.GetGitStatus(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("git status for session %s: %w", sessionID, err)
 	}
@@ -54,7 +59,11 @@ func (s *ReviewChangeSource) CommittedFiles(ctx context.Context, sessionID strin
 	if err != nil {
 		return nil, err
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return nil, fmt.Errorf("session %s workspace is not ready", sessionID)
+	}
 
 	baseCommit, targetBranch := "", ""
 	if s.sessionReader != nil {
@@ -89,7 +98,12 @@ func (s *ReviewChangeSource) execution(ctx context.Context, sessionID string) (*
 	if err != nil {
 		return nil, fmt.Errorf("execution for session %s: %w", sessionID, err)
 	}
-	if execution == nil || execution.GetAgentCtlClient() == nil {
+	if execution == nil {
+		return nil, fmt.Errorf("session %s workspace is not ready", sessionID)
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
+	if client == nil {
 		return nil, fmt.Errorf("session %s workspace is not ready", sessionID)
 	}
 	return execution, nil

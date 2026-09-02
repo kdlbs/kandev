@@ -79,7 +79,8 @@ func (h *VscodeHandlers) wsVscodeStart(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution: "+err.Error(), nil)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agentctl client not available", nil)
 	}
@@ -127,7 +128,8 @@ func (h *VscodeHandlers) wsVscodeStop(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution: "+err.Error(), nil)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agentctl client not available", nil)
 	}
@@ -165,7 +167,8 @@ func (h *VscodeHandlers) wsVscodeStatus(ctx context.Context, msg *ws.Message) (*
 		return ws.NewResponse(msg.ID, msg.Action, types.VscodeStatusResponse{Status: "stopped"})
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewResponse(msg.ID, msg.Action, types.VscodeStatusResponse{Status: "stopped"})
 	}
@@ -225,7 +228,8 @@ func (h *VscodeHandlers) wsVscodeOpenFile(ctx context.Context, msg *ws.Message) 
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found or no active execution: "+err.Error(), nil)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agentctl client not available", nil)
 	}

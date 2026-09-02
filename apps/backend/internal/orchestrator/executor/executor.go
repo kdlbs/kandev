@@ -349,6 +349,7 @@ type RemoteRuntimeStatus struct {
 
 // RemoteStatusPollRequest contains the fields from ExecutorRunning needed for remote status polling.
 type RemoteStatusPollRequest struct {
+	TaskID           string
 	SessionID        string
 	Runtime          agentruntime.Runtime
 	AgentExecutionID string

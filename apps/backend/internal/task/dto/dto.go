@@ -1161,14 +1161,21 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 // TaskPlanRevisionDTO represents a plan revision for API responses.
 // Content is optional so list responses can omit it (fetched on demand).
 type TaskPlanRevisionDTO struct {
-	ID                 string    `json:"id"`
-	TaskID             string    `json:"task_id"`
-	RevisionNumber     int       `json:"revision_number"`
-	Title              string    `json:"title"`
-	Content            string    `json:"content,omitempty"`
+	ID             string `json:"id"`
+	TaskID         string `json:"task_id"`
+	RevisionNumber int    `json:"revision_number"`
+	Title          string `json:"title"`
+	Content        string `json:"content,omitempty"`
+	// ContentLength is the character (rune) count of Content, computed here
+	// before TaskPlanRevisionMetaFromModel blanks Content for list/WS payloads
+	// — so list rows can show a size without fetching full content.
+	ContentLength      int       `json:"content_length"`
 	AuthorKind         string    `json:"author_kind"`
 	AuthorName         string    `json:"author_name"`
 	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
+	WorkflowStepID     string    `json:"workflow_step_id,omitempty"`
+	WorkflowStepName   string    `json:"workflow_step_name,omitempty"`
+	WorkflowStepColor  string    `json:"workflow_step_color,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -1184,9 +1191,13 @@ func TaskPlanRevisionFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisionDT
 		RevisionNumber:     rev.RevisionNumber,
 		Title:              rev.Title,
 		Content:            rev.Content,
+		ContentLength:      models.PlanContentLength(rev.Content),
 		AuthorKind:         rev.AuthorKind,
 		AuthorName:         rev.AuthorName,
 		RevertOfRevisionID: rev.RevertOfRevisionID,
+		WorkflowStepID:     rev.WorkflowStepID,
+		WorkflowStepName:   rev.WorkflowStepName,
+		WorkflowStepColor:  rev.WorkflowStepColor,
 		CreatedAt:          rev.CreatedAt,
 		UpdatedAt:          rev.UpdatedAt,
 	}
