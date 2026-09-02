@@ -227,6 +227,80 @@ func TestDispatch_CronCoalescingIntoQueuedEventRun_DoesNotDemote(t *testing.T) {
 	}
 }
 
+// TestDispatch_EventCoalescingIntoClaimedCronRun_CreatesFreshRun is the
+// WO-46.1 Review-round-1 R1-F1 regression test. processRun evaluates
+// checkIdleSkip against the *models.Run it captured at claim time and
+// never re-reads Reason, so promoting a claimed run's persisted reason
+// (as the queued case does) would race a decision already in flight —
+// the scheduler could still idle-skip on the stale periodic reason
+// while the wakeup-request is already marked coalesced, silently
+// discarding the event trigger. The dispatcher must route the event
+// to its own fresh run instead of coalescing into the claimed one.
+func TestDispatch_EventCoalescingIntoClaimedCronRun_CreatesFreshRun(t *testing.T) {
+	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
+	h.seedRunWithReason("run-cron", "claimed", shared.RunReasonRoutineDispatchCron)
+	h.seedWakeupWithReason("w-event", wakeup.SourceRoutine, `{"routine_id":"r-1"}`, shared.RunReasonRoutineDispatchEvent)
+
+	if err := h.dispatcher.Dispatch(context.Background(), "w-event"); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	gotReq, err := h.repo.GetWakeupRequest(context.Background(), "w-event")
+	if err != nil {
+		t.Fatalf("get wakeup request: %v", err)
+	}
+	if gotReq.Status != officesqlite.WakeupStatusClaimed {
+		t.Errorf("status: got %q, want claimed (own run, not coalesced)", gotReq.Status)
+	}
+	if gotReq.RunID == "" || gotReq.RunID == "run-cron" {
+		t.Errorf("expected a fresh run distinct from the claimed one, got %q", gotReq.RunID)
+	}
+
+	freshRun, err := h.repo.GetRunByID(context.Background(), gotReq.RunID)
+	if err != nil {
+		t.Fatalf("get fresh run: %v", err)
+	}
+	if freshRun.Reason != shared.RunReasonRoutineDispatchEvent {
+		t.Errorf("fresh run.Reason = %q, want %q", freshRun.Reason, shared.RunReasonRoutineDispatchEvent)
+	}
+
+	// The claimed run's reason must stay untouched — the scheduler may
+	// already be mid-decision against it, so the fix must not mutate it.
+	claimedRun, err := h.repo.GetRunByID(context.Background(), "run-cron")
+	if err != nil {
+		t.Fatalf("get claimed run: %v", err)
+	}
+	if claimedRun.Reason != shared.RunReasonRoutineDispatchCron {
+		t.Errorf("claimed run.Reason = %q, want unchanged %q", claimedRun.Reason, shared.RunReasonRoutineDispatchCron)
+	}
+}
+
+// TestDispatch_EmptyReasonFallsBackToSourceForPromotion is the WO-46.1
+// Review-round-1 R1-F2 regression test. coalesceIntoInflightRun must
+// use the same reason-or-source fallback as createFreshRun, so an event
+// request with an empty Reason still promotes a periodic queued run
+// instead of silently leaving it periodic-classified.
+func TestDispatch_EmptyReasonFallsBackToSourceForPromotion(t *testing.T) {
+	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
+	h.seedRunWithReason("run-cron", "queued", shared.RunReasonRoutineDispatchCron)
+	h.seedWakeup("w-1", wakeup.SourceComment, `{"task_id":"t-1","comment_id":"c-1"}`)
+
+	if err := h.dispatcher.Dispatch(context.Background(), "w-1"); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	run, err := h.repo.GetRunByID(context.Background(), "run-cron")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.Reason != wakeup.SourceComment {
+		t.Errorf("run.Reason = %q, want promoted to source %q", run.Reason, wakeup.SourceComment)
+	}
+	if shared.IsPeriodicTasklessWake(run.Reason) {
+		t.Error("merged run must not classify as a periodic taskless wake")
+	}
+}
+
 func TestDispatch_CoalesceIntoClaimedRun(t *testing.T) {
 	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
 	h.seedRun("run-running", "claimed")

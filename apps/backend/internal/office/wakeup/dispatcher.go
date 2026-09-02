@@ -159,17 +159,40 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 // proceed"). Promotion is monotonic (periodic → event only): a
 // periodic request coalescing into an already event-classified run
 // never demotes it back to periodic.
+//
+// A claimed inflight run is already in the scheduler's hands: processRun
+// evaluates checkIdleSkip against the *models.Run it captured at claim
+// time and never re-reads Reason, so promoting the persisted row here
+// would race a decision already in flight and could still let the
+// event trigger be silently idle-skipped. Route the event to its own
+// fresh run instead — the only status a promotion can safely land on
+// is 'queued', where the eventual claim reads the promoted reason.
 func (d *Dispatcher) coalesceIntoInflightRun(
 	ctx context.Context, req *officesqlite.WakeupRequest, inflight *models.Run,
 ) error {
-	if req.Reason != "" &&
+	reason := effectiveReason(req)
+	if reason != "" &&
 		shared.IsPeriodicTasklessWake(inflight.Reason) &&
-		!shared.IsPeriodicTasklessWake(req.Reason) {
-		if err := d.repo.UpdateRunReason(ctx, inflight.ID, req.Reason); err != nil {
+		!shared.IsPeriodicTasklessWake(reason) {
+		if inflight.Status == models.RunStatusClaimed {
+			return d.createFreshRun(ctx, req)
+		}
+		if err := d.repo.UpdateRunReason(ctx, inflight.ID, reason); err != nil {
 			return fmt.Errorf("promote run reason for %s: %w", inflight.ID, err)
 		}
 	}
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
+}
+
+// effectiveReason returns the reason a run derived from req should carry:
+// req.Reason when set, else req.Source — mirroring createFreshRun's
+// fallback so a request is classified the same way whether it lands on
+// a fresh run or merges into an in-flight one.
+func effectiveReason(req *officesqlite.WakeupRequest) string {
+	if req.Reason != "" {
+		return req.Reason
+	}
+	return req.Source
 }
 
 // resolvePolicy returns the concurrency policy for a wakeup-request.
@@ -244,10 +267,7 @@ func normaliseRoutinePolicy(p string) string {
 func (d *Dispatcher) createFreshRun(
 	ctx context.Context, req *officesqlite.WakeupRequest,
 ) error {
-	reason := req.Reason
-	if reason == "" {
-		reason = req.Source
-	}
+	reason := effectiveReason(req)
 	payload := req.Payload
 	if payload == "" {
 		payload = "{}"
