@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
-import { seedClarificationSession } from "../../helpers/clarification";
+import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
+import { watchWs } from "../../helpers/causal-waits";
+import { waitForSessionSettled } from "./quick-chat-helpers";
 
 /**
  * Mobile parity for the multiline custom clarification answer. On a coarse-pointer
@@ -157,6 +159,51 @@ test.describe("Mobile clarification multiline answer", () => {
     }
 
     await expect(overlay).not.toBeVisible({ timeout: 30_000 });
+  });
+
+  test("keeps the failed-submit Retry action reachable on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ws = watchWs(testPage);
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Retry",
+      { scenario: "clarification" },
+    );
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for mobile clarification retry");
+
+    let attempt = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempt += 1;
+      if (attempt === 1) {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "temporary failure" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await session.clarificationOption("PostgreSQL").tap();
+    const retry = testPage.getByTestId("clarification-retry");
+    await expect(retry).toBeVisible();
+    const retryBox = await retry.boundingBox();
+    if (!retryBox) throw new Error("expected mobile clarification Retry to have a bounding box");
+    expect(retryBox.height).toBeGreaterThanOrEqual(44);
+    expect(retryBox.width).toBeGreaterThanOrEqual(44);
+
+    const settled = waitForSessionSettled(ws, sessionId);
+    await retry.tap();
+    await settled;
+    await expect(session.idleInput()).toBeVisible();
+    expect(attempt).toBe(2);
   });
 
   test("keeps the over-limit counter inside the phone viewport", async ({

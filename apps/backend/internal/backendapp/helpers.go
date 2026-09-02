@@ -1874,6 +1874,9 @@ func registerMCPAndDebugRoutes(
 	if p.devMode {
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
+		if p.dbPool != nil {
+			db.RegisterWriterPoolStats(p.dbPool)
+		}
 	}
 }
 

@@ -182,6 +182,8 @@
   "clarificationAnswerOverLimit_one": "{{count}} ćĥàŕàćţēŕ ōvēŕ ţĥē {{max}}-ćĥàŕàćţēŕ ĺĩḿĩţ.",
   "clarificationAnswerOverLimit_other": "{{count}} ćĥàŕàćţēŕś ōvēŕ ţĥē {{max}}-ćĥàŕàćţēŕ ĺĩḿĩţ.",
   "clarificationAnswerRuneCount": "{{current}} / {{max}}",
+  "clarificationExpired": "Ţĥĩś qũēśţĩōń ĩś ńō ĺōńĝēŕ àćţĩvē, śō ŷōũŕ àńśŵēŕ ŵàś ńōţ ŕēćōŕďēď.",
+  "clarificationResponseFailed": "Ćōũĺď ńōţ śēńď ŷōũŕ ŕēśpōńśē.",
   "cleanup": "Ćĺēàńũƥ",
   "clearAllAnnotations": "Ćĺēàŕ àĺĺ àńńōţàţĩōńś",
   "clickAnywhereToStartWriting": "Ćĺĩćķ àńŷŵĥēŕē ţō śţàŕţ ŵŕĩţĩńĝ",
