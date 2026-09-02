@@ -485,6 +485,9 @@ type ResetAndCheckParams = {
   preventAutoStart: boolean;
 };
 
+const getSessionRequestKey = (taskId: string | null, sessionId: string | null) =>
+  JSON.stringify([taskId, sessionId]);
+
 /** Extracted effects: reset state on session/task change, auto-check/resume, and remote retry. */
 function useSessionResetAndCheck({
   taskId,
@@ -494,20 +497,21 @@ function useSessionResetAndCheck({
   setters,
   preventAutoStart,
 }: ResetAndCheckParams): SessionResetAndCheckResult {
+  const requestKey = getSessionRequestKey(taskId, sessionId);
   const [sessionStatusState, setSessionStatus] = useState<{
-    id: string | null;
+    requestKey: string;
     status: SessionStatus | null;
-  }>({ id: sessionId, status: null });
-  // Reset sessionStatus when sessionId changes (derived, not in effect)
-  const sessionStatus = sessionStatusState.id === sessionId ? sessionStatusState.status : null;
+  }>({ requestKey, status: null });
+  const sessionStatus =
+    sessionStatusState.requestKey === requestKey ? sessionStatusState.status : null;
   const hasAttemptedResume = useRef(false);
   const remoteStatusRetryCount = useRef(0);
-  const activeSessionRef = useRef(sessionId);
+  const activeRequestRef = useRef(requestKey);
 
   // Reset all local state when session or task changes to prevent stale data
   // from a previous session leaking into the new one (e.g. topbar branch).
   useEffect(() => {
-    activeSessionRef.current = sessionId;
+    activeRequestRef.current = requestKey;
     hasAttemptedResume.current = false;
     remoteStatusRetryCount.current = 0;
     setters.setResumptionState("idle");
@@ -522,14 +526,16 @@ function useSessionResetAndCheck({
     if (!taskId || !sessionId || connectionStatus !== "connected" || hasAttemptedResume.current)
       return;
     hasAttemptedResume.current = true;
-    const guardedSetters = buildGuardedSetters(activeSessionRef, sessionId, setters);
+    const guardedSetters = buildGuardedSetters(activeRequestRef, requestKey, setters);
     checkAndResume({
       taskId,
       sessionId,
       session,
       preventAutoStart,
       setSessionStatus: (s) => {
-        if (activeSessionRef.current === sessionId) setSessionStatus({ id: sessionId, status: s });
+        if (activeRequestRef.current === requestKey) {
+          setSessionStatus({ requestKey, status: s });
+        }
       },
       setters: guardedSetters,
     });
@@ -552,7 +558,9 @@ function useSessionResetAndCheck({
           task_id: taskId,
           session_id: sessionId,
         });
-        setSessionStatus({ id: sessionId, status: nextStatus });
+        if (activeRequestRef.current === requestKey) {
+          setSessionStatus({ requestKey, status: nextStatus });
+        }
       } catch {
         // Best-effort refresh only.
       }
@@ -566,11 +574,11 @@ function useSessionResetAndCheck({
 
 /** Wrap state setters with a guard that prevents stale async callbacks from updating state. */
 function buildGuardedSetters(
-  activeSessionRef: React.RefObject<string | null>,
-  capturedSessionId: string,
+  activeRequestRef: React.RefObject<string>,
+  capturedRequestKey: string,
   setters: ResumeStateSetter,
 ): ResumeStateSetter {
-  const guard = () => activeSessionRef.current === capturedSessionId;
+  const guard = () => activeRequestRef.current === capturedRequestKey;
   return {
     ...setters,
     setResumptionState: (s) => {

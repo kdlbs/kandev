@@ -236,6 +236,14 @@ resumption hook also clears stale feedback when the shared live session state
 transitions to `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` after an external
 manual recovery.
 
+An automatic status or recovery attempt is owned by the complete task-session
+identity, not by the session ID alone. Task navigation can briefly present the
+new route session while the task store still contains the previously active
+task. Each callback therefore applies feedback and status only when both its
+captured task ID and session ID still match the current request identity. A
+late result from the prior task cannot set an error, notice, or status on the
+newly selected task.
+
 ## Frontend status rendering
 
 `StatusMessage` maps `metadata.kind === "branch_recreated"` to localized
@@ -296,7 +304,8 @@ Backend tests start with the current failure:
 - The WebSocket handler maps the sentinel to a conflict with recovery details.
 
 Frontend unit tests cover the typed WebSocket error, both manual recovery
-surfaces, visible automatic fallback, dual failure detail, and
+surfaces, visible automatic fallback, dual failure detail, task navigation
+with the same route session while the task identity changes, and
 `branch_recreated` status rendering.
 
 Desktop and mobile Playwright tests cover the user sequence from a failed
