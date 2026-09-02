@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
 // waitForNextWholeSecond blocks until the wall clock crosses into a new
@@ -249,6 +250,124 @@ func TestParentWakeReconciler_RedeliversAfterSameSecondReopenAndRecomplete(t *te
 	}
 	if receipt == nil || receipt.DeliveryOperationID == "" {
 		t.Fatalf("generation safely closed but no receipt was recorded: %#v", receipt)
+	}
+}
+
+// raceDispatcher reproduces R4-F1: a reopen+recomplete landing in the scan's
+// still-open second, but not finishing until after real time has crossed
+// into the next second. Its first HandleTrigger call performs the reopen
+// while still inside the scanned second and then blocks past the second
+// boundary before returning, simulating the payload build, child-set
+// revalidation, and engine dispatch that separate ListStuckParents' scan
+// from recordReceipt's commit in production.
+type raceDispatcher struct {
+	t       *testing.T
+	svc     *service.Service
+	childID string
+	calls   int
+}
+
+func (d *raceDispatcher) HandleTrigger(context.Context, string, engine.Trigger, any, string) error {
+	d.calls++
+	if d.calls == 1 {
+		d.svc.ExecSQL(d.t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, d.childID)
+		d.svc.ExecSQL(d.t, `UPDATE tasks SET state = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, d.childID)
+		waitForNextWholeSecond(d.t)
+	}
+	return nil
+}
+
+// TestParentWakeReconciler_ReopenDuringDispatchWindowIsRedelivered is R4-F1's
+// regression test: the still-open-second guard must compare the scanned
+// generation against an instant captured before the scan, not against real
+// time at commit time. A guard comparing against commit-time "now" sees the
+// reopen's second as closed (real time has moved on by the time the engine
+// dispatch returns) and persists a receipt for it, permanently hiding the
+// parent — the exact defect this reconciler exists to fix.
+func TestParentWakeReconciler_ReopenDuringDispatchWindowIsRedelivered(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	const childID = "parent-1-child-0"
+
+	adoptOffice(t, svc, "ws-1")
+	waitForNextWholeSecond(t)
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	dispatcher := &raceDispatcher{t: t, svc: svc, childID: childID}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	if dispatcher.calls != 1 {
+		t.Fatalf("want exactly one engine dispatch after tick 1, got %d", dispatcher.calls)
+	}
+
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if dispatcher.calls != 2 {
+		t.Fatalf("LOST WAKE: reopen landing in the scan's still-open second during dispatch produced no further dispatch, got %d calls", dispatcher.calls)
+	}
+}
+
+// TestParentWakeReconciler_RedeliversAfterPersistedReceiptInvalidatedByReopen
+// is R4-F2's regression test. Unlike the other reopen tests above, tick 1's
+// receipt here is a genuinely persisted row for a closed generation (not
+// deferred by the still-open-second guard), so a redelivery on tick 2 can
+// only come from ListStuckParents' third OR arm
+// (newest_child_updated_at != child_generation) — the other two arms both
+// stay false because the reopen leaves child_set_key and the stored
+// delivery_operation_id untouched.
+func TestParentWakeReconciler_RedeliversAfterPersistedReceiptInvalidatedByReopen(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+	const childID = "parent-1-child-0"
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+	// The seeded children's updated_at defaults to CURRENT_TIMESTAMP at
+	// insert time, i.e. "now". recordReceipt refuses to persist a receipt for
+	// a still-open generation second, so this test — which needs tick 1's
+	// receipt to actually land — waits for that generation to close first.
+	waitForNextWholeSecond(t)
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	receipt, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt after tick 1: %v", err)
+	}
+	if receipt == nil || receipt.DeliveryOperationID == "" {
+		t.Fatalf("tick 1 did not persist a receipt for a closed generation: %#v", receipt)
+	}
+	firstGeneration := receipt.ChildGeneration
+
+	// Reopen and re-complete the child in a later, already-closed second, so
+	// child_set_key stays byte-identical to what the persisted receipt
+	// already matches.
+	waitForNextWholeSecond(t)
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, childID)
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, childID)
+	waitForNextWholeSecond(t)
+
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if got := len(dispatcher.Calls()); got != 2 {
+		t.Fatalf("LOST WAKE: reopen after a persisted receipt for the prior generation was not redelivered, got %d dispatches: %#v", got, dispatcher.Calls())
+	}
+	receiptAfter, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt after tick 2: %v", err)
+	}
+	if receiptAfter == nil || receiptAfter.ChildGeneration == firstGeneration {
+		t.Fatalf("receipt still reflects the stale generation after redelivery: %#v", receiptAfter)
 	}
 }
 
