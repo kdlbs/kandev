@@ -5174,7 +5174,16 @@ func (s *Service) allowEngineSignalCompletion(
 // applyGuardedTransitionLifecycle is the service-owned lifecycle bridge for
 // quorum re-evaluation. The engine still selects the target and owns the CAS,
 // but credential checks, on_exit, history, signal cleanup, terminal handling,
-// session/profile state, and on_enter stay in the orchestrator path.
+// and session/profile state stay in the orchestrator path.
+//
+// on_enter is deliberately NOT triggered here (triggerOnEnter=false below):
+// sessionID is the decider's session (reviewer/approver), not the task's
+// assignee, so dispatching on_enter would hand auto_start_agent's session
+// continuation that same decider session. Office's reactivity
+// (office/dashboard.runReactivityForDecision) is what wakes the assignee.
+// Engine-owned on_enter actions (clear_decisions, ensure_participant_seat,
+// queue_run_for_each_participant) are unaffected — they run unconditionally
+// via the CAS commit's dispatchStepEntry call below.
 func (s *Service) applyGuardedTransitionLifecycle(
 	ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger,
 ) (bool, error) {
@@ -5199,7 +5208,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 		engine.HandleResult{Transitioned: true, FromStepID: fromStepID, ToStepID: toStepID},
 		trigger,
 		task.Description,
-		true,
+		false,
 		func(commitCtx context.Context) (bool, error) {
 			casAttempted = true
 			transitionCtx := commitCtx
@@ -5379,8 +5388,10 @@ func (s *Service) applyEngineTransitionWithCommit(
 
 	if !triggerOnEnter {
 		// on_turn_start transitions: user is about to send a message, no on_enter needed.
-		// However, we still need to switch the agent profile if the target step requires
-		// a different one — the user's prompt should go to the correct agent.
+		// Guarded-transition (quorum re-evaluation) callers also land here — see
+		// applyGuardedTransitionLifecycle's doc comment. Either way we still need
+		// to switch the agent profile if the target step requires a different
+		// one — the next prompt should go to the correct agent.
 		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, session, targetStep, fromStep)
 		if !ok {
 			return false

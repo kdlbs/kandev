@@ -422,10 +422,10 @@ func (s *DashboardService) logDecisionActivity(ctx context.Context, d *DecisionR
 }
 
 // runReactivityForDecision queues the appropriate run after a
-// decision lands. For changes_requested, the assignee is woken with
-// the comment passed through. For approved, when all approvers now
-// have current approved decisions AND the task is in_review, the
-// assignee is woken with task_ready_to_close.
+// decision lands. For changes_requested and rejected (synonyms), the
+// assignee is woken with the comment passed through. For approved,
+// when all approvers now have current approved decisions AND the task
+// is in_review, the assignee is woken with task_ready_to_close.
 //
 // Best-effort — failures are logged, never propagated.
 func (s *DashboardService) runReactivityForDecision(ctx context.Context, d *DecisionRecord) {
@@ -456,7 +456,7 @@ func (s *DashboardService) buildDecisionRuns(
 	ctx context.Context, d *DecisionRecord, exec *sqlite.TaskExecutionFields,
 ) []ApprovalRun {
 	switch d.Decision {
-	case models.DecisionChangesRequested:
+	case models.DecisionChangesRequested, models.DecisionRejected:
 		return []ApprovalRun{{
 			AgentID:         exec.AssigneeAgentProfileID,
 			Reason:          runTaskChangesRequested,

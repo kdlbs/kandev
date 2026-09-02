@@ -106,6 +106,41 @@ func TestRecordAgentDecision_SessionIDForwardedWhenFlagOn(t *testing.T) {
 	}
 }
 
+// TestRecordAgentDecision_RejectedQueuesAssigneeRunWithReason is the
+// agent-path counterpart to TestRequestTaskChanges_QueuesAssigneeRun (plan
+// unit 7): an agent's "rejected" verdict must queue exactly one run for the
+// task's assignee, carrying the reason as DecisionComment, the same way
+// changes_requested already does for the human path — the quorum engine
+// treats the two verdicts as synonyms (isRejectionVerdict).
+func TestRecordAgentDecision_RejectedQueuesAssigneeRunWithReason(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTaskWithAssignee(t, deps.db, "rej1", "ws-d", "REJ1", "in_review", 2, "asg-rej")
+	mustAddParticipant(t, deps, "rej1", "agent-rev", models.ParticipantRoleReviewer)
+
+	q := &stubApprovalQueuer{}
+	deps.svc.SetApprovalReactivityQueuer(q)
+
+	_, err := deps.svc.RecordAgentDecision(context.Background(), dashboard.RecordAgentDecisionInput{
+		TaskID:         "rej1",
+		AgentProfileID: "agent-rev",
+		Decision:       engine.DecisionRejected,
+		Reason:         "tests fail on the happy path",
+	})
+	if err != nil {
+		t.Fatalf("RecordAgentDecision: %v", err)
+	}
+	if len(q.runs) != 1 {
+		t.Fatalf("runs = %d, want 1: %#v", len(q.runs), q.runs)
+	}
+	got := q.runs[0]
+	if got.AgentID != "asg-rej" {
+		t.Errorf("run targeted %q, want assignee asg-rej", got.AgentID)
+	}
+	if got.DecisionComment != "tests fail on the happy path" {
+		t.Errorf("comment lost: %q", got.DecisionComment)
+	}
+}
+
 // insertTestTaskNoStep inserts a task row with no workflow_step_id bound
 // (the schema default is ” — see tasks.workflow_step_id NOT NULL DEFAULT
 // ”), exercising the AC-7/AC-55(1) precondition RecordAgentDecision must
