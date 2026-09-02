@@ -6,12 +6,10 @@
 // already-resolved PendingAllocation/AllocationResult shapes carried on
 // context, mirroring how internal/steptelemetry threads attribution.
 //
-// Scope note: this package only recognises clear_decisions and
-// queue_run_for_each_participant as engine-owned on_enter kinds for now.
-// queue_run and run_code_review on_enter dispatch (AC-A7/AC-A8 in
-// docs/specs/workflow-on-enter-action-dispatch/spec.md) are explicitly
-// deferred to a later Build round — see that spec's Verification section and
-// the task plan's scope note.
+// Only clear_decisions and queue_run_for_each_participant are marker-bearing
+// (carry a step-entry marker and an allocated position). queue_run and
+// run_code_review are ledger-owned but not marker-bearing — see
+// ownershipTable's doc comment for the full ten-kind classification.
 package stepentry
 
 import (
