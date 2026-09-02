@@ -502,7 +502,7 @@ func (h *Handlers) handleHandoffCreatedOutcome(
 	principal mcpscope.Principal, session *models.TaskSession, args *handoffTaskArgs,
 	resolved *handoffResolvedResources, task *models.Task, handedOffAtStr string,
 ) (*ws.Message, error) {
-	settled, _, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, task.ExternalID)
+	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, task.ExternalID)
 	if settleErr != nil {
 		// R-F39: a settlement error halts here. No reverse link, no
 		// activity, no launch.
@@ -511,13 +511,21 @@ func (h *Handlers) handleHandoffCreatedOutcome(
 			fmt.Sprintf("delivery task %s was created but could not settle its external_id", task.ID), nil)
 	}
 
+	// AC-24d: the created row when settled, the survivor SettleExternalID
+	// returns when not — those are different rows in general, even though
+	// today's SettleExternalID implementation happens to re-fetch by the same
+	// task ID.
 	outcome := handoffOutcomeCreated
+	settledTask := task
 	if !settled {
 		outcome = handoffOutcomeCreatedIdentityLost
+		if survivor != nil {
+			settledTask = survivor
+		}
 	}
 
 	reverseLink := h.ensureHandoffReverseLink(ctx, principal.CallerTaskID, task.ID, args.TargetWorkspaceID, handedOffAtStr, false)
-	h.logHandoffActivity(ctx, principal, session, task, args.TargetWorkspaceID, outcome)
+	h.logHandoffActivity(ctx, principal, session, settledTask, args.TargetWorkspaceID, outcome)
 
 	started := false
 	var startError string
@@ -532,8 +540,8 @@ func (h *Handlers) handleHandoffCreatedOutcome(
 	response := handoffTaskResult{
 		TaskID:              task.ID,
 		WorkspaceID:         args.TargetWorkspaceID,
-		WorkflowID:          task.WorkflowID,
-		WorkflowStepID:      task.WorkflowStepID,
+		WorkflowID:          settledTask.WorkflowID,
+		WorkflowStepID:      settledTask.WorkflowStepID,
 		Outcome:             outcome,
 		CreationComplete:    true,
 		Started:             started,
