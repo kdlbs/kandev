@@ -308,7 +308,7 @@ func (h *Handlers) validateHandoffWorkflow(ctx context.Context, workflowID strin
 	const notAMemberMessage = "workflow_id is not a workflow of the target workspace"
 	workflow, err := h.taskSvc.GetWorkflow(ctx, workflowID)
 	if err != nil {
-		if isMCPWorkflowNotFoundError(err) {
+		if isMCPWorkflowNotFoundError(err) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 			return newHandoffError(ws.ErrorCodeValidation, notAMemberMessage)
 		}
 		h.logger.Error("handoff_task_kandev: failed to load workflow_id", zap.String("workflow_id", workflowID), zap.Error(err))
