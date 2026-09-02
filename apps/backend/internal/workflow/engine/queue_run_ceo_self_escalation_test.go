@@ -23,13 +23,26 @@ func newOnAgentErrorInput(failedAgentID string) ActionInput {
 // failing CEO would re-trigger the same escalation on the next failure.
 func TestQueueRunCallback_TargetWorkspaceCEO_SkipsSelfEscalation(t *testing.T) {
 	q := &fakeRunQueue{}
-	cb := QueueRunCallback{Adapter: q, CEOResolver: fakeCEO{id: "ceo-agent"}}
+	log, logs := newObservedSeatLogger(t)
+	cb := QueueRunCallback{Adapter: q, CEOResolver: fakeCEO{id: "ceo-agent"}, Logger: log}
 
 	if _, err := cb.Execute(context.Background(), newOnAgentErrorInput("ceo-agent")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(q.calls) != 0 {
 		t.Fatalf("expected 0 calls (self-escalation skipped), got %d: %+v", len(q.calls), q.calls)
+	}
+
+	matches := logs.FilterMessage("queue_run: skipped workspace.ceo_agent self-escalation")
+	if matches.Len() != 1 {
+		t.Fatalf("expected one warning for self-escalation skip, got %d", matches.Len())
+	}
+	fields := matches.All()[0].ContextMap()
+	if fields["task_id"] != "task-1" {
+		t.Fatalf("task_id field = %v, want task-1", fields["task_id"])
+	}
+	if fields["ceo_agent_id"] != "ceo-agent" {
+		t.Fatalf("ceo_agent_id field = %v, want ceo-agent", fields["ceo_agent_id"])
 	}
 }
 
