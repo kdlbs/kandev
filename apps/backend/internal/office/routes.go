@@ -61,7 +61,15 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 	channelsHandler := channels.NewHandler(svcs.Channels)
 	channels.RegisterRoutes(router, channelsHandler)
 
-	configHandler := config.NewHandler(svcs.Config, log)
+	// A typed-nil *configsync.Service must not be assigned directly to the
+	// ActiveSourceChecker interface parameter: that would produce a non-nil
+	// interface wrapping a nil pointer, and Handler's `guard == nil` check
+	// would then miss it, calling HasActiveSource on a nil receiver.
+	var configSyncGuard config.ActiveSourceChecker
+	if svcs.ConfigSync != nil {
+		configSyncGuard = svcs.ConfigSync
+	}
+	configHandler := config.NewHandler(svcs.Config, configSyncGuard, log)
 	config.RegisterRoutes(router, configHandler)
 
 	if svcs.ConfigSync != nil {
@@ -69,7 +77,11 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 		configsync.RegisterRoutes(router, configSyncHandler)
 	}
 
-	dashboard.RegisterRoutes(router, svcs.Dashboard, svcs.Repo, svcs.GitManager, handoff, log)
+	var dashboardConfigSyncGuard dashboard.ActiveSourceChecker
+	if svcs.ConfigSync != nil {
+		dashboardConfigSyncGuard = svcs.ConfigSync
+	}
+	dashboard.RegisterRoutes(router, svcs.Dashboard, svcs.Repo, svcs.GitManager, handoff, dashboardConfigSyncGuard, log)
 
 	if svcs.Documents != nil {
 		docHandler := dashboard.NewDocumentHandler(svcs.Documents, svcs.KandevHome, log)
