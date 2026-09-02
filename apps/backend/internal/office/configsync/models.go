@@ -16,12 +16,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Defaults for optional config fields.
 const (
 	DefaultBranch          = "main"
-	DefaultPath            = ".kandev/config-sync"
 	DefaultIntervalSeconds = 300
 	MinIntervalSeconds     = 60
 	// MaxIntervalSeconds caps the poll interval at 30 days.
@@ -66,17 +67,27 @@ type Config struct {
 }
 
 // SetConfigRequest is the payload for creating or updating a workspace's
-// config sync configuration. Branch, Path, and IntervalSeconds fall back to
+// config sync configuration. Branch and IntervalSeconds fall back to
 // defaults when empty/zero.
+//
+// Path is a *string, because Office needs three input states where workflow
+// sync has two: nil (field absent) means the default, which for Office IS
+// the repository root; "" means the repository root, explicitly; "a/b"
+// means that directory (AC-OFFICE-CONFIG-SYNC-001.6). A plain string cannot
+// tell an absent field from an empty one, so a settings page that reads a
+// root-addressed config and writes it back unchanged would post "" and have
+// it collide with a non-root default — this is the departure from
+// workflow sync's Normalize, which rewrites both onto a non-empty default
+// and so can never address a repository root.
 type SetConfigRequest struct {
 	// Provider is optional; an empty value means ProviderGitHub.
-	Provider        string `json:"provider"`
-	RepoOwner       string `json:"repo_owner"`
-	RepoName        string `json:"repo_name"`
-	ProjectPath     string `json:"project_path"`
-	Branch          string `json:"branch"`
-	Path            string `json:"path"`
-	IntervalSeconds int    `json:"interval_seconds"`
+	Provider        string  `json:"provider"`
+	RepoOwner       string  `json:"repo_owner"`
+	RepoName        string  `json:"repo_name"`
+	ProjectPath     string  `json:"project_path"`
+	Branch          string  `json:"branch"`
+	Path            *string `json:"path"`
+	IntervalSeconds int     `json:"interval_seconds"`
 	// PollEnabled controls the background polling loop; nil defaults to
 	// true. When false the workspace only syncs via "Sync now".
 	PollEnabled *bool `json:"poll_enabled"`
@@ -186,7 +197,6 @@ func (r *SetConfigRequest) normalizeGitLabTarget() error {
 // ErrInvalidConfig on bad input.
 func (r *SetConfigRequest) Normalize() error {
 	r.Branch = strings.TrimSpace(r.Branch)
-	r.Path = normalizePathFrame(r.Path)
 	if err := r.normalizeTarget(); err != nil {
 		return err
 	}
@@ -196,13 +206,8 @@ func (r *SetConfigRequest) Normalize() error {
 	if !isValidBranchName(r.Branch) {
 		return fmt.Errorf("%w: branch is not a valid git branch name", ErrInvalidConfig)
 	}
-	if r.Path == "" {
-		r.Path = normalizePathFrame(DefaultPath)
-	}
-	for _, segment := range strings.Split(r.Path, "/") {
-		if segment == ".." || segment == "." {
-			return fmt.Errorf("%w: path cannot contain \".\" or \"..\" segments", ErrInvalidConfig)
-		}
+	if err := r.normalizePath(); err != nil {
+		return err
 	}
 	if r.IntervalSeconds == 0 {
 		r.IntervalSeconds = DefaultIntervalSeconds
@@ -216,6 +221,60 @@ func (r *SetConfigRequest) Normalize() error {
 	if r.PollEnabled == nil {
 		enabled := true
 		r.PollEnabled = &enabled
+	}
+	return nil
+}
+
+// normalizePath implements AC-OFFICE-CONFIG-SYNC-001.6 and
+// AC-OFFICE-CONFIG-SYNC-001.7: a nil or empty Path means the repository
+// root, and every other value is validated as-is rather than trimmed into
+// validity, so what is stored is exactly what the walk uses. The one
+// transform applied is Unicode NFC.
+func (r *SetConfigRequest) normalizePath() error {
+	if r.Path == nil {
+		root := ""
+		r.Path = &root
+		return nil
+	}
+	p := norm.NFC.String(*r.Path)
+	if err := validateConfigPath(p); err != nil {
+		return err
+	}
+	r.Path = &p
+	return nil
+}
+
+// validateConfigPath rejects everything AC-OFFICE-CONFIG-SYNC-001.7 lists: a
+// ".." or "." segment, an empty segment from a repeated slash, a leading
+// slash, a backslash, a NUL byte, and (since the empty string is itself a
+// meaningful "repository root" value) a whitespace-only value or a trailing
+// slash.
+func validateConfigPath(p string) error {
+	if strings.ContainsRune(p, 0) {
+		return fmt.Errorf("%w: path cannot contain a NUL byte", ErrInvalidConfig)
+	}
+	if strings.Contains(p, "\\") {
+		return fmt.Errorf("%w: path cannot contain a backslash", ErrInvalidConfig)
+	}
+	if strings.HasPrefix(p, "/") {
+		return fmt.Errorf("%w: path cannot start with a slash", ErrInvalidConfig)
+	}
+	if p == "" {
+		return nil
+	}
+	if strings.TrimSpace(p) != p {
+		return fmt.Errorf("%w: path cannot have leading or trailing whitespace", ErrInvalidConfig)
+	}
+	if strings.HasSuffix(p, "/") {
+		return fmt.Errorf("%w: path cannot end with a slash", ErrInvalidConfig)
+	}
+	for _, segment := range strings.Split(p, "/") {
+		switch segment {
+		case "":
+			return fmt.Errorf("%w: path cannot contain an empty segment (repeated slash)", ErrInvalidConfig)
+		case ".", "..":
+			return fmt.Errorf("%w: path cannot contain \".\" or \"..\" segments", ErrInvalidConfig)
+		}
 	}
 	return nil
 }

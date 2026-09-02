@@ -174,7 +174,7 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 			last_warnings = '[]',
 			last_hash = '',
 			updated_at = excluded.updated_at
-	`), workspaceID, req.Provider, req.RepoOwner, req.RepoName, req.ProjectPath, req.Branch, req.Path,
+	`), workspaceID, req.Provider, req.RepoOwner, req.RepoName, req.ProjectPath, req.Branch, *req.Path,
 		req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now)
 	if err != nil {
 		return nil, err

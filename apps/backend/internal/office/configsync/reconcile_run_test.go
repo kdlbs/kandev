@@ -19,7 +19,7 @@ func seedTestConfig(t *testing.T, store *Store, workspaceID string, path string)
 		RepoOwner: "acme",
 		RepoName:  "kandev-config",
 		Branch:    "main",
-		Path:      path,
+		Path:      &path,
 	})
 	require.NoError(t, err)
 }

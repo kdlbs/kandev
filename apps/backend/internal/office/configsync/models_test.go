@@ -18,8 +18,8 @@ func TestSetConfigRequestNormalize_DefaultsToGitHub(t *testing.T) {
 	if req.Branch != DefaultBranch {
 		t.Errorf("Branch = %q, want %q", req.Branch, DefaultBranch)
 	}
-	if req.Path != normalizePathFrame(DefaultPath) {
-		t.Errorf("Path = %q, want %q", req.Path, normalizePathFrame(DefaultPath))
+	if req.Path == nil || *req.Path != "" {
+		t.Errorf("Path = %v, want pointer to \"\" (repository root)", req.Path)
 	}
 	if req.IntervalSeconds != DefaultIntervalSeconds {
 		t.Errorf("IntervalSeconds = %d, want %d", req.IntervalSeconds, DefaultIntervalSeconds)
@@ -84,20 +84,37 @@ func TestSetConfigRequestNormalize_UnknownProvider(t *testing.T) {
 	}
 }
 
+func TestSetConfigRequestNormalize_NilPathMeansRepositoryRoot(t *testing.T) {
+	req := &SetConfigRequest{RepoOwner: "o", RepoName: "r", Path: nil}
+	if err := req.Normalize(); err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if req.Path == nil || *req.Path != "" {
+		t.Errorf("Path = %v, want pointer to \"\" (repository root)", req.Path)
+	}
+}
+
 func TestSetConfigRequestNormalize_PathValidation(t *testing.T) {
 	tests := []struct {
 		name    string
 		path    string
 		wantErr bool
 	}{
-		{"empty falls back to default", "", false},
-		{"trims slashes", "/foo/bar/", false},
+		{"empty means repository root", "", false},
+		{"plain subdirectory", "foo/bar", false},
+		{"rejects leading slash", "/foo/bar", true},
+		{"rejects trailing slash", "foo/bar/", true},
+		{"rejects backslash", `foo\bar`, true},
+		{"rejects repeated slash", "foo//bar", true},
 		{"rejects traversal", "foo/../bar", true},
 		{"rejects dot segment", "foo/./bar", true},
+		{"rejects whitespace-only", "   ", true},
+		{"rejects surrounding whitespace", " foo/bar ", true},
+		{"rejects NUL byte", "foo\x00bar", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &SetConfigRequest{RepoOwner: "o", RepoName: "r", Path: tt.path}
+			req := &SetConfigRequest{RepoOwner: "o", RepoName: "r", Path: &tt.path}
 			err := req.Normalize()
 			if tt.wantErr && !errors.Is(err, ErrInvalidConfig) {
 				t.Fatalf("Normalize() error = %v, want ErrInvalidConfig", err)
