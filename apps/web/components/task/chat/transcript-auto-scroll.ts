@@ -155,3 +155,20 @@ export function createFrameCoalescer(run: () => void): {
     },
   };
 }
+
+/** Schedules work after the generic Dockview panel restore's one-frame write. */
+export function scheduleAfterPanelRestore(run: () => void): () => void {
+  let cancelled = false;
+  let secondFrame: number | null = null;
+  const firstFrame = requestAnimationFrame(() => {
+    if (cancelled) return;
+    secondFrame = requestAnimationFrame(() => {
+      if (!cancelled) run();
+    });
+  });
+  return () => {
+    cancelled = true;
+    cancelAnimationFrame(firstFrame);
+    if (secondFrame !== null) cancelAnimationFrame(secondFrame);
+  };
+}

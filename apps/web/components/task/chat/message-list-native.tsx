@@ -8,6 +8,7 @@ import { OLDER_PAGE_LIMIT, useLazyLoadMessages } from "@/hooks/use-lazy-load-mes
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
 import { useNativeScrollManagement } from "./message-list-native-scroll";
+import { scheduleAfterPanelRestore } from "./transcript-auto-scroll";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
@@ -99,6 +100,10 @@ type NativeMessageListScrollParams = {
 type ScrollToDividerOptions = {
   onDividerScroll?: () => void;
   scrollLayoutKey?: string;
+  enabled?: boolean;
+  sessionId?: string | null;
+  isProgrammaticScrollLocked?: () => boolean;
+  isVisible?: boolean;
 };
 
 function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
@@ -123,21 +128,27 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     scrollLayoutKey,
     isVisible,
   } = params;
-  const { handleScrollToMessage, sentinelRef, markNotNearBottom, retryLoadMore, showRecovery } =
-    useNativeScrollManagement({
-      scrollRef,
-      items,
-      messages,
-      isWorking,
-      sessionId,
-      enabled,
-      hasUnreadDivider: Boolean(dividerBeforeItemKey),
-      messagesLoading,
-      hasMore,
-      isLoadingMore,
-      loadMore,
-      isVisible,
-    });
+  const {
+    handleScrollToMessage,
+    sentinelRef,
+    markNotNearBottom,
+    isProgrammaticScrollLocked,
+    retryLoadMore,
+    showRecovery,
+  } = useNativeScrollManagement({
+    scrollRef,
+    items,
+    messages,
+    isWorking,
+    sessionId,
+    enabled,
+    hasUnreadDivider: Boolean(dividerBeforeItemKey),
+    messagesLoading,
+    hasMore,
+    isLoadingMore,
+    loadMore,
+    isVisible,
+  });
   const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
   useEffect(() => {
     scrollRef.current?.style.setProperty("--anchored-bar-h", `${anchoredBarOffsetPx}px`);
@@ -145,6 +156,10 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
   useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey, anchoredBarOffsetPx, {
     onDividerScroll: markNotNearBottom,
     scrollLayoutKey,
+    enabled,
+    sessionId,
+    isProgrammaticScrollLocked,
+    isVisible,
   });
   useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
     handleScrollToMessage,
@@ -282,10 +297,10 @@ type NativeMessageListBodyProps = {
  *   bottom-fallback firing first (before dividerBeforeItemKey resolves)
  *   doesn't block the divider correction from still applying once it
  *   does. The caller also supplies a layout key so a loading-state transition
- *   with an unchanged item count can re-assert the target. Embedded, always-
- *   invisible previews (isVisible hardcoded false,
- *   see TaskChatPanel) never resolve a divider, so they keep the
- *   original, unconditional scroll-to-bottom-on-mount behavior untouched.
+ *   with an unchanged item count can re-assert the target. Disabled initial
+ *   placement is owned by the native initial-position hook, while previews
+ *   keep their existing visible-host behavior without participating in read
+ *   tracking.
  */
 export function useScrollToDividerOrBottom(
   scrollRef: React.RefObject<HTMLDivElement | null>,
@@ -294,7 +309,120 @@ export function useScrollToDividerOrBottom(
   anchoredBarOffsetPx: number,
   options: ScrollToDividerOptions = {},
 ) {
-  const { onDividerScroll, scrollLayoutKey = "" } = options;
+  const {
+    onDividerScroll,
+    scrollLayoutKey = "",
+    enabled = true,
+    sessionId = null,
+    isProgrammaticScrollLocked = () => false,
+    isVisible = true,
+  } = options;
+  const { isVisibleRef, activationPendingRef } = useDividerVisibility(isVisible);
+  const isUserScrollingRef = useDividerUserScrolling(scrollRef);
+
+  // Bounds how long the divider correction below can keep re-asserting
+  // itself after mount, independent of user interaction: a scrollbar drag
+  // (no wheel/touch/key event) or a live message arriving long after the
+  // visit has settled must never be able to re-trigger it. 4s comfortably
+  // covers the slowest observed multi-wave initial load (WS backfill
+  // continuing after the REST fetch) without lingering into the range
+  // where the user has plausibly started reading and scrolling normally.
+  const mountedAtRef = useRef<number | null>(null);
+  if (mountedAtRef.current === null) mountedAtRef.current = Date.now();
+  const isWithinSettlingWindow = () => Date.now() - (mountedAtRef.current ?? 0) < 4000;
+
+  const didInitialScroll = useRef(false);
+  const didScrollToDivider = useRef(false);
+  useEffect(() => {
+    if (!isVisible) return;
+    const el = scrollRef.current;
+    if (!el || itemCount === 0) return;
+
+    const placeInitialPosition = () => {
+      if (!isVisibleRef.current) return;
+      const dockviewState = useDockviewStore.getState();
+      const hasPendingLayoutRestore = dockviewState.pendingChatScrollTop !== null;
+      const hasExplicitScrollTarget =
+        sessionId !== null && dockviewState.scrollTarget?.sessionId === sessionId;
+      const hasProgrammaticOwner = isProgrammaticScrollLocked();
+      if (hasPendingLayoutRestore || hasExplicitScrollTarget || hasProgrammaticOwner) {
+        didInitialScroll.current = true;
+        activationPendingRef.current = false;
+        if (hasExplicitScrollTarget || hasProgrammaticOwner) {
+          isUserScrollingRef.current = true;
+        }
+        return;
+      }
+      const canReassertDivider = canReassertDividerScroll({
+        hasDividerTarget: Boolean(dividerBeforeItemKey),
+        didScrollToDivider: didScrollToDivider.current,
+        isUserScrolling: isUserScrollingRef.current,
+        isWithinSettlingWindow: isWithinSettlingWindow(),
+      });
+      if (canReassertDivider) {
+        const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
+        if (dividerEl) {
+          // scrollIntoView aligns against the viewport, which puts the target
+          // behind the fixed mobile session header instead of inside this
+          // nested scroll container. Move by the relative geometry instead;
+          // the desktop anchored prompt bar still reserves its measured height.
+          const containerRect = el.getBoundingClientRect();
+          const dividerRect = dividerEl.getBoundingClientRect();
+          el.scrollTop += dividerRect.top - containerRect.top - anchoredBarOffsetPx;
+          onDividerScroll?.();
+          didScrollToDivider.current = true;
+          didInitialScroll.current = true;
+          activationPendingRef.current = false;
+          return;
+        }
+      }
+      if (didInitialScroll.current) return;
+      // Disabled initial placement is owned by useInitialScrollPosition,
+      // which restores the persisted reader offset (or its bottom fallback).
+      // This divider hook only owns the enabled bottom fallback.
+      if (!enabled) {
+        didInitialScroll.current = true;
+        activationPendingRef.current = false;
+        return;
+      }
+      el.scrollTop = el.scrollHeight;
+      didInitialScroll.current = true;
+      activationPendingRef.current = false;
+    };
+
+    if (activationPendingRef.current) {
+      return scheduleAfterPanelRestore(placeInitialPosition);
+    }
+    placeInitialPosition();
+  }, [
+    itemCount,
+    dividerBeforeItemKey,
+    anchoredBarOffsetPx,
+    onDividerScroll,
+    scrollLayoutKey,
+    enabled,
+    sessionId,
+    isProgrammaticScrollLocked,
+    isVisible,
+    scrollRef,
+  ]);
+}
+
+function useDividerVisibility(isVisible: boolean) {
+  const isVisibleRef = useRef(isVisible);
+  const previousVisibleRef = useRef(isVisible);
+  const activationPendingRef = useRef(false);
+  isVisibleRef.current = isVisible;
+  useEffect(() => {
+    const becameVisible = !previousVisibleRef.current && isVisible;
+    previousVisibleRef.current = isVisible;
+    if (becameVisible) activationPendingRef.current = true;
+    if (!isVisible) activationPendingRef.current = false;
+  }, [isVisible]);
+  return { isVisibleRef, activationPendingRef };
+}
+
+function useDividerUserScrolling(scrollRef: React.RefObject<HTMLDivElement | null>) {
   const isUserScrollingRef = useRef(false);
   useEffect(() => {
     const el = scrollRef.current;
@@ -311,57 +439,7 @@ export function useScrollToDividerOrBottom(
       el.removeEventListener("keydown", markUserScrolling);
     };
   }, [scrollRef]);
-
-  // Bounds how long the divider correction below can keep re-asserting
-  // itself after mount, independent of user interaction: a scrollbar drag
-  // (no wheel/touch/key event) or a live message arriving long after the
-  // visit has settled must never be able to re-trigger it. 4s comfortably
-  // covers the slowest observed multi-wave initial load (WS backfill
-  // continuing after the REST fetch) without lingering into the range
-  // where the user has plausibly started reading and scrolling normally.
-  const mountedAtRef = useRef<number | null>(null);
-  if (mountedAtRef.current === null) mountedAtRef.current = Date.now();
-  const isWithinSettlingWindow = () => Date.now() - (mountedAtRef.current ?? 0) < 4000;
-
-  const didInitialScroll = useRef(false);
-  const didScrollToDivider = useRef(false);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || itemCount === 0) return;
-    const canReassertDivider = canReassertDividerScroll({
-      hasDividerTarget: Boolean(dividerBeforeItemKey),
-      didScrollToDivider: didScrollToDivider.current,
-      isUserScrolling: isUserScrollingRef.current,
-      isWithinSettlingWindow: isWithinSettlingWindow(),
-    });
-    if (canReassertDivider) {
-      if (useDockviewStore.getState().pendingChatScrollTop === null) {
-        const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
-        if (dividerEl) {
-          // scrollIntoView aligns against the viewport, which puts the target
-          // behind the fixed mobile session header instead of inside this
-          // nested scroll container. Move by the relative geometry instead;
-          // the desktop anchored prompt bar still reserves its measured height.
-          const containerRect = el.getBoundingClientRect();
-          const dividerRect = dividerEl.getBoundingClientRect();
-          el.scrollTop += dividerRect.top - containerRect.top - anchoredBarOffsetPx;
-          onDividerScroll?.();
-          didScrollToDivider.current = true;
-          didInitialScroll.current = true;
-          return;
-        }
-      }
-    }
-    if (didInitialScroll.current) return;
-    // If a layout rebuild scroll restore is pending, skip initial scroll
-    // (the restore handler will set the correct position)
-    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
-      didInitialScroll.current = true;
-      return;
-    }
-    el.scrollTop = el.scrollHeight;
-    didInitialScroll.current = true;
-  }, [itemCount, dividerBeforeItemKey, anchoredBarOffsetPx, onDividerScroll, scrollLayoutKey]);
+  return isUserScrollingRef;
 }
 
 /** Sentinel, status/footer, and transcript rows — everything below the
