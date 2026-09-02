@@ -62,6 +62,8 @@
   "openPreviewOnClick": "点击时打开预览",
   "overWipLimit": "超出 WIP 限制",
   "pipeline": "流水线",
+  "pipelineRowPosition": "{{title}}，第 {{position}} 步，共 {{total}} 步",
+  "pipelineUnassignedStep": "未分配",
   "previewPanel": "预览面板",
   "previousStep": "上一步",
   "queuedCount_one": "{{count}} 个排队任务",

@@ -45,7 +45,7 @@ describe("getStepMoveTargets", () => {
     { id: "done", title: "Done" },
   ] as WorkflowStep[];
 
-  it("flags only a hidden neighboring destination for tooltip disclosure", () => {
+  it("flags a neighboring destination as hidden only when it is absent from the visible steps", () => {
     const result = getStepMoveTargets([moveTargets[1], moveTargets[2]], moveTargets, "review");
 
     expect(result).toMatchObject({

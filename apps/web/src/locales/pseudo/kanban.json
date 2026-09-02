@@ -67,6 +67,8 @@
   "openPreviewOnClick": "Ōƥēń ƥŕēvĩēŵ ōń ćĺĩćķ",
   "overWipLimit": "Ōvēŕ ŴĨƤ ĺĩḿĩţ",
   "pipeline": "Ƥĩƥēĺĩńē",
+  "pipelineRowPosition": "{{title}}, śţēƥ {{position}} ōƒ {{total}}",
+  "pipelineUnassignedStep": "Ũńàśśĩĝńēď",
   "previewPanel": "Ƥŕēvĩēŵ Ƥàńēĺ",
   "previousStep": "Ƥŕēvĩōũś śţēƥ",
   "queuedCount_one": "{{count}} qũēũēď",

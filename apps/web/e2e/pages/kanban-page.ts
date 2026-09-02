@@ -228,11 +228,27 @@ export class KanbanPage {
   }
 
   pipelineTaskRepoName(taskId: string): Locator {
-    return this.page.getByTestId(`pipeline-task-repo-${taskId}`);
+    return this.pipelineTask(taskId).getByTestId("task-repo-chip");
   }
 
-  pipelineTaskActionsTrigger(taskId: string): Locator {
-    return this.page.getByTestId(`pipeline-task-actions-trigger-${taskId}`);
+  pipelineOverflowRegion(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-overflow-region");
+  }
+
+  pipelineStatusStrip(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-status-strip");
+  }
+
+  pipelineStepRunScroll(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-step-run-scroll");
+  }
+
+  pipelinePositionSummary(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-position-summary");
+  }
+
+  pipelineTaskMenuTrigger(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByLabel("More options");
   }
 
   async switchToPipelineView() {
@@ -246,5 +262,15 @@ export class KanbanPage {
     await row.waitFor({ state: "visible" });
     await this.enableMultiSelect();
     await this.taskSelectCheckbox(taskId).click();
+  }
+
+  async openPipelineTaskContextMenu(taskId: string) {
+    const row = this.pipelineTask(taskId);
+    await row.waitFor({ state: "visible" });
+    await row.click({ button: "right" });
+  }
+
+  async openPipelineTaskActionsMenu(taskId: string) {
+    await this.pipelineTaskMenuTrigger(taskId).click();
   }
 }

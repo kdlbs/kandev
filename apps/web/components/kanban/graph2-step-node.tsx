@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  IconCheck,
-  IconCircleDashed,
-  IconChevronLeft,
-  IconChevronRight,
-} from "@tabler/icons-react";
+import { IconChevronLeft, IconChevronRight, IconHelpCircle } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Task } from "@/components/kanban-card";
@@ -28,36 +23,64 @@ export type Graph2StepNodeProps = {
   hasPrev: boolean;
   hasNext: boolean;
   onMoveTask: (task: Task, targetStepId: string) => void;
-  onOpenTask: (task: Task) => void;
+  onPreviewTask: (task: Task) => void;
   prevStepId?: string;
   nextStepId?: string;
   prevStepTitle?: string;
   nextStepTitle?: string;
-  prevStepHidden?: boolean;
-  nextStepHidden?: boolean;
   isMoving?: boolean;
 };
 
 const NODE_CLASS =
   "w-[130px] h-[36px] rounded-lg shrink-0 px-2.5 flex flex-col items-start justify-center";
 
-function PastNode({ step }: { step: WorkflowStep }) {
+const COLLAPSED_MARKER_CLASS = "h-3 w-3 shrink-0 rounded-full";
+
+/**
+ * A collapsed step marker (AC-UI-PIPELINE-ROW-001.1). Not a button: a plain
+ * `span` carries no tab stop (AC-UI-PIPELINE-ROW-001.5) and no click target
+ * (AC-UI-PIPELINE-ROW-001.9); the Tooltip still opens on hover for the
+ * fine-pointer route of AC-UI-PIPELINE-ROW-001.4 without one.
+ */
+function CollapsedNode({ step, phase }: { step: WorkflowStep; phase: "past" | "future" }) {
   return (
-    <div className={cn(NODE_CLASS, "border border-muted-foreground/20 bg-muted/30")}>
-      <div className="flex items-center gap-1.5 w-full">
-        <IconCheck className="h-3 w-3 text-green-500 shrink-0" />
-        <span className="text-[11px] text-muted-foreground truncate">{step.title}</span>
-      </div>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-hidden="true"
+          data-testid={`graph2-step-node-collapsed-${phase}`}
+          className={cn(
+            COLLAPSED_MARKER_CLASS,
+            phase === "past"
+              ? "border border-green-500/60 bg-green-500/25"
+              : "border border-dashed border-muted-foreground/30 bg-transparent",
+          )}
+        />
+      </TooltipTrigger>
+      <TooltipContent side="top">{step.title}</TooltipContent>
+    </Tooltip>
   );
 }
 
-function FutureNode({ step }: { step: WorkflowStep }) {
+/**
+ * The synthetic labelled marker rendered when a task has no resolvable
+ * current step (AC-UI-PIPELINE-ROW-005.6): `workflowStepId` is empty, so it
+ * matches no displayed step. It carries fixed unassigned-step copy rather
+ * than a step title, and no move controls, there being no current step for
+ * either direction.
+ */
+export function Graph2UnassignedStepMarker() {
+  const { t } = useTranslation();
   return (
-    <div className={cn(NODE_CLASS, "border border-dashed border-muted-foreground/20 bg-muted/10")}>
+    <div
+      data-testid="graph2-step-node-unassigned"
+      className={cn(NODE_CLASS, "border border-dashed border-muted-foreground/40 bg-muted/20")}
+    >
       <div className="flex items-center gap-1.5 w-full">
-        <IconCircleDashed className="h-3 w-3 text-muted-foreground/40 shrink-0" />
-        <span className="text-[11px] text-muted-foreground/40 truncate">{step.title}</span>
+        <IconHelpCircle className="h-3 w-3 text-muted-foreground/60 shrink-0" />
+        <span className="text-[11px] font-medium text-muted-foreground truncate">
+          {t("kanban:pipelineUnassignedStep")}
+        </span>
       </div>
     </div>
   );
@@ -67,13 +90,11 @@ function MoveButton({
   direction,
   isMoving,
   label,
-  showTooltip,
   onClick,
 }: {
   direction: "left" | "right";
   isMoving?: boolean;
   label: string;
-  showTooltip: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const posClass = direction === "left" ? "-left-3" : "-right-3";
@@ -95,7 +116,8 @@ function MoveButton({
       <Icon className="h-3 w-3" />
     </button>
   );
-  if (!showTooltip) return button;
+  // AC-UI-PIPELINE-ROW-001.7: the tooltip always names the destination step,
+  // not only when that step is otherwise hidden from the run.
   return (
     <Tooltip>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
@@ -111,13 +133,10 @@ export function Graph2StepNode({
   hasPrev,
   hasNext,
   onMoveTask,
-  onOpenTask,
   prevStepId,
   nextStepId,
   prevStepTitle,
   nextStepTitle,
-  prevStepHidden = false,
-  nextStepHidden = false,
   isMoving,
 }: Graph2StepNodeProps) {
   const { t } = useTranslation();
@@ -130,15 +149,11 @@ export function Graph2StepNode({
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
 
-  if (phase === "past") return <PastNode step={step} />;
-  if (phase === "future") return <FutureNode step={step} />;
+  if (phase === "past") return <CollapsedNode step={step} phase="past" />;
+  if (phase === "future") return <CollapsedNode step={step} phase="future" />;
 
   // Current phase
   const running = isRunningState(task.state);
-
-  const handleClick = () => {
-    onOpenTask(task);
-  };
 
   const showMoveControls = isHovered || isFocused;
 
@@ -159,7 +174,6 @@ export function Graph2StepNode({
           direction="left"
           isMoving={isMoving}
           label={t("kanban:moveToStep", { step: prevStepTitle ?? prevStepId })}
-          showTooltip={prevStepHidden}
           onClick={(e) => {
             e.stopPropagation();
             onMoveTask(task, prevStepId);
@@ -167,9 +181,10 @@ export function Graph2StepNode({
         />
       )}
 
+      {/* No onClick: activation is the row's single decision, and an unhandled
+          click bubbles to it unchanged, same as the title. */}
       <button
         type="button"
-        onClick={handleClick}
         className={cn(
           NODE_CLASS,
           "cursor-pointer transition-colors bg-background hover:bg-accent/30",
@@ -195,7 +210,6 @@ export function Graph2StepNode({
           direction="right"
           isMoving={isMoving}
           label={t("kanban:moveToStep", { step: nextStepTitle ?? nextStepId })}
-          showTooltip={nextStepHidden}
           onClick={(e) => {
             e.stopPropagation();
             onMoveTask(task, nextStepId);

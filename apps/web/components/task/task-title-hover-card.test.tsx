@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import { t } from "@/lib/i18n";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
@@ -11,6 +12,7 @@ afterEach(() => cleanup());
 const LONG_TITLE = "A very long parent task title that should render in full";
 const FIRST_SUBTASK_TITLE = "First subtask";
 const HOVER_CARD_TEST_ID = "task-title-hover-card";
+const PREVIEW_TRIGGER_TEST_ID = "task-title-preview-trigger";
 
 function makeTask(overrides: Partial<KanbanState["tasks"][number]>): KanbanState["tasks"][number] {
   return {
@@ -96,7 +98,7 @@ function renderCard(tasks: KanbanState["tasks"], title = LONG_TITLE) {
 
 // Keyboard activation opens the interactive preview and moves focus into it.
 async function openCard() {
-  const trigger = screen.getByTestId("task-title-preview-trigger");
+  const trigger = screen.getByTestId(PREVIEW_TRIGGER_TEST_ID);
   trigger.focus();
   fireEvent.click(trigger, { detail: 0 });
   await screen.findAllByTestId(HOVER_CARD_TEST_ID);
@@ -250,7 +252,7 @@ describe("TaskTitleHoverCard — subtask cap and dismissal", () => {
   it("AC15: does not mount a trigger when there are no subtasks", () => {
     renderCard([makeTask({ id: "parent-1" })]);
 
-    expect(screen.queryByTestId("task-title-preview-trigger")).toBeNull();
+    expect(screen.queryByTestId(PREVIEW_TRIGGER_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(HOVER_CARD_TEST_ID)).toBeNull();
   });
 
@@ -321,6 +323,87 @@ describe("TaskTitleHoverCard — subtask cap and dismissal", () => {
   });
 });
 
+type TitleCardProps = Partial<{
+  description: string;
+  parentTaskId: string | null;
+  isTitleTruncated: boolean;
+}>;
+
+function renderTitleCard(tasks: KanbanState["tasks"], props: TitleCardProps = {}) {
+  render(
+    <StateProvider initialState={{ kanban: { workflowId: "wf-1", steps: [], tasks } }}>
+      <TaskTitleHoverCard taskId="parent-1" title="Parent" {...props}>
+        <span data-testid="trigger">Parent</span>
+      </TaskTitleHoverCard>
+    </StateProvider>,
+  );
+}
+
+describe("TaskTitleHoverCard — description and parent content (AC-UI-PIPELINE-ROW-004.2/004.3)", () => {
+  it("mounts a trigger and shows the description when the task has a description but no subtasks or parent", async () => {
+    renderTitleCard([makeTask({ id: "parent-1" })], {
+      description: "Some longer description text",
+    });
+
+    expect(screen.getByTestId(PREVIEW_TRIGGER_TEST_ID)).not.toBeNull();
+    await openCard();
+    const card = screen.getAllByTestId(HOVER_CARD_TEST_ID)[0];
+    expect(card.textContent).toContain("Some longer description text");
+  });
+
+  it("mounts a trigger and shows the parent task's title when parentTaskId is set", async () => {
+    renderTitleCard(
+      [makeTask({ id: "root-1", title: "Root task" }), makeTask({ id: "parent-1" })],
+      { parentTaskId: "root-1" },
+    );
+
+    expect(screen.getByTestId(PREVIEW_TRIGGER_TEST_ID)).not.toBeNull();
+    await openCard();
+    const parentSection = screen.getAllByTestId("task-title-hover-parent")[0];
+    expect(parentSection.textContent).toContain("Root task");
+  });
+
+  it("falls back to a generic label when the parent task's title cannot be resolved from the store, matching KanbanCardRelationship", async () => {
+    renderTitleCard([makeTask({ id: "parent-1" })], { parentTaskId: "missing-root" });
+
+    await openCard();
+    const parentSection = screen.getAllByTestId("task-title-hover-parent")[0];
+    expect(parentSection.textContent).toContain(t("task:subtask"));
+  });
+
+  it("mounts a trigger when the title is visually truncated, even with no description, parent or subtasks", () => {
+    renderTitleCard([makeTask({ id: "parent-1" })], { isTitleTruncated: true });
+
+    expect(screen.getByTestId(PREVIEW_TRIGGER_TEST_ID)).not.toBeNull();
+  });
+
+  it("still does not mount a trigger with no content and no truncation (AC15 regression)", () => {
+    renderTitleCard([makeTask({ id: "parent-1" })], { isTitleTruncated: false });
+
+    expect(screen.queryByTestId(PREVIEW_TRIGGER_TEST_ID)).toBeNull();
+  });
+
+  it("orders description before parent before subtasks", async () => {
+    renderTitleCard(
+      [
+        makeTask({ id: "root-1", title: "Root task" }),
+        makeTask({ id: "parent-1" }),
+        makeTask({ id: "child-1", title: "Child", parentTaskId: "parent-1", position: 1 }),
+      ],
+      { description: "Desc text", parentTaskId: "root-1" },
+    );
+    await openCard();
+
+    const card = screen.getAllByTestId(HOVER_CARD_TEST_ID)[0];
+    const descIndex = card.innerHTML.indexOf("Desc text");
+    const parentIndex = card.innerHTML.indexOf("task-title-hover-parent");
+    const subtasksIndex = card.innerHTML.indexOf("task-title-hover-subtasks");
+    expect(descIndex).toBeGreaterThan(-1);
+    expect(parentIndex).toBeGreaterThan(descIndex);
+    expect(subtasksIndex).toBeGreaterThan(parentIndex);
+  });
+});
+
 describe("TaskTitleHoverCard — keyboard propagation", () => {
   it("lets Escape bubble from the trigger to a closed surface (e.g. a preview panel) when the preview itself is not open", () => {
     // Regression: a plain click focuses the trigger button without opening
@@ -349,7 +432,7 @@ describe("TaskTitleHoverCard — keyboard propagation", () => {
         </div>
       </StateProvider>,
     );
-    const trigger = screen.getByTestId("task-title-preview-trigger");
+    const trigger = screen.getByTestId(PREVIEW_TRIGGER_TEST_ID);
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "Escape" });
 
@@ -387,5 +470,40 @@ describe("TaskTitleHoverCard — keyboard propagation", () => {
     fireEvent.keyDown(row, { key: "Enter" });
 
     expect(onParentKeyDown).not.toHaveBeenCalled();
+  });
+});
+
+describe("TaskTitleHoverCard — keyboard-focusing the trigger opens the disclosure (AC-UI-PIPELINE-ROW-004.1)", () => {
+  it("opens the preview when the trigger receives focus, without a click", async () => {
+    renderCard([
+      makeTask({ id: "parent-1" }),
+      makeTask({ id: "child-1", parentTaskId: "parent-1" }),
+    ]);
+    const trigger = screen.getByTestId(PREVIEW_TRIGGER_TEST_ID);
+    expect(screen.queryByTestId(HOVER_CARD_TEST_ID)).toBeNull();
+
+    // A real .focus() call, not fireEvent.focus (which only dispatches the
+    // event without moving document.activeElement), so the "focus stays on
+    // the trigger" assertion below is checking real focus state.
+    trigger.focus();
+
+    await screen.findAllByTestId(HOVER_CARD_TEST_ID);
+    // A plain Tab-focus open must not steal focus into the popover — only an
+    // explicit keyboard activation (Enter/Space) does that.
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes the preview when focus leaves the trigger for something other than the popover content", async () => {
+    renderCard([
+      makeTask({ id: "parent-1" }),
+      makeTask({ id: "child-1", parentTaskId: "parent-1" }),
+    ]);
+    const trigger = screen.getByTestId(PREVIEW_TRIGGER_TEST_ID);
+    trigger.focus();
+    await screen.findAllByTestId(HOVER_CARD_TEST_ID);
+
+    trigger.blur();
+
+    await waitFor(() => expect(screen.queryByTestId(HOVER_CARD_TEST_ID)).toBeNull());
   });
 });

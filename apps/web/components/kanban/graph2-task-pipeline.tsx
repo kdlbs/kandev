@@ -1,25 +1,41 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { IconArchive, IconDots, IconTrash } from "@tabler/icons-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+import { useMemo, useState } from "react";
+import { IconDots } from "@tabler/icons-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@kandev/ui/lib/utils";
-import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
+import {
+  KanbanCardDropdownMenuItems,
+  type KanbanCardMenuEntry,
+} from "@/components/kanban-card-menu-items";
+import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
+import {
+  useKanbanCardMenus,
+  KanbanCardDialogs,
+  type KanbanCardMenuState,
+} from "@/components/kanban-card-menu";
+import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import { KanbanCardBadges, RepoChipRow } from "@/components/kanban-card-status-strip";
+import { CardTitle } from "@/components/kanban-card-title";
+import { renderSubagentCountChip } from "@/components/kanban-card-content";
+import { resolveTaskRepositoryChips } from "@/components/kanban-card-repositories";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
+import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
+import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { formatRelativeTime } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
-import { useAppStore } from "@/components/state-provider";
-import { Graph2StepNode } from "./graph2-step-node";
+import { usePipelineOverflowStage } from "@/hooks/use-pipeline-overflow-stage";
+import { Graph2StepNode, Graph2UnassignedStepMarker } from "./graph2-step-node";
 import { Graph2Connector } from "./graph2-connector";
 import { isOrphanMoveTarget } from "./swimlane-kanban-content";
-import type { Task } from "@/components/kanban-card";
+import { dispatchKanbanCardClick, type Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
+import type { KanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
+import type { Repository } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
 type ConnectorType = "past" | "transition" | "future";
@@ -28,16 +44,22 @@ export type Graph2TaskPipelineProps = {
   task: Task;
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];
+  workspaceId: string | null;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
+  repositories: Repository[];
   onMoveTask: (task: Task, targetStepId: string) => void;
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
+  onEditTask?: (task: Task) => void;
   onDeleteTask: (task: Task, opts?: { cascade?: boolean }) => void;
   onArchiveTask?: (task: Task, opts?: { cascade?: boolean }) => void;
   isMoving?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
   isSelected?: boolean;
+  selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onRangeSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
 };
 
@@ -121,19 +143,39 @@ function PipelineStepNodes({
   currentStepIndex,
   task,
   onMoveTask,
-  onOpenTask,
+  onPreviewTask,
   isMoving,
+  atTerminus,
 }: {
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];
   currentStepIndex: number;
   task: Task;
   onMoveTask: (task: Task, targetStepId: string) => void;
-  onOpenTask: (task: Task) => void;
+  onPreviewTask: (task: Task) => void;
   isMoving?: boolean;
+  atTerminus: boolean;
 }) {
+  // A task whose `workflowStepId` matches no displayed step
+  // (currentStepIndex === -1) gets one synthetic labelled marker before the
+  // run, so the row keeps its single-label invariant. An empty `steps` list
+  // is a distinct case and renders no run at all.
+  const showUnassignedMarker = currentStepIndex === -1 && steps.length > 0;
+
   return (
-    <div className="flex items-center gap-0">
+    <div
+      className={cn(
+        "flex items-center gap-0",
+        atTerminus ? "shrink-0" : "min-w-0 flex-1 overflow-x-auto scrollbar-hide",
+      )}
+      data-testid="pipeline-step-run-scroll"
+    >
+      {showUnassignedMarker && (
+        <div className="flex items-center">
+          <Graph2UnassignedStepMarker />
+          <Graph2Connector type="future" />
+        </div>
+      )}
       {steps.map((step, index) => {
         const phase = getStepPhase(index, currentStepIndex);
         const hasConnector = index < steps.length - 1;
@@ -155,10 +197,8 @@ function PipelineStepNodes({
               nextStepId={moveTargets.nextStepId}
               prevStepTitle={moveTargets.prevStepTitle}
               nextStepTitle={moveTargets.nextStepTitle}
-              prevStepHidden={moveTargets.prevStepHidden}
-              nextStepHidden={moveTargets.nextStepHidden}
               onMoveTask={onMoveTask}
-              onOpenTask={onOpenTask}
+              onPreviewTask={onPreviewTask}
               isMoving={isMoving}
             />
 
@@ -170,173 +210,160 @@ function PipelineStepNodes({
   );
 }
 
-function TaskActions({
-  task,
-  onDeleteTask,
-  onArchiveTask,
-  isDeleting,
-  isArchiving,
-}: Pick<
-  Graph2TaskPipelineProps,
-  "task" | "onDeleteTask" | "onArchiveTask" | "isDeleting" | "isArchiving"
->) {
+/** The row's task-menu trigger, sourced from the shared menu module (AC-UI-PIPELINE-ROW-002.1/002.4). */
+function RowMenuTrigger({
+  taskId,
+  entries,
+  triggerRef,
+  isProcessing,
+}: {
+  taskId: string;
+  entries: KanbanCardMenuEntry[];
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  isProcessing?: boolean;
+}) {
   const { t } = useTranslation();
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
-  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const effectiveOpen = open || Boolean(isProcessing);
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            ref={archiveAnchorRef}
-            type="button"
-            data-testid={`pipeline-task-actions-trigger-${task.id}`}
-            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          >
-            <IconDots className="h-3.5 w-3.5" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-[160px]">
-          {onArchiveTask && (
-            <DropdownMenuItem
-              onClick={() => window.setTimeout(() => setShowArchiveConfirm(true), 300)}
-              disabled={isArchiving}
-              className="cursor-pointer"
-            >
-              <IconArchive className="h-3.5 w-3.5 mr-2" />
-              {t("kanban:archiveTask")}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={isDeleting}
-            className="text-destructive focus:text-destructive cursor-pointer"
-          >
-            <IconTrash className="h-3.5 w-3.5 mr-2" />
-            {t("kanban:deleteTask")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <TaskDeleteConfirmDialog
-        open={showDeleteConfirm}
-        onOpenChange={setShowDeleteConfirm}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
-        isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDeleteTask(task, { cascade })}
-      />
-      <TaskArchiveConfirmation
-        open={showArchiveConfirm}
-        anchorRef={archiveAnchorRef}
-        onOpenChange={setShowArchiveConfirm}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
-        isArchiving={isArchiving}
-        onConfirm={({ cascade }) => onArchiveTask?.(task, { cascade })}
-      />
+    <DropdownMenu
+      open={effectiveOpen}
+      onOpenChange={(next) => {
+        if (!next && isProcessing) return;
+        setOpen(next);
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <button
+          ref={triggerRef}
+          type="button"
+          data-testid={`pipeline-row-menu-trigger-${taskId}`}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          aria-label={t("kanban:moreOptions")}
+        >
+          <IconDots className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <KanbanCardDropdownMenuItems entries={entries} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The row's status strip: everything ordered after the title and before the step run. */
+function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<HTMLDivElement> }) {
+  const { t } = useTranslation("common");
+  return (
+    <div
+      ref={innerRef}
+      className="flex shrink-0 items-center gap-1.5"
+      data-testid="pipeline-row-status-strip"
+    >
+      <PRTaskIcon taskId={task.id} />
+      <MRTaskIcon taskId={task.id} />
+      <RegisteredChangeRequestTaskIcon taskId={task.id} />
+      <TaskCardIndicators task={task} />
+      <TaskCardTags task={task} />
+      <KanbanCardBadges task={task} />
+      {renderSubagentCountChip(
+        task,
+        t("common:activeSubagents", { count: task.activeSubagentCount ?? 0 }),
+      )}
+      {task.isRemoteExecutor && (
+        <RemoteCloudTooltip
+          taskId={task.id}
+          sessionId={task.primarySessionId ?? null}
+          executorType={task.primaryExecutorType}
+          fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
+        />
+      )}
+      {task.updatedAt && (
+        <span className="text-[10px] text-muted-foreground/60">
+          {formatRelativeTime(task.updatedAt)}
+        </span>
+      )}
     </div>
   );
 }
 
-function TaskButton({
-  task,
-  repoName,
-  isSelected,
-  onClick,
+/** The row's accessible position summary: names the current step and its ordinal, or the unassigned state when there is none. */
+function RowPositionSummary({
+  steps,
+  currentStepIndex,
 }: {
-  task: Task;
-  repoName: string | undefined;
-  isSelected?: boolean;
-  onClick: () => void;
+  steps: WorkflowStep[];
+  currentStepIndex: number;
 }) {
   const { t } = useTranslation();
-  const hasAction = needsAction(task);
-  const sessionCount = task.sessionCount ?? 0;
+  if (steps.length === 0) return null;
+  const text =
+    currentStepIndex === -1
+      ? t("kanban:pipelineUnassignedStep")
+      : t("kanban:pipelineRowPosition", {
+          title: steps[currentStepIndex].title,
+          position: currentStepIndex + 1,
+          total: steps.length,
+        });
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "w-[200px] shrink-0 rounded-md px-2.5 py-1.5 text-left transition-colors cursor-pointer",
-        "hover:bg-accent/60 active:bg-accent/80",
-        "border border-transparent hover:border-border/50",
-        hasAction && !isSelected && "border-l-2 !border-l-amber-500",
-        isSelected && "ring-1 ring-primary/60 border-primary/60",
-      )}
-    >
-      <span className="text-xs font-medium truncate block text-foreground/80">{task.title}</span>
-      {repoName && (
-        <span
-          data-testid={`pipeline-task-repo-${task.id}`}
-          className="text-xs text-muted-foreground/60 truncate block"
-        >
-          {repoName}
-        </span>
-      )}
-      <div className="flex items-center gap-1.5 mt-0.5">
-        {task.updatedAt && (
-          <span className="text-[10px] text-muted-foreground/60">
-            {formatRelativeTime(task.updatedAt)}
-          </span>
-        )}
-        {sessionCount > 0 && (
-          <span className="text-[10px] text-muted-foreground/60">
-            {t("kanban:sessionCount", { count: sessionCount })}
-          </span>
-        )}
-      </div>
-    </button>
+    <span className="sr-only" data-testid="pipeline-row-position-summary">
+      {text}
+    </span>
   );
 }
 
-function useTaskRepoName(task: Task): string | undefined {
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  return useMemo(() => {
-    const primaryRepoId = task.repositories?.[0]?.repository_id;
-    if (!primaryRepoId) return undefined;
-    for (const repos of Object.values(repositoriesByWorkspace)) {
-      const repo = repos.find((r) => r.id === primaryRepoId);
-      if (repo) return repo.name;
-    }
-    return undefined;
-  }, [repositoriesByWorkspace, task.repositories]);
-}
+type PipelineRowProps = {
+  task: Task;
+  steps: WorkflowStep[];
+  moveTargetSteps: WorkflowStep[];
+  repositoryChips: ReturnType<typeof resolveTaskRepositoryChips>;
+  currentStepIndex: number;
+  menu: KanbanCardMenuState;
+  onMoveTask: (task: Task, targetStepId: string) => void;
+  onPreviewTask: (task: Task) => void;
+  onToggleSelect?: (taskId: string) => void;
+  onRangeSelect?: (taskId: string) => void;
+  onOpenTask: (task: Task) => void;
+  isMoving?: boolean;
+  isDeleting?: boolean;
+  isArchiving?: boolean;
+  isSelected?: boolean;
+  isMultiSelectMode?: boolean;
+};
 
-export function Graph2TaskPipeline({
+/** The row's clickable body: repo chips, title, inline status, step run, and menu trigger. */
+function PipelineRow({
   task,
   steps,
   moveTargetSteps,
+  repositoryChips,
+  currentStepIndex,
+  menu,
   onMoveTask,
   onPreviewTask,
+  onToggleSelect,
+  onRangeSelect,
   onOpenTask,
-  onDeleteTask,
-  onArchiveTask,
   isMoving,
   isDeleting,
   isArchiving,
   isSelected,
-  onToggleSelect,
   isMultiSelectMode,
-}: Graph2TaskPipelineProps) {
+}: PipelineRowProps) {
   const { t } = useTranslation();
-  const currentStepIndex = useMemo(
-    () => steps.findIndex((s) => s.id === task.workflowStepId),
-    [steps, task.workflowStepId],
-  );
-  const repoName = useTaskRepoName(task);
   const showCheckbox = isMultiSelectMode || !!isSelected;
+  const overflowStage = usePipelineOverflowStage<HTMLDivElement, HTMLDivElement>();
 
-  const handleTaskClick = () => {
-    if (isMultiSelectMode || isSelected) {
-      onToggleSelect?.(task.id);
-      return;
-    }
-    onPreviewTask(task);
-  };
+  const handleClick = (e: React.MouseEvent) =>
+    dispatchKanbanCardClick(e, task.id, task, {
+      onToggleSelect,
+      onRangeSelect,
+      onClick: onOpenTask,
+      isMultiSelectMode,
+    });
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -346,54 +373,211 @@ export function Graph2TaskPipeline({
   return (
     <div
       data-testid={`pipeline-task-${task.id}`}
-      className="group flex min-w-max items-center justify-start rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
+      className={cn(
+        "flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-muted/30 cursor-pointer",
+        needsAction(task) && !isSelected && "border-l-2 !border-l-amber-500",
+        isSelected && "ring-1 ring-primary/60",
+      )}
+      onClick={handleClick}
     >
-      <div className="flex items-center gap-3">
-        {showCheckbox && (
-          <div
-            className="shrink-0"
-            onClick={handleCheckboxClick}
-            data-testid={`task-select-checkbox-${task.id}`}
-          >
-            <Checkbox
-              checked={!!isSelected}
-              aria-label={t("kanban:selectTask", { title: task.title })}
-              className="cursor-pointer border-muted-foreground/50"
-            />
-          </div>
+      <RowPositionSummary steps={steps} currentStepIndex={currentStepIndex} />
+      {showCheckbox && (
+        <div
+          className="shrink-0"
+          onClick={handleCheckboxClick}
+          data-testid={`task-select-checkbox-${task.id}`}
+        >
+          <Checkbox
+            checked={!!isSelected}
+            aria-label={t("kanban:selectTask", { title: task.title })}
+            className="cursor-pointer border-muted-foreground/50"
+          />
+        </div>
+      )}
+      <RepoChipRow chips={repositoryChips} />
+      <div
+        className="min-w-0"
+        data-testid="pipeline-row-title"
+        style={{ flex: "1 1 auto", minWidth: "96px", maxWidth: "200px" }}
+      >
+        <CardTitle task={task} enableTitleHover />
+      </div>
+      <div
+        ref={overflowStage.outerRef}
+        data-testid="pipeline-row-overflow-region"
+        className={cn(
+          "flex min-w-0 items-center gap-1.5",
+          overflowStage.atTerminus && "overflow-x-auto scrollbar-hide",
         )}
-        <TaskButton
-          task={task}
-          repoName={repoName}
-          isSelected={isSelected}
-          onClick={handleTaskClick}
-        />
+        style={{ flex: "1 1 0%" }}
+      >
+        <RowInlineStatus task={task} innerRef={overflowStage.stripRef} />
         <PipelineStepNodes
           steps={steps}
           moveTargetSteps={moveTargetSteps}
           currentStepIndex={currentStepIndex}
           task={task}
           onMoveTask={onMoveTask}
-          onOpenTask={onOpenTask}
+          onPreviewTask={onPreviewTask}
           isMoving={isMoving}
+          atTerminus={overflowStage.atTerminus}
         />
-        {!isMultiSelectMode && (
-          <div
-            data-testid={`pipeline-task-actions-sticky-${task.id}`}
-            className="sticky right-0 z-20 shrink-0 self-stretch bg-background"
-          >
-            <div className="flex h-full items-center group-hover:bg-muted/30 transition-colors">
-              <TaskActions
-                task={task}
-                onDeleteTask={onDeleteTask}
-                onArchiveTask={onArchiveTask}
-                isDeleting={isDeleting}
-                isArchiving={isArchiving}
-              />
-            </div>
-          </div>
+      </div>
+      {!isMultiSelectMode && (
+        <div className="ml-auto shrink-0">
+          <RowMenuTrigger
+            taskId={task.id}
+            entries={menu.dropdownMenuEntries}
+            triggerRef={menu.detachFocusReturnRef}
+            isProcessing={isDeleting || isArchiving}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The row's dialogs/confirmations, sourced from the shared menu module (AC-UI-PIPELINE-ROW-002.4). */
+function PipelineDialogs({
+  task,
+  workspaceId,
+  repositories,
+  menu,
+  isDeleting,
+  isArchiving,
+  onDeleteTask,
+  onArchiveTask,
+}: {
+  task: Task;
+  workspaceId: string | null;
+  repositories: Repository[];
+  menu: KanbanCardMenuState;
+  isDeleting?: boolean;
+  isArchiving?: boolean;
+  onDeleteTask: (task: Task, opts?: { cascade?: boolean }) => void;
+  onArchiveTask?: (task: Task, opts?: { cascade?: boolean }) => void;
+}) {
+  return (
+    <>
+      <KanbanCardDialogs
+        task={task}
+        workspaceId={workspaceId}
+        repositories={repositories}
+        menu={menu}
+        isDeleting={isDeleting}
+        onDelete={onDeleteTask}
+      />
+      <TaskDetachConfirmationSurface
+        open={menu.showDetachConfirm}
+        anchorRef={menu.detachAnchorRef}
+        focusReturnRef={menu.detachFocusReturnRef}
+        taskTitle={task.title}
+        sharesParentWorkspace={task.workspaceMode === "inherit_parent"}
+        onOpenChange={menu.setShowDetachConfirm}
+        onConfirm={menu.handleDetachConfirm}
+      />
+      <TaskArchiveConfirmation
+        open={menu.showArchiveConfirm}
+        anchorRef={menu.archiveAnchorRef}
+        focusReturnRef={menu.archiveFocusReturnRef}
+        taskTitle={task.title}
+        taskId={task.id}
+        executorType={task.primaryExecutorType}
+        isArchiving={isArchiving}
+        onOpenChange={menu.setShowArchiveConfirm}
+        onConfirm={({ cascade }) => onArchiveTask?.(task, { cascade })}
+      />
+    </>
+  );
+}
+
+export function Graph2TaskPipeline({
+  task,
+  steps,
+  moveTargetSteps,
+  workspaceId,
+  externalLinkAvailability,
+  repositories,
+  onMoveTask,
+  onPreviewTask,
+  onOpenTask,
+  onEditTask,
+  onDeleteTask,
+  onArchiveTask,
+  isMoving,
+  isDeleting,
+  isArchiving,
+  isSelected,
+  selectedIds,
+  onToggleSelect,
+  onRangeSelect,
+  isMultiSelectMode,
+}: Graph2TaskPipelineProps) {
+  const currentStepIndex = useMemo(
+    () => steps.findIndex((s) => s.id === task.workflowStepId),
+    [steps, task.workflowStepId],
+  );
+  const repositoryChips = useMemo(
+    () => resolveTaskRepositoryChips(task, repositories),
+    [task, repositories],
+  );
+
+  const menu = useKanbanCardMenus({
+    task,
+    workspaceId,
+    externalLinkAvailability,
+    steps: moveTargetSteps,
+    isDeleting,
+    isArchiving,
+    isMoving,
+    isSelected,
+    selectedIds,
+    onEdit: onEditTask,
+    onDelete: onDeleteTask,
+    onArchive: onArchiveTask,
+    onMove: onMoveTask,
+  });
+
+  const row = (
+    <PipelineRow
+      task={task}
+      steps={steps}
+      moveTargetSteps={moveTargetSteps}
+      repositoryChips={repositoryChips}
+      currentStepIndex={currentStepIndex}
+      menu={menu}
+      onMoveTask={onMoveTask}
+      onPreviewTask={onPreviewTask}
+      onToggleSelect={onToggleSelect}
+      onRangeSelect={onRangeSelect}
+      onOpenTask={onOpenTask}
+      isMoving={isMoving}
+      isDeleting={isDeleting}
+      isArchiving={isArchiving}
+      isSelected={isSelected}
+      isMultiSelectMode={isMultiSelectMode}
+    />
+  );
+
+  return (
+    <>
+      <div ref={menu.detachAnchorRef} className="w-full">
+        {isMultiSelectMode ? (
+          row
+        ) : (
+          <KanbanCardContextMenu entries={menu.contextMenuEntries}>{row}</KanbanCardContextMenu>
         )}
       </div>
-    </div>
+      <PipelineDialogs
+        task={task}
+        workspaceId={workspaceId}
+        repositories={repositories}
+        menu={menu}
+        isDeleting={isDeleting}
+        isArchiving={isArchiving}
+        onDeleteTask={onDeleteTask}
+        onArchiveTask={onArchiveTask}
+      />
+    </>
   );
 }
