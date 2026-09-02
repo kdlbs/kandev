@@ -240,6 +240,14 @@ const (
 	// Recording it replaces any existing token (single-slot by construction);
 	// claiming it removes it. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
 	MetaKeyStepHandoffCarry = "step_handoff_carry"
+	// MetaKeyHandoffSource records inbound handoff provenance on a delivery
+	// task created by handoff_task_kandev: the source workspace, task, and
+	// agent that created it. Written once at creation; never mutated.
+	MetaKeyHandoffSource = "handoff_source"
+	// MetaKeyHandoffs records outbound handoff provenance on the source task:
+	// an append-only array of handoff entries, each identifying a delivery
+	// task created from it. Mutated via an optimistic compare-and-set.
+	MetaKeyHandoffs = "handoffs"
 )
 
 // WorkflowInitialSessionSnapshot identifies the immutable task-initial

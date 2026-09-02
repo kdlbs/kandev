@@ -163,7 +163,7 @@ func OfficeContext() string { return prompts.Get("office-context") }
 
 // FormatOfficeContext injects the active task and session IDs into the Office context.
 func FormatOfficeContext(taskID, sessionID string) string {
-	return FormatOfficeContextWithOptions(taskID, sessionID, false)
+	return FormatOfficeContextWithOptions(taskID, sessionID, false, false)
 }
 
 const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
@@ -171,36 +171,57 @@ const officeStepCompleteInstruction = "This workflow step requires an explicit c
 	"Do not call it before a question or during partial progress. " +
 	"If the tool is not visible, use the client's tool search or discovery with the canonical name.\n"
 
+// officeHandoffToolInstruction advertises handoff_task_kandev. It is included
+// only when the session's agent profile has the can_handoff_tasks permission
+// (AC-3/AC-8), never unconditionally — the raw template returned by
+// [OfficeContext] must not mention the tool by name, or
+// TestSyspromptToolNames_ExactlyMatchMCPOfficeMode breaks for every ungranted
+// Office profile.
+const officeHandoffToolInstruction = "- handoff_task_kandev: Create a delivery task in a DIFFERENT workspace, " +
+	"for a decision that must become work somewhere this agent does not run. " +
+	"Required: target_workspace_id, workflow_id, title (<=60 characters), prompt, agent_profile_id, executor_profile_id. " +
+	"Optional: repository_id (must already exist in target_workspace_id), base_branch (only with repository_id), " +
+	"start_agent (default false, diverging from other create tools), external_id. " +
+	"Without external_id the call is NOT idempotent: derive a stable external_id from the deciding artefact " +
+	"before retrying, rather than replaying blindly.\n"
+
 // FormatOfficeContextWithOptions formats the Office context for the current
 // workflow step. The imperative completion instruction is present only when
-// the step's auto-advance policy requires the signal.
-func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal bool) string {
+// the step's auto-advance policy requires the signal. includeHandoff mirrors
+// the CapabilityHandoffTask grant applied to the session's MCP profile.
+func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal, includeHandoff bool) string {
 	instruction := ""
 	if requiresSignal {
 		instruction = officeStepCompleteInstruction
+	}
+	handoffInstruction := ""
+	if includeHandoff {
+		handoffInstruction = officeHandoffToolInstruction
 	}
 	return Resolve("office-context", map[string]string{
 		"task_id":                   taskID,
 		"session_id":                sessionID,
 		"step_complete_instruction": instruction,
+		"handoff_tool_instruction":  handoffInstruction,
 	})
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
 // trustedContents must contain only exact server-generated system block contents.
 func InjectOfficeContext(taskID, sessionID, prompt string, trustedContents ...string) string {
-	return InjectOfficeContextWithOptions(taskID, sessionID, prompt, false, trustedContents...)
+	return InjectOfficeContextWithOptions(taskID, sessionID, prompt, false, false, trustedContents...)
 }
 
 // InjectOfficeContextWithOptions injects the restricted Office context and
-// adds the completion instruction only for a signal-gated workflow step.
+// adds the completion instruction only for a signal-gated workflow step, and
+// the handoff tool bullet only when includeHandoff is true.
 func InjectOfficeContextWithOptions(
 	taskID, sessionID, prompt string,
-	requiresSignal bool,
+	requiresSignal, includeHandoff bool,
 	trustedContents ...string,
 ) string {
 	return canonicalizeKandevContext(
-		FormatOfficeContextWithOptions(taskID, sessionID, requiresSignal),
+		FormatOfficeContextWithOptions(taskID, sessionID, requiresSignal, includeHandoff),
 		prompt,
 		trustedContextContents(sessionID, trustedContents...),
 	)
