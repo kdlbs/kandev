@@ -138,17 +138,19 @@ func (s *CostService) evaluatePolicy(
 		if policy.ActionOnExceed == budgetActionPauseAgent && policy.ScopeType == scopeAgent {
 			result.AgentPaused = s.pauseAgentForBudget(ctx, policy.ScopeID)
 		}
-		result.ExceededSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelExceeded)
-		// A spend that jumps straight from below the alert level to above
-		// the limit must also hold the alert-level claim, so a later
-		// evaluation that lands back in the alert band does not emit a
-		// budget.alert describing a reduction in spend. The outcome is
-		// discarded (claimed or already-claimed are equally fine here); a
-		// claim-store error is still logged and counted like any other.
-		s.claimCompanionAlert(ctx, policy, periodKey)
+		result.ExceededSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelExceeded,
+			// A spend that jumps straight from below the alert level to
+			// above the limit must also hold the alert-level claim before
+			// budget.exceeded is emitted, so a concurrent evaluation
+			// landing in the alert band cannot win that claim in the gap
+			// and emit a budget.alert describing a reduction in spend. The
+			// outcome is discarded (claimed or already-claimed are equally
+			// fine here); a claim-store error is still logged and counted
+			// like any other.
+			func() { s.claimCompanionAlert(ctx, policy, periodKey) })
 	case spent >= threshold:
 		result.AlertFired = true
-		result.AlertSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelAlert)
+		result.AlertSubmitted = s.claimAndEmit(ctx, workspaceID, policy, spent, periodKey, claimLevelAlert, nil)
 	}
 
 	return result, nil
@@ -156,15 +158,23 @@ func (s *CostService) evaluatePolicy(
 
 // claimAndEmit resolves the three outcomes of claiming (policy, periodKey,
 // level) and emits that level's activity row when the claim allows it.
-// Reports whether this evaluation submitted the row.
+// Reports whether this evaluation submitted the row. afterClaim, when
+// non-nil, runs immediately after the claim and before the emission
+// decision, regardless of the claim's outcome — the seam the exceeded
+// level's alert-level companion claim uses so both claims land before
+// either emission is decided.
 func (s *CostService) claimAndEmit(
 	ctx context.Context,
 	workspaceID string,
 	policy *BudgetPolicy,
 	spent int64,
 	periodKey, level string,
+	afterClaim func(),
 ) bool {
 	claimed, err := s.repo.Claim(ctx, policy.ID, periodKey, level)
+	if afterClaim != nil {
+		afterClaim()
+	}
 	if err != nil {
 		s.recordClaimFailure(policy.ID, level, err)
 		s.emitLevel(ctx, workspaceID, policy, spent, level)
