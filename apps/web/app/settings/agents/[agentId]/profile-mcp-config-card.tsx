@@ -434,7 +434,7 @@ function ProfileMCPSelectionContent({
   onSelectedIdsChange,
 }: ProfileMCPSelectionContentProps) {
   const { t } = useTranslation();
-  const hasError = Boolean(definitions.error || editor.error);
+  const hasLoadError = Boolean(definitions.error || editor.loadError);
   let selectionContent: ReactNode;
   if (workspaceRequired) {
     selectionContent = (
@@ -454,7 +454,7 @@ function ProfileMCPSelectionContent({
         definitions={definitions.definitions}
         selectedIds={selectedIds}
         onSelectedIdsChange={onSelectedIdsChange}
-        disabled={hasError}
+        disabled={hasLoadError}
         label={t("settings:mcpServers")}
         description={t("settings:mcpSelectionDescription")}
         testId={`profile-mcp-selection-${profileId}`}
@@ -484,9 +484,14 @@ function ProfileMCPSelectionContent({
         </div>
       )}
       {selectionContent}
-      {hasError && (
+      {hasLoadError && (
         <p className="text-sm text-destructive" role="alert">
           {t("settings:mcpLoadFailed")}
+        </p>
+      )}
+      {Boolean(editor.saveError) && (
+        <p className="text-sm text-destructive" role="alert">
+          {t("settings:mcpSaveFailed")}
         </p>
       )}
     </CardContent>
@@ -540,7 +545,8 @@ function ProfileMCPSelectionCard({
       Boolean(editor.selection) &&
       !editor.loading &&
       !editor.saving &&
-      !editor.error,
+      !editor.loadError &&
+      !definitions.error,
     invalidReason: workspaceRequired ? t("agents:mcpWorkspaceRequired") : undefined,
     save,
     discard: () => setSelectedIds(baselineIds),

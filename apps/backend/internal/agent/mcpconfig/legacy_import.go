@@ -302,6 +302,9 @@ func (i *LegacyImporter) fail(ctx context.Context, result LegacyImportResult, co
 }
 
 func legacyDefinitionInputs(workspaceID, profileID string, config *ProfileConfig) ([]CreateDefinitionInput, []string, bool, error) {
+	if config == nil || !config.Enabled {
+		return nil, nil, false, nil
+	}
 	names := make([]string, 0, len(config.Servers))
 	for name := range config.Servers {
 		names = append(names, name)
@@ -310,11 +313,16 @@ func legacyDefinitionInputs(workspaceID, profileID string, config *ProfileConfig
 	inputs := make([]CreateDefinitionInput, 0, len(names))
 	ids := make([]string, 0, len(names))
 	unsafeSecrets := false
+	usedRuntimeNames := make(map[string]struct{}, len(names))
 	for _, name := range names {
+		if isLegacyReservedServerName(name) {
+			continue
+		}
 		input, unsafe, err := legacyDefinitionInput(workspaceID, profileID, name, config.Servers[name])
 		if err != nil {
 			return nil, nil, false, err
 		}
+		input.RuntimeName = uniqueLegacyRuntimeName(input.RuntimeName, usedRuntimeNames)
 		inputs = append(inputs, input)
 		ids = append(ids, input.ID)
 		unsafeSecrets = unsafeSecrets || unsafe
@@ -352,7 +360,7 @@ func legacyDefinitionInput(workspaceID, profileID, name string, server ServerDef
 		}
 		unsafeSecrets = true
 		bindings = append(bindings, MCPSecretBinding{
-			InputName: "env:" + key,
+			InputName: key,
 			SecretID:  legacySecretID(workspaceID, profileID, name, "env:"+key),
 		})
 	}
@@ -363,7 +371,7 @@ func legacyDefinitionInput(workspaceID, profileID, name string, server ServerDef
 		}
 		unsafeSecrets = true
 		bindings = append(bindings, MCPSecretBinding{
-			InputName: "header:" + key,
+			InputName: key,
 			SecretID:  legacySecretID(workspaceID, profileID, name, "header:"+key),
 		})
 	}
@@ -377,6 +385,25 @@ func legacyDefinitionInput(workspaceID, profileID, name string, server ServerDef
 		SecretBindings: bindings, Source: DefinitionSourceLegacyImport,
 		SourceIdentity: "legacy:" + profileID + ":" + name,
 	}, unsafeSecrets, nil
+}
+
+func isLegacyReservedServerName(name string) bool {
+	runtimeName := legacyRuntimeName(name)
+	return runtimeName == "kandev" || strings.HasPrefix(runtimeName, "kandev.")
+}
+
+func uniqueLegacyRuntimeName(base string, used map[string]struct{}) string {
+	for suffix := 1; ; suffix++ {
+		candidate := base
+		if suffix > 1 {
+			candidate = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		if _, exists := used[candidate]; exists {
+			continue
+		}
+		used[candidate] = struct{}{}
+		return candidate
+	}
 }
 
 func workspaceProfileServerID(workspaceID, profileID, serverName string) string {

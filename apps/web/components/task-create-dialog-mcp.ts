@@ -11,23 +11,27 @@ import type { MCPInheritedSelection } from "@/lib/types/http-mcp";
 type TaskCreateMCPSetupArgs = {
   open: boolean;
   workspaceId: string | null | undefined;
+  openCycle: number;
   isSessionMode: boolean;
   taskId?: string | null;
   effectiveAgentProfileId: string;
   repositories: { repositoryId?: string | null }[];
   mcpServerIdsDirty: boolean;
   setMcpServerIds: (ids: string[]) => void;
+  setMcpServerIdsDirty: (dirty: boolean) => void;
 };
 
 export function useTaskCreateDialogMCPSetup({
   open,
   workspaceId,
+  openCycle,
   isSessionMode,
   taskId,
   effectiveAgentProfileId,
   repositories,
   mcpServerIdsDirty,
   setMcpServerIds,
+  setMcpServerIdsDirty,
 }: TaskCreateMCPSetupArgs) {
   const mcpWorkspaceId = open ? workspaceId : null;
   const definitions = useMCPWorkspaceDefinitions(mcpWorkspaceId);
@@ -56,6 +60,12 @@ export function useTaskCreateDialogMCPSetup({
       })
       .filter((item): item is MCPInheritedSelection => item !== null);
   }, [definitions.definitions, editor.inheritedOrigins]);
+
+  useEffect(() => {
+    if (!open) return;
+    setMcpServerIds([]);
+    setMcpServerIdsDirty(false);
+  }, [open, openCycle, taskId, isSessionMode, workspaceId, setMcpServerIds, setMcpServerIdsDirty]);
 
   useEffect(() => {
     if (mcpServerIdsDirty || !editor.selection) return;

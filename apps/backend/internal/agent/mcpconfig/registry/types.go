@@ -107,15 +107,22 @@ func (e Entry) Identity() string {
 
 // Choice describes one explicit package or remote installation option.
 type Choice struct {
-	ID                string `json:"id"`
-	Kind              string `json:"kind"`
-	RegistryType      string `json:"registry_type,omitempty"`
-	Identifier        string `json:"identifier,omitempty"`
-	Version           string `json:"version,omitempty"`
-	Transport         string `json:"transport,omitempty"`
-	URL               string `json:"url,omitempty"`
-	Selectable        bool   `json:"selectable"`
-	UnsupportedReason string `json:"unsupported_reason,omitempty"`
+	ID                   string                   `json:"id"`
+	Kind                 string                   `json:"kind"`
+	RegistryType         string                   `json:"registry_type,omitempty"`
+	RegistryBaseURL      string                   `json:"registry_base_url,omitempty"`
+	Identifier           string                   `json:"identifier,omitempty"`
+	Version              string                   `json:"version,omitempty"`
+	RuntimeHint          string                   `json:"runtime_hint,omitempty"`
+	RuntimeArguments     []Argument               `json:"runtime_arguments,omitempty"`
+	PackageArguments     []Argument               `json:"package_arguments,omitempty"`
+	EnvironmentVariables []KeyValueInput          `json:"environment_variables,omitempty"`
+	Transport            string                   `json:"transport,omitempty"`
+	URL                  string                   `json:"url,omitempty"`
+	Headers              []KeyValueInput          `json:"headers,omitempty"`
+	Variables            map[string]KeyValueInput `json:"variables,omitempty"`
+	Selectable           bool                     `json:"selectable"`
+	UnsupportedReason    string                   `json:"unsupported_reason,omitempty"`
 }
 
 // SyncState is the durable health and freshness state of the public cache.

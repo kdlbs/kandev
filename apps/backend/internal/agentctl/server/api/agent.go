@@ -817,7 +817,8 @@ func (s *Server) handleWSResumeSession(ctx context.Context, msg *ws.Message) *ws
 	}
 	if err := resumer.ResumeSession(ctx, req.SessionID, mcpServers); err != nil {
 		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		s.logger.Error("resume session failed", zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session resume failed", nil)
 		return resp
 	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)

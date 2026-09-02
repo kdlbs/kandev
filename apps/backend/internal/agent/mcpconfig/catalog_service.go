@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/google/uuid"
 )
 
@@ -84,11 +85,14 @@ func (s *CatalogService) Get(ctx context.Context, workspaceID, id string) (*MCPS
 		return nil, ErrMCPServerDefinitionNotFound
 	}
 	definition, err := s.repo.GetMCPServerDefinition(ctx, workspaceID, id)
-	if errors.Is(err, ErrMCPServerDefinitionNotFound) || definition == nil {
-		return nil, ErrMCPServerDefinitionNotFound
-	}
 	if err != nil {
+		if errors.Is(err, ErrMCPServerDefinitionNotFound) {
+			return nil, ErrMCPServerDefinitionNotFound
+		}
 		return nil, err
+	}
+	if definition == nil {
+		return nil, ErrMCPServerDefinitionNotFound
 	}
 	return cloneDefinition(definition), nil
 }
@@ -294,7 +298,7 @@ func validateNames(definition *MCPServerDefinition) error {
 	if definition.NormalizedRuntimeName == "" || hasWhitespace(definition.RuntimeName) {
 		return fmt.Errorf("%w: runtime name must not contain whitespace", ErrMCPInvalidDefinition)
 	}
-	if definition.NormalizedRuntimeName == "kandev" || strings.HasPrefix(definition.NormalizedRuntimeName, "kandev.") {
+	if definition.NormalizedRuntimeName == codexKandevServerName || strings.HasPrefix(definition.NormalizedRuntimeName, codexKandevServerName+".") {
 		return ErrMCPRuntimeNameReserved
 	}
 	if definition.DisplayName == "" || len([]rune(definition.DisplayName)) > 200 {
@@ -368,26 +372,11 @@ func validHTTPURL(value string) bool {
 
 func exactPackageVersion(value string) bool {
 	value = strings.TrimSpace(value)
-	if value == "" || strings.ContainsAny(value, "^~<>=*| ") || strings.HasPrefix(value, "v") {
+	if value == "" {
 		return false
 	}
-	parts := strings.SplitN(value, "+", 2)
-	core := strings.SplitN(parts[0], "-", 2)[0]
-	numbers := strings.Split(core, ".")
-	if len(numbers) != 3 {
-		return false
-	}
-	for _, number := range numbers {
-		if number == "" || (len(number) > 1 && number[0] == '0') {
-			return false
-		}
-		for _, character := range number {
-			if character < '0' || character > '9' {
-				return false
-			}
-		}
-	}
-	return true
+	_, err := semver.StrictNewVersion(value)
+	return err == nil
 }
 
 func normalizeRuntimeName(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
@@ -418,6 +407,8 @@ func cloneDefinition(definition *MCPServerDefinition) *MCPServerDefinition {
 func cloneConfiguration(configuration MCPServerConfiguration) MCPServerConfiguration {
 	clone := configuration
 	clone.Args = append([]string(nil), configuration.Args...)
+	clone.PackageRuntimeArguments = append([]string(nil), configuration.PackageRuntimeArguments...)
+	clone.PackageArguments = append([]string(nil), configuration.PackageArguments...)
 	clone.Env = cloneStringMap(configuration.Env)
 	clone.Headers = cloneStringMap(configuration.Headers)
 	clone.Options = cloneAnyMap(configuration.Options)

@@ -19,16 +19,18 @@ export function useNewSessionMCPSelection({
   profileId: string;
   repositoryIds: string[];
 }) {
+  const repositoryIdsKey = repositoryIds.join("\u0000");
+  const stableRepositoryIds = useMemo(() => repositoryIds, [repositoryIdsKey]);
   const definitions = useMCPWorkspaceDefinitions(workspaceId);
   const inheritedScopes = useMemo<MCPSelectionScopeRef[]>(() => {
     const refs: MCPSelectionScopeRef[] = [];
     if (profileId) refs.push({ scope: "profile", ownerId: profileId });
-    for (const repositoryId of repositoryIds) {
+    for (const repositoryId of stableRepositoryIds) {
       refs.push({ scope: "repository", ownerId: repositoryId });
     }
     refs.push({ scope: "task", ownerId: taskId });
     return refs;
-  }, [profileId, repositoryIds, taskId]);
+  }, [profileId, stableRepositoryIds, taskId]);
   const editor = useMCPSelectionEditor("task_session", null, workspaceId, inheritedScopes);
   const inherited = useMemo<MCPInheritedSelection[]>(() => {
     return Object.entries(editor.inheritedOrigins)

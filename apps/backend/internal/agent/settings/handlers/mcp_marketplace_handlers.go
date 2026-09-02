@@ -100,8 +100,14 @@ func (h *Handlers) writeMarketplaceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, registry.ErrRegistryEntryNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "marketplace entry not found"})
+	case errors.Is(err, mcpconfig.ErrMCPWorkspaceAccess), errors.Is(err, mcpconfig.ErrMCPServerDefinitionNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "MCP workspace is not available"})
 	case errors.Is(err, registry.ErrMarketplaceRevisionRequired), errors.Is(err, registry.ErrMarketplaceChoiceNotFound):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "marketplace review is required"})
+	case errors.Is(err, mcpconfig.ErrMCPRuntimeNameConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": "MCP runtime name already exists"})
+	case errors.Is(err, mcpconfig.ErrMCPRuntimeNameReserved), errors.Is(err, mcpconfig.ErrMCPInvalidDefinition):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid MCP server definition"})
 	case errors.Is(err, registry.ErrMarketplaceEntryUnavailable), errors.Is(err, registry.ErrMarketplaceChoiceUnsupported):
 		c.JSON(http.StatusConflict, gin.H{"error": "marketplace choice is no longer available"})
 	case errors.Is(err, registry.ErrMarketplaceCatalogUnavailable):

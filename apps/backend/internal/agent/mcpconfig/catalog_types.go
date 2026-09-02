@@ -26,16 +26,19 @@ const (
 
 // MCPServerConfiguration contains non-secret materialization settings.
 type MCPServerConfiguration struct {
-	Command         string            `json:"command,omitempty"`
-	Args            []string          `json:"args,omitempty"`
-	Env             map[string]string `json:"env,omitempty"`
-	Headers         map[string]string `json:"headers,omitempty"`
-	URL             string            `json:"url,omitempty"`
-	PackageType     string            `json:"package_type,omitempty"`
-	PackageName     string            `json:"package_name,omitempty"`
-	PackageVersion  string            `json:"package_version,omitempty"`
-	PackageRegistry string            `json:"package_registry,omitempty"`
-	Options         map[string]any    `json:"options,omitempty"`
+	Command                 string            `json:"command,omitempty"`
+	Args                    []string          `json:"args,omitempty"`
+	Env                     map[string]string `json:"env,omitempty"`
+	Headers                 map[string]string `json:"headers,omitempty"`
+	URL                     string            `json:"url,omitempty"`
+	PackageType             string            `json:"package_type,omitempty"`
+	PackageName             string            `json:"package_name,omitempty"`
+	PackageVersion          string            `json:"package_version,omitempty"`
+	PackageRegistry         string            `json:"package_registry,omitempty"`
+	PackageExecutable       string            `json:"package_executable,omitempty"`
+	PackageRuntimeArguments []string          `json:"package_runtime_arguments,omitempty"`
+	PackageArguments        []string          `json:"package_arguments,omitempty"`
+	Options                 map[string]any    `json:"options,omitempty"`
 }
 
 // MCPSecretBinding references a secret without storing its value in the catalog.

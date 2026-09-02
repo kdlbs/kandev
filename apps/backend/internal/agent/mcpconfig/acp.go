@@ -14,16 +14,16 @@ func ToACPServers(resolved []ResolvedServer) []types.McpServer {
 		}
 		switch server.Type {
 		case ServerTypeStdio:
-			base.Type = "stdio"
+			base.Type = string(ServerTypeStdio)
 			base.Command = server.Command
 			base.Args = append([]string{}, server.Args...)
 			base.Env = cloneStringMap(server.Env)
 		case ServerTypeSSE:
-			base.Type = "sse"
+			base.Type = string(ServerTypeSSE)
 			base.URL = server.URL
 			base.Headers = cloneStringMap(server.Headers)
 		case ServerTypeHTTP:
-			base.Type = "http"
+			base.Type = string(ServerTypeHTTP)
 			base.URL = server.URL
 			base.Headers = cloneStringMap(server.Headers)
 		case ServerTypeStreamableHTTP:

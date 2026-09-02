@@ -122,4 +122,46 @@ func TestLegacyImporterRedactsSecretsAndKeepsFallbackState(t *testing.T) {
 	if state.Status != LegacyImportStatusPending || state.FailureCode != "secret_rebind_required" {
 		t.Fatalf("fallback state = %#v", state)
 	}
+	if got := definition.SecretBindings[0].InputName; got != "Authorization" {
+		t.Fatalf("secret binding input name = %q, want raw header name", got)
+	}
+}
+
+func TestLegacyDefinitionInputsSkipReservedNamesAndDisambiguateNormalizedNames(t *testing.T) {
+	enabled := true
+	inputs, ids, unsafe, err := legacyDefinitionInputs("workspace-1", "profile-1", &ProfileConfig{
+		Enabled: enabled,
+		Servers: map[string]ServerDef{
+			"Kandev":       {Type: ServerTypeStdio, Command: "internal"},
+			"Git Hub":      {Type: ServerTypeStdio, Command: "first"},
+			"git-hub":      {Type: ServerTypeStdio, Command: "second"},
+			"git-hub-2":    {Type: ServerTypeStdio, Command: "third"},
+			"kandev.tools": {Type: ServerTypeStdio, Command: "internal"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("legacyDefinitionInputs: %v", err)
+	}
+	if unsafe {
+		t.Fatal("reserved and collision inputs should not be marked unsafe")
+	}
+	if len(inputs) != 3 || len(ids) != 3 {
+		t.Fatalf("inputs/ids = %d/%d, want 3/3", len(inputs), len(ids))
+	}
+	if inputs[0].RuntimeName != "git-hub" || inputs[1].RuntimeName != "git-hub-2" || inputs[2].RuntimeName != "git-hub-2-2" {
+		t.Fatalf("runtime names = %q, %q, %q", inputs[0].RuntimeName, inputs[1].RuntimeName, inputs[2].RuntimeName)
+	}
+}
+
+func TestLegacyDefinitionInputsDisabledConfigIsEmpty(t *testing.T) {
+	inputs, ids, unsafe, err := legacyDefinitionInputs("workspace-1", "profile-1", &ProfileConfig{
+		Enabled: false,
+		Servers: map[string]ServerDef{"server": {Type: ServerTypeStdio, Command: "server"}},
+	})
+	if err != nil {
+		t.Fatalf("legacyDefinitionInputs: %v", err)
+	}
+	if len(inputs) != 0 || len(ids) != 0 || unsafe {
+		t.Fatalf("disabled result = %#v/%#v/%v, want empty and safe", inputs, ids, unsafe)
+	}
 }

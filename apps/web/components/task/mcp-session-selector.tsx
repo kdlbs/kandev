@@ -23,6 +23,7 @@ type MCPSessionSelectorProps = {
   disabled?: boolean;
   retry?: () => void;
   retrying?: boolean;
+  error?: unknown;
   testId?: string;
 };
 
@@ -100,6 +101,7 @@ export function MCPSessionSelector({
   disabled,
   retry,
   retrying,
+  error,
   testId = "mcp-session-selector",
 }: MCPSessionSelectorProps) {
   const { t } = useTranslation();
@@ -126,6 +128,11 @@ export function MCPSessionSelector({
       </CollapsibleTrigger>
       <CollapsibleContent className="min-w-0 space-y-3 pt-3">
         <SessionStateNotice state={state} retry={retry} retrying={retrying} />
+        {Boolean(error) && (
+          <p className="text-sm text-destructive" role="alert">
+            {t("settings:mcpSaveFailed")}
+          </p>
+        )}
         {definitionsLoading ? (
           <p className="min-h-11 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
             {t("settings:mcpLoading")}

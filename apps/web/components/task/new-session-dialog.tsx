@@ -375,10 +375,13 @@ function NewSessionForm({
     currentProfileId,
     handoff,
   });
-  const taskRepositoryIds = useAppStore((state) => {
-    const task = state.kanban.tasks.find((entry) => entry.id === taskId);
-    return [...new Set((task?.repositories ?? []).map((repository) => repository.repository_id))];
-  });
+  const taskRepositories = useAppStore(
+    (state) => state.kanban.tasks.find((entry) => entry.id === taskId)?.repositories,
+  );
+  const taskRepositoryIds = useMemo(
+    () => [...new Set((taskRepositories ?? []).map((repository) => repository.repository_id))],
+    [taskRepositories],
+  );
   const mcp = useNewSessionMCPSelection({
     workspaceId,
     taskId,

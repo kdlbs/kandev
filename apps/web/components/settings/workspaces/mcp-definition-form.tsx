@@ -12,6 +12,7 @@ import { useSettingsSaveContributor } from "@/components/settings/settings-save-
 import type {
   MCPDefinitionInput,
   MCPExecutionMode,
+  MCPSecretBinding,
   MCPServerConfiguration,
   MCPServerDefinition,
   MCPTransport,
@@ -28,6 +29,8 @@ type FormDraft = {
   url: string;
   packageName: string;
   packageVersion: string;
+  configuration: MCPServerConfiguration;
+  secretBindings: MCPSecretBinding[];
 };
 
 type MCPDefinitionFormProps = {
@@ -40,21 +43,39 @@ type MCPDefinitionFormProps = {
 // i18n-exempt: npm package-shaped example used as a form placeholder.
 const MCP_RUNTIME_NAME_PLACEHOLDER = "@vendor/mcp-server";
 
+function emptyDraft(): FormDraft {
+  return {
+    runtimeName: "",
+    displayName: "",
+    description: "",
+    mode: "existing_executable",
+    transport: "stdio",
+    command: "",
+    args: "",
+    url: "",
+    packageName: "",
+    packageVersion: "",
+    configuration: {},
+    secretBindings: [],
+  };
+}
+
+function cloneConfiguration(config: MCPServerConfiguration): MCPServerConfiguration {
+  return {
+    ...config,
+    args: config.args ? [...config.args] : undefined,
+    env: config.env ? { ...config.env } : undefined,
+    headers: config.headers ? { ...config.headers } : undefined,
+    options: config.options ? { ...config.options } : undefined,
+    package_runtime_arguments: config.package_runtime_arguments
+      ? [...config.package_runtime_arguments]
+      : undefined,
+    package_arguments: config.package_arguments ? [...config.package_arguments] : undefined,
+  };
+}
+
 function draftFromServer(server?: MCPServerDefinition | null): FormDraft {
-  if (!server) {
-    return {
-      runtimeName: "",
-      displayName: "",
-      description: "",
-      mode: "existing_executable",
-      transport: "stdio",
-      command: "",
-      args: "",
-      url: "",
-      packageName: "",
-      packageVersion: "",
-    };
-  }
+  if (!server) return emptyDraft();
   const config = server.configuration;
   return {
     runtimeName: server.runtime_name,
@@ -67,19 +88,23 @@ function draftFromServer(server?: MCPServerDefinition | null): FormDraft {
     url: config?.url ?? "",
     packageName: config?.package_name ?? "",
     packageVersion: config?.package_version ?? "",
+    configuration: cloneConfiguration(config),
+    secretBindings: [...(server.secret_bindings ?? [])],
   };
 }
 
 function toConfiguration(draft: FormDraft): MCPServerConfiguration {
-  if (draft.mode === "remote") return { url: draft.url.trim() };
+  if (draft.mode === "remote") return { ...draft.configuration, url: draft.url.trim() };
   if (draft.mode === "managed_package") {
     return {
+      ...draft.configuration,
       package_type: "npm",
       package_name: draft.packageName.trim(),
       package_version: draft.packageVersion.trim(),
     };
   }
   return {
+    ...draft.configuration,
     command: draft.command.trim(),
     args: draft.args.trim() ? draft.args.trim().split(/\s+/) : [],
   };
@@ -93,6 +118,7 @@ function toPayload(draft: FormDraft): MCPDefinitionInput {
     execution_mode: draft.mode,
     transport: draft.mode === "remote" ? draft.transport : "stdio",
     configuration: toConfiguration(draft),
+    secret_bindings: draft.secretBindings,
     source: "custom",
   };
 }

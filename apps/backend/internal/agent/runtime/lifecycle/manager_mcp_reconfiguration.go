@@ -52,6 +52,19 @@ func (m *Manager) applyPendingSessionMCP(ctx context.Context, sessionID string) 
 
 	execution.promptLifecycleMu.Lock()
 	defer execution.promptLifecycleMu.Unlock()
+	// The selection can change while the execution lock is being acquired.
+	// Re-read it here so this operation cannot apply an older revision and
+	// overwrite the newer request's state when it completes.
+	state, err = m.mcpStateRepo.GetMCPSelectionState(ctx, sessionID)
+	if errors.Is(err, mcpconfig.ErrMCPSelectionStateNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if state.DesiredRevision <= state.AppliedRevision {
+		return nil
+	}
 	if execution.Status != v1.AgentStatusReady {
 		return m.savePendingSessionMCP(ctx, sessionID)
 	}
@@ -154,6 +167,13 @@ func (m *Manager) updateSessionMCPState(
 	if err != nil {
 		return err
 	}
+	expectedDesiredRevision := state.DesiredRevision
 	mutate(&state)
+	if compareAndSwap, ok := m.mcpStateRepo.(mcpconfig.CompareAndSwapMCPSelectionStateRepository); ok {
+		_, err := compareAndSwap.CompareAndSwapMCPSelectionState(
+			ctx, sessionID, expectedDesiredRevision, state,
+		)
+		return err
+	}
 	return m.mcpStateRepo.SaveMCPSelectionState(ctx, sessionID, state)
 }

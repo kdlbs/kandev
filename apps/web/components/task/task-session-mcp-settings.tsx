@@ -109,6 +109,7 @@ export function TaskSessionMCPSettings({
         disabled={editor.saving}
         retry={retry}
         retrying={editor.saving}
+        error={editor.saveError ?? editor.loadError ?? definitions.error}
         testId="task-session-mcp-settings"
       />
     </div>

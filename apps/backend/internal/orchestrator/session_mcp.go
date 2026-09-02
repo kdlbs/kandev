@@ -27,6 +27,9 @@ func (s *Service) applyMCPServerSelections(ctx context.Context, taskID, sessionI
 	if err != nil {
 		return fmt.Errorf("failed to load task for MCP selections: %w", err)
 	}
+	if err := s.validateMCPSelectionSession(ctx, taskID, sessionID); err != nil {
+		return err
+	}
 	return s.applyMCPServerSelectionsForWorkspace(ctx, task.WorkspaceID, sessionID, ids)
 }
 
@@ -34,7 +37,21 @@ func (s *Service) applyMCPServerSelectionsForTask(ctx context.Context, task *v1.
 	if task == nil {
 		return nil
 	}
+	if err := s.validateMCPSelectionSession(ctx, task.ID, sessionID); err != nil {
+		return err
+	}
 	return s.applyMCPServerSelectionsForWorkspace(ctx, task.WorkspaceID, sessionID, ids)
+}
+
+func (s *Service) validateMCPSelectionSession(ctx context.Context, taskID, sessionID string) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to load session for MCP selections: %w", err)
+	}
+	if session == nil || session.TaskID != taskID {
+		return fmt.Errorf("MCP selection session does not belong to task")
+	}
+	return nil
 }
 
 func (s *Service) applyMCPServerSelectionsForWorkspace(ctx context.Context, workspaceID, sessionID string, ids []string) error {

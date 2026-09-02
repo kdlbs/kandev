@@ -2,6 +2,7 @@ package mcpconfig
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -13,5 +14,21 @@ func ManagedPackageCommand(configuration MCPServerConfiguration) (string, []stri
 		return "", nil, fmt.Errorf("%w: managed packages require an npm name and exact version", ErrMCPInvalidDefinition)
 	}
 	packageSpec := configuration.PackageName + "@" + configuration.PackageVersion
-	return "npx", []string{"--yes", "--package", packageSpec, configuration.PackageName}, nil
+	executable := strings.TrimSpace(configuration.PackageExecutable)
+	if executable == "" && configuration.Options != nil {
+		if hint, ok := configuration.Options["runtime_hint"].(string); ok {
+			executable = strings.TrimSpace(hint)
+		}
+	}
+	if executable == "" {
+		executable = path.Base(configuration.PackageName)
+	}
+	args := []string{"--yes", "--package", packageSpec}
+	if registry := strings.TrimSpace(configuration.PackageRegistry); registry != "" {
+		args = append(args, "--registry", registry)
+	}
+	args = append(args, configuration.PackageRuntimeArguments...)
+	args = append(args, executable)
+	args = append(args, configuration.PackageArguments...)
+	return "npx", args, nil
 }

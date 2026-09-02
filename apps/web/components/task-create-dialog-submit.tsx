@@ -319,6 +319,18 @@ async function saveMCPSelectionIfNeeded({
   await save(definitionIds);
 }
 
+async function shouldKeepTaskDialogOpen(
+  error: unknown,
+  mcpServerIdsDirty: boolean,
+  saveTaskMCPSelections: ((definitionIds: string[]) => Promise<unknown>) | undefined,
+  refreshStaleBranchPolicies: (error: unknown) => Promise<boolean>,
+) {
+  if (mcpServerIdsDirty && Boolean(saveTaskMCPSelections)) return true;
+  if (isRepositorySelectionError(error)) return true;
+  if (isTaskDependencyUpdateFailure(error)) return true;
+  return refreshStaleBranchPolicies(error);
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
   isSessionMode,
@@ -707,7 +719,12 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
-      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
+      closeDialog = !(await shouldKeepTaskDialogOpen(
+        error,
+        mcpServerIdsDirty,
+        saveTaskMCPSelections,
+        refreshStaleBranchPolicies,
+      ));
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -726,6 +743,8 @@ export function useTaskSubmitHandlers({
     onSuccess,
     onOpenChange,
     refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
     applyAgentProfileRecentUse,
@@ -743,7 +762,12 @@ export function useTaskSubmitHandlers({
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
-      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
+      closeDialog = !(await shouldKeepTaskDialogOpen(
+        error,
+        mcpServerIdsDirty,
+        saveTaskMCPSelections,
+        refreshStaleBranchPolicies,
+      ));
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -759,6 +783,8 @@ export function useTaskSubmitHandlers({
     onSuccess,
     onOpenChange,
     refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
     editDependencies,

@@ -77,15 +77,165 @@ func (r *sqliteRepository) ReplaceMCPSelections(
 	workspaceID, ownerID string,
 	definitionIDs []string,
 ) error {
-	table, err := selectionTable(scope)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := replaceMCPSelectionsTx(ctx, tx, scope, workspaceID, ownerID, definitionIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ReplaceMCPSelectionsAndState is the atomic task-session write path. The
+// selection and desired revision must become visible together so a provider
+// cannot observe a new selection with an old application state.
+func (r *sqliteRepository) ReplaceMCPSelectionsAndState(
+	ctx context.Context,
+	scope mcpconfig.SelectionScope,
+	workspaceID, ownerID string,
+	definitionIDs []string,
+	state mcpconfig.SessionMCPSelectionState,
+) error {
+	if scope != mcpconfig.SelectionScopeTaskSession {
+		return fmt.Errorf("%w: session state requires task-session scope", mcpconfig.ErrMCPInvalidSelection)
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := replaceMCPSelectionsTx(ctx, tx, scope, workspaceID, ownerID, definitionIDs); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO mcp_task_session_apply_state
+		(task_session_id, desired_revision, applied_revision, apply_state,
+		 failure_code, failure_summary, attachment_attempt_id, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_session_id) DO UPDATE SET
+			desired_revision = excluded.desired_revision,
+			applied_revision = excluded.applied_revision,
+			apply_state = excluded.apply_state,
+			failure_code = excluded.failure_code,
+			failure_summary = excluded.failure_summary,
+			attachment_attempt_id = excluded.attachment_attempt_id,
+			updated_at = excluded.updated_at
+	`), ownerID, state.DesiredRevision, state.AppliedRevision, state.ApplyState,
+		state.FailureCode, state.FailureSummary, state.AttachmentAttemptID, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CompareAndSwapMCPSelectionState protects lifecycle results from racing a
+// newer task-session selection transaction. A false result means a newer
+// desired revision already won and the caller must leave it untouched.
+func (r *sqliteRepository) CompareAndSwapMCPSelectionState(
+	ctx context.Context,
+	sessionID string,
+	expectedDesiredRevision int64,
+	state mcpconfig.SessionMCPSelectionState,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE mcp_task_session_apply_state
+		SET desired_revision = ?, applied_revision = ?, apply_state = ?,
+			failure_code = ?, failure_summary = ?, attachment_attempt_id = ?, updated_at = ?
+		WHERE task_session_id = ? AND desired_revision = ?
+	`), state.DesiredRevision, state.AppliedRevision, state.ApplyState,
+		state.FailureCode, state.FailureSummary, state.AttachmentAttemptID,
+		time.Now().UTC(), sessionID, expectedDesiredRevision)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
+// DeleteMCPTaskData removes task-owned selections and the apply state for the
+// task sessions captured by the task deletion event. The task database owns
+// those session rows, so their IDs are supplied by the event producer.
+func (r *sqliteRepository) DeleteMCPTaskData(ctx context.Context, taskID string, sessionIDs []string) error {
+	if strings.TrimSpace(taskID) == "" {
+		return mcpconfig.ErrMCPInvalidSelection
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_mcp_selections WHERE task_id = ?`), taskID); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			continue
+		}
+		if _, exists := seen[sessionID]; exists {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_session_mcp_selections WHERE task_session_id = ?`), sessionID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM mcp_task_session_apply_state WHERE task_session_id = ?`), sessionID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// DeleteMCPWorkspaceData removes every workspace-owned MCP definition,
+// selection, and legacy-import row. Task deletion events remove session apply
+// state separately because the settings database does not own task sessions.
+func (r *sqliteRepository) DeleteMCPWorkspaceData(ctx context.Context, workspaceID string) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return mcpconfig.ErrMCPInvalidSelection
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := []string{
+		`DELETE FROM workspace_agent_profile_mcp_selections WHERE workspace_id = ? OR mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
+		`DELETE FROM repository_mcp_selections WHERE mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
+		`DELETE FROM task_mcp_selections WHERE mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
+		`DELETE FROM mcp_task_session_apply_state WHERE task_session_id IN (SELECT task_session_id FROM task_session_mcp_selections WHERE mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?))`,
+		`DELETE FROM task_session_mcp_selections WHERE mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
+		`DELETE FROM mcp_server_definitions WHERE workspace_id = ?`,
+		`DELETE FROM mcp_legacy_import_state WHERE workspace_id = ?`,
+	}
+	for _, query := range queries {
+		args := []any{workspaceID}
+		if strings.Count(query, "?") > 1 {
+			args = append(args, workspaceID)
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(query), args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func replaceMCPSelectionsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	scope mcpconfig.SelectionScope,
+	workspaceID, ownerID string,
+	definitionIDs []string,
+) error {
+	table, err := selectionTable(scope)
+	if err != nil {
+		return err
+	}
 	deleteQuery := `DELETE FROM ` + table.name + ` WHERE ` + table.ownerColumn + ` = ?`
 	deleteArgs := []any{ownerID}
 	if scope == mcpconfig.SelectionScopeProfile {
@@ -116,7 +266,7 @@ func (r *sqliteRepository) ReplaceMCPSelections(
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (r *sqliteRepository) SelectionImpact(ctx context.Context, workspaceID, definitionID string) (mcpconfig.SelectionImpact, error) {

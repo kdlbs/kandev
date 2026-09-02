@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -200,10 +199,10 @@ func (h *Handlers) writeMCPCatalogError(c *gin.Context, err error) {
 
 func decodeDeleteRequest(c *gin.Context) (mcpDefinitionRequest, error) {
 	var body mcpDefinitionRequest
-	if c.Request.ContentLength == 0 {
+	if c.Request.Body == nil || c.Request.ContentLength == 0 {
 		return body, nil
 	}
-	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+	if err := c.ShouldBindJSON(&body); err != nil {
 		return body, err
 	}
 	return body, nil

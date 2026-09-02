@@ -42,7 +42,7 @@ export async function createMCPServer(
 ): Promise<MCPServerDefinition> {
   return fetchJson<MCPServerDefinition>(`${workspacePath(workspaceId)}/mcp-servers`, {
     ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
   });
 }
 
@@ -56,7 +56,7 @@ export async function updateMCPServer(
     `${workspacePath(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
     {
       ...options,
-      init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+      init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(payload) },
     },
   );
 }
@@ -73,9 +73,9 @@ export async function deleteMCPServer(
     {
       ...options,
       init: {
+        ...(options?.init ?? {}),
         method: "DELETE",
         body: JSON.stringify({ expected_revision: expectedRevision, confirm }),
-        ...(options?.init ?? {}),
       },
     },
   );
@@ -109,7 +109,7 @@ export async function refreshMCPMarketplace(
 ): Promise<{ refreshed: boolean }> {
   return fetchJson<{ refreshed: boolean }>("/api/v1/mcp-marketplace/refresh", {
     ...options,
-    init: { method: "POST", ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "POST" },
   });
 }
 
@@ -120,7 +120,7 @@ export async function installMCPMarketplaceEntry(
 ): Promise<MCPServerDefinition> {
   return fetchJson<MCPServerDefinition>(`${workspacePath(workspaceId)}/mcp-marketplace/install`, {
     ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
   });
 }
 
@@ -146,9 +146,9 @@ export async function replaceMCPSelections(
   return fetchJson<MCPSelectionResponse>(ownerPath(scope, ownerId), {
     ...options,
     init: {
+      ...(options?.init ?? {}),
       method: "PUT",
       body: JSON.stringify({ workspace_id: workspaceId, definition_ids: definitionIds }),
-      ...(options?.init ?? {}),
     },
   });
 }

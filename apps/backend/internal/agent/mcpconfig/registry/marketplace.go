@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 )
 
@@ -87,7 +88,7 @@ func (s *MarketplaceService) Install(ctx context.Context, request InstallRequest
 	if err != nil {
 		return nil, err
 	}
-	if entry.Revision != request.ExpectedRevision || entry.Status == StatusDeprecated || entry.Status == StatusDeleted {
+	if entry.Revision != request.ExpectedRevision || entry.Status != StatusActive {
 		return nil, ErrMarketplaceEntryUnavailable
 	}
 	choice, err := selectChoice(entry.Choices, request.ChoiceID)
@@ -139,12 +140,18 @@ func definitionInputForChoice(entry Entry, choice Choice, request InstallRequest
 		input.ExecutionMode = mcpconfig.ExecutionModeRemote
 		input.Transport = remoteTransport(choice.Transport)
 		input.Configuration.URL = choice.URL
+		applyRegistryInputs(&input.Configuration, nil, choice.Headers, choice.Variables)
 	case "package":
 		input.ExecutionMode = mcpconfig.ExecutionModeManagedPackage
 		input.Transport = mcpconfig.ServerTypeStdio
 		input.Configuration.PackageType = choice.RegistryType
 		input.Configuration.PackageName = choice.Identifier
 		input.Configuration.PackageVersion = choice.Version
+		input.Configuration.PackageRegistry = choice.RegistryBaseURL
+		input.Configuration.PackageExecutable = choice.RuntimeHint
+		input.Configuration.PackageRuntimeArguments = argumentValues(choice.RuntimeArguments)
+		input.Configuration.PackageArguments = argumentValues(choice.PackageArguments)
+		applyRegistryInputs(&input.Configuration, choice.EnvironmentVariables, choice.Headers, choice.Variables)
 	default:
 		return mcpconfig.CreateDefinitionInput{}, ErrMarketplaceChoiceUnsupported
 	}
@@ -170,7 +177,7 @@ func registryMarketplaceEntries(entries []Entry) []MarketplaceEntry {
 }
 
 func toMarketplaceEntry(entry Entry, source string, publisherSupplied bool) MarketplaceEntry {
-	if entry.Status == "" {
+	if entry.Status == "" && !publisherSupplied {
 		entry.Status = StatusActive
 	}
 	if entry.Revision <= 0 {
@@ -186,13 +193,26 @@ func toMarketplaceEntry(entry Entry, source string, publisherSupplied bool) Mark
 func entryChoices(entry Entry) []Choice {
 	choices := make([]Choice, 0, len(entry.Packages)+len(entry.Remotes))
 	for index, packageChoice := range entry.Packages {
-		choice := Choice{ID: "package-" + strconv.Itoa(index), Kind: "package", RegistryType: packageChoice.RegistryType, Identifier: packageChoice.Identifier, Version: packageChoice.Version, Transport: packageChoice.Transport.Type}
+		choice := Choice{
+			ID: "package-" + strconv.Itoa(index), Kind: "package", RegistryType: packageChoice.RegistryType,
+			RegistryBaseURL: packageChoice.RegistryBaseURL, Identifier: packageChoice.Identifier,
+			Version: packageChoice.Version, RuntimeHint: packageChoice.RuntimeHint,
+			RuntimeArguments:     append([]Argument(nil), packageChoice.RuntimeArguments...),
+			PackageArguments:     append([]Argument(nil), packageChoice.PackageArguments...),
+			EnvironmentVariables: append([]KeyValueInput(nil), packageChoice.EnvironmentVariables...),
+			Transport:            packageChoice.Transport.Type,
+			Headers:              append([]KeyValueInput(nil), packageChoice.Transport.Headers...),
+			Variables:            cloneVariables(packageChoice.Transport.Variables),
+		}
 		choice.Selectable, choice.UnsupportedReason = packageSupported(packageChoice)
 		choices = append(choices, choice)
 	}
 	for index, remote := range entry.Remotes {
 		transport, endpoint := normalizeRemote(remote)
-		choice := Choice{ID: "remote-" + strconv.Itoa(index), Kind: "remote", Transport: transport, URL: endpoint}
+		choice := Choice{
+			ID: "remote-" + strconv.Itoa(index), Kind: "remote", Transport: transport, URL: endpoint,
+			Headers: append([]KeyValueInput(nil), remote.Headers...), Variables: cloneVariables(remote.Variables),
+		}
 		choice.Selectable, choice.UnsupportedReason = remoteSupported(transport, endpoint)
 		choices = append(choices, choice)
 	}
@@ -258,8 +278,66 @@ func defaultRuntimeName(name string) string {
 }
 
 func exactVersion(value string) bool {
-	parts := strings.SplitN(strings.TrimSpace(value), ".", 4)
-	return len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != "" && !strings.ContainsAny(value, "^~<>=*| ") && value != "latest"
+	value = strings.TrimSpace(value)
+	if value == "" || value == "latest" {
+		return false
+	}
+	_, err := semver.StrictNewVersion(value)
+	return err == nil
+}
+
+func argumentValues(arguments []Argument) []string {
+	values := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if strings.TrimSpace(argument.Value) != "" {
+			values = append(values, argument.Value)
+		} else if strings.TrimSpace(argument.Name) != "" {
+			values = append(values, argument.Name)
+		}
+	}
+	return values
+}
+
+func applyRegistryInputs(
+	configuration *mcpconfig.MCPServerConfiguration,
+	environmentVariables, headers []KeyValueInput,
+	variables map[string]KeyValueInput,
+) {
+	if configuration.Env == nil {
+		configuration.Env = map[string]string{}
+	}
+	for _, input := range environmentVariables {
+		if input.IsSecret || strings.TrimSpace(input.Name) == "" {
+			continue
+		}
+		configuration.Env[input.Name] = input.Value
+	}
+	if configuration.Headers == nil {
+		configuration.Headers = map[string]string{}
+	}
+	for _, input := range headers {
+		if input.IsSecret || strings.TrimSpace(input.Name) == "" {
+			continue
+		}
+		configuration.Headers[input.Name] = input.Value
+	}
+	if len(variables) > 0 {
+		if configuration.Options == nil {
+			configuration.Options = map[string]any{}
+		}
+		configuration.Options["registry_variables"] = cloneVariables(variables)
+	}
+}
+
+func cloneVariables(variables map[string]KeyValueInput) map[string]KeyValueInput {
+	if variables == nil {
+		return nil
+	}
+	clone := make(map[string]KeyValueInput, len(variables))
+	for key, value := range variables {
+		clone[key] = value
+	}
+	return clone
 }
 
 var timeNow = func() time.Time { return time.Now().UTC() }

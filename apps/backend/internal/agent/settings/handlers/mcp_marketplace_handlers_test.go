@@ -64,7 +64,7 @@ func TestMCPMarketplaceRoutesRequireReviewAndInstallSelectedChoice(t *testing.T)
 		t.Fatalf("NewLogger: %v", err)
 	}
 	cache := &handlerRegistryCache{entries: []registry.Entry{{
-		Name: "com.example/tools", Description: "Publisher tools", Version: "1.2.3", Revision: 1,
+		Name: "com.example/tools", Description: "Publisher tools", Version: "1.2.3", Revision: 1, Status: registry.StatusActive,
 		Packages: []registry.Package{{RegistryType: "npm", Identifier: "@example/tools", Version: "1.2.3", Transport: registry.Transport{Type: "stdio"}}},
 	}}}
 	syncer := registry.NewSyncService(nil, cache)

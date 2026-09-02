@@ -56,6 +56,19 @@ type SessionMCPSelectionStateRepository interface {
 	SaveMCPSelectionState(context.Context, string, SessionMCPSelectionState) error
 }
 
+// CompareAndSwapMCPSelectionStateRepository updates a session state only when
+// its desired revision is still the one that the caller read. This prevents a
+// provider result for an older selection from overwriting a newer selection
+// committed by another request.
+type CompareAndSwapMCPSelectionStateRepository interface {
+	CompareAndSwapMCPSelectionState(
+		context.Context,
+		string,
+		int64,
+		SessionMCPSelectionState,
+	) (bool, error)
+}
+
 // SelectionImpact counts the durable scopes that reference one definition.
 // Associations remain present when a definition is disabled so re-enabling it
 // restores the user's choices.
@@ -90,6 +103,19 @@ type SelectionRepository interface {
 	ReplaceMCPSelections(context.Context, SelectionScope, string, string, []string) error
 	SelectionImpact(context.Context, string, string) (SelectionImpact, error)
 	DeleteMCPSelectionsForDefinition(context.Context, string, string) error
+}
+
+// AtomicSessionMCPSelectionRepository persists a task-session selection and
+// its desired-application revision in one transaction.
+type AtomicSessionMCPSelectionRepository interface {
+	ReplaceMCPSelectionsAndState(
+		context.Context,
+		SelectionScope,
+		string,
+		string,
+		[]string,
+		SessionMCPSelectionState,
+	) error
 }
 
 // SelectionOwnerValidator verifies that ownerID belongs to the requested
@@ -189,40 +215,61 @@ func (s *SelectionService) Replace(ctx context.Context, scope SelectionScope, wo
 			return fmt.Errorf("%w: %s", ErrMCPDefinitionDisabled, definitionID)
 		}
 	}
+	if scope == SelectionScopeTaskSession && s.stateRepo != nil {
+		return s.replaceSessionSelections(ctx, workspaceID, ownerID, ids)
+	}
 	if err := s.repo.ReplaceMCPSelections(ctx, scope, workspaceID, ownerID, ids); err != nil {
 		return err
-	}
-	if scope == SelectionScopeTaskSession {
-		if err := s.recordSessionMCPChange(ctx, ownerID); err != nil {
-			return err
-		}
 	}
 	return nil
 }
 
-func (s *SelectionService) recordSessionMCPChange(ctx context.Context, sessionID string) error {
-	if s.stateRepo == nil {
-		return nil
-	}
+func (s *SelectionService) replaceSessionSelections(
+	ctx context.Context,
+	workspaceID, sessionID string,
+	ids []string,
+) error {
 	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
 	state, err := s.stateRepo.GetMCPSelectionState(ctx, sessionID)
 	if err != nil && !errors.Is(err, ErrMCPSelectionStateNotFound) {
-		s.stateMu.Unlock()
 		return err
 	}
 	state.DesiredRevision++
 	state.ApplyState = SessionMCPApplyStatePendingIdle
 	state.FailureCode = ""
 	state.FailureSummary = ""
-	if err := s.stateRepo.SaveMCPSelectionState(ctx, sessionID, state); err != nil {
-		s.stateMu.Unlock()
+	if atomic := atomicSessionMCPSelectionRepository(s.repo); atomic != nil {
+		return atomic.ReplaceMCPSelectionsAndState(
+			ctx, SelectionScopeTaskSession, workspaceID, sessionID, ids, state,
+		)
+	}
+	previous, listErr := s.repo.ListMCPSelections(
+		ctx, SelectionScopeTaskSession, workspaceID, sessionID,
+	)
+	if listErr != nil {
+		return listErr
+	}
+	if err := s.repo.ReplaceMCPSelections(
+		ctx, SelectionScopeTaskSession, workspaceID, sessionID, ids,
+	); err != nil {
 		return err
 	}
-	s.stateMu.Unlock()
+	if err := s.stateRepo.SaveMCPSelectionState(ctx, sessionID, state); err != nil {
+		_ = s.repo.ReplaceMCPSelections(
+			ctx, SelectionScopeTaskSession, workspaceID, sessionID, previous,
+		)
+		return err
+	}
 	if s.stateNotifier != nil {
 		s.stateNotifier(context.WithoutCancel(ctx), sessionID)
 	}
 	return nil
+}
+
+func atomicSessionMCPSelectionRepository(repo SelectionRepository) AtomicSessionMCPSelectionRepository {
+	atomic, _ := repo.(AtomicSessionMCPSelectionRepository)
+	return atomic
 }
 
 func (s *SelectionService) SelectionImpact(ctx context.Context, workspaceID, definitionID string) (SelectionImpact, error) {

@@ -225,6 +225,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
       />
       <TaskCreateAdvancedSettings
         isCreateMode={isCreateMode}
+        isEditMode={props.isEditMode}
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}

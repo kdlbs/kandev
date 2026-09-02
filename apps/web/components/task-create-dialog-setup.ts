@@ -175,7 +175,7 @@ function useSubmitHandlersWiring({
     createTask,
   } = props;
   const { parentTaskId } = props;
-  const taskId = props.taskId ?? null;
+  const taskId = props.taskId ?? editingTask?.id ?? null;
   return useTaskSubmitHandlers({
     isSessionMode,
     isEditMode,
@@ -479,12 +479,14 @@ export function useTaskCreateDialogSetup(
   const mcp = useTaskCreateDialogMCPSetup({
     open: resolvedProps.open,
     workspaceId,
+    openCycle: fs.openCycle,
     isSessionMode,
-    taskId: resolvedProps.taskId,
+    taskId: resolvedProps.taskId ?? resolvedProps.editingTask?.id ?? null,
     effectiveAgentProfileId: computed.effectiveAgentProfileId,
     repositories: fs.repositories,
     mcpServerIdsDirty: fs.mcpServerIdsDirty,
     setMcpServerIds: fs.setMcpServerIds,
+    setMcpServerIdsDirty: fs.setMcpServerIdsDirty,
   });
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,

@@ -13,6 +13,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ResolveAgentProfile resolves an agent profile ID to profile information.
@@ -71,7 +73,7 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 			WorkspaceID: execution.WorkspaceID, RepositoryIDs: execution.RepositoryIDs,
 			ProfileID: execution.AgentProfileID, TaskID: execution.TaskID,
 			SessionID: execution.SessionID,
-		}, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
+		}, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig, execution.RuntimeName)
 	}
 	return m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
 }
@@ -85,17 +87,26 @@ func (m *Manager) resolveMcpServersForLaunch(ctx context.Context, req *LaunchReq
 		return m.resolveEffectiveMcpServers(ctx, mcpconfig.ResolutionContext{
 			WorkspaceID: req.WorkspaceID, RepositoryIDs: repositoryIDsFromLaunch(req),
 			ProfileID: profileID, TaskID: req.TaskID, SessionID: req.SessionID,
-		}, profileID, req.Metadata, agentConfig)
+		}, profileID, req.Metadata, agentConfig, models.ExecutorType(req.ExecutorType).Runtime())
 	}
 	return m.resolveMcpServersWithParams(ctx, executionProfileID(req), req.Metadata, agentConfig)
 }
 
-func (m *Manager) resolveEffectiveMcpServers(ctx context.Context, resolutionContext mcpconfig.ResolutionContext, profileID string, metadata map[string]interface{}, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
+func (m *Manager) resolveEffectiveMcpServers(
+	ctx context.Context,
+	resolutionContext mcpconfig.ResolutionContext,
+	profileID string,
+	metadata map[string]interface{},
+	agentConfig agents.Agent,
+	runtime agentruntime.Runtime,
+) ([]agentctltypes.McpServer, error) {
 	if agentConfig == nil {
 		return nil, nil
 	}
-	defaultRT, _ := m.getDefaultExecutorBackend()
-	policy := mcpconfig.DefaultPolicyForRuntime(runtimeName(defaultRT))
+	if runtime == "" {
+		runtime = agentruntime.RuntimeStandalone
+	}
+	policy := mcpconfig.DefaultPolicyForRuntime(runtime)
 	policy, executorID, err := m.applyExecutorMcpPolicy(profileID, "", metadata, policy)
 	if err != nil {
 		return nil, err

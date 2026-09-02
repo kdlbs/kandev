@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-const registryCacheMaxAge = time.Hour
+const (
+	registryCacheMaxAge    = time.Hour
+	registryRefreshTimeout = 2 * time.Minute
+)
 
 // CacheStore persists the public Registry cache and its health state.
 type CacheStore interface {
@@ -54,23 +57,31 @@ func (s *SyncService) Refresh(ctx context.Context, incremental bool) (SyncResult
 	if s.call != nil {
 		call := s.call
 		s.mu.Unlock()
-		select {
-		case <-call.done:
-			return call.result, call.err
-		case <-ctx.Done():
-			return SyncResult{}, ctx.Err()
-		}
+		return waitForRefresh(ctx, call)
 	}
 	call := &refreshCall{done: make(chan struct{})}
 	s.call = call
 	s.mu.Unlock()
 
-	call.result, call.err = s.refresh(ctx, incremental)
-	s.mu.Lock()
-	s.call = nil
-	close(call.done)
-	s.mu.Unlock()
-	return call.result, call.err
+	go func() {
+		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), registryRefreshTimeout)
+		defer cancel()
+		call.result, call.err = s.refresh(refreshCtx, incremental)
+		s.mu.Lock()
+		s.call = nil
+		close(call.done)
+		s.mu.Unlock()
+	}()
+	return waitForRefresh(ctx, call)
+}
+
+func waitForRefresh(ctx context.Context, call *refreshCall) (SyncResult, error) {
+	select {
+	case <-call.done:
+		return call.result, call.err
+	case <-ctx.Done():
+		return SyncResult{}, ctx.Err()
+	}
 }
 
 func (s *SyncService) Cached(ctx context.Context, query string) ([]Entry, SyncState, error) {
@@ -107,7 +118,7 @@ func (s *SyncService) Start(ctx context.Context, interval time.Duration) {
 }
 
 func (s *SyncService) refresh(ctx context.Context, incremental bool) (SyncResult, error) {
-	if s.client == nil || s.store == nil {
+	if !s.ready() {
 		return SyncResult{}, ErrMarketplaceCatalogUnavailable
 	}
 	state, err := s.currentState(ctx)
@@ -115,23 +126,19 @@ func (s *SyncService) refresh(ctx context.Context, incremental bool) (SyncResult
 		return SyncResult{}, err
 	}
 	now := s.now().UTC()
-	state.LastAttemptAt = now
-	_ = s.store.SaveMCPRegistrySyncState(ctx, state)
-	options := ListOptions{IncludeDeleted: true}
-	if incremental && !state.LastSuccessfulAt.IsZero() {
-		updatedSince := state.LastSuccessfulAt
-		options.UpdatedSince = &updatedSince
+	if shouldUseCachedRegistryState(state, now) {
+		return s.cachedResult(ctx, state, now)
 	}
+	state.LastAttemptAt = now
+	if err := s.store.SaveMCPRegistrySyncState(ctx, state); err != nil {
+		return SyncResult{}, err
+	}
+	options := registryRefreshOptions(incremental, state)
 	entries, err := s.client.FetchAll(ctx, options)
 	if err != nil {
 		return s.failedRefresh(ctx, state, err, now)
 	}
-	if options.UpdatedSince != nil {
-		err = s.store.UpsertMCPRegistryEntries(ctx, entries)
-	} else {
-		err = s.store.ReplaceMCPRegistryEntries(ctx, entries)
-	}
-	if err != nil {
+	if err := s.storeEntries(ctx, options, entries); err != nil {
 		return s.failedRefresh(ctx, state, err, now)
 	}
 	state.LastSuccessfulAt = now
@@ -146,6 +153,41 @@ func (s *SyncService) refresh(ctx context.Context, incremental bool) (SyncResult
 		return SyncResult{}, err
 	}
 	return SyncResult{Entries: cached, LastSuccessfulAt: state.LastSuccessfulAt}, nil
+}
+
+func (s *SyncService) ready() bool {
+	return s.client != nil && s.store != nil
+}
+
+func shouldUseCachedRegistryState(state SyncState, now time.Time) bool {
+	return !state.LastAttemptAt.IsZero() && now.Sub(state.LastAttemptAt) < registryCacheMaxAge
+}
+
+func (s *SyncService) cachedResult(ctx context.Context, state SyncState, now time.Time) (SyncResult, error) {
+	entries, err := s.store.ListMCPRegistryEntries(ctx, "")
+	if err != nil {
+		return SyncResult{}, err
+	}
+	return SyncResult{
+		Entries: entries, Stale: state.LastSuccessfulAt.IsZero() || now.Sub(state.LastSuccessfulAt) > registryCacheMaxAge,
+		Degraded: state.Degraded, LastSuccessfulAt: state.LastSuccessfulAt,
+	}, nil
+}
+
+func registryRefreshOptions(incremental bool, state SyncState) ListOptions {
+	options := ListOptions{IncludeDeleted: true}
+	if incremental && !state.LastSuccessfulAt.IsZero() {
+		updatedSince := state.LastSuccessfulAt
+		options.UpdatedSince = &updatedSince
+	}
+	return options
+}
+
+func (s *SyncService) storeEntries(ctx context.Context, options ListOptions, entries []Entry) error {
+	if options.UpdatedSince != nil {
+		return s.store.UpsertMCPRegistryEntries(ctx, entries)
+	}
+	return s.store.ReplaceMCPRegistryEntries(ctx, entries)
 }
 
 func (s *SyncService) currentState(ctx context.Context) (SyncState, error) {
@@ -177,6 +219,10 @@ func sanitizeRegistryError(err error) string {
 		return fmt.Sprintf("registry returned HTTP %d", statusErr.StatusCode)
 	case errors.Is(err, ErrRegistryResponseTooLarge):
 		return "registry response was too large"
+	case errors.Is(err, ErrRegistryTotalResponseTooLarge):
+		return "registry response aggregate was too large"
+	case errors.Is(err, ErrRegistryEntriesTooMany):
+		return "registry returned too many entries"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "registry request timed out"
 	default:

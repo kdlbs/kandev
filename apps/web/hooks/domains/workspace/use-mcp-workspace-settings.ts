@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createMCPServer,
   deleteMCPServer,
@@ -22,24 +22,33 @@ export function useMCPWorkspaceDefinitions(workspaceId: string | null | undefine
   const [definitions, setDefinitions] = useState<MCPServerDefinition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const requestRef = useRef(0);
+  const workspaceRef = useRef(workspaceId);
+  workspaceRef.current = workspaceId;
 
   const reload = useCallback(async () => {
+    const requestID = ++requestRef.current;
+    const isCurrent = () =>
+      requestRef.current === requestID && workspaceRef.current === workspaceId;
     if (!workspaceId) {
-      setDefinitions([]);
-      setError(null);
+      if (isCurrent()) {
+        setDefinitions([]);
+        setError(null);
+      }
       return [];
     }
-    setLoading(true);
+    if (isCurrent()) setLoading(true);
     try {
       const next = await listMCPServers(workspaceId, { cache: "no-store" });
+      if (!isCurrent()) return [];
       setDefinitions(next);
       setError(null);
       return next;
     } catch (cause) {
-      setError(cause);
+      if (isCurrent()) setError(cause);
       return [];
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [workspaceId]);
 
@@ -56,34 +65,45 @@ export function useMCPWorkspaceSettings(workspaceId: string) {
   const [loading, setLoading] = useState(true);
   const [marketplaceLoading, setMarketplaceLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const serverRequestRef = useRef(0);
+  const marketplaceRequestRef = useRef(0);
+  const reloadRequestRef = useRef(0);
+  const workspaceRef = useRef(workspaceId);
+  workspaceRef.current = workspaceId;
 
   const loadServers = useCallback(async () => {
+    const requestID = ++serverRequestRef.current;
     const next = await listMCPServers(workspaceId, { cache: "no-store" });
-    setServers(next);
+    if (serverRequestRef.current === requestID) setServers(next);
     return next;
   }, [workspaceId]);
 
   const searchMarketplace = useCallback(async (query = "") => {
+    const requestID = ++marketplaceRequestRef.current;
     setMarketplaceLoading(true);
     try {
       const next = await searchMCPMarketplace(query);
+      if (marketplaceRequestRef.current !== requestID) return next;
       setMarketplace(next);
       setError(null);
       return next;
     } finally {
-      setMarketplaceLoading(false);
+      if (marketplaceRequestRef.current === requestID) setMarketplaceLoading(false);
     }
   }, []);
 
   const reload = useCallback(async () => {
-    setLoading(true);
+    const requestID = ++reloadRequestRef.current;
+    const isCurrent = () =>
+      reloadRequestRef.current === requestID && workspaceRef.current === workspaceId;
+    if (isCurrent()) setLoading(true);
     try {
       await Promise.all([loadServers(), searchMarketplace()]);
-      setError(null);
+      if (isCurrent()) setError(null);
     } catch (cause) {
-      setError(cause);
+      if (isCurrent()) setError(cause);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [loadServers, searchMarketplace]);
 

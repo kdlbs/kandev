@@ -12,6 +12,9 @@ export type MCPServerConfiguration = {
   package_name?: string;
   package_version?: string;
   package_registry?: string;
+  package_executable?: string;
+  package_runtime_arguments?: string[];
+  package_arguments?: string[];
   options?: Record<string, unknown>;
 };
 
@@ -100,12 +103,33 @@ export type MCPMarketplaceChoice = {
   id: string;
   kind: "package" | "remote" | string;
   registry_type?: string;
+  registry_base_url?: string;
   identifier?: string;
   version?: string;
+  runtime_hint?: string;
+  runtime_arguments?: MCPMarketplaceArgument[];
+  package_arguments?: MCPMarketplaceArgument[];
+  environment_variables?: MCPMarketplaceInput[];
   transport?: string;
   url?: string;
+  headers?: MCPMarketplaceInput[];
+  variables?: Record<string, MCPMarketplaceInput>;
   selectable: boolean;
   unsupported_reason?: string;
+};
+
+export type MCPMarketplaceArgument = {
+  name?: string;
+  value?: string;
+  description?: string;
+};
+
+export type MCPMarketplaceInput = {
+  name?: string;
+  value?: string;
+  description?: string;
+  isRequired?: boolean;
+  isSecret?: boolean;
 };
 
 export type MCPMarketplaceEntry = {
