@@ -66,6 +66,12 @@ func Reduce(document string, budget int) (output string, reduced bool, omittedSe
 	if strings.TrimSpace(document) == "" {
 		return "", false, 0
 	}
+	if budget <= 0 {
+		// Handled before any reservation is subtracted from budget: for a
+		// budget near the minimum int, that subtraction underflows and
+		// wraps positive.
+		return "", true, len(splitSections(document))
+	}
 	if len(document) <= budget {
 		return document, false, 0
 	}

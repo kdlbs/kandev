@@ -107,6 +107,36 @@ func TestAddDynamicPlanIsByteIdenticalUnderBudget(t *testing.T) {
 	}
 }
 
+// TestAddDynamicPlanInjectsBareTitleWhenContentIsWhitespaceOnly is the
+// AC-001.12 named exception for the dynamic site: a plan with a title but
+// whitespace-only content composes to a non-empty document (the bare
+// title), unlike the handover site where the composed document is content
+// alone and this same input injects nothing.
+func TestAddDynamicPlanInjectsBareTitleWhenContentIsWhitespaceOnly(t *testing.T) {
+	ctx := context.Background()
+	const taskID = "task-dynamic-plan-bare-title"
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, "session-dynamic-plan-bare-title", models.TaskSessionStateRunning)
+
+	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
+		ID: "plan-dynamic-bare-title", TaskID: taskID, Title: "Some title", Content: "   \n\t \n",
+	}); err != nil {
+		t.Fatalf("CreateTaskPlan: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+
+	var input dynamicruntime.ContinuationInput
+	if err := svc.addDynamicPlan(ctx, taskID, &input); err != nil {
+		t.Fatalf("addDynamicPlan: %v", err)
+	}
+
+	if input.PlanSummary != "Some title" {
+		t.Fatalf("PlanSummary = %q, want %q (bare title)", input.PlanSummary, "Some title")
+	}
+}
+
 // TestAddDynamicPlanLogsReductionFields is the AC-002.6 assertion for the
 // dynamic site: on a reducing plan, the "reducing dynamic continuation plan"
 // record carries exactly the five documented keys, "site" set to the literal

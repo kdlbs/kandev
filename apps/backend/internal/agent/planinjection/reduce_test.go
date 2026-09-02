@@ -2,6 +2,7 @@ package planinjection
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -318,7 +319,7 @@ func TestReduceOutputIsValidUTF8ForMultibyteInput(t *testing.T) {
 
 func TestReduceReturnsNothingForNonPositiveBudget(t *testing.T) {
 	doc := buildDoc(3, 100)
-	for _, budget := range []int{0, -5} {
+	for _, budget := range []int{0, -5, math.MinInt, math.MinInt + 50} {
 		out, reduced, omitted := Reduce(doc, budget)
 		if out != "" {
 			t.Fatalf("budget=%d: out = %q, want \"\"", budget, out)
