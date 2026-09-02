@@ -92,10 +92,12 @@ test is not necessary because no mobile-specific interaction changes.
 - A hook test proves that startup permits editing and blocks submission.
 - The hook test keeps the clarification exception and environment-prepare
   reason under coverage.
-- A session-recovery E2E test enters a draft during resume. It proves that the
-  send action stays disabled and that the draft survives until readiness.
+- A session-start E2E test uses delayed workspace preparation to keep a real
+  session in STARTING. It proves that the editor stays editable, the send
+  action stays disabled, and the draft survives until readiness.
+- A manual session-recovery E2E test verifies that the recovery card clears and
+  the resumed composer remains usable after the prompt-ready response.
 
 ## Related decisions
 
 - [ADR-0049: Fine-Grained Foreground Idle Busy Signal](../../../decisions/0049-fine-grained-foreground-idle-busy-signal.md)
-

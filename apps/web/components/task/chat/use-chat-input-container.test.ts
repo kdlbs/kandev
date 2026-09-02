@@ -9,7 +9,7 @@ const callerPlaceholder = "Continue working on the task...";
 
 function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
   return renderHook(
-    () =>
+    (currentOverrides: Partial<Parameters<typeof useChatInputContainer>[0]>) =>
       useChatInputContainer({
         ref: createRef<ChatInputContainerHandle>(),
         sessionId: "session-1",
@@ -32,9 +32,10 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
         showRequestChangesTooltip: false,
         onRequestChangesTooltipDismiss: undefined,
         onSubmit: vi.fn(),
-        ...overrides,
+        ...currentOverrides,
       }),
     {
+      initialProps: overrides,
       wrapper: ({ children }) => React.createElement(ToastProvider, null, children),
     },
   );
@@ -47,6 +48,20 @@ describe("useChatInputContainer", () => {
     expect(result.current.isDisabled).toBe(false);
     expect(result.current.submitDisabled).toBe(true);
     expect(result.current.submitDisabledReason).toBeUndefined();
+  });
+
+  it("preserves draft text when startup transitions to failed recovery", () => {
+    const { result, rerender } = renderInputState({ isStarting: true });
+
+    act(() => {
+      result.current.handleChange("my draft");
+    });
+
+    rerender({ isStarting: false, isFailed: true });
+
+    expect(result.current.value).toBe("my draft");
+    expect(result.current.isDisabled).toBe(true);
+    expect(result.current.submitDisabled).toBe(true);
   });
 
   it("surfaces the setup tooltip only while a container/sandbox is preparing", () => {

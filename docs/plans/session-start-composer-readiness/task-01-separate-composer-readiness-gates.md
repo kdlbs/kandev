@@ -87,8 +87,11 @@ None.
   environment-prepare disabled reason.
 - Added a hook regression test that proves startup keeps the editor enabled and
   regular submission disabled.
-- Extended the resume recovery E2E flow to type during startup, retain the
-  draft, enable submission at readiness, and submit the retained draft.
-- Verification passed: locked dependency install, 19 focused Vitest tests, one
-  production-build Chromium E2E test, targeted ESLint, specification lint, and
+- Added a deterministic slow-preparation E2E flow that types during STARTING,
+  keeps regular submission disabled, and verifies the draft after readiness.
+- Kept the manual resume E2E flow focused on recovery-card cleanup and resumed
+  composer usability because its backend request resolves only after the agent
+  is prompt-ready.
+- Verification passed: locked dependency install, 20 focused Vitest tests, two
+  production-build Chromium E2E tests, targeted ESLint, specification lint, and
   `git diff --check`.

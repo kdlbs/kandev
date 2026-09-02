@@ -45,9 +45,11 @@ environment-prepare reason on the disabled send action.
 necessary.
 
 Update the hook test to prove the two gates have different values during
-startup. Update the resume recovery E2E flow to enter text before readiness,
-prove that submission is disabled, and submit the preserved draft after
-readiness.
+startup. Add a deterministic slow-preparation E2E flow that enters text before
+readiness, proves that submission is disabled, and verifies the preserved draft
+after readiness. Keep the manual resume flow focused on post-recovery
+usability because its backend request resolves only after the resumed agent is
+prompt-ready.
 
 ## Tests
 
@@ -67,8 +69,10 @@ readiness.
   `AC-UI-SESSION-START-COMPOSER-READINESS-001.1`,
   `AC-UI-SESSION-START-COMPOSER-READINESS-001.2`, and
   `AC-UI-SESSION-START-COMPOSER-READINESS-001.3`.
-- The E2E flow resumes a failed session, enters a draft during startup, and
-  submits that draft after readiness.
+- The slow-preparation E2E flow holds a new session in STARTING, enters a
+  draft, and verifies that the draft remains after the submit gate clears.
+- The manual resume flow separately verifies that the recovery card clears and
+  the resumed composer remains usable.
 - A separate mobile E2E change is not required. The shared state logic does not
   alter mobile layout, navigation, scrolling, or touch behavior.
 
@@ -79,8 +83,8 @@ readiness.
 ## Verification results
 
 - Installed the locked frontend dependencies successfully.
-- Focused Vitest coverage passed: 2 files and 19 tests.
-- The production-build Chromium resume flow passed: 1 test.
+- Focused Vitest coverage passed: 2 files and 20 tests.
+- The production-build Chromium startup and resume flows passed: 2 tests.
 - Targeted ESLint, specification lint, and `git diff --check` passed.
 
 ## Risks
