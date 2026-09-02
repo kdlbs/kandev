@@ -154,8 +154,8 @@ export function RepositorySetMembersField({
                   repository={repositories.find(
                     (candidate) => candidate.id === member.repositoryId,
                   )}
-                  canMoveUp={index > 0}
-                  canMoveDown={index < draft.members.length - 1}
+                  canMoveUp={!memberSearch && index > 0}
+                  canMoveDown={!memberSearch && index < draft.members.length - 1}
                   onBaseBranchChange={(baseBranch) => updateMember(index, { baseBranch })}
                   onMoveUp={() => moveMember(index, -1)}
                   onMoveDown={() => moveMember(index, 1)}
@@ -350,20 +350,20 @@ function RepositorySetBaseBranchPicker({
   const options = useMemo(() => {
     const available = sortBranches(branches).map(branchToOption);
     const defaultOption = taskDefaultOption(repository, t);
-    if (
-      member.baseBranch &&
-      isLoaded &&
-      !available.some((option) => option.value === member.baseBranch)
-    ) {
-      return [
-        unavailableBranchOption(
-          member.baseBranch,
-          t("workspaces:repositorySetsBranchUnavailable"),
-          t("workspaces:repositorySetsBranchUnavailableReason"),
-        ),
-        defaultOption,
-        ...available,
-      ];
+    const savedBaseAvailable = available.some((option) => option.value === member.baseBranch);
+    if (member.baseBranch && !savedBaseAvailable) {
+      const savedBaseOption = isLoaded
+        ? unavailableBranchOption(
+            member.baseBranch,
+            t("workspaces:repositorySetsBranchUnavailable"),
+            t("workspaces:repositorySetsBranchUnavailableReason"),
+          )
+        : {
+            value: member.baseBranch,
+            label: member.baseBranch,
+            keywords: [member.baseBranch],
+          };
+      return [savedBaseOption, defaultOption, ...available];
     }
     return [defaultOption, ...available];
   }, [branches, isLoaded, member.baseBranch, repository, t]);

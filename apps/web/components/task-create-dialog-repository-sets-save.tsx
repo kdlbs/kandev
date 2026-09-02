@@ -34,6 +34,8 @@ type SaveRepositorySetDialogProps = {
   repositories?: Repository[];
   /** Local execution keeps the checkout branch separate from the base. */
   isLocalExecutor?: boolean;
+  /** Fresh-branch mode uses the selected row branch as the fork base. */
+  freshBranchEnabled?: boolean;
 };
 
 /**
@@ -51,6 +53,7 @@ export function SaveRepositorySetDialog({
   rows,
   repositories,
   isLocalExecutor = false,
+  freshBranchEnabled = false,
 }: SaveRepositorySetDialogProps) {
   const { t } = useTranslation();
   const upsertRepositorySet = useAppStore((state) => state.upsertRepositorySet);
@@ -61,8 +64,8 @@ export function SaveRepositorySetDialog({
 
   const repositoryIds = useMemo(() => selectedRepositoryIdsForSet(rows), [rows]);
   const repositoryMembers = useMemo(
-    () => selectedRepositoryMembersForSet(rows, repositories, isLocalExecutor),
-    [rows, repositories, isLocalExecutor],
+    () => selectedRepositoryMembersForSet(rows, repositories, isLocalExecutor, freshBranchEnabled),
+    [rows, repositories, isLocalExecutor, freshBranchEnabled],
   );
   // A row that names a discovered local path, a remote URL, or nothing at all is
   // not a workspace repository, so it cannot be a member.

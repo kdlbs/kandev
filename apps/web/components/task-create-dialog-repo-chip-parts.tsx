@@ -298,3 +298,56 @@ export function RepoChipBranchPill({
     />
   );
 }
+
+export function RepoChipBaseBranchPill({
+  options,
+  value,
+  defaultBranch,
+  hasRepo,
+  branchesLoading,
+  onSelect,
+  refreshBranches,
+}: {
+  options: PillOption[];
+  value: string;
+  defaultBranch: string;
+  hasRepo: boolean;
+  branchesLoading: boolean;
+  onSelect: (value: string) => void;
+  refreshBranches?: () => void;
+}) {
+  const { t } = useTranslation();
+  const defaultLabel = defaultBranch || t("common:repositoryDefaultBranchOption");
+  const valueLabel = value || t("workspaces:repositorySetsTaskDefault", { branch: defaultLabel });
+  const disabledReason = baseBranchDisabledReason(hasRepo, branchesLoading, t);
+  return (
+    <Pill
+      icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
+      value={valueLabel}
+      selectedValue={value}
+      placeholder={valueLabel}
+      options={options}
+      onSelect={onSelect}
+      disabled={!hasRepo || branchesLoading || options.length === 0}
+      disabledReason={disabledReason}
+      searchPlaceholder={t("task:searchBranches")}
+      emptyMessage={t("task:noBranches")}
+      testId="repo-chip-base-branch"
+      tooltip={t("workspaces:repositorySetsBaseBranchLabel")}
+      onRefresh={refreshBranches}
+      refreshing={branchesLoading}
+      filter={scoreBranch}
+      flat
+    />
+  );
+}
+
+function baseBranchDisabledReason(
+  hasRepo: boolean,
+  branchesLoading: boolean,
+  translate: (key: string) => string,
+): string {
+  if (!hasRepo) return translate("task:selectRepositoryFirst");
+  if (branchesLoading) return translate("task:loadingBranches2");
+  return translate("task:noBranches");
+}

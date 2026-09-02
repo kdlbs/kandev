@@ -5,6 +5,7 @@ import { repositoryId, workspaceId } from "@/lib/types/ids";
 import {
   applyRepositorySet,
   selectedRepositoryIdsForSet,
+  selectedRepositoryMembersForSet,
 } from "@/components/task-create-dialog-repository-sets";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 
@@ -264,5 +265,26 @@ describe("selectedRepositoryIdsForSet", () => {
     ]);
 
     expect(ids).toEqual([REPO_WEB]);
+  });
+});
+
+describe("selectedRepositoryMembersForSet", () => {
+  it("captures the selected fork base while fresh-branch mode is enabled", () => {
+    const repository = {
+      ...AVAILABLE[0],
+      default_branch: "main",
+    } as Repository;
+    const rows: TaskRepoRow[] = [
+      {
+        key: ROW_0,
+        repositoryId: REPO_WEB,
+        branch: "develop",
+        baseBranch: "main",
+      },
+    ];
+
+    expect(selectedRepositoryMembersForSet(rows, [repository], true, true)).toEqual([
+      { repositoryId: REPO_WEB, baseBranch: "develop" },
+    ]);
   });
 });

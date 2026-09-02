@@ -156,16 +156,10 @@ describe("buildRepositoriesPayload — local executor branch split (core)", () =
 
 describe("buildRepositoriesPayload — local executor branch split (edge cases)", () => {
   it("fresh-branch flow: skips the split so the picked base is preserved as base_branch", () => {
-    // When the user enables "Fork a new branch", the chip's branch is the
-    // BASE TO FORK FROM (e.g. "develop"), not a working branch. The backend
-    // creates a new branch from that base and rewrites base_branch to the
-    // new branch name. If we split here, base_branch would land on the
-    // repo's default ("main") and the fork would happen from main instead
-    // of develop — silently wrong.
     const payload = buildRepositoriesPayload({
       useRemote: false,
       remoteRepos: [],
-      repositories: [{ key: "r0", repositoryId: "repo-1", branch: "develop" }],
+      repositories: [{ key: "r0", repositoryId: "repo-1", branch: "develop", baseBranch: "main" }],
       discoveredRepositories: [],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       workspaceRepositories: [{ id: "repo-1", default_branch: "main" }] as any,
@@ -185,13 +179,6 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
   });
 
   it("falls through when default_branch is unknown (legacy repos)", () => {
-    // Repos created before the backend probe fix may have an unset
-    // default_branch in the workspace store. If we synthesize base_branch=
-    // rowBranch here (as the original draft did), we reproduce the very bug
-    // this PR fixes: agentctl recomputes merge-base(HEAD, origin/<rowBranch>)
-    // → collapses to HEAD → empty changes panel. Better to leave the legacy
-    // shape alone — the next backend createRepository call will populate
-    // default_branch via the gitref probe.
     const payload = buildRepositoriesPayload({
       useRemote: false,
       remoteRepos: [],

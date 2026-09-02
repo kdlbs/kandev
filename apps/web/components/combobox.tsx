@@ -236,6 +236,25 @@ function handleComboboxOpenChange(
   onOpenChange?.(next);
 }
 
+function selectComboboxOption({
+  selectedValue,
+  currentValue,
+  onValueChange,
+  setOpen,
+  onOpenChange,
+}: {
+  selectedValue: string;
+  currentValue: string;
+  onValueChange: (value: string) => void;
+  setOpen: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const nextValue = selectedValue === currentValue ? "" : selectedValue;
+  onValueChange(nextValue);
+  setOpen(false);
+  onOpenChange?.(false);
+}
+
 export const Combobox = memo(function Combobox({
   options,
   value,
@@ -320,10 +339,15 @@ export const Combobox = memo(function Combobox({
               options={options}
               value={value}
               touchTarget={touchTarget}
-              onSelect={(v) => {
-                onValueChange(v === value ? "" : v);
-                setOpen(false);
-              }}
+              onSelect={(v) =>
+                selectComboboxOption({
+                  selectedValue: v,
+                  currentValue: value,
+                  onValueChange,
+                  setOpen,
+                  onOpenChange,
+                })
+              }
             />
           </CommandList>
         </Command>

@@ -266,6 +266,43 @@ describe("RepoChipsRow", () => {
     expect(onRowBranchChange).toHaveBeenCalledWith("r0", "main");
   });
 
+  it("keeps a saved worktree base out of the checkout branch state", () => {
+    mockBranches.value = {
+      branches: [
+        { name: "main", type: "local" } as Branch,
+        { name: "develop", type: "local" } as Branch,
+      ],
+      isLoading: false,
+    };
+    const fs = makeFs({
+      repositories: [
+        row({
+          key: "r0",
+          repositoryId: REPO_FRONT_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+    });
+    const onRowBranchChange = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={fs}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("branch-chip-trigger"));
+    fireEvent.click(screen.getByRole("option", { name: /^main/ }));
+
+    expect(fs.updateRepository).toHaveBeenCalledWith("r0", { baseBranch: "main" });
+    expect(onRowBranchChange).not.toHaveBeenCalled();
+  });
+
   it("disables branch policies for multi-repo local execution", () => {
     mockBranches.value = {
       branches: [{ name: "main", type: "local" } as Branch],

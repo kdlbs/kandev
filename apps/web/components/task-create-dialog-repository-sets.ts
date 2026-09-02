@@ -145,6 +145,7 @@ export function selectedRepositoryMembersForSet(
   rows: TaskRepoRow[],
   repositories: Repository[] = [],
   isLocalExecutor = false,
+  freshBranchEnabled = false,
 ): Array<{ repositoryId: string; baseBranch: string }> {
   const byId = new Map(repositories.map((repository) => [repository.id as string, repository]));
   const seen = new Set<string>();
@@ -153,7 +154,9 @@ export function selectedRepositoryMembersForSet(
     if (!repositoryId || seen.has(repositoryId)) return [];
     seen.add(repositoryId);
     const repositoryDefault = byId.get(repositoryId)?.default_branch ?? "";
-    const baseBranch = row.baseBranch || (isLocalExecutor ? repositoryDefault : row.branch) || "";
+    const baseBranch = freshBranchEnabled
+      ? row.branch
+      : row.baseBranch || (isLocalExecutor ? repositoryDefault : row.branch) || "";
     return [{ repositoryId, baseBranch }];
   });
 }

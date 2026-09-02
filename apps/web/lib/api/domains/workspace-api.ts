@@ -48,6 +48,21 @@ export async function listRepositories(
 // Collection routes are workspace-scoped and item routes are flat, mirroring the
 // repository routes above.
 
+type RepositorySetMembersPayload =
+  | {
+      repositoryIds: string[];
+      repositories?: never;
+    }
+  | {
+      repositories: Array<{ repositoryId: string; baseBranch?: string }>;
+      repositoryIds?: never;
+    };
+
+type CreateRepositorySetPayload = {
+  name: string;
+  description?: string;
+} & RepositorySetMembersPayload;
+
 export async function listRepositorySets(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<ListRepositorySetsResponse>(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/repository-sets`,
@@ -57,12 +72,7 @@ export async function listRepositorySets(workspaceId: string, options?: ApiReque
 
 export async function createRepositorySet(
   workspaceId: string,
-  payload: {
-    name: string;
-    description?: string;
-    repositoryIds?: string[];
-    repositories?: Array<{ repositoryId: string; baseBranch?: string }>;
-  },
+  payload: CreateRepositorySetPayload,
   options?: ApiRequestOptions,
 ) {
   return fetchJson<RepositorySet>(
@@ -109,12 +119,7 @@ export async function updateRepositorySet(
   });
 }
 
-function repositorySetRequestBody(payload: {
-  name: string;
-  description?: string;
-  repositoryIds?: string[];
-  repositories?: Array<{ repositoryId: string; baseBranch?: string }>;
-}) {
+function repositorySetRequestBody(payload: CreateRepositorySetPayload) {
   return {
     name: payload.name,
     description: payload.description ?? "",

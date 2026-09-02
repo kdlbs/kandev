@@ -336,7 +336,10 @@ export function buildRepositoriesPayload(opts: {
       const branches = splitLocalExecutorBranches({
         rowBranch: row.branch,
         defaultBranch,
-        baseBranch: row.baseBranch,
+        // Fresh-branch mode uses row.branch as the fork base. A saved set base
+        // is checkout metadata for the ordinary local-executor flow and must
+        // not override the branch the user picked to fork from.
+        baseBranch: opts.freshBranch ? undefined : row.baseBranch,
         isLocalExecutor,
       });
       if (row.repositoryId) {
@@ -515,8 +518,7 @@ function splitLocalExecutorBranches(args: {
       checkout_branch: args.baseBranch ? args.rowBranch || undefined : undefined,
     };
   }
-  const base = args.defaultBranch;
-  const checkout =
-    args.rowBranch && args.rowBranch !== args.defaultBranch ? args.rowBranch : undefined;
+  const base = args.baseBranch || args.defaultBranch;
+  const checkout = args.rowBranch && args.rowBranch !== base ? args.rowBranch : undefined;
   return { base_branch: args.baseBranch || base, checkout_branch: checkout };
 }

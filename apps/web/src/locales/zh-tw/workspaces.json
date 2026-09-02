@@ -170,7 +170,7 @@
   "repositorySetsResetBases": "重置基礎分支",
   "repositorySetsTaskDefault": "任務預設值（{{branch}}）",
   "repositorySetsBaseBranchLabel": "儲存的基礎分支",
-  "repositorySetsBaseBranchFor": "{{name}} 的儲存基礎分支",
+  "repositorySetsBaseBranchFor": "{{name}} 的已儲存基礎分支",
   "repositorySetsBranchUnavailable": "不可用",
   "repositorySetsBranchUnavailableReason": "此儲存的分支不可用。請選擇其他分支，或重置為任務預設值。",
   "repositorySetsMemberMissing": "該儲存庫已不在此工作區中。",
