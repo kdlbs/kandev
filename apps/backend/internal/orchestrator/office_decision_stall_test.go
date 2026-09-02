@@ -228,6 +228,37 @@ func TestDetectOfficeDecisionWaitingOnce_RecordedDecisionSuppresses(t *testing.T
 	}
 }
 
+// AC-002.3 (superseded case): ListStepDecisions returns superseded rows
+// alongside active ones (its own documented contract), so a step whose only
+// decision is superseded must still read as undecided. maybeSupersedeOnRework
+// leaves the row in place with superseded_at set rather than deleting it, so
+// treating any non-empty result as "decided" would permanently suppress the
+// repeat stall this detector exists to find.
+func TestDetectOfficeDecisionWaitingOnce_SupersededDecisionDoesNotSuppress(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedDecisionWaitingTask(t, repo, "t1", "step1")
+	runs := &stallRunReader{}
+	supersededAt := time.Now().UTC().Add(-time.Hour)
+	svc := decisionWaitingService(t, repo,
+		&stallParticipantStore{participants: decidingSeat()},
+		&stallDecisionStore{decisions: []engine.DecisionInfo{{
+			ID: "d1", TaskID: "t1", StepID: "step1", Decision: "approve",
+			SupersededAt: &supersededAt,
+		}}},
+		runs)
+
+	before := officeDecisionWaitingCount()
+	svc.detectOfficeDecisionWaitingOnce(context.Background())
+
+	if got := officeDecisionWaitingCount() - before; got != 1 {
+		t.Fatalf("counter delta = %d, want 1 — a superseded-only decision set is undecided", got)
+	}
+	if runs.calls != 1 {
+		t.Fatalf("run reader called %d times, want 1 — the superseded row must not short-circuit the check", runs.calls)
+	}
+}
+
 // AC-002.4: seats that owe no decision cannot strand a task.
 func TestDetectOfficeDecisionWaitingOnce_NonDecidingSeatsAreNotSurfaced(t *testing.T) {
 	cases := []struct {

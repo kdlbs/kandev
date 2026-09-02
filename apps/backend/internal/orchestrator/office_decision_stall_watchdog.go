@@ -176,7 +176,21 @@ func (s *Service) officeStepAwaitsDecision(
 		officeStallSkipped(officeStallSkipDecisionReadFailed)
 		return false
 	}
-	return len(decisions) == 0
+	return !hasActiveDecision(decisions)
+}
+
+// hasActiveDecision reports whether any row is not superseded.
+// ListStepDecisions returns superseded rows alongside active ones (see
+// engine.DecisionInfo), and a rework round leaves the superseded row in
+// place rather than deleting it, so a re-entered step must be judged on
+// active rows only or it reads as permanently decided.
+func hasActiveDecision(decisions []engine.DecisionInfo) bool {
+	for _, d := range decisions {
+		if d.SupersededAt == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // hasDecidingSeat reports whether any seat at the step owes a decision.

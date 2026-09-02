@@ -196,6 +196,32 @@ func TestReclaimStuckSignalSessionsOnce_SurfacesOfficeTaskAtCandidateGate(t *tes
 	assertOfficeStallNotActedOn(t, repo, "t1", "s1", "step1")
 }
 
+// Signal age alone is not inactivity (stuck_signal_watchdog.go's
+// stuckSignalWatchdogThreshold comment). An Office agent still producing
+// events within the inactivity window — a long tool call, a provider
+// retry/backoff — must not be surfaced just because its signal cleared the
+// age gate. Only the candidate gate needs this: the waiting gate's session is
+// already WAITING_FOR_INPUT, not running.
+func TestReclaimStuckSignalSessionsOnce_ActiveOfficeAgentNotSurfacedAtCandidateGate(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	agentMgr := &mockAgentManager{
+		currentPromptExecutionID: "exec-1",
+	}
+	agentMgr.currentPromptLastActivityAt = time.Now().UTC().Add(-time.Minute)
+	svc := createTestServiceWithAgent(repo, officeStallStepGetter(), newMockTaskRepo(), agentMgr)
+	seedOfficeStrandedSignal(t, svc, repo, "t1", "s1", "step1", models.TaskSessionStateRunning)
+
+	before := officeStrandedCount(stuckSignalGateCandidate)
+	svc.reclaimStuckSignalSessionsOnce(ctx)
+
+	if got := officeStrandedCount(stuckSignalGateCandidate) - before; got != 0 {
+		t.Fatalf("stranded-signal counter delta = %d, want 0 — the agent is still active", got)
+	}
+	assertOfficeStallNotActedOn(t, repo, "t1", "s1", "step1")
+}
+
 // AC-001.3: an Office task entering through the
 // reconcileWaitingStuckSignalSessionIfDue gate is surfaced from that gate.
 // The two gates are near-identical predicates, so each needs its own proof:

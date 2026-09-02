@@ -119,9 +119,14 @@ lives in the payload JSON — and Postgres is a supported driver. Precedent:
   to `DecisionRequired` seats with role `reviewer` or `approver`.
 - Decisions: `engineDecisions.ListStepDecisions(ctx, taskID, stepID)`.
 
-Both are step-scoped, which is what AC-002.1 requires. Note the interaction with
-`SupersedeTaskDecisions`: a rework round supersedes prior decisions rather than
-scoping them by step, so a re-entered step correctly reads as undecided.
+Both are step-scoped, which is what AC-002.1 requires. `ListStepDecisions`
+returns superseded rows alongside active ones by its own documented contract
+(quorum guards filter at the call site), and `SupersedeTaskDecisions` leaves a
+reworked task's prior decision rows in place with `superseded_at` set rather
+than deleting or re-scoping them. The detector must therefore filter on
+`DecisionInfo.SupersededAt` itself — treating any non-empty result as
+"decided" reads a re-entered step as permanently decided after the first
+rework round, which is exactly the repeat stall this detector exists to find.
 
 ## Control flow
 

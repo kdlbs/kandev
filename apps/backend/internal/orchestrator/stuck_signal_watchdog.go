@@ -400,7 +400,16 @@ func (s *Service) stuckSignalCandidate(
 	}
 	switch stuckSignalDispositionFor(task, session, signal) {
 	case stuckSignalSurfaceOnly:
-		s.surfaceOfficeStalledSignal(task, session, signal, stuckSignalGateCandidate, now)
+		// Signal age alone is not inactivity (see stuckSignalWatchdogThreshold's
+		// comment above): an Office agent can still be mid-tool-call when its
+		// signal clears this gate. The waiting gate needs no equivalent check —
+		// that session is WAITING_FOR_INPUT, not running — but this gate's
+		// session is RUNNING/STARTING, so it is read here exactly as the
+		// reclaim path below would read it, just without registering a
+		// reclaim.
+		if _, inactive := s.stuckSignalInactiveLongEnough(ctx, session.ID, now); inactive {
+			s.surfaceOfficeStalledSignal(task, session, signal, stuckSignalGateCandidate, now)
+		}
 		return nil, models.PendingStepCompletionSignal{}, false
 	case stuckSignalReclaimable:
 		return task, signal, true
