@@ -203,6 +203,69 @@ func TestHandleHandoffCreatedOutcome_IdentityLostReportsSurvivorWorkflowStep(t *
 		"AC-24d: response must report the settlement survivor's step, not the stale created-row's step")
 }
 
+// --- AC-19/AC-24d: created_identity_lost's activity log names the same task
+// as the response and reverse link (the created row), not the settlement
+// survivor, so an operator reading the activity log is not misled about
+// which task the caller was told to use ---
+
+func TestHandleHandoffCreatedOutcome_IdentityLostActivityLogUsesCreatedTaskNotSurvivor(t *testing.T) {
+	launcher := newHandoffFakeLauncher(nil)
+	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", launcher)
+	dashSvc, activityRepo, _ := newHandoffDashboardService(t, "")
+	f.h.SetDashboardService(dashSvc)
+	const externalID = "ext-identity-lost-activity"
+	handedOffAt := formatHandoffTimestamp(time.Now().UTC())
+
+	created, err := f.svc.CreateTask(context.Background(), &service.CreateTaskRequest{
+		WorkspaceID:    f.targetWorkspaceID,
+		WorkflowID:     f.targetWorkflowID,
+		WorkflowStepID: f.targetStepID,
+		Title:          "Deliver the thing",
+		Description:    "Do the work",
+		ExternalID:     externalID,
+		Metadata:       handoffSourceMetadata(f, handedOffAt),
+	})
+	require.NoError(t, err)
+	task := created.Task
+
+	releasedTask, err := f.repo.ReleaseTaskExternalID(context.Background(), f.targetWorkspaceID, externalID)
+	require.NoError(t, err)
+	require.NotNil(t, releasedTask)
+
+	principal := mcpscope.Principal{
+		WorkspaceID:     f.sourceWorkspaceID,
+		CallerTaskID:    f.sourceTaskID,
+		CallerSessionID: f.sourceSessionID,
+		Surface:         mcpprofile.SurfaceOfficeTask,
+	}
+	session, err := f.repo.GetTaskSession(context.Background(), f.sourceSessionID)
+	require.NoError(t, err)
+	args := &handoffTaskArgs{
+		TargetWorkspaceID: f.targetWorkspaceID,
+		WorkflowID:        f.targetWorkflowID,
+		Title:             "Deliver the thing",
+		Prompt:            "Do the work",
+		AgentProfileID:    f.targetAgentProfileID,
+		ExecutorProfileID: f.targetExecProfileID,
+		StartAgent:        true,
+		ExternalID:        externalID,
+	}
+	resolved := &handoffResolvedResources{WorkflowStepID: f.targetStepID}
+	msg := makeWSMessage(t, ws.ActionMCPHandoffTask, f.validPayload(nil))
+
+	resp, err := f.h.handleHandoffCreatedOutcome(f.ctx(), msg, principal, session, args, resolved, task, handedOffAt)
+	require.NoError(t, err)
+	result := decodeHandoffResult(t, resp)
+	require.Equal(t, handoffOutcomeCreatedIdentityLost, result.Outcome)
+	require.Equal(t, task.ID, result.TaskID, "precondition: the response names the created row, not the survivor")
+
+	require.Len(t, activityRepo.entries, 2)
+	targetEntry := activityRepo.entries[1]
+	assert.Equal(t, "task.handoff_received", string(targetEntry.Action))
+	assert.Equal(t, task.ID, targetEntry.TargetID,
+		"the activity log must name the same task as the response and reverse link, not the settlement survivor")
+}
+
 // --- AC-24d/R-F39: a genuine SettleExternalID failure halts D3b entirely ---
 
 func TestHandleHandoffCreatedOutcome_SettlementErrorHaltsWithNoReverseLinkActivityOrLaunch(t *testing.T) {

@@ -69,7 +69,13 @@ func TestHandleHandoffTask_ConcurrentSameExternalIDProducesOneTaskBothCallersGet
 
 	assert.Equal(t, result0.TaskID, result1.TaskID, "both callers must receive the one task id")
 	outcomes := []string{result0.Outcome, result1.Outcome}
-	assert.Contains(t, outcomes, handoffOutcomeCreated, "exactly one caller must observe created")
+	createdCount := 0
+	for _, o := range outcomes {
+		if o == handoffOutcomeCreated {
+			createdCount++
+		}
+	}
+	assert.Equal(t, 1, createdCount, "exactly one caller must observe created")
 	for _, o := range outcomes {
 		assert.Contains(t,
 			[]string{handoffOutcomeCreated, handoffOutcomeFoundSettled, handoffOutcomeFoundUnsettled}, o,
@@ -206,6 +212,34 @@ func TestHandleHandoffTask_MalformedEntryInsideHandoffsArrayStillCreatesTask(t *
 	raw, err := f.repo.GetTaskHandoffsRaw(context.Background(), f.sourceTaskID)
 	require.NoError(t, err)
 	assert.Equal(t, corrupted, raw, "malformed data must be left byte-identical, not repaired or dropped")
+}
+
+// --- AC-27: an existing entry's unknown fields, including numbers outside
+// float64's exact integer range, survive an append byte-for-byte ---
+
+func TestHandleHandoffTask_AppendPreservesUnknownNumericFieldPrecision(t *testing.T) {
+	f := newHandoffFixture(t, agentsettingsmodels.AgentRoleCEO, "", nil)
+	// 9007199254740993 (2^53 + 1) is not exactly representable as a float64;
+	// decoding it into map[string]interface{} and re-marshaling would
+	// silently round it to 9007199254740992.
+	const existingEntry = `{"task_id":"existing-delivery","target_workspace_id":"ws-x",` +
+		`"handed_off_at":"2024-01-01T00:00:00.000Z","some_future_field":9007199254740993}`
+	seeded := `[` + existingEntry + `]`
+	stored, _, err := f.repo.SetTaskHandoffsIfUnchanged(context.Background(), f.sourceTaskID, "", seeded)
+	require.NoError(t, err)
+	require.True(t, stored, "precondition: seeding the existing entry must succeed")
+
+	payload := f.validPayload(map[string]interface{}{handoffFieldExternalID: "ext-precision-preserving-append"})
+	resp, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, payload))
+	require.NoError(t, err)
+	result := decodeHandoffResult(t, resp)
+	require.Equal(t, handoffOutcomeCreated, result.Outcome)
+	require.True(t, result.ReverseLinkRecorded)
+
+	raw, err := f.repo.GetTaskHandoffsRaw(context.Background(), f.sourceTaskID)
+	require.NoError(t, err)
+	assert.Contains(t, raw, existingEntry,
+		"the pre-existing entry, including its unknown numeric field, must survive the append byte-for-byte")
 }
 
 // --- AC-27/AC-32: the CAS retry loop exhausts after 5 attempts, and the
