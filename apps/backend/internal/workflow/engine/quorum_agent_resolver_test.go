@@ -263,6 +263,27 @@ func TestResolveParticipantRole_ApproverAtStepSkipsReviewerResolverError(t *test
 	}
 }
 
+// TestResolveParticipantRole_ReviewerAtStepDefersApproverResolverError is the
+// inverse of the approver-at-step case: an unrelated approver resolver error
+// must not hide a valid reviewer seat at the step being evaluated.
+func TestResolveParticipantRole_ReviewerAtStepDefersApproverResolverError(t *testing.T) {
+	boom := errors.New("boom")
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-approver", TaskID: "task-1", StepID: "other-step", Role: "approver", AgentProfileID: "agent-b", DecisionRequired: true},
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	resolver := &perIDErrResolver{errFor: map[string]error{"agent-b": boom}}
+	eng := quorumEngineWithResolver(newFakeDecisionStore(), participants, resolver)
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "reviewer" || participantID != "seat-reviewer" {
+		t.Errorf("role/participantID = %q/%q, want reviewer/seat-reviewer", role, participantID)
+	}
+}
+
 func TestComputeGuardOutcome_ContinuesEvaluatingAfterDroppingUnresolvedSeat(t *testing.T) {
 	parts := scopedParticipants{template: []ParticipantInfo{
 		{ID: "p1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},

@@ -920,13 +920,17 @@ func (e *Engine) ResolveParticipantRole(
 	}
 
 	var matches []roleSeat
+	var firstSeatsErr error
 	for _, r := range []wfmodels.ParticipantRole{
 		wfmodels.ParticipantRoleApprover,
 		wfmodels.ParticipantRoleReviewer,
 	} {
 		seats, seatsErr := e.requiredSeatsForWorkflow(ctx, stepID, taskID, workflowID, string(r))
 		if seatsErr != nil {
-			return "", "", fmt.Errorf("resolve participant role: %w", seatsErr)
+			if firstSeatsErr == nil {
+				firstSeatsErr = seatsErr
+			}
+			continue
 		}
 		if seat, ok := seatFor(seats, agentProfileID); ok {
 			if seat.StepID == stepID {
@@ -934,6 +938,9 @@ func (e *Engine) ResolveParticipantRole(
 			}
 			matches = append(matches, roleSeat{role: string(r), seat: seat})
 		}
+	}
+	if firstSeatsErr != nil {
+		return "", "", fmt.Errorf("resolve participant role: %w", firstSeatsErr)
 	}
 	if len(matches) == 0 {
 		return "", "", ErrParticipantNotFound
