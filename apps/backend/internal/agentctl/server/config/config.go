@@ -36,6 +36,9 @@ import (
 const (
 	windowsOS  = "windows"
 	pathEnvKey = "PATH"
+
+	defaultUnownedPeriod      = 10 * time.Minute
+	defaultDetachedEventLimit = 100
 )
 
 // Config is the agentctl configuration.
@@ -96,6 +99,18 @@ type Config struct {
 
 	// OTLPEndpoint is the resolved endpoint used by agentctl transport tracing.
 	OTLPEndpoint string
+
+	// UnownedPeriod is how long this control server tolerates having no
+	// owning backend before it stops its instances and exits. Sourced from
+	// KANDEV_ACP_UNOWNED_PERIOD (default 10m). Only meaningful when the
+	// agent-survival capability is active; unused otherwise.
+	UnownedPeriod time.Duration
+
+	// DetachedEventLimit bounds the per-instance retained-event count while
+	// this control server has no owning backend attached. Sourced from
+	// KANDEV_ACP_DETACHED_EVENT_LIMIT (default 100). Only meaningful when the
+	// agent-survival capability is active; unused otherwise.
+	DetachedEventLimit int
 
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
@@ -341,11 +356,22 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	idleReaperInterval := getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute)
 	notificationQueueCapacity := getEnvInt("KANDEV_ACP_NOTIF_QUEUE", 131072)
 	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	unownedPeriod := getEnvDuration("KANDEV_ACP_UNOWNED_PERIOD", defaultUnownedPeriod)
+	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
 		notificationQueueCapacity = startup.NotificationQueueCapacity
 		otlpEndpoint = startup.OTLPEndpoint
+		// Zero means the caller did not resolve these (an older backend, or
+		// one built before agent survival existed) — keep the env/built-in
+		// value already computed above rather than adopting zero.
+		if startup.UnownedPeriod != 0 {
+			unownedPeriod = startup.UnownedPeriod
+		}
+		if startup.DetachedEventLimit != 0 {
+			detachedEventLimit = startup.DetachedEventLimit
+		}
 	}
 
 	cfg := &Config{
@@ -373,6 +399,8 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		IdleReaperInterval:        idleReaperInterval,
 		NotificationQueueCapacity: notificationQueueCapacity,
 		OTLPEndpoint:              otlpEndpoint,
+		UnownedPeriod:             unownedPeriod,
+		DetachedEventLimit:        detachedEventLimit,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend

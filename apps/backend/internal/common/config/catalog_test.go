@@ -123,6 +123,11 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_ACP_IDLE_TIMEOUT", class: "catalog"},
 		{envVar: "KANDEV_ACP_IDLE_REAPER_INTERVAL", class: "catalog"},
 		{envVar: "KANDEV_ACP_NOTIF_QUEUE", class: "catalog"},
+		{envVar: "KANDEV_ACP_RECOVERY_DEADLINE", class: "catalog"},
+		{envVar: "KANDEV_ACP_RECOVERY_READ_TIMEOUT", class: "catalog"},
+		{envVar: "KANDEV_ACP_RECOVERY_READ_RETRIES", class: "catalog"},
+		{envVar: "KANDEV_ACP_UNOWNED_PERIOD", class: "catalog"},
+		{envVar: "KANDEV_ACP_DETACHED_EVENT_LIMIT", class: "catalog"},
 		{envVar: "KANDEV_PLAN_COALESCE_WINDOW_MS", class: "catalog"},
 		{envVar: "OTEL_EXPORTER_OTLP_ENDPOINT", class: "catalog"},
 		{envVar: "KANDEV_WEB_PORT", class: "catalog"},
@@ -230,6 +235,8 @@ func TestAgentctlStartupConfigRoundTripsAndRejectsInvalidValues(t *testing.T) {
 		IdleReaperInterval:        3 * time.Minute,
 		NotificationQueueCapacity: 4096,
 		OTLPEndpoint:              "http://collector:4318",
+		UnownedPeriod:             10 * time.Minute,
+		DetachedEventLimit:        100,
 	}
 	raw, err := EncodeAgentctlStartupConfig(want)
 	if err != nil {
@@ -247,5 +254,27 @@ func TestAgentctlStartupConfigRoundTripsAndRejectsInvalidValues(t *testing.T) {
 	invalid.NotificationQueueCapacity = 1
 	if _, err := EncodeAgentctlStartupConfig(invalid); err == nil {
 		t.Fatal("EncodeAgentctlStartupConfig accepted an invalid queue capacity")
+	}
+
+	invalidUnownedPeriod := want
+	invalidUnownedPeriod.UnownedPeriod = -time.Minute
+	if _, err := EncodeAgentctlStartupConfig(invalidUnownedPeriod); err == nil {
+		t.Fatal("EncodeAgentctlStartupConfig accepted a negative unowned period")
+	}
+
+	// Zero is accepted for both fields: an agent-survival-unaware caller (or
+	// an older backend build) omits them, and agentctl substitutes its own
+	// built-in default rather than treating an absent value as invalid.
+	unset := want
+	unset.UnownedPeriod = 0
+	unset.DetachedEventLimit = 0
+	if _, err := EncodeAgentctlStartupConfig(unset); err != nil {
+		t.Fatalf("EncodeAgentctlStartupConfig rejected zero-valued (unset) survival tunables: %v", err)
+	}
+
+	invalidDetachedEventLimit := want
+	invalidDetachedEventLimit.DetachedEventLimit = 10001
+	if _, err := EncodeAgentctlStartupConfig(invalidDetachedEventLimit); err == nil {
+		t.Fatal("EncodeAgentctlStartupConfig accepted an out-of-range detached event limit")
 	}
 }

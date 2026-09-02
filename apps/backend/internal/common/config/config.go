@@ -83,6 +83,21 @@ type AgentctlConfig struct {
 	IdleTimeout               time.Duration `mapstructure:"idleTimeout"`
 	IdleReaperInterval        time.Duration `mapstructure:"idleReaperInterval"`
 	NotificationQueueCapacity int           `mapstructure:"notificationQueueCapacity"`
+
+	// RecoveryDeadline is the single global bound covering adoption,
+	// enumeration and reconstruction together during standalone agent
+	// survival re-tracking at backend startup.
+	RecoveryDeadline time.Duration `mapstructure:"recoveryDeadline"`
+	// RecoveryReadTimeout and RecoveryReadRetries bound each read of a
+	// reconstruction value from the adopted control server during re-tracking.
+	RecoveryReadTimeout time.Duration `mapstructure:"recoveryReadTimeout"`
+	RecoveryReadRetries int           `mapstructure:"recoveryReadRetries"`
+	// UnownedPeriod is how long a standalone control server tolerates having
+	// no owning backend before it stops its instances and exits.
+	UnownedPeriod time.Duration `mapstructure:"unownedPeriod"`
+	// DetachedEventLimit bounds the per-instance retained-event count while
+	// a standalone control server has no owning backend attached.
+	DetachedEventLimit int `mapstructure:"detachedEventLimit"`
 }
 
 // PlanningConfig contains planning service timing settings.
@@ -778,6 +793,9 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	if err := applySurvivalRecoveryEnv(&cfg, envSnapshot, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	warnings := inspectSecretPermissions(selection, v)
 	cfg.Source = buildConfigSource(selection, v, sources, warnings)
 

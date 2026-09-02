@@ -21,6 +21,13 @@ type AgentctlStartupConfig struct {
 	IdleReaperInterval        time.Duration `json:"idleReaperInterval"`
 	NotificationQueueCapacity int           `json:"notificationQueueCapacity"`
 	OTLPEndpoint              string        `json:"otlpEndpoint"`
+	// UnownedPeriod and DetachedEventLimit are agentctl-owned agent-survival
+	// tunables. Zero means "not resolved by an agent-survival-aware backend";
+	// agentctl falls back to its own built-in defaults in that case (see
+	// Validate below), the same compatibility posture already used for a
+	// backend older than this contract.
+	UnownedPeriod      time.Duration `json:"unownedPeriod"`
+	DetachedEventLimit int           `json:"detachedEventLimit"`
 }
 
 // ManagedAgentctlStartupConfig returns the agentctl settings resolved by the
@@ -35,6 +42,8 @@ func (c *Config) ManagedAgentctlStartupConfig() AgentctlStartupConfig {
 		IdleReaperInterval:        c.Agentctl.IdleReaperInterval,
 		NotificationQueueCapacity: c.Agentctl.NotificationQueueCapacity,
 		OTLPEndpoint:              c.Observability.OTLPEndpoint,
+		UnownedPeriod:             c.Agentctl.UnownedPeriod,
+		DetachedEventLimit:        c.Agentctl.DetachedEventLimit,
 	}
 }
 
@@ -51,6 +60,15 @@ func (c AgentctlStartupConfig) Validate() error {
 	}
 	if c.NotificationQueueCapacity < 1024 || c.NotificationQueueCapacity > 131072 {
 		return fmt.Errorf("agentctl notification queue capacity must be between 1024 and 131072")
+	}
+	// Zero means "not resolved by an agent-survival-aware caller"; agentctl
+	// substitutes its own built-in default in that case. Any other value must
+	// already be within the contract's accepted range.
+	if c.UnownedPeriod < 0 {
+		return fmt.Errorf("agentctl unowned period must be zero (unset) or positive")
+	}
+	if c.DetachedEventLimit != 0 && (c.DetachedEventLimit < 1 || c.DetachedEventLimit > 10000) {
+		return fmt.Errorf("agentctl detached event limit must be zero (unset) or between 1 and 10000")
 	}
 	return nil
 }
