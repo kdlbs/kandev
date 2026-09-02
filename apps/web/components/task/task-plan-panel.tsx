@@ -6,7 +6,7 @@ import { PlanPanelHeader } from "./task-plan-panel-header";
 import dynamic from "@/lib/routing/client-dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
+import { useTaskPlan, type PlanSaveError } from "@/hooks/domains/session/use-task-plan";
 import { TaskPlanSaveErrorBanner } from "./task-plan-save-error-banner";
 import { useAppStore } from "@/components/state-provider";
 import { PlanSelectionPopover } from "./plan-selection-popover";
@@ -23,6 +23,7 @@ import { usePlanFindShortcut } from "./use-plan-find-shortcut";
 import { usePlanSelection } from "./use-plan-selection";
 import { Trans, useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import type { TaskPlan } from "@/lib/types/http";
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -84,7 +85,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     handleEmptyStateClick,
     hasUnsavedChanges,
     attemptSave,
-  } = usePlanDraft(plan, isSaving, savePlan, editorWrapperRef, taskId);
+  } = usePlanDraft(plan, isSaving, { savePlan, editorWrapperRef, taskId, saveError });
   const commentState = usePlanComments(activeSessionId);
   const selectionState = usePlanSelection(activeSessionId, commentState);
 
@@ -214,7 +215,7 @@ function PlanPanelContent({
         isLoadingRevisions={state.isLoadingRevisions}
         isSaving={state.isSaving}
         isAgentBusy={state.isAgentBusy}
-        savePlan={state.savePlan}
+        attemptSave={state.attemptSave}
         onOpenRevisions={state.loadRevisions}
         onRevert={state.revertTo}
         loadRevisionContent={state.loadRevisionContent}
@@ -379,13 +380,18 @@ function PlanSelectionPopoverWrapper({
   );
 }
 
+type UsePlanDraftOptions = {
+  savePlan: (content: string, title?: string) => Promise<TaskPlan | null>;
+  editorWrapperRef: React.RefObject<HTMLDivElement | null>;
+  taskId: string | null;
+  saveError: PlanSaveError | null;
+};
+
 /** Draft content, editor key, focus tracking, and auto-save. Exported for direct unit testing of the autosave-suppression behavior. */
 export function usePlanDraft(
   plan: { content?: string; title?: string } | null | undefined,
   isSaving: boolean,
-  savePlan: (content: string, title?: string) => Promise<unknown>,
-  editorWrapperRef: React.RefObject<HTMLDivElement | null>,
-  taskId: string | null,
+  { savePlan, editorWrapperRef, taskId, saveError }: UsePlanDraftOptions,
 ) {
   const [draftContent, setDraftContent] = useState(plan?.content ?? "");
   const draftContentRef = useRef(draftContent);
@@ -480,8 +486,14 @@ export function usePlanDraft(
     if (!hasChanges || isSaving) return;
     // Suppress resubmitting content a save attempt was just rejected for —
     // otherwise a rejected draft resubmits every AUTO_SAVE_DELAY for as long
-    // as the panel stays open and the draft is unchanged.
-    if (draftContent === lastAttemptContentRef.current) return;
+    // as the panel stays open and the draft is unchanged. Scoped to a size
+    // rejection specifically (AC-003.4's "such a rejection" chains back to
+    // AC-003.1's ceiling rejection): a transient transport/server failure
+    // must keep retrying so an unchanged draft still saves once the backend
+    // recovers, instead of staying silently unsaved until the user edits it.
+    if (saveError?.kind === "content-too-large" && draftContent === lastAttemptContentRef.current) {
+      return;
+    }
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
       autoSaveTimerRef.current = null;
@@ -493,7 +505,7 @@ export function usePlanDraft(
         autoSaveTimerRef.current = null;
       }
     };
-  }, [draftContent, plan, isSaving, attemptSave]);
+  }, [draftContent, plan, isSaving, attemptSave, saveError]);
 
   const hasUnsavedChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
   return {

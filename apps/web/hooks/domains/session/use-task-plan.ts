@@ -73,6 +73,18 @@ function useSaveErrorScope(taskId: string | null) {
   // commits after the render, so a save that resolves in between would
   // compare against the previous task's id in exactly the window this guards.
   const currentTaskIdRef = useRef(taskId);
+  // Bumped every time the panel's task identity actually changes, including
+  // a return to a task it already showed (A->B->A). isLatestForTask alone
+  // survives that round trip unchanged — nothing re-attempted a save on A in
+  // between — so without this, an A attempt still in flight when the panel
+  // left A can resolve after the panel returns to A and pass isCurrentAttempt,
+  // displaying a rejection for a write the user never saw fail. AC-003.8: "a
+  // write for the previous task that fails after the change shall not be
+  // displayed at all" — not just "not displayed while away from it".
+  const taskViewRef = useRef(0);
+  if (currentTaskIdRef.current !== taskId) {
+    taskViewRef.current += 1;
+  }
   currentTaskIdRef.current = taskId;
   // Monotonically increasing; incremented before it is read, so the first
   // attempt is 1 and 0 is never a live attempt. Not reset on task change —
@@ -93,6 +105,7 @@ function useSaveErrorScope(taskId: string | null) {
   const beginAttempt = useCallback((attemptTaskId: string): SaveAttemptGuard => {
     saveAttemptSeqRef.current += 1;
     const attemptSeq = saveAttemptSeqRef.current;
+    const attemptView = taskViewRef.current;
     latestIssuedSeqByTaskRef.current.set(attemptTaskId, attemptSeq);
     // A displayed rejection disappears when the next attempt begins, not
     // when that attempt completes.
@@ -101,7 +114,10 @@ function useSaveErrorScope(taskId: string | null) {
       latestIssuedSeqByTaskRef.current.get(attemptTaskId) === attemptSeq;
     return {
       isLatestForTask,
-      isCurrentAttempt: () => currentTaskIdRef.current === attemptTaskId && isLatestForTask(),
+      isCurrentAttempt: () =>
+        currentTaskIdRef.current === attemptTaskId &&
+        taskViewRef.current === attemptView &&
+        isLatestForTask(),
     };
   }, []);
 

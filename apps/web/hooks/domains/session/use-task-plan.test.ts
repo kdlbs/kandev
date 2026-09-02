@@ -362,6 +362,42 @@ describe("useTaskPlan saveError attempt ordering (AC-003.8)", () => {
     expect(result.current.saveError).toBeNull();
   });
 
+  it("drops a stale rejection across an A->B->A round trip, even though no newer A attempt exists (AC-003.8)", async () => {
+    // Regression test: isLatestForTask alone survives a round trip back to
+    // the same task unchanged, because nothing re-attempted a save on A in
+    // between — so the guard used to treat the original A attempt as still
+    // current once the panel returned to A, displaying a rejection for a
+    // write the user never saw fail while away from A. AC-003.8: "a write
+    // for the previous task that fails after the change shall not be
+    // displayed at all" - not just "not displayed while away from it".
+    let rejectA!: (err: unknown) => void;
+    planApiMock.createTaskPlan.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectA = reject;
+      }),
+    );
+
+    const { result, rerender } = renderHook(({ taskId }) => useTaskPlan(taskId), {
+      initialProps: { taskId: TASK_A as string | null },
+    });
+
+    let saveAPromise!: Promise<TaskPlan | null>;
+    act(() => {
+      saveAPromise = result.current.savePlan("oversized");
+    });
+
+    // A -> B -> A before A's rejection arrives.
+    rerender({ taskId: TASK_B });
+    rerender({ taskId: TASK_A });
+
+    await act(async () => {
+      rejectA(sizeRejection(262144, 300000));
+      await saveAPromise;
+    });
+
+    expect(result.current.saveError).toBeNull();
+  });
+
   it("keeps the outcome of the later-started attempt when the earlier one resolves last", async () => {
     let resolveFirst!: (err: unknown) => void;
     let resolveSecond!: (plan: TaskPlan) => void;

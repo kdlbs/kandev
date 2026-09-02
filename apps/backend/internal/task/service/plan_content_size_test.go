@@ -6,12 +6,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// oversizedPlanContent returns content of exactly n bytes, built from ASCII
+// fixedSizeASCIIContent returns content of exactly n bytes, built from ASCII
 // so byte length and rune count agree — the multi-byte case is covered
 // separately below.
 func fixedSizeASCIIContent(n int) string {
@@ -215,26 +216,31 @@ func TestPlanService_ContentSizeCeiling_Ordering(t *testing.T) {
 // TestPlanService_ContentSizeCeiling_NoLockContention pins the second half of
 // AC-001.5: an oversized write must not wait behind another write's per-task
 // lock, because the check reads no stored state and needs no serialization.
+// Uses synctest: the size check fires before locks.acquire, so on the
+// success path the spawned goroutine finishes near-instantly under fake
+// time instead of the test paying the full 2-second real-time budget.
 func TestPlanService_ContentSizeCeiling_NoLockContention(t *testing.T) {
-	svc, _, repo := createTestPlanService(t)
-	ctx := context.Background()
-	seedTask(t, ctx, repo, "task-1")
+	synctest.Test(t, func(t *testing.T) {
+		svc, _, repo := createTestPlanService(t)
+		ctx := context.Background()
+		seedTask(t, ctx, repo, "task-1")
 
-	release := svc.locks.acquire("task-1")
-	defer release()
+		release := svc.locks.acquire("task-1")
+		defer release()
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-1", Content: fixedSizeASCIIContent(MaxPlanContentBytes + 1)})
-		done <- err
-	}()
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-1", Content: fixedSizeASCIIContent(MaxPlanContentBytes + 1)})
+			done <- err
+		}()
 
-	select {
-	case err := <-done:
-		assertPlanContentTooLarge(t, err, MaxPlanContentBytes+1)
-	case <-time.After(2 * time.Second):
-		t.Fatal("oversized write blocked behind the task's write lock")
-	}
+		select {
+		case err := <-done:
+			assertPlanContentTooLarge(t, err, MaxPlanContentBytes+1)
+		case <-time.After(2 * time.Second):
+			t.Fatal("oversized write blocked behind the task's write lock")
+		}
+	})
 }
 
 // TestPlanService_ContentSizeCeiling_RevertExempt pins AC-001.9: RevertPlan

@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePlanDraft } from "./task-plan-panel";
+import type { PlanSaveError } from "@/hooks/domains/session/use-task-plan";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -11,9 +12,22 @@ vi.mock("@/components/state-provider", () => ({
 const AUTO_SAVE_DELAY = 1500;
 const REJECTED_CONTENT = "rejected content";
 const TASK_1 = "task-1";
+// Autosave suppression only applies to a size rejection (AC-003.4's "such a
+// rejection" chains back to AC-003.1's ceiling rejection); every suppression
+// test in this file simulates one via this classified saveError.
+const SIZE_REJECTION: PlanSaveError = {
+  kind: "content-too-large",
+  limit: 262144,
+  submitted: 300000,
+};
 
 type DraftPlan = { content?: string; title?: string } | null;
-type DraftProps = { plan: DraftPlan; isSaving: boolean; taskId: string | null };
+type DraftProps = {
+  plan: DraftPlan;
+  isSaving: boolean;
+  taskId: string | null;
+  saveError?: PlanSaveError | null;
+};
 
 function renderDraft(
   plan: DraftPlan,
@@ -22,9 +36,14 @@ function renderDraft(
 ) {
   const editorWrapperRef = { current: null };
   return renderHook(
-    ({ plan: p, isSaving, taskId: id }: DraftProps) =>
-      usePlanDraft(p, isSaving, savePlan, editorWrapperRef, id),
-    { initialProps: { plan, isSaving: false, taskId } },
+    ({ plan: p, isSaving, taskId: id, saveError = null }: DraftProps) =>
+      usePlanDraft(p, isSaving, {
+        savePlan: savePlan as unknown as Parameters<typeof usePlanDraft>[2]["savePlan"],
+        editorWrapperRef,
+        taskId: id,
+        saveError,
+      }),
+    { initialProps: { plan, isSaving: false, taskId, saveError: null } as DraftProps },
   );
 }
 
@@ -39,12 +58,13 @@ async function settleSaveRoundTrip(
   rerender: (props: DraftProps) => void,
   plan: DraftPlan,
   taskId: string | null,
+  saveError: PlanSaveError | null = null,
 ) {
-  rerender({ plan, isSaving: true, taskId });
+  rerender({ plan, isSaving: true, taskId, saveError: null });
   await act(async () => {
     await Promise.resolve();
   });
-  rerender({ plan, isSaving: false, taskId });
+  rerender({ plan, isSaving: false, taskId, saveError });
 }
 
 describe("usePlanDraft autosave suppression (AC-003.4)", () => {
@@ -78,7 +98,7 @@ describe("usePlanDraft autosave suppression (AC-003.4)", () => {
     // this is the transition the autosave effect depends on, and a version
     // of this hook without the suppression ref re-arms across it and
     // resubmits indefinitely.
-    await settleSaveRoundTrip(rerender, plan, TASK_1);
+    await settleSaveRoundTrip(rerender, plan, TASK_1, SIZE_REJECTION);
 
     // Advance well past several more debounce intervals.
     await act(async () => {
@@ -103,7 +123,7 @@ describe("usePlanDraft autosave suppression (AC-003.4)", () => {
     });
     expect(savePlan).toHaveBeenCalledTimes(1);
 
-    await settleSaveRoundTrip(rerender, plan, TASK_1);
+    await settleSaveRoundTrip(rerender, plan, TASK_1, SIZE_REJECTION);
 
     act(() => {
       result.current.setDraftContent("a different, shorter draft");
@@ -131,12 +151,59 @@ describe("usePlanDraft autosave suppression (AC-003.4)", () => {
     });
     expect(savePlan).toHaveBeenCalledTimes(1);
 
-    await settleSaveRoundTrip(rerender, plan, TASK_1);
+    await settleSaveRoundTrip(rerender, plan, TASK_1, SIZE_REJECTION);
 
     // Simulate the Ctrl/Cmd+S escape hatch: useSaveShortcut calls
     // attemptSave directly, bypassing the autosave debounce entirely.
     await act(async () => {
       await result.current.attemptSave(REJECTED_CONTENT);
+    });
+    expect(savePlan).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("usePlanDraft autosave suppression is scoped to size rejections", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("re-arms after a generic (non-size) failure once its isSaving round trip settles", async () => {
+    // Regression test: the suppression guard used to key only on "was the
+    // just-attempted content rejected", not on why — so a transient
+    // transport/server failure (classified "generic", not
+    // "content-too-large") permanently blocked autosave for an unchanged
+    // draft, with no self-healing once the backend recovered. AC-003.4's
+    // "such a rejection" is scoped to AC-003.1's ceiling rejection, so only
+    // a size rejection may suppress; a generic failure must keep retrying.
+    const savePlan = vi.fn().mockResolvedValue(null);
+    const plan = { content: "" };
+    const { result, rerender } = renderDraft(plan, savePlan);
+
+    act(() => {
+      result.current.setDraftContent(REJECTED_CONTENT);
+    });
+    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY);
+      await Promise.resolve();
+    });
+    expect(savePlan).toHaveBeenCalledTimes(1);
+
+    await settleSaveRoundTrip(rerender, plan, TASK_1, {
+      kind: "generic",
+      message: "network error",
+    });
+
+    // No draft change and no explicit save — a size rejection would stay
+    // suppressed here, but a generic failure must re-arm on its own.
+    await act(async () => {
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY);
+      await Promise.resolve();
     });
     expect(savePlan).toHaveBeenCalledTimes(2);
   });
@@ -169,7 +236,7 @@ describe("usePlanDraft explicit save (Ctrl/Cmd+S) interactions (AC-003.3/003.4)"
     });
     expect(savePlan).toHaveBeenCalledTimes(1);
 
-    await settleSaveRoundTrip(rerender, plan, TASK_1);
+    await settleSaveRoundTrip(rerender, plan, TASK_1, SIZE_REJECTION);
 
     // Never presented as saved: the plan is untouched (savePlan resolved
     // null, so the store's plan was never updated) and the draft still
@@ -197,7 +264,7 @@ describe("usePlanDraft explicit save (Ctrl/Cmd+S) interactions (AC-003.3/003.4)"
     });
     expect(savePlan).toHaveBeenCalledTimes(1);
 
-    await settleSaveRoundTrip(rerender, plan, TASK_1);
+    await settleSaveRoundTrip(rerender, plan, TASK_1, SIZE_REJECTION);
 
     // Explicit save (Ctrl/Cmd+S) on unchanged, still-rejected content.
     await act(async () => {
@@ -207,7 +274,7 @@ describe("usePlanDraft explicit save (Ctrl/Cmd+S) interactions (AC-003.3/003.4)"
 
     // The explicit save's own isSaving round trip settles, with no further
     // draft change or user action afterward.
-    await settleSaveRoundTrip(rerender, plan, TASK_1);
+    await settleSaveRoundTrip(rerender, plan, TASK_1, SIZE_REJECTION);
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY * 3);
       await Promise.resolve();
@@ -349,7 +416,7 @@ describe("usePlanDraft overlapping attemptSave calls (AC-003.4 regression)", () 
     act(() => {
       result.current.setDraftContent("content-B");
     });
-    rerender({ plan, isSaving: false, taskId: TASK_1 });
+    rerender({ plan, isSaving: false, taskId: TASK_1, saveError: SIZE_REJECTION });
     await act(async () => {
       vi.advanceTimersByTime(AUTO_SAVE_DELAY * 3);
       await Promise.resolve();

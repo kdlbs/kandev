@@ -44,14 +44,12 @@ artifact is the plan, not the MCP or browser surface that submits it.
 
 ## Prior art
 
-**Wiki leg — DID NOT RUN, tool unreachable.** Resolved `@henry` to
-`OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki` and
-`QMD_WIKI_COLLECTION=wiki` from `~/.obsidian-wiki/config` (symlink to
-`config.henry`). Retrieval was impossible on all three tiers: `obsidian-wiki` and
-`qmd` are not on `PATH`, no `qmd` MCP tool is registered in this session, and the
-vault directory itself returns `Operation not permitted` under macOS
-Documents-folder protection, so the `grep` fallback could not run either. No wiki
-content was consulted; this is a skipped leg, not an empty result.
+**Wiki leg — DID NOT RUN, tool unreachable.** Retrieval was impossible on all
+three tiers: `obsidian-wiki` and `qmd` are not on `PATH`, no `qmd` MCP tool is
+registered in this session, and the configured vault directory itself returns
+`Operation not permitted` under macOS Documents-folder protection, so the
+`grep` fallback could not run either. No wiki content was consulted; this is a
+skipped leg, not an empty result.
 
 **Vendor leg — DID NOT RUN, tool unreachable.** The `saas-kb` MCP server and its
 `search_fsm_docs` tool are not registered in this session, so the `ai_sdlc`
