@@ -190,6 +190,7 @@ function ConfigureForm({
         onClick={onSave}
         disabled={isSaveDisabled(form, saving, loading)}
         className="cursor-pointer"
+        data-testid="office-config-sync-save"
       >
         <IconDeviceFloppy className="h-4 w-4 mr-1.5" />
         {saving ? t("office:configSyncSaving") : t("common:save")}
