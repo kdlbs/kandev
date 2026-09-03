@@ -94,7 +94,9 @@ transient in-memory check that leaves no trace. Persisting the post-repair
 attestation is required before any launch can use the repaired inventory. A
 failure to persist it is logged and leaves the already-committed row/receipt
 retryable, but the repair result is not launchable until a later retry durably
-records positive matching evidence.
+records positive matching evidence. Attestation persistence is monotonic for
+divergence: once a negative observation is durable, a concurrent or later
+positive observation cannot overwrite it.
 
 ## Fresh and additional-session launch integration
 

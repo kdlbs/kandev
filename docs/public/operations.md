@@ -441,7 +441,7 @@ Stop and investigate manually when the action returns a conflict. Common causes 
 
 A fresh or additional-session launch (a brand-new session, `spawn_session_kandev`, or on-entry auto-start) runs this same guarded repair automatically when it hits the identical single-slot mismatch, using a server-derived idempotency key scoped to that session; no manual action is needed. If automatic repair cannot prove a safe single match, the launch fails exactly as it did before this behavior existed, with no orphaned STARTING/RUNNING session and no primary-session change, and the manual `repair_workspace_inventory` action above remains available.
 
-If Kandev commits the inventory row but cannot durably store positive post-repair evidence, the launch or resume remains blocked and retryable. Use the same idempotency key for manual retries; Kandev re-inspects the preserved checkout and proceeds only after it records matching evidence.
+If Kandev commits the inventory row but cannot durably store positive post-repair evidence, the launch or resume remains blocked and retryable. Use the same idempotency key for manual retries; Kandev re-inspects the preserved checkout and proceeds only after it records matching evidence. Once divergent evidence is durably recorded, retries cannot replace it with a match; preserve the checkout and investigate manually.
 
 ## Updates
 

@@ -371,6 +371,71 @@ func TestRecordWorkspaceInventoryPostRepairAttestationPersistsBeforeAndAfterEvid
 	}
 }
 
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.10
+func TestRecordWorkspaceInventoryPostRepairAttestationCannotReplaceDivergenceWithMatch(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx,
+		`UPDATE task_environment_repos SET branch_slug = ? WHERE id = ?`,
+		"stale", "environment-repository-recovery",
+	); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("load stale inventory: %+v, %v", rows, err)
+	}
+	stale := rows[0]
+
+	if _, err := repo.RepairWorkspaceInventory(ctx, &models.WorkspaceInventoryRepair{
+		TaskID: "task-recovery", WorkspaceID: "workspace-recovery", SessionID: "session-recovery",
+		TaskEnvironmentID: env.ID, TaskRepositoryID: taskRepo.ID, RepositoryID: taskRepo.RepositoryID,
+		EnvironmentRepoID: stale.ID, BranchSlug: "main",
+		WorktreeID: stale.WorktreeID, WorktreePath: stale.WorktreePath,
+		WorktreeBranch: stale.WorktreeBranch, Position: stale.Position,
+		IdempotencyKey: "negative-attestation-key", RequestHash: "request-hash",
+		ExpectedEnvironmentUpdatedAt:  env.UpdatedAt,
+		ExpectedTaskRepositoryUpdate:  taskRepo.UpdatedAt,
+		ExpectedEnvironmentRepoUpdate: stale.UpdatedAt,
+		Preservation: models.WorkspaceInventoryPreservation{
+			HeadOID: "before", StatusHash: "status", ContentHash: "content",
+		},
+	}); err != nil {
+		t.Fatalf("RepairWorkspaceInventory: %v", err)
+	}
+
+	divergent := models.WorkspaceInventoryPreservation{
+		HeadOID: "divergent", StatusHash: "status", ContentHash: "content",
+	}
+	verifiedAt := time.Now().UTC().Truncate(time.Second)
+	if err := repo.RecordWorkspaceInventoryPostRepairAttestation(
+		ctx, "task-recovery", "negative-attestation-key", &divergent, false, verifiedAt,
+	); err != nil {
+		t.Fatalf("record divergent attestation: %v", err)
+	}
+
+	matching := models.WorkspaceInventoryPreservation{
+		HeadOID: "before", StatusHash: "status", ContentHash: "content",
+	}
+	if err := repo.RecordWorkspaceInventoryPostRepairAttestation(
+		ctx, "task-recovery", "negative-attestation-key", &matching, true, verifiedAt.Add(time.Second),
+	); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+		t.Fatalf("replace divergent attestation error = %v, want recovery conflict", err)
+	}
+
+	found, err := repo.GetWorkspaceInventoryRepairReceipt(ctx, "task-recovery", "negative-attestation-key")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInventoryRepairReceipt: %v", err)
+	}
+	if found == nil || found.PostRepairMatched || found.PostRepairEvidence == nil ||
+		found.PostRepairEvidence.HeadOID != divergent.HeadOID || found.PostRepairVerifiedAt == nil ||
+		!found.PostRepairVerifiedAt.Equal(verifiedAt) {
+		t.Fatalf("divergent attestation was overwritten: %+v", found)
+	}
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
 //
 // TestRepairWorkspaceInventoryReceiptPersistsSourceRecordRevisions proves the

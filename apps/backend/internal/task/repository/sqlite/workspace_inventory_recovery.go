@@ -326,7 +326,8 @@ func (r *Repository) RecordWorkspaceInventoryPostRepairAttestation(
 		UPDATE workspace_inventory_recovery_receipts
 		SET receipt_json = ?, post_repair_matched = ?, post_repair_verified_at = ?
 		WHERE task_id = ? AND idempotency_key = ?
-	`), string(updated), matched, verifiedAt, taskID, idempotencyKey)
+		  AND (post_repair_verified_at IS NULL OR post_repair_matched = TRUE OR ? = FALSE)
+	`), string(updated), matched, verifiedAt, taskID, idempotencyKey, matched)
 	if err != nil {
 		return fmt.Errorf("persist post-repair attestation: %w", err)
 	}
