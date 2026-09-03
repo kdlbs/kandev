@@ -16,6 +16,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const recoveryGitDirName = ".git"
+
 // RecoveryState is persisted beside a damaged checkout so a restart observes
 // the same operation rather than beginning a second destructive transition.
 type RecoveryState string
@@ -51,7 +53,7 @@ type CompareAndSwapWorktreeStore interface {
 // the original. The original and snapshot are retained; callers can validate
 // and explicitly clean them up later.
 //
-//nolint:cyclop // Recovery is intentionally one stateful transaction boundary.
+//nolint:cyclop,gocognit,nestif // Recovery is one stateful transaction boundary.
 func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateRequest) (*Worktree, error) {
 	if wt == nil || wt.TaskID == "" || wt.TaskID != req.TaskID || wt.Path == "" || req.RepositoryPath == "" {
 		return nil, fmt.Errorf("%w: recovery identity is incomplete", ErrWorktreeCorrupted)
@@ -75,16 +77,9 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	} else if err := writeRecoveryRecord(jobPath, record); err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(snapshotPath); os.IsNotExist(err) {
-		if err := snapshotCheckout(wt.Path, snapshotPath); err != nil {
-			record.State, record.Error, record.UpdatedAt = RecoveryStateBlocked, err.Error(), time.Now().UTC()
-			_ = writeRecoveryRecord(jobPath, record)
-			return nil, err
-		}
-	}
-	manifest, err := checkoutManifest(snapshotPath)
+	manifest, err := prepareRecoverySnapshot(wt.Path, snapshotPath, jobPath, record)
 	if err != nil {
-		return nil, blockRecovery(jobPath, record, err)
+		return nil, err
 	}
 	record.Manifest = manifest
 	record.State = RecoveryStateRematerializing
@@ -120,11 +115,48 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	} else if err := m.store.UpdateWorktree(ctx, &replacement); err != nil {
 		return nil, blockRecovery(jobPath, record, err)
 	}
+	if replacement.SessionID != "" {
+		m.mu.Lock()
+		m.worktrees[cacheKey(replacement.SessionID, replacement.RepositoryID, replacement.BranchSlug)] = &replacement
+		m.mu.Unlock()
+	}
 	record.Replacement, record.State, record.UpdatedAt = replacementPath, RecoveryStateComplete, time.Now().UTC()
 	if err := writeRecoveryRecord(jobPath, record); err != nil {
 		return nil, err
 	}
 	return &replacement, nil
+}
+
+//nolint:nestif // Snapshot preparation must fail closed across each validation stage.
+func prepareRecoverySnapshot(source, snapshot, recordPath string, record recoveryRecord) (string, error) {
+	var sourceBefore string
+	if _, err := os.Stat(snapshot); os.IsNotExist(err) {
+		var manifestErr error
+		sourceBefore, manifestErr = checkoutManifest(source)
+		if manifestErr != nil {
+			return "", blockRecovery(recordPath, record, manifestErr)
+		}
+		if snapshotErr := snapshotCheckout(source, snapshot); snapshotErr != nil {
+			record.State, record.Error, record.UpdatedAt = RecoveryStateBlocked, snapshotErr.Error(), time.Now().UTC()
+			_ = writeRecoveryRecord(recordPath, record)
+			return "", snapshotErr
+		}
+		sourceAfter, manifestErr := checkoutManifest(source)
+		if manifestErr != nil || sourceBefore != sourceAfter {
+			if manifestErr == nil {
+				manifestErr = fmt.Errorf("original checkout changed during snapshot")
+			}
+			return "", blockRecovery(recordPath, record, manifestErr)
+		}
+	}
+	manifest, err := checkoutManifest(snapshot)
+	if err != nil {
+		return "", blockRecovery(recordPath, record, err)
+	}
+	if sourceBefore != "" && sourceBefore != manifest {
+		return "", blockRecovery(recordPath, record, fmt.Errorf("recovery snapshot does not match original checkout"))
+	}
+	return manifest, nil
 }
 
 func blockRecovery(path string, record recoveryRecord, err error) error {
@@ -188,7 +220,7 @@ func snapshotCheckout(source, destination string) error {
 		if err != nil || rel == "." {
 			return nil
 		}
-		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
+		if rel == recoveryGitDirName || strings.HasPrefix(rel, recoveryGitDirName+string(filepath.Separator)) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -247,12 +279,21 @@ func checkoutManifest(root string) (string, error) {
 		if err != nil {
 			return err
 		}
-		if path == root || entry.IsDir() {
+		if path == root {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
+		}
+		if rel == recoveryGitDirName || strings.HasPrefix(rel, recoveryGitDirName+string(filepath.Separator)) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
 		}
 		info, err := entry.Info()
 		if err != nil {
@@ -302,7 +343,7 @@ func copySnapshotEntries(source, destination string) error {
 		if err != nil {
 			return err
 		}
-		if path == destination || entry.IsDir() || entry.Name() == ".git" {
+		if path == destination || entry.IsDir() || entry.Name() == recoveryGitDirName {
 			return nil
 		}
 		rel, err := filepath.Rel(destination, path)

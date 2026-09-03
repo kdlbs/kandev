@@ -451,13 +451,14 @@ func TestManager_RecoverWorktreeSnapshotsAndRematerializesCheckout(t *testing.T)
 	}
 
 	store := newMockStore()
-	original := &Worktree{ID: "wt-1", TaskID: "task-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
+	original := &Worktree{ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", BranchSlug: "feature-recover", RepositoryPath: repoPath,
 		Path: worktreePath, Branch: "feature/recover", BaseBranch: "main", Status: StatusActive}
 	store.worktrees[original.ID] = original
 	mgr, err := NewManager(cfg, store, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
+	mgr.worktrees[cacheKey(original.SessionID, original.RepositoryID, original.BranchSlug)] = original
 	replacement, err := mgr.RecoverWorktree(ctx, original, CreateRequest{TaskID: original.TaskID, RepositoryID: original.RepositoryID, RepositoryPath: repoPath, BaseBranch: "main"})
 	if err != nil {
 		t.Fatalf("RecoverWorktree: %v", err)
@@ -468,6 +469,10 @@ func TestManager_RecoverWorktreeSnapshotsAndRematerializesCheckout(t *testing.T)
 	content, err := os.ReadFile(filepath.Join(replacement.Path, "preserve-me.txt"))
 	if err != nil || string(content) != "preserved\n" {
 		t.Fatalf("replacement content = %q, err=%v", content, err)
+	}
+	cached, err := mgr.GetBySessionAndRepo(ctx, original.SessionID, original.RepositoryID, original.BranchSlug)
+	if err != nil || cached == nil || cached.Path != replacement.Path {
+		t.Fatalf("cached worktree = %+v, err=%v, want replacement", cached, err)
 	}
 	if _, err := os.Stat(worktreePath + ".kandev-recovery.json"); err != nil {
 		t.Fatalf("durable recovery record missing: %v", err)
