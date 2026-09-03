@@ -5,8 +5,8 @@ import type { TaskPriority } from "@/lib/types/http";
  * Resolves a value read back from storage (or the WS/HTTP wire) to a priority
  * filter selection. A non-list value, `null` included, and any member outside
  * the four priority tokens resolve to empty/dropped rather than reaching the
- * membership test — mirrors the server's `AC-004.4` read-side rules. The
- * result is deduped and returned in rank order so re-renders are stable.
+ * membership test — mirrors the server's read-side rules. The result is
+ * deduped and returned in rank order so re-renders are stable.
  */
 export function parseKanbanPriorityFilterTokens(value: unknown): TaskPriority[] {
   if (!Array.isArray(value)) return [];

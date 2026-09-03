@@ -211,6 +211,13 @@ describe("KanbanDisplayDropdown — board sort and priority filter", () => {
     });
   });
 
+  it("names the board sort select by what it selects, not its current value", () => {
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+
+    expect(screen.getByRole("combobox", { name: "Board sort" })).not.toBeNull();
+  });
+
   it("omits the board sort and priority filter sections on the tasks list page", () => {
     render(<KanbanDisplayDropdown currentPage="tasks" />);
     openDropdown();

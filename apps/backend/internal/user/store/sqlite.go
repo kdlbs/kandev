@@ -1091,12 +1091,11 @@ func decodeKanbanHiddenStepIDs(raw json.RawMessage) map[string][]string {
 }
 
 // decodeKanbanPriorityFilterTokens parses the persisted priority filter
-// selection, resolving to the empty selection (AC-004.4) rather than failing
-// the read when the stored value is not a list at all (missing, null, a bare
-// string) or when it was written before this capability normalized on write.
-// A member outside the four priority tokens is dropped rather than retained,
-// covering a row written directly or before the write-side validation
-// (AC-004.9) existed.
+// selection, resolving to the empty selection rather than failing the read
+// when the stored value is not a list at all (missing, null, a bare string)
+// or when it was written before this capability normalized on write. A
+// member outside the four priority tokens is dropped rather than retained,
+// covering a row written directly or before write-side validation existed.
 func decodeKanbanPriorityFilterTokens(raw json.RawMessage) []string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return []string{}

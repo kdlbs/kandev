@@ -184,7 +184,11 @@ function MobileBoardSortSelect({
     <div className={mobileFieldClass}>
       <label className={mobileFieldLabelClass}>{t("kanban:boardSort")}</label>
       <Select value={boardSort} onValueChange={(value) => onBoardSortChange(value as KanbanSort)}>
-        <SelectTrigger data-testid="mobile-board-sort" className={mobileControlClass}>
+        <SelectTrigger
+          data-testid="mobile-board-sort"
+          aria-label={t("kanban:boardSort")}
+          className={mobileControlClass}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
