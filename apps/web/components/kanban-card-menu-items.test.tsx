@@ -354,23 +354,30 @@ describe("buildKanbanCardMenuEntries — priority action", () => {
       // AC-003.5: reselecting the current priority must stay enabled, unlike
       // a move-to-current-step entry which disables the current step.
       expect(child.disabled).toBeFalsy();
+      if (child.key === "priority-high") {
+        expect(child.trailing).toBeDefined();
+      } else {
+        expect(child.trailing).toBeUndefined();
+      }
     }
   });
 
-  it("indicates no token as current when the held priority is absent or unrecognized", () => {
-    const entries = buildKanbanCardMenuEntries({
-      ...baseArgs,
-      currentPriority: "not-a-real-token",
-      onSelectPriority: vi.fn(),
-    });
-    const children = priorityChildren(entries);
+  it.each([undefined, null, "", "not-a-real-token"])(
+    "indicates no token as current when the held priority is %s",
+    (currentPriority) => {
+      const entries = buildKanbanCardMenuEntries({
+        ...baseArgs,
+        currentPriority,
+        onSelectPriority: vi.fn(),
+      });
+      const children = priorityChildren(entries);
 
-    // None of the four items should render the "current" marker text.
-    for (const child of children) {
-      if (child.kind !== "item") throw new Error("expected item entries");
-      expect(child.testId).toBeDefined();
-    }
-  });
+      for (const child of children) {
+        if (child.kind !== "item") throw new Error("expected item entries");
+        expect(child.trailing).toBeUndefined();
+      }
+    },
+  );
 
   it("invokes onSelectPriority with the selected token, including reselecting the current one", () => {
     const onSelectPriority = vi.fn();
