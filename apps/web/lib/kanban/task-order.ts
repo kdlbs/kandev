@@ -55,6 +55,18 @@ export function compareTasksByPriorityThenCreatedDesc(
 }
 
 /**
+ * Selects the within-step comparator for the kanban and mobile column views,
+ * shared so both views apply the sort token identically (AC-002.5).
+ */
+export function pickKanbanColumnComparator(
+  sortToken: KanbanSort,
+): (a: PriorityRankedTask & CreatedTask, b: PriorityRankedTask & CreatedTask) => number {
+  return sortToken === "priority_desc"
+    ? compareTasksByPriorityThenCreatedDesc
+    : compareTasksByCreatedDesc;
+}
+
+/**
  * `priority_desc` total order for the pipeline view's within-step tiebreak:
  * priority rank, then `position` ascending, then task `id` ascending. The
  * workflow-step index is applied by the caller as the outermost key.

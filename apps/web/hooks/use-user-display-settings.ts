@@ -83,7 +83,11 @@ function priorityFilterTokensUnchanged(
   );
 }
 
-function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings): DisplaySettings {
+/** @internal Exported for testing the snapshot-not-delta commit semantics (AC-004.5). */
+export function buildNormalizedSettings(
+  next: CommitPayload,
+  current: DisplaySettings,
+): DisplaySettings {
   return {
     ...current,
     workspaceId: next.workspaceId,

@@ -3,6 +3,7 @@ import {
   compareTasksByCreatedDesc,
   compareTasksByPriorityThenCreatedDesc,
   compareTasksByPriorityThenPositionAsc,
+  pickKanbanColumnComparator,
   sortIdsByCreatedDesc,
   sortIdsByDisplayOrder,
   sortTasksForPipelineView,
@@ -140,6 +141,23 @@ describe("compareTasksByPriorityThenCreatedDesc", () => {
   });
 });
 
+describe("pickKanbanColumnComparator", () => {
+  it("selects the priority comparator under priority_desc, applying it identically to the kanban and mobile column views", () => {
+    const tasks = [
+      { id: "z", createdAt: BASE_CREATED_AT, priority: "low" as const },
+      { id: "b", createdAt: BASE_CREATED_AT, priority: "critical" as const },
+    ];
+    const comparator = pickKanbanColumnComparator("priority_desc");
+    expect(comparator).toBe(compareTasksByPriorityThenCreatedDesc);
+    expect([...tasks].sort(comparator).map((t) => t.id)).toEqual(["b", "z"]);
+  });
+
+  it("selects the created-desc comparator under created_desc", () => {
+    const comparator = pickKanbanColumnComparator("created_desc");
+    expect(comparator).toBe(compareTasksByCreatedDesc);
+  });
+});
+
 describe("compareTasksByPriorityThenPositionAsc", () => {
   it("orders by priority rank, then position ascending, then id ascending", () => {
     const tasks = [
@@ -162,6 +180,17 @@ describe("compareTasksByPriorityThenPositionAsc", () => {
     expect([...tasks].sort(compareTasksByPriorityThenPositionAsc).map((t) => t.id)).toEqual([
       "no-pos",
       "has-pos",
+    ]);
+  });
+
+  it("breaks a fully tied rank and position by task id ascending", () => {
+    const tasks = [
+      { id: "zeta", position: 1, priority: "high" as const },
+      { id: "alpha", position: 1, priority: "high" as const },
+    ];
+    expect([...tasks].sort(compareTasksByPriorityThenPositionAsc).map((t) => t.id)).toEqual([
+      "alpha",
+      "zeta",
     ]);
   });
 });
