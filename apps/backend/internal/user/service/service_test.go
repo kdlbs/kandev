@@ -617,6 +617,130 @@ func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettings_KanbanSort verifies the board sort enum is set, defaulted, and rejects
+// an invalid value with a validation error (AC-004.9, kanban_sort reading: whole-request reject).
+func TestApplyBasicSettings_KanbanSort(t *testing.T) {
+	t.Run("sets a valid sort", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{KanbanSort: ptr("priority_desc")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.KanbanSort != "priority_desc" {
+			t.Fatalf("KanbanSort = %q, want priority_desc", settings.KanbanSort)
+		}
+	})
+
+	t.Run("empty value defaults", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{KanbanSort: ptr("  ")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.KanbanSort != models.KanbanSortDefault {
+			t.Fatalf("KanbanSort = %q, want %q", settings.KanbanSort, models.KanbanSortDefault)
+		}
+	})
+
+	t.Run("nil is a no-op", func(t *testing.T) {
+		settings := &models.UserSettings{KanbanSort: "priority_desc"}
+		req := &UpdateUserSettingsRequest{}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.KanbanSort != "priority_desc" {
+			t.Fatalf("KanbanSort = %q, want unchanged priority_desc", settings.KanbanSort)
+		}
+	})
+
+	t.Run("rejects an invalid value and leaves settings unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{KanbanSort: "created_desc"}
+		req := &UpdateUserSettingsRequest{
+			KanbanSort:                 ptr("bogus"),
+			KanbanPriorityFilterTokens: ptr([]string{"critical"}),
+		}
+		if err := applyBasicSettings(settings, req); err == nil {
+			t.Fatal("expected invalid kanban_sort error")
+		}
+		if settings.KanbanSort != "created_desc" {
+			t.Fatalf("KanbanSort = %q, want unchanged created_desc on rejection", settings.KanbanSort)
+		}
+	})
+}
+
+// TestNormalizeKanbanPriorityFilterTokens verifies the R5-F1 disposition: an out-of-vocabulary
+// member is dropped (not a whole-request rejection), duplicates are removed, and the remainder
+// is ordered by priority rank.
+func TestNormalizeKanbanPriorityFilterTokens(t *testing.T) {
+	cases := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{name: "nil is empty", input: nil, want: []string{}},
+		{name: "empty stays empty", input: []string{}, want: []string{}},
+		{
+			name:  "already-ranked input is unchanged",
+			input: []string{"critical", "high", "medium", "low"},
+			want:  []string{"critical", "high", "medium", "low"},
+		},
+		{
+			name:  "out-of-order input is stored in rank order",
+			input: []string{"low", "critical"},
+			want:  []string{"critical", "low"},
+		},
+		{
+			name:  "duplicates are removed",
+			input: []string{"high", "high", "critical"},
+			want:  []string{"critical", "high"},
+		},
+		{
+			name:  "an invalid member is dropped, keeping the valid remainder",
+			input: []string{"critical", "urgent", "low"},
+			want:  []string{"critical", "low"},
+		},
+		{
+			name:  "a selection that is all invalid resolves to empty",
+			input: []string{"urgent", "none"},
+			want:  []string{},
+		},
+		{
+			name:  "surrounding whitespace is trimmed before validation",
+			input: []string{" critical ", "high"},
+			want:  []string{"critical", "high"},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeKanbanPriorityFilterTokens(tt.input)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("normalizeKanbanPriorityFilterTokens(%v) = %#v, want %#v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestApplyWorkspaceAndTaskListPreferencesInvalidPriorityFilterMemberCommitsSiblingField is the
+// R5-F1 regression test: an invalid priority-filter member must not block an unrelated field
+// (repository_ids) riding in the same request, because normalizeKanbanPriorityFilterTokens never
+// returns an error — only applyKanbanSort (a true enum) rejects the whole request.
+func TestApplyWorkspaceAndTaskListPreferencesInvalidPriorityFilterMemberCommitsSiblingField(t *testing.T) {
+	settings := &models.UserSettings{RepositoryIDs: []string{"repo-old"}}
+	req := &UpdateUserSettingsRequest{
+		RepositoryIDs:              ptr([]string{"repo-new"}),
+		KanbanPriorityFilterTokens: ptr([]string{"critical", "urgent"}),
+	}
+	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(settings.RepositoryIDs, []string{"repo-new"}) {
+		t.Fatalf("RepositoryIDs = %#v, want [repo-new] committed alongside the dropped invalid token", settings.RepositoryIDs)
+	}
+	if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"critical"}) {
+		t.Fatalf("KanbanPriorityFilterTokens = %#v, want [critical]", settings.KanbanPriorityFilterTokens)
+	}
+}
+
 // TestApplyBasicSettings_TerminalFontFamily verifies the terminal font family is preserved, set, trimmed, and cleared.
 func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
