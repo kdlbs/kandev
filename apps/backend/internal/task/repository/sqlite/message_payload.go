@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -123,6 +124,37 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 		message.Metadata = rehydrated
 	}
 	return nil
+}
+
+// OrphanedMessagePayloadCandidate identifies a task_message_payloads row no
+// longer referenced by any message's payload_digest. Content-addressing
+// means a row can be shared by many messages; it only becomes eligible once
+// every referencing message has been deleted or edited away from it.
+type OrphanedMessagePayloadCandidate struct {
+	Digest           string
+	CompressedSize   int64
+	UncompressedSize int64
+}
+
+// ListOrphanedMessagePayloadCandidates returns task_message_payloads rows no
+// task_session_messages row currently references. Read-only and
+// non-destructive - reported for a later, explicit maintenance command
+// (Task 06) to act on, mirroring ListDuplicateGitSnapshotCandidates and
+// ListObsoletePlanRevisionCandidates.
+func (r *Repository) ListOrphanedMessagePayloadCandidates(ctx context.Context, limit int) ([]OrphanedMessagePayloadCandidate, error) {
+	query := `
+		SELECT p.digest, p.compressed_size, p.uncompressed_size
+		FROM task_message_payloads p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM task_session_messages m WHERE m.payload_digest = p.digest
+		)
+		ORDER BY p.digest ASC`
+	return listLimitedCandidates(ctx, r.ro, query, limit, "orphaned message payload candidates",
+		func(rows *sql.Rows) (OrphanedMessagePayloadCandidate, error) {
+			var c OrphanedMessagePayloadCandidate
+			err := rows.Scan(&c.Digest, &c.CompressedSize, &c.UncompressedSize)
+			return c, err
+		})
 }
 
 func sha256Hex(data []byte) string {

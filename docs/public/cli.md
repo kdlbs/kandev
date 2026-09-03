@@ -216,6 +216,56 @@ Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `statu
 
 </details>
 
+## Database maintenance
+
+`kandev maintenance database` is an offline SQLite retention and compaction
+command for the same file the backend uses (`--home-dir`, `database.path`,
+`KANDEV_HOME_DIR`, and `KANDEV_DATABASE_PATH` resolve identically to the
+normal launcher):
+
+```text
+kandev maintenance database [--execute] [--compact]
+    [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
+```
+
+| Option | Meaning |
+|---|---|
+| `--execute` | Perform retention deletes. Without it, the command is a read-only dry run (the default). |
+| `--compact` | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
+| `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`). |
+| `--candidate-limit <n>` | Cap how many rows are reported/deleted per retention category (default: unlimited). |
+| `--home-dir <path>` | Kandev home directory override (default: `$KANDEV_HOME_DIR` or `~/.kandev`). |
+| `--help`, `-h` | Print command help. |
+
+**Dry run (default).** Without `--execute`, the command never acquires a
+lock, takes a backup, or changes anything; it is always safe to run
+alongside a live `kandev` process. It reports a row count and estimated
+byte size for each retention category: duplicate git snapshots (content-
+identical repository-state polls for the same session), obsolete plan
+revisions (superseded, non-HEAD plan history beyond `--keep-plan-revisions`),
+and orphaned message payloads (externalized tool output no message still
+references). Normal conversation rows, the current plan HEAD, revert
+ancestry, and any protected snapshot are never candidates.
+
+**Execute.** `--execute` requires exclusive access to the database: it takes
+the same ownership lock a live backend takes at boot, so it refuses to run
+while `kandev` is already running against the same home/database. It always
+takes and verifies a fresh backup before deleting anything, written to
+`<database-dir>/backups/kandev-pre-maintenance-<timestamp>.db`; a failed or
+unverified backup aborts before any delete. Retention deletes run inside a
+single transaction, so partial deletion across categories cannot happen.
+
+**Compaction and rollback.** `--compact` (with `--execute`) stages a
+`VACUUM INTO` compacted copy after retention deletes commit, verifies it
+with an integrity check, requires enough free disk for the staged copy, and
+atomically replaces the live database file. The pre-compaction file is kept
+alongside the live database as
+`<database-path>.pre-compact-<timestamp>.bak` for manual rollback: stop
+`kandev` if it is running, then move that file back over the live database
+path. If compaction fails after retention deletes already committed, the
+command still reports the completed backup path and deleted-row counts; only
+the optional compaction step is aborted.
+
 ## Ports and network exposure
 
 | Process | Preferred port | Automatic behavior |

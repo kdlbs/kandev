@@ -4,6 +4,7 @@ package sqlite
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -128,28 +129,10 @@ func (r *Repository) ListDuplicateGitSnapshotCandidates(ctx context.Context, lim
 				)
 		  )
 		ORDER BY s.session_id, s.created_at ASC`
-	args := []interface{}{}
-	if limit > 0 {
-		query += sqlLimitClause
-		args = append(args, limit)
-	}
-
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list duplicate git snapshot candidates: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []DuplicateGitSnapshotCandidate
-	for rows.Next() {
-		var c DuplicateGitSnapshotCandidate
-		if err := rows.Scan(&c.ID, &c.SessionID, &c.ContentDigest); err != nil {
-			return nil, fmt.Errorf("failed to scan duplicate git snapshot candidate: %w", err)
-		}
-		out = append(out, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate duplicate git snapshot candidates: %w", err)
-	}
-	return out, nil
+	return listLimitedCandidates(ctx, r.ro, query, limit, "duplicate git snapshot candidates",
+		func(rows *sql.Rows) (DuplicateGitSnapshotCandidate, error) {
+			var c DuplicateGitSnapshotCandidate
+			err := rows.Scan(&c.ID, &c.SessionID, &c.ContentDigest)
+			return c, err
+		})
 }
