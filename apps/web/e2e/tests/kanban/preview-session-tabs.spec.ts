@@ -361,6 +361,12 @@ test.describe("Preview Plan tab", () => {
       timeout: 15_000,
     });
 
+    // Capture the active session tab and the URL's sessionId before opening
+    // Plan, so the round-trip back to it can be verified below.
+    const sessionTab = previewPanel.locator('[data-testid^="preview-session-tab-"]');
+    const sessionIdBeforePlan = new URL(testPage.url()).searchParams.get("sessionId");
+    expect(sessionIdBeforePlan).toBeTruthy();
+
     // Plan tab is present with the unseen indicator (plan is agent-authored
     // and has never been marked seen in this browser).
     const planTab = previewPanel.getByTestId("preview-plan-tab");
@@ -383,5 +389,16 @@ test.describe("Preview Plan tab", () => {
     // Selecting the tab cleared the unseen indicator, matching the full-page
     // Plan tab's behavior.
     await expect(previewPanel.getByTestId("preview-plan-tab-indicator")).toHaveCount(0);
+
+    // Switching back to the session tab restores its body and leaves the
+    // URL's sessionId untouched — the Plan tab swap never mutated session
+    // selection, it only changed which body is displayed.
+    await sessionTab.click();
+    await expect(
+      previewPanel.getByTestId("agent-message-highlight").getByText("plan created", {
+        exact: false,
+      }),
+    ).toBeVisible({ timeout: 10_000 });
+    expect(new URL(testPage.url()).searchParams.get("sessionId")).toBe(sessionIdBeforePlan);
   });
 });

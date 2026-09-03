@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
@@ -16,8 +16,12 @@ import { useTranslation } from "react-i18next";
  *
  * `failed` is local component state (not the shared store) so a rejected
  * fetch stops the effect instead of retrying every render; it resets when
- * `taskId` changes, allowing one attempt per task. Call this once per
- * preview panel — `usePreviewPlanTab` owns it and passes the result down to
+ * `taskId` changes, allowing one attempt per task. `PreviewSessionTabs`
+ * reuses the same component instance across tasks without remounting, so
+ * revisiting a task that previously failed would otherwise stay stuck in the
+ * error state forever — callers can invoke the returned `retry` to clear it
+ * and let the effect fetch again. Call this once per preview panel —
+ * `usePreviewPlanTab` owns it and passes the result down to
  * `PreviewPlanPanel` — a second mount would duplicate the fetch.
  */
 export function usePreviewPlanSummary(taskId: string) {
@@ -27,6 +31,9 @@ export function usePreviewPlanSummary(taskId: string) {
   const storeApi = useAppStoreApi();
   const [failedTaskId, setFailedTaskId] = useState<string | null>(null);
   const failed = failedTaskId === taskId;
+  const retry = useCallback(() => {
+    setFailedTaskId((current) => (current === taskId ? null : current));
+  }, [taskId]);
 
   useEffect(() => {
     if (loaded || loading || failed) return;
@@ -60,7 +67,7 @@ export function usePreviewPlanSummary(taskId: string) {
       });
   }, [taskId, loaded, loading, failed, storeApi]);
 
-  return { plan, loaded, loading, failed };
+  return { plan, loaded, loading, failed, retry };
 }
 
 type PreviewPlanPanelProps = {

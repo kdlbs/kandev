@@ -76,7 +76,7 @@ export function PreviewSessionTabs({
   const resumption = useSessionResumption(taskId, activeSessionId);
 
   const planTabState = usePreviewPlanTab(taskId, onSessionChange);
-  const { viewMode, planTab } = planTabState;
+  const { viewMode, planTab, hasPlan } = planTabState;
 
   const tabs = useMemo<SessionTab[]>(
     () => [
@@ -103,29 +103,22 @@ export function PreviewSessionTabs({
     return <PreviewLoadingState label={t("task:loadingAgents")} />;
   }
 
-  if (sortedSessions.length === 0) {
-    if (ensureSession?.status === "preparing") {
-      return <PreviewLoadingState label={t("task:preparingWorkspace2")} />;
-    }
-    if (ensureSession?.status === "error") {
-      return (
-        <>
-          <SessionRecoveryFeedback
-            error={resumption.error}
-            notice={resumption.notice}
-            onRetry={() => void resumption.resumeSession()}
-            workspaceId={workspaceId ?? null}
-          />
-          <EnsureSessionErrorEmptyState
-            error={ensureSession.error}
-            onRetry={ensureSession.retry}
-            workspaceId={workspaceId ?? null}
-          />
-        </>
-      );
-    }
-    return <PreviewEmptyState />;
+  const hasNoSessions = sortedSessions.length === 0;
+
+  if (hasNoSessions && !hasPlan) {
+    return (
+      <PreviewNoSessionsState
+        ensureSession={ensureSession}
+        resumption={resumption}
+        workspaceId={workspaceId}
+      />
+    );
   }
+
+  // A task can lose every session (deletion doesn't delete its plan) and
+  // still have a plan worth showing — fall back to the Plan view rather than
+  // an empty session body when there's nothing else to select.
+  const displayViewMode = hasNoSessions ? "plan" : viewMode;
 
   return (
     <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
@@ -138,14 +131,14 @@ export function PreviewSessionTabs({
       <div className="border-b px-2 py-1">
         <SessionTabs
           tabs={tabs}
-          activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
+          activeTab={displayViewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
           onTabChange={planTabState.handleTabChange}
           listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         />
       </div>
       <div className="flex-1 min-h-0">
         <PreviewTabBody
-          viewMode={viewMode}
+          viewMode={displayViewMode}
           planState={planTabState.planState}
           activeSession={activeSession}
           taskId={taskId}
@@ -180,7 +173,8 @@ function PreviewTabBody({
 function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string | null) => void) {
   const { t } = useTranslation();
   const planState = usePreviewPlanSummary(taskId);
-  const { plan, loaded } = planState;
+  const { plan, loaded, failed, retry } = planState;
+  const hasPlan = loaded && plan !== null;
   const lastSeenPlanAt = useAppStore((state) => state.taskPlans.lastSeenUpdatedAtByTaskId[taskId]);
   const markTaskPlanSeen = useAppStore((state) => state.markTaskPlanSeen);
   const hasUnseenPlan = plan?.created_by === "agent" && lastSeenPlanAt !== plan.updated_at;
@@ -215,12 +209,16 @@ function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string 
       if (id === PLAN_TAB_ID) {
         setViewMode("plan");
         if (loaded) markTaskPlanSeen(taskId);
+        // A prior fetch for this task failed; re-selecting the tab is the
+        // user's explicit signal to try again, since the panel is reused
+        // across tasks without remounting and would otherwise stay stuck.
+        else if (failed) retry();
       } else {
         setViewMode("session");
         onSessionChange?.(id);
       }
     },
-    [taskId, loaded, markTaskPlanSeen, onSessionChange],
+    [taskId, loaded, failed, retry, markTaskPlanSeen, onSessionChange],
   );
 
   const planTab = useMemo<SessionTab>(
@@ -234,7 +232,7 @@ function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string 
     [t, hasUnseenPlan],
   );
 
-  return { viewMode, handleTabChange, planTab, planState };
+  return { viewMode, handleTabChange, planTab, planState, hasPlan };
 }
 
 function resolveProfileSubLabel(
@@ -328,4 +326,39 @@ function PreviewEmptyState() {
       </div>
     </div>
   );
+}
+
+/** Sessionless state: preparing/error/empty, per `ensureSession`. */
+function PreviewNoSessionsState({
+  ensureSession,
+  resumption,
+  workspaceId,
+}: {
+  ensureSession?: UseEnsureTaskSessionResult;
+  resumption: ReturnType<typeof useSessionResumption>;
+  workspaceId?: string | null;
+}) {
+  const { t } = useTranslation();
+
+  if (ensureSession?.status === "preparing") {
+    return <PreviewLoadingState label={t("task:preparingWorkspace2")} />;
+  }
+  if (ensureSession?.status === "error") {
+    return (
+      <>
+        <SessionRecoveryFeedback
+          error={resumption.error}
+          notice={resumption.notice}
+          onRetry={() => void resumption.resumeSession()}
+          workspaceId={workspaceId ?? null}
+        />
+        <EnsureSessionErrorEmptyState
+          error={ensureSession.error}
+          onRetry={ensureSession.retry}
+          workspaceId={workspaceId ?? null}
+        />
+      </>
+    );
+  }
+  return <PreviewEmptyState />;
 }

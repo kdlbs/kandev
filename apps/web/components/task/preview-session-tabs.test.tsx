@@ -130,6 +130,7 @@ const TIMESTAMP = "2026-07-21T00:00:00Z";
 const LATER_TIMESTAMP = "2026-07-22T00:00:00Z";
 const PLAN_INDICATOR_TESTID = "preview-plan-tab-indicator";
 const PLAN_TAB_TESTID = "preview-plan-tab";
+const PLAN_PANEL_TESTID = "preview-plan-panel";
 
 const session: TaskSession = {
   id: toSessionId("session-1"),
@@ -257,7 +258,7 @@ describe("PreviewSessionTabs Plan tab", () => {
     fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
 
     expect(screen.queryByTestId("preview-chat")).toBeNull();
-    expect(screen.getByTestId("preview-plan-panel")).toBeTruthy();
+    expect(screen.getByTestId(PLAN_PANEL_TESTID)).toBeTruthy();
     expect(screen.getByText("## Plan content")).toBeTruthy();
     expect(onSessionChange).not.toHaveBeenCalled();
   });
@@ -294,6 +295,20 @@ describe("PreviewSessionTabs Plan tab", () => {
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
 
     expect(screen.queryByTestId(PLAN_INDICATOR_TESTID)).toBeNull();
+  });
+
+  it("shows the Plan tab and renders the plan when the task has no sessions", () => {
+    mocks.useTaskSessions.mockReturnValue({ sessions: [], isLoaded: true });
+    setTaskPlansState({
+      byTaskId: { [TASK_ID]: agentPlan() },
+      loadedByTaskId: { [TASK_ID]: true },
+    });
+
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+
+    expect(screen.getByTestId(PLAN_TAB_TESTID)).toBeTruthy();
+    expect(screen.getByTestId(PLAN_PANEL_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId("preview-empty-state")).toBeNull();
   });
 
   it("clears the indicator (marks seen) when the Plan tab is clicked", () => {
@@ -351,6 +366,63 @@ describe("PreviewSessionTabs Plan tab reliability", () => {
     expect(mocks.getTaskPlan).toHaveBeenCalledTimes(1);
   });
 
+  it("retries the plan fetch for a task revisited after a failure", async () => {
+    // `PreviewSessionTabs` is reused across tasks without remounting, so a
+    // failure for TASK_ID must survive switching the preview to TASK_ID_B and
+    // back. Only TASK_ID's fetch rejects (once); TASK_ID_B always resolves.
+    mocks.getTaskPlan.mockImplementation((id: string) =>
+      id === TASK_ID ? Promise.reject(new Error("boom")) : Promise.resolve(null),
+    );
+
+    const { rerender } = render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-plan-error-state")).toBeTruthy();
+    });
+    expect(mocks.getTaskPlan.mock.calls.filter(([id]) => id === TASK_ID)).toHaveLength(1);
+
+    // Switch away to another task, then back to the failed one.
+    act(() => {
+      rerender(<PreviewSessionTabs taskId={TASK_ID_B} sessionId={null} />);
+    });
+    mocks.getTaskPlan.mockImplementation((id: string) =>
+      id === TASK_ID ? Promise.resolve(agentPlan()) : Promise.resolve(null),
+    );
+    act(() => {
+      rerender(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    });
+
+    // Re-selecting the Plan tab is the retry signal.
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId(PLAN_PANEL_TESTID)).toBeTruthy();
+    });
+    expect(mocks.getTaskPlan.mock.calls.filter(([id]) => id === TASK_ID)).toHaveLength(2);
+  });
+});
+
+describe("PreviewSessionTabs Plan tab indicator timing", () => {
+  beforeEach(() => {
+    mocks.useTaskSessions.mockReturnValue({ sessions: [session], isLoaded: true });
+    mocks.useSessionResumption.mockReturnValue({
+      error: null,
+      notice: null,
+      resumeSession: vi.fn(),
+    });
+    mocks.getTaskPlan.mockResolvedValue(null);
+    fakeStore.setState({ taskPlans: emptyTaskPlans() });
+  });
+
+  afterEach(() => {
+    cleanup();
+    mocks.useTaskSessions.mockReset();
+    mocks.useSessionResumption.mockReset();
+    mocks.markTaskPlanSeen.mockReset();
+    mocks.getTaskPlan.mockReset();
+  });
+
   it("does not re-light the indicator when the plan finishes loading while the Plan tab is already open", async () => {
     mocks.getTaskPlan.mockResolvedValue(agentPlan());
 
@@ -358,7 +430,7 @@ describe("PreviewSessionTabs Plan tab reliability", () => {
     fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
 
     await waitFor(() => {
-      expect(screen.getByTestId("preview-plan-panel")).toBeTruthy();
+      expect(screen.getByTestId(PLAN_PANEL_TESTID)).toBeTruthy();
     });
 
     expect(screen.queryByTestId(PLAN_INDICATOR_TESTID)).toBeNull();
