@@ -24,6 +24,7 @@ const (
 	DefaultSidebarViewID = "view-all-tasks"
 
 	defaultChangesPanelLayout = "tree"
+	jsonNull                  = "null"
 )
 
 type sqliteRepository struct {
@@ -1001,7 +1002,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 // decodeSidebarTaskColorAutomation keeps one corrupt personal rule set from
 // preventing the rest of user settings from loading.
 func decodeSidebarTaskColorAutomation(raw json.RawMessage) models.SidebarTaskColorAutomation {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 || string(raw) == jsonNull {
 		return models.DefaultSidebarTaskColorAutomation()
 	}
 	var value models.SidebarTaskColorAutomation
@@ -1018,7 +1019,7 @@ func decodeSidebarTaskColorAutomation(raw json.RawMessage) models.SidebarTaskCol
 }
 
 func decodeStringIDs(raw json.RawMessage) []string {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 || string(raw) == jsonNull {
 		return []string{}
 	}
 	var ids []string

@@ -13,7 +13,7 @@ import (
 func decodeSidebarTaskColors(raw json.RawMessage) map[string]*string {
 	colors := map[string]*string{}
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte(jsonNull)) {
 		return colors
 	}
 
@@ -45,7 +45,7 @@ func decodeSidebarTaskColors(raw json.RawMessage) map[string]*string {
 
 func decodeSidebarTaskColorValue(raw json.RawMessage) (*string, bool) {
 	trimmed := bytes.TrimSpace(raw)
-	if bytes.Equal(trimmed, []byte("null")) {
+	if bytes.Equal(trimmed, []byte(jsonNull)) {
 		return nil, true
 	}
 	var color string
