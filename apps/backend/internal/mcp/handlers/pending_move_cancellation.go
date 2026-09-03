@@ -63,12 +63,18 @@ func (h *Handlers) handleCancelPendingMove(ctx context.Context, msg *ws.Message)
 }
 
 func pendingMoveRequestShape(payload []byte) (bool, bool) {
+	return canonicalPendingMoveRequestShape(payload, []string{
+		"pending_move_id", "session_id", "task_id", "move_id", "workflow_id",
+		"expected_current_workflow_step_id", "expected_target_workflow_step_id",
+	})
+}
+
+func canonicalPendingMoveRequestShape(payload []byte, keys []string) (bool, bool) {
 	var fields map[string]json.RawMessage
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	if err := decoder.Decode(&fields); err != nil {
 		return false, false
 	}
-	keys := []string{"pending_move_id", "session_id", "task_id", "move_id", "workflow_id", "expected_current_workflow_step_id", "expected_target_workflow_step_id"}
 	for _, key := range keys {
 		value, ok := fields[key]
 		if !ok {

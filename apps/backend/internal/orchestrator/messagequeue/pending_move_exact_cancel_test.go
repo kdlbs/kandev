@@ -292,6 +292,44 @@ func TestSQLiteRepository_ExactCancelPendingMoveRejectsOutOfTreeTarget(t *testin
 	}
 }
 
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-003.1
+func TestSQLiteRepository_ExactCancelPendingMoveRedactsUnauthorizedSessionTarget(t *testing.T) {
+	fixture := newExactCancelFixture(t)
+	const unrelatedTaskID = "12121212-1212-4212-8212-121212121212"
+	const unrelatedSessionID = "13131313-1313-4313-8313-131313131313"
+	const unrelatedMoveID = "14141414-1414-4414-8414-141414141414"
+
+	execExactFixtureSQL(t, fixture.sql, `
+		INSERT INTO tasks (id, workspace_id, parent_id, workflow_id, workflow_step_id)
+		VALUES (?, ?, '', ?, ?)
+	`, unrelatedTaskID, exactWorkspaceID, exactCurrentWorkflowID, exactCurrentStepID)
+	execExactFixtureSQL(t, fixture.sql, `
+		INSERT INTO task_sessions (id, task_id, state) VALUES (?, ?, 'WAITING_FOR_INPUT')
+	`, unrelatedSessionID, unrelatedTaskID)
+	move := &PendingMove{
+		MoveID: unrelatedMoveID, TaskID: unrelatedTaskID, WorkflowID: exactTargetWorkflowID,
+		WorkflowStepID: exactTargetStepID,
+	}
+	if err := fixture.repo.SetPendingMove(context.Background(), unrelatedSessionID, move); err != nil {
+		t.Fatalf("seed unrelated pending move: %v", err)
+	}
+	match := fixture.match
+	match.PendingMoveID = move.ID
+	match.SessionID = unrelatedSessionID
+	match.MoveID = unrelatedMoveID
+
+	result, err := fixture.repo.ExactCancelPendingMove(
+		context.Background(), fixture.actor, match, "correlation-unauthorized-session-target",
+	)
+	if result != nil || !errors.Is(err, ErrPendingMoveNotFoundOrChanged) {
+		t.Fatalf("cross-target cancellation result=%#v err=%v, want stable denial", result, err)
+	}
+	if got, getErr := fixture.repo.GetPendingMove(context.Background(), unrelatedSessionID); getErr != nil || got == nil {
+		t.Fatalf("cross-target cancellation changed pending move=%#v err=%v", got, getErr)
+	}
+	assertPendingMoveCensusAuditTargetRedacted(t, fixture.sql, "correlation-unauthorized-session-target")
+}
+
 func assertExactCancellationPreservedControlState(t *testing.T, fixture exactCancelFixture) {
 	t.Helper()
 	var task struct {

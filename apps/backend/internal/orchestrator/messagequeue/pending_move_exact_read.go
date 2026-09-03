@@ -262,6 +262,26 @@ func (r *memoryRepository) AuditInvalidPendingMoveCensus(
 	return nil
 }
 
+func (s *Service) AuditInvalidPendingMoveCensus(
+	ctx context.Context,
+	actor PendingMoveCancellationActor,
+	correlationID string,
+	present bool,
+	canonical bool,
+) error {
+	if correlationID == "" {
+		correlationID = uuid.New().String()
+	}
+	if err := s.repo.AuditInvalidPendingMoveCensus(ctx, actor, correlationID, present, canonical); err != nil {
+		return ErrPendingMoveReadFailed
+	}
+	s.logger.Warn("pending move census rejected",
+		zap.String("correlation_id", correlationID),
+		zap.String("actor_kind", actor.Kind),
+		zap.String("outcome", PendingMoveCancellationOutcomeInvalidArgument))
+	return nil
+}
+
 // ReadPendingMove validates public identifiers before repository access,
 // delegates the authorized read to the repository, then emits a redacted
 // structured operational mirror of the durable audit result. It never
@@ -277,13 +297,9 @@ func (s *Service) ReadPendingMove(
 	}
 	present, canonical := pendingMoveCensusIdentifierValid(taskID)
 	if !present || !canonical {
-		if err := s.repo.AuditInvalidPendingMoveCensus(ctx, actor, correlationID, present, canonical); err != nil {
-			return nil, ErrPendingMoveReadFailed
+		if err := s.AuditInvalidPendingMoveCensus(ctx, actor, correlationID, present, canonical); err != nil {
+			return nil, err
 		}
-		s.logger.Warn("pending move census rejected",
-			zap.String("correlation_id", correlationID),
-			zap.String("actor_kind", actor.Kind),
-			zap.String("outcome", PendingMoveCancellationOutcomeInvalidArgument))
 		return nil, ErrPendingMoveInvalidArgument
 	}
 	result, err := s.repo.ReadPendingMoveCensus(ctx, actor, taskID, correlationID)

@@ -13,11 +13,29 @@ import (
 )
 
 type recordingPendingMoveReader struct {
-	actor  messagequeue.PendingMoveCancellationActor
-	taskID string
-	result *messagequeue.PendingMoveCensusResult
-	err    error
-	calls  int
+	actor          messagequeue.PendingMoveCancellationActor
+	taskID         string
+	result         *messagequeue.PendingMoveCensusResult
+	err            error
+	calls          int
+	auditCalls     int
+	auditPresent   bool
+	auditCanonical bool
+	auditErr       error
+}
+
+func (r *recordingPendingMoveReader) AuditInvalidPendingMoveCensus(
+	_ context.Context,
+	actor messagequeue.PendingMoveCancellationActor,
+	_ string,
+	present bool,
+	canonical bool,
+) error {
+	r.auditCalls++
+	r.actor = actor
+	r.auditPresent = present
+	r.auditCanonical = canonical
+	return r.auditErr
 }
 
 func (r *recordingPendingMoveReader) ReadPendingMove(
@@ -99,8 +117,9 @@ func TestHandleReadPendingMoveRejectsAndAuditsCallerFields(t *testing.T) {
 		t.Fatalf("handleReadPendingMove: %v", err)
 	}
 	assertWSError(t, resp, PendingMoveInvalidArgumentCode)
-	if reader.calls != 1 || reader.taskID != "" {
-		t.Fatalf("invalid caller fields were not audited safely: calls=%d taskID=%q", reader.calls, reader.taskID)
+	if reader.calls != 0 || reader.auditCalls != 1 || !reader.auditPresent || !reader.auditCanonical {
+		t.Fatalf("invalid caller fields audit calls=(read:%d invalid:%d) shape=(%t,%t)",
+			reader.calls, reader.auditCalls, reader.auditPresent, reader.auditCanonical)
 	}
 }
 
@@ -119,8 +138,52 @@ func TestHandleReadPendingMoveRejectsTrailingJSON(t *testing.T) {
 		t.Fatalf("handleReadPendingMove: %v", err)
 	}
 	assertWSError(t, resp, PendingMoveInvalidArgumentCode)
-	if reader.calls != 1 || reader.taskID != "" {
-		t.Fatalf("trailing JSON was not audited safely: calls=%d taskID=%q", reader.calls, reader.taskID)
+	if reader.calls != 0 || reader.auditCalls != 1 || !reader.auditPresent || !reader.auditCanonical {
+		t.Fatalf("trailing JSON audit calls=(read:%d invalid:%d) shape=(%t,%t)",
+			reader.calls, reader.auditCalls, reader.auditPresent, reader.auditCanonical)
+	}
+}
+
+func TestHandleReadPendingMoveAuditsInvalidPayloadShape(t *testing.T) {
+	tests := map[string]struct {
+		payload   []byte
+		present   bool
+		canonical bool
+	}{
+		"malformed JSON": {
+			payload: []byte(`{"task_id":`),
+		},
+		"wrong task ID type": {
+			payload: []byte(`{"task_id":42}`),
+			present: true,
+		},
+		"canonical task ID with unknown field": {
+			payload:   []byte(`{"task_id":"33333333-3333-4333-8333-333333333333","caller_task_id":"forged"}`),
+			present:   true,
+			canonical: true,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			reader := &recordingPendingMoveReader{}
+			h := &Handlers{pendingMoveReader: reader, logger: testLogger(t)}
+			msg := &ws.Message{
+				ID: "test-id", Type: ws.MessageTypeRequest,
+				Action: ws.ActionMCPReadPendingMove, Payload: tc.payload,
+			}
+
+			resp, err := h.handleReadPendingMove(context.Background(), msg)
+			if err != nil {
+				t.Fatalf("handleReadPendingMove: %v", err)
+			}
+			assertWSError(t, resp, PendingMoveInvalidArgumentCode)
+			if reader.calls != 0 || reader.auditCalls != 1 ||
+				reader.auditPresent != tc.present || reader.auditCanonical != tc.canonical {
+				t.Fatalf("read calls=%d audit calls=%d shape=(%t,%t), want audit shape=(%t,%t)",
+					reader.calls, reader.auditCalls, reader.auditPresent, reader.auditCanonical,
+					tc.present, tc.canonical)
+			}
+		})
 	}
 }
 

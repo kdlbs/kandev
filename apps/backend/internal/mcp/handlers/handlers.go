@@ -224,6 +224,7 @@ type PendingMoveCanceller interface {
 // requires before calling it.
 type PendingMoveReader interface {
 	ReadPendingMove(context.Context, messagequeue.PendingMoveCancellationActor, string, string) (*messagequeue.PendingMoveCensusResult, error)
+	AuditInvalidPendingMoveCensus(context.Context, messagequeue.PendingMoveCancellationActor, string, bool, bool) error
 }
 
 // TaskTitleBranchRenamer performs the best-effort branch side effect after an

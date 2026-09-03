@@ -28,8 +28,10 @@ func (h *Handlers) handleReadPendingMove(ctx context.Context, msg *ws.Message) (
 	}
 	var req readPendingMoveRequest
 	if err := decodePendingMoveRequest(msg.Payload, &req); err != nil {
-		_, auditErr := h.pendingMoveReader.ReadPendingMove(ctx, actor, "", msg.ID)
-		if auditErr != nil {
+		present, canonical := pendingMoveReadRequestShape(msg.Payload)
+		if auditErr := h.pendingMoveReader.AuditInvalidPendingMoveCensus(
+			ctx, actor, msg.ID, present, canonical,
+		); auditErr != nil {
 			return pendingMoveReadError(msg, auditErr)
 		}
 		return ws.NewError(msg.ID, msg.Action, PendingMoveInvalidArgumentCode, pendingMoveInvalidArgumentMessage, nil)
@@ -39,6 +41,10 @@ func (h *Handlers) handleReadPendingMove(ctx context.Context, msg *ws.Message) (
 		return pendingMoveReadError(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+func pendingMoveReadRequestShape(payload []byte) (bool, bool) {
+	return canonicalPendingMoveRequestShape(payload, []string{"task_id"})
 }
 
 func pendingMoveReadError(msg *ws.Message, err error) (*ws.Message, error) {
