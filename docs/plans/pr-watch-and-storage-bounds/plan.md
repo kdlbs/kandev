@@ -86,7 +86,7 @@ Wave 2 (sequential, depends on stable event/storage contracts):
 
 Wave 3 (sequential, destructive operator surface depends on retention implementation):
 
-- [ ] [task-06-database-maintenance-command](task-06-database-maintenance-command.md)
+- [x] [task-06-database-maintenance-command](task-06-database-maintenance-command.md)
 - [ ] [task-07-operator-docs-load-validation](task-07-operator-docs-load-validation.md)
 
 No task is parallel-safe: the watch schema, projector/event semantics, storage representation, and maintenance command all share persistence and operation contracts.
