@@ -1094,6 +1094,18 @@ func TestDecodeKanbanPriorityFilterTokensDropsInvalidMembers(t *testing.T) {
 	}
 }
 
+// TestDecodeKanbanPriorityFilterTokensTrimsWhitespace verifies a legacy row with surrounding
+// whitespace around an otherwise-valid token is returned trimmed, not just validated as if
+// trimmed: the board compares tokens for exact equality, so an untrimmed member would validate
+// but then silently fail every downstream match.
+func TestDecodeKanbanPriorityFilterTokensTrimsWhitespace(t *testing.T) {
+	got := decodeKanbanPriorityFilterTokens(json.RawMessage(`[" critical","low "]`))
+	want := []string{"critical", "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decodeKanbanPriorityFilterTokens = %#v, want %#v", got, want)
+	}
+}
+
 // TestScanUserSettingsKanbanSortCorruptFallsBackToDefault verifies a corrupt kanban_sort value
 // falls back to the default while sibling fields still load.
 func TestScanUserSettingsKanbanSortCorruptFallsBackToDefault(t *testing.T) {

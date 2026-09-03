@@ -1106,8 +1106,9 @@ func decodeKanbanPriorityFilterTokens(raw json.RawMessage) []string {
 	}
 	valid := make([]string, 0, len(tokens))
 	for _, token := range tokens {
-		if models.IsValidKanbanPriorityFilterToken(token) {
-			valid = append(valid, token)
+		trimmed := strings.TrimSpace(token)
+		if models.IsValidKanbanPriorityFilterToken(trimmed) {
+			valid = append(valid, trimmed)
 		}
 	}
 	return valid

@@ -176,9 +176,17 @@ test.describe("Board priority sort and filter", () => {
     }
   });
 
-  test("AC-001.8: toggling the same token twice leaves the selection (and displayed set) unchanged", async ({
+  test("AC-001.8: a toggled-on selection persists across a dropdown close and reopen", async ({
     testPage,
   }) => {
+    // The control is a real toggle (checked -> click -> unchecked), so a
+    // second click on "high" here would clear it, not repeat the selection —
+    // that path is AC-001.8's own duplicate-free-normalization guarantee,
+    // already covered at the unit level by
+    // priority-filter-tokens.test.ts and TestNormalizeKanbanPriorityFilterTokens.
+    // This test verifies the UI-observable half of AC-001.8: a single
+    // selection survives a close/reopen of the display surface unchanged,
+    // rather than reverting or duplicating.
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -186,8 +194,6 @@ test.describe("Board priority sort and filter", () => {
     await expect(kanban.taskCardByTitle(TASK_HIGH)).toBeVisible({ timeout: VISIBLE_TIMEOUT });
     await expect(kanban.taskCardByTitle(TASK_CRITICAL)).not.toBeVisible();
 
-    // Re-selecting "high" a second time (without clearing) must not clear it —
-    // the checkbox is a toggle, so drive it back on explicitly first.
     await openDisplayDropdown(kanban);
     const option = kanban.page.getByTestId("display-priority-filter-option-high");
     await expect(option).toHaveAttribute("data-state", "checked");
