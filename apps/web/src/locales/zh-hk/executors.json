@@ -396,5 +396,6 @@
   "portableConfigTitle": "代理程式設定檔",
   "allowUserNamespacesTitle": "使用者命名空間支援",
   "allowUserNamespacesDescription": "允許在容器內建立無特權的使用者命名空間和執行掛載操作。啟用如 bwrap 的沙盒工具。",
-  "allowUserNamespacesNote": "此設定僅影響新建立的容器。現有任務環境必須重設才能使變更生效。"
+  "allowUserNamespacesNote": "此設定僅影響新建立的容器。現有任務環境必須重設才能使變更生效。",
+  "allowUserNamespacesWarning": "這會為選擇啟用的容器停用 Docker 預設的 AppArmor 限制。只應為需要使用者命名空間沙盒的可信代理執行環境啟用。"
 }

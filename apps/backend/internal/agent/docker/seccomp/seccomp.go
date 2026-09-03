@@ -62,6 +62,15 @@ var usernsRelaxedSyscalls = []string{
 	"unshare",
 }
 
+// These optional allow rules were added after older Docker/libseccomp
+// versions shipped. Omitting them keeps the tailored profile loadable on
+// those supported daemons while retaining Docker's default deny behavior.
+var legacyDaemonUnsupportedSyscalls = []string{
+	"futex_requeue",
+	"listxattrat",
+	"uretprobe",
+}
+
 // seccompRule models one entry in the "syscalls" array of a Docker seccomp
 // profile. It contains only the fields we need to inspect and mutate.
 type seccompRule struct {
@@ -125,39 +134,64 @@ func UsernsProfileJSON() (string, error) {
 func processSyscallRules(rules []json.RawMessage) ([]json.RawMessage, error) {
 	processed := make([]json.RawMessage, 0, len(rules))
 	for i, raw := range rules {
-		var rule seccompRule
-		if err := json.Unmarshal(raw, &rule); err != nil {
-			return nil, fmt.Errorf("seccomp: unmarshal rule %d: %w", i, err)
+		transformed, err := processSyscallRule(raw, i)
+		if err != nil {
+			return nil, err
 		}
-
-		// Drop SCMP_CMP_MASKED_EQ clone rule for non-CAP_SYS_ADMIN.
-		if ruleHasName(rule, "clone") && hasMaskedEqArg(rule) {
-			continue
-		}
-
-		// Drop clone3 ENOSYS fallback rule.
-		if ruleHasName(rule, "clone3") && rule.Action == seccompActionErrno {
-			continue
-		}
-
-		// CAP_SYS_ADMIN-gated group — split out namespace syscalls.
-		if rule.Action == seccompActionAllow && hasCap(rule, "CAP_SYS_ADMIN") {
-			var remaining []string
-			for _, name := range rule.Names {
-				if !slices.Contains(usernsRelaxedSyscalls, name) {
-					remaining = append(remaining, name)
-				}
-			}
-			if len(remaining) > 0 {
-				sort.Strings(remaining)
-				processed = append(processed, makeRule(remaining, seccompActionAllow, capInclude("CAP_SYS_ADMIN")))
-			}
-			continue
-		}
-
-		processed = append(processed, slices.Clone(raw))
+		processed = append(processed, transformed...)
 	}
 	return processed, nil
+}
+
+func processSyscallRule(raw json.RawMessage, index int) ([]json.RawMessage, error) {
+	var rule seccompRule
+	if err := json.Unmarshal(raw, &rule); err != nil {
+		return nil, fmt.Errorf("seccomp: unmarshal rule %d: %w", index, err)
+	}
+	if ruleHasName(rule, "clone") && hasMaskedEqArg(rule) {
+		return nil, nil
+	}
+	if ruleHasName(rule, "clone3") && rule.Action == seccompActionErrno {
+		return nil, nil
+	}
+	if rule.Action == seccompActionAllow && hasCap(rule, "CAP_SYS_ADMIN") {
+		remaining := filterSyscalls(rule.Names, usernsRelaxedSyscalls, legacyDaemonUnsupportedSyscalls)
+		if len(remaining) == 0 {
+			return nil, nil
+		}
+		sort.Strings(remaining)
+		return []json.RawMessage{makeRule(remaining, seccompActionAllow, capInclude("CAP_SYS_ADMIN"))}, nil
+	}
+	if rule.Action != seccompActionAllow {
+		return []json.RawMessage{slices.Clone(raw)}, nil
+	}
+	remaining := filterSyscalls(rule.Names, legacyDaemonUnsupportedSyscalls)
+	if len(remaining) == 0 {
+		return nil, nil
+	}
+	if len(remaining) == len(rule.Names) {
+		return []json.RawMessage{slices.Clone(raw)}, nil
+	}
+	rule.Names = remaining
+	updated, _ := json.Marshal(rule)
+	return []json.RawMessage{updated}, nil
+}
+
+func filterSyscalls(names []string, excluded ...[]string) []string {
+	remaining := make([]string, 0, len(names))
+	for _, name := range names {
+		blocked := false
+		for _, group := range excluded {
+			if slices.Contains(group, name) {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			remaining = append(remaining, name)
+		}
+	}
+	return remaining
 }
 
 // mergeUnconditionalAllow adds the namespace syscalls to the first

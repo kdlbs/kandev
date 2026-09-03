@@ -1,6 +1,8 @@
 package service
 
 import (
+	"time"
+
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -283,12 +285,13 @@ type CreateExecutorProfileRequest struct {
 
 // UpdateExecutorProfileRequest contains the data for updating an executor profile
 type UpdateExecutorProfileRequest struct {
-	Name          *string                `json:"name,omitempty"`
-	McpPolicy     *string                `json:"mcp_policy,omitempty"`
-	Config        map[string]string      `json:"config,omitempty"`
-	PrepareScript *string                `json:"prepare_script,omitempty"`
-	CleanupScript *string                `json:"cleanup_script,omitempty"`
-	EnvVars       []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	Name              *string                `json:"name,omitempty"`
+	McpPolicy         *string                `json:"mcp_policy,omitempty"`
+	Config            map[string]string      `json:"config,omitempty"`
+	PrepareScript     *string                `json:"prepare_script,omitempty"`
+	CleanupScript     *string                `json:"cleanup_script,omitempty"`
+	EnvVars           []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	ExpectedUpdatedAt *time.Time             `json:"-"`
 }
 
 // CreateEnvironmentRequest contains the data for creating an environment

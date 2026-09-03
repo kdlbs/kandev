@@ -396,5 +396,6 @@
   "portableConfigTitle": "智能体配置",
   "allowUserNamespacesTitle": "用户命名空间支持",
   "allowUserNamespacesDescription": "允许在容器内创建无特权的用户命名空间和执行挂载操作。启用类似 bwrap 的沙箱工具。",
-  "allowUserNamespacesNote": "此设置仅影响新创建的容器。现有任务环境必须重置才能使更改生效。"
+  "allowUserNamespacesNote": "此设置仅影响新创建的容器。现有任务环境必须重置才能使更改生效。",
+  "allowUserNamespacesWarning": "这会为选择启用的容器停用 Docker 默认的 AppArmor 限制。仅为需要用户命名空间沙箱的可信代理运行环境启用。"
 }

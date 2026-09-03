@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -157,6 +158,7 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 	if err := rejectOperatorConfigKeys(req.Config); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
+	var expectedUpdatedAt *time.Time
 	if req.Config != nil {
 		current, err := h.taskSvc.GetExecutorProfile(ctx, req.ProfileID)
 		if err != nil {
@@ -164,15 +166,17 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor profile: "+err.Error(), nil)
 		}
 		req.Config = preserveOperatorConfigKeys(req.Config, current.Config)
+		expectedUpdatedAt = &current.UpdatedAt
 	}
 
 	profile, err := h.taskSvc.UpdateExecutorProfile(ctx, req.ProfileID, &service.UpdateExecutorProfileRequest{
-		Name:          req.Name,
-		McpPolicy:     req.McpPolicy,
-		Config:        req.Config,
-		PrepareScript: req.PrepareScript,
-		CleanupScript: req.CleanupScript,
-		EnvVars:       req.EnvVars,
+		Name:              req.Name,
+		McpPolicy:         req.McpPolicy,
+		Config:            req.Config,
+		PrepareScript:     req.PrepareScript,
+		CleanupScript:     req.CleanupScript,
+		EnvVars:           req.EnvVars,
+		ExpectedUpdatedAt: expectedUpdatedAt,
 	})
 	if err != nil {
 		h.logger.Error("failed to update executor profile", zap.Error(err))

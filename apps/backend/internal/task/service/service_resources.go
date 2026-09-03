@@ -1809,8 +1809,14 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 		}
 		profile.EnvVars = req.EnvVars
 	}
-	if err := s.executors.UpdateExecutorProfile(ctx, profile); err != nil {
-		return nil, err
+	var updateErr error
+	if req.ExpectedUpdatedAt != nil {
+		updateErr = s.executors.UpdateExecutorProfileIfUnmodified(ctx, profile, *req.ExpectedUpdatedAt)
+	} else {
+		updateErr = s.executors.UpdateExecutorProfile(ctx, profile)
+	}
+	if updateErr != nil {
+		return nil, updateErr
 	}
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileUpdated, profile)
 	return profile, nil

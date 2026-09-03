@@ -16,6 +16,7 @@ test.describe("Docker executor user namespace sandbox", () => {
   test("enables bwrap user namespaces only for opted-in profiles", async ({
     apiClient,
     seedData,
+    gitConfigEnvVars,
   }) => {
     test.setTimeout(180_000);
     const { executors } = await apiClient.listExecutors();
@@ -25,6 +26,7 @@ test.describe("Docker executor user namespace sandbox", () => {
       apiClient.createExecutorProfile(executor!.id, {
         name: "User namespaces enabled",
         config: { image_tag: E2E_IMAGE_TAG, allow_user_namespaces: "true" },
+        env_vars: gitConfigEnvVars,
         prepare_script: "",
         cleanup_script: "",
         env_vars: [],
@@ -32,6 +34,7 @@ test.describe("Docker executor user namespace sandbox", () => {
       apiClient.createExecutorProfile(executor!.id, {
         name: "User namespaces disabled",
         config: { image_tag: E2E_IMAGE_TAG },
+        env_vars: gitConfigEnvVars,
         prepare_script: "",
         cleanup_script: "",
         env_vars: [],

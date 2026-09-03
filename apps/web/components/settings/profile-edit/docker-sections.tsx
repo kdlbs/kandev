@@ -458,6 +458,10 @@ export function UserNamespacesCard({
           <IconInfoCircle className="mt-0.5 h-4 w-4 shrink-0" />
           {t("executors:allowUserNamespacesNote")}
         </p>
+        <p className="mt-2 flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400">
+          <IconInfoCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {t("executors:allowUserNamespacesWarning")}
+        </p>
       </CardContent>
     </SettingsCard>
   );

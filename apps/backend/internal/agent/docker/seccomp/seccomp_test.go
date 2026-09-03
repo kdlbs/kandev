@@ -193,6 +193,20 @@ func TestUsernsProfile_DockerBlockedSyscalls_StayBlocked(t *testing.T) {
 	}
 }
 
+func TestUsernsProfile_OmitsSyscallsUnsupportedByLegacyDaemons(t *testing.T) {
+	profileJSON, err := UsernsProfileJSON()
+	if err != nil {
+		t.Fatalf("UsernsProfileJSON() returned error: %v", err)
+	}
+	for _, raw := range strings.Split(profileJSON, "\"") {
+		for _, syscall := range legacyDaemonUnsupportedSyscalls {
+			if raw == syscall {
+				t.Fatalf("profile contains syscall %q unsupported by legacy daemons", syscall)
+			}
+		}
+	}
+}
+
 func TestUsernsProfile_DefaultActionIsErrno(t *testing.T) {
 	profileJSON, err := UsernsProfileJSON()
 	if err != nil {

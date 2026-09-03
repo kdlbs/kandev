@@ -396,5 +396,6 @@
   "profileNameExample": "Production, Development",
   "allowUserNamespacesTitle": "User namespace support",
   "allowUserNamespacesDescription": "Allow unprivileged user namespace creation and mount operations inside containers. Enables sandboxing tools like bwrap.",
-  "allowUserNamespacesNote": "This setting only affects newly created containers. Existing task environments must be reset for the change to take effect."
+  "allowUserNamespacesNote": "This setting only affects newly created containers. Existing task environments must be reset for the change to take effect.",
+  "allowUserNamespacesWarning": "This disables Docker's default AppArmor restrictions for opted-in containers. Enable it only for trusted agent runtimes that need user-namespace sandboxing."
 }
