@@ -3,6 +3,7 @@ import {
   attachTaskWorkspaceSources,
   detachTask,
   listTasksByWorkspace,
+  moveTask,
   updateTaskPortForwarding,
 } from "./kanban-api";
 
@@ -131,6 +132,75 @@ describe("listTasksByWorkspace", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect(fetchSpy.mock.calls[0][0]).toBe(
       `${API_BASE_URL}/api/v1/workspaces/ws-1/tasks?page=2&page_size=100&only_archived=true&sort=updated_desc`,
+    );
+  });
+});
+
+describe("moveTask", () => {
+  const workflowId = "workflow-1";
+  const workflowStepId = "step-2";
+
+  it("normalizes one-shot entry options and omits blank values", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ task: { id: "task-1" }, workflow_step: { id: workflowStepId } }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await moveTask(
+      "task-1",
+      {
+        workflow_id: workflowId,
+        workflow_step_id: workflowStepId,
+        position: 0,
+        entry_options: {
+          reset_context: true,
+          instructions: "  Start the verification pass.  ",
+          skip_step_prompt: true,
+        },
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(init?.body).toBe(
+      JSON.stringify({
+        workflow_id: workflowId,
+        workflow_step_id: workflowStepId,
+        position: 0,
+        entry_options: {
+          reset_context: true,
+          skip_step_prompt: true,
+          instructions: "Start the verification pass.",
+        },
+      }),
+    );
+  });
+
+  it("keeps destination-only move payloads unchanged", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ task: { id: "task-1" }, workflow_step: { id: workflowStepId } }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await moveTask(
+      "task-1",
+      { workflow_id: workflowId, workflow_step_id: workflowStepId, position: 0 },
+      { baseUrl: API_BASE_URL },
+    );
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(init?.body).toBe(
+      JSON.stringify({ workflow_id: workflowId, workflow_step_id: workflowStepId, position: 0 }),
     );
   });
 });

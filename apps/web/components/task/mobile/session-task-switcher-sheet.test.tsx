@@ -6,6 +6,7 @@ import {
   MobileTaskList,
   useTaskSheetSelectionController,
 } from "@/components/task/mobile/session-task-switcher-sheet";
+import type { MobileTaskListProps } from "@/components/task/mobile/session-task-switcher-sheet";
 import { selectTaskFromSheet } from "@/components/task/mobile/session-task-switcher-sheet-selection";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import type { TaskSession } from "@/lib/types/http";
@@ -162,6 +163,53 @@ describe("MobileTaskList", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
 
     expect(onEditTask).toHaveBeenCalledWith(editableTask);
+  });
+});
+
+describe("MobileTaskList move options", () => {
+  it("hands move options to the owning mobile task surface", async () => {
+    const onRequestMoveOptions = vi.fn();
+    const props: MobileTaskListProps = {
+      tasks: [task("movable")],
+      workflows: [{ id: "workflow-1", name: "Workflow" }],
+      stepsByWorkflowId: {
+        "workflow-1": [
+          { id: "step-1", title: "Build" },
+          { id: "step-2", title: "Review" },
+        ],
+      },
+      activeTaskId: null,
+      selectedTaskId: null,
+      onSelectTask: vi.fn(),
+      onArchiveTask: vi.fn(),
+      onDeleteTask: vi.fn(),
+      onDetachTask: vi.fn(),
+      deletingTaskId: null,
+      onRequestMoveOptions,
+    };
+
+    render(
+      <ToastProvider>
+        <MobileTaskList {...props} />
+      </ToastProvider>,
+    );
+
+    const row = screen
+      .getByText("Task movable")
+      .closest<HTMLElement>("[data-testid='sidebar-task-item']");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row!).getByRole("button", { name: "Task actions" }));
+    const moveTo = await screen.findByTestId("task-context-move-to");
+    fireEvent.pointerMove(moveTo, { pointerType: "mouse" });
+    const step = await screen.findByTestId("task-context-step-step-2");
+    fireEvent.pointerMove(step, {
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByTestId("task-context-step-options-step-2"));
+
+    expect(onRequestMoveOptions).toHaveBeenCalledOnce();
+    expect(onRequestMoveOptions).toHaveBeenCalledWith("movable", "workflow-1", "step-2");
+    expect(screen.queryByTestId("workflow-move-options")).toBeNull();
   });
 });
 
