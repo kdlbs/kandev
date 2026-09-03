@@ -174,6 +174,39 @@ describe("useEnsureTaskSession", () => {
   });
 });
 
+describe("useEnsureTaskSession failed gate changes", () => {
+  beforeEach(resetEnsureTaskSessionMocks);
+
+  it("keeps a failed ensure latched when the final-step gate changes", async () => {
+    mockStoreState = {
+      userSettings: { preventAutoStartAgentOnOpen: true },
+      kanban: {
+        workflowId: "wf-active",
+        steps: [
+          { id: "step-1", position: 0 },
+          { id: "step-done", position: 1 },
+        ],
+        isLoading: false,
+      },
+      kanbanMulti: { snapshots: {} },
+    };
+    mockEnsureTaskSession.mockRejectedValue(new Error("workspace is not attachable"));
+    const { rerender } = renderHook(() =>
+      useEnsureTaskSession({ id: "task-1", workflowStepId: "step-1", workflowId: "wf-active" }),
+    );
+
+    await flushMicrotasks();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", undefined);
+
+    mockStoreState.kanban.steps = [{ id: "step-1", position: 0 }];
+    rerender();
+    await flushMicrotasks();
+
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("useEnsureTaskSession — task changes", () => {
   beforeEach(resetEnsureTaskSessionMocks);
 

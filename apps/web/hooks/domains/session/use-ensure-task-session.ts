@@ -186,7 +186,7 @@ export function useEnsureTaskSession(
     // branch does NOT latch, so a later steps hydration re-runs the effect
     // with the correct isFinalStep value (fixes late-hydration auto-start).
     if (preventAutoStart && !stepsKnown) return;
-    const key = `${taskId}:${retryToken}:${isFinalStep ? "gated" : "plain"}`;
+    const key = `${taskId}:${retryToken}`;
     if (launchedKeyRef.current === key) return;
     launchedKeyRef.current = key;
 
