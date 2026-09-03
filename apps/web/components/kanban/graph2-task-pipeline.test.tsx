@@ -467,6 +467,25 @@ describe("Graph2TaskPipeline — plugin card slots on the row (AC-UI-PIPELINE-RO
       pluginRegistry.unregisterPlugin(PLUGIN_ID);
     }
   });
+
+  it("bounds task-card-tags to a fixed lane so an arbitrary-width contribution can't push the step run off its column", () => {
+    const PLUGIN_ID = "kandev-plugin-wide-tags-fixture";
+    function WideTag() {
+      return <span data-testid="row-wide-tag">A tag with a genuinely long label</span>;
+    }
+    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent("task-card-tags", WideTag);
+
+    try {
+      renderPipeline(makeTask("step-2"), STEPS);
+
+      const lane = screen.getByTestId("pipeline-row-tags-lane");
+      expect(lane.className).toContain("max-w-[120px]");
+      expect(lane.className).toContain("overflow-hidden");
+      expect(lane.contains(screen.getByTestId("row-wide-tag"))).toBe(true);
+    } finally {
+      pluginRegistry.unregisterPlugin(PLUGIN_ID);
+    }
+  });
 });
 
 describe("Graph2TaskPipeline — multi-select mode hides the actions cluster (AC-UI-PIPELINE-ROW-002.8)", () => {

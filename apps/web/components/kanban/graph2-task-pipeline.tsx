@@ -257,7 +257,22 @@ function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<H
       <MRTaskIcon taskId={task.id} />
       <RegisteredChangeRequestTaskIcon taskId={task.id} />
       <TaskCardIndicators task={task} />
-      <TaskCardTags task={task} />
+      {/* task-card-tags is contractually spacious (its own row on the Kanban
+          card), but this row has no spare row to give it — cap the lane so
+          an arbitrary-width plugin contribution can't push the step tracker
+          off its column. A hidden-scrollbar scroll region here would be a
+          second, undiscoverable nested scroll surface inside the row's own
+          scroll behavior, so this is a static preview instead: clipped, with
+          a soft edge fade so a genuine overflow reads as "more exists" (open
+          the task or the Kanban card for the full row) rather than a hard
+          cut. The fade sits over blank space and is invisible whenever the
+          content already fits inside the cap. */}
+      <div
+        data-testid="pipeline-row-tags-lane"
+        className="shrink-0 max-w-[120px] overflow-hidden [mask-image:linear-gradient(to_right,black_calc(100%-14px),transparent)]"
+      >
+        <TaskCardTags task={task} />
+      </div>
       <KanbanCardBadges task={task} />
       {renderSubagentCountChip(
         task,
