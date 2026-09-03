@@ -32,7 +32,12 @@ const HEALTH_POLL_MS = 250;
  * release. See apps/web/e2e/README.md.
  */
 function isContainerProjectActive(projectName: string): boolean {
-  if (projectName === "containers" || projectName === "docker") return true;
+  if (
+    projectName === "containers" ||
+    projectName === "kubernetes-compat" ||
+    projectName === "docker"
+  )
+    return true;
   if (process.env.KANDEV_E2E_CONTAINERS === "1") return true;
   if (process.env.KANDEV_E2E_DOCKER === "1") return true;
   return false;
@@ -44,6 +49,8 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
+  /** Current backend PID, exposed for process-owned socket assertions. */
+  pid: () => number | undefined;
   /**
    * Kill the backend process and respawn with the same config (DB, ports,
    * tmpDir persist). The captured env is rebuilt from the baseline snapshot
@@ -531,6 +538,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendPort,
           frontendUrl,
           tmpDir,
+          pid: () => backendProc?.pid,
           restart,
           ensureReady,
           useEnv,

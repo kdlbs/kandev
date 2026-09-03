@@ -61,6 +61,10 @@ export type MessageListProps = {
    * to the top of the transcript (e.g. the unread "New" divider) reserve
    * room for the overlay instead of being covered by it. */
   anchoredBarHeight?: number;
+  /** Whether the host panel is actually visible. Persistent Dockview panels
+   * remain mounted while inactive and use this transition to recover missed
+   * oldest-page sentinel observations. */
+  isVisible?: boolean;
 };
 
 /** Imperative handle exposed by `MessageList`, letting the chat panel scroll

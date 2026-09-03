@@ -175,21 +175,34 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 	if strings.EqualFold(opts.Sort, "desc") {
 		sortDir = "DESC"
 	}
-	cursor, err := r.resolveMessageCursor(ctx, sessionID, opts)
+	var (
+		cursor *models.Message
+		err    error
+	)
+	if opts.Around != "" {
+		cursor, err = r.resolveAroundTarget(ctx, sessionID, opts.Around)
+	} else {
+		cursor, err = r.resolveMessageCursor(ctx, sessionID, opts)
+	}
 	if err != nil {
 		return nil, false, err
 	}
-	// The outer cursor bound is the cursor row's normalized-microsecond key,
-	// derived through the same SQL expression the per-row key uses — never a
-	// driver-parsed Go time.Time (mattn/go-sqlite3 serializes time.Time as
-	// RFC3339Nano, which mis-compares lexicographically against the
-	// space-separated per-row expression and silently shifts page boundaries).
+	if cursor != nil && opts.AuthorType == string(models.MessageAuthorUser) &&
+		cursor.AuthorType != models.MessageAuthorUser {
+		return nil, false, fmt.Errorf("message cursor not found: %s", cursor.ID)
+	}
 	var cursorKey string
 	if cursor != nil {
 		cursorKey, err = r.messageCursorKey(ctx, cursor.ID)
 		if err != nil {
+			if opts.Around != "" && errors.Is(err, sql.ErrNoRows) {
+				return nil, false, fmt.Errorf("%w: %s", ErrMessageNotFound, cursor.ID)
+			}
 			return nil, false, err
 		}
+	}
+	if opts.Around != "" {
+		return r.listMessagesAround(ctx, sessionID, cursor, cursorKey, limit)
 	}
 	query, args := buildListMessagesQuery(r.ro.DriverName(), sessionID, opts, cursor, cursorKey, sortDir, limit)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
@@ -319,6 +332,61 @@ func (r *Repository) resolveMessageCursor(ctx context.Context, sessionID string,
 	return nil, nil
 }
 
+// resolveAroundTarget validates and loads the target message for an around-window read.
+func (r *Repository) resolveAroundTarget(ctx context.Context, sessionID, id string) (*models.Message, error) {
+	target, err := r.GetMessage(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrMessageNotFound, id)
+		}
+		return nil, err
+	}
+	if target.TaskSessionID != sessionID {
+		return nil, fmt.Errorf("%w: %s", ErrMessageNotFound, id)
+	}
+	return target, nil
+}
+
+// listMessagesAround returns the target and newer messages in newest-first order,
+// along with whether the bounded window was truncated.
+func (r *Repository) listMessagesAround(
+	ctx context.Context,
+	sessionID string,
+	target *models.Message,
+	targetKey string,
+	limit int,
+) ([]*models.Message, bool, error) {
+	nm := dialect.NormalizedMicrosecond(r.ro.DriverName(), "created_at")
+	bound := "?"
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		bound = "CAST(? AS timestamp)"
+	}
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at,
+		       CASE WHEN author_type = 'user' THEN prompt_seq ELSE 0 END AS prompt_index
+		FROM task_session_messages
+		WHERE task_session_id = ? AND (%s > %s OR (%s = %s AND id >= ?))
+		ORDER BY %s ASC, id ASC`, nm, bound, nm, bound, nm)
+	args := []interface{}{sessionID, targetKey, targetKey, target.ID}
+	if limit > 0 {
+		query += sqlLimitClause
+		args = append(args, limit+1)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	messages, hasMore, err := scanPromptIndexedMessageRows(rows, limit)
+	if err != nil {
+		return nil, false, err
+	}
+	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
+		messages[left], messages[right] = messages[right], messages[left]
+	}
+	return messages, hasMore, nil
+}
+
 // buildListMessagesQuery assembles the paginated message list query and bound arguments, ordering rows by the normalized-microsecond key with cursor and limit bounds.
 func buildListMessagesQuery(driverName, sessionID string, opts models.ListMessagesOptions, cursor *models.Message, cursorKey string, sortDir string, limit int) (string, []interface{}) {
 	nm := dialect.NormalizedMicrosecond(driverName, "created_at")
@@ -343,6 +411,10 @@ func buildListMessagesQuery(driverName, sessionID string, opts models.ListMessag
 		FROM task_session_messages
 		WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
+	if opts.AuthorType != "" {
+		query += " AND author_type = ?"
+		args = append(args, opts.AuthorType)
+	}
 	if cursor != nil {
 		if opts.Before != "" {
 			query += fmt.Sprintf(" AND (%s < %s OR (%s = %s AND id < ?))", nm, bound, nm, bound)

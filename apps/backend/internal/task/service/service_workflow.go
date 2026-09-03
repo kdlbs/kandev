@@ -873,7 +873,9 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
 	candidate.Position = position
-	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+	candidate.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{
+		"from_step_id": fromStepID,
+	}
 	if err := s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep); err != nil {
 		s.logger.Warn("failed to prepare same-step queued promotion", zap.String("task_id", candidate.ID), zap.Error(err))
 		skipped[candidate.ID] = struct{}{}
@@ -938,7 +940,9 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
-	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+	candidate.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{
+		"from_step_id": fromStepID,
+	}
 	candidate.Position = position
 	candidate.WorkflowID = targetStep.WorkflowID
 	candidate.WorkflowStepID = targetStep.ID

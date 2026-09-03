@@ -12,9 +12,10 @@ import (
 )
 
 type captureExecutorRunningWriter struct {
-	prior     *models.ExecutorRunning
-	running   *models.ExecutorRunning
-	upsertErr error
+	prior       *models.ExecutorRunning
+	running     *models.ExecutorRunning
+	upsertErr   error
+	deleteCalls int
 }
 
 func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
@@ -32,6 +33,7 @@ func (w *captureExecutorRunningWriter) UpsertExecutorRunning(_ context.Context, 
 }
 
 func (w *captureExecutorRunningWriter) DeleteExecutorRunningBySessionID(_ context.Context, _ string) error {
+	w.deleteCalls++
 	return nil
 }
 
@@ -64,6 +66,28 @@ func TestBuildRunningFromExecutionPersistsLiveAgentctlEndpoint(t *testing.T) {
 	}
 	if running.LastSeenAt == nil {
 		t.Fatal("LastSeenAt = nil, want live endpoint observation timestamp")
+	}
+}
+
+func TestBuildRunningFromExecutionPersistsFreshExecutorIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		metadata: map[string]interface{}{"executor_id": "  executor-1  "},
+	}, nil)
+
+	if running.ExecutorID != "executor-1" {
+		t.Fatalf("ExecutorID = %q, want executor-1", running.ExecutorID)
+	}
+}
+
+func TestBuildRunningFromExecutionPreservesPriorExecutorIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-2", TaskID: "task-1", SessionID: "session-1",
+		metadata: map[string]interface{}{"executor_id": "hostile-replacement"},
+	}, &models.ExecutorRunning{ExecutorID: "recorded-executor"})
+
+	if running.ExecutorID != "recorded-executor" {
+		t.Fatalf("ExecutorID = %q, want recorded-executor", running.ExecutorID)
 	}
 }
 

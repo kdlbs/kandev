@@ -33,7 +33,7 @@ import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import { buildBranchKeywords } from "./task-create-dialog-branch-options";
+import { buildBranchKeywords } from "./branch-picker-options";
 import {
   ensureAgentProfileRecentUseLoaded,
   orderAgentProfilesByRecentUse,

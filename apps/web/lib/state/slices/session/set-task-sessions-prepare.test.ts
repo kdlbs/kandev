@@ -44,7 +44,7 @@ describe("setTaskSessionsForTask prepare backfill", () => {
       },
     });
 
-    store.getState().setTaskSessionsForTask(TASK_ID, [session]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [session], {});
 
     const prepare = store.getState().prepareProgress.bySessionId["s1"];
     expect(prepare).toBeDefined();
@@ -54,7 +54,7 @@ describe("setTaskSessionsForTask prepare backfill", () => {
 
   it("does not create an entry for sessions without prepare_result", () => {
     const store = makeStore();
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession("s1")]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession("s1")], {});
     expect(store.getState().prepareProgress.bySessionId["s1"]).toBeUndefined();
   });
 
@@ -69,11 +69,15 @@ describe("setTaskSessionsForTask prepare backfill", () => {
       };
     });
 
-    store.getState().setTaskSessionsForTask(TASK_ID, [
-      makeSession("s1", {
-        prepare_result: { status: "completed", steps: [] },
-      }),
-    ]);
+    store.getState().setTaskSessionsForTask(
+      TASK_ID,
+      [
+        makeSession("s1", {
+          prepare_result: { status: "completed", steps: [] },
+        }),
+      ],
+      {},
+    );
 
     // Existing (live) entry is preserved, not overwritten by stale metadata.
     expect(store.getState().prepareProgress.bySessionId["s1"].status).toBe("running");

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agent/planinjection"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -372,8 +373,24 @@ func (s *Service) addDynamicPlan(ctx context.Context, taskID string, input *dyna
 		}
 		return fmt.Errorf("load plan for dynamic continuation: %w", err)
 	}
-	if plan != nil {
-		input.PlanSummary = strings.TrimSpace(plan.Title + "\n" + plan.Content)
+	if plan == nil {
+		return nil
+	}
+
+	composed := strings.TrimSpace(plan.Title + "\n" + plan.Content)
+	// ContainTags is not called here: PlanSummary lands in the plain-text
+	// continuation package (ContinuationPrompt), not in a <kandev-system>
+	// block. If that ever changes, add ContainTags(composed) before Reduce.
+	reducedPlan, reduced, omitted := planinjection.Reduce(composed, planinjection.DynamicBudget)
+	input.PlanSummary = reducedPlan
+	if reduced {
+		s.logger.Info("reducing dynamic continuation plan",
+			zap.String("site", "dynamic_continuation"),
+			zap.String("task_id", taskID),
+			zap.Int("plan_input_bytes", len(composed)),
+			zap.Int("plan_output_bytes", len(reducedPlan)),
+			zap.Int("plan_sections_omitted", omitted),
+		)
 	}
 	return nil
 }

@@ -231,6 +231,10 @@ export class KanbanPage {
     return this.page.getByTestId(`pipeline-task-repo-${taskId}`);
   }
 
+  pipelineTaskActionsTrigger(taskId: string): Locator {
+    return this.page.getByTestId(`pipeline-task-actions-trigger-${taskId}`);
+  }
+
   async switchToPipelineView() {
     await this.viewTogglePipeline.first().click();
     // Wait for a pipeline-specific element — swimlane-container is shared with the kanban view.

@@ -28,13 +28,32 @@ export type TaskDetachConfirmationCopyProps = {
 function TaskDetachDescription({
   taskTitle,
   sharesParentWorkspace,
-}: TaskDetachConfirmationCopyProps): ReactNode {
+  structured = false,
+}: TaskDetachConfirmationCopyProps & { structured?: boolean }): ReactNode {
   const { t } = useTranslation();
+  const title = taskTitle || t("task:thisTask2");
+
+  if (structured) {
+    return (
+      <>
+        <p className="break-words">
+          {t("task:detachWillBecomeTopLevel", {
+            taskTitle: title,
+          })}
+        </p>
+        <p>{t("task:detachingChangesTheHierarchyOnlyAccess")}</p>
+        {sharesParentWorkspace && (
+          <p className="font-medium text-foreground">{t("task:thisTaskSharesItsParentS")}</p>
+        )}
+      </>
+    );
+  }
+
   return (
     <span className="block space-y-2">
       <span className="block">
         {t("task:detachWillBecomeTopLevel", {
-          taskTitle: taskTitle || t("task:thisTask2"),
+          taskTitle: title,
         })}
       </span>
       <span className="block">{t("task:detachingChangesTheHierarchyOnlyAccess")}</span>
@@ -208,10 +227,11 @@ export function TaskDetachConfirmDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{t(DETACH_TASK_FROM_PARENT_KEY)}</AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div>
+            <div className="min-w-0 space-y-2 text-left">
               <TaskDetachDescription
                 taskTitle={taskTitle}
                 sharesParentWorkspace={sharesParentWorkspace}
+                structured
               />
             </div>
           </AlertDialogDescription>
