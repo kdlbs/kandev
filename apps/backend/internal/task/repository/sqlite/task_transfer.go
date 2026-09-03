@@ -535,7 +535,10 @@ func (r *Repository) validateTransferInvariants(
 		return err
 	}
 	if placement.ProjectID != "" {
-		return fmt.Errorf("%w: source task is project-bound", repoerrors.ErrTaskTransferConflict)
+		return fmt.Errorf(
+			"%w: source task is project-bound; cross-workspace transfer requires resolving project membership first",
+			repoerrors.ErrTaskTransferConflict,
+		)
 	}
 	if err := r.validateTransferCleanup(ctx, tx, taskID); err != nil {
 		return err
