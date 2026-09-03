@@ -787,6 +787,14 @@ func registerRoutes(p routeParams) {
 	if p.services.Office != nil {
 		p.services.Office.SetWorkspaceGroupCleaner(handoffSvc)
 	}
+	// Config sync's own tables (office_config_sync_configs,
+	// office_config_sync_manifest) have no FK/cascade onto the workspace
+	// row, so DeleteWorkspace must release them explicitly or the poller
+	// keeps running against — and resurrecting entities into — a deleted
+	// workspace (see the "Workspace deletion side tables" convention).
+	if p.services.Office != nil && p.services.OfficeSvcs != nil && p.services.OfficeSvcs.ConfigSync != nil {
+		p.services.Office.SetConfigSyncCleaner(p.services.OfficeSvcs.ConfigSync)
+	}
 	// Cascade archive/delete must tear down runtime resources
 	// (container, sandbox, worktree, executor_running rows) for every
 	// task in the tree. Without this wiring the agent gets stopped via

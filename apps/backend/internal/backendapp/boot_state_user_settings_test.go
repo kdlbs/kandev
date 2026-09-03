@@ -185,6 +185,19 @@ func TestMapUserSettingsStateNormalizesLastSeenDisplay(t *testing.T) {
 	}
 }
 
+// TestMapUserSettingsStateIncludesDefaultUtilityAgentProfileID verifies boot state carries the
+// default utility agent profile id, the field the Settings UI actually writes.
+func TestMapUserSettingsStateIncludesDefaultUtilityAgentProfileID(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{DefaultUtilityAgentProfileID: "profile-1"},
+	}, "workspace-1")
+
+	got, ok := state["defaultUtilityAgentProfileId"].(string)
+	if !ok || got != "profile-1" {
+		t.Fatalf("defaultUtilityAgentProfileId = %#v, want profile-1", state["defaultUtilityAgentProfileId"])
+	}
+}
+
 // TestMapUserSettingsStateIncludesSystemMetricsDisplayPreference verifies boot state carries the system metrics display preference.
 func TestMapUserSettingsStateIncludesSystemMetricsDisplayPreference(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
