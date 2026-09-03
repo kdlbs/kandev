@@ -60,7 +60,10 @@ receipts expose only a path hash.
 idempotency table. The repair transaction locks and rechecks the source rows,
 uses their expected revisions, writes exactly one environment-repository row,
 and appends one receipt. A unique `(task_id, idempotency_key)` identity returns
-the receipt when its request hash matches and conflicts otherwise.
+the receipt when its request hash matches and conflicts otherwise. The task is
+the receipt's lifecycle owner; session and environment identifiers remain
+immutable audit facts rather than cascading foreign keys, so routine lifecycle
+deletion and the legacy environment-ownership cutover cannot erase receipts.
 
 A same-idempotency-key retry is resolved before candidate selection runs:
 the executor looks up an existing receipt for `(task_id, idempotency_key)`

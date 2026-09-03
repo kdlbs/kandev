@@ -76,9 +76,7 @@ const workspaceInventoryRecoverySchemaDDL = `
 		post_repair_verified_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		UNIQUE(task_id, idempotency_key),
-		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
-		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment

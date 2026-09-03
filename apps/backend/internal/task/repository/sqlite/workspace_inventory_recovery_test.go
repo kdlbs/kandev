@@ -115,6 +115,48 @@ func TestRepairWorkspaceInventoryInsertsMissingRowAndReceipt(t *testing.T) {
 	}
 }
 
+func TestWorkspaceInventoryRecoveryReceiptSurvivesSessionAndEnvironmentDeletion(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx,
+		`DELETE FROM task_environment_repos WHERE id = ?`, "environment-repository-recovery",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := repo.RepairWorkspaceInventory(ctx, &models.WorkspaceInventoryRepair{
+		TaskID: "task-recovery", WorkspaceID: "workspace-recovery", SessionID: "session-recovery",
+		TaskEnvironmentID: env.ID, TaskRepositoryID: taskRepo.ID, RepositoryID: taskRepo.RepositoryID,
+		EnvironmentRepoID: "environment-repository-repaired", BranchSlug: "main",
+		WorktreeID: "worktree-recovery", WorktreePath: "/synthetic/worktree",
+		WorktreeBranch: "feature/recovery", Position: 0,
+		IdempotencyKey: "preserve-audit", RequestHash: "preserve-audit-request",
+		ExpectedEnvironmentUpdatedAt: env.UpdatedAt,
+		ExpectedTaskRepositoryUpdate: taskRepo.UpdatedAt,
+	})
+	if err != nil {
+		t.Fatalf("RepairWorkspaceInventory: %v", err)
+	}
+
+	if _, err := repo.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-recovery"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.ExecContext(ctx, `DELETE FROM task_environments WHERE id = ?`, env.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := repo.db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM workspace_inventory_recovery_receipts WHERE id = ?`, receipt.ID,
+	).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("receipt count after session and environment deletion = %d, want 1", count)
+	}
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
 func TestRepairWorkspaceInventoryCorrectsOnlyTheProvenStaleSlot(t *testing.T) {
 	repo := newRepoForEntityTests(t)
