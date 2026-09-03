@@ -39,7 +39,7 @@ same capability and state on desktop and mobile and document the durable root.
 
 ## Out of scope
 
-- Blocking profile save.
+- Remote launch admission (implemented by Task 05).
 - Creating Coder mounts.
 
 ## Acceptance
@@ -94,4 +94,5 @@ node --test scripts/validate-public-docs.test.mjs && node scripts/validate-publi
 Implemented the stamped `rehome_fresh` action on the existing task launch-error
 card for desktop and mobile. Added the always-visible SSH durable-root warning,
 with Coder called out explicitly, localized interpolation for the example path,
-and public operator guidance.
+and public operator guidance. Task 05 subsequently made detected Coder launch
+admission enforceable while retaining this early configuration warning.

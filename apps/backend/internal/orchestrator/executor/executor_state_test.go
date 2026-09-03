@@ -87,6 +87,13 @@ func TestResolveExecutorConfig_AuthoritativeSSHKeys_ClobberTaskMetadata(t *testi
 			taskValue:    "bash --norc",
 			wantMetadata: "",
 		},
+		{
+			name:         "workdir_policy_profile_wins",
+			key:          lifecycle.MetadataKeySSHWorkdirPolicy,
+			profileValue: "durable",
+			taskValue:    "allow_ephemeral",
+			wantMetadata: "durable",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

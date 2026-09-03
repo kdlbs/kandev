@@ -248,8 +248,10 @@ func TestSSHExecutorCloseSSHClientFallsBackToTheRealClose(t *testing.T) {
 type sshLaunchHarness struct {
 	server     *fakeSSHServer
 	remoteHome string
+	coder      bool
 	// createRequests captures each create-instance body the control server saw.
 	createRequests []string
+	commands       []string
 	handshakes     int
 	mu             sync.Mutex
 }
@@ -284,7 +286,15 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 	}
 
 	h.server = newFakeSSHServer(t, func(command, _ string) sshExecResult {
+		h.mu.Lock()
+		h.commands = append(h.commands, command)
+		h.mu.Unlock()
 		switch {
+		case strings.Contains(command, "CODER_WORKSPACE_NAME"):
+			if h.coder {
+				return sshOut("coder\n")
+			}
+			return sshOut("other\n")
 		case command == "uname -a":
 			return sshOut("Linux remote 6.1.0\n")
 		case command == "uname -m":
@@ -315,10 +325,44 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 	return h
 }
 
+func TestSSHExecutorRejectsCoderLaunchWithoutDurableWorkdirPolicy(t *testing.T) {
+	harness := newSSHLaunchHarness(t, "4242")
+	harness.coder = true
+	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
+	t.Cleanup(func() { _ = exec.Close() })
+
+	metadata := sshConnectionMetadata(t, harness.server)
+	metadata[MetadataKeySSHWorkdirRoot] = "/opt/coder/.kandev"
+	_, err := exec.CreateInstance(context.Background(), &ExecutorCreateRequest{
+		InstanceID: "instance-coder-unsafe",
+		TaskID:     "task-coder-unsafe",
+		SessionID:  "session-coder-unsafe",
+		Protocol:   "acp",
+		Metadata:   metadata,
+	})
+	if err == nil || !strings.Contains(err.Error(), "ssh_workdir_policy") {
+		t.Fatalf("CreateInstance error = %v, want actionable Coder workdir policy error", err)
+	}
+	if got := harness.createInstanceBodies(); len(got) != 0 {
+		t.Fatalf("agent controller started before Coder workdir validation: %v", got)
+	}
+	for _, command := range harness.remoteCommands() {
+		if command == "uname -a" || strings.Contains(command, "mkdir -p") {
+			t.Fatalf("task preparation ran before Coder workdir validation: %q", command)
+		}
+	}
+}
+
 func (h *sshLaunchHarness) createInstanceBodies() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]string(nil), h.createRequests...)
+}
+
+func (h *sshLaunchHarness) remoteCommands() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.commands...)
 }
 
 func TestSSHExecutorCreateInstanceProvisionsAndTracksTheSession(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -110,6 +111,64 @@ func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *A
 // remote mkdir, git clone, sha256 checks, and the like.
 func runSSHCommand(ctx context.Context, client *ssh.Client, cmd string) (stdout, stderr string, err error) {
 	return runSSHCommandStdin(ctx, client, cmd, nil)
+}
+
+const coderEnvironmentProbe = `if test -n "${CODER_WORKSPACE_NAME:-}" || test -n "${CODER_AGENT_URL:-}" || test "${CODER:-}" = "true"; then printf 'coder\n'; else printf 'other\n'; fi`
+
+func validateCoderWorkdirPolicy(ctx context.Context, client *ssh.Client, metadata map[string]interface{}) error {
+	out, _, err := runSSHCommand(ctx, client, coderEnvironmentProbe)
+	if err != nil {
+		return fmt.Errorf("ssh: detect Coder environment: %w", err)
+	}
+	if strings.TrimSpace(out) != "coder" {
+		return nil
+	}
+	policy := strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHWorkdirPolicy))
+	if policy != "durable" && policy != "allow_ephemeral" {
+		return fmt.Errorf("coder SSH launch blocked before agent start: configure ssh_workdir_root on a durable mounted path and set ssh_workdir_policy=durable; ssh_workdir_policy=allow_ephemeral is an explicit data-loss-risk escape hatch")
+	}
+	root, err := expandRemoteHome(ctx, client, strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHWorkdirRoot)))
+	if err != nil {
+		return fmt.Errorf("coder SSH workdir validation failed: %w", err)
+	}
+	root = pathpkg.Clean(root)
+	if !pathpkg.IsAbs(root) || root == "/" {
+		return fmt.Errorf("coder SSH launch blocked before agent start: ssh_workdir_root %q is unsafe; choose a dedicated absolute mounted directory such as /work/.kandev", root)
+	}
+	home, err := expandRemoteHome(ctx, client, "~")
+	if err != nil {
+		return fmt.Errorf("coder SSH workdir validation failed: %w", err)
+	}
+	if isKnownEphemeralCoderRoot(root, home) && policy != "allow_ephemeral" {
+		return fmt.Errorf("coder SSH launch blocked before agent start: ssh_workdir_root %q is known ephemeral; use a durable mounted root such as /work/.kandev, or explicitly accept data-loss risk with ssh_workdir_policy=allow_ephemeral", root)
+	}
+	return probeCoderWorkdirRoot(ctx, client, root)
+}
+
+func isKnownEphemeralCoderRoot(root, home string) bool {
+	return root == home || strings.HasPrefix(root, strings.TrimSuffix(home, "/")+"/") ||
+		root == "/tmp" || strings.HasPrefix(root, "/tmp/") ||
+		root == "/var/tmp" || strings.HasPrefix(root, "/var/tmp/")
+}
+
+func probeCoderWorkdirRoot(ctx context.Context, client *ssh.Client, root string) error {
+	probeDir := root + fmt.Sprintf("/.kandev-workdir-preflight-%d", mrand.Uint64())
+	command := "if ! test -d " + shellQuote(root) + "; then printf 'missing\\n'; " +
+		"elif ! test -w " + shellQuote(root) + " || ! test -x " + shellQuote(root) + "; then printf 'unwritable\\n'; " +
+		"elif (umask 077 && mkdir -- " + shellQuote(probeDir) + " && rmdir -- " + shellQuote(probeDir) + "); then printf 'ready\\n'; " +
+		"else printf 'unwritable\\n'; fi"
+	out, _, err := runSSHCommand(ctx, client, command)
+	if err != nil {
+		return fmt.Errorf("coder SSH workdir validation failed for %q: %w", root, err)
+	}
+	switch strings.TrimSpace(out) {
+	case "ready":
+		return nil
+	case "missing":
+		return fmt.Errorf("coder SSH launch blocked before agent start: ssh_workdir_root %q does not exist; provision the durable mount before starting the workflow", root)
+	default:
+		return fmt.Errorf("coder SSH launch blocked before agent start: ssh_workdir_root %q is not writable; mount a writable durable directory before starting the workflow", root)
+	}
 }
 
 // runSSHCommandStdin is like runSSHCommand but feeds stdin to the remote

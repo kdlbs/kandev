@@ -29,7 +29,10 @@ test.describe("ssh executor — task launch", () => {
     ]);
     const profile = await apiClient.createExecutorProfile(seedData.sshExecutorId, {
       name: "Coder durable nested root",
-      config: { ssh_workdir_root: "/opt/jumprope-fullstack/.kandev" },
+      config: {
+        ssh_workdir_root: "/opt/jumprope-fullstack/.kandev",
+        ssh_workdir_policy: "durable",
+      },
       prepare_script: "",
       cleanup_script: "",
       env_vars: [],

@@ -256,6 +256,7 @@ var profileConfigRenameKeys = map[string]string{
 // login shell that runs every remote command).
 var profileConfigAuthoritativeKeys = []string{
 	lifecycle.MetadataKeySSHWorkdirRoot,
+	lifecycle.MetadataKeySSHWorkdirPolicy,
 	lifecycle.MetadataKeySSHShell,
 	// Reclaiming the remote task directory is destructive and irreversible.
 	// A task that could supply ssh_reclaim_task_dir in its own metadata

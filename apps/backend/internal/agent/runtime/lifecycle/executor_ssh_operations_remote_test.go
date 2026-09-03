@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"golang.org/x/crypto/ssh"
 )
 
 // remoteHomeCommand is the exact probe expandRemoteHome issues; matching on it
@@ -738,6 +739,110 @@ func TestEnsureReuseRequiredRemoteTaskDirExists(t *testing.T) {
 			t.Fatalf("error = %v, want preserved non-missing probe failure", err)
 		}
 	})
+}
+
+func TestValidateCoderWorkdirPolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		root        string
+		policy      string
+		probeResult string
+		wantErr     string
+	}{
+		{name: "durable mounted root", root: "/work/.kandev", policy: "durable", probeResult: "ready"},
+		{name: "missing root", root: "/work/.kandev", policy: "durable", probeResult: "missing", wantErr: "does not exist"},
+		{name: "non-writable root", root: "/work/.kandev", policy: "durable", probeResult: "unwritable", wantErr: "not writable"},
+		{name: "unsafe filesystem root", root: "/", policy: "durable", probeResult: "ready", wantErr: "unsafe"},
+		{name: "ephemeral home root", root: "~/.kandev", policy: "durable", probeResult: "ready", wantErr: "known ephemeral"},
+		{name: "explicit risky escape hatch", root: "~/.kandev", policy: "allow_ephemeral", probeResult: "ready"},
+		{name: "unknown policy", root: "/work/.kandev", policy: "maybe", probeResult: "ready", wantErr: "ssh_workdir_policy"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+				switch {
+				case command == coderEnvironmentProbe:
+					return sshOut("coder\n")
+				case strings.Contains(command, remoteHomeCommand):
+					return sshOut("/home/coder")
+				case strings.Contains(command, ".kandev-workdir-preflight-"):
+					return sshOut(tc.probeResult + "\n")
+				default:
+					return sshOK
+				}
+			})
+			err := validateCoderWorkdirPolicy(context.Background(), server.dial(t), map[string]interface{}{
+				MetadataKeySSHWorkdirRoot:   tc.root,
+				MetadataKeySSHWorkdirPolicy: tc.policy,
+			})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateCoderWorkdirPolicy: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateCoderWorkdirPolicyDoesNotGateOrdinarySSH(t *testing.T) {
+	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+		if command == coderEnvironmentProbe {
+			return sshOut("other\n")
+		}
+		return sshFail("workdir probe must not run")
+	})
+	if err := validateCoderWorkdirPolicy(context.Background(), server.dial(t), nil); err != nil {
+		t.Fatalf("ordinary SSH profile was gated: %v", err)
+	}
+}
+
+func TestValidateCoderWorkdirPolicyUsesIsolatedConcurrentProbes(t *testing.T) {
+	var mu sync.Mutex
+	var probes []string
+	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+		switch {
+		case command == coderEnvironmentProbe:
+			return sshOut("coder\n")
+		case strings.Contains(command, remoteHomeCommand):
+			return sshOut("/home/coder")
+		case strings.Contains(command, ".kandev-workdir-preflight-"):
+			mu.Lock()
+			probes = append(probes, command)
+			mu.Unlock()
+			return sshOut("ready\n")
+		default:
+			return sshOK
+		}
+	})
+	metadata := map[string]interface{}{
+		MetadataKeySSHWorkdirRoot:   "/work/.kandev",
+		MetadataKeySSHWorkdirPolicy: "durable",
+	}
+	clients := []*ssh.Client{server.dial(t), server.dial(t)}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, client := range clients {
+		wg.Add(1)
+		go func(client *ssh.Client) {
+			defer wg.Done()
+			errs <- validateCoderWorkdirPolicy(context.Background(), client, metadata)
+		}(client)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent validation failed: %v", err)
+		}
+	}
+	if len(probes) != 2 || probes[0] == probes[1] {
+		t.Fatalf("concurrent probes = %q, want two isolated paths", probes)
+	}
 }
 
 func TestProbeRemoteBinary(t *testing.T) {

@@ -29,7 +29,7 @@ first because every later concurrency and failure guarantee depends on it.
 - Task-scoped idempotency across concurrent calls and backend restart.
 - Exactly one retry and durable original/recovery failure projection.
 - Evidence-gated automatic recovery and stamped human authorization.
-- Coder SSH task-root warnings and public `/work/.kandev` guidance.
+- Coder SSH task-root fail-fast admission and public `/work/.kandev` guidance.
 - Exact-root SSH repository materialization beneath an ancestor checkout.
 - Desktop and mobile recovery and profile-warning coverage.
 
@@ -75,13 +75,13 @@ category, loss state, paired bounded errors, and
 mobile task Chat error-card/drawer composition; share action state and keep one
 mobile scroll owner with touch-sized controls.
 
-### Coder profile warning and docs
+### Coder profile admission and docs
 
-Extend SSH test/health evidence with a non-sensitive Coder/durable-mount
-capability and return `coder_ephemeral_task_root` from profile save and launch
-validation when applicable. Render it through the existing responsive executor
-profile banner. Update `docs/public/executors.md` to recommend a durable mounted
-root such as `/work/.kandev`.
+Detect Coder at the live SSH boundary and require an authoritative profile
+policy before remote task creation or agent startup. Validate that the root is
+dedicated, available, and writable with an isolated probe; retain an explicitly
+risky ephemeral escape hatch. Keep the responsive warning and update
+`docs/public/executors.md` with the exact policy values and durable-root examples.
 
 ## Tests
 
@@ -97,6 +97,9 @@ root such as `/work/.kandev`.
 - `AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.4`: local-shell and remote SSH
   regressions place the task root beneath another checkout and require the task
   root itself to become the repository top level.
+- `AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.5` through `.7`: lifecycle tests
+  cover pre-Direction rejection, live path usability, the explicit risky escape
+  hatch, ordinary SSH compatibility, and collision-free concurrent probes.
 
 ## E2E tests
 
@@ -115,6 +118,7 @@ root such as `/work/.kandev`.
 - [x] [Task 02: Recover launches with one idempotent retry](task-02-recover-launches.md)
 - [x] [Task 03: Expose recovery and Coder durability warnings](task-03-expose-recovery-warnings.md)
 - [x] [Task 04: Prove end-to-end phase recovery](task-04-prove-phase-recovery.md)
+- [x] [Task 05: Gate Coder launch on workdir admission](task-05-gate-coder-workdir.md)
 
 ## Verification results
 
@@ -131,7 +135,7 @@ reached `RUNNING` at `/opt/jumprope-fullstack/.kandev` below a parent checkout.
   observation cannot authorize automatic rehome after later edits.
 - Stale runtime events from the superseded generation could otherwise fail the
   replacement session.
-- Coder mount layouts are customizable, so the warning must distinguish proved
-  risk from unknown durability and must not claim universal `/work` semantics.
+- Coder mount layouts are customizable, so the operator policy remains an
+  explicit durability assertion rather than inferred proof about `/work`.
 - Shell path comparison must canonicalize both sides without accepting a
   symlinked ancestor as the task checkout.

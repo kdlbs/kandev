@@ -223,6 +223,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		}
 	}()
 	r.report(req.OnProgress, "Connecting to SSH host", PrepareStepCompleted, "")
+	if err := validateCoderWorkdirPolicy(baseCtx, client, req.Metadata); err != nil {
+		return nil, err
+	}
 	if err := r.preflightGitHubCredentialBroker(baseCtx, client, req, SSHRemotePlatform{}); err != nil {
 		return nil, err
 	}

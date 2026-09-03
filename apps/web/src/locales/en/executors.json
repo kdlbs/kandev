@@ -359,7 +359,7 @@
   "sshReclaimTaskDirLabel": "Delete a task's directory when the task is archived or deleted",
   "sshReclaimTaskDirTitle": "Remote task directories",
   "sshReclaimTaskDirWarning": "Deletion is permanent and happens on {{host}}, a machine Kandev does not own. A directory is always kept when it holds uncommitted changes, unpushed commits, or a stash, or when another task shares it. Unarchiving a task clones its repositories again.",
-  "sshCoderDurableRootWarning": "SSH profiles should use a durable mounted task root, such as {{taskRootExample}}. This is especially important for Coder, where home directories and template checkouts may be rebuilt and strand tasks.",
+  "sshCoderDurableRootWarning": "Coder launches require a durable mounted task root such as {{taskRootExample}} and ssh_workdir_policy=durable. Home and temporary roots are blocked unless you explicitly accept data-loss risk with allow_ephemeral.",
   "sshRemotePort": "Remote port",
   "sshReprobe": "Re-probe",
   "sshShellNotDetected": "(not detected)",

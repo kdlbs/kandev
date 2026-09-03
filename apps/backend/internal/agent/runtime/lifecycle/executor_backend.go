@@ -269,9 +269,13 @@ const (
 	MetadataKeySSHLocalForwardPort   = "ssh_local_forward_port"
 	MetadataKeySSHRemoteAgentctlURL  = "ssh_remote_agentctl_url"
 	MetadataKeySSHWorkdirRoot        = "ssh_workdir_root"
-	MetadataKeySSHProxyJump          = "ssh_proxy_jump"
-	MetadataKeySSHIdentitySource     = "ssh_identity_source"
-	MetadataKeySSHIdentityFile       = "ssh_identity_file"
+	// MetadataKeySSHWorkdirPolicy records the operator's durability decision
+	// for Coder-backed SSH profiles. "durable" enables the guarded path;
+	// "allow_ephemeral" is the explicit risky escape hatch.
+	MetadataKeySSHWorkdirPolicy  = "ssh_workdir_policy"
+	MetadataKeySSHProxyJump      = "ssh_proxy_jump"
+	MetadataKeySSHIdentitySource = "ssh_identity_source"
+	MetadataKeySSHIdentityFile   = "ssh_identity_file"
 	// MetadataKeySSHShell names the login shell used when running commands
 	// over SSH on the remote (probe, agentctl launch, install, setup
 	// scripts). Empty / unset falls back to "bash" at runtime — see
@@ -318,6 +322,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHLocalForwardPort:   true,
 	MetadataKeySSHRemoteAgentctlURL:  true,
 	MetadataKeySSHWorkdirRoot:        true,
+	MetadataKeySSHWorkdirPolicy:      true,
 	MetadataKeySSHProxyJump:          true,
 	MetadataKeySSHIdentitySource:     true,
 	MetadataKeySSHIdentityFile:       true,
