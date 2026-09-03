@@ -944,8 +944,8 @@ func (s *Service) queueTaskAssignedRun(
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues
-// downstream blocker / children-completed runs when a task lands in a
-// terminal step. Canonical task-state activity is written by the task service
+// downstream blocker / children-completed runs when a task enters a terminal
+// step. Canonical task-state activity is written by the task service
 // before task.state_changed is published, so the workflow move path is durable
 // before any WebSocket refetch can run. Stage progression itself is owned by
 // the workflow engine (the orchestrator subscribes to TaskMoved and fires
@@ -968,14 +968,15 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 			runID, data.SessionID)
 	}
 
-	if categorizeStep(data.ToStepName) == stepCategoryDone {
+	if categorizeStep(data.ToStepName) == stepCategoryDone &&
+		categorizeStep(data.FromStepName) != stepCategoryDone {
 		return s.finalizeDone(ctx, data)
 	}
 	return nil
 }
 
-// finalizeDone resolves blockers and notifies parents when a task lands
-// in a terminal step. Both side-effects route through the engine via
+// finalizeDone resolves blockers and notifies parents when a task enters
+// a terminal step. Both side-effects route through the engine via
 // dispatchEngineTrigger (on_blocker_resolved / on_children_completed).
 func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
 	if err := s.queueBlockersResolvedRuns(ctx, data.TaskID); err != nil {
@@ -983,7 +984,11 @@ func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
 	}
 	if data.ParentID != "" {
 		if err := s.queueChildrenCompletedRun(ctx, data.ParentID); err != nil {
-			s.logger.Error("children completed run failed", zap.Error(err))
+			// Warn, not Error: ParentWakeReconciler is the documented
+			// recovery path for a parent whose wake didn't get queued
+			// here (including a transient GetChildSetKey failure), so
+			// this is expected to self-heal rather than page anyone.
+			s.logger.Warn("children completed run failed", zap.Error(err))
 		}
 	}
 	return nil
@@ -1075,13 +1080,23 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 		return err
 	}
 
+	// Derived the same way as ParentWakeReconciler's recovery dispatch
+	// (wakeOperationID) so both producers land on the identical operation
+	// id for the same parent + child set. That shared id is what lets
+	// idx_run_idempotency actually dedupe the pair when the reconciler
+	// races this edge-triggered path for the same completion wave.
+	childSetKey, err := s.repo.GetChildSetKey(ctx, parentID)
+	if err != nil {
+		return fmt.Errorf("get child set key: %w", err)
+	}
+
 	children, _, err := s.repo.GetChildSummaries(ctx, parentID)
 	if err != nil {
 		s.logger.Error("get child summaries failed", zap.Error(err))
 		children = nil
 	}
 
-	key := fmt.Sprintf("children_completed:%s", parentID)
+	key := wakeOperationID(parentID, childSetKey)
 	summaries := make([]engine.ChildSummary, 0, len(children))
 	prsByTask := s.lookupChildPRLinks(ctx, children)
 	for _, c := range children {

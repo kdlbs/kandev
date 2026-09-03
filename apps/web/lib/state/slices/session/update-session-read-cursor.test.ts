@@ -131,17 +131,21 @@ describe("setTaskSessionPendingAction", () => {
 
     expect(store.getState().taskSessions.items[SESSION_ID]).toBeUndefined();
   });
+});
 
+describe("setTaskSessionPendingAction revision ordering", () => {
   it("preserves a newer WebSocket projection when a deferred list response resolves", () => {
     const store = makeStore();
     const staleListSession = makeSession({
       pending_action: null,
       pending_action_revision: pendingRevision(1),
     });
-    store.getState().setTaskSessionsForTask(TASK_ID, [staleListSession]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [staleListSession], {});
 
     store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification", pendingRevision(2));
-    store.getState().setTaskSessionsForTask(TASK_ID, [{ ...staleListSession, state: "COMPLETED" }]);
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [{ ...staleListSession, state: "COMPLETED" }], {});
 
     expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
       state: "COMPLETED",
@@ -152,12 +156,16 @@ describe("setTaskSessionPendingAction", () => {
 
   it("rejects a delayed WebSocket projection older than the HTTP snapshot", () => {
     const store = makeStore();
-    store.getState().setTaskSessionsForTask(TASK_ID, [
-      makeSession({
-        pending_action: "clarification",
-        pending_action_revision: pendingRevision(2),
-      }),
-    ]);
+    store.getState().setTaskSessionsForTask(
+      TASK_ID,
+      [
+        makeSession({
+          pending_action: "clarification",
+          pending_action_revision: pendingRevision(2),
+        }),
+      ],
+      {},
+    );
 
     store.getState().setTaskSessionPendingAction(SESSION_ID, null, pendingRevision(1));
 
@@ -175,9 +183,11 @@ describe("setTaskSessionPendingAction", () => {
     const newRevision = { epoch: "10", sequence: 1 };
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ pending_action: "clarification", pending_action_revision: oldRevision }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ pending_action: "clarification", pending_action_revision: oldRevision })],
+        {},
+      );
 
     store.getState().setTaskSessionPendingAction(SESSION_ID, null, newRevision);
     store.getState().setTaskSessionPendingAction(SESSION_ID, "permission", {
@@ -196,9 +206,11 @@ describe("setTaskSessionPendingAction", () => {
     const currentRevision = { epoch: "3", sequence: 1 };
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ pending_action: null, pending_action_revision: currentRevision }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ pending_action: null, pending_action_revision: currentRevision })],
+        {},
+      );
 
     store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification", {
       epoch: "1",

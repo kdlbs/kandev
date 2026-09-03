@@ -130,6 +130,7 @@ func provideOrchestrator(
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
 	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
+	orchestratorSvc.SetLaunchAttachmentClaimer(taskSvc)
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})

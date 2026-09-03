@@ -152,6 +152,16 @@ describe("AddWorkspaceSourcesDialog consequences", () => {
     );
     expect(consequences.textContent).not.toContain("This restarts the task workspace");
   });
+
+  it("treats Kubernetes as a live remote workspace", async () => {
+    render(<Harness executorType="k8s" />);
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    const consequences = await screen.findByTestId("workspace-change-consequences");
+
+    expect(consequences.textContent).toContain("This updates the live task workspace");
+    expect(consequences.textContent).not.toContain("This restarts the task workspace");
+  });
 });
 
 describe("AddWorkspaceSourcesDialog", () => {

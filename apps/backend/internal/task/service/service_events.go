@@ -294,11 +294,11 @@ func (s *Service) enqueueTaskPublication(ctx context.Context, taskID, eventType 
 
 // drainTaskPublications runs the FIFO drain loop for one task's publication
 // queue. queue.draining is ALWAYS released before this call ends — including
-// when a synchronous EventBus subscriber inside next.publish panics — via the
-// deferred recover below. Without this, a panic recovered higher up the stack
-// (MemoryEventBus.Publish itself has no recover) would leave queue.draining
-// stuck true forever, and enqueueTaskPublication would silently append every
-// later publication for that task without ever draining them again.
+// when next.publish itself panics (event-data construction, not the
+// EventBus subscribers it calls into, which recover their own panics) — via
+// the deferred recover below. Without this, queue.draining would stay true
+// forever, and enqueueTaskPublication would silently append every later
+// publication for that task without ever draining them again.
 func (s *Service) drainTaskPublications(taskID string, queue *taskPublicationQueue) {
 	defer func() {
 		if r := recover(); r != nil {

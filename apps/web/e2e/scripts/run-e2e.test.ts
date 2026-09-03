@@ -47,6 +47,26 @@ describe("run-e2e.sh", () => {
     expect(result.stdout).toBe("1");
   });
 
+  it("marks a managed Kubernetes compatibility run before invoking Playwright", () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
+    tempDirs.push(binDir);
+    const pnpmPath = path.join(binDir, "pnpm");
+    fs.writeFileSync(pnpmPath, "#!/usr/bin/env sh\nprintf '%s' \"${KANDEV_E2E_CONTAINERS:-}\"\n");
+    fs.chmodSync(pnpmPath, 0o755);
+
+    const result = spawnSync(
+      "bash",
+      [scriptPath, "--host", "--no-build", "--project", "kubernetes-compat", "--", "--help"],
+      {
+        encoding: "utf8",
+        env: runnerEnv(binDir),
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("1");
+  });
+
   it("passes the marker to every host shard", () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-runner-"));
     const resultFile = path.join(binDir, "marker.txt");

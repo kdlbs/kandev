@@ -35,7 +35,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import { useRepositoryBranchPolicies } from "@/hooks/domains/workspace/use-repository-branch-policies";
 import type { Repository, RepositoryBranchPolicy } from "@/lib/types/http";
-import { branchToOption, sortBranches } from "@/components/task-create-dialog-branch-options";
+import { branchToOption, sortBranches } from "@/components/branch-picker-options";
 import {
   BranchPolicyBranchField,
   PolicyFields,

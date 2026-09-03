@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-19
-updated: 2026-08-24
+updated: 2026-09-01
 owners:
   - cfl12
 ---
@@ -53,6 +53,13 @@ launching work against the wrong pull request or repository branch.
   source error record shall remain visible and update with the new typed cause,
   bounded details, and valid actions; a successful recovery shall clear it only
   after the required relaunch or task move succeeds.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.9:** When the initial prompt fails
+  before the agent produces an event, the system shall settle the active turn
+  and session with a durable error without waiting for stall detection. The
+  error shall exclude file paths and provider secrets.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.10:** When an initial-prompt error
+  belongs to an old execution or prompt, the system shall not fail a replacement
+  execution or successor turn.
 
 ## Out of scope
 

@@ -53,8 +53,12 @@ export function DeleteSessionDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{t("task:deleteSession")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div>
-              <SessionDeleteDescription isPrimary={isPrimary} isOnlySession={sessionCount === 1} />
+            <div className="min-w-0 space-y-2 text-left">
+              <SessionDeleteDescription
+                isPrimary={isPrimary}
+                isOnlySession={sessionCount === 1}
+                structured
+              />
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>

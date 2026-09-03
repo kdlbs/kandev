@@ -230,24 +230,28 @@ describe("setTaskSessionsForTask — bulk cross-slice migration", () => {
     store.getState().setGitStatus("sess-a", { branch: "a" } as never);
     store.getState().appendShellOutput("sess-b", "hello");
 
-    store.getState().setTaskSessionsForTask("task-1", [
-      {
-        id: toSessionId("sess-a"),
-        task_id: toTaskId("task-1"),
-        state: "COMPLETED",
-        task_environment_id: "env-x",
-        started_at: "",
-        updated_at: "",
-      },
-      {
-        id: toSessionId("sess-b"),
-        task_id: toTaskId("task-1"),
-        state: "RUNNING",
-        task_environment_id: "env-y",
-        started_at: "",
-        updated_at: "",
-      },
-    ]);
+    store.getState().setTaskSessionsForTask(
+      "task-1",
+      [
+        {
+          id: toSessionId("sess-a"),
+          task_id: toTaskId("task-1"),
+          state: "COMPLETED",
+          task_environment_id: "env-x",
+          started_at: "",
+          updated_at: "",
+        },
+        {
+          id: toSessionId("sess-b"),
+          task_id: toTaskId("task-1"),
+          state: "RUNNING",
+          task_environment_id: "env-y",
+          started_at: "",
+          updated_at: "",
+        },
+      ],
+      {},
+    );
 
     const state = store.getState();
     expect(state.gitStatus.byEnvironmentId["env-x"]).toEqual({ branch: "a", files: {} });

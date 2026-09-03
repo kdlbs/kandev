@@ -85,6 +85,49 @@ test.describe("File tree create file", () => {
       .toBe(true);
   });
 
+  test("select-all stays in the new-file name input", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.1
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.2
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.createFile("select-all-alpha.ts", "alpha");
+    git.createFile("select-all-beta.ts", "beta");
+    git.stageAll();
+    git.commit("seed select-all files");
+
+    const session = await setupTask(
+      testPage,
+      apiClient,
+      seedData,
+      "ft-create-select-all",
+      "FT Create Select All",
+    );
+    await expect(session.fileTreeNode("select-all-alpha.ts")).toBeVisible({ timeout: 15_000 });
+
+    const input = await startCreateAtRoot(testPage);
+    const draftName = "draft-name.ts";
+    await input.fill(draftName);
+    await input.press("ControlOrMeta+a");
+
+    await expect
+      .poll(async () => ({
+        selection: await input.evaluate((element) => ({
+          start: element.selectionStart,
+          end: element.selectionEnd,
+        })),
+        selectedRows: await session.fileTreeSelectedNodes().count(),
+      }))
+      .toEqual({
+        selection: { start: 0, end: draftName.length },
+        selectedRows: 0,
+      });
+  });
+
   test("New file inside expanded folder creates the file in that folder", async ({
     testPage,
     apiClient,

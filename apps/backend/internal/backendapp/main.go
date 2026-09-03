@@ -514,7 +514,7 @@ func startAgentInfrastructure(
 		eventBus,
 		repos.AgentSettings,
 		agentRegistry,
-		userSecretStore,
+		repos.Secrets,
 		services.Task.TaskBaseBranches,
 		services.Task.TaskComparisonTargets,
 		services.ManagedRuntimeSelections,
@@ -673,6 +673,7 @@ func startAgentInfrastructure(
 		services.GitHub.SetTaskIssueStore(taskStoreAdapter)
 		services.GitHub.SetTaskRepositoryBaseBranchUpdater(taskStoreAdapter)
 		services.GitHub.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
+		services.GitHub.SetWorkspaceGroupOwnerResolver(repos.Task)
 		log.Info("GitHub service configured for orchestrator (PR auto-detection enabled)")
 
 	}
@@ -1622,6 +1623,10 @@ func wireWorkflowEngineForOffice(
 	// REQ-OFFICE-REVIEW-SEATS-004.3: drop a required seat whose agent profile
 	// was deleted after casting, rather than waiting forever on it.
 	orchestratorSvc.SetEngineAgentProfileResolver(officeengineadapters.NewAgentProfileResolverAdapter(repos.Office))
+	// REQ-OFFICE-STALL-VISIBILITY-002: the decision-waiting detector's
+	// false-positive guard. Without this the detector reports nothing rather
+	// than reporting tasks it cannot prove are idle.
+	orchestratorSvc.SetOfficeRunInFlightReader(repos.Office)
 	eng := orchestratorSvc.WorkflowEngine()
 	if eng == nil {
 		log.Warn("workflow engine not initialised; office engine dispatcher disabled")
@@ -2084,6 +2089,7 @@ func buildOfficeDashboardService(
 	cfgWriter *configloader.FileWriter,
 ) *officedashboard.DashboardService {
 	dashboardSvc := officedashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
+	dashboardSvc.SetProjectBudgetEvaluator(costSvc)
 	dashboardSvc.SetGovernanceStore(repo)
 	dashboardSvc.SetSkillLister(skillSvc)
 	dashboardSvc.SetRoutineLister(routineSvc)

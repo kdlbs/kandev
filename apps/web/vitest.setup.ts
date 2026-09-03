@@ -71,6 +71,20 @@ Object.defineProperty(globalThis, "localStorage", {
 
 if (typeof window !== "undefined") {
   const happyDOMWindow = window as unknown as HappyDOMWindow;
+
+  // Happy DOM's default user agent contains AppleWebKit without a Chromium
+  // token. Browser libraries therefore identify it as Safari and enable
+  // WebKit-only workarounds. Monaco's workaround keeps clipboard promises
+  // across body clicks, which produces unhandled cancellation rejections in
+  // otherwise unrelated tests. Model the Chromium engine used by web E2E so
+  // feature detection follows the browser behavior the unit suite represents.
+  Object.defineProperty(happyDOMWindow.navigator, "userAgent", {
+    configurable: true,
+    value:
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  });
+
   happyDOMWindow.happyDOM.settings.fetch.interceptor = {
     beforeAsyncRequest: ({ window: requestWindow }) =>
       Promise.resolve(new requestWindow.Response(null, { status: 404 })),
