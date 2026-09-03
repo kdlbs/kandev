@@ -792,6 +792,52 @@ func TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensCount(t *
 	}
 }
 
+// TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensSize verifies an
+// individually oversized token is rejected before normalization trims and looks it up, so the
+// count cap alone cannot be satisfied by a handful of attacker-controlled multi-megabyte
+// strings — mirroring maxKanbanHiddenStepIDsTotalBytes on the sibling field.
+func TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   []string
+		wantErr string
+	}{
+		{name: "at the byte cap is accepted", value: []string{strings.Repeat("a", maxKanbanPriorityFilterTokensTotalBytes)}},
+		{
+			name:  "exceeding the byte cap is rejected",
+			value: []string{strings.Repeat("a", maxKanbanPriorityFilterTokensTotalBytes+1)},
+			wantErr: fmt.Sprintf(
+				"kanban_priority_filter_tokens: max %d bytes allowed",
+				maxKanbanPriorityFilterTokensTotalBytes,
+			),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{KanbanPriorityFilterTokens: []string{"low"}}
+			req := &UpdateUserSettingsRequest{KanbanPriorityFilterTokens: ptr(tt.value)}
+			err := applyWorkspaceAndTaskListPreferences(settings, req)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+				if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"low"}) {
+					t.Fatalf("expected settings unchanged on error, got %v", settings.KanbanPriorityFilterTokens)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensNilPreservesEmptyClears
 // verifies AC-004.8's request-boundary cases at the apply-step level (not just DTO decode): an
 // absent field pointer (nil, which a request-boundary null also decodes to, per

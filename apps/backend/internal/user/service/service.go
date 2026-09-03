@@ -416,6 +416,9 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 				maxKanbanPriorityFilterTokens,
 			)
 		}
+		if err := validateKanbanPriorityFilterTokensSize(*req.KanbanPriorityFilterTokens); err != nil {
+			return err
+		}
 		settings.KanbanPriorityFilterTokens = normalizeKanbanPriorityFilterTokens(*req.KanbanPriorityFilterTokens)
 	}
 	return nil
@@ -445,6 +448,12 @@ const (
 	// iteration cost on a WS payload (no per-field size guard, unlike the 2MB HTTP
 	// body cap), not to bound legitimate selections.
 	maxKanbanPriorityFilterTokens = 64
+	// maxKanbanPriorityFilterTokensTotalBytes bounds total content regardless of
+	// per-token length, the same total-content guard maxKanbanHiddenStepIDsTotalBytes
+	// applies to its sibling field: the count cap alone still admits 64 individually
+	// oversized tokens before normalizeKanbanPriorityFilterTokens trims and looks up
+	// each one.
+	maxKanbanPriorityFilterTokensTotalBytes = 4096
 )
 
 // validateQuickChatTabOrder bounds the client-supplied mixed-tab order before
@@ -528,6 +537,24 @@ func validateKanbanHiddenStepIDs(hidden map[string][]string) error {
 		}
 		if totalBytes > maxKanbanHiddenStepIDsTotalBytes {
 			return fmt.Errorf("kanban_hidden_step_ids: max %d bytes allowed", maxKanbanHiddenStepIDsTotalBytes)
+		}
+	}
+	return nil
+}
+
+// validateKanbanPriorityFilterTokensSize bounds total token content before
+// normalizeKanbanPriorityFilterTokens trims and looks up each one, so an
+// individually oversized member cannot cost CPU and allocation before the
+// count cap alone would have dropped it as invalid.
+func validateKanbanPriorityFilterTokensSize(tokens []string) error {
+	total := 0
+	for _, token := range tokens {
+		total += len(token)
+		if total > maxKanbanPriorityFilterTokensTotalBytes {
+			return fmt.Errorf(
+				"kanban_priority_filter_tokens: max %d bytes allowed",
+				maxKanbanPriorityFilterTokensTotalBytes,
+			)
 		}
 	}
 	return nil
