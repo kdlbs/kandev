@@ -267,6 +267,10 @@ This is the design's central hazard. The server resolves its harness like this:
    `localharness` (`.exe` variants on Windows), first match wins.
 3. If nothing matches, log `Localharness not found.` and continue starting.
 
+Kandev accepts a candidate only when it is a regular file. On non-Windows
+hosts, it also requires at least one execute bit. Windows mode bits do not
+control executable access, so the regular-file check applies there.
+
 `abspath` does not resolve symlinks, and step 3 is not fatal. Measured:
 
 | Layout | Result |

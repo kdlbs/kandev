@@ -115,9 +115,9 @@ never starts a session that silently loses capability mid-prompt.
 - **AC-AGENTS-ANTIGRAVITY-ACP-002.3:** When the executable is on PATH, discovery
   shall additionally require a harness in the directory containing it, trying
   `localharness_external` then `localharness`, first match wins, each
-  `.exe`-suffixed on windows and unsuffixed elsewhere. A name matches only when it
-  resolves to an existing regular file; a directory, a dangling symlink, or an
-  unstat-able name does not, and discovery continues to the next name.
+  `.exe`-suffixed on windows and unsuffixed elsewhere. A name matches a regular
+  file, with an execute bit required on non-windows hosts. A directory, dangling
+  symlink, or unstat-able name does not match; discovery continues.
 - **AC-AGENTS-ANTIGRAVITY-ACP-002.4:** When `ANTIGRAVITY_HARNESS_PATH` is set to a
   non-empty value in the environment discovery observes, the
   AC-AGENTS-ANTIGRAVITY-ACP-002.3 check shall be treated as satisfied without

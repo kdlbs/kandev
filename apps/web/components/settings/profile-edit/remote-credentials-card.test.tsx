@@ -5,6 +5,7 @@ import { RemoteCredentialsCard } from "./remote-credentials-card";
 import { AgentConfigOptions } from "./portable-config-bundles";
 import { listRemoteCredentials } from "@/lib/api/domains/settings-api";
 import { listAgentConfigBundles, type AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   listRemoteCredentials: vi.fn(),
@@ -29,12 +30,20 @@ function renderRemoteCredentialsCard(
   onChange = vi.fn(),
   onConfigChange = vi.fn(),
   initialConfigBundleIds: string[] = [],
+  options: {
+    agentEnvVars?: Record<string, string | null>;
+    onAgentEnvVarChange?: (methodId: string, secretId: string | null) => void;
+    secrets?: SecretListItem[];
+  } = {},
 ) {
   render(
     <RemoteCredentialsHarness
       onChange={onChange}
       onConfigChange={onConfigChange}
       initialConfigBundleIds={initialConfigBundleIds}
+      agentEnvVars={options.agentEnvVars}
+      onAgentEnvVarChange={options.onAgentEnvVarChange}
+      secrets={options.secrets}
     />,
   );
 }
@@ -43,13 +52,20 @@ function RemoteCredentialsHarness({
   onChange,
   onConfigChange,
   initialConfigBundleIds,
+  agentEnvVars: initialAgentEnvVars = {},
+  onAgentEnvVarChange: onEnvVarChange = () => {},
+  secrets = [],
 }: {
   onChange: (ids: string[]) => void;
   onConfigChange: (ids: string[]) => void;
   initialConfigBundleIds: string[];
+  agentEnvVars?: Record<string, string | null>;
+  onAgentEnvVarChange?: (methodId: string, secretId: string | null) => void;
+  secrets?: SecretListItem[];
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [configBundleIds, setConfigBundleIds] = useState(initialConfigBundleIds);
+  const [agentEnvVars, setAgentEnvVars] = useState(initialAgentEnvVars);
   return (
     <RemoteCredentialsCard
       isRemote={true}
@@ -63,9 +79,12 @@ function RemoteCredentialsHarness({
         setConfigBundleIds(ids);
         onConfigChange(ids);
       }}
-      agentEnvVars={{}}
-      onAgentEnvVarChange={() => {}}
-      secrets={[]}
+      agentEnvVars={agentEnvVars}
+      onAgentEnvVarChange={(methodId, secretId) => {
+        setAgentEnvVars((current) => ({ ...current, [methodId]: secretId }));
+        onEnvVarChange(methodId, secretId);
+      }}
+      secrets={secrets}
       gitIdentityMode="override"
       onGitIdentityModeChange={() => {}}
       gitUserName=""
@@ -255,6 +274,22 @@ describe("RemoteCredentialsCard with multiple env auth methods", () => {
   const antigravityAgentName = "Antigravity";
   const geminiMethodId = "agent:antigravity-acp:env:GEMINI_API_KEY";
   const googleMethodId = "agent:antigravity-acp:env:GOOGLE_API_KEY";
+  const secrets: SecretListItem[] = [
+    {
+      id: "secret-gemini",
+      name: "Gemini key",
+      has_value: true,
+      created_at: "",
+      updated_at: "",
+    },
+    {
+      id: "secret-google",
+      name: "Google key",
+      has_value: true,
+      created_at: "",
+      updated_at: "",
+    },
+  ];
 
   beforeEach(() => {
     vi.mocked(listRemoteCredentials).mockResolvedValue({
@@ -273,7 +308,11 @@ describe("RemoteCredentialsCard with multiple env auth methods", () => {
 
   it("lets both declared env methods be selected independently", async () => {
     const onAuthChange = vi.fn();
-    renderRemoteCredentialsCard(onAuthChange);
+    const onEnvVarChange = vi.fn();
+    renderRemoteCredentialsCard(onAuthChange, vi.fn(), [], {
+      onAgentEnvVarChange: onEnvVarChange,
+      secrets,
+    });
 
     fireEvent.click(await screen.findByText(antigravityAgentName));
     const geminiOption = screen.getByRole("checkbox", {
@@ -286,9 +325,19 @@ describe("RemoteCredentialsCard with multiple env auth methods", () => {
     fireEvent.click(geminiOption);
     fireEvent.click(googleOption);
 
+    const secretSelects = await screen.findAllByRole("combobox");
+    expect(secretSelects).toHaveLength(2);
+
+    fireEvent.click(secretSelects[0]);
+    fireEvent.click(await screen.findByRole("option", { name: "Gemini key" }));
+    fireEvent.click(secretSelects[1]);
+    fireEvent.click(await screen.findByRole("option", { name: "Google key" }));
+
     expect(geminiOption.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
     expect(googleOption.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
     expect(onAuthChange).toHaveBeenLastCalledWith([geminiMethodId, googleMethodId]);
+    expect(onEnvVarChange).toHaveBeenNthCalledWith(1, geminiMethodId, "secret-gemini");
+    expect(onEnvVarChange).toHaveBeenNthCalledWith(2, googleMethodId, "secret-google");
   });
 });
 

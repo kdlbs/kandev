@@ -23,11 +23,10 @@ var antigravityACPLogoDark []byte
 // antigravityHarnessPathEnv, when set to a non-empty value, tells the
 // Antigravity ACP server where to find its harness without searching its own
 // executable's directory. A set value satisfies discovery's harness check
-// without inspecting the directory (AC-AGENTS-ANTIGRAVITY-ACP-002.4).
+// without inspecting the directory.
 const antigravityHarnessPathEnv = "ANTIGRAVITY_HARNESS_PATH"
 
-// antigravityConfigRelDir is the server's config root, home-relative
-// (REQ-AGENTS-ANTIGRAVITY-ACP-004).
+// antigravityConfigRelDir is the server's config root, home-relative.
 const antigravityConfigRelDir = ".gemini/antigravity-acp"
 
 var (
@@ -67,8 +66,8 @@ func (a *AntigravityACP) Logo(v LogoVariant) []byte {
 }
 
 // antigravityACPBinaryName returns the platform-specific ACP server
-// executable name (AC-AGENTS-ANTIGRAVITY-ACP-002.1): defined on every
-// platform, consulting nothing but runtime.GOOS.
+// executable name. It is defined on every platform and consults nothing but
+// runtime.GOOS.
 func antigravityACPBinaryName() string {
 	if runtime.GOOS == "windows" {
 		return "agy_acp_server.exe"
@@ -76,12 +75,11 @@ func antigravityACPBinaryName() string {
 	return "agy_acp_server.par"
 }
 
-// antigravityACPArgv returns the declared launch argument vector for the
-// host platform (REQ-AGENTS-ANTIGRAVITY-ACP-003): total (a defined,
-// non-empty vector on every platform) and deterministic (consults only
-// runtime.GOOS, never PATH, the filesystem, or the environment). argv[0] is
-// built from antigravityACPBinaryName so the launched name can never drift
-// from the name discovery looked up.
+// antigravityACPArgv returns the deterministic launch argument vector for the
+// host platform. It is defined and non-empty on every platform, and it
+// consults only runtime.GOOS, never PATH, the filesystem, or the environment.
+// argv[0] is built from antigravityACPBinaryName so the launched name can
+// never drift from the name discovery looked up.
 func antigravityACPArgv() []string {
 	if runtime.GOOS == "linux" {
 		return []string{antigravityACPBinaryName(), "--uid="}
@@ -98,15 +96,19 @@ func antigravityHarnessNames() []string {
 	return []string{"localharness_external", "localharness"}
 }
 
-// antigravityHarnessPresent reports whether one of the harness names exists,
-// as a regular file, in dir. A directory, a dangling symlink, or an
-// unstat-able name does not match (AC-AGENTS-ANTIGRAVITY-ACP-002.3).
+// antigravityHarnessPresent reports whether one of the harness names exists
+// as a usable regular file in dir. A directory, a dangling symlink, or an
+// unstat-able name does not match.
 func antigravityHarnessPresent(dir string) bool {
 	for _, name := range antigravityHarnessNames() {
 		info, err := os.Stat(filepath.Join(dir, name))
-		if err == nil && info.Mode().IsRegular() {
-			return true
+		if err != nil || !info.Mode().IsRegular() {
+			continue
 		}
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -114,7 +116,7 @@ func antigravityHarnessPresent(dir string) bool {
 // IsInstalled reports the agent available only when the server executable is
 // on PATH and its harness sibling can be found beside it (or
 // ANTIGRAVITY_HARNESS_PATH names one), so a partial install never reads as
-// healthy (REQ-AGENTS-ANTIGRAVITY-ACP-002).
+// healthy.
 func (a *AntigravityACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -161,8 +163,8 @@ func (a *AntigravityACP) Runtime() *RuntimeConfig {
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 			SessionDirTemplate:  "{home}/" + antigravityConfigRelDir,
-			// SessionDirTarget left empty: no container bind mount for the
-			// config root (AC-AGENTS-ANTIGRAVITY-ACP-004.10).
+			// SessionDirTarget stays empty because the config root has no
+			// container bind mount.
 		},
 	}
 }

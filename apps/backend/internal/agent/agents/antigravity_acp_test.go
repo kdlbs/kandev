@@ -279,7 +279,7 @@ func writeFakeAntigravityBinary(t *testing.T, dir string) string {
 
 func writeFakeHarness(t *testing.T, dir, name string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("harness"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("harness"), 0o755); err != nil {
 		t.Fatalf("write fake harness %q: %v", name, err)
 	}
 }
@@ -370,6 +370,32 @@ func TestAntigravityACP_DiscoveryHarnessMustBeRegularFile(t *testing.T) {
 	}
 	if result.Available {
 		t.Error("Available=true when the harness name resolves to a directory, not a regular file")
+	}
+}
+
+func TestAntigravityACP_DiscoveryRejectsNonExecutableHarness(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix execute bits do not control windows executability")
+	}
+
+	binDir := t.TempDir()
+	writeFakeAntigravityBinary(t, binDir)
+	if err := os.WriteFile(
+		filepath.Join(binDir, wantAntigravityHarnessNames()[0]),
+		[]byte("harness"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write non-executable fake harness: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("ANTIGRAVITY_HARNESS_PATH", "")
+
+	result, err := NewAntigravityACP().IsInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("IsInstalled error: %v", err)
+	}
+	if result.Available {
+		t.Error("Available=true when the harness file has no execute permission")
 	}
 }
 
