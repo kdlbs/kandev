@@ -31,8 +31,9 @@ Adjacent contracts this design uses but does not own:
   `blockedReason`, `queuedForStepId`, review state, and repository associations.
 - **The move request path**, owned by `useSwimlaneMove`. That hook's failure
   path is under change here, not adjacent to it.
-- **The plugin host**, whose `task-card-indicators`, `task-card-tags`, and
-  `registerTaskMenuAction` contributions the row must render without change.
+- **The plugin host**, whose `task-card-indicators` and `registerTaskMenuAction`
+  contributions the row must render without change. Its `task-card-tags`
+  contribution stays a Kanban card surface (AC-UI-PIPELINE-ROW-003.6).
 - **Integration availability**, owned by the GitLab, Jira, Linear, and Sentry
   slices behind `useKanbanExternalLinkAvailability`.
 - **Adaptive board sizing**, owned by
@@ -62,14 +63,14 @@ this design absorbs either without a redesign:
 - **Branch B: click navigates.** No full-page affordance is needed; the cluster
   is roughly 28px narrower.
 
-**What we do about it.** The actions cluster is composed from an ordered array of
-optional members (AC-UI-PIPELINE-ROW-003.8). A full-page affordance is one such
-member; whether 09404bae renders it changes the array's contents, not this
-design. The width budget reserves its width, so Branch A is the costed case and
-Branch B has slack. Nothing else here reads the click decision: collapsed
-markers are not click targets (AC-UI-PIPELINE-ROW-001.9), the menu suppresses
-row activation (AC-UI-PIPELINE-ROW-002.7), and the disclosure surface neither
-previews nor navigates (AC-UI-PIPELINE-ROW-004.5).
+**What we do about it.** The actions cluster is an ordered array of optional
+members (AC-UI-PIPELINE-ROW-003.8). A full-page affordance is one such member;
+whether 09404bae renders it changes the array's contents, not this design. The
+width budget reserves its width, so Branch A is the costed case. Nothing else
+here reads the click decision: step pills are not click targets
+(AC-UI-PIPELINE-ROW-001.9), the menu suppresses row activation
+(AC-UI-PIPELINE-ROW-002.7), and the disclosure surface neither previews nor
+navigates (AC-UI-PIPELINE-ROW-004.5).
 
 **The one integration point.** There is no inheritance path today:
 `Graph2StepNode` owns a self-contained `handleClick` calling
@@ -77,13 +78,12 @@ previews nor navigates (AC-UI-PIPELINE-ROW-004.5).
 the coupling 09404bae's dead-`onPreviewTask` fix exists to remove. This design
 therefore assumes the pill inherits nothing and instead states the invariant
 09404bae must satisfy and we must not break: **the row has exactly one
-activation decision, and the title and the labelled current-step pill both route
-through it.** Whichever handler 09404bae installs at the row level is the single
-handler both call; neither element keeps a private `router.push`. If 09404bae
-lands first, delete `Graph2StepNode`'s local `handleClick` and take the row
-handler as a prop. If this work lands first, route both through one row-level
-handler still calling `linkToTask(task.id)`, leaving 09404bae one call site to
-change rather than two. Either order ends at the same shape.
+activation decision, and the title and the current-step pill both route through
+it.** Whichever handler 09404bae installs at the row level is the single handler
+both call; neither keeps a private `router.push`. If 09404bae lands first,
+delete `Graph2StepNode`'s local `handleClick` and take the row handler as a
+prop; if this work lands first, route both through one row-level handler still
+calling `linkToTask(task.id)`. Either order ends at the same shape.
 
 **If 09404bae has not landed** when this work starts, implement against the
 current row and treat the cluster's position and the pill's click handler as
@@ -92,27 +92,24 @@ one.
 
 ## Prior art
 
-**Leg 1 (our own prior reasoning).** QMD `wiki`, 441 documents, vector index
-present, zero pending embedding, so a real semantic search and not a silent grep
-fallback. Five queries on row density, progressive disclosure and board card
-affordances. **Result: nothing useful**; hits used "pipeline" and "card" in
-unrelated senses, leaving no prior position to defer to.
+**Leg 1 (our own prior reasoning).** Five QMD `wiki` queries on row density,
+progressive disclosure and board card affordances returned nothing usable: hits
+used "pipeline" and "card" in unrelated senses, leaving no prior position to
+defer to.
 
-**Leg 2 (what others shipped).** `saas-kb` `search_fsm_docs`,
-`category: "ai_sdlc"`, two queries, two documents read in full, best score
-0.0153, so vendor claims and not evidence. **Warp vertical tabs** is the closest
-shipped analogue: compact single-line default, status badges on the row icon, a
-`+ N more` overflow row, and a hover sidecar showing full un-clipped metadata.
+**Leg 2 (what others shipped).** **Warp vertical tabs** is the closest shipped
+analogue: compact single-line default, status badges on the row icon, a `+ N
+more` overflow row, and a hover sidecar showing full un-clipped metadata.
 **Warp Factories** groups work by stage, which is our Kanban view. **Augment
 Code** and Warp encode status as icons, not text.
 
 **What we do differently.** Nothing in the corpus renders a per-row stage
-pipeline, so REQ-UI-PIPELINE-ROW-001's collapse rule has no shipped precedent.
-We adopt the hover sidecar (REQ-UI-PIPELINE-ROW-004) and status-as-icon density
-(REQ-UI-PIPELINE-ROW-003) because our Kanban card implements both, and reject
-configurable density. We depart from Warp on keyboard access: its sidecar is
-pointer-only, whereas AC-UI-PIPELINE-ROW-001.4 through 001.6 keep every step
-name reachable without one.
+pipeline. We adopt the hover sidecar (REQ-UI-PIPELINE-ROW-004) and
+status-as-icon density (REQ-UI-PIPELINE-ROW-003) because our Kanban card
+implements both, and reject configurable density. We depart from Warp on
+keyboard access: its sidecar is pointer-only, whereas
+AC-UI-PIPELINE-ROW-001.4 through 001.6 keep every step name reachable without
+one.
 
 ## Requirement mapping
 
@@ -204,11 +201,13 @@ This is a frontend-only design under `apps/web/`. No backend component changes.
   consume them from there, so both surfaces render the same components rather
   than two implementations that happen to agree. `KanbanCardBadges` is moved
   whole; the row is not to re-split blocked, queued, session count and review
-  into fresh JSX, because that split is the fork. Because the moved block owns
-  the session-count badge, `Graph2TaskPipeline`'s existing session-count render
-  under the title is deleted when the strip lands: the badge inside the block is
-  the row's only session count, at the card's more-than-one threshold rather
-  than the row's present more-than-zero one (AC-UI-PIPELINE-ROW-003.8). Kanban's rendered output is unchanged, on the
+  into fresh JSX, because that split is the fork. Session count is the one
+  member the row seats outside the strip: it belongs to the information column
+  (AC-UI-PIPELINE-ROW-003.12), at the row's more-than-zero threshold, so
+  `KanbanCardBadges` takes a `hideSessionCount` flag the row passes and the card
+  does not. That is one boolean on the shared component rather than a second
+  badges implementation, and it keeps the row at one session count
+  (AC-UI-PIPELINE-ROW-003.8). Kanban's rendered output is unchanged, on the
   same terms as AC-UI-PIPELINE-ROW-002.6 sets for the menu, and the shared-source
   test in [Observability](#observability) covers the indicators as well as the
   menu entries.
@@ -216,16 +215,15 @@ This is a frontend-only design under `apps/web/`. No backend component changes.
 ### Why extraction and not direct reuse
 
 `components/kanban-card-menu-items.tsx` already exports
-`buildKanbanCardMenuEntries` and
-`useKanbanCardMoveTargets`, so entries alone are reusable today. Everything that
-makes those entries work is not: `useKanbanCardMenus`,
-`useKanbanCardDialogState`, `useKanbanCardMoveMenuActions`,
-`buildLinkDialogHandlers`, `externalLinkHandlers`, and `KanbanCardDialogs` are
-module-private to `kanban-card.tsx`. Calling the entry builder from the row
-without them would mean re-implementing dialog state, the detach flow, the
-deferred-dismissal workarounds, plugin actions, and five dialogs a second time:
-the fork the "reuse, do not fork" constraint exists to prevent and
-AC-UI-PIPELINE-ROW-002.4 forbids. Extraction is the only route satisfying both.
+`buildKanbanCardMenuEntries` and `useKanbanCardMoveTargets`, so entries alone
+are reusable today. Everything that makes those entries work is not:
+`useKanbanCardMenus`, `useKanbanCardDialogState`,
+`useKanbanCardMoveMenuActions`, `buildLinkDialogHandlers`,
+`externalLinkHandlers`, and `KanbanCardDialogs` are module-private to
+`kanban-card.tsx`. Calling the entry builder without them would mean
+re-implementing dialog state, the detach flow, the deferred-dismissal
+workarounds, plugin actions, and five dialogs a second time: the fork
+AC-UI-PIPELINE-ROW-002.4 forbids.
 
 `dispatchKanbanCardClick` is the exception and is **not** private: it is an
 `export` marked `@internal` for testing, and `kanban-card-click.test.ts` already
@@ -291,16 +289,17 @@ Per row, at a 1280px board surface with 9 steps (AC-UI-PIPELINE-ROW-001.3):
 
 | Element | Today | After |
 | --- | --- | --- |
-| Title button | 200px | 200px |
+| Information column | 200px | 200px |
 | Step run (9 steps) | 1370px | ~400px |
-| Repository chips | in title | ~120px |
 | Inline status strip | 0px | ~160px |
 | Actions cluster | ~28px | ~56px |
 | Padding and gaps | ~48px | ~48px |
-| **Row total** | **~1646px** | **~984px** |
+| **Row total** | **~1646px** | **~864px** |
 
-The title's 200px and the repository chips' 120px are the truncation widths
-AC-UI-PIPELINE-ROW-001.3 measures at, so those are contract. The step run
+The information column's 200px is the truncation width
+AC-UI-PIPELINE-ROW-001.3 measures at, so it is contract. Repository chips are
+inside that column rather than beside it, so they cost the row no width of
+their own. The step run
 budget above is superseded by the REQ-UI-PIPELINE-ROW-001 revision: every step
 is a 130px pill (not a collapsed marker), so a nine-step run is ~1170px plus
 connectors and routinely exceeds what is left, which is exactly when
@@ -313,9 +312,9 @@ contribution, and plugin width is third-party and unbounded, so the budget can
 be exceeded by input this design does not control: enough plugin indicators, or
 a board surface below the 1280px minimum. AC-UI-PIPELINE-ROW-003.11 names the
 terminus for that case and it is deliberately not "clip something". Once the
-title is at its 96px floor and the step run is already scrolling, the row's
-region between the title and the actions cluster becomes horizontally
-scrollable, carrying the status strip and the step run together. The actions
+information column's lines are truncated and the step run is already scrolling,
+the row's region between the column and the actions cluster becomes
+horizontally scrollable, carrying the step run and the status strip together. The actions
 cluster is pinned by card 09404bae and stays out of that scroll, so the menu
 remains reachable at any width, which is the defect this whole contract exists
 to avoid re-introducing. Nothing wraps, nothing is clipped, and no plugin
@@ -346,22 +345,32 @@ list agrees about repositories and link availability
 (AC-UI-PIPELINE-ROW-005.9): the criterion states the agreement, this states how
 it is obtained.
 
-**Row composition.** Left to right, per AC-UI-PIPELINE-ROW-003.8:
-repository chips, the title (wrapped in the disclosure surface), the inline
-status strip, the step run, then the pinned actions cluster. Each status member
-renders `null` when it has nothing to show, so absent state costs no width.
+**Row composition.** Left to right, per AC-UI-PIPELINE-ROW-003.8: the
+information column (the title wrapped in the disclosure surface, the repository
+chips, then relative time and session count), the step run, the inline status
+strip, then the pinned actions cluster. Each status member renders `null` when
+it has nothing to show, so absent state costs no width.
 
-**Step run.** For each displayed step the row renders a marker. The current step
-renders labelled with its move controls on hover or focus; the rest render
-collapsed, `aria-hidden`, non-focusable, with a pointer tooltip carrying the step
-title. A visually hidden text node on the row carries the accessible summary
-required by AC-UI-PIPELINE-ROW-001.6.
+The column is a fixed `w-[200px] shrink-0`, never a flex basis: a basis yields
+to its own row's content, which is how the run's starting x came to differ row
+to row (AC-UI-PIPELINE-ROW-003.13). The strip follows the run for the same
+reason. It is the one part of the row whose width is genuinely per-task and,
+through plugin indicators, unbounded, so anything seated after it inherits that
+variance; the run flexes, settling the strip against the actions cluster. The
+repository line reserves its height whether or not the task has a repository,
+so a repo-less row matches its neighbours (AC-UI-PIPELINE-ROW-005.8).
+
+**Step run.** Every displayed step renders its own labelled pill; the current
+one also carries its move controls on hover or focus, and past and future pills
+stay non-focusable. A visually hidden text node on the row carries the
+accessible summary required by AC-UI-PIPELINE-ROW-001.6.
 
 **Overflow.** Two overflow policies apply to different parts of the row and must
 not be confused. The step run scrolls (AC-UI-PIPELINE-ROW-001.8). Everything
-else yields width in the fixed order of AC-UI-PIPELINE-ROW-003.11: the title
-truncates to its 96px floor, then the step run begins to scroll, then the whole
-region between title and actions cluster scrolls as the terminus described under
+else yields width in the fixed order of AC-UI-PIPELINE-ROW-003.11: each line of
+the information column truncates within the column's fixed width, then the step
+run begins to scroll, then the region between the column and the actions
+cluster scrolls as the terminus described under
 [Width budget](#width-budget), by widening that same scroll container rather than
 adding a second one. Repository chips are deliberately **not** a stage:
 `REPO_CHIPS_VISIBLE` is a static cap of 2 with an unconditional `slice`, so they
@@ -386,17 +395,14 @@ conflicting move from another client is handled by
 AC-UI-PIPELINE-ROW-005.3 and AC-UI-PIPELINE-ROW-005.4 instead.
 
 **Move races.** The row is not a second source of truth for the task's step: it
-renders whatever the store holds, so an out-of-band change that lands while a
-move is in flight is simply the new rendering. Only a *failure* writes back,
-and the compare-and-swap above is what stops that write from undoing a newer
-value: it restores the pre-move step only while the store still holds this
-move's optimistic value, and skips otherwise. A failed move can therefore
-neither resurrect a stale step nor revert an unrelated task. The guard is
-presentation only, gating controls rather than requests-in-flight bookkeeping,
-and it is released on every terminal outcome, success, failure, timeout and
-unmount, so a rejected move can be retried immediately
-(AC-UI-PIPELINE-ROW-005.3). There is no cancellation outcome, because the move
-path holds no `AbortController`.
+renders whatever the store holds, so an out-of-band change landing mid-move is
+simply the new rendering. Only a *failure* writes back, and the compare-and-swap
+above stops that write from undoing a newer value: it restores the pre-move step
+only while the store still holds this move's optimistic value. A failed move can
+therefore neither resurrect a stale step nor revert an unrelated task. The guard
+is presentation only, and is released on every terminal outcome, so a rejected
+move can be retried immediately (AC-UI-PIPELINE-ROW-005.3). There is no
+cancellation outcome, because the move path holds no `AbortController`.
 
 ### Nesting constraint
 
@@ -404,12 +410,10 @@ The current row nests its content inside a `<button>`. Repository chip tooltips,
 the title disclosure surface, the step tooltips, and several status indicators
 are interactive, and an interactive element inside a button is invalid and
 breaks pointer behavior (AC-UI-PIPELINE-ROW-003.10). The row's activation target
-must therefore be a non-button element carrying the click handler. Shrinking the
-button to the title text alone is not an alternative: `TaskTitleHoverCard`'s
-fine-pointer branch renders its own
-`<button data-testid="task-title-preview-trigger">` *wrapping* its children, so
-a title-only button would sit inside that trigger and reproduce the same invalid
-nesting.
+must therefore be a non-button element carrying the click handler. A title-only
+button is not an alternative: `TaskTitleHoverCard`'s fine-pointer branch renders
+its own `<button data-testid="task-title-preview-trigger">` *wrapping* its
+children, reproducing the same invalid nesting.
 
 Activation composes because the trigger is selective about what it consumes. Its
 `handleTriggerClick` acts only when `event.detail === 0`, the keyboard
@@ -418,10 +422,9 @@ row's activation handler on the non-button ancestor.
 
 ## Failure and recovery
 
-- **No resolvable current step.** Today `currentStepIndex` resolves to `-1`,
-  which makes every step read as `future`. Under collapse that produces a row of
-  dots with no label, so the task's location becomes invisible; that is the
-  failure AC-UI-PIPELINE-ROW-005.6 exists to prevent.
+- **No resolvable current step.** `currentStepIndex` resolves to `-1`, which
+  makes every step read as `future`, leaving the task's location unstated; that
+  is the failure AC-UI-PIPELINE-ROW-005.6 exists to prevent.
 
   **How the state is reached.** By exactly one route: a task whose
   `workflowStepId` is empty. `toKanbanTask` in `lib/kanban/map-task.ts` coerces a
@@ -430,7 +433,7 @@ row's activation handler on the non-button ancestor.
   (`!task.workflowStepId` returns the task unchanged), so such a task is never
   rewritten to `ORPHAN_STEP_ID` and `findIndex` over the displayed steps returns
   `-1`. Two further call sites defend against the same value, which is why it is
-  treated as a real state rather than a type-level impossibility:
+  a real state rather than a type-level impossibility:
   `deriveAutoHiddenStepIds` filters occupancy through `.filter(Boolean)`, and
   `auto-hide-empty-columns.ts` types its task as
   `{ workflowStepId: string | null }`.
@@ -456,17 +459,14 @@ row's activation handler on the non-button ancestor.
   untouched, and adds no `ViewContentProps` member. Kanban's "Needs
   reassignment" column is unaffected for the same reason.
 
-  **Marker and phase.** The run renders one marker per displayed step. With no
-  resolvable current step every displayed marker is `future`, today's rendering
-  made deliberate, and one labelled marker carrying fixed unassigned-step copy
-  renders before them, so AC-UI-PIPELINE-ROW-001.1's single-label invariant
-  holds. When the current step is displayed, phase is today's `currentStepIndex`
-  comparison, unchanged.
-- **Empty displayed steps.** The row renders title and actions with no step run
-  (AC-UI-PIPELINE-ROW-005.7). It is checked first and wins over the
-  no-current-step case above, which would otherwise also match an empty
-  displayed list; with no displayed steps the row renders no markers, labelled
-  or collapsed. The list's existing empty state is unchanged.
+  **Marker and phase.** With no resolvable current step every displayed marker
+  is `future`, and one labelled marker carrying fixed unassigned-step copy
+  renders before them. When the current step is displayed, phase is today's
+  `currentStepIndex` comparison, unchanged.
+- **Empty displayed steps.** The row renders its information column and actions
+  with no step run (AC-UI-PIPELINE-ROW-005.7). It is checked first and wins over
+  the no-current-step case above, which would otherwise also match an empty
+  displayed list. The list's existing empty state is unchanged.
 - **In-flight move.** Concurrent requests for the same task are dropped, not
   queued (AC-UI-PIPELINE-ROW-005.2); a queue would let a person build a backlog
   of moves whose end state they cannot predict. Failure falls back to the
@@ -486,8 +486,7 @@ row's activation handler on the non-button ancestor.
 
 None. The row is presentation state. The view-mode preference
 (`kandev.taskListing.view.v1`) is read but never written here, and no new
-preference is introduced; see the density exclusion in the requirement's
-out-of-scope list.
+preference is introduced.
 
 ## Security
 
@@ -508,8 +507,8 @@ No new metrics or logs. Behavior is observed through tests:
   the row-local in-flight move guard and its release on every terminal outcome,
   an out-of-band step change surviving a move that settles afterwards, the
   first-step and last-step move-control boundaries, the
-  AC-UI-PIPELINE-ROW-003.11 yield order through to its scroll terminus, and the
-  menu-stays-open case. The no-current-step fixture is easy to build wrong: the
+  AC-UI-PIPELINE-ROW-003.11 yield order through to its scroll terminus, the
+  information column's fixed width and contents, and the menu-stays-open case. The no-current-step fixture is easy to build wrong: the
   task's `workflowStepId` must be the **empty string**, not an id merely absent
   from the step list, because an absent id is remapped to `ORPHAN_STEP_ID` and
   renders as the titled orphan step instead.
@@ -518,8 +517,11 @@ No new metrics or logs. Behavior is observed through tests:
   task (AC-UI-PIPELINE-ROW-002.4). The second does the same for the inline
   status strip: for one task fixture carrying a blocked state, a queued step, a
   review state, two repositories, more than one session and a subagent count,
-  both surfaces render the same indicator set in the AC-UI-PIPELINE-ROW-003.8
-  order, and the row renders exactly one session-count element. Without it the
+  both surfaces render the same indicator set in the same relative order, and
+  the row renders exactly one session-count element, inside its information
+  column. Session count is compared for presence rather than position, because
+  the row seats it in the column ahead of every strip member while the card
+  seats it among them (AC-UI-PIPELINE-ROW-003.8). Without it the
   duplicated-JSX fork the extraction exists to prevent would pass every other
   test in this list.
 - **A Kanban regression test** for AC-UI-PIPELINE-ROW-002.6 and for the widened

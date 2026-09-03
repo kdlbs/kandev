@@ -235,6 +235,10 @@ export class KanbanPage {
     return this.pipelineTask(taskId).getByTestId("pipeline-row-title");
   }
 
+  pipelineTaskInfo(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-info");
+  }
+
   pipelineOverflowRegion(taskId: string): Locator {
     return this.pipelineTask(taskId).getByTestId("pipeline-row-overflow-region");
   }

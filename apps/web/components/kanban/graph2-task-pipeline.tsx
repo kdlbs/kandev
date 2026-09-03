@@ -18,7 +18,7 @@ import {
   KanbanCardDialogs,
   type KanbanCardMenuState,
 } from "@/components/kanban-card-menu";
-import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import { TaskCardIndicators } from "@/components/kanban-card-plugin-slots";
 import { KanbanCardBadges, RepoChipRow } from "@/components/kanban-card-status-strip";
 import { CardTitle } from "@/components/kanban-card-title";
 import { renderSubagentCountChip } from "@/components/kanban-card-content";
@@ -257,53 +257,59 @@ function RowMenuTrigger({
   );
 }
 
-const TAGS_LANE_MAX_WIDTH = 120;
-
 /**
- * task-card-tags is contractually spacious (its own row on the Kanban card),
- * but this row has no spare row to give it. Rather than crop an arbitrary
- * plugin contribution into a fading sliver, measure its natural width and
- * drop the whole lane when it would not fit: an absent tag reads as "no
- * tags" instead of a confusing, half-legible one.
+ * The row's information column: title, repository, relative time and session
+ * count, stacked in a column of one fixed width for every row.
  *
- * The outer element's own `max-width` is what toggles, never its `display`:
- * `contentRef` stays mounted at its natural size throughout, so measuring it
- * after a drop still reports the untouched content width instead of the 0
- * a `display: none` ancestor would force, which would immediately flip the
- * lane back on and loop.
+ * Fixed, never flexible. A column that sizes to its own row's content makes
+ * the step run start at a different x position on every row, so the runs stop
+ * reading as one shared track down the board. Holding all rows at 200px is
+ * what keeps them aligned; each line truncates rather than widening the
+ * column, and the title's full text stays reachable through the hover card
+ * (REQ-UI-PIPELINE-ROW-004).
  */
-function RowTagsLane({ task }: { task: Task }) {
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [fits, setFits] = useState(true);
-
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    const update = () => setFits(el.scrollWidth <= TAGS_LANE_MAX_WIDTH);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [task.id]);
+function RowInfoColumn({
+  task,
+  repositoryChips,
+}: {
+  task: Task;
+  repositoryChips: ReturnType<typeof resolveTaskRepositoryChips>;
+}) {
+  const { t } = useTranslation();
+  const sessionCount = task.sessionCount ?? 0;
 
   return (
-    <div
-      data-testid="pipeline-row-tags-lane"
-      className="shrink-0 overflow-hidden"
-      style={{ maxWidth: fits ? TAGS_LANE_MAX_WIDTH : 0 }}
-    >
-      <div
-        ref={contentRef}
-        data-testid="pipeline-row-tags-lane-content"
-        className="inline-flex items-center"
-      >
-        <TaskCardTags task={task} />
+    <div className="w-[200px] min-w-0 shrink-0" data-testid="pipeline-row-info">
+      <div data-testid="pipeline-row-title">
+        <CardTitle task={task} enableTitleHover />
+      </div>
+      {/* Height is reserved whether or not the task has a repository, so a
+          row with no repository is the same height as one with, and the
+          board keeps a constant row pitch (AC-UI-PIPELINE-ROW-003.9). */}
+      <div className="h-4" data-testid="pipeline-row-repo-line">
+        <RepoChipRow chips={repositoryChips} />
+      </div>
+      <div className="flex items-center gap-1.5">
+        {task.updatedAt && (
+          <span className="text-[10px] text-muted-foreground/60">
+            {formatRelativeTime(task.updatedAt)}
+          </span>
+        )}
+        {sessionCount > 0 && (
+          <span className="text-[10px] text-muted-foreground/60">
+            {t("kanban:sessionCount", { count: sessionCount })}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-/** The row's status strip: everything ordered after the title and before the step run. */
+/**
+ * The row's status strip: the task's state indicators, seated after the step
+ * run so that a row's own indicator count cannot displace its run. The step
+ * run flexes, so the strip settles against the actions cluster on the right.
+ */
 function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<HTMLDivElement> }) {
   const { t } = useTranslation("common");
   return (
@@ -316,8 +322,7 @@ function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<H
       <MRTaskIcon taskId={task.id} />
       <RegisteredChangeRequestTaskIcon taskId={task.id} />
       <TaskCardIndicators task={task} />
-      <RowTagsLane task={task} />
-      <KanbanCardBadges task={task} />
+      <KanbanCardBadges task={task} hideSessionCount className="mt-0 flex-nowrap" />
       {renderSubagentCountChip(
         task,
         t("common:activeSubagents", { count: task.activeSubagentCount ?? 0 }),
@@ -329,11 +334,6 @@ function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<H
           executorType={task.primaryExecutorType}
           fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
         />
-      )}
-      {task.updatedAt && (
-        <span className="text-[10px] text-muted-foreground/60">
-          {formatRelativeTime(task.updatedAt)}
-        </span>
       )}
     </div>
   );
@@ -382,7 +382,7 @@ type PipelineRowProps = {
   isMultiSelectMode?: boolean;
 };
 
-/** The row's clickable body: repo chips, title, inline status, step run, and menu trigger. */
+/** The row's clickable body: information column, step run, inline status, and menu trigger. */
 function PipelineRow({
   task,
   steps,
@@ -445,19 +445,7 @@ function PipelineRow({
           />
         </div>
       )}
-      <RepoChipRow chips={repositoryChips} />
-      <div
-        className="min-w-0"
-        data-testid="pipeline-row-title"
-        // Fixed, not flexible: a title column that grows/shrinks with each
-        // row's own content makes the step run start at a different x
-        // position row to row. Holding it at one width keeps every row's
-        // step run aligned; it still yields down to the 96px floor
-        // (AC-UI-PIPELINE-ROW-003.11) on a board too narrow to hold it.
-        style={{ flex: "0 1 220px", minWidth: "96px" }}
-      >
-        <CardTitle task={task} enableTitleHover />
-      </div>
+      <RowInfoColumn task={task} repositoryChips={repositoryChips} />
       <div
         ref={overflowStage.outerRef}
         data-testid="pipeline-row-overflow-region"
@@ -467,7 +455,6 @@ function PipelineRow({
         )}
         style={{ flex: "1 1 0%" }}
       >
-        <RowInlineStatus task={task} innerRef={overflowStage.stripRef} />
         <PipelineStepNodes
           steps={steps}
           moveTargetSteps={moveTargetSteps}
@@ -477,6 +464,7 @@ function PipelineRow({
           isMoving={isMoving}
           atTerminus={overflowStage.atTerminus}
         />
+        <RowInlineStatus task={task} innerRef={overflowStage.stripRef} />
       </div>
       {!isMultiSelectMode && (
         <div className="ml-auto shrink-0">

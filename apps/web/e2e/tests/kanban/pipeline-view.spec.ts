@@ -45,6 +45,53 @@ test.describe("Pipeline view", () => {
     await expect(kanban.pipelineTaskRepoName(task.id)).toHaveCount(0);
   });
 
+  test("starts every row's step run at the same x, whatever each row's own content is", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Two rows that differ in exactly the things that used to push the step
+    // run sideways: title length, a linked repository, and a status badge.
+    const predecessor = await apiClient.createTask(seedData.workspaceId, "Alignment Predecessor", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const [plain, loaded] = await Promise.all([
+      apiClient.createTask(seedData.workspaceId, "Short", {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      }),
+      apiClient.createTask(
+        seedData.workspaceId,
+        "A longer pipeline task title that will not fit its column",
+        {
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          blocked_by: [predecessor.id],
+        },
+      ),
+    ]);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.switchToPipelineView();
+    await expect(kanban.pipelineTask(plain.id)).toBeVisible();
+    await expect(kanban.pipelineTask(loaded.id).getByTestId("kanban-card-blocked-badge")).toBeVisible();
+
+    const [plainInfo, loadedInfo, plainRun, loadedRun] = await Promise.all([
+      kanban.pipelineTaskInfo(plain.id).boundingBox(),
+      kanban.pipelineTaskInfo(loaded.id).boundingBox(),
+      kanban.pipelineStepRunScroll(plain.id).boundingBox(),
+      kanban.pipelineStepRunScroll(loaded.id).boundingBox(),
+    ]);
+
+    // The information column is one fixed width for every row, so the runs
+    // line up as a single track down the board.
+    expect(Math.abs(plainInfo!.width - loadedInfo!.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(plainRun!.x - loadedRun!.x)).toBeLessThanOrEqual(1);
+  });
+
   test("clicking the row opens the preview panel when 'Open preview on click' is on", async ({
     testPage,
     apiClient,
@@ -242,9 +289,18 @@ test.describe("Pipeline view", () => {
     apiClient,
     seedData,
   }) => {
+    // The task carries status, so the strip has natural width to not fit. A
+    // task with nothing to show renders an empty strip, and an empty strip
+    // never reaches the terminus — there is nothing for the step run's own
+    // scroll to fail to accommodate.
+    const predecessor = await apiClient.createTask(seedData.workspaceId, "Terminus Blocker", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
     const task = await apiClient.createTask(seedData.workspaceId, "Pipeline Terminus Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
+      blocked_by: [predecessor.id],
     });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -252,6 +308,7 @@ test.describe("Pipeline view", () => {
 
     const region = kanban.pipelineOverflowRegion(task.id);
     await expect(region).toBeVisible();
+    await expect(kanban.pipelineTask(task.id).getByTestId("kanban-card-blocked-badge")).toBeVisible();
 
     // Force the combined region far narrower than the status strip's natural
     // content so the strip alone cannot fit, driving the row into its

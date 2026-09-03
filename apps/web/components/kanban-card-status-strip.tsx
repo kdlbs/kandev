@@ -131,9 +131,9 @@ function BlockedBadge({ task }: { task: Task }) {
   );
 }
 
-function hasCardBadges(task: Task): boolean {
+function hasCardBadges(task: Task, hideSessionCount?: boolean): boolean {
   return Boolean(
-    (task.sessionCount && task.sessionCount > 1) ||
+    (!hideSessionCount && task.sessionCount && task.sessionCount > 1) ||
     task.reviewStatus === "changes_requested" ||
     task.reviewStatus === "pending" ||
     task.queuedForStepId ||
@@ -141,14 +141,29 @@ function hasCardBadges(task: Task): boolean {
   );
 }
 
-export function KanbanCardBadges({ task }: { task: Task }) {
+/**
+ * `hideSessionCount` is for a surface that already renders the session count
+ * elsewhere in its own layout (the pipeline row's information column), so the
+ * badge would be the task's second one. The card renders it here.
+ */
+export function KanbanCardBadges({
+  task,
+  hideSessionCount,
+  className,
+}: {
+  task: Task;
+  hideSessionCount?: boolean;
+  className?: string;
+}) {
   const { t } = useTranslation();
-  const showRow = hasCardBadges(task);
+  const showRow = hasCardBadges(task, hideSessionCount);
 
   if (!showRow) return null;
 
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
+    <div
+      className={cn("flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0", className)}
+    >
       {task.blocked && <BlockedBadge task={task} />}
       {task.queuedForStepId && (
         <Badge
@@ -165,7 +180,7 @@ export function KanbanCardBadges({ task }: { task: Task }) {
           })}
         </Badge>
       )}
-      {task.sessionCount && task.sessionCount > 1 && (
+      {!hideSessionCount && (task.sessionCount ?? 0) > 1 && (
         <Badge variant="secondary" className="text-xs h-5">
           {t("kanban:sessionCount", { count: task.sessionCount })}
         </Badge>

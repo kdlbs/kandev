@@ -438,90 +438,94 @@ describe("Graph2TaskPipeline — overflow yield order and scroll terminus (AC-UI
     expect(screen.getByTestId("pipeline-step-run-scroll").className).not.toContain(OVERFLOW_X_AUTO);
   });
 
-  it("gives the title a 96px floor, the first stage the row yields before the step run scrolls", () => {
+  it("holds the information column at one fixed width instead of sizing it to the row's own content", () => {
     renderPipeline(makeTask("step-2"), STEPS);
 
-    const title = screen.getByTestId("pipeline-row-title");
-    expect(title.style.minWidth).toBe("96px");
+    const info = screen.getByTestId("pipeline-row-info");
+    // A column that grows or shrinks with its own row's content starts each
+    // row's step run at a different x, so the runs stop reading as one track
+    // down the board (AC-UI-PIPELINE-ROW-003.13).
+    expect(info.className).toContain("w-[200px]");
+    expect(info.className).toContain("shrink-0");
+    expect(info.style.flex).toBe("");
+  });
+});
+
+describe("Graph2TaskPipeline — the row's information column (AC-UI-PIPELINE-ROW-003.12)", () => {
+  const REPOSITORIES = [{ id: "repo-1", workspace_id: "ws-1", name: "alpha" }] as never;
+
+  function infoTask(): Task {
+    return {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-2",
+      sessionCount: 2,
+      updatedAt: new Date().toISOString(),
+      repositoryId: "repo-1",
+      repositories: [{ id: "link-1", repository_id: "repo-1", position: 0 }],
+    } as unknown as Task;
+  }
+
+  it("stacks the title, repository, relative time and session count inside the column", () => {
+    renderPipeline(infoTask(), STEPS, { repositories: REPOSITORIES });
+
+    const info = screen.getByTestId("pipeline-row-info");
+    expect(info.contains(screen.getByTestId("pipeline-row-title"))).toBe(true);
+    expect(info.contains(screen.getByTestId("task-repo-chip"))).toBe(true);
+    expect(info.contains(screen.getByText(t("kanban:sessionCount", { count: 2 })))).toBe(true);
+    expect(info.textContent).toContain("A task");
+  });
+
+  it("shows a session count of one, which the card's badge threshold would drop", () => {
+    const task = { ...infoTask(), sessionCount: 1 } as Task;
+    renderPipeline(task, STEPS, { repositories: REPOSITORIES });
+
+    const info = screen.getByTestId("pipeline-row-info");
+    expect(info.textContent).toContain(t("kanban:sessionCount", { count: 1 }));
+  });
+
+  it("renders no session count line entry when the task has no sessions", () => {
+    const task = { ...infoTask(), sessionCount: 0 } as Task;
+    renderPipeline(task, STEPS, { repositories: REPOSITORIES });
+
+    expect(screen.queryByText(t("kanban:sessionCount", { count: 0 }))).toBeNull();
   });
 });
 
 describe("Graph2TaskPipeline — plugin card slots on the row (AC-UI-PIPELINE-ROW-003.6)", () => {
-  it("renders the registered task-card-indicators and task-card-tags plugin components", () => {
-    const PLUGIN_ID = "kandev-plugin-row-regression-fixture";
-    function Indicator() {
-      return <span data-testid="row-regression-indicator">indicator</span>;
-    }
-    function Tags() {
-      return <span data-testid="row-regression-tags">tags</span>;
-    }
+  const PLUGIN_ID = "kandev-plugin-row-regression-fixture";
+
+  function Indicator() {
+    return <span data-testid="row-regression-indicator">indicator</span>;
+  }
+  function Tags() {
+    return <span data-testid="row-regression-tags">tags</span>;
+  }
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  it("renders the registered task-card-indicators plugin component", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent("task-card-indicators", Indicator);
+
+    renderPipeline(makeTask("step-2"), STEPS);
+
+    expect(screen.getByTestId("row-regression-indicator")).not.toBeNull();
+  });
+
+  it("does not render the task-card-tags slot, which the row has no lane to hold", () => {
     pluginRegistry.forPlugin(PLUGIN_ID).registerComponent("task-card-indicators", Indicator);
     pluginRegistry.forPlugin(PLUGIN_ID).registerComponent("task-card-tags", Tags);
 
-    try {
-      renderPipeline(makeTask("step-2"), STEPS);
+    renderPipeline(makeTask("step-2"), STEPS);
 
-      expect(screen.getByTestId("row-regression-indicator")).not.toBeNull();
-      expect(screen.getByTestId("row-regression-tags")).not.toBeNull();
-    } finally {
-      pluginRegistry.unregisterPlugin(PLUGIN_ID);
-    }
-  });
-
-  it("keeps a task-card-tags contribution that fits within the lane's 120px cap", () => {
-    const PLUGIN_ID = "kandev-plugin-short-tags-fixture";
-    function ShortTag() {
-      return <span data-testid="row-short-tag">bug</span>;
-    }
-    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent("task-card-tags", ShortTag);
-
-    try {
-      renderPipeline(makeTask("step-2"), STEPS);
-
-      const lane = screen.getByTestId("pipeline-row-tags-lane");
-      expect(lane.style.maxWidth).toBe("120px");
-      expect(lane.contains(screen.getByTestId("row-short-tag"))).toBe(true);
-    } finally {
-      pluginRegistry.unregisterPlugin(PLUGIN_ID);
-    }
-  });
-
-  it("drops the tags lane entirely once its contribution would overflow the cap, instead of cropping it", () => {
-    const PLUGIN_ID = "kandev-plugin-wide-tags-fixture";
-    function WideTag() {
-      return <span data-testid="row-wide-tag">A tag with a genuinely long label</span>;
-    }
-    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent("task-card-tags", WideTag);
-
-    const observerEntries: Array<{ element: Element; callback: ResizeObserverCallback }> = [];
-    class CapturingResizeObserver {
-      private readonly callback: ResizeObserverCallback;
-      constructor(callback: ResizeObserverCallback) {
-        this.callback = callback;
-      }
-      observe(element: Element) {
-        observerEntries.push({ element, callback: this.callback });
-      }
-      disconnect() {}
-      unobserve() {}
-    }
-    vi.stubGlobal("ResizeObserver", CapturingResizeObserver);
-
-    try {
-      renderPipeline(makeTask("step-2"), STEPS);
-      const lane = screen.getByTestId("pipeline-row-tags-lane");
-      const content = screen.getByTestId("pipeline-row-tags-lane-content");
-      Object.defineProperty(content, "scrollWidth", { configurable: true, value: 300 });
-      for (const entry of observerEntries) {
-        if (entry.element === content) act(() => entry.callback([], {} as ResizeObserver));
-      }
-
-      expect(lane.style.maxWidth).toBe("0");
-      expect(screen.getByTestId("row-wide-tag")).toBeTruthy();
-    } finally {
-      pluginRegistry.unregisterPlugin(PLUGIN_ID);
-      vi.unstubAllGlobals();
-    }
+    // task-card-tags is contractually spacious — its own row on the Kanban
+    // card. The pipeline row is a single line with a fixed information column
+    // and a step run, so the only way to seat a tag here is to crop it into a
+    // half-legible sliver. The row omits the slot and the card keeps it.
+    expect(screen.getByTestId("row-regression-indicator")).not.toBeNull();
+    expect(screen.queryByTestId("row-regression-tags")).toBeNull();
   });
 });
 

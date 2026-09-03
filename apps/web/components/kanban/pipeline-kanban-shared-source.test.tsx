@@ -200,12 +200,15 @@ describe("Shared-source parity — task menu (AC-UI-PIPELINE-ROW-002.4)", () => 
  * *this* subsequence renders in the *same relative order* on both, not that
  * either surface's absolute layout matches the other.
  */
+const SESSION_COUNT_TEXT = t("kanban:sessionCount", { count: 2 });
+const SESSION_COUNT_ID = "session-count";
+
 function indicatorSelectors(): Array<{ id: string; selector: string }> {
   return [
     { id: "pr", selector: `[data-testid="pr-task-icon-${TASK.id}"]` },
     { id: "blocked", selector: '[data-testid="kanban-card-blocked-badge"]' },
     { id: "queued", selector: `text:${t("kanban:queuedForStep", { step: "Done" })}` },
-    { id: "session-count", selector: `text:${t("kanban:sessionCount", { count: 2 })}` },
+    { id: SESSION_COUNT_ID, selector: `text:${SESSION_COUNT_TEXT}` },
     { id: "review-state", selector: `text:${t("kanban:changesRequested")}` },
   ];
 }
@@ -242,7 +245,7 @@ describe("Shared-source parity — inline status strip (AC-UI-PIPELINE-ROW-003.8
     // Every indicator in the fixture must actually be present on the card —
     // otherwise a fixture that silently fails to seed one would make this
     // comparison vacuously pass.
-    expect(cardOrder).toEqual(["pr", "blocked", "queued", "session-count", "review-state"]);
+    expect(cardOrder).toEqual(["pr", "blocked", "queued", SESSION_COUNT_ID, "review-state"]);
     cleanup();
 
     const { container: rowContainer } = renderPipelineRow();
@@ -251,9 +254,16 @@ describe("Shared-source parity — inline status strip (AC-UI-PIPELINE-ROW-003.8
     );
     const rowOrder = orderedIndicatorIds(rowContainer);
 
-    expect(rowOrder).toEqual(cardOrder);
-    // Exactly one session-count element on the row, at the card's >1
-    // threshold — the badges block is the row's only session count.
-    expect(screen.getAllByText(t("kanban:sessionCount", { count: 2 }))).toHaveLength(1);
+    // Session count is the one member the row seats outside the shared
+    // strip: it belongs to the information column, which precedes every
+    // inline indicator, so it is compared for presence rather than position.
+    const withoutSessionCount = (ids: string[]) => ids.filter((id) => id !== SESSION_COUNT_ID);
+    expect(withoutSessionCount(rowOrder)).toEqual(withoutSessionCount(cardOrder));
+    expect(rowOrder).toContain(SESSION_COUNT_ID);
+    // Exactly one session-count element on the row — the information column
+    // renders it, and the shared badges block suppresses its own.
+    expect(screen.getAllByText(SESSION_COUNT_TEXT)).toHaveLength(1);
+    const info = screen.getByTestId("pipeline-row-info");
+    expect(info.textContent).toContain(SESSION_COUNT_TEXT);
   });
 });
