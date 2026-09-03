@@ -96,7 +96,11 @@ selection see zero provable mismatches and misreport a conflict. A changed
 session, environment, repository slot, branch identity, worktree identity, or
 ambiguous current row is a genuine idempotency-key reuse and conflicts. An
 existing valid slot, stale revisions, or any ambiguous proof returns a typed
-result without changing inventory.
+result without changing inventory. A request-hash match here only short-circuits
+*candidate selection* — it is not itself a launch success. The matched receipt
+still passes through the durable post-repair attestation gate described next
+(completing it now when a prior crash or failed write left it unattested)
+before this retry can be handed back as launchable.
 
 ## Before-and-after checkout attestation
 
@@ -130,6 +134,12 @@ crashed, or its attestation write itself failed, before attestation landed.
 Any session reaching the already-valid branch instead completes (or is
 blocked by, if already negative) the same durable attestation a same-session
 retry already requires, before it is ever handed back as an admitted launch.
+Both entry points that can reach the already-valid branch are covered
+end-to-end, through the real `LaunchPreparedSession` and resume call sites
+(not only the attestation helper directly), with a genuinely different
+session ID than the one whose repair crashed: a fresh/additional-session
+launch retried by a different session, and a resume of a different session
+after an earlier launch's repair committed but crashed before attestation.
 
 ## Fresh and additional-session launch integration
 

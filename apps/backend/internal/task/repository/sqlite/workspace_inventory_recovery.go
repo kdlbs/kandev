@@ -291,8 +291,16 @@ func (r *Repository) loadWorkspaceInventoryReceiptTx(ctx context.Context, tx *sq
 
 // GetWorkspaceInventoryRepairReceipt returns the previously committed receipt
 // for a task-scoped idempotency key, or nil if none exists. Callers use it to
-// short-circuit a retry once the canonical inventory already matches, which
-// would otherwise leave no provable mismatch for candidate selection to find.
+// short-circuit CANDIDATE SELECTION for a retry once the canonical inventory
+// already matches, which would otherwise leave no provable mismatch for
+// candidate selection to find. It returns the raw committed receipt as-is —
+// including one whose post-repair attestation never landed (crash-after-commit
+// or a failed attestation write). It never short-circuits launch admission by
+// itself: callers must still gate the returned receipt behind durable
+// positive post-repair attestation (completing it now via
+// RecordWorkspaceInventoryPostRepairAttestation when absent) before treating
+// it as a launchable success, exactly as executor.attestedExistingWorkspaceInventoryReceipt
+// and executor.attestedWorkspaceInventoryRowsReceipt do.
 func (r *Repository) GetWorkspaceInventoryRepairReceipt(
 	ctx context.Context,
 	taskID string,
