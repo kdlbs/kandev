@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
 import { SettingsSaveProvider } from "./settings-save-provider";
 import type { UtilityAgent } from "@/lib/api/domains/utility-api";
@@ -66,12 +66,31 @@ function ReadDefaultUtilityAgentProfileId() {
   return <div data-testid="stored-profile-id">{value ?? ""}</div>;
 }
 
+function SetNewerDefaultUtilityAgentProfile() {
+  const storeApi = useAppStoreApi();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        storeApi.getState().setUserSettings({
+          ...storeApi.getState().userSettings,
+          defaultUtilityAgentProfileId: "profile-2",
+          revision: 2,
+        })
+      }
+    >
+      Apply newer profile update
+    </button>
+  );
+}
+
 function renderSection() {
   return render(
     <StateProvider initialState={{ userSettings: { ...defaultState.userSettings } }}>
       <SettingsSaveProvider>
         <UtilityAgentsSection />
       </SettingsSaveProvider>
+      <SetNewerDefaultUtilityAgentProfile />
       <ReadDefaultUtilityAgentProfileId />
     </StateProvider>,
   );
@@ -105,6 +124,33 @@ describe("UtilityAgentsSection save", () => {
     );
     await waitFor(() =>
       expect(screen.getByTestId("stored-profile-id").textContent).toBe("profile-1"),
+    );
+  });
+
+  it("does not overwrite a newer store update when the save response arrives late", async () => {
+    let resolveUpdate: (value: unknown) => void = () => undefined;
+    updateUserSettings.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUpdate = resolve;
+      }),
+    );
+
+    renderSection();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pick default profile" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply newer profile update" }));
+    resolveUpdate({
+      settings: {
+        revision: 1,
+        default_utility_agent_profile_id: "profile-1",
+      },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stored-profile-id").textContent).toBe("profile-2"),
     );
   });
 });
