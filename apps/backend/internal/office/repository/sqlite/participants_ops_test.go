@@ -195,12 +195,18 @@ func TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat(t *testing.T) {
 // legitimate multi-reviewer scenario TestAddTaskParticipant_IsIdempotentPerNaturalKey
 // already covers for distinct agents: two manually-added seats (both
 // provenance="manual") for the same role are never collapsed by the claim
-// logic, since neither carries provenance="auto".
+// logic, since neither carries provenance="auto". Both agents are seeded as
+// live agent_profiles rows so each registration actually reaches
+// findClaimableAutoSeat's claim search (and finds no "auto" seat to claim)
+// instead of short-circuiting at the unknown-agent check attemptClaim
+// applies first.
 func TestAddTaskParticipant_MultiReviewerManualSeatsUntouched(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
 
 	seedParticipantTask(t, repo, "ap-multi", "step-1")
+	seedParticipantAgent(t, repo, "agent-one")
+	seedParticipantAgent(t, repo, "agent-two")
 
 	if _, err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-one", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant (first): %v", err)

@@ -166,13 +166,23 @@ func (r *Repository) AddTaskParticipant(ctx context.Context, taskID, agentID, ro
 		return commitParticipantWrite(tx, *claimed)
 	}
 	// No claim landed — either no claimable auto seat existed, or the
-	// selected one was removed or decided concurrently, outside this
-	// transaction's own exclusion (a recorded decision serializes on a
-	// different lock namespace). Either way, fall through to inserting a
-	// fresh seat rather than completing having written nothing.
+	// selected one was removed, reprovenanced, or decided since
+	// findClaimableAutoSeat's read (claimAutoSeat's guard is a defensive
+	// backstop: recordStepDecisionTx now shares this transaction's
+	// ParticipantRoleSeatLockKey exclusion, so it cannot actually interleave
+	// here). Either way, fall through to inserting a fresh seat rather than
+	// completing having written nothing.
 
-	if err := r.insertManualParticipant(ctx, tx, stepID, taskID, role, agentID); err != nil {
+	inserted, err := r.insertManualParticipant(ctx, tx, stepID, taskID, role, agentID)
+	if err != nil {
 		return ParticipantWriteResult{}, err
+	}
+	if !inserted {
+		// The natural-key backstop fired: a row already existed at this
+		// exact (step, task, role, agent) identity despite the exclusion —
+		// report the same outcome probeExistingIdentity would have (design
+		// doc "Contention").
+		return commitParticipantWrite(tx, ParticipantWriteResult{Outcome: ParticipantWriteOutcomeUnchanged})
 	}
 	return commitParticipantWrite(tx, ParticipantWriteResult{Outcome: ParticipantWriteOutcomeInserted, StepID: stepID})
 }
@@ -235,16 +245,26 @@ func (r *Repository) attemptClaim(
 }
 
 // insertManualParticipant writes a fresh "manual" seat for agentID.
-func (r *Repository) insertManualParticipant(ctx context.Context, tx *sqlx.Tx, stepID, taskID, role, agentID string) error {
+// Returns false, with no error, when the insert hit
+// participantsNaturalKeyIndexName instead of landing — a row already
+// existed at this exact (step, task, role, agent) identity. Every known
+// caller reaches this insert already holding ParticipantRoleSeatLockKey, so
+// that should never happen; the index remains a defensive backstop against
+// a writer somehow outside the exclusion, and firing it is treated as no
+// change rather than retried (design doc "Contention").
+func (r *Repository) insertManualParticipant(ctx context.Context, tx *sqlx.Tx, stepID, taskID, role, agentID string) (bool, error) {
 	id := uuid.New().String()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO workflow_step_participants
 			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
 		VALUES (?, ?, ?, ?, ?, 1, 0, ?)
 	`), id, stepID, taskID, role, agentID, string(models.ParticipantProvenanceManual)); err != nil {
-		return fmt.Errorf("insert participant: %w", err)
+		if workflowrepo.IsParticipantsNaturalKeyViolation(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("insert participant: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // commitParticipantWrite commits tx and returns result, or a wrapped error
@@ -405,23 +425,24 @@ func (r *Repository) findClaimableAutoSeat(
 }
 
 // claimAutoSeat reassigns the seat identified by seatID to agentID and
-// marks it "manual", conditional on no decision having been recorded
-// against it. Returns false when the conditional UPDATE affected no row:
-// the seat was removed, or a decision committed against it, between
-// findClaimableAutoSeat's read and this write. A recorded decision
-// serializes on a different advisory-lock namespace
-// (workflow-step-decision:) than this transaction's
-// ParticipantRoleSeatLockKey exclusion, so on the server dialect the two
-// can interleave inside this one transaction; the condition closes that
-// window without a retry. The caller then falls through to inserting a
-// fresh seat.
+// marks it "manual", conditional on the seat still carrying provenance
+// "auto" and no decision having been recorded against it. Returns false
+// when the conditional UPDATE affected no row: the seat was removed, its
+// provenance changed, or a decision was recorded, since
+// findClaimableAutoSeat's read. recordStepDecisionTx now serializes on the
+// same ParticipantRoleSeatLockKey exclusion as this transaction, so that
+// race window is already closed by the lock for every known caller; both
+// conditions remain as a defensive backstop against a writer that somehow
+// reaches this table without holding it. The caller then falls through to
+// inserting a fresh seat.
 func (r *Repository) claimAutoSeat(ctx context.Context, tx *sqlx.Tx, seatID, agentID string) (bool, error) {
 	res, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE workflow_step_participants
 		SET agent_profile_id = ?, provenance = ?
 		WHERE id = ?
+		  AND provenance = ?
 		  AND NOT EXISTS (SELECT 1 FROM workflow_step_decisions WHERE participant_id = ?)
-	`), agentID, string(models.ParticipantProvenanceManual), seatID, seatID)
+	`), agentID, string(models.ParticipantProvenanceManual), seatID, string(models.ParticipantProvenanceAuto), seatID)
 	if err != nil {
 		return false, fmt.Errorf("claim auto-cast participant: %w", err)
 	}

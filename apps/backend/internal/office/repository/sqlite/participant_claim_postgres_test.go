@@ -195,6 +195,50 @@ func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *
 			t.Fatalf("iteration %d: RecordStepDecision: %v", i, decisionErr)
 		}
 
+		var decisionCount int
+		if err := db.GetContext(ctx, &decisionCount, db.Rebind(
+			`SELECT COUNT(*) FROM workflow_step_decisions WHERE participant_id = ?`,
+		), seatID); err != nil {
+			t.Fatalf("iteration %d: count decisions: %v", i, err)
+		}
+		var seatAgent, seatProvenance string
+		if err := db.GetContext(ctx, &seatAgent, db.Rebind(
+			`SELECT agent_profile_id FROM workflow_step_participants WHERE id = ?`,
+		), seatID); err != nil {
+			t.Fatalf("iteration %d: read seat: %v", i, err)
+		}
+		if err := db.GetContext(ctx, &seatProvenance, db.Rebind(
+			`SELECT provenance FROM workflow_step_participants WHERE id = ?`,
+		), seatID); err != nil {
+			t.Fatalf("iteration %d: read seat provenance: %v", i, err)
+		}
+
+		if claimResult.Outcome == sqlite.ParticipantWriteOutcomeClaimed {
+			claimedTotal++
+			// decisionErr == nil above already proved RecordStepDecision's
+			// own goroutine committed successfully. Assert the DB actually
+			// reflects both concurrent writes rather than trusting the
+			// in-memory return values: the claim's reassignment must have
+			// landed (proving claimAutoSeat's guard did not silently
+			// no-op), and the decision it raced against must have landed
+			// too (proving RecordStepDecision genuinely wrote under real
+			// cross-connection concurrency, not just returned success).
+			if seatAgent != "agent-claiming" || seatProvenance != "manual" {
+				t.Fatalf(
+					"iteration %d: AddTaskParticipant reported Claimed but seat %s reads agent=%q provenance=%q",
+					i, seatID, seatAgent, seatProvenance,
+				)
+			}
+			if decisionCount != 1 {
+				t.Fatalf(
+					"iteration %d: expected exactly one decision recorded against claimed seat %s, got %d",
+					i, seatID, decisionCount,
+				)
+			}
+			continue
+		}
+		notClaimedTotal++
+
 		// AC-002.5 protects a decision already on file when the claim
 		// examines the seat — it does not promise anything about a decision
 		// recorded afterward for an agent a claim has since, legitimately,
@@ -207,25 +251,6 @@ func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *
 		// shared exclusion (both writers now serialize on it, closing the
 		// window claimAutoSeat's NOT EXISTS guard alone could not) guarantees
 		// no decision existed yet when the claim's guard ran.
-		if claimResult.Outcome == sqlite.ParticipantWriteOutcomeClaimed {
-			claimedTotal++
-			continue
-		}
-		notClaimedTotal++
-
-		var decisionCount int
-		if err := db.GetContext(ctx, &decisionCount, db.Rebind(
-			`SELECT COUNT(*) FROM workflow_step_decisions WHERE participant_id = ?`,
-		), seatID); err != nil {
-			t.Fatalf("iteration %d: count decisions: %v", i, err)
-		}
-		var seatAgent string
-		if err := db.GetContext(ctx, &seatAgent, db.Rebind(
-			`SELECT agent_profile_id FROM workflow_step_participants WHERE id = ?`,
-		), seatID); err != nil {
-			t.Fatalf("iteration %d: read seat: %v", i, err)
-		}
-
 		if decisionCount > 0 && seatAgent != "agent-auto" {
 			t.Fatalf(
 				"iteration %d: a decision was recorded by agent-auto against seat %s, but the claim reassigned that seat to %q — the decided seat's current holder never actually decided (SR21)",
@@ -234,11 +259,268 @@ func TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision(t *
 		}
 	}
 
-	// Logged, not asserted: which branch wins each iteration is scheduler
-	// noise (both goroutines start from the same close(start) signal with
-	// no forced ordering), so a run landing all-claimed or all-not-claimed
-	// is possible and is not itself a defect. The correctness check inside
-	// the loop above is what actually proves SR21 on every "not claimed"
-	// iteration; this is just visibility into how the 15 iterations split.
+	// The split itself is scheduler noise (both goroutines start from the
+	// same close(start) signal with no forced ordering), so a run landing
+	// all-claimed or all-not-claimed is possible and is not itself a
+	// defect — every iteration is asserted above regardless of which
+	// branch it takes; this is just visibility into how the 15 iterations
+	// split.
 	t.Logf("claimed=%d not-claimed=%d", claimedTotal, notClaimedTotal)
+}
+
+// TestPostgresEnsureRoleSeatVsAddTaskParticipant_ConvergesOnManualSeat is
+// AC-OFFICE-SEAT-PROVENANCE-004.1's actual proof obligation: automatic
+// casting (EnsureRoleSeat) and a manual registration naming a DIFFERENT
+// agent profile racing for one (task, role) that starts with no seat at
+// all. Exactly one seat must exist afterwards, naming the manually
+// registered agent, provenance "manual" — regardless of which writer wins
+// ParticipantRoleSeatLockKey's shared exclusion first:
+//   - EnsureRoleSeat first: it inserts the "auto" seat and commits;
+//     AddTaskParticipant then claims it in place.
+//   - AddTaskParticipant first: findClaimableAutoSeat sees nothing yet, so
+//     it inserts its own "manual" seat directly; EnsureRoleSeat then runs
+//     its own existence check (workflow+role scoped, any step), finds that
+//     seat, and inserts nothing.
+//
+// TestPostgresAddTaskParticipant_ClaimDoesNotOverwriteAConcurrentDecision
+// above races claim vs. decision-recording; neither it nor
+// TestPostgresEnsureRoleSeat_ConcurrentEntriesConvergeOnOneSeat (two
+// EnsureRoleSeat callers) drives this writer-vs-writer pairing. Skips
+// unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresEnsureRoleSeatVsAddTaskParticipant_ConvergesOnManualSeat(t *testing.T) {
+	const iterations = 15
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := openIsolatedPostgresMultiConnForClaimRace(t, dsn, 4)
+	ctx := context.Background()
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
+	workflowRepo, err := workflowrepo.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init workflow repo: %v", err)
+	}
+	officeRepo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES (?, '', 'Seat Writer Race', ?, ?)
+	`), "wf-seat-writer-race", now, now); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	step := &models.WorkflowStep{
+		WorkflowID: "wf-seat-writer-race", Name: "Review", Position: 0, StageType: models.StageTypeReview,
+	}
+	if err := workflowRepo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+
+	for _, agentID := range []string{"agent-auto-cast", "agent-manual-race"} {
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
+		`), agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent %s: %v", agentID, err)
+		}
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'ws-seat-writer-race', '', ?, ?)
+		`), agentID, agentID, agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent profile %s: %v", agentID, err)
+		}
+	}
+
+	for i := 0; i < iterations; i++ {
+		taskID := fmt.Sprintf("task-seat-writer-race-%d", i)
+		seedNow := time.Now().UTC()
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO tasks (id, workflow_step_id, title, created_at, updated_at) VALUES (?, ?, 'race', ?, ?)
+		`), taskID, step.ID, seedNow, seedNow); err != nil {
+			t.Fatalf("iteration %d: seed task: %v", i, err)
+		}
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var autoErr, claimErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, autoErr = workflowRepo.EnsureRoleSeat(ctx, "wf-seat-writer-race", step.ID, taskID, "reviewer", "agent-auto-cast")
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, claimErr = officeRepo.AddTaskParticipant(ctx, taskID, "agent-manual-race", "reviewer")
+		}()
+		close(start)
+		wg.Wait()
+
+		if autoErr != nil {
+			t.Fatalf("iteration %d: EnsureRoleSeat: %v", i, autoErr)
+		}
+		if claimErr != nil {
+			t.Fatalf("iteration %d: AddTaskParticipant: %v", i, claimErr)
+		}
+
+		var seats []struct {
+			AgentProfileID string `db:"agent_profile_id"`
+			Provenance     string `db:"provenance"`
+		}
+		if err := db.SelectContext(ctx, &seats, db.Rebind(`
+			SELECT agent_profile_id, provenance FROM workflow_step_participants
+			WHERE task_id = ? AND role = 'reviewer'
+		`), taskID); err != nil {
+			t.Fatalf("iteration %d: list seats: %v", i, err)
+		}
+		if len(seats) != 1 {
+			t.Fatalf("iteration %d: AC-OFFICE-SEAT-PROVENANCE-004.1: expected exactly one seat, got %d: %+v", i, len(seats), seats)
+		}
+		if seats[0].AgentProfileID != "agent-manual-race" {
+			t.Fatalf("iteration %d: expected the manually registered agent to hold the seat, got %q", i, seats[0].AgentProfileID)
+		}
+		if seats[0].Provenance != "manual" {
+			t.Fatalf("iteration %d: expected provenance manual, got %q", i, seats[0].Provenance)
+		}
+	}
+}
+
+// TestPostgresAddTaskParticipantVsAddTaskParticipant_OneClaimsOneInserts is
+// AC-OFFICE-SEAT-PROVENANCE-004.3's proof obligation: two manual
+// registrations naming two different agent profiles racing for one role
+// slate holding a single unclaimed "auto" seat. Exactly one shall claim it
+// and the other shall write a new "manual" seat — two seats afterward, both
+// naming their own agent, both provenance "manual". Skips unless
+// KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresAddTaskParticipantVsAddTaskParticipantOneClaimsOneInserts(t *testing.T) {
+	const iterations = 15
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := openIsolatedPostgresMultiConnForClaimRace(t, dsn, 4)
+	ctx := context.Background()
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
+	workflowRepo, err := workflowrepo.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init workflow repo: %v", err)
+	}
+	officeRepo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES (?, '', 'Manual Claim Race', ?, ?)
+	`), "wf-manual-claim-race", now, now); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	step := &models.WorkflowStep{
+		WorkflowID: "wf-manual-claim-race", Name: "Review", Position: 0, StageType: models.StageTypeReview,
+	}
+	if err := workflowRepo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+
+	for _, agentID := range []string{"agent-auto-seeded", "agent-manual-a", "agent-manual-b"} {
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
+		`), agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent %s: %v", agentID, err)
+		}
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'ws-manual-claim-race', '', ?, ?)
+		`), agentID, agentID, agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent profile %s: %v", agentID, err)
+		}
+	}
+
+	for i := 0; i < iterations; i++ {
+		taskID := fmt.Sprintf("task-manual-claim-race-%d", i)
+		seatID := fmt.Sprintf("seat-manual-claim-race-%d", i)
+		seedNow := time.Now().UTC()
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO tasks (id, workflow_step_id, title, created_at, updated_at) VALUES (?, ?, 'race', ?, ?)
+		`), taskID, step.ID, seedNow, seedNow); err != nil {
+			t.Fatalf("iteration %d: seed task: %v", i, err)
+		}
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO workflow_step_participants
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+			VALUES (?, ?, ?, 'reviewer', 'agent-auto-seeded', 1, 0, 'auto')
+		`), seatID, step.ID, taskID); err != nil {
+			t.Fatalf("iteration %d: seed auto seat: %v", i, err)
+		}
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var resultA, resultB sqlite.ParticipantWriteResult
+		var errA, errB error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			resultA, errA = officeRepo.AddTaskParticipant(ctx, taskID, "agent-manual-a", "reviewer")
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			resultB, errB = officeRepo.AddTaskParticipant(ctx, taskID, "agent-manual-b", "reviewer")
+		}()
+		close(start)
+		wg.Wait()
+
+		if errA != nil {
+			t.Fatalf("iteration %d: AddTaskParticipant(agent-manual-a): %v", i, errA)
+		}
+		if errB != nil {
+			t.Fatalf("iteration %d: AddTaskParticipant(agent-manual-b): %v", i, errB)
+		}
+
+		claimedCount := 0
+		if resultA.Outcome == sqlite.ParticipantWriteOutcomeClaimed {
+			claimedCount++
+		}
+		if resultB.Outcome == sqlite.ParticipantWriteOutcomeClaimed {
+			claimedCount++
+		}
+		if claimedCount != 1 {
+			t.Fatalf(
+				"iteration %d: AC-OFFICE-SEAT-PROVENANCE-004.3: expected exactly one registration to claim the auto seat, got %d (A=%v B=%v)",
+				i, claimedCount, resultA.Outcome, resultB.Outcome,
+			)
+		}
+
+		var seats []struct {
+			AgentProfileID string `db:"agent_profile_id"`
+			Provenance     string `db:"provenance"`
+		}
+		if err := db.SelectContext(ctx, &seats, db.Rebind(`
+			SELECT agent_profile_id, provenance FROM workflow_step_participants
+			WHERE task_id = ? AND role = 'reviewer' ORDER BY agent_profile_id ASC
+		`), taskID); err != nil {
+			t.Fatalf("iteration %d: list seats: %v", i, err)
+		}
+		if len(seats) != 2 {
+			t.Fatalf("iteration %d: expected exactly two seats afterward, got %d: %+v", i, len(seats), seats)
+		}
+		for _, seat := range seats {
+			if seat.AgentProfileID != "agent-manual-a" && seat.AgentProfileID != "agent-manual-b" {
+				t.Fatalf("iteration %d: unexpected seat holder %q, want agent-manual-a or agent-manual-b", i, seat.AgentProfileID)
+			}
+			if seat.Provenance != "manual" {
+				t.Fatalf("iteration %d: seat %q has provenance %q, want manual", i, seat.AgentProfileID, seat.Provenance)
+			}
+		}
+	}
 }

@@ -329,6 +329,98 @@ func TestAddTaskReviewer_HappyPath_NoCaller(t *testing.T) {
 	}
 }
 
+// TestAddTaskReviewer_ClaimingAutoSeatCancelsDisplacedRunAndLogsActivity
+// drives ParticipantWriteOutcomeClaimed's side effects
+// (applyParticipantAddOutcome) end to end through the HTTP handler, not
+// just at the repository layer: a manual registration claiming an
+// auto-cast seat must cancel the run step-entry fan-out queued for the
+// displaced agent and record a "task_participant_claimed" activity entry,
+// on top of reassigning the seat itself.
+func TestAddTaskReviewer_ClaimingAutoSeatCancelsDisplacedRunAndLogsActivity(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "claim1", "ws-claim", "C", "todo", 2)
+	stepID := "step-claim1"
+
+	// AddTaskParticipant's identity probe only lets a live agent_profiles
+	// row claim a cast seat (AC-OFFICE-SEAT-PROVENANCE-005.8).
+	if _, err := deps.db.Exec(`
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES ('agent-claiming', '', 'agent-claiming', 'agent-claiming', 'ws-claim', '', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed claiming agent profile: %v", err)
+	}
+
+	if _, err := deps.db.Exec(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES ('auto-seat-claim1', ?, 'claim1', 'reviewer', 'agent-auto', 1, 0, 'auto')
+	`, stepID); err != nil {
+		t.Fatalf("seed auto seat: %v", err)
+	}
+
+	// The run step-entry fan-out queued for the auto-cast agent —
+	// CancelDisplacedParticipantRun should cancel it once the claim lands.
+	run := &models.Run{
+		AgentProfileID: "agent-auto",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"claim1","workflow_step_id":"` + stepID + `"}`,
+		Status:         models.RunStatusQueued,
+		CoalescedCount: 1,
+	}
+	if err := deps.repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("seed displaced run: %v", err)
+	}
+
+	body := `{"agent_profile_id":"agent-claiming"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/office/tasks/claim1/reviewers", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := deps.db.Get(&count,
+		`SELECT COUNT(*) FROM workflow_step_participants WHERE task_id = 'claim1' AND role = 'reviewer'`,
+	); err != nil {
+		t.Fatalf("count seats: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("seats = %d, want 1 (claimed in place, not a second row)", count)
+	}
+	var agentID, provenance string
+	if err := deps.db.QueryRow(
+		`SELECT agent_profile_id, provenance FROM workflow_step_participants WHERE id = 'auto-seat-claim1'`,
+	).Scan(&agentID, &provenance); err != nil {
+		t.Fatalf("read claimed seat: %v", err)
+	}
+	if agentID != "agent-claiming" || provenance != "manual" {
+		t.Fatalf("seat = (agent=%q provenance=%q), want (agent-claiming, manual)", agentID, provenance)
+	}
+
+	gotRun, err := deps.repo.GetRunByID(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get displaced run: %v", err)
+	}
+	if gotRun.Status != "cancelled" {
+		t.Fatalf("displaced run status = %q, want cancelled", gotRun.Status)
+	}
+
+	var activityCount int
+	if err := deps.db.Get(&activityCount, `
+		SELECT COUNT(*) FROM office_activity_log
+		WHERE target_id = 'claim1' AND action = 'task_participant_claimed'
+	`); err != nil {
+		t.Fatalf("count claim activity: %v", err)
+	}
+	if activityCount != 1 {
+		t.Fatalf("claim activity entries = %d, want 1", activityCount)
+	}
+}
+
 func TestAddTaskApprover_HappyPath_NoCaller(t *testing.T) {
 	deps := newTestDeps(t)
 	insertTestTask(t, deps.db, "app1", "ws-app", "A", "todo", 2)

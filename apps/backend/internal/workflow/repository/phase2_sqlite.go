@@ -748,6 +748,16 @@ func isParticipantsNaturalKeyViolation(err error) bool {
 	return strings.Contains(err.Error(), sqliteParticipantsNaturalKeyViolationMessage)
 }
 
+// IsParticipantsNaturalKeyViolation is isParticipantsNaturalKeyViolation,
+// exported so office's AddTaskParticipant — a second writer of this same
+// table, in a different package — can recognize the same defensive
+// backstop EnsureRoleSeat retries on, instead of reimplementing the
+// per-dialect error matching against a private constant only this package
+// can see.
+func IsParticipantsNaturalKeyViolation(err error) bool {
+	return isParticipantsNaturalKeyViolation(err)
+}
+
 const participantsLockNamespace = "workflow-participant-role-seat:"
 
 // ParticipantRoleSeatLockKey derives the shared advisory-lock key
