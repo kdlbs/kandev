@@ -198,9 +198,12 @@ test.describe("Mobile sidebar task actions", () => {
       workflow_step_id: seedData.startStepId,
     });
 
-    await testPage.addInitScript((taskId) => {
-      window.localStorage.setItem("kandev.taskColors", JSON.stringify({ [taskId]: "red" }));
-    }, task.id);
+    await apiClient.saveUserSettings({
+      sidebar_task_color_patch: {
+        colors: { [task.id]: "red" },
+        if_missing: false,
+      },
+    });
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
