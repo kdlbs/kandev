@@ -142,18 +142,21 @@ describe("buildPipelineStepIndexOf", () => {
 });
 
 describe("filterIdsByPriorityFilter", () => {
+  // STORED_INVALID_ID is AC-001.10's persistent unranked origin (a stored value
+  // outside the four tokens); "unranked" is the transient origin (absent
+  // field). Both must be excluded identically under a non-empty selection.
+  const STORED_INVALID_ID = "stored-invalid";
   const taskById = new Map<string, DisplayOrderTask>([
     ["high", { id: "high", priority: "high" }],
     ["low", { id: "low", priority: "low" }],
     ["unranked", { id: "unranked" }],
+    [STORED_INVALID_ID, { id: STORED_INVALID_ID, priority: "urgent" as TaskPriority }],
   ]);
 
   it("keeps every id when the priority filter is empty", () => {
-    expect(filterIdsByPriorityFilter(["high", "low", "unranked"], taskById, [])).toEqual([
-      "high",
-      "low",
-      "unranked",
-    ]);
+    expect(
+      filterIdsByPriorityFilter(["high", "low", "unranked", STORED_INVALID_ID], taskById, []),
+    ).toEqual(["high", "low", "unranked", STORED_INVALID_ID]);
   });
 
   it("drops an id whose task's priority is outside the active selection", () => {
@@ -162,6 +165,12 @@ describe("filterIdsByPriorityFilter", () => {
 
   it("drops an unranked task under a non-empty selection", () => {
     expect(filterIdsByPriorityFilter(["high", "unranked"], taskById, ["high"])).toEqual(["high"]);
+  });
+
+  it("drops a persistent-origin unranked task (stored value outside the vocabulary) under a non-empty selection", () => {
+    expect(filterIdsByPriorityFilter(["high", STORED_INVALID_ID], taskById, ["high"])).toEqual([
+      "high",
+    ]);
   });
 
   it("keeps an id whose task isn't in the map — visibility can't be determined, so it isn't excluded", () => {
@@ -346,5 +355,106 @@ describe("useTaskMultiSelect — bulk actions exclude priority-filtered-out task
     });
 
     expect(archiveTaskById).toHaveBeenCalledTimes(2);
+  });
+});
+
+// eligibleSelectedIds (lib.ts:176-187) reads the filter once, synchronously,
+// before runBulkAction's only await point (Promise.allSettled) — so every
+// `per(id)` dispatch below already happened by the time a test can mutate
+// the store. These three tests pin that "snapshot at invocation, not at
+// completion" contract for the in-flight window between dispatch and settle.
+describe("useTaskMultiSelect — eligibility snapshot is frozen at invocation (AC-002.11)", () => {
+  beforeEach(() => {
+    moveTaskById.mockReset().mockResolvedValue(undefined);
+    deleteTaskById.mockReset().mockResolvedValue(undefined);
+    archiveTaskById.mockReset().mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  it("a task hidden by a filter change after invocation still gets acted on", async () => {
+    storeApi = makeStoreApi([makeTask("a", "high"), makeTask("b", "low")], []);
+    const { useTaskMultiSelect } = await import("./use-task-multi-select");
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+
+    act(() => result.current.toggleSelect("a"));
+    act(() => result.current.toggleSelect("b"));
+
+    const gates = { a: deferred<void>(), b: deferred<void>() };
+    deleteTaskById.mockImplementation((id: string) => gates[id as "a" | "b"].promise);
+
+    let bulkDeletePromise: Promise<void> | undefined;
+    act(() => {
+      bulkDeletePromise = result.current.bulkDelete();
+    });
+
+    // Both dispatches already fired synchronously above; hiding "b" now must
+    // not undo the dispatch already made against the pre-mutation snapshot.
+    storeApi.getState().userSettings.kanbanPriorityFilterTokens = ["high"];
+
+    await act(async () => {
+      gates.a.resolve();
+      gates.b.resolve();
+      await bulkDeletePromise;
+    });
+
+    expect(deleteTaskById).toHaveBeenCalledTimes(2);
+    expect(deleteTaskById).toHaveBeenCalledWith("a", undefined);
+    expect(deleteTaskById).toHaveBeenCalledWith("b", undefined);
+  });
+
+  it("a task revealed after invocation isn't added to the acted-on set", async () => {
+    storeApi = makeStoreApi([makeTask("a", "high"), makeTask("c", "low")], ["high"]);
+    const { useTaskMultiSelect } = await import("./use-task-multi-select");
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+
+    act(() => result.current.toggleSelect("a"));
+    act(() => result.current.toggleSelect("c"));
+
+    const gate = deferred<void>();
+    deleteTaskById.mockImplementation(() => gate.promise);
+
+    let bulkDeletePromise: Promise<void> | undefined;
+    act(() => {
+      bulkDeletePromise = result.current.bulkDelete();
+    });
+
+    // "c" was excluded from the invocation-time snapshot; revealing it now
+    // must not retroactively fold it into the dispatch already in flight.
+    storeApi.getState().userSettings.kanbanPriorityFilterTokens = [];
+
+    await act(async () => {
+      gate.resolve();
+      await bulkDeletePromise;
+    });
+
+    expect(deleteTaskById).toHaveBeenCalledTimes(1);
+    expect(deleteTaskById).toHaveBeenCalledWith("a", undefined);
+    expect(result.current.selectedIds.has("c")).toBe(true);
+  });
+
+  it("an invocation whose eligible snapshot is empty is a no-op", async () => {
+    storeApi = makeStoreApi([makeTask("c", "low")], ["high"]);
+    const { useTaskMultiSelect } = await import("./use-task-multi-select");
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+
+    act(() => result.current.toggleSelect("c"));
+
+    await act(async () => {
+      await result.current.bulkDelete();
+    });
+
+    expect(deleteTaskById).not.toHaveBeenCalled();
+    expect(result.current.selectedIds.has("c")).toBe(true);
+    expect(result.current.isProcessing).toBe(false);
   });
 });

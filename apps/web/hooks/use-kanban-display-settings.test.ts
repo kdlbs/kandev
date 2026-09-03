@@ -135,14 +135,15 @@ describe("useKanbanDisplaySettings — step visibility", () => {
 
     act(() => result.current.onToggleStepVisibility(mocks.workflowId, "step-a"));
 
-    expect(mocks.commitSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceId: mocks.workspaceId,
-        workflowId: mocks.workflowId,
-        repositoryIds: ["repo-1"],
-        hiddenWorkflowStepIds: { [mocks.workflowId]: ["step-a"] },
-      }),
-    );
+    expect(mocks.commitSettings).toHaveBeenCalledWith({
+      workspaceId: mocks.workspaceId,
+      workflowId: mocks.workflowId,
+      repositoryIds: ["repo-1"],
+      hiddenWorkflowStepIds: { [mocks.workflowId]: ["step-a"] },
+      workflowIdsWithAutoHideEmptySteps: undefined,
+      kanbanSort: mocks.kanbanSort,
+      kanbanPriorityFilterTokens: mocks.kanbanPriorityFilterTokens,
+    });
   });
 
   it("re-ticking a hidden step removes only that id, idempotently", () => {
