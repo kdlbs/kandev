@@ -8,9 +8,12 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
  * Tests the session tabs on the kanban right-side preview panel:
  * - Every session of the task shows up as a tab
  * - Clicking a tab switches the rendered session body and updates the URL
+ * - The Agents dropdown lists every session and switches the preview when a
+ *   row is picked, without opening the full-page task view
  *
- * Session creation and deletion are deliberately NOT exposed in the preview
- * panel — those live on the full-page task view.
+ * The tab strip itself stays read-only (no per-tab close button, no "+"
+ * button) — session creation, resume, delete, and set-primary are reached
+ * through the Agents dropdown instead.
  */
 test.describe("Preview session tabs", () => {
   test("shows all sessions as tabs and switches between them", async ({
@@ -146,6 +149,23 @@ test.describe("Preview session tabs", () => {
     await expect(testPage.getByTestId(`preview-session-tab-close-${primaryId}`)).toHaveCount(0);
     await expect(testPage.getByTestId(`preview-session-tab-close-${secondaryId}`)).toHaveCount(0);
     await expect(previewPanel.getByRole("button", { name: "+" })).toHaveCount(0);
+
+    // 10. The Agents dropdown lists both sessions and switches the preview
+    // (not the tab strip's "+"/close controls, which stay absent per step 9).
+    await previewPanel.getByTestId("sessions-dropdown-trigger").click();
+    const primaryRow = testPage.getByTestId(`sessions-dropdown-row-${primaryId}`);
+    const secondaryRow = testPage.getByTestId(`sessions-dropdown-row-${secondaryId}`);
+    await expect(primaryRow).toBeVisible({ timeout: 10_000 });
+    await expect(secondaryRow).toBeVisible();
+
+    // 11. Click the non-active row (primary) — preview body and URL switch back.
+    await primaryRow.click();
+    await expect(primaryTab).toHaveAttribute("data-state", "active");
+    await expect(secondaryTab).toHaveAttribute("data-state", "inactive");
+    await expect(previewPanel.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(testPage).toHaveURL(new RegExp(`sessionId=${primaryId}`), { timeout: 5_000 });
   });
 });
 

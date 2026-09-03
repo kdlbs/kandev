@@ -15,6 +15,7 @@ import { sendMessageRequest } from "@/hooks/use-message-handler";
 import type { ChatSubmitPayload } from "./chat/chat-input-container";
 import { EnsureSessionErrorEmptyState, SessionRecoveryFeedback } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
+import { SessionsDropdown } from "./sessions-dropdown";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
   buildAgentLabelsById,
@@ -36,10 +37,11 @@ type PreviewSessionTabsProps = {
 };
 
 /**
- * Read-only session tabs for the kanban preview panel.
- *
- * Tabs only switch between existing sessions — creating or deleting sessions
- * is deliberately restricted to the full-page task view.
+ * Session tabs for the kanban preview panel, paired with the Agents dropdown
+ * for full session management (create, resume, delete, set primary) without
+ * leaving the board. Selecting a session from the dropdown updates only this
+ * panel's local preview state, not the global active session or dockview
+ * layout — the preview has no dockview to switch.
  */
 export function PreviewSessionTabs({
   taskId,
@@ -117,7 +119,7 @@ export function PreviewSessionTabs({
         </>
       );
     }
-    return <PreviewEmptyState />;
+    return <PreviewEmptyState taskId={taskId} />;
   }
 
   return (
@@ -128,12 +130,17 @@ export function PreviewSessionTabs({
         onRetry={() => void resumption.resumeSession()}
         workspaceId={workspaceId ?? null}
       />
-      <div className="border-b px-2 py-1">
+      <div className="border-b px-2 py-1 flex items-center gap-1 min-w-0">
         <SessionTabs
           tabs={tabs}
           activeTab={activeSessionId ?? ""}
           onTabChange={(id) => onSessionChange?.(id)}
           listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        />
+        <SessionsDropdown
+          taskId={taskId}
+          activeSessionId={activeSessionId}
+          onSelectSession={(id) => onSessionChange?.(id)}
         />
       </div>
       <div className="flex-1 min-h-0">
@@ -209,10 +216,13 @@ function PreviewLoadingState({ label }: { label: string }) {
   return <PanelLoadingState testId="preview-loading-state" label={label} />;
 }
 
-function PreviewEmptyState() {
+function PreviewEmptyState({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
   return (
     <div className="flex h-full flex-col">
+      <div className="flex justify-end border-b px-2 py-1">
+        <SessionsDropdown taskId={taskId} activeSessionId={null} />
+      </div>
       <div
         className="flex flex-1 items-center justify-center text-sm text-muted-foreground"
         data-testid="preview-empty-state"

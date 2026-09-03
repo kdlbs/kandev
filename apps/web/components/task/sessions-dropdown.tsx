@@ -104,6 +104,7 @@ type SessionsDropdownProps = {
   taskTitle?: string;
   primarySessionId?: string | null;
   onSetPrimary?: (sessionId: string) => void;
+  onSelectSession?: (sessionId: string) => void;
 };
 
 function useRunningSessionsClock(sessions: TaskSession[]) {
@@ -121,12 +122,20 @@ function useRunningSessionsClock(sessions: TaskSession[]) {
   return currentTime;
 }
 
-function useSessionSelectionHandlers(taskId: string | null) {
+export function useSessionSelectionHandlers(
+  taskId: string | null,
+  onSelectSession?: (sessionId: string) => void,
+) {
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const appStore = useAppStoreApi();
   const handleSelectSession = useCallback(
     (sessionId: string, close: () => void) => {
       if (!taskId) return;
+      if (onSelectSession) {
+        onSelectSession(sessionId);
+        close();
+        return;
+      }
       const state = appStore.getState();
       const oldSessionId = state.tasks.activeSessionId;
       const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
@@ -138,7 +147,7 @@ function useSessionSelectionHandlers(taskId: string | null) {
       if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId, sessionIds);
       close();
     },
-    [appStore, setActiveSession, taskId],
+    [appStore, onSelectSession, setActiveSession, taskId],
   );
   return { handleSelectSession };
 }
@@ -230,7 +239,9 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   taskTitle = "",
   primarySessionId: primarySessionIdProp = null,
   onSetPrimary,
+  onSelectSession,
 }: SessionsDropdownProps) {
+  const { t } = useTranslation();
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [open, setOpen] = useState(false);
   const storePrimarySessionId = useAppStore((state) => {
@@ -253,7 +264,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   );
   const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
     useSessionsDropdownState(taskId);
-  const { handleSelectSession } = useSessionSelectionHandlers(taskId);
+  const { handleSelectSession } = useSessionSelectionHandlers(taskId, onSelectSession);
   const { handleResumeSession, handleDeleteSession, handleSetPrimary } = useSessionLifecycleActions(
     taskId,
     loadSessions,
@@ -276,6 +287,9 @@ export const SessionsDropdown = memo(function SessionsDropdown({
             variant="ghost"
             size="sm"
             className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+            data-testid="sessions-dropdown-trigger"
+            title={t("common:agents")}
+            aria-label={t("common:agents")}
           >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
             <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
@@ -466,6 +480,7 @@ function SessionRow({
   return (
     <div
       onClick={() => onSelect(session.id)}
+      data-testid={`sessions-dropdown-row-${session.id}`}
       className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${isActive ? "bg-muted/50" : ""}`}
     >
       <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">#{number}</span>

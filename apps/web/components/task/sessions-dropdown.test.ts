@@ -7,6 +7,11 @@ const lifecycleMocks = vi.hoisted(() => ({
   removeQuickChatSession: vi.fn(),
   request: vi.fn(),
   quickChatSessions: [] as Array<{ sessionId: string; taskId?: string }>,
+  setActiveSession: vi.fn(),
+  performLayoutSwitch: vi.fn(),
+  activeSessionId: null as string | null,
+  environmentIdBySessionId: {} as Record<string, string>,
+  taskSessionIds: [] as string[],
 }));
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
@@ -15,15 +20,32 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: lifecycleMocks.getWebSocketClient,
 }));
+vi.mock("@/lib/state/dockview-store", () => ({
+  performLayoutSwitch: lifecycleMocks.performLayoutSwitch,
+}));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({ removeQuickChatSession: lifecycleMocks.removeQuickChatSession }),
+    selector({
+      removeQuickChatSession: lifecycleMocks.removeQuickChatSession,
+      setActiveSession: lifecycleMocks.setActiveSession,
+    }),
   useAppStoreApi: () => ({
-    getState: () => ({ quickChat: { sessions: lifecycleMocks.quickChatSessions } }),
+    getState: () => ({
+      quickChat: { sessions: lifecycleMocks.quickChatSessions },
+      tasks: { activeSessionId: lifecycleMocks.activeSessionId },
+      environmentIdBySessionId: lifecycleMocks.environmentIdBySessionId,
+      taskSessionsByTask: {
+        itemsByTaskId: { "task-1": lifecycleMocks.taskSessionIds.map((id) => ({ id })) },
+      },
+    }),
   }),
 }));
 
-import { sessionStatusTooltip, useSessionLifecycleActions } from "./sessions-dropdown";
+import {
+  sessionStatusTooltip,
+  useSessionLifecycleActions,
+  useSessionSelectionHandlers,
+} from "./sessions-dropdown";
 
 describe("sessionStatusTooltip", () => {
   it("prioritizes permission over clarification for input-capable sessions", () => {
@@ -61,6 +83,42 @@ describe("sessionStatusTooltip", () => {
     expect(
       sessionStatusTooltip("COMPLETED", { permission: false, clarification: false }, "background"),
     ).toBe("Complete");
+  });
+});
+
+describe("useSessionSelectionHandlers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    lifecycleMocks.activeSessionId = "session-a";
+    lifecycleMocks.environmentIdBySessionId = { "session-a": "env-a", "session-b": "env-b" };
+    lifecycleMocks.taskSessionIds = ["session-a", "session-b"];
+  });
+
+  it("routes selection through the override and skips the global active session and dockview layout switch", () => {
+    const onSelectSession = vi.fn();
+    const close = vi.fn();
+    const { result } = renderHook(() => useSessionSelectionHandlers("task-1", onSelectSession));
+
+    result.current.handleSelectSession("session-b", close);
+
+    expect(onSelectSession).toHaveBeenCalledWith("session-b");
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(lifecycleMocks.setActiveSession).not.toHaveBeenCalled();
+    expect(lifecycleMocks.performLayoutSwitch).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the global active session and dockview layout switch without an override", () => {
+    const close = vi.fn();
+    const { result } = renderHook(() => useSessionSelectionHandlers("task-1", undefined));
+
+    result.current.handleSelectSession("session-b", close);
+
+    expect(lifecycleMocks.setActiveSession).toHaveBeenCalledWith("task-1", "session-b");
+    expect(lifecycleMocks.performLayoutSwitch).toHaveBeenCalledWith("env-a", "env-b", "session-b", [
+      "session-a",
+      "session-b",
+    ]);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
 
