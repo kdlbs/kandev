@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -17,6 +19,8 @@ import (
 
 type workspaceInventoryRepairRepository interface {
 	RepairWorkspaceInventory(context.Context, *models.WorkspaceInventoryRepair) (*models.WorkspaceInventoryRecoveryReceipt, error)
+	GetWorkspaceInventoryRepairReceipt(ctx context.Context, taskID, idempotencyKey string) (*models.WorkspaceInventoryRecoveryReceipt, error)
+	RecordWorkspaceInventoryPostRepairAttestation(ctx context.Context, taskID, idempotencyKey string, evidence *models.WorkspaceInventoryPreservation, matched bool, verifiedAt time.Time) error
 }
 
 func (e *Executor) repairReuseEnvironmentInventory(
@@ -31,6 +35,11 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	repairer, err := e.workspaceInventoryRepairer(task, session, req, env, idempotencyKey)
 	if err != nil {
 		return nil, err
+	}
+	if existing, err := e.existingWorkspaceInventoryRepairReceipt(ctx, repairer, task, session, env, idempotencyKey); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
 	}
 	repairSession, err := e.workspaceInventoryRepairSession(ctx, req, env, session, repositories)
 	if err != nil {
@@ -71,11 +80,77 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	if err != nil {
 		return nil, err
 	}
-	after, err := inspectWorkspaceInventoryCandidate(ctx, info, candidate)
-	if err != nil || !samePreservationEvidence(evidence, after) {
+	after, inspectErr := inspectWorkspaceInventoryCandidate(ctx, info, candidate)
+	matched := inspectErr == nil && samePreservationEvidence(evidence, after)
+	postEvidence, verifiedAt := e.recordWorkspaceInventoryPostRepairAttestation(ctx, repairer, task.ID, idempotencyKey, spec, session, after, matched)
+	receipt.PostRepairEvidence = postEvidence
+	receipt.PostRepairMatched = matched
+	receipt.PostRepairVerifiedAt = &verifiedAt
+	if !matched {
 		return nil, fmt.Errorf("%w: checkout changed during metadata repair", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
 	return receipt, nil
+}
+
+// existingWorkspaceInventoryRepairReceipt returns an already-committed receipt
+// for this task-scoped idempotency key when its session/environment identity
+// still matches the caller's context. This must run before candidate
+// selection: once a prior repair committed, the canonical inventory already
+// matches, leaving no provable mismatch for selectWorkspaceInventoryRepairTarget
+// to find, which would otherwise misreport a retry as a conflict.
+func (e *Executor) existingWorkspaceInventoryRepairReceipt(
+	ctx context.Context,
+	repairer workspaceInventoryRepairRepository,
+	task *v1.Task,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+	idempotencyKey string,
+) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	existing, err := repairer.GetWorkspaceInventoryRepairReceipt(ctx, task.ID, idempotencyKey)
+	if err != nil {
+		return nil, fmt.Errorf("load existing workspace inventory repair receipt: %w", err)
+	}
+	if existing == nil {
+		return nil, nil
+	}
+	if existing.SessionID != session.ID || existing.TaskEnvironmentID != env.ID {
+		return nil, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict
+	}
+	return existing, nil
+}
+
+// recordWorkspaceInventoryPostRepairAttestation persists non-secret
+// before/after checkout evidence onto the committed receipt and returns the
+// evidence/timestamp so the caller can also surface it on the in-memory
+// receipt it returns. The repair transaction already committed by the time
+// this runs, so a failure to persist this attestation is logged and never
+// turns an otherwise-successful repair into a failure; a match/mismatch is
+// recorded either way so an unexpected concurrent write is itself part of
+// the durable audit trail rather than a transient in-memory check.
+func (e *Executor) recordWorkspaceInventoryPostRepairAttestation(
+	ctx context.Context,
+	repairer workspaceInventoryRepairRepository,
+	taskID string,
+	idempotencyKey string,
+	spec RepoSpec,
+	session *models.TaskSession,
+	after *worktree.PreservationEvidence,
+	matched bool,
+) (*models.WorkspaceInventoryPreservation, time.Time) {
+	var postEvidence *models.WorkspaceInventoryPreservation
+	if after != nil {
+		evidence := workspaceInventoryPreservation(spec, session, after)
+		postEvidence = &evidence
+	}
+	verifiedAt := time.Now().UTC()
+	if err := repairer.RecordWorkspaceInventoryPostRepairAttestation(ctx, taskID, idempotencyKey, postEvidence, matched, verifiedAt); err != nil && e.logger != nil {
+		e.logger.Warn("failed to persist workspace inventory post-repair attestation",
+			zap.String("task_id", taskID),
+			zap.String("idempotency_key", idempotencyKey),
+			zap.Bool("matched", matched),
+			zap.Error(err))
+	}
+	return postEvidence, verifiedAt
 }
 
 func (e *Executor) workspaceInventoryRepairer(
@@ -274,6 +349,16 @@ func (e *Executor) rejectCompetingWorkspaceWriters(ctx context.Context, taskID, 
 		}
 	}
 	return nil
+}
+
+// workspaceInventoryLaunchIdempotencyKey derives a stable, server-owned
+// idempotency key for the automatic repair attempted during fresh/additional
+// -session launch (LaunchPreparedSession). Unlike resume's explicit
+// RecoverSession action, a fresh launch has no caller-supplied key, so this
+// binds every retry of the same session to the same key without letting any
+// caller-supplied value become part of repair identity.
+func workspaceInventoryLaunchIdempotencyKey(sessionID string) string {
+	return "launch-session-inventory-repair:" + sessionID
 }
 
 func workspaceInventoryRepairHash(repair *models.WorkspaceInventoryRepair) string {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -199,5 +200,130 @@ func TestWorkspaceInventoryRecoveryRepositoryExposesAtomicRepair(t *testing.T) {
 
 	if _, ok := reflect.TypeOf(repo).MethodByName("RepairWorkspaceInventory"); !ok {
 		t.Fatal("Repository does not expose RepairWorkspaceInventory")
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+func TestGetWorkspaceInventoryRepairReceiptReturnsCommittedReceipt(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx,
+		`UPDATE task_environment_repos SET branch_slug = ? WHERE id = ?`,
+		"stale", "environment-repository-recovery",
+	); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("load stale inventory: %+v, %v", rows, err)
+	}
+	stale := rows[0]
+
+	missing, err := repo.GetWorkspaceInventoryRepairReceipt(ctx, "task-recovery", "no-such-key")
+	if err != nil || missing != nil {
+		t.Fatalf("lookup for missing key = %+v, %v", missing, err)
+	}
+
+	receipt, err := repo.RepairWorkspaceInventory(ctx, &models.WorkspaceInventoryRepair{
+		TaskID: "task-recovery", WorkspaceID: "workspace-recovery", SessionID: "session-recovery",
+		TaskEnvironmentID: env.ID, TaskRepositoryID: taskRepo.ID, RepositoryID: taskRepo.RepositoryID,
+		EnvironmentRepoID: stale.ID, BranchSlug: "main",
+		WorktreeID: stale.WorktreeID, WorktreePath: stale.WorktreePath,
+		WorktreeBranch: stale.WorktreeBranch, Position: stale.Position,
+		IdempotencyKey: "lookup-key", RequestHash: "request-hash",
+		ExpectedEnvironmentUpdatedAt:  env.UpdatedAt,
+		ExpectedTaskRepositoryUpdate:  taskRepo.UpdatedAt,
+		ExpectedEnvironmentRepoUpdate: stale.UpdatedAt,
+		Preservation: models.WorkspaceInventoryPreservation{
+			HeadOID: "0123456789abcdef", StatusHash: "status", ContentHash: "content",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RepairWorkspaceInventory: %v", err)
+	}
+
+	found, err := repo.GetWorkspaceInventoryRepairReceipt(ctx, "task-recovery", "lookup-key")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInventoryRepairReceipt: %v", err)
+	}
+	if found == nil || found.ID != receipt.ID || found.ResultCode != models.WorkspaceInventoryRecoveryDeduplicated {
+		t.Fatalf("found receipt = %+v, want deduplicated copy of %+v", found, receipt)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.10
+func TestRecordWorkspaceInventoryPostRepairAttestationPersistsBeforeAndAfterEvidence(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx,
+		`UPDATE task_environment_repos SET branch_slug = ? WHERE id = ?`,
+		"stale", "environment-repository-recovery",
+	); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("load stale inventory: %+v, %v", rows, err)
+	}
+	stale := rows[0]
+
+	receipt, err := repo.RepairWorkspaceInventory(ctx, &models.WorkspaceInventoryRepair{
+		TaskID: "task-recovery", WorkspaceID: "workspace-recovery", SessionID: "session-recovery",
+		TaskEnvironmentID: env.ID, TaskRepositoryID: taskRepo.ID, RepositoryID: taskRepo.RepositoryID,
+		EnvironmentRepoID: stale.ID, BranchSlug: "main",
+		WorktreeID: stale.WorktreeID, WorktreePath: stale.WorktreePath,
+		WorktreeBranch: stale.WorktreeBranch, Position: stale.Position,
+		IdempotencyKey: "attestation-key", RequestHash: "request-hash",
+		ExpectedEnvironmentUpdatedAt:  env.UpdatedAt,
+		ExpectedTaskRepositoryUpdate:  taskRepo.UpdatedAt,
+		ExpectedEnvironmentRepoUpdate: stale.UpdatedAt,
+		Preservation: models.WorkspaceInventoryPreservation{
+			HeadOID: "0123456789abcdef", StatusHash: "status", ContentHash: "content",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RepairWorkspaceInventory: %v", err)
+	}
+	if receipt.PostRepairMatched || receipt.PostRepairEvidence != nil || receipt.PostRepairVerifiedAt != nil {
+		t.Fatalf("receipt should have no post-repair attestation before it is recorded: %+v", receipt)
+	}
+
+	after := models.WorkspaceInventoryPreservation{
+		HeadOID: "0123456789abcdef", StatusHash: "status", ContentHash: "content",
+	}
+	verifiedAt := time.Now().UTC().Truncate(time.Second)
+	if err := repo.RecordWorkspaceInventoryPostRepairAttestation(ctx, "task-recovery", "attestation-key", &after, true, verifiedAt); err != nil {
+		t.Fatalf("RecordWorkspaceInventoryPostRepairAttestation: %v", err)
+	}
+
+	found, err := repo.GetWorkspaceInventoryRepairReceipt(ctx, "task-recovery", "attestation-key")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInventoryRepairReceipt: %v", err)
+	}
+	if found == nil || !found.PostRepairMatched || found.PostRepairEvidence == nil ||
+		found.PostRepairEvidence.HeadOID != after.HeadOID || found.PostRepairVerifiedAt == nil ||
+		!found.PostRepairVerifiedAt.Equal(verifiedAt) {
+		t.Fatalf("post-repair attestation not persisted: %+v", found)
+	}
+	// The original before-repair preservation evidence remains intact
+	// alongside the newly persisted after-repair evidence.
+	if found.Preservation.HeadOID != receipt.Preservation.HeadOID {
+		t.Fatalf("before-repair preservation evidence overwritten: %+v", found.Preservation)
+	}
+
+	// A divergent after-repair inspection is itself durable audit evidence,
+	// not silently dropped.
+	mismatch := models.WorkspaceInventoryPreservation{HeadOID: "divergent", StatusHash: "status", ContentHash: "content"}
+	if err := repo.RecordWorkspaceInventoryPostRepairAttestation(ctx, "task-recovery", "attestation-key", &mismatch, false, verifiedAt.Add(time.Second)); err != nil {
+		t.Fatalf("RecordWorkspaceInventoryPostRepairAttestation(mismatch): %v", err)
+	}
+	found, err = repo.GetWorkspaceInventoryRepairReceipt(ctx, "task-recovery", "attestation-key")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInventoryRepairReceipt: %v", err)
+	}
+	if found.PostRepairMatched || found.PostRepairEvidence == nil || found.PostRepairEvidence.HeadOID != "divergent" {
+		t.Fatalf("mismatch attestation not persisted: %+v", found)
 	}
 }

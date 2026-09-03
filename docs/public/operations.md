@@ -439,6 +439,8 @@ The task-scoped `repair_workspace_inventory` session recovery action is safe onl
 
 Stop and investigate manually when the action returns a conflict. Common causes are multiple unmatched rows, duplicate repository/branch attachments, a moved or symlinked path, a detached or unexpected branch, a missing Git worktree registration, a user-owned local repository, a Docker/SSH/Sprites-only checkout, another active session, or state that changed during inspection. A conflict is intentionally preservation-first: Kandev leaves checkout files and provider resources untouched and does not fall back to rematerialization.
 
+A fresh or additional-session launch (a brand-new session, `spawn_session_kandev`, or on-entry auto-start) runs this same guarded repair automatically when it hits the identical single-slot mismatch, using a server-derived idempotency key scoped to that session; no manual action is needed. If automatic repair cannot prove a safe single match, the launch fails exactly as it did before this behavior existed, with no orphaned STARTING/RUNNING session and no primary-session change, and the manual `repair_workspace_inventory` action above remains available.
+
 ## Updates
 
 Stable is the default update channel. It resolves signed releases from the public GitHub Releases

@@ -58,17 +58,20 @@ type WorkspaceInventoryRepair struct {
 // WorkspaceInventoryRecoveryReceipt is the append-only audit result returned
 // without exposing a host checkout path.
 type WorkspaceInventoryRecoveryReceipt struct {
-	ID                string                         `json:"id"`
-	TaskID            string                         `json:"task_id"`
-	WorkspaceID       string                         `json:"workspace_id"`
-	SessionID         string                         `json:"session_id"`
-	TaskEnvironmentID string                         `json:"task_environment_id"`
-	TaskRepositoryID  string                         `json:"task_repository_id"`
-	EnvironmentRepoID string                         `json:"environment_repo_id"`
-	RepositoryID      string                         `json:"repository_id"`
-	IdempotencyKey    string                         `json:"idempotency_key"`
-	RequestHash       string                         `json:"-"`
-	ResultCode        string                         `json:"result_code"`
-	Preservation      WorkspaceInventoryPreservation `json:"preservation"`
-	CreatedAt         time.Time                      `json:"created_at"`
+	ID                   string                          `json:"id"`
+	TaskID               string                          `json:"task_id"`
+	WorkspaceID          string                          `json:"workspace_id"`
+	SessionID            string                          `json:"session_id"`
+	TaskEnvironmentID    string                          `json:"task_environment_id"`
+	TaskRepositoryID     string                          `json:"task_repository_id"`
+	EnvironmentRepoID    string                          `json:"environment_repo_id"`
+	RepositoryID         string                          `json:"repository_id"`
+	IdempotencyKey       string                          `json:"idempotency_key"`
+	RequestHash          string                          `json:"-"`
+	ResultCode           string                          `json:"result_code"`
+	Preservation         WorkspaceInventoryPreservation  `json:"preservation"`
+	PostRepairEvidence   *WorkspaceInventoryPreservation `json:"post_repair_evidence,omitempty"`
+	PostRepairMatched    bool                            `json:"post_repair_matched"`
+	PostRepairVerifiedAt *time.Time                      `json:"post_repair_verified_at,omitempty"`
+	CreatedAt            time.Time                       `json:"created_at"`
 }

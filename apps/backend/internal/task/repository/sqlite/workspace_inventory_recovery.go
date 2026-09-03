@@ -249,3 +249,89 @@ func (r *Repository) loadWorkspaceInventoryReceiptTx(ctx context.Context, tx *sq
 	receipt.RequestHash = requestHash
 	return receipt, nil
 }
+
+// GetWorkspaceInventoryRepairReceipt returns the previously committed receipt
+// for a task-scoped idempotency key, or nil if none exists. Callers use it to
+// short-circuit a retry once the canonical inventory already matches, which
+// would otherwise leave no provable mismatch for candidate selection to find.
+func (r *Repository) GetWorkspaceInventoryRepairReceipt(
+	ctx context.Context,
+	taskID string,
+	idempotencyKey string,
+) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	if taskID == "" || idempotencyKey == "" {
+		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	var payload, requestHash string
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT receipt_json, request_hash FROM workspace_inventory_recovery_receipts
+		WHERE task_id = ? AND idempotency_key = ?
+	`), taskID, idempotencyKey).Scan(&payload, &requestHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	receipt := &models.WorkspaceInventoryRecoveryReceipt{}
+	if err := json.Unmarshal([]byte(payload), receipt); err != nil {
+		return nil, err
+	}
+	receipt.RequestHash = requestHash
+	receipt.ResultCode = models.WorkspaceInventoryRecoveryDeduplicated
+	return receipt, nil
+}
+
+// RecordWorkspaceInventoryPostRepairAttestation persists the post-repair
+// checkout evidence onto an already-committed receipt. It is best-effort
+// audit evidence: the repair itself has already committed, so a failure here
+// must not be surfaced as a repair failure.
+func (r *Repository) RecordWorkspaceInventoryPostRepairAttestation(
+	ctx context.Context,
+	taskID string,
+	idempotencyKey string,
+	evidence *models.WorkspaceInventoryPreservation,
+	matched bool,
+	verifiedAt time.Time,
+) error {
+	if taskID == "" || idempotencyKey == "" {
+		return models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	var payload, requestHash string
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT receipt_json, request_hash FROM workspace_inventory_recovery_receipts
+		WHERE task_id = ? AND idempotency_key = ?
+	`), taskID, idempotencyKey).Scan(&payload, &requestHash)
+	if err != nil {
+		return fmt.Errorf("load receipt for post-repair attestation: %w", err)
+	}
+	receipt := &models.WorkspaceInventoryRecoveryReceipt{}
+	if err := json.Unmarshal([]byte(payload), receipt); err != nil {
+		return fmt.Errorf("decode receipt for post-repair attestation: %w", err)
+	}
+	receipt.RequestHash = requestHash
+	receipt.PostRepairEvidence = evidence
+	receipt.PostRepairMatched = matched
+	verified := verifiedAt
+	receipt.PostRepairVerifiedAt = &verified
+	updated, err := json.Marshal(receipt)
+	if err != nil {
+		return fmt.Errorf("encode receipt for post-repair attestation: %w", err)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workspace_inventory_recovery_receipts
+		SET receipt_json = ?, post_repair_matched = ?, post_repair_verified_at = ?
+		WHERE task_id = ? AND idempotency_key = ?
+	`), string(updated), matched, verifiedAt, taskID, idempotencyKey)
+	if err != nil {
+		return fmt.Errorf("persist post-repair attestation: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("persist post-repair attestation: %w", models.ErrWorkspaceInventoryRecoveryConflict)
+	}
+	return nil
+}

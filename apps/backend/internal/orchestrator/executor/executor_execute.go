@@ -1317,7 +1317,43 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		}
 	}
 	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
-		return nil, err
+		// A fresh or additional-session launch has no caller-facing knob to
+		// request repair (unlike RecoverSession's explicit
+		// repair_workspace_inventory action for resume), so guarded repair is
+		// attempted automatically here whenever the mismatch is plausibly
+		// recoverable. This is safe to attempt unconditionally because
+		// repairReuseEnvironmentInventory only ever mutates the canonical row
+		// when it can prove exactly one reciprocal identity; every other case
+		// returns a typed, non-mutating error. The idempotency key is derived
+		// solely from the session id so a caller can never influence which
+		// prior repair a retry of this same session dedupes against.
+		//
+		// A failed repair attempt (not applicable, ambiguous, or conflicting)
+		// falls back to the original ErrWorkspaceReuseUnsafe admission error
+		// rather than surfacing the repair-specific error: existing callers of
+		// this widely used launch path only understand the pre-existing
+		// fail-closed contract, and the silent self-heal attempt must never
+		// change what a caller observes when it does not help.
+		if !req.WorkspaceReuseRequired || !req.UseWorktree {
+			return nil, err
+		}
+		receipt, repairErr := e.repairReuseEnvironmentInventory(
+			ctx, task, session, req, existingEnv, allRepos,
+			workspaceInventoryLaunchIdempotencyKey(session.ID),
+		)
+		if repairErr != nil {
+			if e.logger != nil {
+				e.logger.Info("automatic workspace inventory repair did not resolve launch mismatch, falling back to fail-closed admission error",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", sessionID),
+					zap.Error(repairErr))
+			}
+			return nil, err
+		}
+		req.WorkspaceInventoryRecoveryReceipt = receipt
+		if validateErr := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); validateErr != nil {
+			return nil, validateErr
+		}
 	}
 
 	// Pass attachments for the initial prompt
@@ -1375,7 +1411,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		e.captureBaseCommit(captureCtx, sid)
 	}(sessionID)
 
-	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
+	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg, req.WorkspaceInventoryRecoveryReceipt)
 }
 
 func (e *Executor) waitForTaskEnvironmentReady(ctx context.Context, environmentID string) (*models.TaskEnvironment, error) {
@@ -1599,7 +1635,7 @@ func (e *Executor) transitionLaunchFailure(
 }
 
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
-func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
+func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, workspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt) (*TaskExecution, error) {
 	now := time.Now().UTC()
 	if err := e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
@@ -1611,16 +1647,17 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		sessionState = v1.TaskSessionStateStarting
 	}
 	execution := &TaskExecution{
-		TaskID:           task.ID,
-		AgentExecutionID: resp.AgentExecutionID,
-		AgentProfileID:   agentProfileID,
-		StartedAt:        session.StartedAt,
-		SessionState:     sessionState,
-		LastUpdate:       now,
-		SessionID:        sessionID,
-		WorktreePath:     resp.WorktreePath,
-		WorktreeBranch:   resp.WorktreeBranch,
-		PrepareResult:    resp.PrepareResult,
+		TaskID:                            task.ID,
+		AgentExecutionID:                  resp.AgentExecutionID,
+		AgentProfileID:                    agentProfileID,
+		StartedAt:                         session.StartedAt,
+		SessionState:                      sessionState,
+		LastUpdate:                        now,
+		SessionID:                         sessionID,
+		WorktreePath:                      resp.WorktreePath,
+		WorktreeBranch:                    resp.WorktreeBranch,
+		PrepareResult:                     resp.PrepareResult,
+		WorkspaceInventoryRecoveryReceipt: workspaceInventoryRecoveryReceipt,
 	}
 
 	if startAgent {

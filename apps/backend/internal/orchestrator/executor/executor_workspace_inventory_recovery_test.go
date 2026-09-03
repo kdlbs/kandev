@@ -204,3 +204,283 @@ func TestSelectWorkspaceInventoryRepairTargetKeepsOtherRepositoryCanonical(t *te
 		t.Fatalf("selected spec=%+v info=%+v candidate=%+v", spec, info, candidate)
 	}
 }
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+func TestRepairReuseEnvironmentInventoryRetryAfterCommitReturnsStoredReceipt(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	row := &models.TaskEnvironmentRepo{
+		ID: "environment-repo", TaskEnvironmentID: "environment", RepositoryID: "repository",
+		BranchSlug: "stale", WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+		WorktreeBranch: "feature/recovery", Position: 0, Status: "active", UpdatedAt: now,
+	}
+	env := &models.TaskEnvironment{
+		ID: "environment", TaskID: "task", WorkspacePath: worktreePath,
+		Status: models.TaskEnvironmentStatusReady, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{row},
+	}
+	mockRepo := &mockRepository{
+		taskEnvironmentRepos:       map[string][]*models.TaskEnvironmentRepo{env.ID: env.Repos},
+		workspaceInventoryReceipts: map[string]*models.WorkspaceInventoryRecoveryReceipt{},
+	}
+	executor := &Executor{repo: mockRepo}
+	task := &v1.Task{ID: "task", WorkspaceID: "workspace"}
+	session := &models.TaskSession{ID: "session", TaskID: "task", TaskEnvironmentID: env.ID, State: models.TaskSessionStateFailed}
+	req := &LaunchAgentRequest{TaskID: "task", WorkspaceID: "workspace", UseWorktree: true, WorkspaceReuseRequired: true,
+		Repositories: []RepoSpec{{TaskRepositoryID: "task-repository", RepositoryID: "repository", BranchIdentitySlug: "main"}}}
+	repositories := []*repoInfo{{
+		TaskRepositoryID: "task-repository", TaskRepositoryUpdatedAt: now,
+		RepositoryID: "repository", RepositoryPath: repositoryPath, Position: 0,
+		Repository: &models.Repository{ID: "repository", SourceType: "github"},
+	}}
+
+	first, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "retry-key")
+	if err != nil {
+		t.Fatalf("first repairReuseEnvironmentInventory: %v", err)
+	}
+	if first.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
+		t.Fatalf("first result code = %q", first.ResultCode)
+	}
+	if !first.PostRepairMatched || first.PostRepairEvidence == nil || first.PostRepairVerifiedAt == nil {
+		t.Fatalf("first receipt missing post-repair attestation: %+v", first)
+	}
+
+	// Simulate the canonical-inventory reload that happens between calls in
+	// production: the repaired row now matches, so a retry that reached
+	// candidate selection would find zero unmatched slots and misreport a
+	// conflict without the short-circuit this test proves.
+	env.Repos[0].BranchSlug = "main"
+
+	second, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "retry-key")
+	if err != nil {
+		t.Fatalf("retry after commit returned error instead of stored receipt: %v", err)
+	}
+	if second.ID != first.ID || second.ResultCode != models.WorkspaceInventoryRecoveryDeduplicated {
+		t.Fatalf("retry receipt = %+v, want deduplicated copy of %+v", second, first)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+func TestRepairReuseEnvironmentInventoryRetryFromDifferentSessionConflicts(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	row := &models.TaskEnvironmentRepo{
+		ID: "environment-repo", TaskEnvironmentID: "environment", RepositoryID: "repository",
+		BranchSlug: "stale", WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+		WorktreeBranch: "feature/recovery", Position: 0, Status: "active", UpdatedAt: now,
+	}
+	env := &models.TaskEnvironment{
+		ID: "environment", TaskID: "task", WorkspacePath: worktreePath,
+		Status: models.TaskEnvironmentStatusReady, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{row},
+	}
+	mockRepo := &mockRepository{
+		taskEnvironmentRepos:       map[string][]*models.TaskEnvironmentRepo{env.ID: env.Repos},
+		workspaceInventoryReceipts: map[string]*models.WorkspaceInventoryRecoveryReceipt{},
+	}
+	executor := &Executor{repo: mockRepo}
+	task := &v1.Task{ID: "task", WorkspaceID: "workspace"}
+	req := &LaunchAgentRequest{TaskID: "task", WorkspaceID: "workspace", UseWorktree: true, WorkspaceReuseRequired: true,
+		Repositories: []RepoSpec{{TaskRepositoryID: "task-repository", RepositoryID: "repository", BranchIdentitySlug: "main"}}}
+	repositories := []*repoInfo{{
+		TaskRepositoryID: "task-repository", TaskRepositoryUpdatedAt: now,
+		RepositoryID: "repository", RepositoryPath: repositoryPath, Position: 0,
+		Repository: &models.Repository{ID: "repository", SourceType: "github"},
+	}}
+	session := &models.TaskSession{ID: "session", TaskID: "task", TaskEnvironmentID: env.ID, State: models.TaskSessionStateFailed}
+
+	if _, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "reused-key"); err != nil {
+		t.Fatalf("first repairReuseEnvironmentInventory: %v", err)
+	}
+
+	other := &models.TaskSession{ID: "other-session", TaskID: "task", TaskEnvironmentID: env.ID, State: models.TaskSessionStateFailed}
+	_, err := executor.repairReuseEnvironmentInventory(context.Background(), task, other, req, env, repositories, "reused-key")
+	if !errors.Is(err, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict) {
+		t.Fatalf("cross-session idempotency-key reuse error = %v", err)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+//
+// TestBuildResumeRequestRetryAfterCommittedRepairSucceeds proves the
+// orchestrator-facing resume entry point (not just the low-level repair
+// primitive) tolerates a caller retry with the same idempotency key once a
+// repair has already committed: the first call repairs and resumes once, and
+// a second call built from a freshly reloaded session/environment (mirroring
+// a real caller retry) neither re-triggers a destructive repair nor surfaces
+// ErrWorkspaceInventoryRecoveryIdempotencyConflict — it observes the already
+// -corrected canonical row and proceeds.
+func TestBuildResumeRequestRetryAfterCommittedRepairSucceeds(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	repo := newMockRepository()
+	const taskID = "task-resume-retry"
+	const sessionID = "session-resume-retry"
+	seedWorktreeExecutor(repo)
+	repo.repositories["repo-front"] = &models.Repository{
+		ID: "repo-front", Name: "frontend", Provider: "github", LocalPath: repositoryPath,
+	}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: taskID, RepositoryID: "repo-front", Position: 0, BaseBranch: "main",
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Resume"}
+	repo.taskEnvironments["env-retry"] = &models.TaskEnvironment{
+		ID: "env-retry", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: worktreePath,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-retry", TaskEnvironmentID: "env-retry",
+			RepositoryID: "repo-front", BranchSlug: "stale",
+			WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+			WorktreeBranch: "feature/recovery", Position: 0, Status: "active",
+		}},
+	}
+	repo.taskEnvironmentRepos["env-retry"] = repo.taskEnvironments["env-retry"].Repos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: "env-retry",
+		RepositoryID: "repo-front", ExecutorID: models.ExecutorIDWorktree,
+		AgentProfileID: "profile-123", State: models.TaskSessionStateFailed,
+		StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := repo.tasks[taskID].ToAPI()
+	options := ResumeOptions{RepairWorkspaceInventory: true, WorkspaceInventoryIdempotencyKey: "orchestrator-retry-key"}
+
+	req1, _, _, _, _, err := exec.buildResumeRequestAtCredentialBoundaryWithOptions(
+		context.Background(), task, repo.sessions[sessionID], false, nil, options)
+	if err != nil {
+		t.Fatalf("first buildResumeRequestAtCredentialBoundaryWithOptions: %v", err)
+	}
+	if req1.WorkspaceInventoryRecoveryReceipt == nil || req1.WorkspaceInventoryRecoveryReceipt.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
+		t.Fatalf("first receipt = %+v, want a committed repair", req1.WorkspaceInventoryRecoveryReceipt)
+	}
+
+	// A retry re-reads the session the same way a real caller would before
+	// calling resume again, rather than reusing the first call's in-memory
+	// request/session objects.
+	freshSession := *repo.sessions[sessionID]
+	req2, _, _, _, _, err := exec.buildResumeRequestAtCredentialBoundaryWithOptions(
+		context.Background(), task, &freshSession, false, nil, options)
+	if err != nil {
+		t.Fatalf("retry after committed repair returned an error instead of succeeding: %v", err)
+	}
+	if req2.WorkspaceInventoryRecoveryReceipt != nil &&
+		req2.WorkspaceInventoryRecoveryReceipt.ResultCode != models.WorkspaceInventoryRecoveryRepaired &&
+		req2.WorkspaceInventoryRecoveryReceipt.ResultCode != models.WorkspaceInventoryRecoveryDeduplicated {
+		t.Fatalf("retry receipt reported an unexpected result code: %+v", req2.WorkspaceInventoryRecoveryReceipt)
+	}
+	if len(repo.taskEnvironmentRepos["env-retry"]) != 1 {
+		t.Fatalf("retry duplicated the canonical inventory row: %+v", repo.taskEnvironmentRepos["env-retry"])
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+//
+// TestLaunchPreparedSessionAutoRepairsRecoverableInventoryMismatchAndLaunchesOnce
+// proves guarded repair is wired into fresh/additional-session launch (not
+// just resume): LaunchPreparedSession self-heals one provably stale canonical
+// row automatically, launches the agent exactly once, and surfaces the
+// resulting receipt on the returned TaskExecution.
+func TestLaunchPreparedSessionAutoRepairsRecoverableInventoryMismatchAndLaunchesOnce(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	repo := newMockRepository()
+	const taskID = "task-launch-auto-repair"
+	const sessionID = "session-launch-auto-repair"
+	seedWorktreeExecutor(repo)
+	repo.repositories["repo-front"] = &models.Repository{
+		ID: "repo-front", Name: "frontend", Provider: "github", LocalPath: repositoryPath,
+	}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: taskID, RepositoryID: "repo-front", Position: 0, BaseBranch: "main",
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Auto Repair"}
+	repo.taskEnvironments["env-auto-repair"] = &models.TaskEnvironment{
+		ID: "env-auto-repair", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: worktreePath,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-auto-repair", TaskEnvironmentID: "env-auto-repair",
+			RepositoryID: "repo-front", BranchSlug: "stale",
+			WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+			WorktreeBranch: "feature/recovery", Position: 0, Status: "active",
+		}},
+	}
+	repo.taskEnvironmentRepos["env-auto-repair"] = repo.taskEnvironments["env-auto-repair"].Repos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: "env-auto-repair",
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+
+	manager := &mockAgentManager{}
+	exec := newTestExecutor(t, manager, repo)
+	execution, err := exec.LaunchPreparedSession(context.Background(),
+		&v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Auto Repair"}, sessionID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree, StartAgent: true})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+	if manager.launchAgentCallCount != 1 {
+		t.Fatalf("LaunchAgent calls = %d, want exactly 1", manager.launchAgentCallCount)
+	}
+	if execution.WorkspaceInventoryRecoveryReceipt == nil ||
+		execution.WorkspaceInventoryRecoveryReceipt.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
+		t.Fatalf("execution receipt = %+v, want a committed repair", execution.WorkspaceInventoryRecoveryReceipt)
+	}
+	rows := repo.taskEnvironmentRepos["env-auto-repair"]
+	if len(rows) != 1 || rows[0].BranchSlug != "main" {
+		t.Fatalf("canonical inventory not repaired in place: %+v", rows)
+	}
+}
+
+// TestLaunchPreparedSessionFailedAutoRepairPreservesFailClosedErrorAndLeavesNoOrphanState
+// proves that when automatic repair cannot resolve a mismatch (no provable
+// single reciprocal identity, e.g. a repository entirely missing from
+// inventory), LaunchPreparedSession still fails closed with the original
+// ErrWorkspaceReuseUnsafe admission error, never calls LaunchAgent, and never
+// promotes the session into a bad primary/orphan STARTING or RUNNING state.
+func TestLaunchPreparedSessionFailedAutoRepairPreservesFailClosedErrorAndLeavesNoOrphanState(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-launch-unrepairable"
+	sessionID := "session-launch-unrepairable"
+	seedMultiRepoTask(t, repo, taskID)
+	seedWorktreeExecutor(repo)
+
+	environmentRepos := []*models.TaskEnvironmentRepo{{
+		TaskEnvironmentID: "env-unrepairable",
+		RepositoryID:      "repo-front",
+		BranchSlug:        "main",
+		WorktreeID:        "wt-front",
+		Status:            "active",
+	}}
+	environment := &models.TaskEnvironment{
+		ID:           "env-unrepairable",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+		Repos:        environmentRepos,
+	}
+	repo.taskEnvironments[environment.ID] = environment
+	repo.taskEnvironmentRepos[environment.ID] = environmentRepos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environment.ID,
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+
+	manager := &mockAgentManager{}
+	exec := newTestExecutor(t, manager, repo)
+	_, err := exec.LaunchPreparedSession(context.Background(),
+		&v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Multi"}, sessionID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("LaunchPreparedSession error = %v, want ErrWorkspaceReuseUnsafe preserved after failed auto-repair", err)
+	}
+	if manager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", manager.launchAgentCallCount)
+	}
+	if got := repo.sessions[sessionID].State; got != models.TaskSessionStateCreated {
+		t.Fatalf("session state = %q, want unchanged CREATED (no orphan STARTING/RUNNING state)", got)
+	}
+	if len(repo.taskEnvironmentRepos[environment.ID]) != 1 {
+		t.Fatalf("failed repair mutated canonical inventory: %+v", repo.taskEnvironmentRepos[environment.ID])
+	}
+}
