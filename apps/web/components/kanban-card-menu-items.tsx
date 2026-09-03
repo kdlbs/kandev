@@ -192,9 +192,9 @@ function buildMoveToCurrentWorkflowSubmenu({
 }
 
 /**
- * Reselecting the task's current priority stays enabled (AC-003.5: repeating
- * the same selection completes idempotently), unlike `buildStepEntry`, which
- * disables the current step for a move action.
+ * Reselecting the task's current priority stays enabled and completes
+ * idempotently, unlike `buildStepEntry`, which disables the current step for
+ * a move action.
  */
 function buildPriorityItemEntry(
   priority: TaskPriority,

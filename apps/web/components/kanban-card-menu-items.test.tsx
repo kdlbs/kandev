@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
@@ -7,6 +8,10 @@ import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "./kanban-card-menu-items";
+
+function renderNodeText(node: ReactNode): string {
+  return render(<>{node}</>).container.textContent ?? "";
+}
 
 const PluginBitbucketIcon = () => null;
 
@@ -329,7 +334,7 @@ describe("buildKanbanCardMenuEntries — priority action", () => {
     return priorityEntry.children;
   }
 
-  it("presents exactly the four priority tokens in severity order", () => {
+  it("presents exactly the four priority tokens in severity order, each by its localized label", () => {
     const entries = buildKanbanCardMenuEntries({ ...baseArgs, onSelectPriority: vi.fn() });
     const children = priorityChildren(entries);
 
@@ -339,6 +344,9 @@ describe("buildKanbanCardMenuEntries — priority action", () => {
       "priority-medium",
       "priority-low",
     ]);
+    expect(
+      children.map((child) => renderNodeText(child.kind === "item" ? child.label : undefined)),
+    ).toEqual(["Critical", "High", "Medium", "Low"]);
   });
 
   it("marks the task's current priority and leaves all four selectable", () => {
@@ -351,13 +359,13 @@ describe("buildKanbanCardMenuEntries — priority action", () => {
 
     for (const child of children) {
       if (child.kind !== "item") throw new Error("expected item entries");
-      // AC-003.5: reselecting the current priority must stay enabled, unlike
-      // a move-to-current-step entry which disables the current step.
+      // Reselecting the current priority must stay enabled, unlike a
+      // move-to-current-step entry which disables the current step.
       expect(child.disabled).toBeFalsy();
       if (child.key === "priority-high") {
-        expect(child.trailing).toBeDefined();
+        expect(renderNodeText(child.trailing)).toBe("Current");
       } else {
-        expect(child.trailing).toBeUndefined();
+        expect(renderNodeText(child.trailing)).toBe("");
       }
     }
   });

@@ -10,7 +10,7 @@ import type { TaskPriority } from "@/lib/types/http";
  * Persists a priority change from the card menu. Not optimistic: the card
  * follows the stored value from the resulting `task.updated` event, so a
  * failure here needs only a toast — the card keeps showing whatever it was
- * already showing (AC-003.7).
+ * already showing.
  */
 export function useUpdateTaskPriority() {
   const { toast } = useToast();
