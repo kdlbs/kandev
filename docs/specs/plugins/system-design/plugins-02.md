@@ -249,7 +249,7 @@ domain structs. See [ADR 0043](../../../decisions/0043-plugin-host-data-api.md) 
 
 | RPC                     | Capability                   | Returns                                                                                                                                                                                                                                           |
 | ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, title, description, state, priority, timestamps, parent, identifier, repositories, metadata)                                                                                                                      |
+| `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, workflow-step ID, title, description, state, priority, labels, timestamps, parent, identifier, repositories, metadata)                                                                                         |
 | `ListWorkspaces`        | `api_read:workspaces`        | Workspaces (id, name, owner, defaults, timestamps)                                                                                                                                                                                                |
 | `ListWorkflows`         | `api_read:workflows`         | Workflows for a workspace                                                                                                                                                                                                                         |
 | `ListWorkflowSteps`     | `api_read:workflows`         | Steps for a workflow (id, name, position, stage type)                                                                                                                                                                                             |
@@ -293,8 +293,10 @@ placement defaults when the plugin omits them (single workspace; that
 workspace's first workflow — ambiguous → `InvalidArgument`), accepts an optional
 `start_agent` that best-effort auto-launches an agent, and requires a title.
 `UpdateTask` accepts a conservative field mask — `title` / `description` /
-`state` / `workflow_step_id`, each optional (a nil field is left unchanged); a
-missing task returns gRPC `NotFound`.
+`state` / `priority` / `labels`, each optional (a nil field is left unchanged);
+a present `workflow_step_id` is rejected and workflow transitions use
+`MoveTask`. Labels distinguish omission from an explicit empty slice, so an
+empty slice clears all labels. A missing task returns gRPC `NotFound`.
 
 `Host.Messages().Send` (capability `api_write:messages`) delivers a prompt to a
 task session through the orchestrator's real delivery path — the same one

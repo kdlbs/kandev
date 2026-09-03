@@ -158,8 +158,11 @@ verbatim. Concretely:
   best-effort launches an agent through the orchestrator (a launch failure never
   fails the create, matching REST/MCP's async auto-start). `UpdateTask` exposes
   a **conservative field mask** — `title` / `description` / `state` /
-  `workflow_step_id`, each optional — deliberately smaller than the full REST
-  update surface.
+  `priority` / `labels`, each optional — deliberately smaller than the full REST
+  update surface. `workflow_step_id` remains present for wire compatibility but
+  is rejected by Update; plugins must use `MoveTask` for workflow transitions.
+  Labels use explicit presence: omitted leaves them unchanged, while an
+  explicitly supplied empty slice clears them.
 - **`SendMessage`** (capability `api_write:messages`) replaced the originally
   planned `CreateComment`: an office `TaskComment` is an office/dashboard
   construct, not a way to message the agent working a task. SendMessage delivers
