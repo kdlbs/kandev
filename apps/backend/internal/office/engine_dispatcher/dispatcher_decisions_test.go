@@ -362,7 +362,7 @@ func TestDispatcher_RecordDecision_ForeignSessionFallsBackToUnresolvable(t *test
 	}
 }
 
-// TestDispatcher_RecordDecision_TerminalSessionFallsBackToUnresolvable
+// TestDispatcher_RecordDecision_NonActiveSessionFallsBackToUnresolvable
 // covers the other session_unresolvable case: a supplied session that
 // belongs to the right task but is not in an active state. The table is
 // derived from taskmodels.AllTaskSessionStates filtered by
