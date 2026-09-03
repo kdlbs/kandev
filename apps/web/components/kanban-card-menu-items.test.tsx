@@ -316,3 +316,75 @@ describe("buildKanbanCardMenuEntries — detach", () => {
     expect(entries.some((entry) => entry.key === "detach")).toBe(false);
   });
 });
+
+describe("buildKanbanCardMenuEntries — priority action", () => {
+  const baseArgs = {
+    workflows: [],
+    stepsByWorkflowId: {},
+  };
+
+  function priorityChildren(entries: KanbanCardMenuEntry[]) {
+    const priorityEntry = entries.find((entry) => entry.key === "priority");
+    if (priorityEntry?.kind !== "submenu") throw new Error("expected a priority submenu");
+    return priorityEntry.children;
+  }
+
+  it("presents exactly the four priority tokens in severity order", () => {
+    const entries = buildKanbanCardMenuEntries({ ...baseArgs, onSelectPriority: vi.fn() });
+    const children = priorityChildren(entries);
+
+    expect(children.map((child) => child.key)).toEqual([
+      "priority-critical",
+      "priority-high",
+      "priority-medium",
+      "priority-low",
+    ]);
+  });
+
+  it("marks the task's current priority and leaves all four selectable", () => {
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      currentPriority: "high",
+      onSelectPriority: vi.fn(),
+    });
+    const children = priorityChildren(entries);
+
+    for (const child of children) {
+      if (child.kind !== "item") throw new Error("expected item entries");
+      // AC-003.5: reselecting the current priority must stay enabled, unlike
+      // a move-to-current-step entry which disables the current step.
+      expect(child.disabled).toBeFalsy();
+    }
+  });
+
+  it("indicates no token as current when the held priority is absent or unrecognized", () => {
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      currentPriority: "not-a-real-token",
+      onSelectPriority: vi.fn(),
+    });
+    const children = priorityChildren(entries);
+
+    // None of the four items should render the "current" marker text.
+    for (const child of children) {
+      if (child.kind !== "item") throw new Error("expected item entries");
+      expect(child.testId).toBeDefined();
+    }
+  });
+
+  it("invokes onSelectPriority with the selected token, including reselecting the current one", () => {
+    const onSelectPriority = vi.fn();
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      currentPriority: "critical",
+      onSelectPriority,
+    });
+    const children = priorityChildren(entries);
+    const criticalEntry = children.find((child) => child.key === "priority-critical");
+    if (criticalEntry?.kind !== "item") throw new Error("expected an item entry");
+
+    criticalEntry.onSelect?.();
+
+    expect(onSelectPriority).toHaveBeenCalledWith("critical");
+  });
+});

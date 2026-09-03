@@ -31,6 +31,12 @@ import {
   type TaskMoveStep,
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
+import {
+  isKanbanPriority,
+  KANBAN_PRIORITY_LABEL_KEYS,
+  KANBAN_PRIORITY_TOKENS,
+} from "@/lib/kanban/task-priority";
+import type { TaskPriority } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
 import type { PluginIcon, PluginTaskMenuContext } from "@/lib/plugins/types";
@@ -92,6 +98,9 @@ type BuildKanbanCardMenuEntriesArgs = {
   isArchiving?: boolean;
   isDetaching?: boolean;
   parentTaskId?: string | null;
+  /** The task's currently held priority; may be absent, empty or unrecognized. */
+  currentPriority?: string | null;
+  onSelectPriority?: (priority: TaskPriority) => void;
   onEdit?: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
@@ -182,6 +191,57 @@ function buildMoveToCurrentWorkflowSubmenu({
   };
 }
 
+/**
+ * Reselecting the task's current priority stays enabled (AC-003.5: repeating
+ * the same selection completes idempotently), unlike `buildStepEntry`, which
+ * disables the current step for a move action.
+ */
+function buildPriorityItemEntry(
+  priority: TaskPriority,
+  currentPriority: string | null | undefined,
+  onSelect: (priority: TaskPriority) => void,
+): KanbanCardMenuEntry {
+  const isCurrent = isKanbanPriority(currentPriority) && currentPriority === priority;
+  return {
+    kind: "item",
+    key: `priority-${priority}`,
+    testId: `task-context-priority-${priority}`,
+    label: <span className="flex-1 truncate">{t(KANBAN_PRIORITY_LABEL_KEYS[priority])}</span>,
+    trailing: isCurrent ? (
+      <span
+        data-testid={`task-context-priority-current-${priority}`}
+        className="ml-auto text-[10px] text-muted-foreground"
+      >
+        {t("kanban:current")}
+      </span>
+    ) : undefined,
+    onSelect: () => onSelect(priority),
+  };
+}
+
+function buildPriorityMenuEntry({
+  currentPriority,
+  disabled,
+  onSelectPriority,
+}: {
+  currentPriority?: string | null;
+  disabled?: boolean;
+  onSelectPriority?: (priority: TaskPriority) => void;
+}): KanbanCardMenuEntry | null {
+  if (!onSelectPriority) return null;
+  return {
+    kind: "submenu",
+    key: "priority",
+    testId: "task-context-priority",
+    label: t("kanban:priority"),
+    disabled,
+    className: "w-40",
+    children: KANBAN_PRIORITY_TOKENS.map((priority) =>
+      buildPriorityItemEntry(priority, currentPriority, onSelectPriority),
+    ),
+  };
+}
+
 function buildWorkflowTargetEntry({
   workflow,
   steps,
@@ -265,6 +325,8 @@ export function buildKanbanCardMenuEntries({
   isArchiving,
   isDetaching,
   parentTaskId,
+  currentPriority,
+  onSelectPriority,
   onEdit,
   onArchive,
   onDelete,
@@ -290,6 +352,13 @@ export function buildKanbanCardMenuEntries({
       context: resolvePluginMenuContext(pluginMenuContext),
     }),
   ];
+
+  const priorityEntry = buildPriorityMenuEntry({
+    currentPriority,
+    disabled: isProcessing,
+    onSelectPriority,
+  });
+  if (priorityEntry) entries.push(priorityEntry);
 
   const moveToEntry = buildMoveToCurrentWorkflowSubmenu({
     steps: currentSteps,
@@ -327,7 +396,27 @@ export function buildKanbanCardMenuEntries({
   });
   if (linkEntry) entries.push(linkEntry);
 
-  entries.push({
+  entries.push(buildArchiveEntry({ isArchiving, isProcessing, onArchive }));
+
+  const detachEntry = buildDetachEntry({ parentTaskId, onDetach, isDetaching, isProcessing });
+  if (detachEntry) entries.push(detachEntry);
+
+  entries.push({ kind: "separator", key: "delete-separator" });
+  entries.push(buildDeleteEntry({ isDeleting, isProcessing, onDelete }));
+
+  return entries;
+}
+
+function buildArchiveEntry({
+  isArchiving,
+  isProcessing,
+  onArchive,
+}: {
+  isArchiving?: boolean;
+  isProcessing: boolean;
+  onArchive?: () => void;
+}): KanbanCardMenuEntry {
+  return {
     kind: "item",
     key: "archive",
     icon: isArchiving ? (
@@ -338,13 +427,19 @@ export function buildKanbanCardMenuEntries({
     label: t("kanban:archive"),
     disabled: isProcessing || !onArchive,
     onSelect: onArchive,
-  });
+  };
+}
 
-  const detachEntry = buildDetachEntry({ parentTaskId, onDetach, isDetaching, isProcessing });
-  if (detachEntry) entries.push(detachEntry);
-
-  entries.push({ kind: "separator", key: "delete-separator" });
-  entries.push({
+function buildDeleteEntry({
+  isDeleting,
+  isProcessing,
+  onDelete,
+}: {
+  isDeleting?: boolean;
+  isProcessing: boolean;
+  onDelete?: () => void;
+}): KanbanCardMenuEntry {
+  return {
     kind: "item",
     key: "delete",
     icon: isDeleting ? (
@@ -356,9 +451,7 @@ export function buildKanbanCardMenuEntries({
     destructive: true,
     disabled: isProcessing || !onDelete,
     onSelect: onDelete,
-  });
-
-  return entries;
+  };
 }
 
 function buildDetachEntry({
