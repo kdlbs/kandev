@@ -151,6 +151,27 @@ describe("useEnsureTaskSession", () => {
     await flushMicrotasks();
     expect(result.current.status).toBe("idle");
   });
+
+  // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.7
+  // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.8
+  it("keeps a failed ensure latched until the user retries", async () => {
+    mockEnsureTaskSession.mockRejectedValue(new Error("workspace is not attachable"));
+    const { result, rerender } = renderHook(() => useEnsureTaskSession(TASK));
+
+    await flushMicrotasks();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+
+    mockSessionsResult = {
+      ...mockSessionsResult,
+      loadSessions: vi.fn().mockResolvedValue(undefined),
+    };
+    rerender();
+    await flushMicrotasks();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.retry());
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("useEnsureTaskSession — task changes", () => {
