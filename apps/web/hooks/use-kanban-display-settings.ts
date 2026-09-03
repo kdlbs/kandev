@@ -8,6 +8,9 @@ import type { TaskListingView } from "@/lib/task-listing/view-preference";
 import { listingHistoryHref } from "@/lib/task-listing/view-navigation";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { selectWorkflowSwimlanes } from "@/lib/kanban/workflow-swimlanes";
+import type { KanbanSort } from "@/lib/kanban/kanban-sort";
+import { toggleKanbanPriorityFilterToken } from "@/lib/kanban/priority-filter-tokens";
+import type { TaskPriority } from "@/lib/types/http";
 
 type UserSettingsFields = {
   workspaceId: string | null;
@@ -15,6 +18,8 @@ type UserSettingsFields = {
   repositoryIds: string[];
   hiddenWorkflowStepIds?: Record<string, string[]>;
   workflowIdsWithAutoHideEmptySteps?: string[];
+  kanbanSort?: KanbanSort;
+  kanbanPriorityFilterTokens?: TaskPriority[];
 };
 
 type CommitSettingsFn = (
@@ -32,6 +37,8 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
     repositoryIds: settings.repositoryIds,
     hiddenWorkflowStepIds: settings.hiddenWorkflowStepIds,
     workflowIdsWithAutoHideEmptySteps: settings.workflowIdsWithAutoHideEmptySteps,
+    kanbanSort: settings.kanbanSort,
+    kanbanPriorityFilterTokens: settings.kanbanPriorityFilterTokens,
   };
 }
 
@@ -210,6 +217,24 @@ export function useKanbanDisplaySettings() {
     },
     [commitSettings, userSettings],
   );
+  const onBoardSortChange = useCallback(
+    (sort: KanbanSort) => {
+      commitSettings({ ...baseSettingsPayload(userSettings), kanbanSort: sort });
+    },
+    [commitSettings, userSettings],
+  );
+  const onPriorityFilterChange = useCallback(
+    (token: TaskPriority) => {
+      commitSettings({
+        ...baseSettingsPayload(userSettings),
+        kanbanPriorityFilterTokens: toggleKanbanPriorityFilterToken(
+          userSettings.kanbanPriorityFilterTokens ?? [],
+          token,
+        ),
+      });
+    },
+    [commitSettings, userSettings],
+  );
 
   const { eligibleWorkflows, onToggleStepVisibility, onToggleAutoHideEmpty } =
     useStepVisibilityHandlers(workflows, snapshots, userSettings, commitSettings, activeWorkflowId);
@@ -232,6 +257,8 @@ export function useKanbanDisplaySettings() {
     snapshots,
     hiddenWorkflowStepIds: userSettings.hiddenWorkflowStepIds ?? {},
     workflowIdsWithAutoHideEmptySteps: userSettings.workflowIdsWithAutoHideEmptySteps ?? [],
+    boardSort: userSettings.kanbanSort,
+    priorityFilterTokens: userSettings.kanbanPriorityFilterTokens ?? [],
     onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,
@@ -239,6 +266,8 @@ export function useKanbanDisplaySettings() {
     onToggleTasksListShowDetails,
     onToggleStepVisibility,
     onToggleAutoHideEmpty,
+    onBoardSortChange,
+    onPriorityFilterChange,
     onViewModeChange,
   };
 }

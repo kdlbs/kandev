@@ -43,7 +43,7 @@ function makeUpdateMessage(workflowId: string, tasks: unknown[], steps: unknown[
 }
 
 describe("kanban.update handler — priority preservation", () => {
-  it("preserves priority from existing tasks", () => {
+  it("preserves priority from existing tasks when the update omits it", () => {
     const store = makeStore({
       kanban: {
         workflowId: WORKFLOW_ID,
@@ -70,6 +70,70 @@ describe("kanban.update handler — priority preservation", () => {
 
     const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
     expect(task?.priority).toBe("critical");
+  });
+
+  it("applies a new priority carried by the update", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowId: WORKFLOW_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            priority: "low",
+          },
+        ],
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        {
+          id: TASK_ID,
+          workflowStepId: STEP_ID,
+          title: TASK_TITLE,
+          position: 0,
+          priority: "high",
+        },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.priority).toBe("high");
+  });
+
+  it("applies an explicit null priority instead of falling back to the existing value", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowId: WORKFLOW_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            priority: "critical",
+          },
+        ],
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        { id: TASK_ID, workflowStepId: STEP_ID, title: UPDATED_TITLE, position: 0, priority: null },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.priority).toBeNull();
   });
 
   it("preserves priority in kanbanMulti snapshot", () => {
@@ -109,32 +173,41 @@ describe("kanban.update handler — priority preservation", () => {
     expect(task?.priority).toBe("critical");
   });
 
-  it("applies an explicit null priority instead of falling back to the existing value", () => {
+  it("preserves priority from the snapshot's own cached task when the update omits it and the single-workflow lookup misses", () => {
     const store = makeStore({
-      kanban: {
-        workflowId: WORKFLOW_ID,
-        steps: [],
-        tasks: [
-          {
-            id: TASK_ID,
+      kanban: { workflowId: null, steps: [], tasks: [] },
+      kanbanMulti: {
+        snapshots: {
+          [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
-            workflowStepId: STEP_ID,
-            title: TASK_TITLE,
-            position: 0,
-            priority: "critical",
+            workflowName: "Workflow",
+            steps: [],
+            tasks: [
+              {
+                id: TASK_ID,
+                workflowId: WORKFLOW_ID,
+                workflowStepId: STEP_ID,
+                title: TASK_TITLE,
+                position: 0,
+                priority: "critical",
+              },
+            ],
           },
-        ],
+        },
+        isLoading: false,
       },
     } as Partial<AppState>);
 
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
     handler(
       makeUpdateMessage(WORKFLOW_ID, [
-        { id: TASK_ID, workflowStepId: STEP_ID, title: UPDATED_TITLE, position: 0, priority: null },
+        { id: TASK_ID, workflowStepId: STEP_ID, title: UPDATED_TITLE, position: 0 },
       ]),
     );
 
-    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
-    expect(task?.priority).toBeNull();
+    const task = store
+      .getState()
+      .kanbanMulti.snapshots[WORKFLOW_ID]?.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.priority).toBe("critical");
   });
 });

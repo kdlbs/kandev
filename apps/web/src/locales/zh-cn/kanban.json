@@ -115,5 +115,9 @@
   "noWorkflowsAvailableYet": "暂无可用的工作流。",
   "pullToRefreshPull": "下拉刷新",
   "pullToRefreshRefreshing": "正在刷新任务",
-  "pullToRefreshRelease": "松开即可刷新"
+  "pullToRefreshRelease": "松开即可刷新",
+  "boardSort": "看板排序",
+  "boardSortCreatedDesc": "最新优先",
+  "boardSortPriorityDesc": "优先级",
+  "priorityFilter": "优先级筛选"
 }

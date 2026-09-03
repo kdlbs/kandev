@@ -6,8 +6,9 @@ import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
-import { repositoryId, type Repository } from "@/lib/types/http";
+import { repositoryId, type Repository, type TaskPriority } from "@/lib/types/http";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
+import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 
 type DisplaySettings = UserSettingsState;
 
@@ -28,6 +29,8 @@ type CommitPayload = {
   kanbanViewMode?: string | null;
   hiddenWorkflowStepIds?: Record<string, string[]>;
   workflowIdsWithAutoHideEmptySteps?: string[];
+  kanbanSort?: KanbanSort;
+  kanbanPriorityFilterTokens?: TaskPriority[];
 };
 
 export function normalizeWorkflowIds(ids: string[]): string[] {
@@ -45,16 +48,39 @@ export function normalizeHiddenStepIds(raw: Record<string, string[]>): Record<st
   return result;
 }
 
-function hiddenStepIdsEqual(a: Record<string, string[]>, b: Record<string, string[]>): boolean {
-  const aKeys = Object.keys(a).sort();
-  const bKeys = Object.keys(b).sort();
+function hiddenStepIdsEqual(
+  a: Record<string, string[]> | undefined,
+  b: Record<string, string[]> | undefined,
+): boolean {
+  const left = a ?? {};
+  const right = b ?? {};
+  const aKeys = Object.keys(left).sort();
+  const bKeys = Object.keys(right).sort();
   if (aKeys.length !== bKeys.length) return false;
   return aKeys.every((key, i) => {
     if (key !== bKeys[i]) return false;
-    const aIds = [...a[key]].sort();
-    const bIds = [...b[key]].sort();
+    const aIds = [...left[key]].sort();
+    const bIds = [...right[key]].sort();
     return aIds.length === bIds.length && aIds.every((id, j) => id === bIds[j]);
   });
+}
+
+function normalizePriorityFilterTokens(tokens: TaskPriority[]): TaskPriority[] {
+  return Array.from(new Set(tokens)).sort();
+}
+
+function workflowIdsUnchanged(a: string[] | undefined, b: string[] | undefined): boolean {
+  return normalizeWorkflowIds(a ?? []).join("\0") === normalizeWorkflowIds(b ?? []).join("\0");
+}
+
+function priorityFilterTokensUnchanged(
+  a: TaskPriority[] | undefined,
+  b: TaskPriority[] | undefined,
+): boolean {
+  return (
+    normalizePriorityFilterTokens(a ?? []).join("\0") ===
+    normalizePriorityFilterTokens(b ?? []).join("\0")
+  );
 }
 
 function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings): DisplaySettings {
@@ -72,6 +98,10 @@ function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings):
     workflowIdsWithAutoHideEmptySteps: normalizeWorkflowIds(
       next.workflowIdsWithAutoHideEmptySteps ?? current.workflowIdsWithAutoHideEmptySteps ?? [],
     ),
+    kanbanSort: next.kanbanSort ?? current.kanbanSort,
+    kanbanPriorityFilterTokens: normalizePriorityFilterTokens(
+      next.kanbanPriorityFilterTokens ?? current.kanbanPriorityFilterTokens ?? [],
+    ),
     loaded: true,
   };
 }
@@ -88,12 +118,16 @@ export function isSettingsUnchanged(
     normalized.tasksListShowDetails === current.tasksListShowDetails &&
     normalized.repositoryIds.length === current.repositoryIds.length &&
     normalized.repositoryIds.every((id, index) => id === current.repositoryIds[index]) &&
-    hiddenStepIdsEqual(
-      normalized.hiddenWorkflowStepIds ?? {},
-      current.hiddenWorkflowStepIds ?? {},
+    hiddenStepIdsEqual(normalized.hiddenWorkflowStepIds, current.hiddenWorkflowStepIds) &&
+    workflowIdsUnchanged(
+      normalized.workflowIdsWithAutoHideEmptySteps,
+      current.workflowIdsWithAutoHideEmptySteps,
     ) &&
-    normalizeWorkflowIds(normalized.workflowIdsWithAutoHideEmptySteps ?? []).join("\0") ===
-      normalizeWorkflowIds(current.workflowIdsWithAutoHideEmptySteps ?? []).join("\0")
+    normalized.kanbanSort === current.kanbanSort &&
+    priorityFilterTokensUnchanged(
+      normalized.kanbanPriorityFilterTokens,
+      current.kanbanPriorityFilterTokens,
+    )
   );
 }
 
@@ -106,6 +140,8 @@ export function buildSettingsUpdatePayload(normalized: DisplaySettings): Record<
     tasks_list_show_details: normalized.tasksListShowDetails,
     kanban_hidden_step_ids: normalized.hiddenWorkflowStepIds,
     workflow_ids_with_auto_hide_empty_steps: normalized.workflowIdsWithAutoHideEmptySteps,
+    kanban_sort: normalized.kanbanSort,
+    kanban_priority_filter_tokens: normalized.kanbanPriorityFilterTokens,
   };
 }
 
