@@ -109,6 +109,36 @@ func (r *StandaloneExecutor) stopWithRetry(ctx context.Context, instanceID strin
 	return lastErr
 }
 
+// listInstancesWithRetry enumerates the adopted control server's live
+// instances within the same bounded per-attempt timeout and retry count as
+// stopWithRetry (AC-EXECUTORS-SURVIVAL-002.13): this enumeration is the sole
+// read source for two AC-EXECUTORS-SURVIVAL-002.3 reconstruction-table
+// values -- workspace source roots and provider session identity -- both
+// declared to come from the adopted instance, so a transient failure here
+// must be retried before an instance's reconstruction is given up on.
+func (r *StandaloneExecutor) listInstancesWithRetry(ctx context.Context) ([]*agentctl.InstanceInfo, error) {
+	timeout := r.recoveryReadTimeout
+	if timeout <= 0 {
+		timeout = defaultRecoveryReadTimeout
+	}
+	retries := r.recoveryReadRetries
+	if retries < 0 {
+		retries = defaultRecoveryReadRetries
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+		instances, err := r.ctl.ListInstances(attemptCtx)
+		cancel()
+		if err == nil {
+			return instances, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
 func (r *StandaloneExecutor) Name() executor.Name {
 	return executor.NameStandalone
 }
@@ -306,20 +336,22 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 // and any winner-stop or unstoppable report they trigger, keep running and
 // recording their outcome in the background after this call returns.
 //
-// When the adopted server cannot be enumerated at all, this reports nothing
-// recovered, stops nothing, and leaves every record to the existing
-// stale-execution repair path (AC-EXECUTORS-SURVIVAL-002.12) rather than
-// treating an enumeration failure as though every instance were an orphan.
+// Enumeration itself is retried within the AC-EXECUTORS-SURVIVAL-002.13
+// bounded budget (listInstancesWithRetry) before being treated as failed --
+// workspace source roots and provider session identity are read back from
+// this same response, so a transient enumeration failure must not skip the
+// retry that AC applies to every other adopted-instance read. When the
+// adopted server still cannot be enumerated after retries are exhausted,
+// this reports nothing recovered, stops nothing, and leaves every record to
+// the existing stale-execution repair path (AC-EXECUTORS-SURVIVAL-002.12)
+// rather than treating an enumeration failure as though every instance were
+// an orphan.
 //
-// Scope note: this does not yet implement the full four-source reconstruction
-// table of design part 3 (task-environment identity, agent identity/command
-// re-derivation, workspace source roots and provider session identity read
-// back from the instance) -- those require new agentctl wire-contract fields
-// not yet added. A recovered execution here carries the same field set the
-// pre-existing (never-before-reachable) recovery consumer in Manager.Start
-// already builds.
+// Scope note: agent identity and the agent/continuation commands, arguments,
+// and history setting still need re-derivation from the restored agent
+// profile and the agent-type registry, not yet implemented here.
 func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
-	instances, err := r.ctl.ListInstances(ctx)
+	instances, err := r.listInstancesWithRetry(ctx)
 	if err != nil {
 		r.logger.Warn("failed to enumerate standalone instances for recovery; leaving every record to the existing repair path",
 			zap.Error(err))

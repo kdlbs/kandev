@@ -34,6 +34,12 @@ type standaloneControlServer struct {
 	// for exercising AC-EXECUTORS-SURVIVAL-002.12.
 	listInstances    []*agentctlclient.InstanceInfo
 	listInstancesErr bool
+	// listInstancesFailures is the number of remaining GET
+	// /api/v1/instances attempts to fail (500) before it starts answering
+	// with listInstances -- lets a test pin the exact bounded-retry attempt
+	// count (AC-EXECUTORS-SURVIVAL-002.13) for the enumeration read itself.
+	listInstancesFailures int
+	listInstancesAttempts int
 	// deleteFailures, keyed by instance ID, is the number of remaining DELETE
 	// attempts to fail (500) for that instance before it starts succeeding --
 	// lets a test pin the exact bounded-retry attempt count
@@ -98,7 +104,13 @@ func newStandaloneControlServer(t *testing.T, healthy bool) *standaloneControlSe
 			}
 			s.deleted = append(s.deleted, id)
 		case r.URL.Path == "/api/v1/instances" && r.Method == http.MethodGet:
+			s.listInstancesAttempts++
 			if s.listInstancesErr {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if s.listInstancesFailures > 0 {
+				s.listInstancesFailures--
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -468,6 +480,69 @@ func TestStandaloneExecutorRecoverInstancesEnumerationFailureRecoversNothing(t *
 	defer control.mu.Unlock()
 	if len(control.deleted) != 0 {
 		t.Fatalf("deleted = %v, want none: an unenumerable server must not have instances stopped blind", control.deleted)
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesRetriesTransientEnumerationFailure
+// pins AC-EXECUTORS-SURVIVAL-002.13's bounded read retry applied to the
+// enumeration call itself: workspace source roots and provider session
+// identity are read back only from this response, so a transient failure
+// must be retried, not treated as a hard enumeration failure on the first
+// error.
+func TestStandaloneExecutorRecoverInstancesRetriesTransientEnumerationFailure(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "instance-1", Port: 5001, SessionID: "session-1"},
+	}
+	control.listInstancesFailures = 1 // fails once, succeeds on the retry
+	exec := control.executor(t)
+	exec.SetRecoveryRetryConfig(50*time.Millisecond, 1)
+
+	records := []*models.ExecutorRunning{{SessionID: "session-1", AgentExecutionID: "instance-1"}}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 1 {
+		t.Fatalf("recovered = %+v, want the one instance recovered after the retry succeeds", recovered)
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if control.listInstancesAttempts != 2 {
+		t.Fatalf("listInstances attempts = %d, want exactly 2 (1 failure plus 1 retry)", control.listInstancesAttempts)
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesExhaustingEnumerationRetryRecoversNothing
+// pins the exhausted-budget half of AC-EXECUTORS-SURVIVAL-002.13 for the
+// enumeration read: once every attempt fails, recovery falls back to
+// AC-EXECUTORS-SURVIVAL-002.12's existing repair path rather than retrying
+// indefinitely.
+func TestStandaloneExecutorRecoverInstancesExhaustingEnumerationRetryRecoversNothing(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "instance-1", Port: 5001, SessionID: "session-1"},
+	}
+	control.listInstancesFailures = 999 // never succeeds within the retry budget
+	exec := control.executor(t)
+	exec.SetRecoveryRetryConfig(20*time.Millisecond, 1)
+
+	records := []*models.ExecutorRunning{{SessionID: "session-1", AgentExecutionID: "instance-1"}}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v, want a logged-and-swallowed exhausted-retry enumeration failure", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none", recovered)
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if control.listInstancesAttempts != 2 {
+		t.Fatalf("listInstances attempts = %d, want exactly 2 (1 retry configured)", control.listInstancesAttempts)
 	}
 }
 
