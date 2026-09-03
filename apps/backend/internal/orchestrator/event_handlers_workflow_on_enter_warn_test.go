@@ -206,7 +206,7 @@ func TestProcessOnEnter_LedgerOwnedKinds_DoNotWarnAndWriteNoMarker(t *testing.T)
 		t.Fatalf("expected a real entryID to be allocated")
 	}
 
-	svc.processOnEnter(ctx, "task-ledger-owned", session, step, "", holder.EntryID)
+	svc.processOnEnter(ctx, "task-ledger-owned", session, step, "", holder.EntryID, nil)
 
 	var warnings []observer.LoggedEntry
 	for _, e := range logs.All() {
@@ -284,7 +284,7 @@ func TestProcessOnEnter_EveryLedgerOwnedKind_DoesNotWarn(t *testing.T) {
 		Events:     wfmodels.StepEvents{OnEnter: actions},
 	}
 
-	svc.processOnEnter(ctx, "task-all-ledger", session, step, "", 0)
+	svc.processOnEnter(ctx, "task-all-ledger", session, step, "", 0, nil)
 
 	var warnings []observer.LoggedEntry
 	for _, e := range logs.All() {
