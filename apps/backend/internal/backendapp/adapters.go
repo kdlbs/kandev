@@ -324,6 +324,23 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 
 // LaunchAgent creates a new agentctl instance for a task.
 // Agent subprocess is NOT started - call StartAgentProcess() explicitly.
+// wrapSessionRecoveryGuardError translates the raw lifecycle recovery-guard
+// sentinels into an orchestrator.SessionRecoveryGuardError so callers outside
+// internal/agent/runtime/ can distinguish a retryable in-progress recovery
+// from a non-retryable unstoppable-agent condition without importing
+// lifecycle directly. Errors that are not guard-related pass through
+// unchanged.
+func wrapSessionRecoveryGuardError(err error, sessionID string) error {
+	switch {
+	case errors.Is(err, lifecycle.ErrSessionRecoveryGuarded):
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: true}
+	case errors.Is(err, lifecycle.ErrSessionUnstoppableAgent):
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: false}
+	default:
+		return err
+	}
+}
+
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
 	// fall back to RepositoryURL (legacy: this carries a local filesystem path
@@ -342,7 +359,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// Create the agentctl execution (does NOT start agent process)
 	execution, err := a.mgr.Launch(ctx, launchReq)
 	if err != nil {
-		return nil, err
+		return nil, wrapSessionRecoveryGuardError(err, req.SessionID)
 	}
 
 	// Extract worktree info from metadata if available
