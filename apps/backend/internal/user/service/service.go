@@ -108,6 +108,8 @@ type UpdateUserSettingsRequest struct {
 	QuickChatTabOrderByWorkspace      *map[string][]string
 	KanbanHiddenStepIDs               *map[string][]string
 	WorkflowIDsWithAutoHideEmptySteps *[]string
+	KanbanSort                        *string
+	KanbanPriorityFilterTokens        *[]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -437,6 +439,12 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		}
 		settings.WorkflowIDsWithAutoHideEmptySteps = workflowIDs
 	}
+	if err := applyKanbanSort(settings, req.KanbanSort); err != nil {
+		return err
+	}
+	if req.KanbanPriorityFilterTokens != nil {
+		settings.KanbanPriorityFilterTokens = normalizeKanbanPriorityFilterTokens(*req.KanbanPriorityFilterTokens)
+	}
 	return nil
 }
 
@@ -707,6 +715,55 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 		settings.TasksListGroup = v
 	}
 	return nil
+}
+
+// applyKanbanSort validates and applies the board sort enum, defaulting an
+// empty value and rejecting the whole request on an invalid one, modeled on
+// applyTasksListPreferences (AC-004.9).
+func applyKanbanSort(settings *models.UserSettings, sortValue *string) error {
+	if sortValue == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*sortValue)
+	if v == "" {
+		v = models.KanbanSortDefault
+	}
+	if !models.IsValidKanbanSort(v) {
+		return fmt.Errorf("kanban_sort must be one of %s", strings.Join(models.KanbanSortValues(), ", "))
+	}
+	settings.KanbanSort = v
+	return nil
+}
+
+// normalizeKanbanPriorityFilterTokens drops any member outside the four
+// priority tokens, removes duplicates, and orders the remainder by priority
+// rank (AC-004.9). Unlike applyKanbanSort, an invalid member does not reject
+// the request: the field is a subset selection rather than an enum, "remove
+// duplicates from the remainder" only parses if a remainder survives an
+// invalid member, and a whole-request rejection would silently block this
+// settings record's other fields (repository filter, hidden step ids) on
+// every write until the stray token is cleared, since the caller applies this
+// value inside the same best-effort settings payload as those fields.
+func normalizeKanbanPriorityFilterTokens(tokens []string) []string {
+	valid := make([]string, 0, len(tokens))
+	seen := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if !models.IsValidKanbanPriorityFilterToken(token) {
+			continue
+		}
+		if _, dup := seen[token]; dup {
+			continue
+		}
+		seen[token] = struct{}{}
+		valid = append(valid, token)
+	}
+	sort.SliceStable(valid, func(i, j int) bool {
+		rankI, _ := models.KanbanPriorityFilterTokenRank(valid[i])
+		rankJ, _ := models.KanbanPriorityFilterTokenRank(valid[j])
+		return rankI < rankJ
+	})
+	return valid
 }
 
 // applyTerminalLinkBehavior validates and applies the terminal link behavior
@@ -1030,6 +1087,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
+		"kanban_sort":                              settings.KanbanSort,
+		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}

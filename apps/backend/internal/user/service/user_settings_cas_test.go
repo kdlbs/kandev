@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -447,6 +448,73 @@ func TestUpdateUserSettingsSameValuePatchIsNoop(t *testing.T) {
 	}
 	if got == nil || got.Revision != base.Revision {
 		t.Fatalf("no-op returned settings = %+v, want current revision %d", got, base.Revision)
+	}
+}
+
+// TestUpdateUserSettingsRejectsInvalidKanbanSort verifies an invalid kanban_sort is rejected
+// without an upsert, and that a valid sibling field in the same request is not applied either
+// (whole-request rejection, distinguishing this enum field from the priority-filter list field).
+func TestUpdateUserSettingsRejectsInvalidKanbanSort(t *testing.T) {
+	repo := &recordingUserRepository{getSettings: &models.UserSettings{UserID: store.DefaultUserID}}
+	eventBus := &recordingEventBus{}
+	svc := newCASService(repo, eventBus)
+
+	_, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		KanbanSort:    ptr("bogus"),
+		RepositoryIDs: ptr([]string{"repo-1"}),
+	})
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 0 {
+		t.Fatalf("expected no upsert on validation failure, got %d", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+}
+
+// TestUpdateUserSettingsAppliesKanbanSortAndDropsInvalidPriorityFilterMember is an end-to-end
+// (service-layer) version of the R5-F1 regression test: an invalid priority-filter member does
+// not block the rest of the request, and the published event carries the normalized values.
+func TestUpdateUserSettingsAppliesKanbanSortAndDropsInvalidPriorityFilterMember(t *testing.T) {
+	updated := &models.UserSettings{
+		UserID:                     store.DefaultUserID,
+		KanbanSort:                 "priority_desc",
+		KanbanPriorityFilterTokens: []string{"critical", "low"},
+	}
+	repo := &recordingUserRepository{
+		getSettings:        &models.UserSettings{UserID: store.DefaultUserID},
+		preservingSettings: updated,
+	}
+	eventBus := &recordingEventBus{}
+	svc := newCASService(repo, eventBus)
+
+	got, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		KanbanSort:                 ptr("priority_desc"),
+		KanbanPriorityFilterTokens: ptr([]string{"low", "urgent", "critical"}),
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if got.KanbanSort != "priority_desc" {
+		t.Fatalf("KanbanSort = %q, want priority_desc", got.KanbanSort)
+	}
+	if !reflect.DeepEqual(got.KanbanPriorityFilterTokens, []string{"critical", "low"}) {
+		t.Fatalf("KanbanPriorityFilterTokens = %#v, want [critical low]", got.KanbanPriorityFilterTokens)
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 1 {
+		t.Fatalf("upserts = %d, want 1", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("published events = %d, want 1", len(eventBus.publishedEvents))
+	}
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", eventBus.publishedEvents[0].Data)
+	}
+	if got := eventData["kanban_sort"]; got != "priority_desc" {
+		t.Fatalf("event kanban_sort = %#v, want priority_desc", got)
+	}
+	if got := eventData["kanban_priority_filter_tokens"]; !reflect.DeepEqual(got, []string{"critical", "low"}) {
+		t.Fatalf("event kanban_priority_filter_tokens = %#v, want [critical low]", got)
 	}
 }
 
