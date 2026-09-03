@@ -196,9 +196,17 @@ func gitMetadataMounts(projections []*worktree.GitMetadataProjection) ([]docker.
 		if projection == nil || projection.Revalidate() != nil {
 			return nil, errors.New(gitMetadataProjectionInvalid)
 		}
-		common[projection.CommonDir] = struct{}{}
-		if projection.WorktreesDir != "" {
-			worktrees[projection.WorktreesDir] = struct{}{}
+		// A regular (non-worktree) repository has GitDir == CommonDir, and
+		// GitDir is already in WritablePaths. Adding CommonDir to the
+		// read-only set here as well would produce two Docker mounts
+		// targeting the identical path with conflicting ReadOnly flags.
+		// Only linked worktrees, whose owned GitDir differs from the shared
+		// CommonDir, need the separate read-only common-directory mount.
+		if projection.GitDir != projection.CommonDir {
+			common[projection.CommonDir] = struct{}{}
+			if projection.WorktreesDir != "" {
+				worktrees[projection.WorktreesDir] = struct{}{}
+			}
 		}
 		for _, path := range projection.WritablePaths {
 			writable[path] = struct{}{}

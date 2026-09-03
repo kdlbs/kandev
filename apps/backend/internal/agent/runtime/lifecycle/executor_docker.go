@@ -289,8 +289,18 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 	if err != nil {
 		return ContainerConfig{}, err
 	}
-	if requiresCloneGitMetadataPolicy(req) {
+	requiresClonePolicy := requiresCloneGitMetadataPolicy(req)
+	if requiresClonePolicy {
 		prepareScript = cloneGitMetadataPrepareScript(prepareScript)
+	}
+	// A clone-in-container checkout is created fresh at /workspace inside the
+	// container; there is no host checkout to project. Omitting the
+	// projections here (rather than relying solely on the mutable-clone
+	// policy env var) keeps buildContainerConfig from ever bind-mounting host
+	// Git paths into a container whose checkout is not the host's.
+	gitMetadataProjections := req.GitMetadataProjections
+	if requiresClonePolicy {
+		gitMetadataProjections = nil
 	}
 	return ContainerConfig{
 		AgentConfig:                    req.AgentConfig,
@@ -301,8 +311,8 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		SessionID:                      req.SessionID,
 		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
 		InstanceID:                     req.InstanceID,
-		GitMetadataProjections:         req.GitMetadataProjections,
-		RequiresCloneGitMetadataPolicy: requiresCloneGitMetadataPolicy(req),
+		GitMetadataProjections:         gitMetadataProjections,
+		RequiresCloneGitMetadataPolicy: requiresClonePolicy,
 		WorkspaceSourceRoots:           []string{dockerWorkspacePath},
 		Credentials:                    req.Env,
 		AutoApprovePermissions:         req.AutoApprovePermissions,

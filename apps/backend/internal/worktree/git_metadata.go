@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/securityutil"
 )
 
 // GitMetadataProjectionVersion changes whenever the shape of the metadata
@@ -160,7 +162,11 @@ func buildGitMetadataProjection(checkout, gitDir, commonDir, worktreeName string
 	if err != nil {
 		return nil, invalidGitMetadata(err)
 	}
-	paths := []string{gitDir, filepath.Join(commonDir, "objects")}
+	objectDir := filepath.Join(commonDir, "objects")
+	if err := rejectSymlinkComponents(objectDir); err != nil {
+		return nil, invalidGitMetadata(err)
+	}
+	paths := []string{gitDir, objectDir}
 	refPath, reflogPath := "", ""
 	if ref != "" {
 		refPath = filepath.Join(commonDir, filepath.FromSlash(ref))
@@ -168,17 +174,25 @@ func buildGitMetadataProjection(checkout, gitDir, commonDir, worktreeName string
 		if err := rejectSymlinkComponents(refPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, invalidGitMetadata(err)
 		}
+		if err := rejectSymlinkComponents(reflogPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, invalidGitMetadata(err)
+		}
 		// Git creates ref.lock and reflog lock siblings before replacing the
 		// current files. Grant their immediate directories as well as the files;
 		// neither directory can be the common Git root because current refs are
 		// constrained to refs/heads/..., and this remains narrower than a common
-		// metadata grant.
-		paths = append(paths,
-			refPath,
-			filepath.Dir(refPath),
-			reflogPath,
-			filepath.Dir(reflogPath),
-		)
+		// metadata grant. The ref and reflog files themselves are granted only
+		// when they already exist: a fully packed-refs branch has no loose ref
+		// file, and core.logAllRefUpdates=false leaves no reflog file, so
+		// granting a nonexistent path would give an executor a mount source
+		// that can never be satisfied.
+		paths = append(paths, filepath.Dir(refPath), filepath.Dir(reflogPath))
+		if pathExists(refPath) {
+			paths = append(paths, refPath)
+		}
+		if pathExists(reflogPath) {
+			paths = append(paths, reflogPath)
+		}
 	}
 	projection := &GitMetadataProjection{
 		Version:        GitMetadataProjectionVersion,
@@ -186,7 +200,7 @@ func buildGitMetadataProjection(checkout, gitDir, commonDir, worktreeName string
 		GitDir:         gitDir,
 		CommonDir:      commonDir,
 		WorktreesDir:   filepath.Join(commonDir, "worktrees"),
-		ObjectDir:      filepath.Join(commonDir, "objects"),
+		ObjectDir:      objectDir,
 		CurrentRef:     ref,
 		CurrentRefPath: refPath,
 		ReflogPath:     reflogPath,
@@ -274,6 +288,16 @@ func canonicalExistingPath(path string) (string, error) {
 	return filepath.Clean(canonical), nil
 }
 
+// pathExists reports whether path currently exists. It is used to decide
+// whether a ref or reflog file itself belongs in WritablePaths: a mount or
+// permission grant for a source that does not exist would never be
+// satisfiable, whereas the file's parent directory (always granted
+// separately) lets Git create it later.
+func pathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
 func directChildName(parent, child string) (string, error) {
 	rel, err := filepath.Rel(parent, child)
 	if err != nil || rel == "." || rel == ".." || filepath.Dir(rel) != "." {
@@ -299,9 +323,16 @@ func readCurrentBranchRef(headPath string) (string, error) {
 }
 
 // ValidBranchRef reports whether ref is a canonical local branch ref that is
-// safe to use below a Git metadata directory.
+// safe to use below a Git metadata directory. The branch-name suffix is
+// validated against the same allowlist the rest of the backend uses for
+// task and base branch names, so a HEAD ref this resolver trusts can never
+// be rejected downstream (or vice versa) by a different validation rule.
 func ValidBranchRef(ref string) bool {
-	if !strings.HasPrefix(ref, "refs/heads/") || strings.ContainsAny(ref, "\\\x00") {
+	if !strings.HasPrefix(ref, "refs/heads/") || strings.ContainsAny(ref, "\\\x00\n\r") {
+		return false
+	}
+	name := strings.TrimPrefix(ref, "refs/heads/")
+	if !securityutil.IsValidBranchName(name) {
 		return false
 	}
 	for _, part := range strings.Split(ref, "/") {

@@ -49,6 +49,44 @@ func TestGitMetadataMountsMasksSiblingWorktrees(t *testing.T) {
 	}
 }
 
+// TestGitMetadataMountsRegularRepositoryHasNoConflictingDuplicateMount covers
+// a regular (non-worktree) repository, where GitDir == CommonDir. Since GitDir
+// is already granted writable via WritablePaths, also adding CommonDir to the
+// read-only set would produce two Docker mounts targeting the same path with
+// contradictory ReadOnly flags.
+func TestGitMetadataMountsRegularRepositoryHasNoConflictingDuplicateMount(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	runContainerGit(t, "", "init", "-b", "main", repo)
+	runContainerGit(t, repo, "config", "user.email", "test@example.com")
+	runContainerGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, repo, "add", "file")
+	runContainerGit(t, repo, "commit", "-m", "initial")
+	projection, err := worktree.ResolveGitMetadata(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.GitDir != projection.CommonDir {
+		t.Fatalf("test fixture must be a regular repository: GitDir=%q CommonDir=%q", projection.GitDir, projection.CommonDir)
+	}
+	mounts, err := gitMetadataMounts([]*worktree.GitMetadataProjection{projection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := make(map[string]int, len(mounts))
+	for _, mount := range mounts {
+		targets[mount.Target]++
+	}
+	for target, count := range targets {
+		if count > 1 {
+			t.Fatalf("mount target %q used %d times, want exactly 1: %#v", target, count, mounts)
+		}
+	}
+	assertGitMount(t, mounts, projection.GitDir, false, false)
+}
+
 func runContainerGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	if dir != "" {
@@ -67,6 +105,49 @@ func assertGitMount(t *testing.T, mounts []docker.MountConfig, target string, re
 		}
 	}
 	t.Fatalf("missing mount target=%q readOnly=%t tmpfs=%t: %#v", target, readOnly, tmpfs, mounts)
+}
+
+// TestBuildContainerConfig_MutableCloneOmitsHostGitMetadataMounts guards the
+// clone-in-container invariant: a checkout created fresh at /workspace inside
+// the container has no host checkout to project, so even a caller that (by
+// bug) still attaches host GitMetadataProjections under
+// RequiresCloneGitMetadataPolicy must not have them bind-mounted into the
+// container.
+func TestBuildContainerConfig_MutableCloneOmitsHostGitMetadataMounts(t *testing.T) {
+	cm := newCMTest(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	runContainerGit(t, "", "init", "-b", "main", repo)
+	runContainerGit(t, repo, "config", "user.email", "test@example.com")
+	runContainerGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, repo, "add", "file")
+	runContainerGit(t, repo, "commit", "-m", "initial")
+	projection, err := worktree.ResolveGitMetadata(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := ContainerConfig{
+		AgentConfig:                    newConfigStubAgent(),
+		InstanceID:                     "0123456789abcdef",
+		TaskID:                         "task-1",
+		RequiresCloneGitMetadataPolicy: true,
+		// A leaked host projection here must never surface as a mount.
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+	}
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	for _, mount := range got.Mounts {
+		if mount.Source == repo || mount.Target == repo ||
+			mount.Source == projection.CommonDir || mount.Target == projection.CommonDir ||
+			mount.Source == projection.GitDir || mount.Target == projection.GitDir {
+			t.Fatalf("mutable-clone container must not mount host Git metadata: %#v", mount)
+		}
+	}
 }
 
 // configStubAgent wraps MockAgent and overrides Runtime() with a fixed

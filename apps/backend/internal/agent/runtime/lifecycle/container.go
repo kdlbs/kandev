@@ -451,11 +451,20 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// sources resolve to a real on-disk location.
 	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag, config.InstanceID)
 
-	gitMounts, err := gitMetadataMounts(config.GitMetadataProjections)
-	if err != nil {
-		return docker.ContainerConfig{}, err
+	// A mutable-clone checkout is created fresh inside the container; it has
+	// no host checkout to bind-mount, and host Git metadata projections must
+	// never be attached to a container whose checkout the host cannot see.
+	// This is a defense-in-depth guard: callers should already omit
+	// projections under this policy, but a leaked host path here would
+	// otherwise silently bind-mount unrelated host Git administration into
+	// the container.
+	if !config.RequiresCloneGitMetadataPolicy {
+		gitMounts, err := gitMetadataMounts(config.GitMetadataProjections)
+		if err != nil {
+			return docker.ContainerConfig{}, err
+		}
+		mounts = append(mounts, gitMounts...)
 	}
-	mounts = append(mounts, gitMounts...)
 
 	if config.LocalClonePath != "" {
 		mounts = append(mounts, docker.MountConfig{

@@ -20,6 +20,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func newTestDockerLogger() *logger.Logger {
@@ -143,6 +144,36 @@ func TestDockerExecutorCloneLaunchWiringUsesPathFreeRequirement(t *testing.T) {
 	}
 	if strings.Contains(config.Credentials["CODEX_CONFIG"], "/host/") {
 		t.Fatalf("normal Docker clone wiring leaked a host path: %s", config.Credentials["CODEX_CONFIG"])
+	}
+}
+
+// TestDockerExecutorCloneLaunchDiscardsLeakedHostGitMetadataProjections
+// guards against a checkout created fresh inside the container being handed
+// host GitMetadataProjections it cannot correspond to. A caller populating
+// req.GitMetadataProjections despite the mutable-clone policy being active
+// (e.g. a stale value carried from a prior worktree-based launch) must not
+// have those host paths propagate into ContainerConfig, since
+// buildContainerConfig would otherwise bind-mount them into the container.
+func TestDockerExecutorCloneLaunchDiscardsLeakedHostGitMetadataProjections(t *testing.T) {
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	req := &ExecutorCreateRequest{
+		InstanceID:             "instance-1",
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+		Metadata:               map[string]interface{}{},
+		GitMetadataProjections: []*worktree.GitMetadataProjection{{CheckoutPath: "/host/repo"}},
+	}
+
+	config, err := exec.buildContainerLaunchConfig(req)
+	if err != nil {
+		t.Fatalf("buildContainerLaunchConfig: %v", err)
+	}
+	if len(config.GitMetadataProjections) != 0 {
+		t.Fatalf("mutable-clone wiring must discard leaked host projections: %#v", config.GitMetadataProjections)
+	}
+	if !config.RequiresCloneGitMetadataPolicy {
+		t.Fatal("mutable-clone wiring omitted the mutable-clone requirement")
 	}
 }
 

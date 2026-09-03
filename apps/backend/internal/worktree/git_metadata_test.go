@@ -91,6 +91,23 @@ func TestValidBranchRefRejectsNullByte(t *testing.T) {
 	}
 }
 
+func TestValidBranchRefRejectsCarriageReturnAndNewline(t *testing.T) {
+	for _, ref := range []string{"refs/heads/main\r", "refs/heads/ma\nin"} {
+		if ValidBranchRef(ref) {
+			t.Fatalf("ValidBranchRef accepted control character ref %q", ref)
+		}
+	}
+}
+
+func TestValidBranchRefRejectsNonCanonicalBranchName(t *testing.T) {
+	// securityutil.IsValidBranchName requires the branch name to start with an
+	// alphanumeric character; a leading dash could otherwise be misread as a
+	// git command-line flag by any future caller that shells out with the ref.
+	if ValidBranchRef("refs/heads/-flag-like") {
+		t.Fatal("ValidBranchRef accepted a branch name starting with a dash")
+	}
+}
+
 func TestResolveGitMetadataForRepositoryRejectsDifferentValidCommonDirectory(t *testing.T) {
 	repositoryA := initGitMetadataRepository(t)
 	repositoryB := initGitMetadataRepository(t)
@@ -230,6 +247,48 @@ func TestGitMetadataProjectionIncludesCurrentRefAndReflogLockDirectories(t *test
 		if lockDirectory == projection.CommonDir || lockDirectory == projection.WorktreesDir {
 			t.Fatalf("lock directory must not broaden common metadata access: %q", lockDirectory)
 		}
+	}
+}
+
+func TestGitMetadataProjectionRejectsSymlinkedObjectsDirectory(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	commonDir := runGitMetadata(t, repo, "rev-parse", "--path-format=absolute", "--git-dir")
+
+	realObjects := filepath.Join(commonDir, "objects")
+	forgedTarget := t.TempDir()
+	if err := os.Rename(realObjects, forgedTarget+"-moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(forgedTarget+"-moved", realObjects); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if _, err := ResolveGitMetadata(checkout); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("ResolveGitMetadata error = %v, want symlinked objects directory rejection", err)
+	}
+}
+
+func TestGitMetadataProjectionOmitsNonexistentReflogFileButKeepsItsDirectory(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	runGitMetadata(t, repo, "config", "core.logAllRefUpdates", "false")
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	commonDir := runGitMetadata(t, repo, "rev-parse", "--path-format=absolute", "--git-dir")
+	reflogPath := filepath.Join(commonDir, "logs", "refs", "heads", "task-branch")
+	if _, err := os.Stat(reflogPath); err == nil {
+		t.Fatalf("test setup: reflog unexpectedly exists at %q", reflogPath)
+	}
+
+	projection, err := ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsGitMetadataPath(projection.WritablePaths, projection.ReflogPath) {
+		t.Fatalf("WritablePaths grants a reflog file that does not exist: %#v", projection.WritablePaths)
+	}
+	if !containsGitMetadataPath(projection.WritablePaths, filepath.Dir(projection.ReflogPath)) {
+		t.Fatalf("WritablePaths must still grant the reflog's parent directory so Git can create it: %#v", projection.WritablePaths)
 	}
 }
 
