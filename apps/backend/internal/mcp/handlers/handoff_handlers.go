@@ -41,10 +41,15 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	caller := req.CallerTaskID
-	if caller == "" {
-		caller = req.TaskID
+	if req.CallerTaskID == "" || req.CallerSessionID == "" {
+		err := &service.RelatedReadAccessError{
+			Reason:         service.RelatedReadDenialScopeRequired,
+			InternalReason: "caller task or session identity missing",
+		}
+		h.logRelatedReadDecision(req, req.CallerTaskID, "denied", err)
+		return mapRelatedReadError(msg, err)
 	}
+	caller := req.CallerTaskID
 	related, err := svc.ListRelatedForRequest(ctx, service.RelatedReadRequest{
 		CallerTaskID: caller,
 		TargetTaskID: req.TaskID,

@@ -93,6 +93,25 @@ func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T
 	assert.Equal(t, before, snapshotRelatedReadTables(t, repo))
 }
 
+func TestListRelatedTasksDispatcherRejectsExplicitTargetWithoutAttestedIdentity(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	log := testLogger(t)
+	handoff := service.NewHandoffService(repo, repo, service.NewDocumentService(repo, log), nil, nil, log)
+	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
+	handlers.SetHandoffService(handoff)
+	dispatcher := ws.NewDispatcher()
+	handlers.RegisterHandlers(dispatcher)
+	seedRelatedReadTasks(t, repo)
+
+	response := dispatchRelatedRead(t, dispatcher, map[string]any{
+		"task_id": "stranger", "verbose": true,
+	})
+
+	assertRelatedReadDenied(t, response, "related_task_scope_required")
+	assert.NotContains(t, string(response.Payload), "stranger")
+	assert.NotContains(t, string(response.Payload), "Unrelated")
+}
+
 func TestListRelatedTasksAuditMarksInternalFailuresAsErrors(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	core, observed := observer.New(zap.InfoLevel)

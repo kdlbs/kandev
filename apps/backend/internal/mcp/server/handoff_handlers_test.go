@@ -127,6 +127,47 @@ func TestListRelatedTasks_AttestsProfileScopeAndCallerIdentity(t *testing.T) {
 	assert.NotContains(t, props, "related_read_scope")
 }
 
+func TestListRelatedTasks_RejectsExplicitTargetWithoutAttestedCallerIdentity(t *testing.T) {
+	backend := &testBackend{response: relatedTasksResponse("secret")}
+	profile := mcpprofile.New(mcpprofile.SurfaceOfficeTask, []mcpprofile.Capability{
+		mcpprofile.CapabilityWorkspaceTaskTreeRead,
+	}, nil)
+	s := NewWithProfile(backend, "", "", 10005, newTestLogger(t), "", false, profile)
+
+	result := callTool(t, s, "list_related_tasks_kandev", map[string]interface{}{
+		"task_id": "known-target", "verbose": true,
+	})
+
+	require.True(t, result.IsError)
+	assert.Nil(t, backend.lastPayload, "missing attested identity must be rejected before forwarding")
+	require.Len(t, result.Content, 1)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"code": "FORBIDDEN"`)
+	assert.Contains(t, text.Text, `"reason": "related_task_scope_required"`)
+	assert.NotContains(t, text.Text, "known-target")
+	assert.NotContains(t, text.Text, "secret")
+}
+
+func TestListRelatedTasks_RejectsExplicitTargetWithoutAttestedSession(t *testing.T) {
+	backend := &testBackend{response: relatedTasksResponse("secret")}
+	s := New(backend, "", "caller-task", 10005, newTestLogger(t), "", false, ModeTask, []string{"github"})
+
+	result := callTool(t, s, "list_related_tasks_kandev", map[string]interface{}{
+		"task_id": "known-target", "verbose": true,
+	})
+
+	require.True(t, result.IsError)
+	assert.Nil(t, backend.lastPayload, "missing attested session must be rejected before forwarding")
+	require.Len(t, result.Content, 1)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"code": "FORBIDDEN"`)
+	assert.Contains(t, text.Text, `"reason": "related_task_scope_required"`)
+	assert.NotContains(t, text.Text, "known-target")
+	assert.NotContains(t, text.Text, "secret")
+}
+
 func TestRelatedReadScopeRequiresOfficeSurface(t *testing.T) {
 	profile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{
 		mcpprofile.CapabilityWorkspaceTaskTreeRead,

@@ -100,6 +100,13 @@ coordination docs to the shared parent.`,
 
 func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" || s.sessionID == "" {
+			return backendErrorToolResult(&BackendError{
+				Code:    ws.ErrorCodeForbidden,
+				Message: "related task access denied",
+				Details: map[string]interface{}{"reason": "related_task_scope_required"},
+			}), nil
+		}
 		taskID := req.GetString("task_id", "")
 		if taskID == "" || taskID == "self" {
 			taskID = s.taskID

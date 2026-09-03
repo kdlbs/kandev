@@ -120,7 +120,9 @@ func TestHandleListRelatedTasks_IncludesAssociatedPRs(t *testing.T) {
 		}},
 	}
 
-	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{"task_id": "task-rel"})
+	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
+		"task_id": "task-rel", "caller_task_id": "task-rel", "caller_session_id": "session-rel",
+	})
 	resp, err := h.handleListRelatedTasks(ctx, msg)
 	require.NoError(t, err)
 
@@ -147,7 +149,8 @@ func TestHandleListRelatedTasks_ReturnsNonLeakingStructuredDenial(t *testing.T) 
 	h := &Handlers{handoffSvc: service.NewHandoffService(repo, nil, nil, nil, nil, testLogger(t)), logger: testLogger(t).WithFields()}
 
 	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
-		"task_id": "foreign", "caller_task_id": "caller", "related_read_scope": "workspace-task-tree",
+		"task_id": "foreign", "caller_task_id": "caller", "caller_session_id": "session-caller",
+		"related_read_scope": "workspace-task-tree",
 	})
 	resp, err := h.handleListRelatedTasks(ctx, msg)
 	require.NoError(t, err)
