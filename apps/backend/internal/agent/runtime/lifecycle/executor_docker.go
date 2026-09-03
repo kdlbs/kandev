@@ -626,8 +626,12 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	return &agentctl.CreateInstanceRequest{
 		ID:            instanceID,
 		WorkspacePath: dockerWorkspacePath,
-		AgentType:     agentType,
-		Env:           cloneStringMap(req.Env),
+		// Reconnect may need to create a new agentctl instance in an existing
+		// container. Preserve the canonical in-container root so clone Git
+		// metadata attestation has the same server-owned scope as initial create.
+		WorkspaceSourceRoots: []string{dockerWorkspacePath},
+		AgentType:            agentType,
+		Env:                  cloneStringMap(req.Env),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

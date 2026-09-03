@@ -782,6 +782,18 @@ func TestReconnectInstanceID(t *testing.T) {
 	})
 }
 
+func TestBuildReconnectCreateInstanceRequestPreservesCloneWorkspaceRoot(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID: "exec-new",
+		Env:        map[string]string{"CODEX_CONFIG": `{}`},
+	}
+
+	created := buildReconnectCreateInstanceRequest(req, "exec-new")
+	if len(created.WorkspaceSourceRoots) != 1 || created.WorkspaceSourceRoots[0] != dockerWorkspacePath {
+		t.Fatalf("WorkspaceSourceRoots = %#v, want [%q]", created.WorkspaceSourceRoots, dockerWorkspacePath)
+	}
+}
+
 func TestShouldStartExistingDockerContainer(t *testing.T) {
 	tests := []struct {
 		state string

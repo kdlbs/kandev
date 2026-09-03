@@ -60,6 +60,9 @@ func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.
 		t.Fatalf("clone launch synthesized host projections: %#v", req.GitMetadataProjections)
 	}
 	policyEnv := instance.Metadata["runtime_env"].(map[string]string)
+	if !strings.Contains(req.Env["CODEX_CONFIG"], "/executor/workspace/.git") {
+		t.Fatalf("launch request did not receive attested clone policy: %s", req.Env["CODEX_CONFIG"])
+	}
 	if strings.Contains(policyEnv["CODEX_CONFIG"], "/host/") {
 		t.Fatalf("rendered clone policy leaked host path: %s", policyEnv["CODEX_CONFIG"])
 	}
