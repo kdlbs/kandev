@@ -88,6 +88,8 @@ func (c *HandoffCleaner) CleanupMultiRepoRoot(ctx context.Context, rootPath stri
 	if err := c.requireManagedRoot(rootPath); err != nil {
 		return err
 	}
+	receipt := newBranchCleanupReceipt()
+	var cleanupErrs []error
 	seen := make(map[string]struct{}, len(worktreeIDs))
 	for _, id := range worktreeIDs {
 		if id == "" {
@@ -97,14 +99,21 @@ func (c *HandoffCleaner) CleanupMultiRepoRoot(ctx context.Context, rootPath stri
 			continue
 		}
 		seen[id] = struct{}{}
-		if _, err := c.manager.RemoveByIDWithReceipt(ctx, id); err != nil {
+		childReceipt, err := c.manager.RemoveByIDWithReceipt(ctx, id)
+		receipt.merge(childReceipt)
+		if err != nil {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("remove multi-repo worktree %s: %w", id, err))
 			c.logger.Warn("multi-repo worktree remove failed",
 				zap.String("worktree_id", id), zap.Error(err))
-			// Continue removing the rest; the root removal at the end
-			// will reclaim any straggler files. We deliberately do not
-			// abort: a partial cleanup is preferable to leaving the
-			// whole tree behind.
 		}
+		if childReceipt.Retained > 0 {
+			cleanupErrs = append(cleanupErrs,
+				fmt.Errorf("multi-repo worktree %s retained %d resource(s)", id, childReceipt.Retained))
+		}
+	}
+	c.logger.Info("multi-repo worktree cleanup receipt", receipt.reasonFields()...)
+	if len(cleanupErrs) > 0 {
+		return errors.Join(cleanupErrs...)
 	}
 	if err := os.RemoveAll(rootPath); err != nil {
 		return fmt.Errorf("remove multi-repo root %s: %w", rootPath, err)
