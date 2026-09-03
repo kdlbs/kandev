@@ -1289,7 +1289,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 		if validateErr := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); validateErr != nil {
 			return "", existingEnv, nil, validateErr
 		}
-	} else if options.RepairWorkspaceInventory {
+	} else if req.WorkspaceReuseRequired && req.UseWorktree {
 		receipt, repairErr := e.attestedWorkspaceInventoryRowsReceipt(
 			ctx, task, session, req, existingEnv, allRepos,
 		)

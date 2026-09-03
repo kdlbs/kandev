@@ -511,3 +511,93 @@ func TestResumeCrossSessionRetryCompletesUnattestedLaunchCommitBeforeLaunch(t *t
 			req.WorkspaceInventoryRecoveryReceipt.SessionID)
 	}
 }
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+//
+// TestNormalResumeCrossSessionUnattestedLaunchCommitBlocksBeforeLaunch proves
+// the ordinary resume path, not just the explicit repair action, gates an
+// already-valid row that another session repaired before crashing or failing
+// before durable post-repair attestation. A normal resume has no repair option
+// set, but it must still refuse to launch from a repaired row until that row's
+// receipt is positively attested.
+func TestNormalResumeCrossSessionUnattestedLaunchCommitBlocksBeforeLaunch(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	repo := newMockRepository()
+	const taskID = "task-normal-resume-cross-session"
+	const sessionAID = "session-normal-resume-cross-session-a"
+	const sessionCID = "session-normal-resume-cross-session-c"
+	seedWorktreeExecutor(repo)
+	repo.repositories["repo-front"] = &models.Repository{
+		ID: "repo-front", Name: "frontend", Provider: "github", LocalPath: repositoryPath,
+	}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: taskID, RepositoryID: "repo-front", Position: 0, BaseBranch: "main",
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Normal Resume Cross Session"}
+	repo.taskEnvironments["env-normal-resume-cross-session"] = &models.TaskEnvironment{
+		ID: "env-normal-resume-cross-session", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: worktreePath,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-normal-resume-cross-session", TaskEnvironmentID: "env-normal-resume-cross-session",
+			RepositoryID: "repo-front", BranchSlug: "stale",
+			WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+			WorktreeBranch: "feature/recovery", Position: 0, Status: "active",
+		}},
+	}
+	repo.taskEnvironmentRepos["env-normal-resume-cross-session"] = repo.taskEnvironments["env-normal-resume-cross-session"].Repos
+	repo.sessions[sessionAID] = &models.TaskSession{
+		ID: sessionAID, TaskID: taskID, TaskEnvironmentID: "env-normal-resume-cross-session",
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repo.sessions[sessionCID] = &models.TaskSession{
+		ID: sessionCID, TaskID: taskID, TaskEnvironmentID: "env-normal-resume-cross-session",
+		RepositoryID: "repo-front", ExecutorID: models.ExecutorIDWorktree,
+		AgentProfileID: "profile-123", State: models.TaskSessionStateFailed,
+		StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repo.recordWorkspaceInventoryPostRepairAttestationFunc = func(
+		context.Context, string, string, *models.WorkspaceInventoryPreservation, bool, time.Time,
+	) error {
+		return errors.New("attestation store unavailable")
+	}
+
+	manager := &mockAgentManager{}
+	exec := newTestExecutor(t, manager, repo)
+	task := repo.tasks[taskID].ToAPI()
+	if _, err := exec.LaunchPreparedSession(context.Background(), task, sessionAID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree, StartAgent: true},
+	); !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("session A initial repair error = %v, want fail-closed reuse error", err)
+	}
+	if got := repo.taskEnvironmentRepos["env-normal-resume-cross-session"][0].BranchSlug; got != "main" {
+		t.Fatalf("test setup did not commit the repair row before attestation failure: branch_slug=%q", got)
+	}
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions[sessionCID], true)
+	if !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+		t.Fatalf("normal resume against unattested cross-session row error = %v, want recovery conflict", err)
+	}
+	if manager.launchAgentCallCount != 0 {
+		t.Fatalf("normal resume against unattested cross-session row launched agent %d times", manager.launchAgentCallCount)
+	}
+
+	repo.recordWorkspaceInventoryPostRepairAttestationFunc = nil
+	execution, err := exec.ResumeSession(context.Background(), repo.sessions[sessionCID], true)
+	if err != nil {
+		t.Fatalf("normal resume after attestation store recovery: %v", err)
+	}
+	if manager.launchAgentCallCount != 1 {
+		t.Fatalf("normal resume after attestation store recovery launched agent %d times, want 1", manager.launchAgentCallCount)
+	}
+	if execution.WorkspaceInventoryRecoveryReceipt == nil ||
+		!execution.WorkspaceInventoryRecoveryReceipt.PostRepairMatched ||
+		execution.WorkspaceInventoryRecoveryReceipt.PostRepairVerifiedAt == nil {
+		t.Fatalf("normal resume did not complete durable post-repair attestation: %+v", execution.WorkspaceInventoryRecoveryReceipt)
+	}
+	if execution.WorkspaceInventoryRecoveryReceipt.SessionID != sessionAID {
+		t.Fatalf("completed receipt should remain owned by session A's original repair, got session_id=%q",
+			execution.WorkspaceInventoryRecoveryReceipt.SessionID)
+	}
+}
