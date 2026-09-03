@@ -103,6 +103,16 @@ func CanonicalCapabilityList(caps []string) ([]string, error) {
 // declared by an installed manifest. Legacy api_read/api_write declarations
 // are intentionally represented as exact capability IDs and never broadened.
 func ManifestCapabilityDigest(m manifest.Manifest) string {
+	canonical, err := ManifestCapabilityIDs(m)
+	if err != nil {
+		return ""
+	}
+	return CanonicalApprovalDigest(canonical...)
+}
+
+// ManifestCapabilityIDs returns the exact capability IDs declared by an
+// installed manifest in canonical order.
+func ManifestCapabilityIDs(m manifest.Manifest) ([]string, error) {
 	caps := make([]string, 0, len(m.Capabilities.APIRead)+len(m.Capabilities.APIWrite))
 	for _, resource := range m.Capabilities.APIRead {
 		caps = append(caps, "api_read:"+strings.TrimSpace(resource))
@@ -110,6 +120,5 @@ func ManifestCapabilityDigest(m manifest.Manifest) string {
 	for _, resource := range m.Capabilities.APIWrite {
 		caps = append(caps, "api_write:"+strings.TrimSpace(resource))
 	}
-	canonical, _ := CanonicalCapabilityList(caps)
-	return CanonicalApprovalDigest(canonical...)
+	return CanonicalCapabilityList(caps)
 }

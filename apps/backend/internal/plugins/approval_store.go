@@ -65,9 +65,10 @@ type CapabilityApprovalEvent struct {
 }
 
 type approvalLedgerFile struct {
-	Approvals  map[string]CapabilityApproval `json:"approvals"`
-	Events     []CapabilityApprovalEvent     `json:"events"`
-	Tombstones map[string]time.Time          `json:"tombstones"`
+	Approvals   map[string]CapabilityApproval `json:"approvals"`
+	Events      []CapabilityApprovalEvent     `json:"events"`
+	Tombstones  map[string]time.Time          `json:"tombstones"`
+	Idempotency map[string]CapabilityApproval `json:"idempotency,omitempty"`
 }
 
 var (
@@ -93,8 +94,9 @@ func (l *approvalLedger) load() (*approvalLedgerFile, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &approvalLedgerFile{
-				Approvals:  map[string]CapabilityApproval{},
-				Tombstones: map[string]time.Time{},
+				Approvals:   map[string]CapabilityApproval{},
+				Tombstones:  map[string]time.Time{},
+				Idempotency: map[string]CapabilityApproval{},
 			}, nil
 		}
 		return nil, err
@@ -108,6 +110,9 @@ func (l *approvalLedger) load() (*approvalLedgerFile, error) {
 	}
 	if file.Tombstones == nil {
 		file.Tombstones = map[string]time.Time{}
+	}
+	if file.Idempotency == nil {
+		file.Idempotency = map[string]CapabilityApproval{}
 	}
 	return &file, nil
 }
@@ -144,6 +149,10 @@ func approvalKey(installationID, workspaceID string) string {
 	return installationID + "\x00" + workspaceID
 }
 
+func approvalIdempotencyKey(eventType CapabilityApprovalEventType, auditID, installationID, workspaceID string) string {
+	return string(eventType) + "\x00" + auditID + "\x00" + installationID + "\x00" + workspaceID
+}
+
 func (l *approvalLedger) grant(installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
 	if revision == 0 {
 		return CapabilityApproval{}, ErrApprovalRevisionConflict
@@ -162,12 +171,9 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	key := approvalKey(installationID, workspaceID)
 	current := file.Approvals[key]
 	if auditID != "" {
-		for _, event := range file.Events {
-			if event.AuditID != auditID || event.InstallationID != installationID || event.WorkspaceID != workspaceID {
-				continue
-			}
-			if current.Revision == revision && current.ManifestDigest == manifestDigest && equalStrings(current.CapabilityIDs, capabilityIDs) {
-				return current, nil
+		if replayed, ok := file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)]; ok {
+			if replayed.Revision == revision && replayed.ManifestDigest == manifestDigest && equalStrings(replayed.CapabilityIDs, capabilityIDs) {
+				return replayed, nil
 			}
 			return CapabilityApproval{}, ErrApprovalIdempotencyConflict
 		}
@@ -191,6 +197,9 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 		approval.CreatedAt = current.CreatedAt
 	}
 	file.Approvals[key] = approval
+	if auditID != "" {
+		file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)] = approval
+	}
 	file.Events = append(file.Events, CapabilityApprovalEvent{
 		AuditID: auditID, InstallationID: installationID, WorkspaceID: workspaceID,
 		BeforeRevision: current.Revision, AfterRevision: revision,
@@ -216,9 +225,9 @@ func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, ex
 	if !ok {
 		return CapabilityApproval{}, fmt.Errorf("plugins: approval not found")
 	}
-	for _, event := range file.Events {
-		if event.AuditID == auditID && event.InstallationID == installationID && event.WorkspaceID == workspaceID && event.Type == CapabilityApprovalEventRevoke {
-			return current, nil
+	if auditID != "" {
+		if replayed, ok := file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventRevoke, auditID, installationID, workspaceID)]; ok {
+			return replayed, nil
 		}
 	}
 	if allowCurrent {
@@ -233,6 +242,9 @@ func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, ex
 	next.HumanActor = actor
 	next.UpdatedAt = at
 	file.Approvals[key] = next
+	if auditID != "" {
+		file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventRevoke, auditID, installationID, workspaceID)] = next
+	}
 	file.Events = append(file.Events, CapabilityApprovalEvent{
 		AuditID: auditID, InstallationID: installationID, WorkspaceID: workspaceID,
 		BeforeRevision: current.Revision, AfterRevision: next.Revision,
@@ -249,9 +261,14 @@ func (l *approvalLedger) tombstoneInstallation(installationID string, at time.Ti
 	if err != nil {
 		return err
 	}
-	file.Tombstones[installationID] = at
+	if _, ok := file.Tombstones[installationID]; !ok {
+		file.Tombstones[installationID] = at
+	}
 	for key, approval := range file.Approvals {
 		if approval.InstallationID != installationID {
+			continue
+		}
+		if approval.TombstonedAt != nil {
 			continue
 		}
 		approval.Revision++
@@ -271,6 +288,38 @@ func (l *approvalLedger) tombstoneInstallation(installationID string, at time.Ti
 	return l.save(file)
 }
 
+func (l *approvalLedger) reviewManifestChange(installationID, manifestDigest string, manifestCapabilities []string, at time.Time) error {
+	canonical, err := CanonicalCapabilityList(manifestCapabilities)
+	if err != nil {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, err := l.load()
+	if err != nil {
+		return err
+	}
+	for key, approval := range file.Approvals {
+		if approval.InstallationID != installationID || approval.ManifestDigest == manifestDigest || approval.TombstonedAt != nil {
+			continue
+		}
+		current := approval
+		approval.Revision++
+		approval.ManifestDigest = manifestDigest
+		approval.CapabilityIDs = intersectStrings(approval.CapabilityIDs, canonical)
+		approval.UpdatedAt = at
+		file.Approvals[key] = approval
+		file.Events = append(file.Events, CapabilityApprovalEvent{
+			AuditID:        CanonicalApprovalDigest(installationID, approval.WorkspaceID, fmt.Sprint(approval.Revision), manifestDigest, "manifest-review"),
+			InstallationID: installationID, WorkspaceID: approval.WorkspaceID,
+			BeforeRevision: current.Revision, AfterRevision: approval.Revision,
+			BeforeDigest: current.ManifestDigest, AfterDigest: manifestDigest,
+			Actor: "host", Reason: "installation manifest changed", Type: CapabilityApprovalEventUpgradeReview, ObservedAt: at,
+		})
+	}
+	return l.save(file)
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -281,6 +330,23 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func intersectStrings(a, b []string) []string {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(b))
+	for _, v := range b {
+		allowed[v] = struct{}{}
+	}
+	out := make([]string, 0, len(a))
+	for _, v := range a {
+		if _, ok := allowed[v]; ok {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func (l *approvalLedger) get(installationID, workspaceID string) (CapabilityApproval, bool, error) {

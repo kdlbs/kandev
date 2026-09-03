@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -105,6 +106,70 @@ func TestServiceInstallOverActivePluginRestartsWithNewVersion(t *testing.T) {
 	}
 	if rec2.Status != StatusActive {
 		t.Fatalf("rec2.Status = %q, want %q", rec2.Status, StatusActive)
+	}
+}
+
+func TestServiceInstallUpgradeReviewsExistingCapabilityApprovals(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	rec1, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.0.0", "tasks", "messages"))
+	if err != nil {
+		t.Fatalf("install initial plugin: %v", err)
+	}
+	originalDigest := ManifestCapabilityDigest(rec1.Manifest)
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, originalDigest, []string{"api_read:tasks", "api_read:messages"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("grant initial approval: %v", err)
+	}
+
+	rec2, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.1.0", "tasks"))
+	if err != nil {
+		t.Fatalf("upgrade plugin: %v", err)
+	}
+	if rec2.InstallationID != rec1.InstallationID {
+		t.Fatalf("installation id changed on upgrade: %q -> %q", rec1.InstallationID, rec2.InstallationID)
+	}
+
+	row, ok, err := svc.approvalCurrent(rec1.InstallationID, "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("approvalCurrent after upgrade: ok=%v err=%v", ok, err)
+	}
+	if row.Revision != 2 {
+		t.Fatalf("revision after upgrade = %d, want 2", row.Revision)
+	}
+	if row.ManifestDigest != ManifestCapabilityDigest(rec2.Manifest) {
+		t.Fatalf("manifest digest after upgrade = %q, want %q", row.ManifestDigest, ManifestCapabilityDigest(rec2.Manifest))
+	}
+	if got, want := row.CapabilityIDs, []string{"api_read:tasks"}; !equalStrings(got, want) {
+		t.Fatalf("capabilities after narrowing upgrade = %#v, want %#v", got, want)
+	}
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 3, row.ManifestDigest, []string{"api_read:tasks", "api_read:messages"}, "human", "widen", "audit-2"); err != nil {
+		t.Fatalf("grant widened approval: %v", err)
+	}
+	rec3, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.2.0", "tasks", "messages"))
+	if err != nil {
+		t.Fatalf("rollback-equivalent install: %v", err)
+	}
+	if rec3.InstallationID != rec1.InstallationID {
+		t.Fatalf("installation id changed on rollback-equivalent replacement: %q -> %q", rec1.InstallationID, rec3.InstallationID)
+	}
+	row, ok, err = svc.approvalCurrent(rec1.InstallationID, "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("approvalCurrent after rollback-equivalent replacement: ok=%v err=%v", ok, err)
+	}
+	if row.Revision != 4 {
+		t.Fatalf("revision after rollback-equivalent replacement = %d, want 4", row.Revision)
+	}
+	if got, want := row.CapabilityIDs, []string{"api_read:messages", "api_read:tasks"}; !equalStrings(got, want) {
+		t.Fatalf("capabilities after rollback-equivalent replacement = %#v, want %#v", got, want)
+	}
+	file, err := svc.approvalLedger().load()
+	if err != nil {
+		t.Fatalf("load approvals: %v", err)
+	}
+	if len(file.Events) != 4 || file.Events[1].Type != CapabilityApprovalEventUpgradeReview ||
+		file.Events[1].BeforeDigest != originalDigest || file.Events[1].AfterDigest != ManifestCapabilityDigest(rec2.Manifest) ||
+		file.Events[2].Type != CapabilityApprovalEventGrant || file.Events[3].Type != CapabilityApprovalEventUpgradeReview ||
+		file.Events[3].BeforeDigest != ManifestCapabilityDigest(rec2.Manifest) || file.Events[3].AfterDigest != ManifestCapabilityDigest(rec3.Manifest) {
+		t.Fatalf("approval events after upgrade = %#v", file.Events)
 	}
 }
 
@@ -370,4 +435,34 @@ func TestServiceInstallFromURL_RejectsNonHTTPSchemeBeforeAnyRequest(t *testing.T
 	if err == nil {
 		t.Fatal("InstallFromURL() expected error for file:// scheme, got nil")
 	}
+}
+
+func testPackageWithAPIRead(t *testing.T, id, version string, resources ...string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	quotedResources := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		quotedResources = append(quotedResources, fmt.Sprintf("%q", resource))
+	}
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: %s
+display_name: Test Plugin
+capabilities:
+  api_read: [%s]
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, version, strings.Join(quotedResources, ", "), platformKey)
+
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
 }

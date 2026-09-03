@@ -231,6 +231,34 @@ func TestApprovalGrantRetryIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestApprovalGrantRetryReplaysAfterLaterRevision(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	at := time.Now().UTC()
+	first, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", at)
+	if err != nil {
+		t.Fatalf("first grant: %v", err)
+	}
+	if _, err := ledger.grant("inst-1", "ws-1", 2, "digest-b", []string{"api_read:tasks"}, "human", "upgrade", "audit-2", at.Add(time.Second)); err != nil {
+		t.Fatalf("second grant: %v", err)
+	}
+
+	replayed, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", at.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("retry original grant after later revision: %v", err)
+	}
+	if replayed.Revision != first.Revision || replayed.ManifestDigest != first.ManifestDigest || !replayed.UpdatedAt.Equal(first.UpdatedAt) {
+		t.Fatalf("retry did not replay original result: first=%#v replayed=%#v", first, replayed)
+	}
+	file, err := ledger.load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(file.Events) != 2 {
+		t.Fatalf("event count = %d, want original two events only", len(file.Events))
+	}
+}
+
 func TestApprovalTombstoneAppendsWorkspaceEventAndMarksRow(t *testing.T) {
 	dir := t.TempDir()
 	ledger := newApprovalLedger(dir)
@@ -254,6 +282,39 @@ func TestApprovalTombstoneAppendsWorkspaceEventAndMarksRow(t *testing.T) {
 	}
 	if len(file.Events) != 2 || file.Events[1].Type != CapabilityApprovalEventRevoke || file.Events[1].AuditID == "" {
 		t.Fatalf("tombstone events = %#v", file.Events)
+	}
+}
+
+func TestApprovalTombstoneRetryDoesNotAdvanceRevisionOrDuplicateEvents(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	at := time.Now().UTC()
+	if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1", at); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if err := ledger.tombstoneInstallation("inst-1", at.Add(time.Second)); err != nil {
+		t.Fatalf("first tombstone: %v", err)
+	}
+	first, ok, err := ledger.get("inst-1", "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("get after first tombstone: ok=%v err=%v", ok, err)
+	}
+	if err := ledger.tombstoneInstallation("inst-1", at.Add(2*time.Second)); err != nil {
+		t.Fatalf("second tombstone: %v", err)
+	}
+	second, ok, err := ledger.get("inst-1", "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("get after second tombstone: ok=%v err=%v", ok, err)
+	}
+	if second.Revision != first.Revision || !second.UpdatedAt.Equal(first.UpdatedAt) {
+		t.Fatalf("tombstone retry advanced row: first=%#v second=%#v", first, second)
+	}
+	file, err := ledger.load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(file.Events) != 2 {
+		t.Fatalf("event count = %d, want grant plus one tombstone revoke", len(file.Events))
 	}
 }
 

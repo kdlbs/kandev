@@ -125,6 +125,19 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
 	}
+	if err := s.reviewInstalledApprovals(rec); err != nil {
+		if hadOldRec {
+			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
+				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
+					zap.String("plugin_id", rec.ID), zap.Error(restoreErr))
+			}
+		} else if deleteErr := s.store.Delete(rec.ID); deleteErr != nil {
+			s.log.Warn("plugins: failed to delete plugin record after approval review error",
+				zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
+		}
+		_ = os.RemoveAll(result.InstallPath)
+		return nil, err
+	}
 	s.registry.Add(rec)
 	s.agentToolInstallMu.Unlock()
 	catalogLocked = false
@@ -146,6 +159,18 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return rec, activateErr
 	}
 	return installed, activateErr
+}
+
+func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
+	ledger := s.approvalLedger()
+	if ledger == nil {
+		return nil
+	}
+	caps, err := ManifestCapabilityIDs(rec.Manifest)
+	if err != nil {
+		return err
+	}
+	return ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC())
 }
 
 // extractPackage runs pkgtar.Install and registers the extracted version
