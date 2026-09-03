@@ -59,7 +59,13 @@ function PreviewPanelHeader({
           {task?.title ?? t("task:taskChat")}
         </h2>
         {handleMoveStep && (
-          <div className="min-w-0 max-w-[50%] shrink">
+          <div
+            // `w-full` on the trigger button counteracts a browser quirk:
+            // a <button> normally sizes to its content regardless of `display`,
+            // so without an explicit width it overflows this shrink-capped
+            // wrapper instead of shrinking to it (defeating truncation).
+            className="min-w-0 max-w-[50%] shrink [&>button]:w-full"
+          >
             <MinimalWorkflowStepper
               sortedSteps={workflowSteps}
               currentIndex={currentIndex}

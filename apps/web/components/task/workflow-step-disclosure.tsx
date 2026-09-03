@@ -385,6 +385,7 @@ function CompactWorkflowStepDisclosure({
         className="w-72 max-w-[calc(100vw-1rem)] p-2"
         onOpenAutoFocus={controls.handleOpenAutoFocus}
         onCloseAutoFocus={controls.handleCloseAutoFocus}
+        onEscapeKeyDown={(event) => event.stopPropagation()}
         onMouseEnter={controls.openDisclosure}
         onMouseLeave={controls.scheduleClose}
         onFocusCapture={controls.handleContentFocus}
@@ -433,7 +434,7 @@ function MinimalStepContents({
         className="flex min-w-0 items-center gap-1.5 text-xs"
       >
         <StepCircleIndicator isCurrent={currentIndex >= 0} isCompleted={false} />
-        <span className="truncate text-xs font-medium leading-none text-foreground">
+        <span className="min-w-0 truncate text-xs font-medium leading-none text-foreground">
           {current.name}
         </span>
       </div>

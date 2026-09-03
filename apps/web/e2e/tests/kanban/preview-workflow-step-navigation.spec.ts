@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import type { ApiClient } from "../../helpers/api-client";
 
 const LONG_STEP_NAME = `Awaiting review from the platform team ${"x".repeat(60)}`;
 
@@ -29,6 +30,20 @@ async function hideColumn(kanban: KanbanPage, workflowId: string, stepId: string
   await closeColumnsMenu(kanban, workflowId);
 }
 
+// A task's very first page load in a fresh workspace runs a one-time settings
+// reconciliation (`use-user-display-settings.ts`'s workspaceId-mismatch effect)
+// that issues its own partial settings PATCH. That PATCH is built from a
+// settings snapshot captured before this call's PATCH landed, so calling
+// `saveUserSettings` before the first `goto()` gets silently clobbered back to
+// its default and a card click falls through to full-page navigation instead
+// of opening the preview. Letting that first-load reconciliation settle, then
+// setting the flag and reloading, avoids the race.
+async function enablePreviewOnClick(kanban: KanbanPage, apiClient: ApiClient) {
+  await kanban.goto();
+  await apiClient.saveUserSettings({ enable_preview_on_click: true });
+  await kanban.goto();
+}
+
 function adjacentStep(
   steps: Array<{ id: string; position: number }>,
   currentStepId: string,
@@ -41,10 +56,6 @@ function adjacentStep(
 }
 
 test.describe("Kanban preview workflow step navigation", () => {
-  test.beforeEach(async ({ apiClient }) => {
-    await apiClient.saveUserSettings({ enable_preview_on_click: true });
-  });
-
   test("moves the task to a step whose board column is hidden", async ({
     testPage,
     apiClient,
@@ -63,7 +74,7 @@ test.describe("Kanban preview workflow step navigation", () => {
     );
 
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await enablePreviewOnClick(kanban, apiClient);
     await hideColumn(kanban, seedData.workflowId, targetStep.id);
     await expect(kanban.columnByStepId(targetStep.id)).toBeHidden();
 
@@ -122,7 +133,7 @@ test.describe("Kanban preview workflow step navigation", () => {
     });
 
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await enablePreviewOnClick(kanban, apiClient);
 
     const card = kanban.taskCardByTitle("Preview step nav containment");
     await expect(card).toBeVisible({ timeout: 10_000 });
@@ -152,9 +163,12 @@ test.describe("Kanban preview workflow step navigation", () => {
     expect(closeBox).not.toBeNull();
     if (!titleBox || !triggerBox || !closeBox) return;
 
-    // Single row: every header element sits at the same vertical position.
-    expect(Math.abs(titleBox.y - closeBox.y)).toBeLessThan(4);
-    expect(Math.abs(triggerBox.y - closeBox.y)).toBeLessThan(4);
+    // Single row: every header element shares the same vertical center. Comparing
+    // raw tops would fail spuriously — items-center aligns centers, not tops, and
+    // the h2 title's text line-box is naturally shorter than the 32px icon buttons.
+    const centerY = (box: { y: number; height: number }) => box.y + box.height / 2;
+    expect(Math.abs(centerY(titleBox) - centerY(closeBox))).toBeLessThan(4);
+    expect(Math.abs(centerY(triggerBox) - centerY(closeBox))).toBeLessThan(4);
 
     // The title floor AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 requires.
     expect(titleBox.width).toBeGreaterThanOrEqual(88);
@@ -179,7 +193,7 @@ test.describe("Kanban preview workflow step navigation", () => {
     });
 
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await enablePreviewOnClick(kanban, apiClient);
     const card = kanban.taskCardByTitle("Preview step nav escape");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
