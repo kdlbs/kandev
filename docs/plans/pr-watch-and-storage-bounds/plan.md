@@ -75,9 +75,9 @@ Pending.
 
 Wave 1 (sequential, shared schema and state contracts):
 
-- [ ] [task-01-canonical-watch-migration](task-01-canonical-watch-migration.md)
-- [ ] [task-02-idempotent-polling-events](task-02-idempotent-polling-events.md)
-- [ ] [task-03-contention-safe-projection](task-03-contention-safe-projection.md)
+- [x] [task-01-canonical-watch-migration](task-01-canonical-watch-migration.md)
+- [x] [task-02-idempotent-polling-events](task-02-idempotent-polling-events.md)
+- [x] [task-03-contention-safe-projection](task-03-contention-safe-projection.md)
 
 Wave 2 (sequential, depends on stable event/storage contracts):
 
