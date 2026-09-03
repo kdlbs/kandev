@@ -32,6 +32,7 @@ import { type ProfileFormData } from "@/components/settings/profile-form-fields"
 import { permissionsToProfilePatch, profilePermissionValues } from "@/lib/agent-permissions";
 import { listAvailableAgents, listWorkflowTemplates } from "@/lib/api";
 import { listAgentsAction, updateAgentProfileAction } from "@/app/actions/agents";
+import { isHandledApiError } from "@/lib/api/client";
 import { StepAgents, type AgentSetting } from "@/components/onboarding/step-agents";
 import type { AvailableAgent, ToolStatus, WorkflowTemplate, AgentProfile } from "@/lib/types/http";
 import { Trans, useTranslation } from "react-i18next";
@@ -273,19 +274,24 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   } = useOnboardingResources(open);
 
   const saveAgentSettings = useCallback(async () => {
-    await Promise.all(
-      Object.values(agentSettings)
-        .filter((s) => s.dirty)
-        .map((s) =>
-          updateAgentProfileAction(s.profileId, {
-            model: s.formData.model,
-            ...permissionsToProfilePatch(s.formData),
-            cli_passthrough: s.formData.cli_passthrough,
-            cli_flags: s.formData.cli_flags,
-            command_prefix: s.formData.command_prefix,
-          }),
-        ),
-    );
+    try {
+      await Promise.all(
+        Object.values(agentSettings)
+          .filter((s) => s.dirty)
+          .map((s) =>
+            updateAgentProfileAction(s.profileId, {
+              model: s.formData.model,
+              ...permissionsToProfilePatch(s.formData),
+              cli_passthrough: s.formData.cli_passthrough,
+              cli_flags: s.formData.cli_flags,
+              command_prefix: s.formData.command_prefix,
+            }),
+          ),
+      );
+    } catch (error) {
+      if (isHandledApiError(error)) return;
+      throw error;
+    }
   }, [agentSettings]);
 
   const handleSkip = () => {

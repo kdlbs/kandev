@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from "react";
 import { duplicateAgentProfileAction } from "@/app/actions/agents";
+import { isHandledApiError } from "@/lib/api/client";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { t as translate } from "@/lib/i18n";
@@ -110,6 +111,7 @@ export function useProfileDuplicate() {
           variant: "success",
         });
       } catch (error) {
+        if (isHandledApiError(error)) return;
         toast({
           title: translate("agents:failedToDuplicateProfile"),
           description: error instanceof Error ? error.message : translate("agents:requestFailed"),
