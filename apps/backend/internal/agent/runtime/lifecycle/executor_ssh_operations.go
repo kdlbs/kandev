@@ -905,13 +905,28 @@ fi
 %[3]s`, pid, sshAgentctlStopPollAttempts, removeSessionDir)
 }
 
-// isRemoteAgentctlAlive returns true when a kill -0 on the pid succeeds.
-func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
+// probeRemoteAgentctlLiveness distinguishes a completed remote process probe
+// from an SSH failure that leaves the process state unknown.
+func probeRemoteAgentctlLiveness(ctx context.Context, client *ssh.Client, pid int) (bool, error) {
 	if pid <= 0 {
-		return false
+		return false, nil
 	}
 	_, _, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, err
+}
+
+// isRemoteAgentctlAlive is the best-effort boolean form used by status and
+// startup polling, where either absence or an unavailable probe means down.
+func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
+	alive, _ := probeRemoteAgentctlLiveness(ctx, client, pid)
+	return alive
 }
 
 // SSHPortForwarder fans out incoming local-port connections to a remote port
