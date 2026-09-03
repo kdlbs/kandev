@@ -3,17 +3,17 @@ package orchestrator
 // TestOnAgentErrorFireSitesArePinned is the regression guard for the defect
 // this card fixes: on_agent_error declared, compiled, and silently never
 // dispatched outside Office. It walks the whole backend source tree
-// (go/parser, rooted at apps/backend/internal so a third fire site added in
-// ANY package — not just this one — can fail it) and asserts the set of
-// functions that actually FIRE engine.TriggerOnAgentError is exactly the two
-// registered ones. A bare identifier scan would also match the trigger
-// constant declaration, the compileGenericActions trigger-map entry, the
-// OnAgentErrorPayload doc comment, and the Office engine dispatcher's
-// session-resolution branches — so a fire site is defined syntactically: an
-// occurrence in the value of the `Trigger:` key of an engine.HandleInput
-// composite literal (the orchestrator shape), or a direct call argument to
-// dispatchEngineTrigger (the Office shape, which passes the trigger
-// positionally). Mirrors the design of
+// (go/parser, rooted at apps/backend so a third fire site added in ANY
+// package — not just internal/, and not just this one — can fail it) and
+// asserts the set of functions that actually FIRE engine.TriggerOnAgentError
+// is exactly the two registered ones. A bare identifier scan would also match
+// the trigger constant declaration, the compileGenericActions trigger-map
+// entry, the OnAgentErrorPayload doc comment, and the Office engine
+// dispatcher's session-resolution branches — so a fire site is defined
+// syntactically: an occurrence in the value of the `Trigger:` key of an
+// engine.HandleInput composite literal (the orchestrator shape), or a direct
+// call argument to dispatchEngineTrigger (the Office shape, which passes the
+// trigger positionally). Mirrors the design of
 // task/repository/sqlite/step_transition_writers_pin_test.go.
 
 import (
@@ -31,11 +31,11 @@ import (
 
 // registeredAgentErrorFireSites is the closed set of functions known to fire
 // engine.TriggerOnAgentError, keyed "packageRelDir/ReceiverType.FuncName"
-// (relative to the apps/backend/internal scan root). A builder who renames
-// either function must update this set in the same commit.
+// (relative to the apps/backend scan root). A builder who renames either
+// function must update this set in the same commit.
 var registeredAgentErrorFireSites = []string{
-	"office/service/Service.dispatchAgentErrorTrigger",
-	"orchestrator/Service.dispatchKanbanAgentErrorTrigger",
+	"internal/office/service/Service.dispatchAgentErrorTrigger",
+	"internal/orchestrator/Service.dispatchKanbanAgentErrorTrigger",
 }
 
 func TestOnAgentErrorFireSitesArePinned(t *testing.T) {
@@ -43,11 +43,11 @@ func TestOnAgentErrorFireSitesArePinned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locate backend source root: %v", err)
 	}
-	if filepath.Base(root) != "internal" {
-		t.Fatalf("scan root %q is not the backend internal/ directory", root)
+	if filepath.Base(root) != "backend" {
+		t.Fatalf("scan root %q is not the apps/backend directory", root)
 	}
-	if _, statErr := os.Stat(filepath.Join(root, "office")); statErr != nil {
-		t.Fatalf("scan root %q does not contain sibling package internal/office: %v", root, statErr)
+	if _, statErr := os.Stat(filepath.Join(root, "internal", "office")); statErr != nil {
+		t.Fatalf("scan root %q does not contain internal/office: %v", root, statErr)
 	}
 
 	found, err := findAgentErrorFireSites(root)
@@ -101,7 +101,7 @@ func findAgentErrorBackendSourceRoot(startDir string) (string, error) {
 	}
 	for {
 		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
-			return filepath.Join(dir, "internal"), nil
+			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

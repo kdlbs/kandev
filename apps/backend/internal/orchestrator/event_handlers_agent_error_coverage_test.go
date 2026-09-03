@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +11,8 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
-	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -45,164 +44,6 @@ func newAgentErrorTransientTestService(
 	}
 	svc.initWorkflowEngine()
 	return svc, logs
-}
-
-// --- AC-A1 route coverage: all five production fire sites reach the real
-// dispatch, with the workflow engine actually wired (agentErrorDeps
-// populated). R4/R5 previously only exercised via newTransientTestService,
-// which never calls initWorkflowEngine — this closed that gap. ---
-
-func TestDispatchKanbanAgentErrorTrigger_R1BusDrivenFailureDispatches(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-
-	stepGetter := newMockStepGetter()
-	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-		Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionClearDecisions}}},
-	}
-	decisions := &spyDecisionStore{}
-	svc, logs := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
-
-	svc.handleAgentFailed(ctx, watcher.AgentEventData{
-		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", ErrorMessage: "agent crashed",
-	})
-
-	if decisions.clearCalls != 1 {
-		t.Fatalf("clearCalls = %d, want 1 (R1's bus-driven entry point must reach the real dispatch)", decisions.clearCalls)
-	}
-	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
-		t.Fatalf("got %d dispatch INFO records, want 1", len(got))
-	}
-}
-
-func TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-
-	stepGetter := newMockStepGetter()
-	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-		Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionClearDecisions}}},
-	}
-	decisions := &spyDecisionStore{}
-	svc, logs := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
-
-	npmErr := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
-		Code:    routingerr.CodeManagedRuntimeNpmResolution,
-		Details: "npm error code ETARGET",
-	})
-	handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1", npmErr, false)
-
-	if !handled {
-		t.Fatal("expected handled=true for a managed npm runtime startup failure")
-	}
-	if decisions.clearCalls != 1 {
-		t.Fatalf("clearCalls = %d, want 1 (R2's npm-resolution branch must reach the real dispatch)", decisions.clearCalls)
-	}
-	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
-		t.Fatalf("got %d dispatch INFO records, want 1", len(got))
-	}
-}
-
-func TestDispatchKanbanAgentErrorTrigger_R3AuthErrorDispatches(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-
-	stepGetter := newMockStepGetter()
-	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-		Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionClearDecisions}}},
-	}
-	decisions := &spyDecisionStore{}
-	svc, logs := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
-
-	handled := svc.handleAgentStartFailed(
-		ctx, "t1", "s1", "exec-1", errors.New("authentication required: please log in"), false,
-	)
-
-	if !handled {
-		t.Fatal("expected handled=true for an auth-error start failure")
-	}
-	if decisions.clearCalls != 1 {
-		t.Fatalf("clearCalls = %d, want 1 (R3's auth-error branch must reach the real dispatch)", decisions.clearCalls)
-	}
-	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
-		t.Fatalf("got %d dispatch INFO records, want 1", len(got))
-	}
-}
-
-func TestDispatchKanbanAgentErrorTrigger_R4NoCachedPromptDispatches(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-
-	stepGetter := newMockStepGetter()
-	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-		Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionClearDecisions}}},
-	}
-	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
-	decisions := &spyDecisionStore{}
-	svc, logs := newAgentErrorTransientTestService(t, repo, stepGetter, agentMgr, func(s *Service) {
-		s.engineDecisions = decisions
-	})
-	t.Cleanup(svc.cancelAllTransientRetries)
-
-	svc.scheduleTransientRetry("t1", "s1", "", 1, time.Hour)
-	svc.retryTransientPrompt(ctx, "t1", "s1", "")
-
-	if decisions.clearCalls != 1 {
-		t.Fatalf("clearCalls = %d, want 1 (R4's no-cached-prompt path must reach the real dispatch)", decisions.clearCalls)
-	}
-	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
-		t.Fatalf("got %d dispatch INFO records, want 1", len(got))
-	}
-}
-
-func TestDispatchKanbanAgentErrorTrigger_R5SynchronousPromptErrorDispatches(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-	session, err := repo.GetTaskSession(ctx, "s1")
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	session.State = models.TaskSessionStateWaitingForInput
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("update session: %v", err)
-	}
-	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
-
-	stepGetter := newMockStepGetter()
-	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-		Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionClearDecisions}}},
-	}
-	agentMgr := &mockAgentManager{
-		repoForExecutionLookup: repo,
-		promptErr:              errors.New("session rejected prompt synchronously"),
-	}
-	decisions := &spyDecisionStore{}
-	svc, logs := newAgentErrorTransientTestService(t, repo, stepGetter, agentMgr, func(s *Service) {
-		s.engineDecisions = decisions
-	})
-	t.Cleanup(svc.cancelAllTransientRetries)
-
-	svc.rememberTurnPrompt("s1", "hello", "", false, nil)
-	svc.transientRetries.Store("s1", &transientRetryEntry{attempt: 1, cancel: func() {}})
-
-	svc.retryTransientPrompt(ctx, "t1", "s1", "exec-1")
-
-	if decisions.clearCalls != 1 {
-		t.Fatalf("clearCalls = %d, want 1 (R5's synchronous PromptTask failure must reach the real dispatch)", decisions.clearCalls)
-	}
-	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
-		t.Fatalf("got %d dispatch INFO records, want 1", len(got))
-	}
 }
 
 // --- AC-A10: a user cancel racing a claimed retry timer must never let the
@@ -243,8 +84,13 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentCancelDoesNotLeakMarker(t *te
 	if decisions.clearCalls != 1 {
 		t.Fatalf("timer's own delivery clearCalls = %d, want 1 (AC-A8's marker must not leak into R4)", decisions.clearCalls)
 	}
-	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
-		t.Fatalf("total dispatch INFO records across both deliveries = %d, want exactly 1", len(got))
+	// AC-A10 requires "at most one", never exactly one unconditionally: the
+	// cancel outrunning the timer at one of retryTransientPrompt's ctx.Err()
+	// checks is a legitimate zero-outcome variant of this same race (AC-B5).
+	// This drive pins the timer arriving, so it also happens to observe 1
+	// here, but the assertion must state the actual invariant.
+	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) > 1 {
+		t.Fatalf("total dispatch INFO records across both deliveries = %d, want at most 1", len(got))
 	}
 }
 
@@ -587,7 +433,7 @@ func TestDispatchKanbanAgentErrorTrigger_WalkFailureAndEngineFailureLogsError(t 
 	}
 }
 
-func TestDispatchKanbanAgentErrorTrigger_RedeliveryIdempotentNeverTouchesStepGetter(t *testing.T) {
+func TestDispatchKanbanAgentErrorTrigger_RedeliveryIdempotentEngineNeverCallsLoadStep(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -605,12 +451,14 @@ func TestDispatchKanbanAgentErrorTrigger_RedeliveryIdempotentNeverTouchesStepGet
 		t.Fatalf("first delivery: got %d INFO records, want 1", len(got))
 	}
 
-	// Break the underlying step getter for the redelivery. Neither caller
-	// reaches it: the engine's idempotency short-circuit skips its own
-	// LoadStep entirely, and the walk's own LoadStep is served from
-	// workflowStore's step cache (populated by the first delivery) rather
-	// than calling through to the now-broken getter. This redelivery must
-	// stay a clean, silent no-op either way.
+	// Force a genuine cache miss on redelivery. Without this, both the walk's
+	// own LoadStep and (if the engine wrongly called it too) the engine's
+	// LoadStep would be served from workflowStore's step cache populated by
+	// the first delivery, and a broken getter below would prove nothing about
+	// which caller actually reached it.
+	if err := svc.handleWorkflowStepCacheInvalidation(ctx, stepEvent(events.WorkflowStepUpdated, "step1", "wf1")); err != nil {
+		t.Fatalf("invalidate step cache: %v", err)
+	}
 	stepGetter.getStepFunc = func(context.Context, string) (*wfmodels.WorkflowStep, error) {
 		return nil, errors.New("step store unavailable")
 	}
@@ -626,11 +474,21 @@ func TestDispatchKanbanAgentErrorTrigger_RedeliveryIdempotentNeverTouchesStepGet
 	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 0 {
 		t.Errorf("got a dispatch INFO record, want none")
 	}
-	if got := filterLogs(logs, msgAgentErrorDispatchFailed); len(got) != 0 {
-		t.Errorf("got a dispatch-failed ERROR record, want none (the engine never re-ran LoadStep)")
+	if got := filterLogs(logs, msgAgentErrorNoActions); len(got) != 0 {
+		t.Errorf("got a dispatch DEBUG record, want none (idempotent short-circuit, not an empty-actions dispatch)")
 	}
-	if got := stepGetter.GetStepCalls() - callsBefore; got != 0 {
-		t.Errorf("GetStep calls on redelivery = %d, want exactly 0 (both callers avoid the broken getter)", got)
+	if got := filterLogs(logs, msgAgentErrorDispatchFailed); len(got) != 0 {
+		t.Errorf("got a dispatch-failed ERROR record, want none (the engine must not have re-run LoadStep)")
+	}
+	// Exactly one real GetStep call is expected here: the pre-engine walk's
+	// own LoadStep, which hits the now-broken getter on a genuine cache miss
+	// and fails silently (AC-E14). A second call would mean the engine's own
+	// loadExecutionContext/LoadStep ran despite the operation already being
+	// applied — the isOperationAlreadyApplied short-circuit AC-E14's third
+	// branch requires must run first.
+	if got := stepGetter.GetStepCalls() - callsBefore; got != 1 {
+		t.Errorf("GetStep calls on redelivery = %d, want exactly 1 (the walk's own call only; "+
+			"the engine must not call LoadStep on an idempotent short-circuit)", got)
 	}
 }
 

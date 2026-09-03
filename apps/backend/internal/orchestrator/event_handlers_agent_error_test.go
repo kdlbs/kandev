@@ -112,6 +112,9 @@ func TestDispatchKanbanAgentErrorTrigger_ClearDecisionsDispatchesAndIsIdempotent
 	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 0 {
 		t.Errorf("redelivery emitted %d %q record(s), want 0", len(got), msgAgentErrorDispatched)
 	}
+	if got := filterLogs(logs, msgAgentErrorNoActions); len(got) != 0 {
+		t.Errorf("redelivery emitted %d %q record(s), want 0 (idempotent short-circuit, not an empty-actions dispatch)", len(got), msgAgentErrorNoActions)
+	}
 }
 
 // --- AC-C2/C4/C8: idempotency key shape, distinct executions both fire,
@@ -577,6 +580,60 @@ func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 	})
 }
 
+// --- AC-F7: a guard skip must not mark the operation applied, so a later
+// delivery of the exact same failure can still dispatch once the guard
+// condition that blocked it clears. ---
+
+func TestDispatchKanbanAgentErrorTrigger_GuardSkipDoesNotSuppressLaterValidDispatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "s2", TaskID: "t1", State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionClearDecisions}}},
+	}
+	decisions := &spyDecisionStore{}
+	svc, logs := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
+
+	data := watcher.AgentEventData{TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1"}
+
+	// s2 is still working, so AC-F5 skips before the engine is ever called —
+	// the operation must never be marked applied by this skip.
+	svc.dispatchKanbanAgentErrorTrigger(ctx, data)
+	if decisions.clearCalls != 0 {
+		t.Fatalf("first delivery clearCalls = %d, want 0 (blocked by sibling session)", decisions.clearCalls)
+	}
+	if got := filterLogs(logs, msgAgentErrorAnotherSessionWorking); len(got) != 1 {
+		t.Fatalf("got %d %q DEBUG records, want 1", len(got), msgAgentErrorAnotherSessionWorking)
+	}
+
+	// s2 settles; the exact same failure (same session, same execution id,
+	// same operation id) redelivers and must now dispatch.
+	s2, err := repo.GetTaskSession(ctx, "s2")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	s2.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, s2); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	logs.TakeAll()
+
+	svc.dispatchKanbanAgentErrorTrigger(ctx, data)
+	if decisions.clearCalls != 1 {
+		t.Errorf("second delivery clearCalls = %d, want 1 (the earlier guard skip must not have marked the operation applied)", decisions.clearCalls)
+	}
+	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
+		t.Errorf("got %d dispatch INFO records, want 1", len(got))
+	}
+}
+
 type agentErrorSessionReloadErrorRepo struct {
 	sessionExecutorStore
 	err error
@@ -628,8 +685,14 @@ func TestDispatchKanbanAgentErrorTrigger_ActionVocabularyWarn(t *testing.T) {
 			}
 		}
 		// Since queue_run has no adapter, HandleTrigger reports it as an
-		// action with no effect: ActionCount > 0 but nothing executed —
-		// still a dispatch, per AC-E2's "no actions ran" contract's sibling.
+		// action with no effect: ActionCount > 0 but nothing executed, so
+		// this is the AC-A6 INFO dispatch record, not AC-E2's DEBUG. Both the
+		// walk WARNING above and this INFO must be present together — the
+		// pair is what AC-E4/AC-A6's "does not count against at most one"
+		// carve-out actually requires proving.
+		if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
+			t.Errorf("got %d %q INFO record(s), want 1 (dispatch must still proceed alongside the walk WARNING)", len(got), msgAgentErrorDispatched)
+		}
 	})
 
 	t.Run("two move_to_step actions produce no warning", func(t *testing.T) {
