@@ -346,6 +346,7 @@ test.describe("Git Changes Panel", () => {
       "opacity",
       "0",
     );
+    await expect(pendingStageSlot.locator("svg.animate-spin")).toBeVisible();
     await expect(siblingRow.locator("svg.animate-spin")).toHaveCount(0);
 
     pausedAction.release("worktree.stage");
@@ -367,6 +368,7 @@ test.describe("Git Changes Panel", () => {
       "opacity",
       "0",
     );
+    await expect(pendingUnstageSlot.locator("svg.animate-spin")).toBeVisible();
 
     pausedAction.release("worktree.unstage");
     await expect(unstagedSection.getByTestId("file-row-pending-action.txt")).toBeVisible();

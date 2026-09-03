@@ -64,11 +64,12 @@ component-local request state.
 Extend `apps/web/e2e/tests/git/git-changes-panel.spec.ts` with a narrow
 WebSocket transport controller patterned after the existing request-pause
 helpers. It shall pause only the armed `worktree.stage` or
-`worktree.unstage` frame and forward all other frames. The regression creates
-one modified file, starts each action from the UI, waits until the request is
-paused, moves the pointer to a neutral location, and asserts the existing
-spinner is still visible before releasing the request and observing the file's
-new section.
+`worktree.unstage` frame and forward all other frames. The regression creates a
+target file (`pending-action.txt`) and a sibling file (`pending-sibling.txt`),
+starts each action from the UI, waits until the request is paused, moves the
+pointer to a neutral location, and asserts the existing spinner is still
+visible only for the target row before releasing the request and observing the
+file's new section.
 
 ## Tests
 

@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-CHANGES-FILE-ACTION-FEEDBACK-001
 ---
 
-# Changes File Action Feedback System Design
+# File-action feedback
 
 ## Purpose and boundaries
 
