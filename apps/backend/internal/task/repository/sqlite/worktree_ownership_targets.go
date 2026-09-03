@@ -64,6 +64,16 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 	return nil
 }
 
+// activeTargetForWorktree returns a target that can still own a physical
+// worktree during cutover. Deleted targets remain history, not ownership.
+func (t *taskWorktreeTargets) activeTargetForWorktree(worktreeID string) *envRepoTarget {
+	target := t.targetForWorktree(worktreeID)
+	if target == nil || target.status == worktreeRepoStatusDeleted || target.deletedAt != nil {
+		return nil
+	}
+	return target
+}
+
 // mergeLegacyEnvRepo merges a pre-existing environment-repository row. These
 // rows are the canonical source and win field conflicts (except for the
 // physical-worktree identity, which must agree everywhere).
