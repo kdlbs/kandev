@@ -107,6 +107,63 @@ test.describe("Kanban preview workflow step navigation", () => {
     await expect(previewPanel).toBeVisible();
   });
 
+  test("opens the touch drawer and moves the task from a tablet preview", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const targetStep = adjacentStep(seedData.steps, seedData.startStepId);
+    const task = await apiClient.createTask(seedData.workspaceId, "Preview step nav tablet", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const kanban = new KanbanPage(tabletTestPage);
+    await enablePreviewOnClick(kanban, apiClient);
+
+    const card = kanban.taskCardByTitle("Preview step nav tablet");
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.tap();
+
+    const previewPanel = tabletTestPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+
+    const trigger = previewPanel.getByTestId("workflow-stepper-minimal");
+    const cue = trigger.getByTestId("workflow-stepper-touch-disclosure-cue");
+    await expect(trigger).toBeVisible();
+    await expect(cue).toBeVisible();
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    if (!triggerBox) return;
+    expect(triggerBox.width).toBeGreaterThanOrEqual(44);
+    expect(triggerBox.height).toBeGreaterThanOrEqual(44);
+
+    await trigger.tap();
+
+    const disclosure = tabletTestPage.getByTestId("workflow-step-disclosure");
+    await expect(disclosure).toBeVisible();
+    const moveButton = disclosure.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
+    await expect(moveButton).toBeVisible();
+    const moveButtonBox = await moveButton.boundingBox();
+    expect(moveButtonBox).not.toBeNull();
+    if (!moveButtonBox) return;
+    expect(moveButtonBox.height).toBeGreaterThanOrEqual(44);
+
+    await moveButton.tap();
+
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 15_000,
+      })
+      .toBe(targetStep.id);
+    await expect(tabletTestPage.locator('[data-slot="drawer-content"]')).toHaveAttribute(
+      "data-state",
+      "closed",
+    );
+    await expect(previewPanel).toBeVisible();
+  });
+
   test("keeps the header a single row at the panel's minimum width", async ({
     testPage,
     apiClient,

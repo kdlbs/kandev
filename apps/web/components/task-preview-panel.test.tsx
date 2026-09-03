@@ -173,3 +173,17 @@ describe("TaskPreviewPanel step indicator", () => {
     expect(onMoveStep).not.toHaveBeenCalled();
   });
 });
+
+describe("TaskPreviewPanel step indicator lifecycle", () => {
+  it("reports the disclosure closed when the stepper unmounts", () => {
+    const onDisclosureOpenChange = vi.fn();
+    const { rerender } = renderPanel({ onDisclosureOpenChange });
+
+    fireEvent.mouseEnter(screen.getByTestId(STEPPER_TEST_ID));
+    expect(onDisclosureOpenChange).toHaveBeenLastCalledWith(true);
+
+    rerender(<TaskPreviewPanel task={TASK} onClose={vi.fn()} workflowSteps={[]} />);
+
+    expect(onDisclosureOpenChange).toHaveBeenLastCalledWith(false);
+  });
+});

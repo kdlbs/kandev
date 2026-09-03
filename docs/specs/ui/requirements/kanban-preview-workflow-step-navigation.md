@@ -171,10 +171,11 @@ the task even when its target column is not on the board.
   step the indicator is showing, which is the first step in order, together with
   the total. It shall use the same wording as the resolved case, because that is
   exactly what the indicator renders visually in that case: the marker is
-  suppressed but the position count is not. The absence of a current step shall
-  be conveyed by withholding the current-step semantics from the indicator, not
-  by different text, so the accessible name and the visible content never
-  disagree about which step is shown or about whether the task is on it.
+  suppressed and the visible position count follows the single-step rule, so it
+  is omitted. The absence of a current step shall be conveyed by withholding the
+  current-step semantics from the indicator, not by different text, so the
+  accessible name and the visible content never disagree about which step is
+  shown or about whether the task is on it.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.19:** When the preview panel closes
   or switches to a different task while the step disclosure is open, the disclosure
   shall close with it and shall not reopen on the next preview until the user opens

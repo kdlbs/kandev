@@ -330,6 +330,12 @@ function CompactWorkflowStepDisclosure({
   useEffect(() => {
     onDisclosureOpenChange?.(controls.open);
   }, [controls.open, onDisclosureOpenChange]);
+  useEffect(
+    () => () => {
+      onDisclosureOpenChange?.(false);
+    },
+    [onDisclosureOpenChange],
+  );
   const trigger = (
     <CompactWorkflowTrigger
       current={current}

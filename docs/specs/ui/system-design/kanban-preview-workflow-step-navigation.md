@@ -241,7 +241,7 @@ The preview header stays one flex row: title, step indicator, panel controls.
   controls at the end of the row rather than floating between the two, so a
   short title does not leave the indicator stranded mid-row and the indicator's
   position does not move as the title's length changes.
-- The title stays a shrinkable, minimum-width-zero, truncating element.
+- The title stays a shrinkable, truncating element with a minimum width of 88px.
 - Both the title and the step name truncate with an ellipsis. The position count
   and the current-step marker do not shrink, so the count stays readable while
   the name truncates.
