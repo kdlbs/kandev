@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 
 	"go.uber.org/zap"
 
@@ -26,6 +27,7 @@ const (
 	msgAgentErrorDispatched            = "on_agent_error dispatched"
 	msgAgentErrorNoActions             = "on_agent_error dispatch: step declares no actions"
 	msgAgentErrorDispatchFailed        = "on_agent_error dispatch failed"
+	msgAgentErrorDispatchPanicked      = "on_agent_error dispatch panicked"
 
 	// defaultAgentFailedMessage backfills an empty AgentEventData.ErrorMessage
 	// (e.g. a synthetic start-failure event). Shared with the two other
@@ -264,4 +266,25 @@ func (s *Service) dispatchKanbanAgentErrorTrigger(ctx context.Context, data watc
 		zap.String("session_id", data.SessionID),
 		zap.String("step_id", task.WorkflowStepID),
 		zap.String("operation_id", operationID))
+}
+
+// dispatchKanbanAgentErrorTriggerRecovered wraps dispatchKanbanAgentErrorTrigger
+// with panic recovery. The dispatch now runs synchronously after the caller
+// has released the failed session's cancelInFlight guard (see
+// handleRecoverableFailureLockedState), so — unlike an agent.failed delivery
+// that arrives through the event bus's own recover-and-log invokeHandler
+// (events/bus/safe_handler.go) — routes R2-R5 reach this call with no
+// recover above them on the stack. A panicking callback (e.g. auto_start_agent)
+// would otherwise take the whole backend process down.
+func (s *Service) dispatchKanbanAgentErrorTriggerRecovered(ctx context.Context, data watcher.AgentEventData) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error(msgAgentErrorDispatchPanicked,
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Any("panic", r),
+				zap.String("stack", string(debug.Stack())))
+		}
+	}()
+	s.dispatchKanbanAgentErrorTrigger(ctx, data)
 }

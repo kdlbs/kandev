@@ -1849,9 +1849,11 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 
 	// The caller runs this after releasing cancelInFlight. A direct
 	// auto_start_agent callback can start the same session and reacquire that
-	// guard, so dispatching while it is held would deadlock.
+	// guard, so dispatching while it is held would deadlock. Panic recovery is
+	// the recovered wrapper's job, not this one's — routes R2-R5 reach this
+	// closure with no recover above them on the stack.
 	return func() {
-		s.dispatchKanbanAgentErrorTrigger(context.WithoutCancel(ctx), data)
+		s.dispatchKanbanAgentErrorTriggerRecovered(context.WithoutCancel(ctx), data)
 	}
 }
 
