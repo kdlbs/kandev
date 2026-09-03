@@ -85,7 +85,10 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	}
 	after, inspectErr := inspectWorkspaceInventoryCandidate(ctx, info, candidate)
 	matched := inspectErr == nil && samePreservationEvidence(evidence, after)
-	postEvidence, verifiedAt := e.recordWorkspaceInventoryPostRepairAttestation(ctx, repairer, task.ID, idempotencyKey, spec, session, running, after, matched)
+	postEvidence, verifiedAt, attestErr := e.recordWorkspaceInventoryPostRepairAttestation(ctx, repairer, task.ID, idempotencyKey, spec, session, running, after, matched)
+	if attestErr != nil {
+		return nil, fmt.Errorf("%w: post-repair attestation was not durable", models.ErrWorkspaceInventoryRecoveryConflict)
+	}
 	receipt.PostRepairEvidence = postEvidence
 	receipt.PostRepairMatched = matched
 	receipt.PostRepairVerifiedAt = &verifiedAt
@@ -164,9 +167,12 @@ func (e *Executor) attestedExistingWorkspaceInventoryReceipt(
 	after, inspectErr := inspectWorkspaceInventoryCandidate(ctx, info, candidate)
 	matched := inspectErr == nil && samePreservationEvidence(before, after)
 	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
-	postEvidence, verifiedAt := e.recordWorkspaceInventoryPostRepairAttestation(
+	postEvidence, verifiedAt, attestErr := e.recordWorkspaceInventoryPostRepairAttestation(
 		ctx, repairer, existing.TaskID, existing.IdempotencyKey, spec, session, running, after, matched,
 	)
+	if attestErr != nil {
+		return nil, fmt.Errorf("%w: post-repair attestation was not durable", models.ErrWorkspaceInventoryRecoveryConflict)
+	}
 	completed := *existing
 	completed.PostRepairEvidence = postEvidence
 	completed.PostRepairMatched = matched
@@ -326,10 +332,11 @@ func workspaceInventoryRetryRowMatches(
 // before/after checkout evidence onto the committed receipt and returns the
 // evidence/timestamp so the caller can also surface it on the in-memory
 // receipt it returns. The repair transaction already committed by the time
-// this runs, so a failure to persist this attestation is logged and never
-// turns an otherwise-successful repair into a failure; a match/mismatch is
-// recorded either way so an unexpected concurrent write is itself part of
-// the durable audit trail rather than a transient in-memory check.
+// this runs, but launch admission still requires this write to succeed: a
+// committed row without durable positive attestation is retryable, not safe
+// to launch from. A match/mismatch is recorded either way when persistence
+// succeeds so an unexpected concurrent write is itself part of the durable
+// audit trail rather than a transient in-memory check.
 func (e *Executor) recordWorkspaceInventoryPostRepairAttestation(
 	ctx context.Context,
 	repairer workspaceInventoryRepairRepository,
@@ -340,21 +347,24 @@ func (e *Executor) recordWorkspaceInventoryPostRepairAttestation(
 	running *models.ExecutorRunning,
 	after *worktree.PreservationEvidence,
 	matched bool,
-) (*models.WorkspaceInventoryPreservation, time.Time) {
+) (*models.WorkspaceInventoryPreservation, time.Time, error) {
 	var postEvidence *models.WorkspaceInventoryPreservation
 	if after != nil {
 		evidence := workspaceInventoryPreservation(spec, session, after, running)
 		postEvidence = &evidence
 	}
 	verifiedAt := time.Now().UTC()
-	if err := repairer.RecordWorkspaceInventoryPostRepairAttestation(ctx, taskID, idempotencyKey, postEvidence, matched, verifiedAt); err != nil && e.logger != nil {
-		e.logger.Warn("failed to persist workspace inventory post-repair attestation",
-			zap.String("task_id", taskID),
-			zap.String("idempotency_key", idempotencyKey),
-			zap.Bool("matched", matched),
-			zap.Error(err))
+	if err := repairer.RecordWorkspaceInventoryPostRepairAttestation(ctx, taskID, idempotencyKey, postEvidence, matched, verifiedAt); err != nil {
+		if e.logger != nil {
+			e.logger.Warn("failed to persist workspace inventory post-repair attestation",
+				zap.String("task_id", taskID),
+				zap.String("idempotency_key", idempotencyKey),
+				zap.Bool("matched", matched),
+				zap.Error(err))
+		}
+		return postEvidence, verifiedAt, err
 	}
-	return postEvidence, verifiedAt
+	return postEvidence, verifiedAt, nil
 }
 
 func (e *Executor) workspaceInventoryRepairer(

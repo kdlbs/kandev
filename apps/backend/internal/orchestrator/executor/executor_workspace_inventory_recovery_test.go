@@ -113,6 +113,16 @@ func TestRepairReuseEnvironmentInventoryPreservesDirtyCheckout(t *testing.T) {
 			Preservation: repair.Preservation,
 		}, nil
 	}
+	// This test's custom repairWorkspaceInventoryFunc bypasses the mock's
+	// default receipt store, so the default post-repair attestation lookup
+	// (keyed on that store) would find nothing and fail closed. Stub durable
+	// attestation persistence directly: this test proves checkout
+	// preservation, not attestation-store mechanics.
+	mockRepo.recordWorkspaceInventoryPostRepairAttestationFunc = func(
+		context.Context, string, string, *models.WorkspaceInventoryPreservation, bool, time.Time,
+	) error {
+		return nil
+	}
 	executor := &Executor{repo: mockRepo}
 	receipt, err := executor.repairReuseEnvironmentInventory(
 		context.Background(),
@@ -325,11 +335,11 @@ func TestRepairReuseEnvironmentInventoryRetryAfterUnattestedCommitSafelyComplete
 	}}
 
 	first, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "crash-key")
-	if err != nil {
-		t.Fatalf("first repairReuseEnvironmentInventory: %v", err)
+	if !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+		t.Fatalf("first repairReuseEnvironmentInventory error = %v, want retryable conflict", err)
 	}
-	if first.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
-		t.Fatalf("first result code = %q", first.ResultCode)
+	if first != nil {
+		t.Fatalf("first repair returned an in-memory success receipt despite failed durable attestation: %+v", first)
 	}
 	stored := mockRepo.workspaceInventoryReceipts["task\x00crash-key"]
 	if stored == nil || stored.PostRepairVerifiedAt != nil {
@@ -344,8 +354,8 @@ func TestRepairReuseEnvironmentInventoryRetryAfterUnattestedCommitSafelyComplete
 	if err != nil {
 		t.Fatalf("retry after unattested commit returned an error instead of safely completing attestation: %v", err)
 	}
-	if second.ID != first.ID {
-		t.Fatalf("retry produced a different receipt instead of completing the existing one: %+v vs %+v", second, first)
+	if second.ID != stored.ID {
+		t.Fatalf("retry did not complete the existing receipt: %+v", second)
 	}
 	if !second.PostRepairMatched || second.PostRepairEvidence == nil || second.PostRepairVerifiedAt == nil {
 		t.Fatalf("retry did not durably complete post-repair attestation: %+v", second)
