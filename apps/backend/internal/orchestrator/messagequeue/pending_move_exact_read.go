@@ -37,11 +37,14 @@ func (r *sqliteRepository) ReadPendingMoveCensus(
 		return nil, r.commitPendingMoveCensusDenied(ctx, tx, actor, taskID, correlationID)
 	}
 
-	target, err := r.readExactCancelTargetByTask(ctx, tx, taskID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	target, rowExists, err := r.readPendingMoveCensusTarget(ctx, tx, taskID)
+	if err != nil {
 		return nil, ErrPendingMoveReadFailed
 	}
-	if errors.Is(err, sql.ErrNoRows) || target == nil {
+	if target == nil {
+		if rowExists {
+			return nil, r.commitPendingMoveCensusDenied(ctx, tx, actor, taskID, correlationID)
+		}
 		if err := r.appendPendingMoveCensusAudit(ctx, tx, actor, taskID, nil, correlationID,
 			PendingMoveCensusOutcomeZeroRow); err != nil {
 			return nil, ErrPendingMoveReadFailed
@@ -80,6 +83,31 @@ func (r *sqliteRepository) ReadPendingMoveCensus(
 	}, nil
 }
 
+func (r *sqliteRepository) readPendingMoveCensusTarget(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+) (*exactCancelTarget, bool, error) {
+	pendingMoveID, err := r.readLatestPendingMoveIDByTask(ctx, tx, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	target, err := r.readExactCancelTargetByTask(ctx, tx, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, true, nil
+	}
+	if err != nil {
+		return nil, true, err
+	}
+	if target.rowID != pendingMoveID {
+		return nil, true, nil
+	}
+	return target, true, nil
+}
+
 func (r *sqliteRepository) commitPendingMoveCensusDenied(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -95,6 +123,25 @@ func (r *sqliteRepository) commitPendingMoveCensusDenied(
 		return ErrPendingMoveReadFailed
 	}
 	return ErrPendingMoveNotFoundOrChanged
+}
+
+func (r *sqliteRepository) readLatestPendingMoveIDByTask(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+) (string, error) {
+	var pendingMoveID string
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id
+		FROM pending_moves
+		WHERE task_id = ?
+		ORDER BY queued_at DESC
+		LIMIT 1
+	`), taskID).Scan(&pendingMoveID)
+	if err != nil {
+		return "", err
+	}
+	return pendingMoveID, nil
 }
 
 // readExactCancelTargetByTask is readExactCancelTarget's task-keyed sibling.

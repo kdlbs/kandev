@@ -79,6 +79,47 @@ func TestSQLiteRepository_ReadPendingMoveCensusZeroRow(t *testing.T) {
 }
 
 // @covers AC-TASKS-PENDING-MOVE-CANCELLATION-004.3
+func TestSQLiteRepository_ReadPendingMoveCensusRejectsBrokenRelations(t *testing.T) {
+	cases := map[string]string{
+		"session belongs to another task":          `UPDATE task_sessions SET task_id = '` + exactCallerTaskID + `' WHERE id = '` + exactTargetSessionID + `'`,
+		"current step belongs to another workflow": `UPDATE tasks SET workflow_step_id = '` + exactTargetStepID + `' WHERE id = '` + exactTargetTaskID + `'`,
+		"target step belongs to another workflow":  `UPDATE pending_moves SET workflow_step_id = '` + exactCurrentStepID + `' WHERE session_id = '` + exactTargetSessionID + `'`,
+		"target task crosses workspace":            `UPDATE tasks SET workspace_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' WHERE id = '` + exactTargetTaskID + `'`,
+	}
+	for name, mutation := range cases {
+		t.Run(name, func(t *testing.T) {
+			fixture := newExactCancelFixture(t)
+			if _, err := fixture.sql.Exec(mutation); err != nil {
+				t.Fatalf("mutate relation: %v", err)
+			}
+
+			result, err := fixture.repo.ReadPendingMoveCensus(
+				context.Background(), fixture.actor, exactTargetTaskID, "correlation-census-relation",
+			)
+			if result != nil || !errors.Is(err, ErrPendingMoveNotFoundOrChanged) {
+				t.Fatalf("result=%#v err=%v, want stable relation mismatch", result, err)
+			}
+			var count int
+			if err := fixture.sql.Get(&count, `SELECT COUNT(*) FROM pending_moves WHERE id = ?`, fixture.match.PendingMoveID); err != nil {
+				t.Fatalf("count pending row: %v", err)
+			}
+			if count != 1 {
+				t.Fatalf("broken relation removed pending row, count=%d", count)
+			}
+			var auditedTargetID string
+			if err := fixture.sql.Get(&auditedTargetID,
+				`SELECT pending_move_id FROM pending_move_cancellation_audit WHERE correlation_id = ?`,
+				"correlation-census-relation"); err != nil {
+				t.Fatalf("read broken-relation audit: %v", err)
+			}
+			if auditedTargetID != "" {
+				t.Fatalf("broken-relation audit retained untrusted target ID %q", auditedTargetID)
+			}
+		})
+	}
+}
+
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-004.3
 func TestSQLiteRepository_ReadPendingMoveCensusAuthorizationIsNonLeaking(t *testing.T) {
 	cases := map[string]func(*exactCancelFixture){
 		"ordinary agent": func(f *exactCancelFixture) { f.actor.Kind = "agent" },
