@@ -27,6 +27,9 @@ default.
   resume, prompt, MCP, and profile CLI arguments.
 - `lifecycle.Manager.profileCLIFlagTokens` resolves enabled profile CLI flags
   before it builds the passthrough command.
+- `agent/settings/controller.Controller.PreviewAgentCommand` builds the same
+  passthrough argv for the settings preview, including resolved profile CLI
+  flags.
 
 ## Command composition
 
@@ -38,6 +41,10 @@ profile with `--verbose` keeps access to the Claude verbose view mode.
 
 The change does not alter the ACP adapter command. It also does not alter model,
 permission, resume, prompt, or MCP argument composition.
+
+The settings command preview passes resolved profile CLI flags to the same
+passthrough builder. The preview therefore matches the command that Kandev
+launches for the selected profile.
 
 ## Compatibility
 
@@ -60,8 +67,9 @@ launch command.
 
 ## Verification
 
-A focused agent-package test inspects the complete tokenized command. The test
-covers the quiet default and the explicit `--verbose` profile flag.
+A focused agent-package test inspects the complete tokenized command. A
+controller test compares passthrough preview output with an enabled profile
+flag. The tests cover the quiet default and the explicit `--verbose` opt-in.
 
 A live Claude session is not necessary for this contract. The command argv is
 the Kandev-owned boundary, while Claude owns its output rendering.

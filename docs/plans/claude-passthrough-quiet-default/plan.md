@@ -28,6 +28,8 @@ receives the flag.
 - Preserve explicit `--verbose` opt-in through profile CLI flags.
 - Add regression tests for both command forms.
 - Document the quiet default and the verbose opt-in path.
+- Keep the settings command preview aligned with the launched passthrough
+  command.
 
 ### Out of scope
 
@@ -48,6 +50,9 @@ Update the CLI-flags reference in `docs/public/agents-and-profiles.md`. State
 that Claude passthrough uses standard output by default and that `--verbose` is
 an explicit profile flag.
 
+Pass resolved profile CLI flags through the passthrough branch of
+`Controller.PreviewAgentCommand`, so the settings preview matches runtime.
+
 ## Tests
 
 | Acceptance criterion | Evidence |
@@ -56,6 +61,7 @@ an explicit profile flag.
 | `AC-CLI-PASSTHROUGH-LAUNCH-001.2` | `TestClaudeACP_PassthroughCmd_VerboseOptIn` builds a command with `CLIFlagTokens` and expects `--verbose`. |
 | `AC-CLI-PASSTHROUGH-LAUNCH-001.3` | The focused agent package tests preserve existing command-composition coverage. |
 | `AC-CLI-PASSTHROUGH-LAUNCH-001.4` | The opt-in test uses the current profile token input and requires no model change. |
+| `AC-CLI-PASSTHROUGH-LAUNCH-001.5` | `TestController_PreviewAgentCommand_PassthroughIncludesCLIFlags` proves that preview output includes the enabled profile flag. |
 
 ## E2E tests
 
@@ -76,8 +82,16 @@ owns the output that each argv mode renders.
   production change. The default argv contained the forced flag, and explicit
   opt-in produced a duplicate flag.
 - GREEN: The focused command passed two tests after the production change.
-- Full agent package: `go test ./internal/agent/agents -count=1` passed 259
-  tests.
+- Fixup RED: The controller preview regression failed before the passthrough
+  branch passed `CLIFlagTokens` to the builder.
+- Fixup GREEN: The preview now forwards resolved profile CLI flags, and the
+  passthrough builder removes duplicate permission CLI tokens so preview and
+  runtime stay identical. Focused controller tests passed, including the
+  existing no-duplicate regression.
+- Full agent package: `go test ./internal/agent/agents -count=1` passed 260
+  tests; the controller package passed 237 tests.
+- Specification lint passed all files, and the CLI catalog now reports 3
+  requirements and 1 design.
 - Public documentation: `node --test scripts/validate-public-docs.test.mjs`
   passed 61 tests, and `node scripts/validate-public-docs.mjs` validated 41
   published pages.

@@ -24,3 +24,21 @@ func TestClaudeACP_PassthroughCmd_VerboseOptIn(t *testing.T) {
 		t.Fatalf("argv = %#v, want %#v", got, want)
 	}
 }
+
+func TestStandardPassthrough_DeduplicatesPermissionCLIFlags(t *testing.T) {
+	agent := StandardPassthrough{
+		Cfg: PassthroughConfig{Supported: true, PassthroughCmd: NewCommand("auggie")},
+		PermSettings: map[string]PermissionSetting{
+			"allow_indexing": {Supported: true, ApplyMethod: PermissionApplyMethodCLIFlag, CLIFlag: "--allow-indexing"},
+		},
+	}
+
+	got := agent.BuildPassthroughCommand(PassthroughOptions{
+		PermissionValues: map[string]bool{"allow_indexing": true},
+		CLIFlagTokens:    []string{"--allow-indexing"},
+	}).Args()
+	want := []string{"auggie", "--allow-indexing"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
