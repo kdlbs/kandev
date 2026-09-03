@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -55,6 +56,66 @@ func filterLogs(logs *observer.ObservedLogs, msg string) []observer.LoggedEntry 
 		}
 	}
 	return out
+}
+
+func TestHandleRecoverableFailureDispatchesAfterSessionGuardRelease(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionAutoStartAgent}},
+		},
+	}
+	svc, _ := newAgentErrorTestService(t, repo, stepGetter, nil)
+
+	callback := &guardReacquiringAgentErrorCallback{svc: svc, done: make(chan struct{})}
+	registry := engine.MapRegistry{engine.ActionAutoStartAgent: callback}
+	workflowEngine := engine.New(svc.workflowStore, registry)
+	svc.workflowEngine = workflowEngine
+	svc.agentErrorDeps.Store(&agentErrorDispatchDeps{
+		engine:   workflowEngine,
+		registry: registry,
+		store:    svc.workflowStore,
+	})
+
+	finished := make(chan struct{})
+	go func() {
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1",
+		})
+		close(finished)
+	}()
+
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("recoverable failure did not finish while dispatching auto_start_agent")
+	}
+	select {
+	case <-callback.done:
+	case <-time.After(time.Second):
+		t.Fatal("deferred on_agent_error callback did not complete")
+	}
+}
+
+type guardReacquiringAgentErrorCallback struct {
+	svc  *Service
+	done chan struct{}
+}
+
+func (c *guardReacquiringAgentErrorCallback) Execute(
+	_ context.Context, in engine.ActionInput,
+) (engine.ActionResult, error) {
+	lock, release := c.svc.acquireCancelInFlightGuard(in.State.SessionID)
+	defer release()
+	lock.Lock()
+	close(c.done)
+	lock.Unlock()
+	return engine.ActionResult{}, nil
 }
 
 // --- AC-A1/A6/C1/C3: dispatch fires, records exactly one INFO, and a

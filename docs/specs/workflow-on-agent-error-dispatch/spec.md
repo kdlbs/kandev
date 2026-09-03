@@ -334,9 +334,8 @@ closes it by construction. See [AC-E12 and AC-E13](#e-action-vocabulary-and-tran
   through R5. A dispatch covering only the bus-driven route R1, or only R1–R3, does not satisfy this
   criterion.
 - **AC-A3** The dispatch shall be the last action of terminal-failure handling: after the session
-  state write, the task REVIEW reconcile, the pending step-completion reconciliation, and the
-  `go s.cleanupAgentExecution(...)` launch. It shall not wait on that goroutine nor assume it
-  completed.
+  state write, REVIEW and signal reconcile, and the `go s.cleanupAgentExecution(...)` launch.
+  Release `cancelInFlight` before dispatch; callbacks can reacquire. Do not wait on cleanup.
 - **AC-A4** The step whose `on_agent_error` actions are evaluated shall be the task's current step
   **at dispatch time**, read from a task reloaded after the step-completion reconciliation and
   supplied to the engine as `PreloadedState`. WHEN a pending step-completion signal reconciled into a
@@ -708,9 +707,9 @@ dispatch.
 
 ## Concurrency and ordering
 
-- **Two failures, same session, in sequence.** Serialized by the per-session `cancelInFlight` guard
-  held around the locked handler. Distinct executions produce distinct operation ids (AC-C1) and both
-  dispatch; a repeat of one is absorbed by AC-C3.
+- **Two failures, same session, in sequence.** `cancelInFlight` serializes bookkeeping, then is
+  released before dispatch so callbacks can reacquire it. Distinct executions produce distinct
+  operation ids (AC-C1) and both dispatch; a repeat is absorbed by AC-C3.
 - **Two failures, two sessions, same task, concurrent.** Not serialized — the guard is per-session.
   AC-F5 resolves the common shape: whichever session settles while the other is still working skips.
   IF both reach a terminal state such that neither observes the other as working, THEN both may
