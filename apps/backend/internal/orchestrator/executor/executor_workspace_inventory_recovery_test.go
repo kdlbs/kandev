@@ -301,6 +301,47 @@ func TestRepairReuseEnvironmentInventoryRetryFromDifferentSessionConflicts(t *te
 }
 
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+func TestRepairReuseEnvironmentInventoryRetryWithChangedBranchIdentityConflicts(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	row := &models.TaskEnvironmentRepo{
+		ID: "environment-repo", TaskEnvironmentID: "environment", RepositoryID: "repository",
+		BranchSlug: "stale", WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+		WorktreeBranch: "feature/recovery", Position: 0, Status: "active", UpdatedAt: now,
+	}
+	env := &models.TaskEnvironment{
+		ID: "environment", TaskID: "task", WorkspacePath: worktreePath,
+		Status: models.TaskEnvironmentStatusReady, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{row},
+	}
+	mockRepo := &mockRepository{
+		taskEnvironmentRepos:       map[string][]*models.TaskEnvironmentRepo{env.ID: env.Repos},
+		workspaceInventoryReceipts: map[string]*models.WorkspaceInventoryRecoveryReceipt{},
+	}
+	executor := &Executor{repo: mockRepo}
+	task := &v1.Task{ID: "task", WorkspaceID: "workspace"}
+	session := &models.TaskSession{ID: "session", TaskID: "task", TaskEnvironmentID: env.ID, State: models.TaskSessionStateFailed}
+	req := &LaunchAgentRequest{TaskID: "task", WorkspaceID: "workspace", UseWorktree: true, WorkspaceReuseRequired: true,
+		Repositories: []RepoSpec{{TaskRepositoryID: "task-repository", RepositoryID: "repository", BranchIdentitySlug: "main"}}}
+	repositories := []*repoInfo{{
+		TaskRepositoryID: "task-repository", TaskRepositoryUpdatedAt: now,
+		RepositoryID: "repository", RepositoryPath: repositoryPath, Position: 0,
+		Repository: &models.Repository{ID: "repository", SourceType: "github"},
+	}}
+
+	if _, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "reused-key"); err != nil {
+		t.Fatalf("first repairReuseEnvironmentInventory: %v", err)
+	}
+	env.Repos[0].BranchSlug = "main"
+	req.Repositories[0].BranchIdentitySlug = "renamed"
+
+	_, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "reused-key")
+	if !errors.Is(err, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict) {
+		t.Fatalf("changed-payload idempotency-key reuse error = %v", err)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
 //
 // TestBuildResumeRequestRetryAfterCommittedRepairSucceeds proves the
 // orchestrator-facing resume entry point (not just the low-level repair

@@ -172,7 +172,7 @@ func statusCounts(status []byte) (int, int) {
 }
 
 func checkoutContentHash(ctx context.Context, worktreePath string) (string, error) {
-	output, err := gitBytes(ctx, worktreePath, "ls-files", "-co", "--exclude-standard", "-z")
+	output, err := gitBytes(ctx, worktreePath, "ls-files", "-co", "-z")
 	if err != nil {
 		return "", err
 	}

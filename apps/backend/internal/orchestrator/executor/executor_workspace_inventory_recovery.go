@@ -36,7 +36,9 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	if err != nil {
 		return nil, err
 	}
-	if existing, err := e.existingWorkspaceInventoryRepairReceipt(ctx, repairer, task, session, env, idempotencyKey); err != nil {
+	if existing, err := e.existingWorkspaceInventoryRepairReceipt(
+		ctx, repairer, task, session, req, env, repositories, idempotencyKey,
+	); err != nil {
 		return nil, err
 	} else if existing != nil {
 		return existing, nil
@@ -103,7 +105,9 @@ func (e *Executor) existingWorkspaceInventoryRepairReceipt(
 	repairer workspaceInventoryRepairRepository,
 	task *v1.Task,
 	session *models.TaskSession,
+	req *LaunchAgentRequest,
 	env *models.TaskEnvironment,
+	repositories []*repoInfo,
 	idempotencyKey string,
 ) (*models.WorkspaceInventoryRecoveryReceipt, error) {
 	existing, err := repairer.GetWorkspaceInventoryRepairReceipt(ctx, task.ID, idempotencyKey)
@@ -113,10 +117,146 @@ func (e *Executor) existingWorkspaceInventoryRepairReceipt(
 	if existing == nil {
 		return nil, nil
 	}
-	if existing.SessionID != session.ID || existing.TaskEnvironmentID != env.ID {
+	retryHash, ok := workspaceInventoryRetryRequestHash(existing, task, session, req, env, repositories)
+	if !ok || retryHash != existing.RequestHash {
 		return nil, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict
 	}
 	return existing, nil
+}
+
+func workspaceInventoryRetryRequestHash(
+	existing *models.WorkspaceInventoryRecoveryReceipt,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	env *models.TaskEnvironment,
+	repositories []*repoInfo,
+) (string, bool) {
+	if !workspaceInventoryRetryReceiptMatches(existing, task, session, env) ||
+		!workspaceInventoryRetryRequestMatches(req, task) {
+		return "", false
+	}
+	spec, ok := workspaceInventoryRetrySpec(req, existing)
+	if !ok {
+		return "", false
+	}
+	info, candidate, ok := workspaceInventoryRetryCandidate(env, repositories, existing, spec)
+	if !ok {
+		return "", false
+	}
+	preservation := existing.Preservation
+	preservation.ExpectedBranchSlug = launchRepoBranchIdentitySlug(spec)
+	repair := &models.WorkspaceInventoryRepair{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		TaskEnvironmentID: env.ID, TaskRepositoryID: info.TaskRepositoryID,
+		RepositoryID: info.RepositoryID, EnvironmentRepoID: candidate.ID,
+		BranchSlug: launchRepoBranchIdentitySlug(spec), WorktreeID: candidate.WorktreeID,
+		WorktreePath: candidate.WorktreePath, WorktreeBranch: candidate.WorktreeBranch,
+		Position: info.Position, Preservation: preservation,
+	}
+	return workspaceInventoryRepairHash(repair), true
+}
+
+func workspaceInventoryRetryReceiptMatches(
+	existing *models.WorkspaceInventoryRecoveryReceipt,
+	task *v1.Task,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+) bool {
+	return existing != nil && task != nil && session != nil && env != nil &&
+		existing.TaskID == task.ID && existing.WorkspaceID == task.WorkspaceID &&
+		existing.SessionID == session.ID && session.TaskID == task.ID &&
+		existing.TaskEnvironmentID == env.ID && env.TaskID == task.ID &&
+		env.Status == models.TaskEnvironmentStatusReady
+}
+
+func workspaceInventoryRetryRequestMatches(req *LaunchAgentRequest, task *v1.Task) bool {
+	return req != nil && task != nil && req.TaskID == task.ID && req.WorkspaceID == task.WorkspaceID
+}
+
+func workspaceInventoryRetrySpec(
+	req *LaunchAgentRequest,
+	existing *models.WorkspaceInventoryRecoveryReceipt,
+) (RepoSpec, bool) {
+	specs := req.Repositories
+	if len(specs) == 0 {
+		if spec, ok := topLevelLaunchRepoSpec(req); ok {
+			specs = []RepoSpec{spec}
+		}
+	}
+	var matched []RepoSpec
+	for _, spec := range specs {
+		if spec.TaskRepositoryID == existing.TaskRepositoryID && spec.RepositoryID == existing.RepositoryID {
+			matched = append(matched, spec)
+		}
+	}
+	if len(matched) != 1 {
+		return RepoSpec{}, false
+	}
+	return matched[0], true
+}
+
+func workspaceInventoryRetryCandidate(
+	env *models.TaskEnvironment,
+	repositories []*repoInfo,
+	existing *models.WorkspaceInventoryRecoveryReceipt,
+	spec RepoSpec,
+) (*repoInfo, *models.TaskEnvironmentRepo, bool) {
+	info, ok := workspaceInventoryRetryRepoInfo(repositories, spec)
+	if !ok {
+		return nil, nil, false
+	}
+	if canonicalInventoryMatches(spec, env.Repos, true) != 1 {
+		return nil, nil, false
+	}
+	candidate, ok := workspaceInventoryRetryRow(env.Repos, existing, spec, info.Position)
+	if !ok || validateWorkspaceInventoryRepairCandidate(env, info, candidate) != nil {
+		return nil, nil, false
+	}
+	return info, candidate, true
+}
+
+func workspaceInventoryRetryRepoInfo(repositories []*repoInfo, spec RepoSpec) (*repoInfo, bool) {
+	var matched []*repoInfo
+	for _, info := range repositories {
+		if info != nil && info.TaskRepositoryID == spec.TaskRepositoryID && info.RepositoryID == spec.RepositoryID {
+			matched = append(matched, info)
+		}
+	}
+	if len(matched) != 1 {
+		return nil, false
+	}
+	return matched[0], true
+}
+
+func workspaceInventoryRetryRow(
+	rows []*models.TaskEnvironmentRepo,
+	existing *models.WorkspaceInventoryRecoveryReceipt,
+	spec RepoSpec,
+	position int,
+) (*models.TaskEnvironmentRepo, bool) {
+	var matchedRows []*models.TaskEnvironmentRepo
+	for _, row := range rows {
+		if workspaceInventoryRetryRowMatches(row, existing, spec, position) {
+			matchedRows = append(matchedRows, row)
+		}
+	}
+	if len(matchedRows) != 1 {
+		return nil, false
+	}
+	return matchedRows[0], true
+}
+
+func workspaceInventoryRetryRowMatches(
+	row *models.TaskEnvironmentRepo,
+	existing *models.WorkspaceInventoryRecoveryReceipt,
+	spec RepoSpec,
+	position int,
+) bool {
+	return row != nil && row.ID == existing.EnvironmentRepoID && row.RepositoryID == spec.RepositoryID &&
+		row.Position == position && row.BranchSlug == launchRepoBranchIdentitySlug(spec) &&
+		row.DeletedAt == nil && row.Status != taskEnvironmentRepoStatusFailed &&
+		row.Status != taskEnvironmentRepoStatusDeleted
 }
 
 // recordWorkspaceInventoryPostRepairAttestation persists non-secret
@@ -362,11 +502,14 @@ func workspaceInventoryLaunchIdempotencyKey(sessionID string) string {
 }
 
 func workspaceInventoryRepairHash(repair *models.WorkspaceInventoryRepair) string {
-	value := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s",
+	value := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%s",
 		repair.TaskID, repair.WorkspaceID, repair.SessionID, repair.TaskEnvironmentID,
 		repair.TaskRepositoryID, repair.RepositoryID, repair.EnvironmentRepoID,
-		repair.BranchSlug, repair.WorktreeID, repair.Preservation.HeadOID,
-		repair.Preservation.StatusHash+repair.Preservation.ContentHash)
+		repair.BranchSlug, repair.WorktreeID, repair.WorktreePath, repair.WorktreeBranch, repair.Position,
+		repair.Preservation.ExpectedBranchSlug, repair.Preservation.ObservedBranch,
+		repair.Preservation.RefName, repair.Preservation.HeadOID, repair.Preservation.PathHash,
+		repair.Preservation.StatusHash, repair.Preservation.DirtyCount,
+		repair.Preservation.UntrackedCount, repair.Preservation.ContentHash)
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }

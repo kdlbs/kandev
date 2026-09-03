@@ -72,7 +72,7 @@ const workspaceInventoryRecoverySchemaDDL = `
 		request_hash TEXT NOT NULL,
 		result_code TEXT NOT NULL,
 		receipt_json TEXT NOT NULL,
-		post_repair_matched BOOLEAN NOT NULL DEFAULT 0,
+		post_repair_matched BOOLEAN NOT NULL DEFAULT FALSE,
 		post_repair_verified_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		UNIQUE(task_id, idempotency_key),

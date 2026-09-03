@@ -50,9 +50,9 @@ worktree recovery validates all of these facts:
 - no competing session or runtime claims a live writer.
 
 The inspector captures HEAD, ref containment, porcelain status counts and
-hash, a bounded content hash over tracked and untracked files, executor state,
-and source record revisions. Host paths remain internal; public receipts expose
-only a path hash.
+hash, a bounded content hash over tracked, untracked, and ignored files,
+executor state, and source record revisions. Host paths remain internal; public
+receipts expose only a path hash.
 
 ## Repair transaction and idempotency
 
@@ -64,14 +64,17 @@ the receipt when its request hash matches and conflicts otherwise.
 
 A same-idempotency-key retry is resolved before candidate selection runs:
 the executor looks up an existing receipt for `(task_id, idempotency_key)`
-first. When one exists and its session/environment identity still matches the
-caller's context, it is returned directly — including on a retry issued after
-the canonical inventory now matches (the ordinary case once a prior repair
-already committed), which would otherwise make candidate selection see zero
-provable mismatches and misreport a conflict. An existing receipt bound to a
-different session or environment is a genuine idempotency-key reuse and still
-conflicts. An existing valid slot, stale revisions, or any ambiguous proof
-returns a typed result without changing inventory.
+first. When one exists, the executor reconstructs the stable request identity
+from the current server-owned task, session, environment, repository slot, and
+repaired row while retaining the receipt's original preservation snapshot. It
+returns the receipt only when that reconstructed request hash matches, including
+on a retry issued after the canonical inventory now matches (the ordinary case
+once a prior repair already committed), which would otherwise make candidate
+selection see zero provable mismatches and misreport a conflict. A changed
+session, environment, repository slot, branch identity, worktree identity, or
+ambiguous current row is a genuine idempotency-key reuse and conflicts. An
+existing valid slot, stale revisions, or any ambiguous proof returns a typed
+result without changing inventory.
 
 ## Before-and-after checkout attestation
 
