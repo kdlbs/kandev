@@ -322,7 +322,7 @@ func TestUsernsProfile_OnlyChangedSyscalls(t *testing.T) {
 
 	// No other syscalls should have changed from default to unconditional allow.
 	for sc := range defaultUncond {
-		if !modifiedUncond[sc] {
+		if !modifiedUncond[sc] && !slices.Contains(legacyDaemonUnsupportedSyscalls, sc) {
 			t.Errorf("syscall %q was in default unconditional allow but is missing from modified", sc)
 		}
 	}
