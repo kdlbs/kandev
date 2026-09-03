@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // StandaloneExecutor implements Runtime for standalone agentctl execution.
@@ -217,7 +218,7 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 	return nil
 }
 
-func (r *StandaloneExecutor) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
+func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	// Standalone instances are not persisted - they are transient processes
 	// managed by agentctl. Session resume will restart them as needed.
 	return nil, nil

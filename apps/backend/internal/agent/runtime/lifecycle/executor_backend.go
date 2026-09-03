@@ -147,8 +147,11 @@ type ExecutorBackend interface {
 	StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error
 
 	// RecoverInstances discovers and recovers instances that were running before a restart.
+	// records is the live standalone recovery-inventory read at startup step 3
+	// (Manager.ListLiveStandaloneExecutorsRunning); only the standalone runtime
+	// acts on it today, every other implementation ignores it.
 	// Returns recovered instances that can be re-tracked by the manager.
-	RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error)
+	RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error)
 
 	// GetInteractiveRunner returns the interactive runner for passthrough mode.
 	// May return nil if the runtime doesn't support passthrough mode.

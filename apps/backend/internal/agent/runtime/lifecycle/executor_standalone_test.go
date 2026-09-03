@@ -99,7 +99,7 @@ func TestStandaloneExecutorStaticSurface(t *testing.T) {
 	if exec.IsAlwaysResumable() {
 		t.Fatal("standalone instances are transient and not always resumable")
 	}
-	instances, err := exec.RecoverInstances(context.Background())
+	instances, err := exec.RecoverInstances(context.Background(), nil)
 	if err != nil || instances != nil {
 		t.Fatalf("RecoverInstances() = %v, %v; want nil, nil", instances, err)
 	}

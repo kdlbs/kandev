@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -335,7 +336,7 @@ func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {
 		t.Fatalf("StopInstance reason = %q, want %q", mock.stopReason, StopReasonBackendShutdown)
 	}
 }
-func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
+func (m *mockStopTracker) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 func (m *mockStopTracker) GetInteractiveRunner() *process.InteractiveRunner {

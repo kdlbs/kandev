@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // MockExecutor implements Runtime interface for testing
@@ -17,6 +18,9 @@ type MockExecutor struct {
 	healthCheckErr   error
 	recoverInstances []*ExecutorInstance
 	recoverErr       error
+	// recoverRecords captures the records RecoverInstances was called with,
+	// so tests can assert RecoverAll passes them through unchanged.
+	recoverRecords []*models.ExecutorRunning
 }
 
 func (m *MockExecutor) Name() executor.Name { return m.name }
@@ -29,7 +33,8 @@ func (m *MockExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRe
 func (m *MockExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	return nil
 }
-func (m *MockExecutor) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
+func (m *MockExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
+	m.recoverRecords = records
 	return m.recoverInstances, m.recoverErr
 }
 func (m *MockExecutor) GetInteractiveRunner() *process.InteractiveRunner {
@@ -224,7 +229,7 @@ func TestExecutorRegistry_RecoverAll(t *testing.T) {
 		registry.Register(&MockExecutor{name: executor.NameDocker, recoverInstances: nil})
 		registry.Register(&MockExecutor{name: executor.NameStandalone, recoverInstances: []*ExecutorInstance{}})
 
-		instances, err := registry.RecoverAll(ctx)
+		instances, err := registry.RecoverAll(ctx, nil)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -248,7 +253,7 @@ func TestExecutorRegistry_RecoverAll(t *testing.T) {
 		registry.Register(&MockExecutor{name: executor.NameDocker, recoverInstances: dockerInstances})
 		registry.Register(&MockExecutor{name: executor.NameStandalone, recoverInstances: standaloneInstances})
 
-		instances, err := registry.RecoverAll(ctx)
+		instances, err := registry.RecoverAll(ctx, nil)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -269,7 +274,7 @@ func TestExecutorRegistry_RecoverAll(t *testing.T) {
 		registry.Register(&MockExecutor{name: executor.NameDocker, recoverErr: recoverErr})
 		registry.Register(&MockExecutor{name: executor.NameStandalone, recoverInstances: standaloneInstances})
 
-		instances, err := registry.RecoverAll(ctx)
+		instances, err := registry.RecoverAll(ctx, nil)
 		// Should still get instances from successful runtimes
 		// Note: map iteration order is not guaranteed, so we check that at least standalone instances are recovered
 		if len(instances) == 0 && err == nil {
@@ -283,12 +288,39 @@ func TestExecutorRegistry_RecoverAll(t *testing.T) {
 		log := newTestRegistryLogger()
 		registry := NewExecutorRegistry(log)
 
-		instances, err := registry.RecoverAll(ctx)
+		instances, err := registry.RecoverAll(ctx, nil)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 		if len(instances) != 0 {
 			t.Errorf("expected no instances, got %d", len(instances))
+		}
+	})
+
+	// TestExecutorRegistry_RecoverAllPassesRecordsThroughUnchanged pins that
+	// the live-standalone recovery-inventory records read at startup step 3
+	// reach every registered runtime's RecoverInstances unchanged, even one
+	// that ultimately ignores them (design 03's "producer receives records
+	// as a parameter"; five of six executors are exactly such an ignorer).
+	t.Run("records pass through unchanged to every runtime", func(t *testing.T) {
+		log := newTestRegistryLogger()
+		registry := NewExecutorRegistry(log)
+
+		docker := &MockExecutor{name: executor.NameDocker}
+		standalone := &MockExecutor{name: executor.NameStandalone}
+		registry.Register(docker)
+		registry.Register(standalone)
+
+		records := []*models.ExecutorRunning{{ID: "row-1", SessionID: "session-1"}}
+		if _, err := registry.RecoverAll(ctx, records); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(docker.recoverRecords) != 1 || docker.recoverRecords[0] != records[0] {
+			t.Errorf("docker executor recoverRecords = %v, want the same records slice", docker.recoverRecords)
+		}
+		if len(standalone.recoverRecords) != 1 || standalone.recoverRecords[0] != records[0] {
+			t.Errorf("standalone executor recoverRecords = %v, want the same records slice", standalone.recoverRecords)
 		}
 	})
 }

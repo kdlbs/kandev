@@ -109,7 +109,7 @@ func TestDockerExecutor_RecoverInstances(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
-	instances, err := exec.RecoverInstances(context.Background())
+	instances, err := exec.RecoverInstances(context.Background(), nil)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}

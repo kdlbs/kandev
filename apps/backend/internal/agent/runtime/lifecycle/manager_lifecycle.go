@@ -43,8 +43,16 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 
+	// Read the live standalone recovery-inventory records (startup step 3,
+	// AC-EXECUTORS-SURVIVAL-002.8) before recovery contacts any control
+	// server, and hand them to every runtime's RecoverInstances unchanged.
+	records, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
+	if listErr != nil {
+		m.logger.Warn("failed to read live standalone recovery-inventory records", zap.Error(listErr))
+	}
+
 	// Try to recover executions from all runtimes
-	recovered, err := m.executorRegistry.RecoverAll(ctx)
+	recovered, err := m.executorRegistry.RecoverAll(ctx, records)
 	if err != nil {
 		m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
 	}
