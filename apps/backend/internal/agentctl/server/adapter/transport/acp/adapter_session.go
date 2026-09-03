@@ -24,6 +24,13 @@ func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
 
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+	return a.newSession(ctx, mcpServers)
+}
+
+//nolint:funlen // pre-existing session creation flow retained for transition ordering
+func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.mu.Lock()
 	conn := a.acpConn
 	a.mu.Unlock()
@@ -377,6 +384,9 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 //
 //nolint:funlen // pre-existing length preserved from adapter.go file split
 func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+
 	a.mu.Lock()
 	conn := a.acpConn
 	supportsLoad := a.capabilities.LoadSession
@@ -533,15 +543,18 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // superseded one, so a successful reset closes the outgoing session to release its
 // resources. The old session is captured before NewSession overwrites a.sessionID.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+
 	a.mu.RLock()
 	previous, conn := a.sessionID, a.acpConn
 	a.mu.RUnlock()
 
-	newID, err := a.NewSession(ctx, mcpServers)
+	newID, err := a.newSession(ctx, mcpServers)
 	if err != nil {
 		return "", err
 	}
-	a.closeSupersededSession(ctx, conn, previous, newID)
+	a.closeSupersededSessionLocked(ctx, conn, previous, newID)
 	return newID, nil
 }
 
@@ -559,6 +572,14 @@ const closeSupersededSessionTimeout = 10 * time.Second
 // running. A close error is logged and never surfaces to the caller, since the
 // reset itself already succeeded.
 func (a *Adapter) closeSupersededSession(ctx context.Context, conn *acp.ClientSideConnection, previous, newID string) {
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+	a.closeSupersededSessionLocked(ctx, conn, previous, newID)
+}
+
+// closeSupersededSessionLocked requires sessionTransitionMu to be held so the
+// still-current check and session/close request form one transition.
+func (a *Adapter) closeSupersededSessionLocked(ctx context.Context, conn *acp.ClientSideConnection, previous, newID string) {
 	if previous == "" || previous == newID || conn == nil {
 		return
 	}
