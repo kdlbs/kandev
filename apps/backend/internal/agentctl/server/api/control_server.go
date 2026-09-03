@@ -38,20 +38,35 @@ type ControlServer struct {
 	credentials       *credentialState
 	shutdownRequested chan struct{}
 	shutdownOnce      sync.Once
+	unownedPeriod     time.Duration
+	reaperStop        chan struct{}
+	reaperStopOnce    sync.Once
+	reaperWG          sync.WaitGroup
 }
 
 // NewControlServer creates a new ControlServer for instance management.
 func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger.Logger) *ControlServer {
 	gin.SetMode(gin.ReleaseMode)
 
+	csLogger := log.WithFields(zap.String("component", "control-server"))
+	unownedPeriod, adjustments := resolveUnownedPeriod(cfg.UnownedPeriod, cfg.IdleTimeout)
+	for _, reason := range adjustments {
+		csLogger.Warn(reason,
+			zap.Duration("configured_unowned_period", cfg.UnownedPeriod),
+			zap.Duration("idle_timeout", cfg.IdleTimeout),
+			zap.Duration("effective_unowned_period", unownedPeriod))
+	}
+
 	cs := &ControlServer{
 		cfg:               cfg,
 		instMgr:           instMgr,
-		logger:            log.WithFields(zap.String("component", "control-server")),
+		logger:            csLogger,
 		router:            gin.New(),
 		ownership:         newOwnershipState(),
 		credentials:       newCredentialState(cfg.AuthToken),
 		shutdownRequested: make(chan struct{}),
+		unownedPeriod:     unownedPeriod,
+		reaperStop:        make(chan struct{}),
 	}
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
