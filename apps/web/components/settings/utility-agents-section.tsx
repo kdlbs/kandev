@@ -19,7 +19,7 @@ import {
   CustomAgentsSection,
   USE_DEFAULT,
 } from "@/components/settings/utility-sections";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 export { isUtilityAgentDirty } from "./utility-dirty";
 
@@ -95,6 +95,8 @@ function revision(agents: UtilityAgent[], profileId: string) {
 export function UtilityAgentsSection() {
   const { t } = useTranslation();
   const profiles = useAppStore((state) => state.agentProfiles.items);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
   const [agents, setAgents] = useState<UtilityAgent[]>([]);
   const [savedAgents, setSavedAgents] = useState<UtilityAgent[]>([]);
   const [defaultProfileId, setDefaultProfileId] = useState("");
@@ -157,6 +159,10 @@ export function UtilityAgentsSection() {
       ]);
       setSavedAgents(agents);
       setSavedDefaultProfileId(defaultProfileId);
+      setUserSettings({
+        ...storeApi.getState().userSettings,
+        defaultUtilityAgentProfileId: defaultProfileId || null,
+      });
     },
     discard: () => {
       setAgents(savedAgents);
