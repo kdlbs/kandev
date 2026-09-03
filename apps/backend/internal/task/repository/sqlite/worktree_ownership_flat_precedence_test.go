@@ -215,3 +215,49 @@ func TestCutover_DoesNotLogRolledBackFlatDemotion(t *testing.T) {
 		t.Fatalf("rolled-back flat demotion logs = %d, want none", len(entries))
 	}
 }
+
+// TestCutover_SupersededHistoricalSessionWorktreeKeepsCanonicalSlot covers the
+// shape reported in issue #2505: a terminal session keeps an active legacy
+// worktree row on the empty branch slot while the surviving flat environment
+// and its canonical repository row own the same repository on a named slot.
+// The session row is superseded, so it must stay out of the normalized graph
+// instead of opening a second slot the worktree inventory check then rejects.
+func TestCutover_SupersededHistoricalSessionWorktreeKeepsCanonicalSlot(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{
+		envID:     "env-superseded-slot",
+		taskID:    "task-superseded-slot",
+		repoID:    "repo-superseded-slot",
+		sessionID: "sess-superseded-slot",
+	}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-canonical-slot", "/tasks/canonical-slot", "feature/canonical", now)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_repos (
+			id, task_environment_id, repository_id, branch_slug,
+			worktree_id, worktree_path, worktree_branch, position,
+			error_message, created_at, updated_at
+		) VALUES (?, ?, ?, 'main', ?, ?, ?, 0, '', ?, ?)`),
+		"env-repo-superseded", seed.envID, seed.repoID,
+		"wt-canonical-slot", "/tasks/canonical-slot", "feature/canonical", now, now); err != nil {
+		t.Fatalf("seed canonical repository row: %v", err)
+	}
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-superseded", seed.repoID, "",
+		"/tasks/superseded", "feature/superseded", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	if len(env.Repos) != 1 {
+		t.Fatalf("normalized repos = %+v, want only the canonical slot", env.Repos)
+	}
+	if env.Repos[0].WorktreeID != "wt-canonical-slot" || env.Repos[0].BranchSlug != "main" {
+		t.Fatalf("normalized repo = %+v, want wt-canonical-slot on slot main", env.Repos[0])
+	}
+}

@@ -122,6 +122,15 @@ func (t *taskWorktreeTargets) mergeSessionWorktree(wt legacySessionWorktree, his
 		}
 		return existing.verifyWorktree(wt.worktreeID, wt.worktreePath, wt.worktreeBranch)
 	}
+	// A superseded row is historical evidence, never an ownership source, so
+	// it must not open a repository slot of its own: the legacy worktree
+	// inventory already excludes it, and claiming an unowned slot would add a
+	// live worktree the inventory check then reports as extra. A deleted row
+	// is the exception, because its claim carries the deleted status and stays
+	// out of both inventories.
+	if historical && !isLegacyDeletedWorktree(wt) {
+		return nil
+	}
 	target := t.rowForKey(wt.repositoryID, wt.branchSlug)
 	if historical && target.worktreeID != "" {
 		return nil
