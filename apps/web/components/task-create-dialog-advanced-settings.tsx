@@ -7,13 +7,17 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
+import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
 import { cn } from "@/lib/utils";
+import type { TaskPriority } from "@/lib/types/http";
 
 type TaskCreateAdvancedSettingsProps = {
   isCreateMode: boolean;
   isTaskStarted: boolean;
   blockedBy: string[];
   onBlockedByChange: (next: string[]) => void;
+  priority: TaskPriority;
+  onPriorityChange: (next: TaskPriority) => void;
   dependenciesDisabled?: boolean;
 };
 
@@ -22,6 +26,8 @@ export function TaskCreateAdvancedSettings({
   isTaskStarted,
   blockedBy,
   onBlockedByChange,
+  priority,
+  onPriorityChange,
   dependenciesDisabled,
 }: TaskCreateAdvancedSettingsProps) {
   const { t } = useTranslation();
@@ -58,6 +64,9 @@ export function TaskCreateAdvancedSettings({
           className="grid min-w-0 grid-cols-1 gap-4 px-1 md:grid-cols-2"
           data-testid="task-create-advanced-settings-grid"
         >
+          <div data-testid="task-create-priority-setting-row">
+            <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
+          </div>
           <div
             className="flex min-w-0 items-center gap-3"
             data-testid="task-create-dependency-setting-row"

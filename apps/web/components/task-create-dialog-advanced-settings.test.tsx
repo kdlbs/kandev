@@ -52,6 +52,8 @@ function renderAdvancedSettings(
         isTaskStarted={false}
         blockedBy={[]}
         onBlockedByChange={() => {}}
+        priority="medium"
+        onPriorityChange={() => {}}
         {...overrides}
       />
     </TooltipProvider>,
@@ -66,6 +68,7 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(trigger.className).toContain("min-h-12");
     expect(screen.queryByTestId(DEPENDENCY_TRIGGER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("task-create-priority-select")).toBeNull();
   });
 
   it("reveals the dependency selector when expanded", () => {
@@ -76,6 +79,7 @@ describe("TaskCreateAdvancedSettings", () => {
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByTestId(DEPENDENCY_TRIGGER_TEST_ID).getAttribute("hidden")).toBeNull();
+    expect(screen.getByTestId("task-create-priority-select").getAttribute("hidden")).toBeNull();
   });
 
   it("labels the dependency setting and provides contextual help", async () => {
@@ -116,6 +120,8 @@ describe("TaskCreateAdvancedSettings", () => {
             isTaskStarted={false}
             blockedBy={blockedBy}
             onBlockedByChange={setBlockedBy}
+            priority="medium"
+            onPriorityChange={() => {}}
           />
         </TooltipProvider>
       );

@@ -92,6 +92,7 @@ test.describe("Task creation — priority control", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
+    await dialog.getByTestId("task-create-advanced-settings-trigger").click();
     const select = dialog.getByTestId("task-create-priority-select");
     await expect(select).toContainText("Medium");
 

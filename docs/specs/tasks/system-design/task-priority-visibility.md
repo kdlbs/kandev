@@ -44,7 +44,8 @@ Office task surface remains a separate consumer with its own vocabulary.
   renders a non-medium indicator, and the shared card menu sends priority
   changes through the existing update hook.
 - The task creation dialog sends the selected priority token and uses the same
-  four-token picker at every supported breakpoint.
+  four-token picker inside the Advanced settings section, which is collapsed by
+  default, at every supported breakpoint.
 - The mobile E2E scenario checks the touch target sizes and the complete create
   and update flow.
 
@@ -63,7 +64,7 @@ carry priority preserves the existing value in the client projection.
 
 Creation follows this path:
 
-`Create dialog -> task create request -> task service -> task row -> task.created -> board store -> card indicator`
+`Create dialog -> Advanced settings -> priority picker -> task create request -> task service -> task row -> task.created -> board store -> card indicator`
 
 The backend applies `medium` when a create request omits priority. The selected
 token is present in the created task and in the event consumed by the board.

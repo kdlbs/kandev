@@ -109,8 +109,10 @@ it appears on the board.
 #### Acceptance criteria
 
 - **AC-TASKS-PRIORITY-VISIBILITY-002.1:** The primary task creation dialog shall
-  offer a priority control presenting exactly the four priority tokens, each shown
-  by its localized label. This is the shared dialog component, so the control shall
+  offer a priority control inside its **Advanced settings** section, which is
+  collapsed by default.
+  The control shall present exactly the four priority tokens, each shown by its
+  localized label. This is the shared dialog component, so the control shall
   appear no matter which entry point opened it (the board, the sidebar's new-task
   action, or an integration's task launcher). Subtask creation is a separate flow
   and is excluded; see `## Out of scope`.
