@@ -319,6 +319,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
 		RemoteRefState:             req.RemoteRefState,
 		WorktreeID:                 req.WorktreeID,
+		WorktreePath:               req.WorktreePath,
 		ReuseRequired:              req.WorkspaceReuseRequired && !req.AllowBranchReplacement,
 		AllowBranchReplacement:     req.AllowBranchReplacement,
 		TaskDirName:                req.TaskDirName,
@@ -563,6 +564,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.RemoteContribution = spec.RemoteContribution
 	subReq.ContributionDestination = spec.ContributionDestination
 	subReq.WorktreeID = spec.WorktreeID
+	subReq.WorktreePath = spec.WorktreePath
 	subReq.WorkspaceReuseRequired = req.WorkspaceReuseRequired || spec.WorkspaceReuseRequired
 	subReq.AllowBranchReplacement = req.AllowBranchReplacement || spec.AllowBranchReplacement
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix

@@ -689,6 +689,70 @@ func TestMaterializeRepositoriesForEnvironment_RemovesCheckoutsBeforeReconciling
 	}
 }
 
+// TestMaterializeRepositoriesForEnvironmentRollsBackNonCloneRescanWhenLaterCloneRefreshFails
+// covers the mixed-runtime case: a plain (non-clone) execution's rescan
+// succeeds first, then a later mutable-clone execution's post-materialization
+// policy refresh fails. The earlier successful rescan must be rolled back
+// (reconciled back to its prior roots) alongside the clone-side compensation,
+// not left pointing at the now-removed attached repository.
+func TestMaterializeRepositoriesForEnvironmentRollsBackNonCloneRescanWhenLaterCloneRefreshFails(t *testing.T) {
+	plain := newWorkspaceRebindAgentctlServer(t, false)
+	clone := newWorkspaceRebindAgentctlServer(t, false)
+	clone.failAttestAt = 1
+	t.Cleanup(plain.Close)
+	t.Cleanup(plain.closeConnections)
+	t.Cleanup(clone.Close)
+	t.Cleanup(clone.closeConnections)
+
+	store := NewExecutionStore()
+	plainExecution := &AgentExecution{
+		ID:                   "execution-1",
+		SessionID:            "session-1",
+		TaskEnvironmentID:    "environment-1",
+		WorkspacePath:        "/executor/plain",
+		WorkspaceSourceRoots: []string{"/executor/plain"},
+		Status:               v1.AgentStatusReady,
+		agentctl:             workspaceMaterializationAgentctlClient(t, plain.URL),
+	}
+	if err := store.Add(plainExecution); err != nil {
+		t.Fatal(err)
+	}
+	cloneExecution := &AgentExecution{ID: "execution-2", SessionID: "session-2", TaskEnvironmentID: "environment-1", agentctl: workspaceMaterializationAgentctlClient(t, clone.URL)}
+	configureCloneAttachmentExecution(cloneExecution, "execution-2", "session-2", "environment-1", "/executor/two")
+	if err := store.Add(cloneExecution); err != nil {
+		t.Fatal(err)
+	}
+
+	streamManager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	t.Cleanup(streamManager.Wait)
+	manager := &Manager{executionStore: store, logger: newTestLogger(), streamManager: streamManager}
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/acme/added.git",
+		Destination:   "added-main",
+		BaseBranch:    "main",
+	}})
+	if err == nil {
+		t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite clone refresh failure")
+	}
+	if !sameStrings(plainExecution.WorkspaceSourceRoots, []string{"/executor/plain"}) {
+		t.Fatalf("plain execution roots = %v, want untouched prior root", plainExecution.WorkspaceSourceRoots)
+	}
+	plainOps := plain.operationLog()
+	if !sameStrings(plainOps, []string{"materialize", "rescan", "remove", "reconcile"}) {
+		t.Fatalf("plain server operations = %v, want materialize, rescan, checkout removal, then reconcile rollback", plainOps)
+	}
+	if plain.hasMaterialized("added-main") {
+		t.Fatal("plain executor retained the attached checkout after clone executor refresh failed")
+	}
+	if clone.hasMaterialized("added-main") {
+		t.Fatal("clone executor retained the attached checkout after its own refresh failed")
+	}
+}
+
 func workspaceMaterializationAgentctlClient(t *testing.T, rawURL string) *agentctl.Client {
 	t.Helper()
 	parsed, err := url.Parse(rawURL)

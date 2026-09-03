@@ -631,6 +631,130 @@ func TestCreate_TryReuseExistingRejectsSymlinkedWorktreePath(t *testing.T) {
 	}
 }
 
+// TestCreate_ReusesWorktreeByPersistedPathWhenSessionRepoLookupMisses covers
+// the resumed multi-repository containment fix: when the primary
+// (session, repository, branch-slug) lookup misses — for example, because
+// the branch-layout slug changed between the original launch and this
+// resume — but the request carries a durable WorktreePath from the task
+// environment's persisted repository record that exactly matches an
+// existing worktree row owned by this session and repository, Create must
+// reuse that worktree rather than recreate the checkout at a different path.
+func TestCreate_ReusesWorktreeByPersistedPathWhenSessionRepoLookupMisses(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	cfg := newTestConfig(t)
+	tasksBase := cfg.TasksBasePath
+
+	taskDir := filepath.Join(tasksBase, "resume-task_path1")
+	if err := os.MkdirAll(taskDir, 0755); err != nil {
+		t.Fatalf("mkdir task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(taskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "task-resume-path1",
+		TaskDirName:   "resume-task_path1",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write ownership marker: %v", err)
+	}
+	worktreePath := filepath.Join(taskDir, "my-repo")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/resume-path1", worktreePath, "main")
+
+	store := newMockStore()
+	store.worktrees["wt-path1"] = &Worktree{
+		ID:           "wt-path1",
+		TaskID:       "task-resume-path1",
+		SessionID:    "session-resume-path1",
+		RepositoryID: "repository-1",
+		// A different persisted BranchSlug than the resume request below
+		// simulates a renamed branch-layout slug, forcing the primary
+		// session+repo+slug lookup to miss.
+		BranchSlug: "old-slug",
+		Path:       worktreePath,
+		Branch:     "feature/resume-path1",
+		Status:     StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-resume-path1",
+		SessionID:      "session-resume-path1",
+		RepositoryID:   "repository-1",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		BranchSlug:     "new-slug",
+		WorktreePath:   worktreePath,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want reuse via persisted WorktreePath", err)
+	}
+	if wt.ID != "wt-path1" || wt.Path != worktreePath {
+		t.Fatalf("Create() = %+v, want reuse of existing worktree wt-path1 at %q", wt, worktreePath)
+	}
+	if !wt.Reused {
+		t.Fatal("Create() did not mark the resumed worktree as reused")
+	}
+}
+
+// TestCreate_IgnoresPersistedPathFromAnotherRepository confirms the
+// WorktreePath fallback tier never adopts a path match belonging to a
+// different repository within the same session — the exact-path match must
+// be scoped by RepositoryID, not by path alone.
+func TestCreate_IgnoresPersistedPathFromAnotherRepository(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	cfg := newTestConfig(t)
+	tasksBase := cfg.TasksBasePath
+
+	taskDir := filepath.Join(tasksBase, "resume-task_path2")
+	if err := os.MkdirAll(taskDir, 0755); err != nil {
+		t.Fatalf("mkdir task dir: %v", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(taskDir, storageworkspaces.OwnershipMarker{
+		TaskID:        "task-resume-path2",
+		TaskDirName:   "resume-task_path2",
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("write ownership marker: %v", err)
+	}
+	worktreePath := filepath.Join(taskDir, "other-repo")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/other-repo", worktreePath, "main")
+
+	store := newMockStore()
+	store.worktrees["wt-path2"] = &Worktree{
+		ID:           "wt-path2",
+		TaskID:       "task-resume-path2",
+		SessionID:    "session-resume-path2",
+		RepositoryID: "repository-other",
+		BranchSlug:   "old-slug",
+		Path:         worktreePath,
+		Branch:       "feature/other-repo",
+		Status:       StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-resume-path2",
+		SessionID:      "session-resume-path2",
+		RepositoryID:   "repository-requested",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		BranchSlug:     "new-slug",
+		WorktreePath:   worktreePath,
+		TaskDirName:    "resume-task_path2b",
+		RepoName:       "my-repo",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if wt.ID == "wt-path2" || wt.Path == worktreePath {
+		t.Fatalf("Create() = %+v, must not reuse another repository's worktree at the same path", wt)
+	}
+}
+
 func TestCreate_ReuseRequiredAllowsTransferredEnvironmentOwner(t *testing.T) {
 	repoPath := initGitRepoWithRemote(t)
 	cfg := newTestConfig(t)

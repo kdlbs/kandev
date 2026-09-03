@@ -260,6 +260,17 @@ type CreateRequest struct {
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
 	WorktreeID string
 
+	// WorktreePath is the last known-durable on-disk checkout path for this
+	// (SessionID, RepositoryID) pair, carried from the task environment's
+	// persisted repository record. It is consulted only when the primary
+	// session+repository+branch-slug lookup and the WorktreeID lookup both
+	// miss (for example, a legacy environment persisted before WorktreeID
+	// existed, combined with a changed branch-layout slug). The path is never
+	// trusted on its own: it is used solely to filter this session's own
+	// persisted worktree rows by exact canonical path, never to adopt an
+	// arbitrary directory as a worktree.
+	WorktreePath string
+
 	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
 	// When set together with RepoName, the worktree is placed at
 	// ~/.kandev/tasks/{TaskDirName}/{RepoName}/ instead of ~/.kandev/worktrees/.

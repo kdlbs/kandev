@@ -1260,6 +1260,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				PRNumber:                   r.PRNumber,
 				RemoteContribution:         r.RemoteContribution,
 				WorktreeID:                 r.WorktreeID,
+				WorktreePath:               r.WorktreePath,
 				AllowBranchReplacement:     req.AllowBranchReplacement || r.AllowBranchReplacement,
 				WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
 				WorktreeBranchTemplate:     r.WorktreeBranchTemplate,

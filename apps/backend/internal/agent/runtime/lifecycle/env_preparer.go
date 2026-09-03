@@ -79,6 +79,10 @@ type RepoPrepareSpec struct {
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution *models.RemoteContribution
 	WorktreeID         string
+	// WorktreePath is the durable resumed checkout path persisted on the task
+	// environment repository row. See worktree.CreateRequest.WorktreePath for
+	// how it is consulted as a last-resort reuse signal.
+	WorktreePath string
 	// WorkspaceReuseRequired makes preparation attach to the exact canonical
 	// environment. It forbids worktree creation/recreation and all repository
 	// mutating setup paths.
@@ -132,7 +136,11 @@ type EnvPrepareRequest struct {
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
 	WorktreeID              string
-	WorktreeBranch          string
+	// WorktreePath is the durable resumed checkout path persisted on the task
+	// environment repository row. See worktree.CreateRequest.WorktreePath for
+	// how it is consulted as a last-resort reuse signal.
+	WorktreePath   string
+	WorktreeBranch string
 	// WorkspaceReuseRequired applies attach-only semantics to every repository
 	// in this request. RepoPrepareSpec carries the same value so multi-repo
 	// callers can retain it while requests are split.
