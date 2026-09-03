@@ -1341,6 +1341,15 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+	// AC-EXECUTORS-SURVIVAL-002.8/002.16: refuse rather than queue or block a
+	// launch for a session whose recovery guard is currently held. Checked
+	// first, before any activity lease or singleflight coalescing, so a
+	// guarded session can never partially acquire launch-path state.
+	if req.SessionID != "" {
+		if err := m.recoveryGuard.CheckLaunchAllowed(req.SessionID); err != nil {
+			return nil, err
+		}
+	}
 	if req.SessionID == "" {
 		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
 		if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -51,11 +52,34 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Warn("failed to read live standalone recovery-inventory records", zap.Error(listErr))
 	}
 
+	// Take a recovery guard for every named session except a confirmed
+	// passthrough one, BEFORE any control server is contacted, so a
+	// concurrent launch request cannot race re-tracking
+	// (AC-EXECUTORS-SURVIVAL-002.8, AC-EXECUTORS-SURVIVAL-005.3). No lookup
+	// configured is treated the same as a failed read: every session is
+	// guarded rather than excluded.
+	passthroughLookup := m.passthroughLookup
+	if passthroughLookup == nil {
+		passthroughLookup = func(context.Context, string) (bool, bool) { return false, false }
+	}
+	guardedSessions := SessionsToGuard(ctx, sessionIDsFromExecutorRunning(records), passthroughLookup)
+	for _, sessionID := range guardedSessions {
+		m.recoveryGuard.AcquireOrObserve(sessionID)
+	}
+
 	// Try to recover executions from all runtimes
 	recovered, err := m.executorRegistry.RecoverAll(ctx, records)
 	if err != nil {
 		m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
 	}
+
+	// Recovery is synchronous above: by this point every guarded session's
+	// outcome (re-tracked or not) is already decided, so every guard taken
+	// for this pass is released now. ReleaseAllExceptRetained leaves held
+	// whatever a later layer marks retained-unstoppable or stop-in-flight
+	// (AC-EXECUTORS-SURVIVAL-002.16, AC-EXECUTORS-SURVIVAL-003.7); neither is
+	// wired into this synchronous startup pass yet.
+	m.recoveryGuard.ReleaseAllExceptRetained()
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
 			execution := &AgentExecution{
@@ -158,6 +182,18 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// sessionIDsFromExecutorRunning extracts the distinct, non-empty session
+// identities named by a set of recovery-inventory records.
+func sessionIDsFromExecutorRunning(records []*models.ExecutorRunning) []string {
+	sessionIDs := make([]string, 0, len(records))
+	for _, rec := range records {
+		if rec != nil && rec.SessionID != "" {
+			sessionIDs = append(sessionIDs, rec.SessionID)
+		}
+	}
+	return sessionIDs
 }
 
 // GetRecoveredExecutions returns a snapshot of all currently tracked executions

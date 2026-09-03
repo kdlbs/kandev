@@ -89,6 +89,21 @@ type Manager struct {
 	// permissions, so they get different checks.
 	sessionExecCheck func(ctx context.Context, sessionID string) error
 
+	// recoveryGuard is the in-memory per-session acquire-or-observe map of
+	// AC-EXECUTORS-SURVIVAL-002.8, taken over the live standalone
+	// recovery-inventory records at startup step 3 before any control server
+	// is contacted, and consulted by Launch to refuse a concurrent request
+	// for a session that might still be re-tracking. Always non-nil.
+	recoveryGuard *RecoveryGuard
+
+	// passthroughLookup reads a session's durable passthrough mode
+	// (TaskSession.IsPassthrough) for AC-EXECUTORS-SURVIVAL-005.3's startup
+	// guard exclusion. Nil = every live standalone session is guarded (the
+	// safe default: guarding a passthrough session by mistake only costs one
+	// refused launch, never excluding a real candidate). See
+	// SetPassthroughLookup.
+	passthroughLookup PassthroughLookup
+
 	// environmentAccessCheck is the environment-keyed sibling of
 	// sessionAccessCheck, used by the terminal environment-shell route which
 	// resolves executions by environment ID. Nil = no scoping.
@@ -320,6 +335,7 @@ func NewManager(
 		stopCh:                   stopCh,
 		skillDeployer:            NoopSkillDeployer(),
 		remediateNpxCache:        routingerr.RemediateNpxCache,
+		recoveryGuard:            NewRecoveryGuard(),
 	}
 	// Initialize stream manager with callbacks that delegate to manager methods
 	// mcpHandler will be set later via SetMCPHandler.
@@ -480,6 +496,17 @@ func (m *Manager) CheckSessionExecAccess(ctx context.Context, sessionID string) 
 		return m.CheckSessionAccess(ctx, sessionID)
 	}
 	return m.sessionExecCheck(ctx, sessionID)
+}
+
+// SetPassthroughLookup installs the durable passthrough-mode read used at
+// startup step 3 to exclude passthrough sessions from the recovery guard
+// (AC-EXECUTORS-SURVIVAL-005.3). Must read TaskSession.IsPassthrough from the
+// durable store, never from in-memory execution state -- that state is empty
+// at this point in startup, which would silently guard every passthrough
+// session instead of excluding it. Set once during startup wiring, before
+// Start runs.
+func (m *Manager) SetPassthroughLookup(lookup PassthroughLookup) {
+	m.passthroughLookup = lookup
 }
 
 // SetAttachmentReader wires the backend attachment reader used by prompt
