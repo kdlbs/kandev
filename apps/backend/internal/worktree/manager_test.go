@@ -506,17 +506,60 @@ func TestIsAdminDirectoryMissing(t *testing.T) {
 	}
 }
 
-func TestClaimRecoveryOperationIsExclusive(t *testing.T) {
+func TestRecoveryOperationLockIsExclusiveAndReleasesForAdoption(t *testing.T) {
 	claimPath := filepath.Join(t.TempDir(), "recovery.claim")
-	if err := claimRecoveryOperation(claimPath, "operation-1"); err != nil {
+	first, err := acquireRecoveryOperation(claimPath)
+	if err != nil {
 		t.Fatalf("first recovery claim: %v", err)
 	}
-	if err := claimRecoveryOperation(claimPath, "operation-2"); !errors.Is(err, os.ErrExist) {
-		t.Fatalf("second recovery claim error = %v, want os.ErrExist", err)
+	second, err := acquireRecoveryOperation(claimPath)
+	if !errors.Is(err, errRecoveryOperationClaimed) {
+		t.Fatalf("second recovery claim error = %v, want errRecoveryOperationClaimed", err)
 	}
-	content, err := os.ReadFile(claimPath)
-	if err != nil || string(content) != "operation-1\n" {
-		t.Fatalf("claim content = %q, err=%v, want first operation", content, err)
+	if second != nil {
+		_ = second.Close()
+		t.Fatal("second recovery claim unexpectedly acquired the lock")
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("release first recovery claim: %v", err)
+	}
+	adopted, err := acquireRecoveryOperation(claimPath)
+	if err != nil {
+		t.Fatalf("recovery claim after owner exit: %v", err)
+	}
+	if err := adopted.Close(); err != nil {
+		t.Fatalf("release adopted recovery claim: %v", err)
+	}
+}
+
+func TestRecoveryRecordIsAdoptableAfterRestart(t *testing.T) {
+	worktreePath := t.TempDir()
+	jobPath := worktreePath + ".kandev-recovery.json"
+	claimPath := worktreePath + ".kandev-recovery.claim"
+	if err := os.WriteFile(claimPath, []byte("orphaned operation\n"), 0o600); err != nil {
+		t.Fatalf("write orphaned recovery claim: %v", err)
+	}
+	original := recoveryRecord{
+		OperationID: "operation-1", TaskID: "task-1", WorktreeID: "worktree-1",
+		Original: worktreePath, Snapshot: worktreePath + ".snapshot",
+		State: RecoveryStateSnapshotting,
+	}
+	if err := createRecoveryRecord(jobPath, original); err != nil {
+		t.Fatalf("create recovery record: %v", err)
+	}
+	adopted, snapshot, err := loadOrClaimRecovery(&Worktree{ID: original.WorktreeID, TaskID: original.TaskID, Path: worktreePath}, jobPath)
+	if err != nil {
+		t.Fatalf("adopt recovery record: %v", err)
+	}
+	if adopted.OperationID != original.OperationID || snapshot != original.Snapshot {
+		t.Fatalf("adopted record = %+v, snapshot=%q; want %+v", adopted, snapshot, original)
+	}
+	claim, err := acquireRecoveryOperation(claimPath)
+	if err != nil {
+		t.Fatalf("adopt orphaned recovery claim: %v", err)
+	}
+	if err := claim.Close(); err != nil {
+		t.Fatalf("release adopted orphaned recovery claim: %v", err)
 	}
 }
 

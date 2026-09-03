@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -49,6 +50,8 @@ type CompareAndSwapWorktreeStore interface {
 	CompareAndSwapWorktree(ctx context.Context, expected, replacement *Worktree) (bool, error)
 }
 
+var errRecoveryOperationClaimed = errors.New("recovery operation is currently claimed")
+
 // RecoverWorktree snapshots a damaged checkout and rematerializes it beside
 // the original. The original and snapshot are retained; callers can validate
 // and explicitly clean them up later.
@@ -65,10 +68,11 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 		return nil, fmt.Errorf("%w: recovery ownership validation failed: %w", ErrWorktreeCorrupted, err)
 	}
 	jobPath := wt.Path + ".kandev-recovery.json"
-	record, snapshotPath, err := loadOrClaimRecovery(wt, jobPath)
+	record, snapshotPath, claim, err := beginRecovery(wt, jobPath)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = claim.Close() }()
 	manifest, err := prepareRecoverySnapshot(wt.Path, snapshotPath, jobPath, record)
 	if err != nil {
 		return nil, err
@@ -119,6 +123,18 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	return &replacement, nil
 }
 
+func beginRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, *recoveryLock, error) {
+	record, snapshotPath, err := loadOrClaimRecovery(wt, jobPath)
+	if err != nil {
+		return recoveryRecord{}, "", nil, err
+	}
+	claim, err := acquireRecoveryOperation(wt.Path + ".kandev-recovery.claim")
+	if err != nil {
+		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, err.Error())
+	}
+	return record, snapshotPath, claim, nil
+}
+
 func loadOrClaimRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, error) {
 	snapshotPath := wt.Path + ".kandev-recovery-" + uuid.NewString()
 	record := recoveryRecord{
@@ -127,36 +143,62 @@ func loadOrClaimRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, 
 		UpdatedAt: time.Now().UTC(),
 	}
 	if existing, err := readRecoveryRecord(jobPath); err == nil {
-		if existing.TaskID != wt.TaskID || existing.WorktreeID != wt.ID {
-			return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record ownership is ambiguous")
-		}
-		return recoveryRecord{}, "", recoveryStateError(wt, existing.State)
+		return adoptRecoveryRecord(wt, existing)
 	} else if !os.IsNotExist(err) {
 		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record is unreadable")
 	}
-	if err := claimRecoveryOperation(wt.Path+".kandev-recovery.claim", record.OperationID); err != nil {
-		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, err.Error())
-	}
-	if err := writeRecoveryRecord(jobPath, record); err != nil {
+	if err := createRecoveryRecord(jobPath, record); err != nil {
+		if existing, readErr := readRecoveryRecord(jobPath); readErr == nil && existing.TaskID == wt.TaskID && existing.WorktreeID == wt.ID {
+			return adoptRecoveryRecord(wt, existing)
+		}
 		return recoveryRecord{}, "", err
 	}
 	return record, snapshotPath, nil
 }
 
-func claimRecoveryOperation(path, operationID string) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+func adoptRecoveryRecord(wt *Worktree, existing recoveryRecord) (recoveryRecord, string, error) {
+	if existing.TaskID != wt.TaskID || existing.WorktreeID != wt.ID {
+		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record ownership is ambiguous")
+	}
+	if existing.Original != wt.Path || existing.Snapshot == "" || existing.OperationID == "" {
+		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record identity is incomplete")
+	}
+	if existing.State == RecoveryStateBlocked || existing.State == RecoveryStateComplete {
+		return recoveryRecord{}, "", recoveryStateError(wt, existing.State)
+	}
+	return existing, existing.Snapshot, nil
+}
+
+func createRecoveryRecord(path string, record recoveryRecord) error {
+	data, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
-	if _, writeErr := file.WriteString(operationID + "\n"); writeErr != nil {
-		_ = file.Close()
-		return writeErr
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".kandev-recovery-*")
+	if err != nil {
+		return fmt.Errorf("create recovery record: %w", err)
 	}
-	if syncErr := file.Sync(); syncErr != nil {
-		_ = file.Close()
-		return syncErr
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+	if err := tmp.Chmod(0600); err != nil {
+		return err
 	}
-	return file.Close()
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Link(tmpPath, path); err != nil {
+		return err
+	}
+	return syncFile(filepath.Dir(path))
 }
 
 func recoveryStateError(wt *Worktree, state RecoveryState) error {
