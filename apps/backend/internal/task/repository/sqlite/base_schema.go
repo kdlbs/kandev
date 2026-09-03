@@ -22,7 +22,6 @@ func (r *Repository) initSchema() error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
-		r.initWorkspaceInventoryRecoverySchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
@@ -49,6 +48,7 @@ func (r *Repository) initSchema() error {
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
+		r.initWorkspaceInventoryRecoverySchema,
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
