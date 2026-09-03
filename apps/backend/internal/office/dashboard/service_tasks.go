@@ -413,10 +413,9 @@ func (s *DashboardService) addOrRemoveParticipant(
 }
 
 // applyParticipantAddOutcome drives the post-commit side effects an add
-// outcome earns (docs/specs/office/system-design/participant-seat-provenance-01.md,
-// "The registration writer reports its outcome"). Unchanged earns none —
-// an identity-probe hit, promotion included, raises no activity entry and
-// publishes no notification. Claimed additionally records the takeover,
+// outcome earns. Unchanged earns none — an identity-probe hit, promotion
+// included, raises no activity entry and publishes no notification.
+// Claimed additionally records the takeover,
 // ends the displaced agent's live session, and cancels the run already
 // queued for it. Inserted is the plain-registration path, unchanged from
 // before this write reported an outcome. No order among these effects is
@@ -429,8 +428,12 @@ func (s *DashboardService) applyParticipantAddOutcome(
 		return
 	case sqlite.ParticipantWriteOutcomeClaimed:
 		s.logParticipantClaimActivity(ctx, taskID, result.StepID, role, result.DisplacedAgentProfileID, agentID)
-		s.terminateDisplacedSession(ctx, taskID, result.DisplacedAgentProfileID, role)
-		s.cancelDisplacedRun(ctx, taskID, result.StepID, result.DisplacedAgentProfileID)
+		// Detached from ctx: these run after the claim has already
+		// committed, so a caller (HTTP request, WS handler) that cancels
+		// after that point must not also cancel the cleanup it earned.
+		detachedCtx := context.WithoutCancel(ctx)
+		s.terminateDisplacedSession(detachedCtx, taskID, result.DisplacedAgentProfileID, role)
+		s.cancelDisplacedRun(detachedCtx, taskID, result.StepID, result.DisplacedAgentProfileID)
 	case sqlite.ParticipantWriteOutcomeInserted:
 		s.logParticipantActivity(ctx, taskID, agentID, role, "task_participant_added")
 	}

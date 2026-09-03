@@ -115,12 +115,11 @@ type ParticipantWriteResult struct {
 
 // AddTaskParticipant registers agentID in role for taskID, claiming an
 // unclaimed automatic seat in place when one exists rather than always
-// inserting a second seat into the role's slate
-// (docs/specs/office/requirements/participant-seat-provenance.md,
-// REQ-OFFICE-SEAT-PROVENANCE-002). Returns ParticipantWriteOutcomeUnchanged,
-// with no error, when the task has no workflow_step_id yet or does not
-// exist — the caller surface gives no way to reject creation, and a later
-// step-set will not retroactively add the participant.
+// inserting a second seat into the role's slate. Returns
+// ParticipantWriteOutcomeUnchanged, with no error, when the task has no
+// workflow_step_id yet or does not exist — the caller surface gives no way
+// to reject creation, and a later step-set will not retroactively add the
+// participant.
 //
 // Both this writer and automatic casting's EnsureRoleSeat
 // (internal/workflow/repository) serialize on the same advisory lock,
