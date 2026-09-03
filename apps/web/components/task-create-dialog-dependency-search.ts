@@ -1,14 +1,20 @@
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskPR } from "@/lib/types/github";
 import { taskPRInfoFromSummary } from "@/components/task/task-pr-info";
 
 type Task = KanbanState["tasks"][number];
 
 /** GitHub PR + GitLab MR numbers linked to a task, de-duplicated and ascending. */
-export function changeRequestNumbers(task: Task, mrsForTask: TaskMR[]): number[] {
+export function changeRequestNumbers(
+  task: Task,
+  mrsForTask: TaskMR[],
+  prsForTask: TaskPR[] = [],
+): number[] {
   const numbers = new Set<number>();
   const prNumber = taskPRInfoFromSummary(task.statusSummary)?.number;
   if (prNumber) numbers.add(prNumber);
+  for (const pr of prsForTask) numbers.add(pr.pr_number);
   for (const mr of mrsForTask) numbers.add(mr.mr_iid);
   return [...numbers].sort((a, b) => a - b);
 }
@@ -20,8 +26,10 @@ export function dependencyOptionValue(task: Task, numbers: number[]): string {
 }
 
 function timestampMs(task: Task): number | undefined {
-  const value = task.updatedAt ?? task.createdAt;
-  return value ? new Date(value).getTime() : undefined;
+  const updated = task.updatedAt ? Date.parse(task.updatedAt) : NaN;
+  if (Number.isFinite(updated)) return updated;
+  const created = task.createdAt ? Date.parse(task.createdAt) : NaN;
+  return Number.isFinite(created) ? created : undefined;
 }
 
 /** Most-recently-updated first, falling back to createdAt then title. */

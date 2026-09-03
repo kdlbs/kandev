@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskPR } from "@/lib/types/github";
 import { TaskCreateDependencies } from "./task-create-dialog-dependencies";
 
 const WORKSPACE_ID = "workspace-1";
@@ -13,6 +14,7 @@ type MockStore = {
   kanbanMulti: { snapshots: Record<string, { tasks?: KanbanState["tasks"] }> };
   workspaces: { activeId: string | null };
   taskMRs: { byWorkspaceId: Record<string, Record<string, TaskMR[]>> };
+  taskPRs: { byTaskId: Record<string, TaskPR[]> };
 };
 
 const ALPHA_ID = "task-alpha";
@@ -32,7 +34,34 @@ function emptyStore(): MockStore {
     kanbanMulti: { snapshots: {} },
     workspaces: { activeId: WORKSPACE_ID },
     taskMRs: { byWorkspaceId: {} },
+    taskPRs: { byTaskId: {} },
   };
+}
+
+function taskPR(overrides: Partial<TaskPR> = {}): TaskPR {
+  return {
+    id: "pr-assoc-1",
+    workspace_id: WORKSPACE_ID,
+    task_id: ALPHA_ID,
+    owner: "kdlbs",
+    repo: "kandev",
+    pr_number: 3295,
+    pr_url: "https://github.com/kdlbs/kandev/pull/3295",
+    pr_title: "fix flaky test",
+    head_branch: "fix",
+    base_branch: "main",
+    author_login: "nova28",
+    state: "merged",
+    review_state: "",
+    checks_state: "",
+    mergeable_state: "mergeable",
+    review_count: 0,
+    pending_review_count: 0,
+    comment_count: 0,
+    unresolved_review_threads: 0,
+    checks_total: 0,
+    ...overrides,
+  } as TaskPR;
 }
 
 let mockStore: MockStore = emptyStore();
@@ -181,7 +210,7 @@ describe("TaskCreateDependencies", () => {
 
 describe("TaskCreateDependencies change-request search", () => {
   it("narrows to the PR-linked task when searching by PR number and shows its badge", () => {
-    const prTask = task(ALPHA_ID, "[Auto] PR merged - kdlbs/kandev#3295 fix flaky test", {
+    const prTask = task(ALPHA_ID, ALPHA_TITLE, {
       statusSummary: { pull_request: { number: 3295, state: "merged" } } as never,
     });
     mockStore = {
@@ -261,5 +290,40 @@ describe("TaskCreateDependencies change-request search", () => {
       .getAllByTestId(/task-create-dependency-option-/)
       .map((option) => option.getAttribute("data-testid"));
     expect(options).toEqual([optionTestId(BETA_ID), optionTestId(ALPHA_ID)]);
+  });
+});
+
+describe("TaskCreateDependencies multi-PR change requests", () => {
+  it("shows a badge for every GitHub PR linked to a multi-repo task and finds it by any number", () => {
+    const prTask = task(ALPHA_ID, ALPHA_TITLE, {
+      statusSummary: { pull_request: { number: 1001, state: "open" } } as never,
+    });
+    mockStore = {
+      ...emptyStore(),
+      kanban: {
+        tasks: [prTask, task(BETA_ID, BETA_TITLE)],
+      },
+      taskPRs: {
+        byTaskId: {
+          [ALPHA_ID]: [
+            taskPR({ id: "pr-assoc-1", pr_number: 1001, repo: "kandev" }),
+            taskPR({ id: "pr-assoc-2", pr_number: 1002, repo: "kandev-docs" }),
+          ],
+        },
+      },
+    };
+
+    renderDependencies();
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+
+    const picker = screen.getByTestId(POPOVER_TEST_ID);
+    const alphaOption = within(picker).getByTestId(optionTestId(ALPHA_ID));
+    expect(within(alphaOption).getByText("#1001")).toBeTruthy();
+    expect(within(alphaOption).getByText("#1002")).toBeTruthy();
+
+    const search = within(picker).getByPlaceholderText(SEARCH_TASKS_LABEL);
+    fireEvent.change(search, { target: { value: "1002" } });
+    expect(within(picker).getByTestId(optionTestId(ALPHA_ID))).toBeTruthy();
+    expect(within(picker).queryByTestId(optionTestId(BETA_ID))).toBeNull();
   });
 });
