@@ -11,6 +11,7 @@ import type {
   AgentProfileRecentUseApiRecord,
   WorkflowProfileSessionStartPolicy,
   WorkflowProfileSessionEndPolicy,
+  TaskPriority,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -204,7 +205,7 @@ type CreateTaskOpts = {
   /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
   start_when_unblocked?: boolean;
   /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
-  priority?: string;
+  priority?: TaskPriority;
 };
 
 export type TaskDependencyRef = {
@@ -507,7 +508,7 @@ export class ApiClient {
       /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
       start_when_unblocked?: boolean;
       /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
-      priority?: string;
+      priority?: TaskPriority;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -536,7 +537,7 @@ export class ApiClient {
   }
 
   /** Simulates a REST API caller (or another browser client) setting priority. */
-  async updateTaskPriority(taskId: string, priority: string): Promise<void> {
+  async updateTaskPriority(taskId: string, priority: TaskPriority): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { priority });
   }
 
@@ -2414,7 +2415,7 @@ export class ApiClient {
     primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
-    priority?: string;
+    priority?: TaskPriority;
     parent_id?: string;
     metadata?: Record<string, unknown> | null;
     repositories?: Array<{

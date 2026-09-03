@@ -10,43 +10,15 @@ owners:
 
 ## Overview
 
-Every kanban task already carries a priority. The column exists, the four-value
-vocabulary is fixed by a database `CHECK` constraint, the create and update APIs
-accept it, and it travels on the task DTO, the workflow snapshot and every task
-event. `apps/web/components/kanban-card.tsx` declares `priority?: TaskPriority`
-and never reads it.
+Kanban tasks use four priority tokens: `critical`, `high`, `medium`, and `low`.
+People can see non-medium priorities on task cards and can set the priority when
+they create or triage a task. Existing task storage, APIs, and events already
+carry the value. This capability makes that value visible and usable on the
+kanban board without changing the task model or priority vocabulary.
 
-So the value is set by the Office task UI, by REST API callers and by the
-database default, and no one working the kanban board can see it or change it.
-The MCP task tools do not accept priority on create or update, so an agent
-cannot set it either. The board is the surface where a person decides what to
-pick up next, and the one field that answers that question is invisible there.
-
-The storage and the REST contract are complete, but the delivery paths that feed
-the board are not, and the gaps are invisible today precisely because nothing
-renders the value. Two are live. The Go boot payload's task mapper,
-`mapKanbanTaskState`, is a camelCase whitelist that does not list `priority`, so
-the board's first paint carries none. The web client's `updateTask` payload type
-omits `priority`, so no browser code can change it. This is the same class of
-defect already found and regression-tested for `auto_start_failed`, where "the
-very first paint was wrong" until a later event corrected it.
-
-A third omission exists but is not reachable today. The `kanban.update` WebSocket
-handler rebuilds each task from an explicit field list that neither carries
-`priority` nor preserves it. No server code publishes the `kanban.update` action,
-so that handler does not run in production; the live board-refresh path is
-`task.updated`, which already carries priority. Closing that omission is
-defensive work, verifiable by unit test only. It is not the observable target of
-AC-TASKS-PRIORITY-VISIBILITY-001.9, and no acceptance criterion may be verified
-by waiting for a `kanban.update` frame, because none arrives.
-
-The acceptance criteria below are written to be unsatisfiable without closing the
-two live gaps.
-
-This capability makes priority observable on the kanban card and settable by a
-person, at creation and afterwards. It adds no storage, no migration, no new
-endpoint and no new vocabulary. The `tasks` system owns it because the durable
-artifact is the task's priority, not the board that draws it.
+The `tasks` system owns this capability because priority is part of the durable
+task record. The board is one presentation and interaction surface for that
+record.
 
 ## Terminology
 
@@ -64,42 +36,11 @@ artifact is the task's priority, not the board that draws it.
 
 ## Prior art
 
-**Wiki leg — DID NOT RUN, vault unreadable.** Resolved via `@henry` to
-`OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`,
-`QMD_WIKI_COLLECTION="wiki"`. The path exists and is user-owned, but every read
-returns `Operation not permitted` even with the sandbox disabled (macOS protects
-`~/Documents` for this process). No `obsidian-wiki` or `qmd` CLI on `PATH` and no
-`qmd` MCP server, so there was no fallback transport. No wiki content informed
-this document.
-
-**Vendor leg — DID NOT RUN, tool unreachable.** The `saas-kb` MCP server and its
-`search_fsm_docs` tool are not registered in this session, so the `ai_sdlc`
-category was not queried. No vendor claims informed this document.
-
-**In-repo prior art — searched `apps/web` for `priority` and read the Office task
-surfaces.** The leg that produced something, and the strongest of the three,
-because Kandev has already shipped this feature once. The Office UI has a
-complete priority implementation: `PRIORITY_LABEL_KEYS` in
-`apps/web/app/office/lib/label-keys.ts`, a fallback priority ordering, a picker in
-the new-task bottom bar, and priority sort, filter and grouping over its task
-tree. Its label-keys module also records the convention this document follows:
-the record keys are wire values that "are never translated", and the table stores
-keys rather than resolved labels because "a `t()` here would resolve once at
-import and freeze at the boot locale".
-
-The backend has already made the same ordering decision too. The WIP-queue pull
-queries in `apps/backend/internal/task/repository/sqlite/task.go` order by
-`position` first and only then by a `CASE` over priority, so priority is a
-tiebreak inside a manually ordered list and does not override it.
-
-**What is different here.** Office and kanban do not share a vocabulary. Office
-adds a fifth token, `none`, and lets a workspace override its priority labels as
-data; the kanban vocabulary is exactly four tokens pinned by a database `CHECK`
-constraint, with no workspace override. The Office labels therefore live in the
-`office` namespace and are not reused across it. This capability re-states the
-same four labels in the `kanban` namespace, using the wording already translated
-in all five locales, and adopts Office's key-not-label convention without
-importing its module or its `none` case.
+The Office task surface already uses a priority picker and localized labels. It
+has a separate vocabulary that includes `none` and supports workspace-defined
+labels. Kanban keeps its own four-token vocabulary and localized labels, so the
+two surfaces remain independent while following the same token-versus-label
+convention.
 
 ## Requirements
 
@@ -271,46 +212,17 @@ compared or sent.
 
 Each exclusion below is a decision, not an omission.
 
-- **Sorting or filtering the board by priority.** Cut deliberately after
-  measurement, not skipped. The kanban board has no sort or filter surface of any
-  kind today, and its data source, `GET /workflows/:id/snapshot`, accepts no sort
-  or filter parameter and calls `ListTasks(ctx, workflowID)` with no options.
-  Delivering this needs a new query surface or a new client-side control plus new
-  persisted view state, and it collides with a real design question this
-  capability does not answer: the board is manually ordered by drag and drop, so a
-  priority sort has to either override that ordering or act only as a tiebreak,
-  the way the WIP-queue pull queries already do. That is a product decision worth
-  its own requirement, and it is not pre-approved. Tracked as follow-up task
-  `c730decf-42fd-4905-af81-5dff77a07db7`, filed unstarted so the ordering
-  decision is made before anything is built.
-- **Setting priority while creating a subtask.** Subtask creation is a second,
-  independently implemented flow: `apps/web/components/task/new-subtask-dialog.tsx`
-  with its own submit hook `use-subtask-submit.ts`, whose `createTask` call builds
-  its own payload and shares no code with the primary dialog's
-  `buildCreateTaskPayload`. Excluded for the same reason changing priority away
-  from the board is excluded below: this capability is scoped to the board as the
-  triage surface. Nothing is lost permanently, because a subtask gets the `medium`
-  default and its priority can then be set from its card under
-  REQ-TASKS-PRIORITY-VISIBILITY-003. A follow-up needs only to add the field to
-  `use-subtask-submit.ts` and render the same control, which by then exists.
-- **Server-side rejection of an invalid priority token.** The live update path
-  does not validate priority: `httpUpdateTaskRequest` in
-  `apps/backend/internal/task/handlers/task_http_handlers.go` carries no binding
-  constraint and `Service.UpdateTask` assigns it unchecked, so an
-  out-of-vocabulary token reaches the database `CHECK` constraint and surfaces as
-  a storage error rather than a validation error. The structs in
-  `apps/backend/pkg/api/v1/task.go` do carry an `oneof=critical high medium low`
-  binding, but that package is not the live route. Not closed here: every surface
-  this adds is a fixed four-option control that cannot emit an invalid token, so
-  the gap is unreachable from the behavior specified. A real backend hardening
-  item and a plausible follow-up.
-- **MCP priority write support.** `handleCreateTask` and `handleUpdateTask` in
-  `apps/backend/internal/mcp/handlers/handlers.go` declare request structs with no
-  `Priority` field, so no registered tool forwards one. This capability does not
-  add it, and nothing here depends on it: the card must follow the stored value
-  whoever wrote it, and the writers that exist today (the Office task UI, REST API
-  callers, and the surfaces added here) are enough to observe every acceptance
-  criterion. Wiring an MCP parameter is a separate change to the MCP contract.
+- **Sorting or filtering the board by priority.** The board remains manually
+  ordered. Priority sorting or filtering needs its own product decision about how
+  it interacts with that order and its own requirement.
+- **Setting priority while creating a subtask.** Subtasks keep their existing
+  creation flow and receive the default `medium` priority. A person can change a
+  subtask's priority later from its card.
+- **Server-side rejection of an invalid priority token.** This capability adds
+  fixed four-option controls, so its user-facing writers cannot emit an invalid
+  token. Consistent validation for every API writer is a separate hardening task.
+- **MCP priority write support.** The MCP task contract is unchanged. Adding a
+  priority argument to MCP tools is a separate contract change.
 - **The Office task UI.** Office already surfaces priority, over a different
   five-token vocabulary that includes `none` and supports workspace-supplied
   labels. Nothing here changes it, and the two vocabularies are deliberately not
@@ -320,10 +232,8 @@ Each exclusion below is a decision, not an omission.
   and is a different capability.
 - **Any schema or migration work.** The column, its type, its default and its
   constraint already exist and are not touched.
-- **Labels and tags.** `docs/specs/tasks/requirements/labels.md` explicitly
-  excludes "label groups or categories (e.g. 'priority: high' vs 'type: bug')",
-  so priority is deliberately not modelled as a label, and this capability does
-  not model labels as priority.
+- **Labels and tags.** Priority remains a task field. It is not modelled as a
+  label or tag.
 - **Changing priority from anywhere other than the board.** A control on the task
   detail page, in the session sidebar or in a command palette is additive and not
   required to satisfy REQ-TASKS-PRIORITY-VISIBILITY-003.
@@ -333,9 +243,7 @@ Each exclusion below is a decision, not an omission.
   filtered out before the board renders, so they have no card to carry an
   indicator.
 - **Task-creation retry and idempotency semantics.** Adding a priority field to
-  the creation request does not change how a repeated create is deduplicated.
-  That contract is owned by
-  `docs/specs/tasks/requirements/external-id-idempotency.md` and is unchanged: a
+  the creation request does not change how a repeated create is deduplicated. A
   deduplicated create returns the existing task and does not re-apply the
   submitted priority.
 - **Priority as an input to scheduling.** Nothing here changes which task an

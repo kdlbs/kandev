@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { watchWs } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 // Touch/narrow-viewport coverage for REQ-TASKS-PRIORITY-VISIBILITY-001..003
 // (docs/specs/tasks/requirements/task-priority-visibility.md), run on the
@@ -32,6 +33,11 @@ test.describe("Mobile kanban — task priority", () => {
       "aria-label",
       "Priority Critical",
     );
+    const menuTrigger = card.getByRole("button", { name: "More options" });
+    const menuTriggerBox = await menuTrigger.boundingBox();
+    expect(menuTriggerBox).not.toBeNull();
+    expect(menuTriggerBox!.width).toBeGreaterThanOrEqual(44);
+    expect(menuTriggerBox!.height).toBeGreaterThanOrEqual(44);
 
     // Full-screen creation form: the priority control is reachable and
     // submits with the board rendered at a phone viewport.
@@ -40,9 +46,17 @@ test.describe("Mobile kanban — task priority", () => {
     await expect(dialog).toBeVisible();
     const select = dialog.getByTestId("task-create-priority-select");
     await expect(select).toContainText("Medium");
+    const selectBox = await select.boundingBox();
+    expect(selectBox).not.toBeNull();
+    expect(selectBox!.height).toBeGreaterThanOrEqual(44);
     await select.click();
     const listbox = testPage.getByRole("listbox");
-    await listbox.getByTestId("task-create-priority-option-high").click();
+    await waitForFiniteAnimations(listbox);
+    const highOption = listbox.getByTestId("task-create-priority-option-high");
+    const highOptionBox = await highOption.boundingBox();
+    expect(highOptionBox).not.toBeNull();
+    expect(highOptionBox!.height).toBeGreaterThanOrEqual(44);
+    await highOption.click();
     await expect(select).toContainText("High");
     await testPage.getByTestId("task-title-input").fill("Mobile Priority Create Task");
     await testPage.getByTestId("task-description-input").fill("verifies mobile submitted priority");

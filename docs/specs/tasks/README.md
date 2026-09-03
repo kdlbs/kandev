@@ -146,6 +146,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
 - [Edit task dependencies](system-design/task-dependency-detail-editing.md)
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
+- [Task priority visibility](system-design/task-priority-visibility.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)

@@ -17,13 +17,21 @@ export function TaskCreatePrioritySelect({
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground">{t("kanban:priority")}</span>
+      <label htmlFor="task-create-priority-select" className="text-xs text-muted-foreground">
+        {t("kanban:priority")}
+      </label>
       <Select
         value={value}
         onValueChange={(next) => onChange(next as TaskPriority)}
         disabled={disabled}
       >
-        <SelectTrigger data-testid="task-create-priority-select" className="h-8 w-32" size="sm">
+        <SelectTrigger
+          id="task-create-priority-select"
+          data-testid="task-create-priority-select"
+          aria-label={t("kanban:priority")}
+          className="h-11 min-h-11 w-32 sm:h-8 sm:min-h-0"
+          size="sm"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -32,6 +40,7 @@ export function TaskCreatePrioritySelect({
               key={token}
               value={token}
               data-testid={`task-create-priority-option-${token}`}
+              className="min-h-11 sm:min-h-7"
             >
               {t(KANBAN_PRIORITY_LABEL_KEYS[token])}
             </SelectItem>
