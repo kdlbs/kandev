@@ -203,6 +203,8 @@ type CreateTaskOpts = {
   blocked_by?: string[];
   /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
   start_when_unblocked?: boolean;
+  /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
+  priority?: string;
 };
 
 export type TaskDependencyRef = {
@@ -272,6 +274,7 @@ function buildCreateTaskBody(
   if (options.start_when_unblocked !== undefined) {
     body.start_when_unblocked = options.start_when_unblocked;
   }
+  setIf(body, "priority", options.priority);
   return body;
 }
 
@@ -503,6 +506,8 @@ export class ApiClient {
       blocked_by?: string[];
       /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
       start_when_unblocked?: boolean;
+      /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
+      priority?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -528,6 +533,11 @@ export class ApiClient {
    *  desired object. */
   async updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { metadata });
+  }
+
+  /** Simulates a REST API caller (or another browser client) setting priority. */
+  async updateTaskPriority(taskId: string, priority: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { priority });
   }
 
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
@@ -2404,6 +2414,7 @@ export class ApiClient {
     primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
+    priority?: string;
     parent_id?: string;
     metadata?: Record<string, unknown> | null;
     repositories?: Array<{
