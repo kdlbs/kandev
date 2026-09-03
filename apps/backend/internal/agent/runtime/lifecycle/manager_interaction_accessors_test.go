@@ -370,6 +370,60 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 	require.Equal(t, models.ExecutorRunningStatusStopped, writer.running.Status)
 }
 
+func TestStopAgentWithReasonRetainsExecutionWhenTerminalPersistenceFails(t *testing.T) {
+	tests := map[string]func(*captureExecutorRunningWriter, error){
+		"prior row read": func(writer *captureExecutorRunningWriter, failure error) {
+			writer.getErr = failure
+		},
+		"terminal upsert": func(writer *captureExecutorRunningWriter, failure error) {
+			writer.upsertErr = failure
+		},
+	}
+	for name, injectFailure := range tests {
+		t.Run(name, func(t *testing.T) {
+			log := newTestRegistryLogger()
+			execRegistry := NewExecutorRegistry(log)
+			stopTracker := &forceRecordingStopTracker{
+				mockStopTracker: mockStopTracker{name: executor.NameStandalone},
+			}
+			execRegistry.Register(stopTracker)
+			bus := &MockEventBus{}
+			mgr := NewManager(newTestRegistry(), bus, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+			cleanupManagerStopCh(t, mgr)
+			writer := &captureExecutorRunningWriter{}
+			persistErr := errors.New("terminal persistence unavailable")
+			injectFailure(writer, persistErr)
+			mgr.SetExecutorRunningWriter(writer)
+
+			require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+				ID: "exec-terminal-persist", TaskID: "task-terminal-persist",
+				SessionID: "session-terminal-persist", RuntimeName: executor.NameStandalone,
+				Status: v1.AgentStatusRunning,
+			}))
+
+			err := mgr.StopAgentWithReason(
+				context.Background(), "exec-terminal-persist", StopReasonBackendShutdown, true,
+			)
+
+			require.ErrorIs(t, err, persistErr)
+			execution, exists := mgr.executionStore.Get("exec-terminal-persist")
+			require.True(t, exists, "failed terminal persistence must retain the execution for retry")
+			require.Equal(t, v1.AgentStatusStopped, execution.Status)
+			require.Empty(t, bus.PublishedEvents, "failed terminal persistence must not publish agent.stopped")
+
+			writer.getErr = nil
+			writer.upsertErr = nil
+			require.NoError(t, mgr.StopAgentWithReason(
+				context.Background(), "exec-terminal-persist", StopReasonBackendShutdown, true,
+			))
+			_, exists = mgr.executionStore.Get("exec-terminal-persist")
+			require.False(t, exists)
+			require.Len(t, bus.PublishedEvents, 1)
+			require.Equal(t, events.AgentStopped, bus.PublishedEvents[0].Type)
+		})
+	}
+}
+
 func TestStopAgentWithReasonRetainsExecutionWhenBackendCleanupFails(t *testing.T) {
 	log := newTestRegistryLogger()
 	execRegistry := NewExecutorRegistry(log)

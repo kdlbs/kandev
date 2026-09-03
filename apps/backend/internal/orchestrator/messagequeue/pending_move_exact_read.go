@@ -22,7 +22,7 @@ func (r *sqliteRepository) ReadPendingMoveCensus(
 	taskID string,
 	correlationID string,
 ) (*PendingMoveCensusResult, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, pendingMoveCensusTxOptions())
 	if err != nil {
 		return nil, ErrPendingMoveReadFailed
 	}
@@ -34,7 +34,7 @@ func (r *sqliteRepository) ReadPendingMoveCensus(
 		return nil, ErrPendingMoveReadFailed
 	}
 	if !authorized {
-		return nil, r.commitPendingMoveCensusDenied(ctx, tx, actor, taskID, correlationID)
+		return nil, r.commitPendingMoveCensusDenied(ctx, tx, actor, correlationID)
 	}
 
 	target, rowExists, err := r.readPendingMoveCensusTarget(ctx, tx, taskID)
@@ -43,7 +43,7 @@ func (r *sqliteRepository) ReadPendingMoveCensus(
 	}
 	if target == nil {
 		if rowExists {
-			return nil, r.commitPendingMoveCensusDenied(ctx, tx, actor, taskID, correlationID)
+			return nil, r.commitPendingMoveCensusDenied(ctx, tx, actor, correlationID)
 		}
 		if err := r.appendPendingMoveCensusAudit(ctx, tx, actor, taskID, nil, correlationID,
 			PendingMoveCensusOutcomeZeroRow); err != nil {
@@ -83,6 +83,13 @@ func (r *sqliteRepository) ReadPendingMoveCensus(
 	}, nil
 }
 
+func pendingMoveCensusTxOptions() *sql.TxOptions {
+	// SQLite already snapshots reads for a transaction and ignores this option.
+	// PostgreSQL otherwise defaults to READ COMMITTED and would take a new
+	// snapshot for each authorization and target-relation statement.
+	return &sql.TxOptions{Isolation: sql.LevelRepeatableRead}
+}
+
 func (r *sqliteRepository) readPendingMoveCensusTarget(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -112,10 +119,9 @@ func (r *sqliteRepository) commitPendingMoveCensusDenied(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	actor PendingMoveCancellationActor,
-	taskID string,
 	correlationID string,
 ) error {
-	if err := r.appendPendingMoveCensusAudit(ctx, tx, actor, taskID, nil, correlationID,
+	if err := r.appendPendingMoveCensusAudit(ctx, tx, actor, "", nil, correlationID,
 		PendingMoveCancellationOutcomeNotFoundOrChanged); err != nil {
 		return ErrPendingMoveReadFailed
 	}

@@ -14,6 +14,7 @@ import (
 type captureExecutorRunningWriter struct {
 	prior       *models.ExecutorRunning
 	running     *models.ExecutorRunning
+	getErr      error
 	upsertErr   error
 	deleteCalls int
 }
@@ -21,6 +22,9 @@ type captureExecutorRunningWriter struct {
 func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
 	context.Context, string,
 ) (*models.ExecutorRunning, error) {
+	if w.getErr != nil {
+		return nil, w.getErr
+	}
 	if w.prior == nil {
 		return nil, models.ErrExecutorRunningNotFound
 	}

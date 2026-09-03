@@ -2,11 +2,40 @@ package messagequeue
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/testutil"
 )
+
+type pendingMoveCensusAuditTarget struct {
+	PendingMoveID string `db:"pending_move_id"`
+	MoveID        string `db:"move_id"`
+	TaskID        string `db:"task_id"`
+	SessionID     string `db:"session_id"`
+	WorkflowID    string `db:"workflow_id"`
+	CurrentStepID string `db:"prior_current_workflow_step_id"`
+	TargetStepID  string `db:"prior_target_workflow_step_id"`
+}
+
+func assertPendingMoveCensusAuditTargetRedacted(t *testing.T, db *sqlx.DB, correlationID string) {
+	t.Helper()
+	var auditedTarget pendingMoveCensusAuditTarget
+	if err := db.Get(&auditedTarget, `
+		SELECT pending_move_id, move_id, task_id, session_id, workflow_id,
+			prior_current_workflow_step_id, prior_target_workflow_step_id
+		FROM pending_move_cancellation_audit WHERE correlation_id = ?
+	`, correlationID); err != nil {
+		t.Fatalf("read denied census audit: %v", err)
+	}
+	if auditedTarget != (pendingMoveCensusAuditTarget{}) {
+		t.Fatalf("denied census audit retained untrusted target identity: %#v", auditedTarget)
+	}
+}
 
 // @covers AC-TASKS-PENDING-MOVE-CANCELLATION-004.1
 func TestSQLiteRepository_ReadPendingMoveCensusFound(t *testing.T) {
@@ -106,15 +135,7 @@ func TestSQLiteRepository_ReadPendingMoveCensusRejectsBrokenRelations(t *testing
 			if count != 1 {
 				t.Fatalf("broken relation removed pending row, count=%d", count)
 			}
-			var auditedTargetID string
-			if err := fixture.sql.Get(&auditedTargetID,
-				`SELECT pending_move_id FROM pending_move_cancellation_audit WHERE correlation_id = ?`,
-				"correlation-census-relation"); err != nil {
-				t.Fatalf("read broken-relation audit: %v", err)
-			}
-			if auditedTargetID != "" {
-				t.Fatalf("broken-relation audit retained untrusted target ID %q", auditedTargetID)
-			}
+			assertPendingMoveCensusAuditTargetRedacted(t, fixture.sql, "correlation-census-relation")
 		})
 	}
 }
@@ -156,16 +177,101 @@ func TestSQLiteRepository_ReadPendingMoveCensusAuthorizationIsNonLeaking(t *test
 			if getErr != nil || move == nil || move.ID != fixture.match.PendingMoveID {
 				t.Fatalf("denial mutated pending move: move=%#v err=%v", move, getErr)
 			}
-			var targetID string
-			if err := fixture.sql.Get(&targetID,
-				`SELECT pending_move_id FROM pending_move_cancellation_audit WHERE correlation_id = ?`,
-				"correlation-census-denied"); err != nil {
-				t.Fatalf("read denial audit: %v", err)
-			}
-			if targetID != "" {
-				t.Fatalf("authorization denial audit leaked target ID %q", targetID)
-			}
+			assertPendingMoveCensusAuditTargetRedacted(t, fixture.sql, "correlation-census-denied")
 		})
+	}
+}
+
+func TestPostgresRepository_ReadPendingMoveCensusUsesOneSnapshot(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := testutil.OpenIsolatedPostgres(t, dsn)
+	fixture := newExactCancelFixtureWithDB(t, db)
+
+	var schema string
+	if err := db.Get(&schema, `SELECT current_schema()`); err != nil {
+		t.Fatalf("read postgres schema: %v", err)
+	}
+	openPeer := func() *sqlx.DB {
+		peer, err := sqlx.Open("pgx", dsn)
+		if err != nil {
+			t.Fatalf("open postgres peer: %v", err)
+		}
+		peer.SetMaxOpenConns(1)
+		peer.SetMaxIdleConns(1)
+		t.Cleanup(func() { _ = peer.Close() })
+		if _, err := peer.Exec(`SET search_path TO ` + schema); err != nil {
+			t.Fatalf("set postgres peer search path: %v", err)
+		}
+		return peer
+	}
+	mutator := openPeer()
+	poller := openPeer()
+
+	if _, err := db.Exec(`
+		ALTER TABLE pending_moves RENAME TO pending_moves_census_snapshot_backing;
+		CREATE FUNCTION pending_move_census_snapshot_barrier() RETURNS boolean
+		LANGUAGE plpgsql VOLATILE AS $$
+		BEGIN
+			PERFORM pg_advisory_xact_lock(hashtextextended(current_schema(), 0));
+			RETURN true;
+		END;
+		$$;
+		CREATE VIEW pending_moves AS
+			SELECT pending.* FROM pending_moves_census_snapshot_backing pending
+			WHERE pending_move_census_snapshot_barrier();
+	`); err != nil {
+		t.Fatalf("install census statement barrier: %v", err)
+	}
+
+	mutationTx, err := mutator.BeginTxx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin target mutation: %v", err)
+	}
+	defer func() { _ = mutationTx.Rollback() }()
+	if _, err := mutationTx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), 0))`); err != nil {
+		t.Fatalf("acquire census statement barrier: %v", err)
+	}
+	if _, err := mutationTx.Exec(`UPDATE tasks SET workspace_id = $1 WHERE id = $2`,
+		"cccccccc-cccc-4ccc-8ccc-cccccccccccc", exactTargetTaskID); err != nil {
+		t.Fatalf("stage target reparent: %v", err)
+	}
+
+	backendPID := pgBackendPID(t, db)
+	type censusResponse struct {
+		result *PendingMoveCensusResult
+		err    error
+	}
+	responseCh := make(chan censusResponse, 1)
+	go func() {
+		result, readErr := fixture.repo.ReadPendingMoveCensus(
+			context.Background(), fixture.actor, exactTargetTaskID, "correlation-census-snapshot",
+		)
+		responseCh <- censusResponse{result: result, err: readErr}
+	}()
+
+	waitForWaitingLocks(t, poller, backendPID, 1, "census pending-row read")
+	if err := mutationTx.Commit(); err != nil {
+		t.Fatalf("commit target reparent: %v", err)
+	}
+
+	select {
+	case response := <-responseCh:
+		if response.err != nil || response.result == nil || !response.result.Found {
+			t.Fatalf("census result=%#v err=%v, want the authorization snapshot", response.result, response.err)
+		}
+		if response.result.PendingMoveID != fixture.match.PendingMoveID ||
+			response.result.CurrentWorkflowStepID != exactCurrentStepID {
+			t.Fatalf("census returned a mixed relation snapshot: %#v", response.result)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("census did not finish after releasing its statement barrier")
+	}
+}
+
+func TestPendingMoveCensusTransactionUsesRepeatableRead(t *testing.T) {
+	options := pendingMoveCensusTxOptions()
+	if options == nil || options.Isolation != sql.LevelRepeatableRead {
+		t.Fatalf("census transaction options = %#v, want repeatable read", options)
 	}
 }
 
