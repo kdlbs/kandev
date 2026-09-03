@@ -807,7 +807,7 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	if err != nil {
 		return false, err
 	}
-	if _, err := r.updateTaskTx(ctx, tx, task, metadata, ""); err != nil {
+	if _, _, err := r.updateTaskTx(ctx, tx, task, metadata, ""); err != nil {
 		return false, err
 	}
 	if err := r.deleteDeferredMoveGuardTx(ctx, tx, record); err != nil {
