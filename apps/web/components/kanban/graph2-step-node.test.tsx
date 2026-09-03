@@ -5,7 +5,7 @@ import { StateProvider } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
-import { Graph2StepNode } from "./graph2-step-node";
+import { Graph2StepNode, Graph2UnassignedStepMarker } from "./graph2-step-node";
 
 afterEach(() => {
   cleanup();
@@ -40,6 +40,26 @@ function renderCurrentNode(foregroundActivity?: ForegroundActivity | null) {
     </StateProvider>,
   );
 }
+
+describe("Graph2StepNode — current step tooltip", () => {
+  it("carries the full step title as a native tooltip, matching the past/future pills", () => {
+    const { container } = renderCurrentNode(null);
+    const button = container.querySelector("button");
+    expect(button?.getAttribute("title")).toBe(STEP_TITLE);
+  });
+});
+
+describe("Graph2UnassignedStepMarker — tooltip", () => {
+  it("carries its own copy as a native tooltip, same as every other pill", () => {
+    const { getByTestId } = render(
+      <StateProvider>
+        <Graph2UnassignedStepMarker />
+      </StateProvider>,
+    );
+    const marker = getByTestId("graph2-step-node-unassigned");
+    expect(marker.getAttribute("title")).toBe(marker.textContent);
+  });
+});
 
 describe("Graph2StepNode — task-level background-running affordance", () => {
   it("shows the background spinner (IconLoader) for a background-running task, not the done check", () => {
@@ -184,6 +204,20 @@ describe("Graph2StepNode — past/future step pills", () => {
   it("renders a not-yet-reached step as a labelled pill showing its title", () => {
     const { step } = renderPill("future");
     expect(getNode("future").textContent).toContain(step.title);
+  });
+
+  it("carries the full step title as a native tooltip, since the pill's own label truncates", () => {
+    const { step: pastStep } = renderPill("past");
+    expect(getNode("past").getAttribute("title")).toBe(pastStep.title);
+
+    const { step: futureStep } = renderPill("future");
+    expect(getNode("future").getAttribute("title")).toBe(futureStep.title);
+  });
+
+  it("does not color a completed step's check green — the icon shape carries the done signal, not a third hue", () => {
+    renderPill("past");
+    const check = getNode("past").querySelector(".tabler-icon-check");
+    expect(check?.getAttribute("class")).not.toContain("text-green-500");
   });
 
   it("renders completed and not-yet-reached pills with visually distinct styling", () => {
