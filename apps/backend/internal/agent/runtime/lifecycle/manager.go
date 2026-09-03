@@ -104,6 +104,17 @@ type Manager struct {
 	// SetPassthroughLookup.
 	passthroughLookup PassthroughLookup
 
+	// recoveryDeadline and recoveryDeadlineStart implement the
+	// AC-EXECUTORS-SURVIVAL-003.7 single bound covering this startup pass's
+	// adoption+enumeration+reconstruction work. recoveryDeadlineStart is the
+	// instant this launch first contacted a recorded control endpoint (zero
+	// when it never did -- Start then falls back to its own invocation
+	// time); recoveryDeadline is the configured duration from that instant.
+	// A zero recoveryDeadline falls back to the AC's own 30s default. See
+	// SetRecoveryDeadline / SetRecoveryDeadlineStart.
+	recoveryDeadline      time.Duration
+	recoveryDeadlineStart time.Time
+
 	// environmentAccessCheck is the environment-keyed sibling of
 	// sessionAccessCheck, used by the terminal environment-shell route which
 	// resolves executions by environment ID. Nil = no scoping.
@@ -507,6 +518,22 @@ func (m *Manager) CheckSessionExecAccess(ctx context.Context, sessionID string) 
 // Start runs.
 func (m *Manager) SetPassthroughLookup(lookup PassthroughLookup) {
 	m.passthroughLookup = lookup
+}
+
+// SetRecoveryDeadline installs the configured AC-EXECUTORS-SURVIVAL-003.7
+// recovery deadline duration. Zero (unset) falls back to the AC's own 30s
+// default at Start.
+func (m *Manager) SetRecoveryDeadline(d time.Duration) {
+	m.recoveryDeadline = d
+}
+
+// SetRecoveryDeadlineStart installs the AC-EXECUTORS-SURVIVAL-003.7 recovery
+// deadline's clock start: the instant this launch first contacted a recorded
+// control endpoint. A zero value (no adoption attempted, or none recorded)
+// falls back to Start's own invocation time. Set once during startup wiring,
+// before Start runs.
+func (m *Manager) SetRecoveryDeadlineStart(t time.Time) {
+	m.recoveryDeadlineStart = t
 }
 
 // RecoveryGuard exposes the in-memory recovery guard so it can be wired into

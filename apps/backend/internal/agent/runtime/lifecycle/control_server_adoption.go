@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -91,11 +92,17 @@ const (
 
 // AdoptionOutcome is the result of attempting to adopt a previously-detached
 // control server. Endpoint and Credential are populated only when Adopted.
+// ContactedAt is the instant this attempt first reached the recorded control
+// endpoint (the GetIdentity call) -- the AC-EXECUTORS-SURVIVAL-003.7 recovery
+// deadline's clock start. It is left zero when no live server was ever
+// reached (no record, or the client/transport itself could not be built),
+// since nothing recovery-relevant is running in that case.
 type AdoptionOutcome struct {
-	Adopted    bool
-	Reason     AdoptionReason
-	Endpoint   string
-	Credential string
+	Adopted     bool
+	Reason      AdoptionReason
+	Endpoint    string
+	Credential  string
+	ContactedAt time.Time
 }
 
 // AttemptAdoptControlServer implements startup steps 4 through 6 of design
@@ -125,24 +132,28 @@ func AttemptAdoptControlServer(
 		return AdoptionOutcome{Reason: AdoptionReasonNoServer}
 	}
 
+	// The AC-EXECUTORS-SURVIVAL-003.7 recovery deadline's clock starts here,
+	// at the first real contact with the recorded control endpoint --
+	// regardless of which gate below ultimately refuses or accepts adoption.
+	contactedAt := time.Now()
 	identity, err := client.GetIdentity(ctx)
 	if err != nil {
 		return AdoptionOutcome{Reason: AdoptionReasonNoServer}
 	}
 
 	if identity.HomeDir == "" || identity.HomeDir != homeDir || len(identity.Capabilities) == 0 {
-		return AdoptionOutcome{Reason: AdoptionReasonIdentityMismatch}
+		return AdoptionOutcome{Reason: AdoptionReasonIdentityMismatch, ContactedAt: contactedAt}
 	}
 
 	credential, err := revealControlServerCredential(ctx, secretStore, record.CredentialSecretID)
 	if err != nil {
-		return AdoptionOutcome{Reason: AdoptionReasonCredentialUnavailable}
+		return AdoptionOutcome{Reason: AdoptionReasonCredentialUnavailable, ContactedAt: contactedAt}
 	}
 
 	client.SetAuthToken(credential)
 	rotated, err := client.RotateCredential(ctx)
 	if err != nil {
-		return AdoptionOutcome{Reason: AdoptionReasonAuthenticationFailed}
+		return AdoptionOutcome{Reason: AdoptionReasonAuthenticationFailed, ContactedAt: contactedAt}
 	}
 
 	if !capabilitiesSatisfy(requiredCapabilities, identity.Capabilities) {
@@ -151,13 +162,13 @@ func AttemptAdoptControlServer(
 			log.Warn("failed to stop incompatible control server; leaving it to its own unowned shutdown",
 				zap.String("endpoint", record.Endpoint), zap.Error(stopErr))
 		}
-		return AdoptionOutcome{Reason: AdoptionReasonCapabilityIncompatible}
+		return AdoptionOutcome{Reason: AdoptionReasonCapabilityIncompatible, ContactedAt: contactedAt}
 	}
 
 	client.SetAuthToken(rotated.Credential)
 	secretID, err := storeControlServerCredential(ctx, secretStore, record.CredentialSecretID, rotated.Credential)
 	if err != nil {
-		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed}
+		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: contactedAt}
 	}
 
 	updated := &models.ControlServerRecord{
@@ -169,7 +180,7 @@ func AttemptAdoptControlServer(
 		CreatedAt:          record.CreatedAt,
 	}
 	if err := store.UpsertControlServerRecord(ctx, updated); err != nil {
-		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed}
+		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: contactedAt}
 	}
 
 	// Sent only after both durable writes above completed
@@ -184,7 +195,7 @@ func AttemptAdoptControlServer(
 			zap.String("endpoint", record.Endpoint), zap.Error(err))
 	}
 
-	return AdoptionOutcome{Adopted: true, Endpoint: record.Endpoint, Credential: rotated.Credential}
+	return AdoptionOutcome{Adopted: true, Endpoint: record.Endpoint, Credential: rotated.Credential, ContactedAt: contactedAt}
 }
 
 // RecordFreshControlServer durably records a freshly spawned (not adopted)

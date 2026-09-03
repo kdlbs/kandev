@@ -21,6 +21,12 @@ import (
 type agentctlLauncherResult struct {
 	cleanup    func() error
 	binaryPath string
+	// recoveryDeadlineStart is the AC-EXECUTORS-SURVIVAL-003.7 recovery
+	// deadline's clock start (the instant this launch first contacted a
+	// recorded control endpoint). Zero when this launch never contacted one
+	// (adoption disabled, no record, or a fresh spawn) -- the lifecycle
+	// manager falls back to its own Start-time default in that case.
+	recoveryDeadlineStart time.Time
 }
 
 // provideAgentctlLauncher starts or adopts the agentctl control server for
@@ -102,7 +108,8 @@ func adoptSurvivingAgentctl(
 			}
 			return nil
 		},
-		binaryPath: launcher.FindAgentctlBinary(),
+		binaryPath:            launcher.FindAgentctlBinary(),
+		recoveryDeadlineStart: outcome.ContactedAt,
 	}
 }
 

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -297,6 +298,14 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 // the winner's own stop then also fails, the session is reported to the
 // installed UnstoppableSessionRecorder (AC-EXECUTORS-SURVIVAL-002.16).
 //
+// Every stop runs in its own goroutine against context.Background(), never
+// ctx: if ctx carries a deadline (AC-EXECUTORS-SURVIVAL-003.7) and it elapses
+// while stops are still outstanding, this stops WAITING for them -- treating
+// every session whose losing duplicate hasn't yet resolved as not re-tracked
+// right now -- but never cancels work already dispatched. Outstanding stops,
+// and any winner-stop or unstoppable report they trigger, keep running and
+// recording their outcome in the background after this call returns.
+//
 // When the adopted server cannot be enumerated at all, this reports nothing
 // recovered, stops nothing, and leaves every record to the existing
 // stale-execution repair path (AC-EXECUTORS-SURVIVAL-002.12) rather than
@@ -317,54 +326,205 @@ func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*mo
 		return nil, nil
 	}
 
+	correlation := CorrelateRecoveryInstances(records, instances)
+
+	// winnersBySession is a stable snapshot of every session's recovered
+	// winner, independent of correlation.Winners (which this call mutates
+	// and returns): AC-EXECUTORS-SURVIVAL-003.7 requires an in-flight loser
+	// stop, once dispatched, to still be able to find and stop its session's
+	// winner even after that session has already been dropped from the
+	// returned map at the deadline.
+	winnersBySession := make(map[string]*agentctl.InstanceInfo, len(correlation.Winners))
+	for sessionID, winner := range correlation.Winners {
+		winnersBySession[sessionID] = winner
+	}
+
+	pending := pendingLoserCounts(correlation.ToStop, correlation.Winners)
+	results := r.dispatchRecoveryStops(correlation.ToStop)
+	tracker := &jointFailureTracker{exec: r, winners: winnersBySession}
+	r.collectRecoveryStops(ctx, results, correlation.Winners, pending, tracker)
+
+	return r.buildRecoveredInstances(correlation.Winners, indexRecordsBySession(records)), nil
+}
+
+// recoveryStopOutcome is one instance's bounded stop attempt result.
+type recoveryStopOutcome struct {
+	inst *agentctl.InstanceInfo
+	err  error
+}
+
+// dispatchRecoveryStops starts one goroutine per not-re-tracked instance,
+// each stopping it within the bounded retry budget against
+// context.Background() -- never the caller's ctx, so an elapsed recovery
+// deadline can never abort a stop already in flight
+// (AC-EXECUTORS-SURVIVAL-003.7). The returned channel is closed once every
+// goroutine has reported.
+func (r *StandaloneExecutor) dispatchRecoveryStops(toStop []*agentctl.InstanceInfo) <-chan recoveryStopOutcome {
+	results := make(chan recoveryStopOutcome, len(toStop))
+	var wg sync.WaitGroup
+	for _, inst := range toStop {
+		wg.Add(1)
+		go func(inst *agentctl.InstanceInfo) {
+			defer wg.Done()
+			results <- recoveryStopOutcome{inst: inst, err: r.stopWithRetry(context.Background(), inst.ID)}
+		}(inst)
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+	return results
+}
+
+// pendingLoserCounts counts, per session with a winner, how many of its
+// losing duplicates have not yet reported a stop outcome.
+func pendingLoserCounts(toStop []*agentctl.InstanceInfo, winners map[string]*agentctl.InstanceInfo) map[string]int {
+	pending := make(map[string]int, len(winners))
+	for _, inst := range toStop {
+		if _, hasWinner := winners[inst.SessionID]; hasWinner {
+			pending[inst.SessionID]++
+		}
+	}
+	return pending
+}
+
+// collectRecoveryStops waits for dispatchRecoveryStops's results, applying
+// each as it arrives, until either every result has landed or ctx's deadline
+// (if any) elapses first. On deadline elapse it synchronously drops every
+// session with an outstanding loser stop from winners -- AC-EXECUTORS-SURVIVAL-003.7's
+// "treated as not-re-tracked" -- then keeps draining the remaining results in
+// the background so their outcomes (including a later AC-EXECUTORS-SURVIVAL-002.16
+// report) still get recorded.
+//
+// winners is only ever mutated from this call's own goroutine, and only
+// before this function returns: the caller iterates it immediately after
+// (buildRecoveredInstances), and the background drain goroutine started at
+// the deadline branch never touches it, to avoid a concurrent map
+// read/write with that iteration.
+func (r *StandaloneExecutor) collectRecoveryStops(
+	ctx context.Context,
+	results <-chan recoveryStopOutcome,
+	winners map[string]*agentctl.InstanceInfo,
+	pending map[string]int,
+	tracker *jointFailureTracker,
+) {
+	deadlineCh, stopTimer := recoveryDeadlineChannel(ctx)
+	defer stopTimer()
+
+	for {
+		select {
+		case res, ok := <-results:
+			if !ok {
+				return
+			}
+			r.handleRecoveryStopResult(res, pending, tracker)
+			if res.err != nil {
+				delete(winners, res.inst.SessionID)
+			}
+		case <-deadlineCh:
+			for sessionID, n := range pending {
+				if n > 0 {
+					delete(winners, sessionID)
+				}
+			}
+			go func() {
+				for res := range results {
+					r.handleRecoveryStopResult(res, pending, tracker)
+				}
+			}()
+			return
+		}
+	}
+}
+
+// recoveryDeadlineChannel returns a channel that fires at ctx's deadline, or
+// a nil channel (which never fires) when ctx carries none.
+func recoveryDeadlineChannel(ctx context.Context) (<-chan time.Time, func()) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil, func() {}
+	}
+	timer := time.NewTimer(time.Until(deadline))
+	return timer.C, func() { timer.Stop() }
+}
+
+// handleRecoveryStopResult applies one stop outcome: on success it only
+// clears the session's pending-loser count; on failure it also logs and, for
+// a losing duplicate whose session has a winner, triggers the joint failure
+// handling (AC-EXECUTORS-SURVIVAL-002.15).
+func (r *StandaloneExecutor) handleRecoveryStopResult(res recoveryStopOutcome, pending map[string]int, tracker *jointFailureTracker) {
+	sessionID := res.inst.SessionID
+	if _, tracked := pending[sessionID]; tracked {
+		pending[sessionID]--
+	}
+	if res.err == nil {
+		return
+	}
+	r.logger.Warn("failed to stop a not-re-tracked standalone instance during recovery after exhausting retries",
+		zap.String("instance_id", res.inst.ID), zap.String("session_id", sessionID), zap.Error(res.err))
+	tracker.onLoserStopFailed(sessionID)
+}
+
+// jointFailureTracker ensures AC-EXECUTORS-SURVIVAL-002.15/002.16's joint
+// winner-stop-and-possible-unstoppable-report handling runs at most once per
+// session, whether triggered synchronously (before the recovery deadline) or
+// from the background drain after it (AC-EXECUTORS-SURVIVAL-003.7).
+type jointFailureTracker struct {
+	exec    *StandaloneExecutor
+	winners map[string]*agentctl.InstanceInfo
+	handled sync.Map // sessionID -> *sync.Once
+}
+
+func (t *jointFailureTracker) onLoserStopFailed(sessionID string) {
+	winner, ok := t.winners[sessionID]
+	if !ok {
+		return // orphan, or a session with no winner: nothing to jointly affect
+	}
+	once, _ := t.handled.LoadOrStore(sessionID, &sync.Once{})
+	once.(*sync.Once).Do(func() {
+		t.exec.stopWinnerAfterLoserFailure(sessionID, winner)
+	})
+}
+
+// stopWinnerAfterLoserFailure stops a session's winning instance on the same
+// bounded retry terms after one of its losing duplicates could not be
+// stopped; on failure it reports the session to the installed
+// UnstoppableSessionRecorder (AC-EXECUTORS-SURVIVAL-002.16). Always runs to
+// completion once started, even past the recovery deadline
+// (AC-EXECUTORS-SURVIVAL-003.7).
+func (r *StandaloneExecutor) stopWinnerAfterLoserFailure(sessionID string, winner *agentctl.InstanceInfo) {
+	if err := r.stopWithRetry(context.Background(), winner.ID); err != nil {
+		r.logger.Warn("failed to stop the winning instance after its losing duplicate could not be stopped; retaining session as unstoppable",
+			zap.String("instance_id", winner.ID), zap.String("session_id", sessionID), zap.Error(err))
+		if r.unstoppableRecorder != nil {
+			r.unstoppableRecorder.RetainAsUnstoppable(sessionID)
+		}
+		return
+	}
+	r.logger.Warn("stopped the winning instance because its losing duplicate could not be stopped; session left not re-tracked",
+		zap.String("instance_id", winner.ID), zap.String("session_id", sessionID))
+}
+
+// indexRecordsBySession maps every named recovery-inventory record by
+// session ID for use while building recovered executions.
+func indexRecordsBySession(records []*models.ExecutorRunning) map[string]*models.ExecutorRunning {
 	recordBySession := make(map[string]*models.ExecutorRunning, len(records))
 	for _, rec := range records {
 		if rec != nil && rec.SessionID != "" {
 			recordBySession[rec.SessionID] = rec
 		}
 	}
+	return recordBySession
+}
 
-	correlation := CorrelateRecoveryInstances(records, instances)
-
-	// AC-EXECUTORS-SURVIVAL-002.15: a stop that exhausts its bounded retries
-	// is recorded; when the failed instance was a losing duplicate for a
-	// session that DOES have a winner, that winner must not be re-tracked
-	// either -- collected here and resolved below, after every ToStop
-	// instance has had its own retry budget, so one session's outcome never
-	// depends on iteration order (AC-EXECUTORS-SURVIVAL-002.11).
-	sessionsWithFailedLoserStop := make(map[string]bool)
-	for _, inst := range correlation.ToStop {
-		if err := r.stopWithRetry(ctx, inst.ID); err != nil {
-			r.logger.Warn("failed to stop a not-re-tracked standalone instance during recovery after exhausting retries",
-				zap.String("instance_id", inst.ID),
-				zap.String("session_id", inst.SessionID),
-				zap.Error(err))
-			if _, hasWinner := correlation.Winners[inst.SessionID]; hasWinner {
-				sessionsWithFailedLoserStop[inst.SessionID] = true
-			}
-		}
-	}
-
-	for sessionID := range sessionsWithFailedLoserStop {
-		winner := correlation.Winners[sessionID]
-		delete(correlation.Winners, sessionID)
-		if err := r.stopWithRetry(ctx, winner.ID); err != nil {
-			r.logger.Warn("failed to stop the winning instance after its losing duplicate could not be stopped; retaining session as unstoppable",
-				zap.String("instance_id", winner.ID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			if r.unstoppableRecorder != nil {
-				r.unstoppableRecorder.RetainAsUnstoppable(sessionID)
-			}
-			continue
-		}
-		r.logger.Warn("stopped the winning instance because its losing duplicate could not be stopped; session left not re-tracked",
-			zap.String("instance_id", winner.ID),
-			zap.String("session_id", sessionID))
-	}
-
-	recovered := make([]*ExecutorInstance, 0, len(correlation.Winners))
-	for sessionID, inst := range correlation.Winners {
+// buildRecoveredInstances converts every still-winning correlated instance
+// into an ExecutorInstance for the caller to re-track.
+func (r *StandaloneExecutor) buildRecoveredInstances(
+	winners map[string]*agentctl.InstanceInfo,
+	recordBySession map[string]*models.ExecutorRunning,
+) []*ExecutorInstance {
+	recovered := make([]*ExecutorInstance, 0, len(winners))
+	for sessionID, inst := range winners {
 		record := recordBySession[sessionID]
 
 		client := agentctl.NewClient(r.host, inst.Port, r.logger,
@@ -393,8 +553,7 @@ func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*mo
 			Metadata:             metadata,
 		})
 	}
-
-	return recovered, nil
+	return recovered
 }
 
 // SetInteractiveRunner sets the interactive runner for passthrough mode.

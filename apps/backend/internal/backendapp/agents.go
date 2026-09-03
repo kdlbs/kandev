@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -36,6 +37,7 @@ func provideLifecycleManager(
 	managedRuntimeSelections managedruntime.SelectionReader,
 	mcpIdentityScoper lifecycle.MCPIdentityScoper,
 	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
+	recoveryDeadlineStart time.Time,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
@@ -121,6 +123,13 @@ func provideLifecycleManager(
 	// into the standalone backend before Start runs its recovery pass.
 	standaloneExec.SetRecoveryRetryConfig(cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries)
 	standaloneExec.SetUnstoppableSessionRecorder(lifecycleMgr.RecoveryGuard())
+
+	// AC-EXECUTORS-SURVIVAL-003.7: the single bound covering this pass's
+	// adoption+enumeration+reconstruction work, clocked from this launch's
+	// first contact with a recorded control endpoint (zero when there was
+	// none -- Start then falls back to its own invocation time).
+	lifecycleMgr.SetRecoveryDeadline(cfg.Agentctl.RecoveryDeadline)
+	lifecycleMgr.SetRecoveryDeadlineStart(recoveryDeadlineStart)
 
 	// Register environment preparers (keyed by ExecutorType — the
 	// "local"/"worktree"/"local_docker"/"sprites" taxonomy, not Runtime).

@@ -507,6 +507,7 @@ func startServices( //nolint:cyclop
 		return false
 	}
 	var agentctlBinaryPath string
+	var recoveryDeadlineStart time.Time
 	if agentctlResult != nil {
 		addCleanup(agentctlResult.cleanup)
 		defer func() {
@@ -522,10 +523,11 @@ func startServices( //nolint:cyclop
 		// Capture the binary path so initOfficeServices can include it in the
 		// ServiceOptions when constructing the office service.
 		agentctlBinaryPath = agentctlResult.binaryPath
+		recoveryDeadlineStart = agentctlResult.recoveryDeadlineStart
 	}
 
 	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
-		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups, cancelContext)
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart, runCleanups, cancelContext)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -545,6 +547,7 @@ func startAgentInfrastructure(
 	agentSettingsController *agentsettingscontroller.Controller,
 	agentRegistry *registry.Registry,
 	agentctlBinaryPath string,
+	recoveryDeadlineStart time.Time,
 	runCleanups func(),
 	cancelContext context.CancelFunc,
 ) bool {
@@ -587,6 +590,7 @@ func startAgentInfrastructure(
 		services.ManagedRuntimeSelections,
 		mcpScopeResolver.Scope,
 		mcpScopeResolver.ScopePrincipal,
+		recoveryDeadlineStart,
 	)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))

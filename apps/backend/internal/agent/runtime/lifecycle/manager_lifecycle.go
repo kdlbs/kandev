@@ -67,8 +67,18 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.recoveryGuard.AcquireOrObserve(sessionID)
 	}
 
-	// Try to recover executions from all runtimes
-	recovered, err := m.executorRegistry.RecoverAll(ctx, records)
+	// AC-EXECUTORS-SURVIVAL-003.7: bound this pass's
+	// adoption+enumeration+reconstruction work with a single deadline, clocked
+	// from this launch's first control-server contact (or, absent one, from
+	// right now). A backend implementation that honors ctx.Deadline() (see
+	// StandaloneExecutor.RecoverInstances) may still let work already in
+	// flight at the deadline finish in the background rather than aborting
+	// it -- cancelling recoveryCtx below only stops the deadline timer itself
+	// from leaking, it never reaches that background work, which deliberately
+	// runs against context.Background() instead.
+	recoveryCtx, cancelRecovery := context.WithDeadline(ctx, m.recoveryDeadlineDeadline())
+	recovered, err := m.executorRegistry.RecoverAll(recoveryCtx, records)
+	cancelRecovery()
 	if err != nil {
 		m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
 	}
@@ -182,6 +192,25 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// defaultRecoveryDeadline is the AC-EXECUTORS-SURVIVAL-003.7 fallback used
+// when no recovery deadline was configured (recoveryDeadline left zero).
+const defaultRecoveryDeadline = 30 * time.Second
+
+// recoveryDeadlineDeadline resolves the wall-clock instant this startup
+// pass's recovery work must stop admitting new work by, per
+// AC-EXECUTORS-SURVIVAL-003.7.
+func (m *Manager) recoveryDeadlineDeadline() time.Time {
+	start := m.recoveryDeadlineStart
+	if start.IsZero() {
+		start = time.Now()
+	}
+	period := m.recoveryDeadline
+	if period <= 0 {
+		period = defaultRecoveryDeadline
+	}
+	return start.Add(period)
 }
 
 // sessionIDsFromExecutorRunning extracts the distinct, non-empty session
