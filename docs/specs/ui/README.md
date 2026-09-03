@@ -6,7 +6,6 @@ migration: in_progress
 owners:
   - kandev
 ---
-
 # UI
 
 ## Scope
@@ -15,7 +14,6 @@ UI owns responsive behavior.
 [Tasks](../tasks/README.md), [Agents](../agents/README.md),
 [Plugins](../plugins/README.md), and [Integrations](../integrations/README.md) own
 behavior/state.
-
 ## Map
 
 ### Requirements
@@ -140,7 +138,6 @@ behavior/state.
 - [WebKit Task Dialog Rendering](requirements/webkit-task-dialog-rendering.md)
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
-
 ### Design
 
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
@@ -186,7 +183,6 @@ behavior/state.
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
 - [Transcript history visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
-
 ## Related
 
 - [Platform](../platform/README.md)
