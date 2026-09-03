@@ -22,10 +22,7 @@ export async function prepareManagedRuntimeProfile(
   apiClient: ApiClient,
   backend: BackendContext,
 ): Promise<AgentProfile> {
-  await backend.restart({
-    KANDEV_MOCK_AGENT: "true",
-    KANDEV_MOCK_PROVIDERS: "opencode-acp",
-  });
+  await backend.restart({ KANDEV_MOCK_AGENT: "true" });
 
   let agentId = "";
   let observedAgents = "";
