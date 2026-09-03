@@ -63,6 +63,7 @@ export function TaskPreviewPanel({
             sessionId={sessionId}
             ensureSession={ensureSession}
             workspaceId={activeWorkspaceId ?? null}
+            primarySessionId={task.primarySessionId ?? null}
             onSessionChange={onSessionChange}
           />
         ) : (

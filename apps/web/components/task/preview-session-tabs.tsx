@@ -12,10 +12,13 @@ import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ens
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
 import { sendMessageRequest } from "@/hooks/use-message-handler";
+import { buildStartRequest } from "@/lib/services/session-launch-helpers";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { useToast } from "@/components/toast-provider";
 import type { ChatSubmitPayload } from "./chat/chat-input-container";
 import { EnsureSessionErrorEmptyState, SessionRecoveryFeedback } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
-import { SessionsDropdown } from "./sessions-dropdown";
+import { SessionsDropdown, type SessionsDropdownCreateSessionData } from "./sessions-dropdown";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
   buildAgentLabelsById,
@@ -28,11 +31,46 @@ import { useTranslation } from "react-i18next";
 
 const LABEL_SEPARATOR = " \u2022 ";
 
+/**
+ * New-session creation stays caller-local instead of the dialog's default
+ * submit path, which navigates to the full task page
+ * (`router.push(linkToTask(taskId))`) \u2014 wrong for an embedded surface like
+ * the kanban preview panel.
+ */
+function usePreviewCreateSession(
+  taskId: string,
+  onSessionChange?: (sessionId: string | null) => void,
+) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  return useCallback(
+    async (data: SessionsDropdownCreateSessionData) => {
+      const { request } = buildStartRequest(taskId, data.agentProfileId, {
+        executorId: data.executorId,
+        prompt: data.prompt,
+        attachments: data.attachments,
+      });
+      try {
+        const response = await launchSession(request);
+        if (response.session_id) onSessionChange?.(response.session_id);
+      } catch (error) {
+        toast({
+          title: t("task:failedToCreateSession"),
+          description: error instanceof Error ? error.message : t("common:anErrorOccurred"),
+          variant: "error",
+        });
+      }
+    },
+    [taskId, onSessionChange, toast, t],
+  );
+}
+
 type PreviewSessionTabsProps = {
   taskId: string;
   sessionId: string | null;
   ensureSession?: UseEnsureTaskSessionResult;
   workspaceId?: string | null;
+  primarySessionId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
 };
 
@@ -48,11 +86,13 @@ export function PreviewSessionTabs({
   sessionId,
   ensureSession,
   workspaceId,
+  primarySessionId = null,
   onSessionChange,
 }: PreviewSessionTabsProps) {
   const { t } = useTranslation();
   const { sessions, isLoaded } = useTaskSessions(taskId);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const handleCreateSession = usePreviewCreateSession(taskId, onSessionChange);
 
   const sortedSessions = useMemo(() => sortSessions(sessions), [sessions]);
   const agentLabelsById = useMemo(() => buildAgentLabelsById(agentProfiles), [agentProfiles]);
@@ -99,27 +139,15 @@ export function PreviewSessionTabs({
   }
 
   if (sortedSessions.length === 0) {
-    if (ensureSession?.status === "preparing") {
-      return <PreviewLoadingState label={t("task:preparingWorkspace2")} />;
-    }
-    if (ensureSession?.status === "error") {
-      return (
-        <>
-          <SessionRecoveryFeedback
-            error={resumption.error}
-            notice={resumption.notice}
-            onRetry={() => void resumption.resumeSession()}
-            workspaceId={workspaceId ?? null}
-          />
-          <EnsureSessionErrorEmptyState
-            error={ensureSession.error}
-            onRetry={ensureSession.retry}
-            workspaceId={workspaceId ?? null}
-          />
-        </>
-      );
-    }
-    return <PreviewEmptyState taskId={taskId} />;
+    return (
+      <PreviewNoSessionsState
+        taskId={taskId}
+        ensureSession={ensureSession}
+        resumption={resumption}
+        workspaceId={workspaceId}
+        onCreateSession={handleCreateSession}
+      />
+    );
   }
 
   return (
@@ -140,7 +168,9 @@ export function PreviewSessionTabs({
         <SessionsDropdown
           taskId={taskId}
           activeSessionId={activeSessionId}
+          primarySessionId={primarySessionId}
           onSelectSession={(id) => onSessionChange?.(id)}
+          onCreateSession={handleCreateSession}
         />
       </div>
       <div className="flex-1 min-h-0">
@@ -216,12 +246,59 @@ function PreviewLoadingState({ label }: { label: string }) {
   return <PanelLoadingState testId="preview-loading-state" label={label} />;
 }
 
-function PreviewEmptyState({ taskId }: { taskId: string }) {
+function PreviewNoSessionsState({
+  taskId,
+  ensureSession,
+  resumption,
+  workspaceId,
+  onCreateSession,
+}: {
+  taskId: string;
+  ensureSession?: UseEnsureTaskSessionResult;
+  resumption: ReturnType<typeof useSessionResumption>;
+  workspaceId?: string | null;
+  onCreateSession: (data: SessionsDropdownCreateSessionData) => void;
+}) {
+  const { t } = useTranslation();
+  if (ensureSession?.status === "preparing") {
+    return <PreviewLoadingState label={t("task:preparingWorkspace2")} />;
+  }
+  if (ensureSession?.status === "error") {
+    return (
+      <>
+        <SessionRecoveryFeedback
+          error={resumption.error}
+          notice={resumption.notice}
+          onRetry={() => void resumption.resumeSession()}
+          workspaceId={workspaceId ?? null}
+        />
+        <EnsureSessionErrorEmptyState
+          error={ensureSession.error}
+          onRetry={ensureSession.retry}
+          workspaceId={workspaceId ?? null}
+        />
+      </>
+    );
+  }
+  return <PreviewEmptyState taskId={taskId} onCreateSession={onCreateSession} />;
+}
+
+function PreviewEmptyState({
+  taskId,
+  onCreateSession,
+}: {
+  taskId: string;
+  onCreateSession: (data: SessionsDropdownCreateSessionData) => void;
+}) {
   const { t } = useTranslation();
   return (
     <div className="flex h-full flex-col">
       <div className="flex justify-end border-b px-2 py-1">
-        <SessionsDropdown taskId={taskId} activeSessionId={null} />
+        <SessionsDropdown
+          taskId={taskId}
+          activeSessionId={null}
+          onCreateSession={onCreateSession}
+        />
       </div>
       <div
         className="flex flex-1 items-center justify-center text-sm text-muted-foreground"

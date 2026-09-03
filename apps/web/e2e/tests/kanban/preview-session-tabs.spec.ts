@@ -167,6 +167,68 @@ test.describe("Preview session tabs", () => {
     });
     await expect(testPage).toHaveURL(new RegExp(`sessionId=${primaryId}`), { timeout: 5_000 });
   });
+
+  test("creating a session from the preview's Agents dropdown stays on the kanban board", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    // 1. Create a task with one finished session.
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Preview New Session Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return DONE_STATES.includes(sessions[0]?.state);
+        },
+        { timeout: 30_000, message: "Waiting for first session to finish" },
+      )
+      .toBe(true);
+
+    // 2. Open the kanban preview for the task.
+    const kanban = new KanbanPage(testPage);
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    await kanban.goto();
+    const previewCard = kanban.taskCardByTitle("Preview New Session Task");
+    await expect(previewCard).toBeVisible({ timeout: 10_000 });
+    await previewCard.click();
+    const previewPanel = testPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+
+    // 3. Open the Agents dropdown and start a second session via "New".
+    await previewPanel.getByTestId("sessions-dropdown-trigger").click();
+    await testPage.getByRole("menu").getByRole("button", { name: "New", exact: true }).click();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
+    await dialog.getByRole("button", { name: "Create Session" }).click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    // 4. The new session lands in the preview, not the full-page task view:
+    // the board stays mounted and the URL never gains a /t/<id> segment.
+    await expect(kanban.board).toBeVisible();
+    await expect(testPage).not.toHaveURL(/\/t\//);
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 30_000,
+        message: "Waiting for the second session to be created",
+      })
+      .toBe(2);
+    const previewTabs = previewPanel.locator('[data-testid^="preview-session-tab-"]');
+    await expect(previewTabs).toHaveCount(2, { timeout: 15_000 });
+  });
 });
 
 /**

@@ -4,21 +4,29 @@ import { StateProvider } from "@/components/state-provider";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 import type { ChatSubmitPayload } from "./chat/chat-input-container";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { SessionsDropdownCreateSessionData } from "./sessions-dropdown";
 
 type SessionsDropdownStubProps = {
   taskId: string | null;
   activeSessionId?: string | null;
+  primarySessionId?: string | null;
   onSelectSession?: (sessionId: string) => void;
+  onCreateSession?: (data: SessionsDropdownCreateSessionData) => void;
 };
 
 const mocks = vi.hoisted(() => ({
   getWebSocketClient: vi.fn(),
+  request: vi.fn(),
+  toast: vi.fn(),
   onSend: null as null | ((payload: ChatSubmitPayload) => Promise<void>),
   dropdownProps: [] as SessionsDropdownStubProps[],
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: mocks.getWebSocketClient,
+}));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: mocks.toast }),
 }));
 vi.mock("./task-chat-panel", () => ({
   TaskChatPanel: ({ onSend }: { onSend: (payload: ChatSubmitPayload) => Promise<void> }) => {
@@ -30,13 +38,28 @@ vi.mock("./sessions-dropdown", () => ({
   SessionsDropdown: (props: SessionsDropdownStubProps) => {
     mocks.dropdownProps.push(props);
     return (
-      <button
-        type="button"
-        data-testid="sessions-dropdown-trigger"
-        onClick={() => props.onSelectSession?.("session-b")}
-      >
-        Agents
-      </button>
+      <>
+        <button
+          type="button"
+          data-testid="sessions-dropdown-trigger"
+          onClick={() => props.onSelectSession?.("session-b")}
+        >
+          Agents
+        </button>
+        <button
+          type="button"
+          data-testid="sessions-dropdown-new-session"
+          onClick={() =>
+            props.onCreateSession?.({
+              prompt: "hello",
+              agentProfileId: "profile-1",
+              executorId: "executor-1",
+            })
+          }
+        >
+          New
+        </button>
+      </>
     );
   },
 }));
@@ -54,6 +77,8 @@ const session: TaskSession = {
 afterEach(() => {
   cleanup();
   mocks.getWebSocketClient.mockReset();
+  mocks.request.mockReset();
+  mocks.toast.mockReset();
   mocks.dropdownProps = [];
   mocks.onSend = null;
 });
@@ -115,50 +140,55 @@ describe("PreviewSessionBody send failures", () => {
   });
 });
 
+const PREVIEW_TASK_ID = "task-2";
+
+function fixturePreviewSession(id: string, startedAt: string): TaskSession {
+  return {
+    id: toSessionId(id),
+    task_id: toTaskId(PREVIEW_TASK_ID),
+    state: "COMPLETED",
+    started_at: startedAt,
+    updated_at: startedAt,
+  };
+}
+
+function twoPreviewSessions(): TaskSession[] {
+  return [
+    fixturePreviewSession("session-a", "2026-07-21T00:00:00Z"),
+    fixturePreviewSession("session-b", "2026-07-21T00:01:00Z"),
+  ];
+}
+
+function renderPreview(
+  sessions: TaskSession[],
+  sessionId: string | null,
+  onSessionChange = vi.fn(),
+  primarySessionId: string | null = null,
+) {
+  render(
+    <StateProvider
+      initialState={{
+        taskSessionsByTask: {
+          itemsByTaskId: { [PREVIEW_TASK_ID]: sessions },
+          loadedByTaskId: { [PREVIEW_TASK_ID]: true },
+          loadingByTaskId: {},
+        },
+      }}
+    >
+      <PreviewSessionTabs
+        taskId={PREVIEW_TASK_ID}
+        sessionId={sessionId}
+        primarySessionId={primarySessionId}
+        onSessionChange={onSessionChange}
+      />
+    </StateProvider>,
+  );
+  return { onSessionChange };
+}
+
 describe("PreviewSessionTabs agents dropdown", () => {
-  const TASK_ID = "task-2";
-
-  function fixtureSession(id: string, startedAt: string): TaskSession {
-    return {
-      id: toSessionId(id),
-      task_id: toTaskId(TASK_ID),
-      state: "COMPLETED",
-      started_at: startedAt,
-      updated_at: startedAt,
-    };
-  }
-
-  function twoSessions(): TaskSession[] {
-    return [
-      fixtureSession("session-a", "2026-07-21T00:00:00Z"),
-      fixtureSession("session-b", "2026-07-21T00:01:00Z"),
-    ];
-  }
-
-  function renderPreview(
-    sessions: TaskSession[],
-    sessionId: string | null,
-    onSessionChange = vi.fn(),
-  ) {
-    render(
-      <StateProvider
-        initialState={{
-          taskSessionsByTask: {
-            itemsByTaskId: { [TASK_ID]: sessions },
-            loadedByTaskId: { [TASK_ID]: true },
-            loadingByTaskId: {},
-          },
-        }}
-      >
-        <PreviewSessionTabs
-          taskId={TASK_ID}
-          sessionId={sessionId}
-          onSessionChange={onSessionChange}
-        />
-      </StateProvider>,
-    );
-    return { onSessionChange };
-  }
+  const TASK_ID = PREVIEW_TASK_ID;
+  const twoSessions = twoPreviewSessions;
 
   it("renders the Agents dropdown in the tab row, wired to the active session", () => {
     renderPreview(twoSessions(), "session-a");
@@ -186,5 +216,56 @@ describe("PreviewSessionTabs agents dropdown", () => {
     fireEvent.click(screen.getByTestId("sessions-dropdown-trigger"));
 
     expect(onSessionChange).toHaveBeenCalledWith("session-b");
+  });
+
+  it("threads the previewed task's primarySessionId to the dropdown instead of the global active task", () => {
+    renderPreview(twoSessions(), "session-a", vi.fn(), "session-b");
+
+    expect(mocks.dropdownProps.at(-1)).toMatchObject({ primarySessionId: "session-b" });
+  });
+});
+
+describe("PreviewSessionTabs new session creation", () => {
+  const TASK_ID = PREVIEW_TASK_ID;
+
+  it("creating a session from the dropdown launches it inline and selects it locally, without navigating", async () => {
+    mocks.request.mockResolvedValue({
+      success: true,
+      task_id: TASK_ID,
+      session_id: "session-new",
+      state: "STARTING",
+    });
+    mocks.getWebSocketClient.mockReturnValue({ request: mocks.request });
+    const { onSessionChange } = renderPreview(twoPreviewSessions(), "session-a");
+
+    fireEvent.click(screen.getByTestId("sessions-dropdown-new-session"));
+    await vi.waitFor(() => expect(onSessionChange).toHaveBeenCalledWith("session-new"));
+
+    expect(mocks.request).toHaveBeenCalledWith(
+      "session.launch",
+      expect.objectContaining({
+        task_id: TASK_ID,
+        intent: "start",
+        agent_profile_id: "profile-1",
+        executor_id: "executor-1",
+        prompt: "hello",
+      }),
+      expect.any(Number),
+    );
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a toast instead of navigating when inline session creation fails", async () => {
+    mocks.request.mockRejectedValue(new Error("launch failed"));
+    mocks.getWebSocketClient.mockReturnValue({ request: mocks.request });
+    const { onSessionChange } = renderPreview(twoPreviewSessions(), "session-a");
+
+    fireEvent.click(screen.getByTestId("sessions-dropdown-new-session"));
+    await vi.waitFor(() => expect(mocks.toast).toHaveBeenCalled());
+
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "launch failed", variant: "error" }),
+    );
+    expect(onSessionChange).not.toHaveBeenCalledWith("session-new");
   });
 });

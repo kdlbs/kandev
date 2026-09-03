@@ -22,6 +22,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -98,6 +99,13 @@ function mapSessionStatus(state: TaskSessionState): SessionStatus {
   }
 }
 
+export type SessionsDropdownCreateSessionData = {
+  prompt: string;
+  agentProfileId: string;
+  executorId: string;
+  attachments?: MessageAttachment[];
+};
+
 type SessionsDropdownProps = {
   taskId: string | null;
   activeSessionId?: string | null;
@@ -105,6 +113,13 @@ type SessionsDropdownProps = {
   primarySessionId?: string | null;
   onSetPrimary?: (sessionId: string) => void;
   onSelectSession?: (sessionId: string) => void;
+  /**
+   * Overrides new-session creation to stay caller-local instead of the
+   * dialog's default submit path, which navigates to the full task page
+   * (`router.push(linkToTask(taskId))`) — wrong for an embedded surface
+   * like the kanban preview panel.
+   */
+  onCreateSession?: (data: SessionsDropdownCreateSessionData) => void;
 };
 
 function useRunningSessionsClock(sessions: TaskSession[]) {
@@ -240,6 +255,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   primarySessionId: primarySessionIdProp = null,
   onSetPrimary,
   onSelectSession,
+  onCreateSession,
 }: SessionsDropdownProps) {
   const { t } = useTranslation();
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
@@ -320,6 +336,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
         steps={[]}
         taskId={taskId}
         initialValues={{ title: taskTitle, description: "" }}
+        onCreateSession={onCreateSession}
       />
     </>
   );
