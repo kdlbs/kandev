@@ -92,4 +92,91 @@ test.describe("Create task dependency selector on mobile", () => {
     await expect(trigger).toContainText("Mobile dependency predecessor");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile dependency selection");
   });
+
+  test("edits predecessors from the same touch-friendly dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    };
+    const predecessor = await apiClient.createTask(
+      seedData.workspaceId,
+      "Mobile edit dependency Alpha",
+      taskOptions,
+    );
+    const replacement = await apiClient.createTask(
+      seedData.workspaceId,
+      "Mobile edit dependency Beta",
+      taskOptions,
+    );
+    const target = await apiClient.createTask(
+      seedData.workspaceId,
+      "Mobile edit dependency target",
+      {
+        ...taskOptions,
+        description: "Mobile edit prompt",
+        blocked_by: [predecessor.id],
+      },
+    );
+    await apiClient.updateTaskState(target.id, "IN_PROGRESS");
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await mobile.taskCard(target.id).getByRole("button", { name: "More options" }).tap();
+    await testPage
+      .locator('[data-slot="dropdown-menu-content"]:visible')
+      .getByRole("menuitem", { name: "Edit", exact: true })
+      .tap();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    const editDependencies = dialog.getByTestId("task-edit-dependencies");
+    await expect(editDependencies).toBeVisible();
+    const trigger = dialog.getByTestId("task-create-dependencies-trigger");
+    await expect(trigger).toBeVisible({ timeout: 30_000 });
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+    await assertLocatorWithinViewportX(trigger, "mobile edit dependency trigger");
+    await assertNoElementHorizontalOverflow(trigger, "mobile edit dependency trigger");
+    await expect(trigger).toContainText("Mobile edit dependency Alpha");
+
+    await trigger.tap();
+    const picker = dialog.getByTestId("task-create-dependencies-popover");
+    await expect(picker).toBeVisible();
+    await assertLocatorWithinViewportX(picker, "mobile edit dependency picker");
+    await assertNoElementHorizontalOverflow(picker, "mobile edit dependency picker");
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile edit dependency picker");
+    const info = picker.getByTestId("task-create-dependency-info");
+    const infoBox = await info.boundingBox();
+    expect(infoBox).not.toBeNull();
+    expect(infoBox!.height).toBeGreaterThanOrEqual(44);
+    expect(infoBox!.width).toBeGreaterThanOrEqual(44);
+
+    const search = picker.getByPlaceholder("Search tasks...");
+    await search.fill("Mobile edit dependency Beta");
+    const option = picker.getByTestId(`task-create-dependency-option-${replacement.id}`);
+    await expect(option).toBeVisible();
+    const optionBox = await option.boundingBox();
+    expect(optionBox).not.toBeNull();
+    expect(optionBox!.height).toBeGreaterThanOrEqual(44);
+    await prCapture.screenshot("mobile-task-dependency-picker", {
+      caption: "Mobile task edit dialog predecessor picker",
+    });
+    await option.tap();
+    await expect(trigger).toContainText("2 dependencies");
+    await testPage.keyboard.press("Escape");
+    await dialog.getByRole("button", { name: "Update", exact: true }).tap();
+    await expect(dialog).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        (await apiClient.getTaskDependencies(target.id)).depends_on?.map((ref) => ref.id),
+      )
+      .toEqual(expect.arrayContaining([predecessor.id, replacement.id]));
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile edit dependency saved");
+  });
 });

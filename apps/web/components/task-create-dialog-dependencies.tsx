@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
+import type { TaskDependencyCandidate } from "@/lib/types/task-dependencies";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { cn } from "@/lib/utils";
 
@@ -36,20 +37,35 @@ export type TaskCreateDependenciesProps = {
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
+  /** Optional server-backed candidates for the edit dialog. */
+  candidates?: TaskDependencyCandidate[];
+  /** Titles for selected tasks that are outside the current search page. */
+  selectedTitles?: Record<string, string>;
+  /** True while the server-backed candidate search is running. */
+  candidatesLoading?: boolean;
+  /** Controlled search value for the server-backed candidate search. */
+  searchValue?: string;
+  onSearchValueChange?: (value: string) => void;
+  /** The edited task is never a valid predecessor of itself. */
+  excludeTaskId?: string;
 };
 
-function useBoardTasks(): KanbanState["tasks"] {
+function useBoardTasks(): TaskDependencyCandidate[] {
   const boardTasks = useAppStore((state) => state.kanban?.tasks ?? NO_TASKS);
   const snapshots = useAppStore((state) => state.kanbanMulti?.snapshots ?? NO_SNAPSHOTS);
 
   // The home route hydrates its swimlanes into kanbanMulti.snapshots and can
   // leave kanban.tasks empty, so both slices must supply picker candidates.
   return useMemo(() => {
-    const byId = new Map<string, KanbanState["tasks"][number]>();
-    for (const task of boardTasks) byId.set(task.id, task);
+    const byId = new Map<string, TaskDependencyCandidate>();
+    for (const task of boardTasks) {
+      byId.set(task.id, { id: task.id, title: task.title, isArchived: task.isArchived });
+    }
     for (const snapshot of Object.values(snapshots)) {
       for (const task of snapshot.tasks ?? []) {
-        if (!byId.has(task.id)) byId.set(task.id, task);
+        if (!byId.has(task.id)) {
+          byId.set(task.id, { id: task.id, title: task.title, isArchived: task.isArchived });
+        }
       }
     }
     return [...byId.values()];
@@ -75,7 +91,7 @@ function DependencyOption({
   selected,
   onSelect,
 }: {
-  task: KanbanState["tasks"][number];
+  task: TaskDependencyCandidate;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -102,11 +118,14 @@ function DependencyOption({
 }
 
 type DependencyPickerContentProps = {
-  candidates: KanbanState["tasks"];
+  candidates: TaskDependencyCandidate[];
   value: string[];
   onChange: (next: string[]) => void;
   setOpen: (open: boolean) => void;
   portalContainer: HTMLElement | null;
+  candidatesLoading: boolean;
+  searchValue?: string;
+  onSearchValueChange?: (value: string) => void;
 };
 
 function DependencyPickerContent({
@@ -115,8 +134,15 @@ function DependencyPickerContent({
   onChange,
   setOpen,
   portalContainer,
+  candidatesLoading,
+  searchValue,
+  onSearchValueChange,
 }: DependencyPickerContentProps) {
   const { t } = useTranslation();
+  const commandInputProps =
+    searchValue === undefined
+      ? {}
+      : { value: searchValue, onValueChange: onSearchValueChange ?? (() => undefined) };
   return (
     <PopoverContent
       align="start"
@@ -128,7 +154,7 @@ function DependencyPickerContent({
       <Command>
         <div className="flex items-center gap-1">
           <div className="min-w-0 flex-1">
-            <CommandInput placeholder={t("task:searchTasks")} />
+            <CommandInput {...commandInputProps} placeholder={t("task:searchTasks")} />
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -149,7 +175,9 @@ function DependencyPickerContent({
           </Tooltip>
         </div>
         <CommandList>
-          <CommandEmpty>{t("task:noTasksFound")}</CommandEmpty>
+          <CommandEmpty>
+            {candidatesLoading ? t("tasks:loadingTasks") : t("task:noTasksFound")}
+          </CommandEmpty>
           <CommandGroup>
             <CommandItem
               value="__no_dependency__"
@@ -190,19 +218,35 @@ function DependencyPickerContent({
   );
 }
 
-export function TaskCreateDependencies({ value, onChange, disabled }: TaskCreateDependenciesProps) {
+export function TaskCreateDependencies({
+  value,
+  onChange,
+  disabled,
+  candidates: providedCandidates,
+  selectedTitles,
+  candidatesLoading = false,
+  searchValue,
+  onSearchValueChange,
+  excludeTaskId,
+}: TaskCreateDependenciesProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
-  const tasks = useBoardTasks();
+  const boardTasks = useBoardTasks();
+  const tasks = providedCandidates ?? boardTasks;
 
   const selectedTitle = useMemo(() => {
     if (value.length !== 1) return undefined;
-    return tasks.find((task) => task.id === value[0])?.title;
-  }, [tasks, value]);
+    return selectedTitles?.[value[0]] ?? tasks.find((task) => task.id === value[0])?.title;
+  }, [selectedTitles, tasks, value]);
   const candidates = useMemo(
-    () => tasks.filter((task) => !task.isArchived).sort((a, b) => a.title.localeCompare(b.title)),
-    [tasks],
+    () =>
+      tasks
+        .filter(
+          (task) => task.id !== excludeTaskId && (!task.isArchived || value.includes(task.id)),
+        )
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    [excludeTaskId, tasks, value],
   );
   const triggerLabel = <DependencyTriggerLabel value={value} selectedTitle={selectedTitle} t={t} />;
 
@@ -243,6 +287,9 @@ export function TaskCreateDependencies({ value, onChange, disabled }: TaskCreate
           onChange={onChange}
           setOpen={setOpen}
           portalContainer={portalContainer}
+          candidatesLoading={candidatesLoading}
+          searchValue={searchValue}
+          onSearchValueChange={onSearchValueChange}
         />
       </Popover>
     </div>

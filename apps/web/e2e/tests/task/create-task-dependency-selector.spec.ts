@@ -160,4 +160,88 @@ test.describe("Task-create dependency selector", () => {
       await apiClient.deleteWorkflow(extraWorkflow.id).catch(() => {});
     }
   });
+
+  test("edits a started task's predecessor set and keeps cancel draft-only", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    };
+    const alpha = await apiClient.createTask(
+      seedData.workspaceId,
+      "Edit dependency Alpha",
+      taskOptions,
+    );
+    const beta = await apiClient.createTask(
+      seedData.workspaceId,
+      "Edit dependency Beta",
+      taskOptions,
+    );
+    const archived = await apiClient.createTask(
+      seedData.workspaceId,
+      "Edit archived dependency",
+      taskOptions,
+    );
+    await apiClient.archiveTask(archived.id);
+    const target = await apiClient.createTask(seedData.workspaceId, "Edit dependency target", {
+      ...taskOptions,
+      description: "The started task prompt remains unchanged.",
+      blocked_by: [alpha.id],
+    });
+    await apiClient.updateTaskState(target.id, "IN_PROGRESS");
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.openTaskActionsMenu(target.id);
+    await testPage.getByRole("menuitem", { name: "Edit", exact: true }).click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog.getByTestId("task-edit-dependencies")).toBeVisible();
+    await prCapture.screenshot("desktop-task-dependency-edit-dialog", {
+      caption: "Desktop task edit dialog with predecessor dependencies",
+    });
+    const dependency = dialog.getByTestId(DEPENDENCY_TRIGGER);
+    await expect(dependency).toContainText("Edit dependency Alpha");
+    await dependency.click();
+    const picker = dialog.getByTestId("task-create-dependencies-popover");
+    const search = picker.getByPlaceholder("Search tasks...");
+    await search.fill("Edit dependency Beta");
+    await expect(picker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${beta.id}`)).toBeVisible();
+    await picker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${beta.id}`).click();
+    await expect(dependency).toContainText("2 dependencies");
+
+    await testPage.keyboard.press("Escape");
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(
+      (await apiClient.getTaskDependencies(target.id)).depends_on?.map((ref) => ref.id),
+    ).toEqual([alpha.id]);
+
+    await kanban.openTaskActionsMenu(target.id);
+    await testPage.getByRole("menuitem", { name: "Edit", exact: true }).click();
+    const reopened = testPage.getByTestId("create-task-dialog");
+    await expect(reopened.getByTestId("task-edit-dependencies")).toBeVisible();
+    const reopenedDependency = reopened.getByTestId(DEPENDENCY_TRIGGER);
+    await reopenedDependency.click();
+    const reopenedPicker = reopened.getByTestId("task-create-dependencies-popover");
+    await reopenedPicker.getByPlaceholder("Search tasks...").fill("");
+    await expect(
+      reopenedPicker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${archived.id}`),
+    ).toHaveCount(0);
+    await reopenedPicker.getByPlaceholder("Search tasks...").fill("Edit dependency Beta");
+    await reopenedPicker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${beta.id}`).click();
+    await testPage.keyboard.press("Escape");
+    await reopened.getByRole("button", { name: "Update", exact: true }).click();
+    await expect(reopened).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        (await apiClient.getTaskDependencies(target.id)).depends_on?.map((ref) => ref.id),
+      )
+      .toEqual(expect.arrayContaining([alpha.id, beta.id]));
+  });
 });

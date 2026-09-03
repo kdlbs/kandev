@@ -91,6 +91,13 @@ func (e *CycleError) Error() string {
 // not wired. Callers must treat it as "cannot determine", not "not blocked".
 var ErrDependencyRepositoryUnavailable = fmt.Errorf("dependency repository not configured")
 
+// ErrInvalidDependencySet identifies malformed full-set replacement input.
+// Authorization errors intentionally do not use this sentinel, so foreign
+// task IDs remain indistinguishable from missing IDs.
+var ErrInvalidDependencySet = errors.New("invalid dependency set")
+
+var errDependencyCrossWorkspace = errors.New("dependency tasks must share a workspace")
+
 // ResolveStartWhenUnblocked decides whether a create request's agent start
 // should become a start-when-unblocked intent instead of an immediate launch.
 //
@@ -129,7 +136,7 @@ func (s *Service) validateDependencyPair(ctx context.Context, taskID, dependsOnT
 		return fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, dependsOnTaskID)
 	}
 	if task.WorkspaceID != "" && dep.WorkspaceID != "" && task.WorkspaceID != dep.WorkspaceID {
-		return fmt.Errorf("task %s belongs to a different workspace", dependsOnTaskID)
+		return fmt.Errorf("%w: task %s belongs to a different workspace", errDependencyCrossWorkspace, dependsOnTaskID)
 	}
 	return nil
 }
@@ -181,6 +188,105 @@ func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID str
 	// and a subscriber that called back into this method would deadlock on a
 	// non-reentrant mutex.
 	s.publishDependencyChange(ctx, taskID, dependsOnTaskID)
+	return nil
+}
+
+// ReplaceDependencies replaces every direct predecessor of taskID in one
+// validated operation. The complete desired set is checked before storage is
+// changed, and the repository applies its edge diff in one transaction.
+func (s *Service) ReplaceDependencies(ctx context.Context, taskID string, dependsOnTaskIDs []string) error {
+	if s.blockers == nil {
+		return ErrDependencyRepositoryUnavailable
+	}
+	if taskID == "" {
+		return fmt.Errorf("%w: task_id is required", ErrInvalidDependencySet)
+	}
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return err
+	}
+	if err := validateDependencyIDs(taskID, dependsOnTaskIDs); err != nil {
+		return err
+	}
+	for _, dependsOnTaskID := range dependsOnTaskIDs {
+		if err := s.authorizeTaskID(ctx, dependsOnTaskID); err != nil {
+			return err
+		}
+	}
+	replacer, ok := s.blockers.(taskDependencyReplacer)
+	if !ok {
+		return ErrDependencyRepositoryUnavailable
+	}
+	changed, err := s.replaceDependencyEdges(ctx, taskID, dependsOnTaskIDs, replacer)
+	if err != nil {
+		return err
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	s.publishDependencyChange(ctx, append([]string{taskID}, changed...)...)
+	return nil
+}
+
+func validateDependencyIDs(taskID string, dependsOnTaskIDs []string) error {
+	seen := make(map[string]struct{}, len(dependsOnTaskIDs))
+	for _, dependsOnTaskID := range dependsOnTaskIDs {
+		switch dependsOnTaskID {
+		case "":
+			return fmt.Errorf("%w: dependency task IDs cannot be empty", ErrInvalidDependencySet)
+		case taskID:
+			return fmt.Errorf("%w: a task cannot depend on itself", ErrInvalidDependencySet)
+		}
+		if _, duplicate := seen[dependsOnTaskID]; duplicate {
+			return fmt.Errorf("%w: dependency %s is listed more than once", ErrInvalidDependencySet, dependsOnTaskID)
+		}
+		seen[dependsOnTaskID] = struct{}{}
+	}
+	return nil
+}
+
+// replaceDependencyEdges holds the dependency lock across all reads that
+// validate the graph and the repository's atomic replacement.
+func (s *Service) replaceDependencyEdges(
+	ctx context.Context,
+	taskID string,
+	dependsOnTaskIDs []string,
+	replacer taskDependencyReplacer,
+) ([]string, error) {
+	s.dependencyEdgeMu.Lock()
+	defer s.dependencyEdgeMu.Unlock()
+
+	if err := s.validateReplacementSet(ctx, taskID, dependsOnTaskIDs); err != nil {
+		return nil, err
+	}
+	existing, err := s.blockers.ListTaskBlockers(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task dependencies: %w", err)
+	}
+	for _, dependsOnTaskID := range dependsOnTaskIDs {
+		cycle, err := s.checkDependencyCycle(ctx, taskID, dependsOnTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("check dependency cycle: %w", err)
+		}
+		if cycle != nil {
+			return nil, cycle
+		}
+	}
+	changed := changedDependencyIDs(existing, dependsOnTaskIDs)
+	if err := replacer.ReplaceTaskBlockers(ctx, taskID, dependsOnTaskIDs); err != nil {
+		return nil, err
+	}
+	return changed, nil
+}
+
+func (s *Service) validateReplacementSet(ctx context.Context, taskID string, dependsOnTaskIDs []string) error {
+	for _, dependsOnTaskID := range dependsOnTaskIDs {
+		if err := s.validateDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
+			if errors.Is(err, errDependencyCrossWorkspace) {
+				return fmt.Errorf("%w: %w", ErrInvalidDependencySet, err)
+			}
+			return err
+		}
+	}
 	return nil
 }
 
