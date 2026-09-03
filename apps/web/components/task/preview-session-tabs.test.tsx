@@ -59,6 +59,7 @@ type TaskPlansState = {
 
 type FakeAppState = {
   agentProfiles: { items: never[] };
+  connection: { status: "connected" | "disconnected" };
   taskPlans: TaskPlansState;
   markTaskPlanSeen: (taskId: string) => void;
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
@@ -76,6 +77,7 @@ function emptyTaskPlans(): TaskPlansState {
 // cannot reproduce.
 const fakeStore = createStore<FakeAppState>()((set, get) => ({
   agentProfiles: { items: [] },
+  connection: { status: "connected" },
   taskPlans: emptyTaskPlans(),
   markTaskPlanSeen: (taskId: string) => {
     mocks.markTaskPlanSeen(taskId);
@@ -131,6 +133,7 @@ const LATER_TIMESTAMP = "2026-07-22T00:00:00Z";
 const PLAN_INDICATOR_TESTID = "preview-plan-tab-indicator";
 const PLAN_TAB_TESTID = "preview-plan-tab";
 const PLAN_PANEL_TESTID = "preview-plan-panel";
+const PLAN_ERROR_TESTID = "preview-plan-error-state";
 
 const session: TaskSession = {
   id: toSessionId("session-1"),
@@ -225,7 +228,7 @@ describe("PreviewSessionTabs Plan tab", () => {
       resumeSession: vi.fn(),
     });
     mocks.getTaskPlan.mockResolvedValue(null);
-    fakeStore.setState({ taskPlans: emptyTaskPlans() });
+    fakeStore.setState({ taskPlans: emptyTaskPlans(), connection: { status: "connected" } });
   });
 
   afterEach(() => {
@@ -309,6 +312,18 @@ describe("PreviewSessionTabs Plan tab", () => {
     expect(screen.getByTestId(PLAN_TAB_TESTID)).toBeTruthy();
     expect(screen.getByTestId(PLAN_PANEL_TESTID)).toBeTruthy();
     expect(screen.queryByTestId("preview-empty-state")).toBeNull();
+    expect(mocks.markTaskPlanSeen).toHaveBeenCalledWith(TASK_ID);
+    expect(screen.queryByTestId(PLAN_INDICATOR_TESTID)).toBeNull();
+  });
+
+  it("uses a touch-sized tab list for coarse-pointer previews", () => {
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+
+    const list = screen
+      .getByTestId("preview-session-tabs")
+      .querySelector('[data-slot="tabs-list"]');
+    expect(list).not.toBeNull();
+    expect(list?.className).toContain("[@media(pointer:coarse)]:!h-11");
   });
 
   it("clears the indicator (marks seen) when the Plan tab is clicked", () => {
@@ -326,6 +341,43 @@ describe("PreviewSessionTabs Plan tab", () => {
   });
 });
 
+describe("PreviewSessionTabs Plan tab session loading", () => {
+  beforeEach(() => {
+    mocks.useTaskSessions.mockReturnValue({ sessions: [], isLoaded: false });
+    mocks.useSessionResumption.mockReturnValue({
+      error: null,
+      notice: null,
+      resumeSession: vi.fn(),
+    });
+    mocks.getTaskPlan.mockResolvedValue(null);
+    fakeStore.setState({ taskPlans: emptyTaskPlans(), connection: { status: "connected" } });
+  });
+
+  afterEach(() => {
+    cleanup();
+    mocks.useTaskSessions.mockReset();
+    mocks.useSessionResumption.mockReset();
+    mocks.markTaskPlanSeen.mockReset();
+    mocks.getTaskPlan.mockReset();
+  });
+
+  it("does not mark a plan seen while the session list is still loading", () => {
+    setTaskPlansState({
+      byTaskId: { [TASK_ID]: agentPlan() },
+      loadedByTaskId: { [TASK_ID]: true },
+    });
+
+    const { rerender } = render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+
+    expect(mocks.markTaskPlanSeen).not.toHaveBeenCalled();
+
+    mocks.useTaskSessions.mockReturnValue({ sessions: [session], isLoaded: true });
+    rerender(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+
+    expect(screen.getByTestId(PLAN_INDICATOR_TESTID)).toBeTruthy();
+  });
+});
+
 describe("PreviewSessionTabs Plan tab reliability", () => {
   beforeEach(() => {
     mocks.useTaskSessions.mockReturnValue({ sessions: [session], isLoaded: true });
@@ -335,7 +387,7 @@ describe("PreviewSessionTabs Plan tab reliability", () => {
       resumeSession: vi.fn(),
     });
     mocks.getTaskPlan.mockResolvedValue(null);
-    fakeStore.setState({ taskPlans: emptyTaskPlans() });
+    fakeStore.setState({ taskPlans: emptyTaskPlans(), connection: { status: "connected" } });
   });
 
   afterEach(() => {
@@ -353,7 +405,7 @@ describe("PreviewSessionTabs Plan tab reliability", () => {
     fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
 
     await waitFor(() => {
-      expect(screen.getByTestId("preview-plan-error-state")).toBeTruthy();
+      expect(screen.getByTestId(PLAN_ERROR_TESTID)).toBeTruthy();
     });
     expect(mocks.getTaskPlan).toHaveBeenCalledTimes(1);
 
@@ -378,7 +430,7 @@ describe("PreviewSessionTabs Plan tab reliability", () => {
     fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
 
     await waitFor(() => {
-      expect(screen.getByTestId("preview-plan-error-state")).toBeTruthy();
+      expect(screen.getByTestId(PLAN_ERROR_TESTID)).toBeTruthy();
     });
     expect(mocks.getTaskPlan.mock.calls.filter(([id]) => id === TASK_ID)).toHaveLength(1);
 
@@ -403,6 +455,85 @@ describe("PreviewSessionTabs Plan tab reliability", () => {
   });
 });
 
+describe("PreviewSessionTabs Plan tab recovery", () => {
+  beforeEach(() => {
+    mocks.useTaskSessions.mockReturnValue({ sessions: [session], isLoaded: true });
+    mocks.useSessionResumption.mockReturnValue({
+      error: null,
+      notice: null,
+      resumeSession: vi.fn(),
+    });
+    mocks.getTaskPlan.mockResolvedValue(null);
+    fakeStore.setState({ taskPlans: emptyTaskPlans(), connection: { status: "connected" } });
+  });
+
+  afterEach(() => {
+    cleanup();
+    mocks.useTaskSessions.mockReset();
+    mocks.useSessionResumption.mockReset();
+    mocks.markTaskPlanSeen.mockReset();
+    mocks.getTaskPlan.mockReset();
+  });
+
+  it("retries a failed plan fetch after the WebSocket reconnects", async () => {
+    mocks.getTaskPlan.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(agentPlan());
+
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId(PLAN_ERROR_TESTID)).toBeTruthy();
+    });
+
+    act(() => {
+      fakeStore.setState({ connection: { status: "disconnected" } });
+    });
+    act(() => {
+      fakeStore.setState({ connection: { status: "connected" } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId(PLAN_PANEL_TESTID)).toBeTruthy();
+    });
+    expect(mocks.getTaskPlan).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows an authoritative WebSocket plan after an earlier fetch failure", async () => {
+    mocks.getTaskPlan.mockRejectedValue(new Error("boom"));
+
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId(PLAN_ERROR_TESTID)).toBeTruthy();
+    });
+
+    act(() => {
+      fakeStore.getState().setTaskPlan(TASK_ID, agentPlan({ updated_at: LATER_TIMESTAMP }));
+    });
+
+    expect(screen.getByTestId(PLAN_PANEL_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(PLAN_ERROR_TESTID)).toBeNull();
+  });
+
+  it("retries a failed plan fetch from the error state", async () => {
+    mocks.getTaskPlan.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(agentPlan());
+
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-plan-retry")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("preview-plan-retry"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(PLAN_PANEL_TESTID)).toBeTruthy();
+    });
+    expect(mocks.getTaskPlan).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("PreviewSessionTabs Plan tab indicator timing", () => {
   beforeEach(() => {
     mocks.useTaskSessions.mockReturnValue({ sessions: [session], isLoaded: true });
@@ -412,7 +543,7 @@ describe("PreviewSessionTabs Plan tab indicator timing", () => {
       resumeSession: vi.fn(),
     });
     mocks.getTaskPlan.mockResolvedValue(null);
-    fakeStore.setState({ taskPlans: emptyTaskPlans() });
+    fakeStore.setState({ taskPlans: emptyTaskPlans(), connection: { status: "connected" } });
   });
 
   afterEach(() => {
@@ -487,7 +618,7 @@ describe("PreviewSessionTabs Plan tab indicator timing", () => {
 
 describe("usePreviewPlanSummary fetch race", () => {
   beforeEach(() => {
-    fakeStore.setState({ taskPlans: emptyTaskPlans() });
+    fakeStore.setState({ taskPlans: emptyTaskPlans(), connection: { status: "connected" } });
   });
 
   afterEach(() => {

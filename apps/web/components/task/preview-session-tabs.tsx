@@ -28,6 +28,8 @@ import { useTranslation } from "react-i18next";
 
 const LABEL_SEPARATOR = " \u2022 ";
 const PLAN_TAB_ID = "plan";
+const PREVIEW_TAB_CLASS_NAME =
+  "bg-muted/50 data-[state=active]:bg-muted [@media(pointer:coarse)]:!min-h-11";
 
 type PreviewSessionTabsProps = {
   taskId: string;
@@ -75,7 +77,11 @@ export function PreviewSessionTabs({
   // restart where the session row is persisted but agentctl isn't alive).
   const resumption = useSessionResumption(taskId, activeSessionId);
 
-  const planTabState = usePreviewPlanTab(taskId, onSessionChange);
+  // Do not force the Plan view while the session list is still loading. The
+  // first render can have zero sessions before the list arrives, and treating
+  // that transient state as sessionless would mark an unseen plan as seen.
+  const hasNoSessions = isLoaded && sortedSessions.length === 0;
+  const planTabState = usePreviewPlanTab(taskId, hasNoSessions, onSessionChange);
   const { viewMode, planTab, hasPlan } = planTabState;
 
   const tabs = useMemo<SessionTab[]>(
@@ -91,7 +97,7 @@ export function PreviewSessionTabs({
             <SessionAgentLogo profile={profile} />
           ),
           testId: `preview-session-tab-${session.id}`,
-          className: "bg-muted/50 data-[state=active]:bg-muted",
+          className: PREVIEW_TAB_CLASS_NAME,
         };
       }),
       planTab,
@@ -102,8 +108,6 @@ export function PreviewSessionTabs({
   if (!isLoaded && sortedSessions.length === 0) {
     return <PreviewLoadingState label={t("task:loadingAgents")} />;
   }
-
-  const hasNoSessions = sortedSessions.length === 0;
 
   if (hasNoSessions && !hasPlan) {
     return (
@@ -118,8 +122,6 @@ export function PreviewSessionTabs({
   // A task can lose every session (deletion doesn't delete its plan) and
   // still have a plan worth showing — fall back to the Plan view rather than
   // an empty session body when there's nothing else to select.
-  const displayViewMode = hasNoSessions ? "plan" : viewMode;
-
   return (
     <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
       <SessionRecoveryFeedback
@@ -131,14 +133,14 @@ export function PreviewSessionTabs({
       <div className="border-b px-2 py-1">
         <SessionTabs
           tabs={tabs}
-          activeTab={displayViewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
+          activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
           onTabChange={planTabState.handleTabChange}
-          listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+          listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         />
       </div>
       <div className="flex-1 min-h-0">
         <PreviewTabBody
-          viewMode={displayViewMode}
+          viewMode={viewMode}
           planState={planTabState.planState}
           activeSession={activeSession}
           taskId={taskId}
@@ -160,7 +162,9 @@ function PreviewTabBody({
   activeSession: TaskSession | null;
   taskId: string;
 }) {
-  if (viewMode === "plan") return <PreviewPlanPanel {...planState} />;
+  if (viewMode === "plan") {
+    return <PreviewPlanPanel {...planState} onRetry={planState.retry} />;
+  }
   if (!activeSession) return null;
   return <PreviewSessionBody key={activeSession.id} session={activeSession} taskId={taskId} />;
 }
@@ -170,7 +174,11 @@ function PreviewTabBody({
  * unseen-plan indicator (mirrors `plan-tab.tsx`'s dot logic, scoped to this
  * task instead of the global active task), and clearing it on selection.
  */
-function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string | null) => void) {
+function usePreviewPlanTab(
+  taskId: string,
+  hasNoSessions: boolean,
+  onSessionChange?: (sessionId: string | null) => void,
+) {
   const { t } = useTranslation();
   const planState = usePreviewPlanSummary(taskId);
   const { plan, loaded, failed, retry } = planState;
@@ -192,6 +200,8 @@ function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string 
     setViewMode("session");
   }
 
+  const displayViewMode = hasNoSessions && hasPlan ? "plan" : viewMode;
+
   // While the Plan tab is the active view, re-mark seen whenever the plan's
   // updated_at changes. Covers both clicking Plan before the fetch resolves
   // (nothing is marked seen until the plan actually arrives) and a WS plan
@@ -199,10 +209,10 @@ function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string 
   // seen-mark commits before paint, matching plan-tab.tsx's dot logic.
   const planUpdatedAt = plan?.updated_at;
   useLayoutEffect(() => {
-    if (viewMode === "plan" && planUpdatedAt !== undefined) {
+    if (displayViewMode === "plan" && planUpdatedAt !== undefined) {
       markTaskPlanSeen(taskId);
     }
-  }, [viewMode, taskId, markTaskPlanSeen, planUpdatedAt]);
+  }, [displayViewMode, taskId, markTaskPlanSeen, planUpdatedAt]);
 
   const handleTabChange = useCallback(
     (id: string) => {
@@ -227,12 +237,12 @@ function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string 
       label: t("task:plan"),
       icon: <PlanTabIcon hasUnseen={hasUnseenPlan} />,
       testId: "preview-plan-tab",
-      className: "bg-muted/50 data-[state=active]:bg-muted",
+      className: PREVIEW_TAB_CLASS_NAME,
     }),
     [t, hasUnseenPlan],
   );
 
-  return { viewMode, handleTabChange, planTab, planState, hasPlan };
+  return { viewMode: displayViewMode, handleTabChange, planTab, planState, hasPlan };
 }
 
 function resolveProfileSubLabel(

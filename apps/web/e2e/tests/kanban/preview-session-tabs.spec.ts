@@ -401,4 +401,65 @@ test.describe("Preview Plan tab", () => {
     ).toBeVisible({ timeout: 10_000 });
     expect(new URL(testPage.url()).searchParams.get("sessionId")).toBe(sessionIdBeforePlan);
   });
+
+  test("keeps the Plan tab touch-sized on a coarse-pointer tablet", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Preview Plan Tablet Task",
+      seedData.agentProfileId,
+      {
+        description: CREATE_PLAN_SCRIPT,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await expect
+      .poll(
+        async () => {
+          const plan = await apiClient.getTaskPlan(task.id);
+          return plan?.content.includes("Step one") ?? false;
+        },
+        { timeout: 30_000, message: "Waiting for tablet preview plan" },
+      )
+      .toBe(true);
+
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(tabletTestPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardByTitle("Preview Plan Tablet Task");
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.tap();
+
+    const previewPanel = tabletTestPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+    const planTab = previewPanel.getByTestId("preview-plan-tab");
+    await expect(planTab).toBeVisible({ timeout: 15_000 });
+
+    const box = await planTab.boundingBox();
+    const viewport = tabletTestPage.viewportSize();
+    expect(box).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+
+    const hitTarget = await tabletTestPage.evaluate(
+      ({ x, y }) =>
+        document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-testid="preview-plan-tab"]')
+          ?.dataset.testid ?? null,
+      { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 },
+    );
+    expect(hitTarget).toBe("preview-plan-tab");
+
+    await planTab.tap();
+    await expect(previewPanel.getByText("Step one")).toBeVisible({ timeout: 10_000 });
+  });
 });

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@kandev/ui/button";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
@@ -15,12 +16,9 @@ import { useTranslation } from "react-i18next";
  * would clear the Plan tab's unseen indicator before the user ever looks.
  *
  * `failed` is local component state (not the shared store) so a rejected
- * fetch stops the effect instead of retrying every render; it resets when
- * `taskId` changes, allowing one attempt per task. `PreviewSessionTabs`
- * reuses the same component instance across tasks without remounting, so
- * revisiting a task that previously failed would otherwise stay stuck in the
- * error state forever — callers can invoke the returned `retry` to clear it
- * and let the effect fetch again. Call this once per preview panel —
+ * fetch stops the effect instead of retrying every render. A reconnect or
+ * explicit retry clears the error and lets the effect fetch again. Call this
+ * once per preview panel —
  * `usePreviewPlanTab` owns it and passes the result down to
  * `PreviewPlanPanel` — a second mount would duplicate the fetch.
  */
@@ -28,21 +26,36 @@ export function usePreviewPlanSummary(taskId: string) {
   const plan = useAppStore((state) => state.taskPlans.byTaskId[taskId] ?? null);
   const loaded = useAppStore((state) => state.taskPlans.loadedByTaskId[taskId] ?? false);
   const loading = useAppStore((state) => state.taskPlans.loadingByTaskId[taskId] ?? false);
+  const connectionStatus = useAppStore((state) => state.connection.status);
   const storeApi = useAppStoreApi();
   const [failedTaskId, setFailedTaskId] = useState<string | null>(null);
   const failed = failedTaskId === taskId;
   const retry = useCallback(() => {
     setFailedTaskId((current) => (current === taskId ? null : current));
   }, [taskId]);
+  const previousConnectionStatus = useRef(connectionStatus);
 
   useEffect(() => {
-    if (loaded || loading || failed) return;
+    const reconnected =
+      previousConnectionStatus.current !== "connected" && connectionStatus === "connected";
+    previousConnectionStatus.current = connectionStatus;
+    if (reconnected) retry();
+  }, [connectionStatus, retry]);
+
+  useEffect(() => {
+    if (loaded && failedTaskId === taskId) setFailedTaskId(null);
+  }, [failedTaskId, loaded, taskId]);
+
+  useEffect(() => {
+    if (connectionStatus !== "connected" || failed) return;
+    const currentPlanState = storeApi.getState().taskPlans;
+    if (currentPlanState.loadedByTaskId[taskId] || currentPlanState.loadingByTaskId[taskId]) return;
     const { setTaskPlanLoading } = storeApi.getState();
     setTaskPlanLoading(taskId, true);
     getTaskPlan(taskId)
       .then((result) => {
         // Race guard: a WS `task.plan.created`/`task.plan.updated`/
-        // `task.plan.deleted` push can land in the store while this HTTP
+        // `task.plan.deleted` push can land in the store while this WebSocket
         // request is in flight. `loadedByTaskId` (not `byTaskId` truthiness)
         // tells us whether the store already holds an authoritative entry —
         // a deleted plan is stored as `null` on purpose, and that tombstone
@@ -65,9 +78,9 @@ export function usePreviewPlanSummary(taskId: string) {
       .finally(() => {
         storeApi.getState().setTaskPlanLoading(taskId, false);
       });
-  }, [taskId, loaded, loading, failed, storeApi]);
+  }, [connectionStatus, failed, storeApi, taskId]);
 
-  return { plan, loaded, loading, failed, retry };
+  return { plan, loaded, loading, failed: failed && !loaded, retry };
 }
 
 type PreviewPlanPanelProps = {
@@ -75,19 +88,35 @@ type PreviewPlanPanelProps = {
   loaded: boolean;
   loading: boolean;
   failed: boolean;
+  onRetry: () => void;
 };
 
 /** Read-only plan render for the kanban preview panel's Plan tab. */
-export function PreviewPlanPanel({ plan, loaded, loading, failed }: PreviewPlanPanelProps) {
+export function PreviewPlanPanel({
+  plan,
+  loaded,
+  loading,
+  failed,
+  onRetry,
+}: PreviewPlanPanelProps) {
   const { t } = useTranslation();
 
   if (failed) {
     return (
       <div
-        className="flex h-full items-center justify-center text-sm text-muted-foreground"
+        className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
         data-testid="preview-plan-error-state"
       >
-        {t("task:planLoadError")}
+        <span>{t("task:planLoadError")}</span>
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 min-w-11 cursor-pointer [@media(pointer:fine)]:min-h-0 [@media(pointer:fine)]:min-w-0"
+          onClick={onRetry}
+          data-testid="preview-plan-retry"
+        >
+          {t("task:retry")}
+        </Button>
       </div>
     );
   }
