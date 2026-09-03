@@ -111,29 +111,14 @@ describe("OfficeConfigSyncSection", () => {
     expect(setProvider).toHaveBeenCalledWith("gitlab");
   });
 
-  it("disables Save until the GitHub owner and repo fields are both filled", () => {
-    mockController = controller({
-      config: null,
-      form: { ...EMPTY_FORM, repo_owner: "acme" },
-    });
-    render(<OfficeConfigSyncSection />);
-
-    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("enables Save once both GitHub fields are filled and calls handleSave on click", () => {
-    const handleSave = vi.fn().mockResolvedValue(true);
+  it("does not render a page-local Save control", () => {
     mockController = controller({
       config: null,
       form: { ...EMPTY_FORM, repo_owner: "acme", repo_name: "office-config" },
-      handleSave,
     });
     render(<OfficeConfigSyncSection />);
 
-    const saveButton = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
-    expect(saveButton.disabled).toBe(false);
-    fireEvent.click(saveButton);
-    expect(handleSave).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
   it("requires an explicit confirmation before calling handleDelete", async () => {

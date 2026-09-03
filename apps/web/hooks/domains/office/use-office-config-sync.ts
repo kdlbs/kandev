@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { t } from "@/lib/i18n";
 import { toast } from "@/lib/toast/sonner";
 import { useRouter } from "@/lib/routing/client-router";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getOfficeConfigSyncConfig,
@@ -51,6 +52,25 @@ function configToForm(cfg: OfficeConfigSyncConfig | null): OfficeConfigSyncFormS
     interval_seconds: cfg.interval_seconds,
     poll_enabled: cfg.poll_enabled,
   };
+}
+
+function formRevision(form: OfficeConfigSyncFormState): string {
+  return JSON.stringify(form);
+}
+
+function invalidFormField(form: OfficeConfigSyncFormState): "target" | "interval" | undefined {
+  const targetMissing =
+    form.provider === "gitlab"
+      ? !form.project_path.trim()
+      : !form.repo_owner.trim() || !form.repo_name.trim();
+  if (targetMissing) return "target";
+  if (
+    form.poll_enabled &&
+    (!Number.isInteger(form.interval_seconds) || form.interval_seconds < 60)
+  ) {
+    return "interval";
+  }
+  return undefined;
 }
 
 // Background refresh so the status card picks up new poller results
@@ -159,53 +179,43 @@ function useOfficeConfigSyncInitialLoad(
   }, [workspaceId, setConfig, reset, setLoading]);
 }
 
-export function useOfficeConfigSync(workspaceId: string) {
-  const router = useRouter();
-  const [config, setConfig] = useState<OfficeConfigSyncConfig | null>(null);
-  const { form, update, setProvider, reset } = useOfficeConfigSyncForm();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+function useOfficeConfigSyncSaveContributor({
+  workspaceId,
+  form,
+  config,
+  handleSave,
+  reset,
+}: {
+  workspaceId: string;
+  form: OfficeConfigSyncFormState;
+  config: OfficeConfigSyncConfig | null;
+  handleSave: (throwOnError?: boolean) => Promise<boolean>;
+  reset: (cfg: OfficeConfigSyncConfig | null) => void;
+}) {
+  const revision = formRevision(form);
+  const savedRevision = formRevision(configToForm(config));
+  const invalidField = invalidFormField(form);
 
-  useOfficeConfigSyncInitialLoad(workspaceId, { setConfig, reset, setLoading });
-  useOfficeConfigSyncRefresh(workspaceId, setConfig);
+  useSettingsSaveContributor({
+    id: "office-config-sync",
+    order: 20,
+    revision,
+    isDirty: Boolean(workspaceId) && revision !== savedRevision,
+    canSave: invalidField === undefined,
+    save: async () => {
+      await handleSave(true);
+    },
+    discard: () => reset(config),
+  });
+}
 
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    try {
-      const payload: OfficeConfigSyncSetConfigRequest =
-        form.provider === "gitlab"
-          ? {
-              provider: "gitlab",
-              project_path: form.project_path.trim(),
-              branch: form.branch.trim(),
-              path: form.path,
-              interval_seconds: form.interval_seconds,
-              poll_enabled: form.poll_enabled,
-            }
-          : {
-              provider: "github",
-              repo_owner: form.repo_owner.trim(),
-              repo_name: form.repo_name.trim(),
-              branch: form.branch.trim(),
-              path: form.path,
-              interval_seconds: form.interval_seconds,
-              poll_enabled: form.poll_enabled,
-            };
-      const saved = await setOfficeConfigSyncConfig(workspaceId, payload);
-      setConfig(saved);
-      reset(saved);
-      toast.success(t("office:configSyncConfigSaved"));
-      return true;
-    } catch (err) {
-      toast.error(t("office:configSyncSaveFailed", { error: String(err) }));
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  }, [workspaceId, form, reset]);
-
-  const handleDelete = useCallback(async () => {
+function useOfficeConfigSyncDelete(
+  workspaceId: string,
+  setConfig: (cfg: OfficeConfigSyncConfig | null) => void,
+  reset: (cfg: OfficeConfigSyncConfig | null) => void,
+  router: ReturnType<typeof useRouter>,
+) {
+  return useCallback(async () => {
     try {
       await deleteOfficeConfigSyncConfig(workspaceId);
       setConfig(null);
@@ -220,7 +230,62 @@ export function useOfficeConfigSync(workspaceId: string) {
       toast.error(t("office:configSyncRemoveFailed", { error: String(err) }));
       return false;
     }
-  }, [workspaceId, reset, router]);
+  }, [workspaceId, reset, router, setConfig]);
+}
+
+export function useOfficeConfigSync(workspaceId: string) {
+  const router = useRouter();
+  const [config, setConfig] = useState<OfficeConfigSyncConfig | null>(null);
+  const { form, update, setProvider, reset } = useOfficeConfigSyncForm();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  useOfficeConfigSyncInitialLoad(workspaceId, { setConfig, reset, setLoading });
+  useOfficeConfigSyncRefresh(workspaceId, setConfig);
+
+  const handleSave = useCallback(
+    async (throwOnError = false) => {
+      setSaving(true);
+      try {
+        const payload: OfficeConfigSyncSetConfigRequest =
+          form.provider === "gitlab"
+            ? {
+                provider: "gitlab",
+                project_path: form.project_path.trim(),
+                branch: form.branch.trim(),
+                path: form.path,
+                interval_seconds: form.interval_seconds,
+                poll_enabled: form.poll_enabled,
+              }
+            : {
+                provider: "github",
+                repo_owner: form.repo_owner.trim(),
+                repo_name: form.repo_name.trim(),
+                branch: form.branch.trim(),
+                path: form.path,
+                interval_seconds: form.interval_seconds,
+                poll_enabled: form.poll_enabled,
+              };
+        const saved = await setOfficeConfigSyncConfig(workspaceId, payload);
+        setConfig(saved);
+        reset(saved);
+        toast.success(t("office:configSyncConfigSaved"));
+        return true;
+      } catch (err) {
+        toast.error(t("office:configSyncSaveFailed", { error: String(err) }));
+        if (throwOnError) throw err;
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [workspaceId, form, reset],
+  );
+
+  useOfficeConfigSyncSaveContributor({ workspaceId, form, config, handleSave, reset });
+
+  const handleDelete = useOfficeConfigSyncDelete(workspaceId, setConfig, reset, router);
 
   const handleSyncNow = useCallback(async () => {
     setSyncing(true);
@@ -229,9 +294,10 @@ export function useOfficeConfigSync(workspaceId: string) {
       setConfig(res.config);
       reset(res.config);
       syncOutcomeToast(res.error, res.result?.warnings);
-      // Reload agent/skill/project/routine lists when the sync actually
-      // changed something so they show up without a manual refresh.
-      if (res.result && !res.result.unchanged) {
+      // A later reconciliation phase can fail after earlier entity writes
+      // commit, so a failed response can still leave lists changed. Refresh
+      // when `result` is omitted as well as when the sync reports changes.
+      if (!res.result || !res.result.unchanged) {
         router.refresh();
       }
     } catch (err) {

@@ -6,7 +6,6 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
-import { IconDeviceFloppy } from "@tabler/icons-react";
 import { RemoteRepoProviderTabs } from "@/components/task-create-dialog-remote-repo-provider-tabs";
 import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
@@ -49,7 +48,7 @@ function TargetFields({ form, update }: FieldsProps) {
     );
   }
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <div className="space-y-1.5">
         <Label htmlFor="office-config-sync-repo-owner">{t("office:configSyncRepoOwner")}</Label>
         <Input
@@ -75,7 +74,7 @@ function TargetFields({ form, update }: FieldsProps) {
 function BranchDirectoryFields({ form, update }: FieldsProps) {
   const { t } = useTranslation();
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <div className="space-y-1.5">
         <Label htmlFor="office-config-sync-branch">{t("office:configSyncBranchLabel")}</Label>
         <Input
@@ -140,32 +139,12 @@ function PollFields({ form, update }: FieldsProps) {
   );
 }
 
-function isSaveDisabled(
-  form: OfficeConfigSyncFormState,
-  saving: boolean,
-  loading: boolean,
-): boolean {
-  const targetMissing =
-    form.provider === "gitlab"
-      ? !form.project_path.trim()
-      : !form.repo_owner.trim() || !form.repo_name.trim();
-  const intervalInvalid =
-    form.poll_enabled && (!Number.isInteger(form.interval_seconds) || form.interval_seconds < 60);
-  return saving || loading || targetMissing || intervalInvalid;
-}
-
 function ConfigureForm({
   form,
   update,
   setProvider,
-  saving,
-  loading,
-  onSave,
 }: FieldsProps & {
   setProvider: (provider: OfficeConfigSyncProvider) => void;
-  saving: boolean;
-  loading: boolean;
-  onSave: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -185,15 +164,6 @@ function ConfigureForm({
       <TargetFields form={form} update={update} />
       <BranchDirectoryFields form={form} update={update} />
       <PollFields form={form} update={update} />
-      <Button
-        onClick={onSave}
-        disabled={isSaveDisabled(form, saving, loading)}
-        className="cursor-pointer"
-        data-testid="office-config-sync-save"
-      >
-        <IconDeviceFloppy className="h-4 w-4 mr-1.5" />
-        {saving ? t("office:configSyncSaving") : t("common:save")}
-      </Button>
     </div>
   );
 }
@@ -257,27 +227,13 @@ export function OfficeConfigSyncSection() {
               {t("office:configSyncEditConfiguration")}
             </summary>
             <div className="mt-3 space-y-3">
-              <ConfigureForm
-                form={sync.form}
-                update={sync.update}
-                setProvider={sync.setProvider}
-                saving={sync.saving}
-                loading={sync.loading}
-                onSave={sync.handleSave}
-              />
+              <ConfigureForm form={sync.form} update={sync.update} setProvider={sync.setProvider} />
               <RemoveAction saving={sync.saving} onRemove={sync.handleDelete} />
             </div>
           </details>
         </div>
       ) : (
-        <ConfigureForm
-          form={sync.form}
-          update={sync.update}
-          setProvider={sync.setProvider}
-          saving={sync.saving}
-          loading={sync.loading}
-          onSave={sync.handleSave}
-        />
+        <ConfigureForm form={sync.form} update={sync.update} setProvider={sync.setProvider} />
       )}
     </section>
   );

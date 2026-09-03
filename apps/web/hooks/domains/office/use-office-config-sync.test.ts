@@ -16,6 +16,11 @@ vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ refresh: mockRouterRefresh }),
 }));
 
+const mockUseSettingsSaveContributor = vi.fn();
+vi.mock("@/components/settings/settings-save-provider", () => ({
+  useSettingsSaveContributor: (contributor: unknown) => mockUseSettingsSaveContributor(contributor),
+}));
+
 const getOfficeConfigSyncConfigMock =
   vi.fn<(workspaceId: string) => Promise<OfficeConfigSyncConfig | null>>();
 const setOfficeConfigSyncConfigMock =
@@ -64,6 +69,24 @@ afterEach(() => {
 });
 
 describe("useOfficeConfigSync", () => {
+  it("registers the config draft with the shared settings save coordinator", async () => {
+    const { result } = renderHook(() => useOfficeConfigSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.update("repo_owner", "kdlbs"));
+    act(() => result.current.update("repo_name", REPO_NAME));
+
+    await waitFor(() =>
+      expect(mockUseSettingsSaveContributor).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          id: "office-config-sync",
+          isDirty: true,
+          canSave: true,
+        }),
+      ),
+    );
+  });
+
   it("loads config and pre-fills the form on mount", async () => {
     getOfficeConfigSyncConfigMock.mockResolvedValue(
       makeConfig({ repo_owner: "acme", branch: "dev" }),
@@ -208,7 +231,7 @@ describe("useOfficeConfigSync — GitLab form paths", () => {
 });
 
 describe("useOfficeConfigSync — sync now and polling", () => {
-  it("handleSyncNow updates config from the force-sync response, including failures, without a router refresh", async () => {
+  it("handleSyncNow refreshes entity lists after a failed sync attempt", async () => {
     getOfficeConfigSyncConfigMock.mockResolvedValue(makeConfig({ last_ok: true }));
     forceOfficeConfigSyncMock.mockResolvedValue({
       config: makeConfig({ last_ok: false, last_error: "clone failed" }),
@@ -226,9 +249,9 @@ describe("useOfficeConfigSync — sync now and polling", () => {
     expect(result.current.config?.last_error).toBe("clone failed");
     expect(result.current.syncing).toBe(false);
     expect(mockToastError).toHaveBeenCalled();
-    // A failed sync attempt has no `result`, so nothing changed server-side —
-    // no reason to force a reload of agent/skill/project/routine lists.
-    expect(mockRouterRefresh).not.toHaveBeenCalled();
+    // A later reconciliation phase can fail after earlier entity writes commit.
+    // The UI must refresh even when the failed response omits `result`.
+    expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("handleSyncNow refreshes the router when the sync changed something", async () => {
