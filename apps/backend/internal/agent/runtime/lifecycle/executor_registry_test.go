@@ -21,6 +21,10 @@ type MockExecutor struct {
 	// recoverRecords captures the records RecoverInstances was called with,
 	// so tests can assert RecoverAll passes them through unchanged.
 	recoverRecords []*models.ExecutorRunning
+	// stopInstanceCalls records every instance StopInstance was called with,
+	// so tests can assert a refused recovered instance was actually stopped.
+	stopInstanceCalls []*ExecutorInstance
+	stopInstanceErr   error
 }
 
 func (m *MockExecutor) Name() executor.Name { return m.name }
@@ -31,7 +35,8 @@ func (m *MockExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRe
 	return nil, nil
 }
 func (m *MockExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
-	return nil
+	m.stopInstanceCalls = append(m.stopInstanceCalls, instance)
+	return m.stopInstanceErr
 }
 func (m *MockExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	m.recoverRecords = records

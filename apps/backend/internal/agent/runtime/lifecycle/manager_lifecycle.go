@@ -93,9 +93,14 @@ func (m *Manager) Start(ctx context.Context) error {
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
 			execution := &AgentExecution{
-				ID:                   ri.InstanceID,
-				TaskID:               ri.TaskID,
-				SessionID:            ri.SessionID,
+				ID:        ri.InstanceID,
+				TaskID:    ri.TaskID,
+				SessionID: ri.SessionID,
+				// AC-EXECUTORS-SURVIVAL-002.14: agent profile identity's
+				// declared source is the recovery-inventory record's
+				// execution-profile column, carried onto ri by
+				// buildRecoveredInstances -- never the adopted instance.
+				AgentProfileID:       ri.AgentProfileID,
 				ContainerID:          ri.ContainerID,
 				ContainerIP:          ri.ContainerIP,
 				WorkspacePath:        ri.WorkspacePath,
@@ -130,6 +135,26 @@ func (m *Manager) Start(ctx context.Context) error {
 			// new source -- an empty value here is a legitimate non-Office
 			// launch, not a missing reconstruction.
 			execution.OfficeAgentProfileID = getMetadataString(ri.Metadata, MetadataKeyOfficeAgentProfileID)
+			// AC-EXECUTORS-SURVIVAL-002.14: agent identity, agent and
+			// continuation commands and their arguments, and the history
+			// setting are re-derived from the restored agent profile and the
+			// agent-type registry, never read from the instance. When the
+			// re-derivation cannot answer (AC-EXECUTORS-SURVIVAL-002.4: the
+			// declared source answered and the value is not present -- an
+			// unresolvable profile or an agent type no longer in the
+			// registry), this instance is authoritatively missing a required
+			// value: refuse to re-track it and leave it to the stop path
+			// AC-EXECUTORS-SURVIVAL-002.6 defines, rather than tracking a
+			// session the backend cannot safely operate.
+			if err := m.reDeriveRecoveredAgentIdentity(ctx, execution); err != nil {
+				m.logger.Error("refusing to re-track recovered execution: agent identity could not be reconstructed",
+					zap.String("instance_id", execution.ID),
+					zap.String("session_id", execution.SessionID),
+					zap.String("agent_profile_id", execution.AgentProfileID),
+					zap.Error(err))
+				m.stopUnreconstructableRecoveredInstance(ctx, ri)
+				continue
+			}
 			// Create trace span for the recovered session
 			_, recoverySpan := tracing.TraceSessionRecovered(
 				context.Background(), execution.TaskID, execution.SessionID, execution.ID,
@@ -235,6 +260,70 @@ func (m *Manager) hydrateRecoveredTaskEnvironmentID(ctx context.Context, executi
 	}
 	if info != nil {
 		execution.TaskEnvironmentID = info.TaskEnvironmentID
+	}
+}
+
+// reDeriveRecoveredAgentIdentity implements AC-EXECUTORS-SURVIVAL-002.14's
+// last reconstruction-table row: agent identity, agent and continuation
+// commands and their arguments, and the history setting are re-derived from
+// the restored agent profile and the agent-type registry -- the same
+// computation an ordinary launch performs, never read from the adopted
+// instance, so a compromised or stale instance cannot tell the backend which
+// command to run for the session's next turn.
+//
+// Re-derivation reflects the profile and registry as they stand at recovery,
+// not as they stood before the restart (AC-EXECUTORS-SURVIVAL-002.3): a
+// profile edited or an agent type removed during the outage takes effect
+// exactly as it would on the session's next ordinary turn.
+//
+// getAgentConfigForExecution and buildFreshAgentCommand are the same
+// primitives an in-session context reset uses (manager_interaction.go's
+// prepareAgentRestart), reused as-is: both already consume nothing but
+// execution fields already restored by this point (AgentProfileID,
+// RuntimeName, metadata), with no launch-request-only dependency.
+func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution *AgentExecution) error {
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return fmt.Errorf("agent identity: %w", err)
+	}
+	execution.AgentID = agentConfig.ID()
+	if rt := agentConfig.Runtime(); rt != nil {
+		execution.historyEnabled = rt.SessionConfig.HistoryContextInjection ||
+			rt.SessionConfig.NewSessionOnWorkspaceRebind
+	}
+	commands, err := m.buildFreshAgentCommand(ctx, execution, agentConfig)
+	if err != nil {
+		return fmt.Errorf("agent and continuation commands: %w", err)
+	}
+	execution.AgentCommand = commands.initial
+	execution.ContinueCommand = commands.continue_
+	execution.AgentArgs = commands.args
+	execution.ContinueArgs = commands.continueArgs
+	return nil
+}
+
+// stopUnreconstructableRecoveredInstance implements the
+// AC-EXECUTORS-SURVIVAL-002.4 refusal path's "leave the instance to the stop
+// path defined by AC-EXECUTORS-SURVIVAL-002.6" for an instance whose agent
+// identity could not be re-derived: it was never added to the execution
+// store, so RemoveExecution's teardown does not apply -- stop the live
+// instance directly through its owning runtime backend. A stop failure is
+// logged; the instance is left to the existing stale-execution repair path
+// like any other recovery-time stop failure that isn't part of the joint
+// winner/loser accounting.
+func (m *Manager) stopUnreconstructableRecoveredInstance(ctx context.Context, ri *ExecutorInstance) {
+	backend, err := m.executorRegistry.GetBackend(ri.RuntimeName)
+	if err != nil {
+		m.logger.Warn("cannot stop unreconstructable recovered instance: no backend for its runtime",
+			zap.String("instance_id", ri.InstanceID),
+			zap.String("runtime", string(ri.RuntimeName)),
+			zap.Error(err))
+		return
+	}
+	if err := backend.StopInstance(ctx, ri, true); err != nil {
+		m.logger.Warn("failed to stop unreconstructable recovered instance",
+			zap.String("instance_id", ri.InstanceID),
+			zap.Error(err))
 	}
 }
 

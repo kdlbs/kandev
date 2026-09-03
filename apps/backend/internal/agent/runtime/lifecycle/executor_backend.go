@@ -674,6 +674,16 @@ type ExecutorInstance struct {
 	// "provider session identity" row). Same recovery-only shape as Env above.
 	ProviderSessionID string
 
+	// AgentProfileID is a recovery-only carrier for
+	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the
+	// recovery-inventory record's execution-profile column, read by
+	// StandaloneExecutor.buildRecoveredInstances so the recovery loop can set
+	// AgentExecution.AgentProfileID before re-deriving agent identity, without
+	// waiting on persistExecutorRunningResult's separate DB-backed self-heal.
+	// A fresh launch's profile flows through ExecutorCreateRequest.AgentProfileID
+	// instead, never through this field.
+	AgentProfileID string
+
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by authenticated container/remote executors for encrypted storage in SecretStore.
 	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)

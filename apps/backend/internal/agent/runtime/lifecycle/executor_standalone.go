@@ -566,17 +566,23 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 
 		taskID := inst.TaskID
 		var metadata map[string]interface{}
+		var agentProfileID string
 		if record != nil {
 			if record.TaskID != "" {
 				taskID = record.TaskID
 			}
 			metadata = record.Metadata
+			// AC-EXECUTORS-SURVIVAL-002.14: agent profile identity's declared
+			// source is the recovery-inventory record's execution-profile
+			// column -- never the adopted instance.
+			agentProfileID = record.ExecutionProfileID
 		}
 
 		recovered = append(recovered, &ExecutorInstance{
 			InstanceID:           inst.ID,
 			TaskID:               taskID,
 			SessionID:            sessionID,
+			AgentProfileID:       agentProfileID,
 			RuntimeName:          r.Name(),
 			Client:               client,
 			StandaloneInstanceID: inst.ID,

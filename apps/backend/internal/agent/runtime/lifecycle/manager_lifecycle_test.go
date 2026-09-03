@@ -401,9 +401,10 @@ func TestManager_StartSeedsRecoveredExecution(t *testing.T) {
 	execRegistry.Register(&MockExecutor{
 		name: executor.NameStandalone,
 		recoverInstances: []*ExecutorInstance{{
-			InstanceID: "exec-recovered",
-			TaskID:     "task-recovered",
-			Client:     client,
+			InstanceID:     "exec-recovered",
+			TaskID:         "task-recovered",
+			AgentProfileID: "profile-1",
+			Client:         client,
 		}},
 	})
 	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
