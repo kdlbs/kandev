@@ -130,6 +130,9 @@ describe("SessionContextMenuItems", () => {
 
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Close Others" })).toBeNull();
+    // Only the setAsPrimary/stop-or-resume separator renders; no orphan
+    // separator is left behind where Close Others' own separator would go.
+    expect(screen.getAllByRole("separator")).toHaveLength(1);
   });
 });
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { ChatSubmitPayload } from "./chat/chat-input-container";
@@ -309,14 +309,36 @@ describe("PreviewSessionTabs session context menu", () => {
   });
 });
 
-describe("PreviewSessionTabs delete session selection", () => {
-  async function deleteViaContextMenu(tabTestId: string) {
-    fireEvent.contextMenu(screen.getByTestId(tabTestId));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    const confirm = await screen.findByTestId("session-delete-confirm");
-    fireEvent.click(confirm);
-  }
+async function deleteViaContextMenu(tabTestId: string) {
+  fireEvent.contextMenu(screen.getByTestId(tabTestId));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+  const confirm = await screen.findByTestId("session-delete-confirm");
+  fireEvent.click(confirm);
+}
 
+/** Makes `mocks.remove` hang until the returned resolver is called, so a
+ * test can change props (simulate the user switching tabs) while a
+ * `session.delete` round-trip is still in flight. */
+function deferDelete() {
+  let resolveDelete: (ok: boolean) => void = () => {};
+  mocks.remove.mockImplementation(
+    () =>
+      new Promise<boolean>((resolve) => {
+        resolveDelete = resolve;
+      }),
+  );
+  return {
+    settle: async (ok: boolean) => {
+      await act(async () => {
+        resolveDelete(ok);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    },
+  };
+}
+
+describe("PreviewSessionTabs delete session selection", () => {
   it("does not change the viewed session when a non-active tab is deleted", async () => {
     mocks.sessions = [
       makeSession("session-a", { state: "COMPLETED" }),
@@ -379,5 +401,74 @@ describe("PreviewSessionTabs delete session selection", () => {
       expect(mocks.remove).toHaveBeenCalledWith("session-a", { feedback: "toast" }),
     );
     expect(onSessionChange).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("PreviewSessionTabs deferred delete", () => {
+  it("does not redirect when the active tab changes while its own delete is still pending", async () => {
+    mocks.sessions = [
+      makeSession("session-a", { state: "COMPLETED" }),
+      makeSession("session-b", { state: "COMPLETED" }),
+      makeSession("session-c", { state: "COMPLETED" }),
+    ];
+    const onSessionChange = vi.fn();
+    const pendingDelete = deferDelete();
+    const { rerender } = render(
+      <PreviewSessionTabs
+        taskId={TASK_ID}
+        sessionId="session-a"
+        onSessionChange={onSessionChange}
+      />,
+    );
+
+    await deleteViaContextMenu(SESSION_A_TAB_TESTID);
+    await vi.waitFor(() =>
+      expect(mocks.remove).toHaveBeenCalledWith("session-a", { feedback: "toast" }),
+    );
+
+    // User switches away from the tab being deleted before session.delete settles.
+    rerender(
+      <PreviewSessionTabs
+        taskId={TASK_ID}
+        sessionId="session-b"
+        onSessionChange={onSessionChange}
+      />,
+    );
+    await pendingDelete.settle(true);
+
+    expect(onSessionChange).not.toHaveBeenCalled();
+  });
+
+  it("redirects once the pending delete resolves for a tab that became active in the meantime", async () => {
+    mocks.sessions = [
+      makeSession("session-a", { state: "COMPLETED" }),
+      makeSession("session-b", { state: "COMPLETED" }),
+    ];
+    const onSessionChange = vi.fn();
+    const pendingDelete = deferDelete();
+    const { rerender } = render(
+      <PreviewSessionTabs
+        taskId={TASK_ID}
+        sessionId="session-a"
+        onSessionChange={onSessionChange}
+      />,
+    );
+
+    await deleteViaContextMenu("preview-session-tab-session-b");
+    await vi.waitFor(() =>
+      expect(mocks.remove).toHaveBeenCalledWith("session-b", { feedback: "toast" }),
+    );
+
+    // User switches to the tab now pending deletion before session.delete settles.
+    rerender(
+      <PreviewSessionTabs
+        taskId={TASK_ID}
+        sessionId="session-b"
+        onSessionChange={onSessionChange}
+      />,
+    );
+    await pendingDelete.settle(true);
+
+    expect(onSessionChange).toHaveBeenCalledWith("session-a");
   });
 });

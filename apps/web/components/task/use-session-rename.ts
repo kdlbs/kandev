@@ -43,6 +43,6 @@ export function useSessionRenameCommitter(
         });
       }
     },
-    [sessionId, taskId, currentName, appStoreApi, onDone, toast],
+    [sessionId, taskId, currentName, appStoreApi, onDone, toast, t],
   );
 }

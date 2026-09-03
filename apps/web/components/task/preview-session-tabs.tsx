@@ -331,13 +331,23 @@ export function PreviewSessionTabs({
   const resumption = useSessionResumption(taskId, activeSessionId);
 
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
+  // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
+  // closure at the moment delete is confirmed, and `session.delete` can take
+  // a WS round-trip to settle. Reading these off refs (updated every render)
+  // instead of closing over `activeSessionId`/`sortedSessions` means the
+  // eventual `onDeleted` call sees which tab is active *now*, not which one
+  // was active when the delete was requested.
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const sortedSessionsRef = useRef(sortedSessions);
+  sortedSessionsRef.current = sortedSessions;
   const handleSessionRemoved = useCallback(
     (removedSessionId: string) => {
-      if (removedSessionId !== activeSessionId) return;
-      const remaining = sortedSessions.filter((s) => s.id !== removedSessionId);
+      if (removedSessionId !== activeSessionIdRef.current) return;
+      const remaining = sortedSessionsRef.current.filter((s) => s.id !== removedSessionId);
       onSessionChange?.(remaining[0]?.id ?? null);
     },
-    [sortedSessions, activeSessionId, onSessionChange],
+    [onSessionChange],
   );
 
   const tabs = useBuildPreviewTabs({
