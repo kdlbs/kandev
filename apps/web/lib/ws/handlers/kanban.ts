@@ -86,7 +86,47 @@ type KanbanUpdateTask = {
   blocks?: KanbanTask["blocks"];
   start_when_unblocked?: boolean;
   startWhenUnblocked?: boolean;
+  priority?: KanbanTask["priority"];
 };
+
+/**
+ * Fall back to the multi-snapshot's own value only when the main kanban
+ * lookup returned `undefined` (task absent from kanban.tasks). An explicit
+ * `null` means the primary was intentionally cleared and must NOT be
+ * replaced by a stale snapshot value.
+ */
+function preserveIfUndefined<T>(value: T | undefined, fallback: T | undefined): T | undefined {
+  return value === undefined ? fallback : value;
+}
+
+function preserveMultiSnapshotFields(
+  t: KanbanTask,
+  fallback: KanbanTask | undefined,
+): Pick<
+  KanbanTask,
+  | "primarySessionId"
+  | "primarySessionState"
+  | "primarySessionPendingAction"
+  | "taskPendingAction"
+  | "foregroundActivity"
+  | "interrupted"
+  | "autoStartFailed"
+  | "priority"
+> {
+  return {
+    primarySessionId: preserveIfUndefined(t.primarySessionId, fallback?.primarySessionId),
+    primarySessionState: preserveIfUndefined(t.primarySessionState, fallback?.primarySessionState),
+    primarySessionPendingAction: preserveIfUndefined(
+      t.primarySessionPendingAction,
+      fallback?.primarySessionPendingAction,
+    ),
+    taskPendingAction: preserveIfUndefined(t.taskPendingAction, fallback?.taskPendingAction),
+    foregroundActivity: preserveIfUndefined(t.foregroundActivity, fallback?.foregroundActivity),
+    interrupted: preserveIfUndefined(t.interrupted, fallback?.interrupted),
+    autoStartFailed: preserveIfUndefined(t.autoStartFailed, fallback?.autoStartFailed),
+    priority: preserveIfUndefined(t.priority, fallback?.priority),
+  };
+}
 
 export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -135,6 +175,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               interrupted: existing?.interrupted,
               autoStartFailed: existing?.autoStartFailed,
               foregroundActivity: existing?.foregroundActivity,
+              priority: task.priority ?? existing?.priority,
               ...queueFields(task, existing),
               ...dependencyFields(task, existing),
             };
@@ -152,34 +193,10 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
           const multiTasks = tasks.map((t) => {
             const fallback = existingMultiById.get(t.id);
             const repoFields = mergeTaskRepositoryFields(fallback, t);
-            // Fall back to the multi-snapshot's own value only when the main
-            // kanban lookup returned `undefined` (task absent from kanban.tasks).
-            // An explicit `null` means the primary was intentionally cleared
-            // and must NOT be replaced by a stale snapshot value.
             return {
               ...t,
               ...repoFields,
-              primarySessionId:
-                t.primarySessionId === undefined ? fallback?.primarySessionId : t.primarySessionId,
-              primarySessionState:
-                t.primarySessionState === undefined
-                  ? fallback?.primarySessionState
-                  : t.primarySessionState,
-              primarySessionPendingAction:
-                t.primarySessionPendingAction === undefined
-                  ? fallback?.primarySessionPendingAction
-                  : t.primarySessionPendingAction,
-              taskPendingAction:
-                t.taskPendingAction === undefined
-                  ? fallback?.taskPendingAction
-                  : t.taskPendingAction,
-              foregroundActivity:
-                t.foregroundActivity === undefined
-                  ? fallback?.foregroundActivity
-                  : t.foregroundActivity,
-              interrupted: t.interrupted === undefined ? fallback?.interrupted : t.interrupted,
-              autoStartFailed:
-                t.autoStartFailed === undefined ? fallback?.autoStartFailed : t.autoStartFailed,
+              ...preserveMultiSnapshotFields(t, fallback),
             };
           });
           return {

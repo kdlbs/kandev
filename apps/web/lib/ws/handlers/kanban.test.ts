@@ -592,6 +592,37 @@ describe("kanban.update handler — multi-snapshot primary lookup", () => {
   });
 });
 
+describe("kanban.update handler — priority preservation", () => {
+  it("preserves priority from existing tasks", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowId: WORKFLOW_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            priority: "critical",
+          },
+        ],
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        { id: TASK_ID, workflowStepId: STEP_ID, title: UPDATED_TITLE, position: 0 },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.priority).toBe("critical");
+  });
+});
+
 describe("kanban.update handler — task filtering", () => {
   it("skips ephemeral tasks", () => {
     const store = makeStore({
