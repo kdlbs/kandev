@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -103,6 +106,194 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 		SessionID:   "sess-1",
 		TaskID:      "task-1",
 		ResumeToken: "token-abc",
+	}
+}
+
+func TestBuildResumeRequestUsesAuthoritativeKubernetesRunningRecord(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	session := repo.sessions["sess-1"]
+	session.ExecutorID = "repointed-executor"
+	session.ExecutorProfileID = "deleted-or-invalid-profile"
+	session.Metadata = map[string]interface{}{
+		lifecycle.MetadataKeyKubernetesPodUID:          "hostile-pod-uid",
+		lifecycle.MetadataKeyKubernetesProfileSnapshot: "hostile-snapshot",
+		lifecycle.MetadataKeyKubernetesNamespace:       "hostile-namespace",
+		lifecycle.MetadataKeyAuthTokenSecret:           "stale-session-auth-secret",
+		lifecycle.MetadataKeyBootstrapNonceSecret:      "stale-session-nonce-secret",
+	}
+	repo.executors["recorded-kubernetes-executor"] = &models.Executor{
+		ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeKubernetes, Resumable: true,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeconfigPath:        "/etc/kandev/current-kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeContext:           "current-context",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+	}
+	repo.executors["repointed-executor"] = &models.Executor{
+		ID: "repointed-executor", Type: models.ExecutorTypeLocal,
+	}
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		ID: "sess-1", SessionID: "sess-1", TaskID: "task-1",
+		ExecutorID: "recorded-kubernetes-executor", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution", Metadata: recordedKubernetesResumeMetadata(),
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req, _, config, _, running, err := exec.buildResumeRequest(
+		context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1"}, session, true,
+	)
+
+	if err != nil {
+		t.Fatalf("buildResumeRequest() error = %v", err)
+	}
+	if running != repo.executorsRunning["sess-1"] {
+		t.Fatal("buildResumeRequest() did not retain the authoritative running row")
+	}
+	if req.ExecutorType != string(models.ExecutorTypeKubernetes) || config.ExecutorID != "recorded-kubernetes-executor" {
+		t.Fatalf("executor = type %q id %q", req.ExecutorType, config.ExecutorID)
+	}
+	if req.PreviousExecutionID != "recorded-execution" {
+		t.Fatalf("PreviousExecutionID = %q", req.PreviousExecutionID)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyKubernetesPodUID]; got != "recorded-pod-uid" {
+		t.Fatalf("Pod UID = %v, want recorded-pod-uid", got)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyKubernetesProfileSnapshot]; got != recordedKubernetesResumeMetadata()[lifecycle.MetadataKeyKubernetesProfileSnapshot] {
+		t.Fatalf("snapshot = %v, want recorded workload snapshot", got)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyExecutorProfileID]; got != "recorded-profile" {
+		t.Fatalf("executor profile = %v, want recorded-profile", got)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyAuthTokenSecret]; got != "recorded-auth-secret" {
+		t.Fatalf("auth secret reference = %v, want recorded-auth-secret", got)
+	}
+	if got := req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret]; got != "recorded-nonce-secret" {
+		t.Fatalf("nonce secret reference = %v, want recorded-nonce-secret", got)
+	}
+	if config.ExecutorCfg[lifecycle.MetadataKeyKubernetesKubeContext] != "current-context" ||
+		config.ExecutorCfg[lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds] != "45" {
+		t.Fatalf("current connection config was not retained: %#v", config.ExecutorCfg)
+	}
+	if session.ExecutorID != "recorded-kubernetes-executor" {
+		t.Fatalf("session executor = %q, want recorded Kubernetes executor", session.ExecutorID)
+	}
+}
+
+func TestBuildResumeRequestFailsClosedWhenRecordedKubernetesExecutorChangedType(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	session := repo.sessions["sess-1"]
+	session.ExecutorID = "repointed-executor"
+	repo.executors["recorded-kubernetes-executor"] = &models.Executor{
+		ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeLocal,
+	}
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		ID: "sess-1", SessionID: "sess-1", TaskID: "task-1",
+		ExecutorID: "recorded-kubernetes-executor", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution", Metadata: recordedKubernetesResumeMetadata(),
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	_, _, _, _, _, err := exec.buildResumeRequest(
+		context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1"}, session, true,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "current Kubernetes executor is unavailable") {
+		t.Fatalf("buildResumeRequest() error = %v", err)
+	}
+}
+
+func TestBuildResumeRequestFailsClosedWhenRecordedKubernetesInventoryIsIncomplete(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	session := repo.sessions["sess-1"]
+	session.ExecutorID = "recorded-kubernetes-executor"
+	repo.executors["recorded-kubernetes-executor"] = &models.Executor{
+		ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeKubernetes, Resumable: true,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "in_cluster",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+	}
+	incomplete := recordedKubernetesResumeMetadata()
+	delete(incomplete, lifecycle.MetadataKeyKubernetesPodUID)
+	repo.executorsRunning["sess-1"] = &models.ExecutorRunning{
+		ID: "sess-1", SessionID: "sess-1", TaskID: "task-1",
+		ExecutorID: "recorded-kubernetes-executor", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution", Metadata: incomplete,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	_, _, _, _, _, err := exec.buildResumeRequest(
+		context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1"}, session, true,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "validate recorded Kubernetes runtime") {
+		t.Fatalf("buildResumeRequest() error = %v, want incomplete inventory rejection", err)
+	}
+}
+
+func TestBuildResumeRequestFailsClosedWhenRuntimeInventoryReadFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.getExecutorRunningFunc = func(context.Context, string) (*models.ExecutorRunning, error) {
+		return nil, errors.New("database unavailable")
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	_, _, _, _, _, err := exec.buildResumeRequest(
+		context.Background(),
+		&v1.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+		repo.sessions["sess-1"],
+		true,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "load runtime inventory") {
+		t.Fatalf("buildResumeRequest() error = %v, want runtime inventory read failure", err)
+	}
+}
+
+func recordedKubernetesResumeMetadata() map[string]interface{} {
+	return recordedKubernetesResumeMetadataFor("task-1", "sess-1", "recorded-execution")
+}
+
+func recordedKubernetesResumeMetadataFor(taskID, sessionID, executionID string) map[string]interface{} {
+	profile := kubeexecutor.ProfileConfig{
+		Platform:      kubeexecutor.PlatformLinuxAMD64,
+		MainContainer: kubeexecutor.DefaultMainContainerName,
+		PodTemplateYAML: "apiVersion: v1\nkind: PodTemplate\ntemplate:\n  spec:\n" +
+			"    containers:\n      - name: kandev-agent\n        image: example.test/agent:latest\n",
+		Workspace: kubeexecutor.WorkspaceConfig{Mode: kubeexecutor.WorkspaceModeEmptyDir},
+	}
+	snapshot, _ := json.Marshal(profile)
+	profileHash := sha256.Sum256(snapshot)
+	templateHash := sha256.Sum256([]byte(profile.PodTemplateYAML))
+	return map[string]interface{}{
+		lifecycle.MetadataKeyExecutorProfileID:               "recorded-profile",
+		lifecycle.MetadataKeyKubernetesInventoryState:        lifecycle.KubernetesInventoryStateReady,
+		lifecycle.MetadataKeyKubernetesNamespace:             "kandev-agents",
+		lifecycle.MetadataKeyKubernetesPodName:               "recorded-pod",
+		lifecycle.MetadataKeyKubernetesPodUID:                "recorded-pod-uid",
+		lifecycle.MetadataKeyKubernetesMainContainer:         "kandev-agent",
+		lifecycle.MetadataKeyKubernetesRuntimeWorkspaceMode:  "empty_dir",
+		lifecycle.MetadataKeyKubernetesAgentctlRemotePort:    "41001",
+		lifecycle.MetadataKeyKubernetesAgentctlInstanceID:    executionID,
+		lifecycle.MetadataKeyKubernetesResourceExecutorID:    "recorded-kubernetes-executor",
+		lifecycle.MetadataKeyKubernetesResourceProfileID:     "recorded-profile",
+		lifecycle.MetadataKeyKubernetesResourceInstanceID:    executionID,
+		lifecycle.MetadataKeyKubernetesResourceTaskID:        taskID,
+		lifecycle.MetadataKeyKubernetesResourceSessionID:     sessionID,
+		lifecycle.MetadataKeyKubernetesResourceEnvironmentID: "environment-1",
+		lifecycle.MetadataKeyKubernetesExecutorConfigHash:    "recorded-executor-hash",
+		lifecycle.MetadataKeyKubernetesProfileConfigHash:     fmt.Sprintf("%x", profileHash),
+		lifecycle.MetadataKeyKubernetesTemplateHash:          fmt.Sprintf("%x", templateHash),
+		lifecycle.MetadataKeyKubernetesProfileSnapshot:       string(snapshot),
+		lifecycle.MetadataKeyAuthTokenSecret:                 "recorded-auth-secret",
+		lifecycle.MetadataKeyBootstrapNonceSecret:            "recorded-nonce-secret",
 	}
 }
 

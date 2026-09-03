@@ -6,6 +6,25 @@ import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
+import { waitForStableActiveSession } from "../../helpers/session-store";
+
+type E2EMessageStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      messages: { bySession: Record<string, Array<{ content: string }>> };
+    };
+  };
+};
+
+const INACTIVE_SESSION_MARKER = "INACTIVE-AUTO-SCROLL-CATCH-UP-7M2P";
+
+function overflowScript(prefix: string, messageCount = 30): string {
+  return Array.from(
+    { length: messageCount },
+    (_, i) =>
+      `e2e:message("${prefix} ${i + 1} - lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua")`,
+  ).join("\n");
+}
 
 /**
  * Seed a task whose mock-agent script emits enough distinct messages to
@@ -18,11 +37,7 @@ async function seedOverflowingTask(
   title: string,
   messageCount = 30,
 ): Promise<SessionPage> {
-  const script = Array.from(
-    { length: messageCount },
-    (_, i) =>
-      `e2e:message("Filler message ${i + 1} - lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua")`,
-  ).join("\n");
+  const script = overflowScript("Filler message", messageCount);
 
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -53,6 +68,68 @@ async function seedOverflowingTask(
   return session;
 }
 
+/** Seeds two real sessions with overflowing persisted histories. */
+async function seedTwoSessionOverflowingTask(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+): Promise<{
+  session: SessionPage;
+  taskId: string;
+  firstSessionId: string;
+  secondSessionId: string;
+}> {
+  const firstScript = overflowScript("First session history");
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    "Inactive session transcript auto-scroll",
+    seedData.agentProfileId,
+    {
+      description: firstScript,
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "first overflowing session should finish before opening the task",
+  );
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await session.openNewSessionDialog();
+  await session.newSessionPromptInput().fill(overflowScript("Second session history"));
+  await session.newSessionStartButton().click();
+  await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+
+  let secondSessionId: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const second = sessions.find((candidate) => candidate.id !== task.session_id);
+        if (!second) return false;
+        secondSessionId = second.id;
+        return ["COMPLETED", "WAITING_FOR_INPUT"].includes(second.state);
+      },
+      { timeout: 120_000, message: "second overflowing session should finish" },
+    )
+    .toBe(true);
+  if (!secondSessionId) throw new Error("second session was not created");
+
+  return {
+    session,
+    taskId: task.id,
+    firstSessionId: task.session_id,
+    secondSessionId,
+  };
+}
+
 function chatList(testPage: Page) {
   return testPage.locator(".chat-message-list:visible").first();
 }
@@ -69,6 +146,137 @@ async function waitForOverflow(testPage: Page) {
 }
 
 test.describe("Transcript auto-scroll toggle", () => {
+  test("inactive session transcript reopens at the bottom after refresh and hidden updates", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+
+    const { session, firstSessionId, secondSessionId } = await seedTwoSessionOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+    );
+    await expect(session.sessionTabBySessionId(firstSessionId)).toBeVisible({ timeout: 15_000 });
+    await expect(session.sessionTabBySessionId(secondSessionId)).toBeVisible({ timeout: 15_000 });
+
+    // Leave the first transcript inactive before a refresh. This reproduces
+    // Dockview's persistent portal with populated content and zero geometry.
+    await session.sessionTabBySessionId(secondSessionId).click();
+    await waitForStableActiveSession(testPage, secondSessionId);
+    await testPage.reload({ waitUntil: "domcontentloaded" });
+
+    const refreshedSession = new SessionPage(testPage);
+    await refreshedSession.waitForLoad();
+    await expect(refreshedSession.sessionTabBySessionId(firstSessionId)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(refreshedSession.sessionTabBySessionId(secondSessionId)).toBeVisible({
+      timeout: 15_000,
+    });
+    await refreshedSession.sessionTabBySessionId(secondSessionId).click();
+    await waitForStableActiveSession(testPage, secondSessionId);
+
+    // Activating the previously inactive, enabled transcript must place it at
+    // the newest message after SessionPanelContent restores its old offset.
+    await refreshedSession.sessionTabBySessionId(firstSessionId).click();
+    await waitForStableActiveSession(testPage, firstSessionId);
+    const firstChat = testPage.locator(
+      `[data-testid='session-chat'][data-session-id=${JSON.stringify(firstSessionId)}]`,
+    );
+    const firstList = firstChat.locator(".chat-message-list");
+    await expect
+      .poll(async () => firstList.evaluate((el) => el.scrollHeight - el.clientHeight), {
+        timeout: 15_000,
+        message: "first inactive transcript should overflow after activation",
+      })
+      .toBeGreaterThan(200);
+    await expect
+      .poll(
+        async () => firstList.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
+        {
+          timeout: 15_000,
+          message: "activating an inactive enabled transcript should restore the bottom",
+        },
+      )
+      .toBeLessThan(10);
+
+    // Deliver new content while that bottom-following transcript is hidden.
+    // Wait for the store event before switching back so the assertion proves
+    // activation reconciliation, not a delayed initial fetch.
+    await refreshedSession.sessionTabBySessionId(secondSessionId).click();
+    await waitForStableActiveSession(testPage, secondSessionId);
+    await apiClient.seedSessionMessage(firstSessionId, {
+      type: "message",
+      content: INACTIVE_SESSION_MARKER,
+      authorType: "agent",
+    });
+    await expect
+      .poll(
+        async () =>
+          testPage.evaluate(
+            ({ sid, marker }) => {
+              const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
+              return store
+                ?.getState()
+                .messages.bySession[sid]?.some((message) => message.content === marker);
+            },
+            { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
+          ),
+        {
+          timeout: 15_000,
+          message: "hidden message should arrive in the inactive transcript cache",
+        },
+      )
+      .toBe(true);
+
+    await refreshedSession.sessionTabBySessionId(firstSessionId).click();
+    await waitForStableActiveSession(testPage, firstSessionId);
+    await expect(
+      refreshedSession.activeChat().getByText(INACTIVE_SESSION_MARKER, { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(
+        async () => firstList.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
+        {
+          timeout: 15_000,
+          message: "hidden content should catch up an enabled transcript on activation",
+        },
+      )
+      .toBeLessThan(10);
+
+    // A reader-owned position must survive the same tab round trip. Dispatch
+    // a native scroll event so both the transcript coordinator and the
+    // generic panel restorer capture the exact reader position.
+    const targetScrollTop = await firstList.evaluate((el) => {
+      const target = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+      el.scrollTop = target;
+      el.dispatchEvent(new Event("scroll"));
+      return el.scrollTop;
+    });
+    expect(targetScrollTop).toBeGreaterThan(100);
+    const toggle = firstChat.getByTestId("auto-scroll-toggle-button");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await refreshedSession.sessionTabBySessionId(secondSessionId).click();
+    await waitForStableActiveSession(testPage, secondSessionId);
+    await refreshedSession.sessionTabBySessionId(firstSessionId).click();
+    await waitForStableActiveSession(testPage, firstSessionId);
+    await expect
+      .poll(
+        async () =>
+          firstList.evaluate((el, expected) => Math.abs(el.scrollTop - expected), targetScrollTop),
+        {
+          timeout: 15_000,
+          message: "disabled reader position should survive session activation",
+        },
+      )
+      .toBeLessThanOrEqual(20);
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  });
+
   test("can be hidden without changing the default auto-scroll state", async ({
     testPage,
     apiClient,

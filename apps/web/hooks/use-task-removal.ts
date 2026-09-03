@@ -5,6 +5,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
 import { linkToTaskOverview, replaceTaskUrl } from "@/lib/links";
 import { fetchTask, listTaskSessions } from "@/lib/api";
+import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
 import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
@@ -76,15 +77,21 @@ function taskSessionListRequestOptions(signal?: AbortSignal) {
   return signal ? { cache: "no-store" as const, init: { signal } } : { cache: "no-store" as const };
 }
 
+type TaskSessionLoadCommit = {
+  sessions: TaskSession[];
+  force: boolean;
+  activityEpochsAtRequestStart: Readonly<Record<string, number>>;
+};
+
 function commitTaskSessionLoad(
   store: StoreApi<AppState>,
   taskId: string,
   generation: number,
-  sessions: TaskSession[],
-  force: boolean,
+  commit: TaskSessionLoadCommit,
 ): TaskSession[] {
+  const { sessions, force, activityEpochsAtRequestStart } = commit;
   if (taskSessionLoadIsCurrent(store, taskId, generation)) {
-    store.getState().setTaskSessionsForTask(taskId, sessions);
+    store.getState().setTaskSessionsForTask(taskId, sessions, activityEpochsAtRequestStart);
     return sessions;
   }
   // Forced callers use this result to choose a pending-action owner. Never
@@ -111,11 +118,16 @@ async function loadTaskSessionsForTaskFromStore(
     return cachedSessions;
   }
   const loadGeneration = beginTaskSessionLoad(store, taskId);
+  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(store.getState(), taskId);
   store.getState().setTaskSessionsLoading(taskId, true);
   try {
     const response = await listTaskSessions(taskId, taskSessionListRequestOptions(signal));
     const sessions = response.sessions ?? [];
-    return commitTaskSessionLoad(store, taskId, loadGeneration, sessions, force);
+    return commitTaskSessionLoad(store, taskId, loadGeneration, {
+      sessions,
+      force,
+      activityEpochsAtRequestStart,
+    });
   } catch (error) {
     if (!isAbortError(error)) console.error("Failed to load task sessions:", error);
     if (force) throw error;

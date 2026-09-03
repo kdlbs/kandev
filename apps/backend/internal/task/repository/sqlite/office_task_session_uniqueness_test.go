@@ -1,8 +1,6 @@
 package sqlite
 
 import (
-	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -42,16 +40,18 @@ func insertOfficeSession(t *testing.T, db *sqlx.DB, s officeSessionSeed) {
 }
 
 // TestIsOfficeTaskSessionUniqueViolation_ClassifiesSQLiteMessage exercises
-// isOfficeTaskSessionUniqueViolation against a real SQLite UNIQUE-constraint
-// error, then drives both production call sites that wrap it in
-// ErrOfficeSessionRaceConflict (createTaskSession's INSERT and
-// updateTaskSessionWithStateGuard's UPDATE) to prove the wrapping itself,
-// not just the classifier. uniq_office_task_session is not wired into
-// base_schema.go — a table-wide partial index on this pair broke live
-// kanban-relaunch and workflow-replacement flows (see the follow-up card
-// linked from ErrOfficeSessionRaceConflict's doc comment) — so this test
-// builds and drops its own scoped index rather than relying on production
-// schema.
+// isOfficeTaskSessionUniqueViolation directly against a real SQLite
+// UNIQUE-constraint error. The classifier's two production call sites
+// (createTaskSession's INSERT and updateTaskSessionWithStateGuard's UPDATE)
+// were deleted per the system design's "Baseline" instruction — office
+// session-uniqueness enforcement lives only in CreateOfficeTaskSession's
+// in-transaction guard now (session.go), which never parses driver error
+// text — so this function is intentionally referenced only by this test
+// file. uniq_office_task_session is not wired into base_schema.go — a
+// table-wide partial index on this pair broke live kanban-relaunch and
+// workflow-replacement flows (see the follow-up card linked from
+// ErrOfficeSessionRaceConflict's doc comment) — so this test builds and
+// drops its own scoped index rather than relying on production schema.
 func TestIsOfficeTaskSessionUniqueViolation_ClassifiesSQLiteMessage(t *testing.T) {
 	repo := newRepoForHealTests(t)
 	insertTask(t, repo.db, "task-classify-1")
@@ -92,42 +92,6 @@ func TestIsOfficeTaskSessionUniqueViolation_ClassifiesSQLiteMessage(t *testing.T
 	}
 	if !isOfficeTaskSessionUniqueViolation(err) {
 		t.Fatalf("expected err to classify as an office task session unique violation, got: %v", err)
-	}
-
-	// The raw INSERT above only proves SQLite's message format. Also drive
-	// the two real production call sites that route through the
-	// classifier, so a change that breaks either wrapping fails here rather
-	// than only after the follow-up index lands.
-	ctx := context.Background()
-
-	// CreateTaskSession -> createTaskSession's INSERT path.
-	createErr := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "sess-classify-3", TaskID: "task-classify-1", AgentProfileID: agent,
-		State: models.TaskSessionStateCreated,
-	})
-	if createErr == nil {
-		t.Fatal("expected CreateTaskSession into an occupied live (task, agent) slot to fail")
-	}
-	if !errors.Is(createErr, ErrOfficeSessionRaceConflict) {
-		t.Fatalf("expected errors.Is(err, ErrOfficeSessionRaceConflict) from CreateTaskSession, got: %v", createErr)
-	}
-
-	// UpdateTaskSession -> updateTaskSessionWithStateGuard's UPDATE path
-	// (e.g. a terminal-session resume racing another live row into the
-	// same slot).
-	insertOfficeSession(t, repo.db, officeSessionSeed{
-		id: "sess-classify-4", taskID: "task-classify-1", agentProfileID: "agent-classify-other",
-		state: models.TaskSessionStateCreated,
-	})
-	updateErr := repo.UpdateTaskSession(ctx, &models.TaskSession{
-		ID: "sess-classify-4", TaskID: "task-classify-1", AgentProfileID: agent,
-		State: models.TaskSessionStateCreated,
-	})
-	if updateErr == nil {
-		t.Fatal("expected UpdateTaskSession moving a session into an occupied live (task, agent) slot to fail")
-	}
-	if !errors.Is(updateErr, ErrOfficeSessionRaceConflict) {
-		t.Fatalf("expected errors.Is(err, ErrOfficeSessionRaceConflict) from UpdateTaskSession, got: %v", updateErr)
 	}
 }
 

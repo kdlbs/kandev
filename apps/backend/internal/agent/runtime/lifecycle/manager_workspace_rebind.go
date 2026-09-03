@@ -53,11 +53,15 @@ func (m *Manager) RebindWorkspaceWithGitMetadata(ctx context.Context, sessionID,
 		// failing a batch because an old session is no longer live.
 		return nil
 	}
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
 	policyReq, err := m.prepareGitMetadataRebind(ctx, execution, workspacePath, projections)
 	if err != nil {
 		return err
 	}
-	if execution.IsPassthrough || execution.agentctl == nil || execution.ACPSessionID == "" {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
+	if execution.IsPassthrough || client == nil || execution.ACPSessionID == "" {
 		return fmt.Errorf("workspace rebind is unsupported for this session; start a new session after attaching sources")
 	}
 	execution.promptLifecycleMu.Lock()
@@ -76,19 +80,28 @@ func (m *Manager) RebindWorkspaceWithGitMetadata(ctx context.Context, sessionID,
 	// Stop before changing agentctl's workdir: a successful rebind must never
 	// leave a child running in the old CWD. If stop cannot be proven, do not
 	// attempt adoption or start a duplicate process.
-	if err := execution.agentctl.Stop(ctx); err != nil {
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	err = client.Stop(ctx)
+	releaseClient()
+	if err != nil {
 		execution.Status = v1.AgentStatusReady
 		return fmt.Errorf("stop agent before workspace rebind: %w", err)
 	}
 	execution.WorkspaceSourceRoots = newRoots
-	if err := execution.agentctl.RebindWorkspace(ctx, workspacePath, newRoots); err != nil {
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	err = client.RebindWorkspace(ctx, workspacePath, newRoots)
+	releaseClient()
+	if err != nil {
 		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, oldProjections, oldRuntimeEnv, acpID, fmt.Errorf("rebind agentctl workspace: %w", err))
 	}
 	execution.WorkspacePath = workspacePath
 	if err := m.installGitMetadataRebindPolicy(ctx, execution, projections, policyReq); err != nil {
 		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, oldProjections, oldRuntimeEnv, acpID, fmt.Errorf("refresh agent filesystem policy: %w", err))
 	}
-	if _, err := execution.agentctl.Start(ctx); err != nil {
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	_, err = client.Start(ctx)
+	releaseClient()
+	if err != nil {
 		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, oldProjections, oldRuntimeEnv, acpID, fmt.Errorf("restart agent after workspace rebind: %w", err))
 	}
 	if err := m.restoreReboundACPSession(ctx, execution, acpID, startNewSession); err != nil {
@@ -123,7 +136,12 @@ func (m *Manager) installGitMetadataRebindPolicy(ctx context.Context, execution 
 		return nil
 	}
 	approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
-	return execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, policyReq.Env, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	defer releaseClient()
+	return client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, policyReq.Env, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
 }
 
 func (m *Manager) preflightGitMetadataRebind(ctx context.Context, execution *AgentExecution, workspacePath string, projections []*worktree.GitMetadataProjection) (*ExecutorCreateRequest, error) {
@@ -159,23 +177,47 @@ func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentE
 	execution.WorkspaceSourceRoots = append([]string(nil), oldRoots...)
 	execution.GitMetadataProjections = append([]*worktree.GitMetadataProjection(nil), oldProjections...)
 	execution.setRuntimeEnvironment(oldRuntimeEnv)
-	if err := execution.agentctl.Stop(rollbackCtx); err != nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
+	}
+	err := client.Stop(rollbackCtx)
+	releaseClient()
+	if err != nil {
 		m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback stop failed: %v", cause, err))
 		return fmt.Errorf("%w; rollback stop failed: %v", cause, err)
 	}
-	if err := execution.agentctl.RebindWorkspace(rollbackCtx, oldPath, oldRoots); err != nil {
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
+	}
+	err = client.RebindWorkspace(rollbackCtx, oldPath, oldRoots)
+	releaseClient()
+	if err != nil {
 		m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback rebind failed: %v", cause, err))
 		return fmt.Errorf("%w; rollback rebind failed: %v", cause, err)
 	}
 	execution.WorkspacePath = oldPath
 	if execution.RuntimeName == executor.NameStandalone {
 		approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(rollbackCtx, execution)
-		if err := execution.agentctl.ConfigureAgent(rollbackCtx, execution.AgentCommand, execution.AgentArgs, oldRuntimeEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs); err != nil {
+		configClient, releaseConfigClient := execution.AcquireAgentCtlClient()
+		if configClient == nil {
+			return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
+		}
+		err := configClient.ConfigureAgent(rollbackCtx, execution.AgentCommand, execution.AgentArgs, oldRuntimeEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
+		releaseConfigClient()
+		if err != nil {
 			m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback filesystem policy failed: %v", cause, err))
 			return fmt.Errorf("%w; rollback filesystem policy failed: %v", cause, err)
 		}
 	}
-	if _, err := execution.agentctl.Start(rollbackCtx); err != nil {
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
+	}
+	_, err = client.Start(rollbackCtx)
+	releaseClient()
+	if err != nil {
 		m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback restart failed: %v", cause, err))
 		return fmt.Errorf("%w; rollback restart failed: %v", cause, err)
 	}
@@ -199,13 +241,25 @@ func (m *Manager) restoreReboundACPSession(ctx context.Context, execution *Agent
 	if err := waitForReboundUpdatesStream(ctx, updatesReady); err != nil {
 		return err
 	}
-	if _, err := execution.agentctl.Initialize(ctx, "kandev", "1.0.0"); err != nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("agentctl client is unavailable")
+	}
+	_, err := client.Initialize(ctx, "kandev", "1.0.0")
+	releaseClient()
+	if err != nil {
 		return fmt.Errorf("initialize restarted ACP adapter: %w", err)
 	}
 	if startNewSession {
 		return m.createReboundACPSession(ctx, execution)
 	}
-	if err := execution.agentctl.LoadSession(ctx, acpID, nil); err != nil {
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("agentctl client is unavailable")
+	}
+	err = client.LoadSession(ctx, acpID, nil)
+	releaseClient()
+	if err != nil {
 		return err
 	}
 	return nil
@@ -235,7 +289,12 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 	previousModel := execution.GetModelState()
 	previousModelID := m.effectiveSessionModelForReset(ctx, execution)
 	execution.SetModelState(nil)
-	newSessionID, err := execution.agentctl.NewSession(ctx, execution.WorkspacePath, mcpServers)
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("agentctl client is unavailable")
+	}
+	newSessionID, err := client.NewSession(ctx, execution.WorkspacePath, mcpServers)
+	releaseClient()
 	if err != nil {
 		execution.SetModelState(previousModel)
 		return fmt.Errorf("create ACP session in rebound workspace: %w", err)
@@ -266,9 +325,14 @@ func (m *Manager) reapplyReboundSessionConfig(
 	mode *CachedModeState,
 ) error {
 	if modelID != "" {
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		if client == nil {
+			return fmt.Errorf("agentctl client is unavailable")
+		}
 		policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 		policy.Model = modelID
-		decision, err := applyStartModelPolicy(ctx, m.logger, execution.agentctl, execution.GetModelState(), policy)
+		decision, err := applyStartModelPolicy(ctx, m.logger, client, execution.GetModelState(), policy)
+		releaseClient()
 		if err != nil {
 			m.logger.Warn("failed to re-apply model after workspace rebind",
 				zap.String("execution_id", execution.ID),
@@ -287,7 +351,13 @@ func (m *Manager) reapplyReboundSessionConfig(
 				strings.EqualFold(option.Category, "mode") {
 				continue
 			}
-			if err := execution.agentctl.SetConfigOption(ctx, option.ID, option.CurrentValue); err != nil {
+			client, releaseClient := execution.AcquireAgentCtlClient()
+			if client == nil {
+				return fmt.Errorf("agentctl client is unavailable")
+			}
+			err := client.SetConfigOption(ctx, option.ID, option.CurrentValue)
+			releaseClient()
+			if err != nil {
 				m.logger.Warn("failed to re-apply config option after workspace rebind",
 					zap.String("execution_id", execution.ID),
 					zap.String("config_id", option.ID),
@@ -306,7 +376,12 @@ func waitForReboundAgentReady(ctx context.Context, execution *AgentExecution) er
 	defer ticker.Stop()
 	var lastErr error
 	for {
-		status, err := execution.agentctl.GetStatus(readyCtx)
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		if client == nil {
+			return fmt.Errorf("wait for restarted agent readiness: agentctl client is unavailable")
+		}
+		status, err := client.GetStatus(readyCtx)
+		releaseClient()
 		if err == nil && status.AgentStatus == agentctlProcessStatusRunning {
 			return nil
 		}

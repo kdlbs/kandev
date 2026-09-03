@@ -22,6 +22,10 @@ prompt, and upward navigation must not require routine use of a manual loader.
   history that contains no stored user prompt.
 - **Preload region:** The area near the oldest loaded edge where upward
   pagination can continue without another user action.
+- **Text part:** A persisted user or agent transcript row whose message type is
+  `message` or `content`, including a legacy row without an explicit type.
+  Tool calls, thinking, progress, status, and other activity rows are not text
+  parts for lazy-load batch sizing.
 
 ## Requirements
 
@@ -45,6 +49,8 @@ start.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10:** Opening a task shall request only the bounded newest window until the user navigates upward.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.11:** Desktop and mobile transcripts shall provide the same history boundary, continuous upward loading, recovery, and scroll-position behavior.
 - **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.12:** When a previously opened session is revisited after more than one message page was persisted while it was inactive, the transcript shall reconcile to a contiguous newest window and upward pagination shall reach every persisted user prompt without gaps or duplicate rows.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.13:** When an upward lazy-load operation sizes its batch, it shall target 20 newly loaded text parts. Tool calls and other activity rows shall not advance that target; the operation can stop earlier when prompt `#1` is loaded, persisted history is exhausted, a request makes no progress, or its bounded safety limit is reached.
+- **AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.14:** When a previously hidden transcript becomes visible with its restored viewport at the oldest loaded edge and older history remains, the transcript shall resume older-history loading without requiring the user to move away from and return to that edge.
 
 ## Exclusions
 

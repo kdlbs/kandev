@@ -1,3 +1,4 @@
+import { renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   hasTranscriptProgressedPastView,
@@ -6,7 +7,17 @@ import {
   resolveNativeInitialScrollTop,
   isPrependUpdate,
   createFrameCoalescer,
+  useActivationPending,
+  scheduleAfterPanelRestore,
 } from "./transcript-auto-scroll";
+
+function runPendingFrame(pendingOrder: number[], frameCallbacks: Map<number, () => void>) {
+  const id = pendingOrder.shift();
+  if (id === undefined) return;
+  const callback = frameCallbacks.get(id);
+  frameCallbacks.delete(id);
+  callback?.();
+}
 
 describe("isPrependUpdate", () => {
   it("is a prepend when item count grows and the first item's key changed", () => {
@@ -323,14 +334,6 @@ describe("createFrameCoalescer", () => {
     vi.unstubAllGlobals();
   });
 
-  function runPendingFrame() {
-    const id = pendingOrder.shift();
-    if (id === undefined) return;
-    const cb = frameCallbacks.get(id);
-    frameCallbacks.delete(id);
-    cb?.();
-  }
-
   it("coalesces multiple schedule() calls within a frame into a single run() call", () => {
     const run = vi.fn();
     const coalescer = createFrameCoalescer(run);
@@ -338,7 +341,7 @@ describe("createFrameCoalescer", () => {
     coalescer.schedule();
     coalescer.schedule();
     expect(run).not.toHaveBeenCalled();
-    runPendingFrame();
+    runPendingFrame(pendingOrder, frameCallbacks);
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -346,9 +349,9 @@ describe("createFrameCoalescer", () => {
     const run = vi.fn();
     const coalescer = createFrameCoalescer(run);
     coalescer.schedule();
-    runPendingFrame();
+    runPendingFrame(pendingOrder, frameCallbacks);
     coalescer.schedule();
-    runPendingFrame();
+    runPendingFrame(pendingOrder, frameCallbacks);
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -358,7 +361,7 @@ describe("createFrameCoalescer", () => {
     coalescer.schedule();
     coalescer.flush();
     expect(run).toHaveBeenCalledTimes(1);
-    runPendingFrame();
+    runPendingFrame(pendingOrder, frameCallbacks);
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -375,7 +378,87 @@ describe("createFrameCoalescer", () => {
     coalescer.schedule();
     coalescer.flush();
     coalescer.schedule();
-    runPendingFrame();
+    runPendingFrame(pendingOrder, frameCallbacks);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("scheduleAfterPanelRestore", () => {
+  let frameCallbacks: Map<number, () => void>;
+  let nextFrameId: number;
+  let pendingOrder: number[];
+
+  beforeEach(() => {
+    frameCallbacks = new Map();
+    pendingOrder = [];
+    nextFrameId = 1;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      const id = nextFrameId++;
+      frameCallbacks.set(id, cb);
+      pendingOrder.push(id);
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      frameCallbacks.delete(id);
+      pendingOrder = pendingOrder.filter((pendingId) => pendingId !== id);
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("runs only after the panel restore frame and a follow-up frame", () => {
+    const run = vi.fn();
+    scheduleAfterPanelRestore(run);
+
+    runPendingFrame(pendingOrder, frameCallbacks);
+    expect(run).not.toHaveBeenCalled();
+
+    runPendingFrame(pendingOrder, frameCallbacks);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels both activation frames", () => {
+    const run = vi.fn();
+    const cancel = scheduleAfterPanelRestore(run);
+    runPendingFrame(pendingOrder, frameCallbacks);
+    cancel();
+
+    runPendingFrame(pendingOrder, frameCallbacks);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("cancels before the first activation frame", () => {
+    const run = vi.fn();
+    const cancel = scheduleAfterPanelRestore(run);
+    cancel();
+
+    while (pendingOrder.length > 0) runPendingFrame(pendingOrder, frameCallbacks);
+
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("useActivationPending", () => {
+  it("tracks hidden-to-visible transitions until the activation owner consumes them", () => {
+    const { result, rerender } = renderHook(
+      ({ isVisible }: { isVisible: boolean }) => useActivationPending(isVisible),
+      { initialProps: { isVisible: false } },
+    );
+
+    expect(result.current.activationPendingRef.current).toBe(false);
+
+    rerender({ isVisible: true });
+
+    expect(result.current.isVisibleRef.current).toBe(true);
+    expect(result.current.activationPendingRef.current).toBe(true);
+
+    result.current.activationPendingRef.current = false;
+    rerender({ isVisible: false });
+    expect(result.current.activationPendingRef.current).toBe(false);
+
+    rerender({ isVisible: true });
+    expect(result.current.activationPendingRef.current).toBe(true);
   });
 });

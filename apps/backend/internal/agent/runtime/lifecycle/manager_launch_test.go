@@ -1036,16 +1036,22 @@ func (p *trackingPreparer) Prepare(_ context.Context, _ *EnvPrepareRequest, _ Pr
 	return &EnvPrepareResult{Success: true, WorkspacePath: "/tmp/ws"}, nil
 }
 
-type progressPreparer struct{}
+type progressPreparer struct {
+	workspacePath string
+}
 
 func (p *progressPreparer) Name() string { return "docker" }
 
 func (p *progressPreparer) Prepare(_ context.Context, _ *EnvPrepareRequest, onProgress PrepareProgressCallback) (*EnvPrepareResult, error) {
+	workspacePath := p.workspacePath
+	if workspacePath == "" {
+		workspacePath = "/tmp/ws"
+	}
 	step := beginStep("Validate Docker")
 	reportProgress(onProgress, step, 0, 1)
 	completeStepSuccess(&step)
 	reportProgress(onProgress, step, 0, 1)
-	return &EnvPrepareResult{Success: true, Steps: []PrepareStep{step}, WorkspacePath: "/tmp/ws"}, nil
+	return &EnvPrepareResult{Success: true, Steps: []PrepareStep{step}, WorkspacePath: workspacePath}, nil
 }
 
 type staticManagedGoCacheEnvironment struct {

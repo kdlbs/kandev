@@ -49,20 +49,22 @@ type WorkflowPortable struct {
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                       string                `json:"name" yaml:"name"`
-	Position                   int                   `json:"position" yaml:"position"`
-	Color                      string                `json:"color" yaml:"color"`
-	Prompt                     string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                     StepEvents            `json:"events" yaml:"events"`
-	IsStartStep                bool                  `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel         bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove            bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours      int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfile               *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	AutoAdvanceRequiresSignal  bool                  `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
-	CancelTriggersTurnComplete bool                  `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
-	WIPLimit                   int                   `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
-	PullFromStepPosition       *int                  `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	Name                       string                                       `json:"name" yaml:"name"`
+	Position                   int                                          `json:"position" yaml:"position"`
+	Color                      string                                       `json:"color" yaml:"color"`
+	Prompt                     string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                     StepEvents                                   `json:"events" yaml:"events"`
+	IsStartStep                bool                                         `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel         bool                                         `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove            bool                                         `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours      int                                          `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile               *AgentProfilePortable                        `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	ProfileSessionStartPolicy  taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy    taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
+	AutoAdvanceRequiresSignal  bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
+	WIPLimit                   int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepPosition       *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
@@ -99,6 +101,8 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			ShowInCommandPanel:         s.ShowInCommandPanel,
 			AllowManualMove:            s.AllowManualMove,
 			AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
+			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(s.ProfileSessionStartPolicy)),
+			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
 			AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
 			WIPLimit:                   s.WIPLimit,

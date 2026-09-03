@@ -92,6 +92,7 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 		return nil, err
 	}
 	clients := distinctWorkspaceRepositoryClients(executions)
+	defer releaseWorkspaceRepositoryClients(clients)
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("workspace execution has no agentctl client")
 	}
@@ -186,6 +187,7 @@ func materializeWorkspaceRepositories(ctx context.Context, client workspaceRepos
 type workspaceRepositoryExecution struct {
 	sessionID   string
 	client      workspaceRepositoryClient
+	release     func()
 	sourceRoots []string
 	execution   *AgentExecution
 }
@@ -196,7 +198,12 @@ func (m *Manager) liveWorkspaceExecutionsForEnvironment(ctx context.Context, tas
 	}
 	executions := make([]*AgentExecution, 0)
 	for _, execution := range m.executionStore.List() {
-		if execution != nil && execution.TaskEnvironmentID == taskEnvironmentID && execution.GetAgentCtlClient() != nil {
+		if execution == nil || execution.TaskEnvironmentID != taskEnvironmentID {
+			continue
+		}
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		releaseClient()
+		if client != nil {
 			executions = append(executions, execution)
 		}
 	}
@@ -205,7 +212,12 @@ func (m *Manager) liveWorkspaceExecutionsForEnvironment(ctx context.Context, tas
 		if err != nil {
 			return nil, fmt.Errorf("ensure workspace execution: %w", err)
 		}
-		if execution == nil || execution.GetAgentCtlClient() == nil {
+		if execution == nil {
+			return nil, fmt.Errorf("workspace execution has no agentctl client")
+		}
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		releaseClient()
+		if client == nil {
 			return nil, fmt.Errorf("workspace execution has no agentctl client")
 		}
 		executions = append(executions, execution)
@@ -218,17 +230,19 @@ func distinctWorkspaceRepositoryClients(executions []*AgentExecution) []workspac
 	clients := make([]workspaceRepositoryExecution, 0, len(executions))
 	seen := make(map[*agentctl.Client]struct{}, len(executions))
 	for _, execution := range executions {
-		client := execution.GetAgentCtlClient()
+		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			continue
 		}
 		if _, exists := seen[client]; exists {
+			releaseClient()
 			continue
 		}
 		seen[client] = struct{}{}
 		clients = append(clients, workspaceRepositoryExecution{
 			sessionID:   execution.SessionID,
 			client:      client,
+			release:     releaseClient,
 			sourceRoots: append([]string(nil), execution.WorkspaceSourceRoots...),
 			execution:   execution,
 		})
@@ -470,6 +484,14 @@ func (m *Manager) failClosedCloneWorkspacePolicyRefresh(ctx context.Context, ref
 		m.executionStore.UpdateError(execution.ID, execution.ErrorMessage)
 	}
 	return unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor")
+}
+
+func releaseWorkspaceRepositoryClients(executions []workspaceRepositoryExecution) {
+	for _, execution := range executions {
+		if execution.release != nil {
+			execution.release()
+		}
+	}
 }
 
 func workspaceRepositorySessionIDs(executions []*AgentExecution) []string {

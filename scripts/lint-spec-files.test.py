@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,7 +35,6 @@ class SpecLinterTest(unittest.TestCase):
                 "system-index": 200,
                 "template": 100,
             },
-            "legacy_size_exceptions": {},
         }
 
     def write(self, relative: str, content: str) -> Path:
@@ -42,6 +42,15 @@ class SpecLinterTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path
+
+    def git(self, *args: str) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def valid_requirement(self) -> str:
         return """---
@@ -103,31 +112,31 @@ migration: in_progress
     def test_freezes_an_oversized_legacy_file_at_its_recorded_size(self) -> None:
         path = self.write("docs/specs/legacy/spec.md", "x" * 12)
         self.config["limits"]["legacy"] = 10
-        self.config["legacy_size_exceptions"] = {"docs/specs/legacy/spec.md": 12}
+        exceptions = {"docs/specs/legacy/spec.md": 12}
 
         linter = load_linter()
-        self.assertEqual(linter.lint_specs(self.root, self.config), [])
+        self.assertEqual(linter.lint_specs(self.root, self.config, exceptions), [])
 
         path.write_text("x" * 13, encoding="utf-8")
-        violations = linter.lint_specs(self.root, self.config)
+        violations = linter.lint_specs(self.root, self.config, exceptions)
         self.assertIn("file-size", self.rules(violations))
         self.assertIn("frozen ceiling 12", violations[0].message)
 
     def test_reports_a_stale_legacy_size_exception(self) -> None:
         self.write("docs/specs/legacy/spec.md", "small")
         self.config["limits"]["legacy"] = 10
-        self.config["legacy_size_exceptions"] = {"docs/specs/legacy/spec.md": 12}
+        exceptions = {"docs/specs/legacy/spec.md": 12}
 
-        violations = load_linter().lint_specs(self.root, self.config)
+        violations = load_linter().lint_specs(self.root, self.config, exceptions)
 
         self.assertEqual(self.rules(violations), ["stale-size-exception"])
 
     def test_requires_the_legacy_ceiling_to_follow_every_size_reduction(self) -> None:
         self.write("docs/specs/legacy/spec.md", "x" * 11)
         self.config["limits"]["legacy"] = 10
-        self.config["legacy_size_exceptions"] = {"docs/specs/legacy/spec.md": 12}
+        exceptions = {"docs/specs/legacy/spec.md": 12}
 
-        violations = load_linter().lint_specs(self.root, self.config)
+        violations = load_linter().lint_specs(self.root, self.config, exceptions)
 
         self.assertEqual(self.rules(violations), ["stale-size-exception"])
         self.assertIn("Lower the frozen ceiling to 11", violations[0].message)
@@ -135,30 +144,141 @@ migration: in_progress
     def test_reports_a_redundant_legacy_size_exception(self) -> None:
         self.write("docs/specs/legacy/spec.md", "x" * 8)
         self.config["limits"]["legacy"] = 10
-        self.config["legacy_size_exceptions"] = {"docs/specs/legacy/spec.md": 8}
+        exceptions = {"docs/specs/legacy/spec.md": 8}
 
-        violations = load_linter().lint_specs(self.root, self.config)
+        violations = load_linter().lint_specs(self.root, self.config, exceptions)
 
         self.assertEqual(self.rules(violations), ["stale-size-exception"])
         self.assertIn("at or below the default limit", violations[0].message)
 
     def test_rejects_a_raised_legacy_size_ceiling(self) -> None:
-        path = self.write("docs/specs/legacy/spec.md", "x" * 13)
-        previous_config = {
-            **self.config,
-            "legacy_size_exceptions": {"docs/specs/legacy/spec.md": 12},
-        }
-        current_config = {
-            **self.config,
-            "legacy_size_exceptions": {"docs/specs/legacy/spec.md": 13},
-        }
+        previous_exceptions = {"docs/specs/legacy/spec.md": 12}
+        current_exceptions = {"docs/specs/legacy/spec.md": 13}
 
         violations = load_linter().check_legacy_size_ratchet(
-            self.root, current_config, previous_config
+            self.root, current_exceptions, previous_exceptions
         )
 
         self.assertEqual(self.rules(violations), ["legacy-size-ratchet"])
-        self.assertEqual(violations[0].path, path)
+        self.assertEqual(violations[0].path, self.root / "docs/specs/legacy/spec.md")
+
+    def test_rejects_a_raised_absolute_ceiling_without_crashing(self) -> None:
+        previous_exceptions = {"/etc/passwd": 100}
+        current_exceptions = {"/etc/passwd": 200}
+
+        violations = load_linter().check_legacy_size_ratchet(
+            self.root, current_exceptions, previous_exceptions
+        )
+
+        self.assertEqual(self.rules(violations), ["legacy-size-ratchet"])
+        # main() calls violation.path.relative_to(root) on every violation; a
+        # noncanonical (e.g. absolute) historical path must not produce a
+        # violation path that raises there.
+        violations[0].path.relative_to(self.root)
+
+    def test_loads_the_previous_ceiling_from_git_history_and_flags_a_raise(self) -> None:
+        self.config["limits"]["legacy"] = 10
+        self.git("init")
+        self.git("config", "user.email", "test@example.com")
+        self.git("config", "user.name", "Spec Lint Test")
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t12\n")
+        self.write("docs/specs/legacy/spec.md", "x" * 12)
+        self.git("add", "-A")
+        self.git("commit", "-m", "freeze the legacy ceiling at 12")
+        self.write("README.md", "placeholder\n")
+        self.git("add", "-A")
+        self.git("commit", "-m", "unrelated follow-up commit")
+
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t13\n")
+        self.write("docs/specs/legacy/spec.md", "x" * 13)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertIn("legacy-size-ratchet", self.rules(violations))
+
+    def test_loads_a_valid_sidecar_from_disk_and_enforces_its_ceiling(self) -> None:
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t12\n")
+        path = self.write("docs/specs/legacy/spec.md", "x" * 12)
+        self.config["limits"]["legacy"] = 10
+
+        self.assertEqual(load_linter().lint_specs(self.root, self.config), [])
+
+        path.write_text("x" * 13, encoding="utf-8")
+        violations = load_linter().lint_specs(self.root, self.config)
+        self.assertIn("file-size", self.rules(violations))
+        self.assertIn("frozen ceiling 12", violations[0].message)
+
+    def test_rejects_a_symlinked_size_exception_sidecar(self) -> None:
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        target = Path(outside.name) / "not-a-sidecar.txt"
+        target.write_text("not a sidecar\n", encoding="utf-8")
+        sidecar = self.root / "docs/specs/spec-lint-exceptions.tsv"
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.symlink_to(target)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertEqual(self.rules(violations), ["invalid-size-exception-catalog"])
+
+    def test_rejects_noncanonical_size_exception_targets(self) -> None:
+        self.write(
+            "docs/specs/spec-lint-exceptions.tsv",
+            "other/specs/not-a-spec.md\t100\n"
+            "docs/specs/legacy/not-a-spec.txt\t100\n",
+        )
+        self.write("other/specs/not-a-spec.md", "x")
+        self.write("docs/specs/legacy/not-a-spec.txt", "x")
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertEqual(self.rules(violations), ["invalid-size-exception", "invalid-size-exception"])
+
+    def test_rejects_an_absolute_size_exception_target_without_crashing(self) -> None:
+        self.write("docs/specs/spec-lint-exceptions.tsv", "/etc/passwd\t100\n")
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertEqual(self.rules(violations), ["invalid-size-exception"])
+        # main() calls violation.path.relative_to(root) on every violation; an
+        # absolute (or otherwise out-of-tree) target must not produce a violation
+        # path that raises there.
+        for violation in violations:
+            violation.path.relative_to(self.root)
+
+    def test_flags_a_malformed_size_exception_line(self) -> None:
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\n")
+        self.write("docs/specs/legacy/spec.md", "x" * 5)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertIn("malformed-size-exception", self.rules(violations))
+
+    def test_flags_a_non_ascii_digit_as_a_malformed_size_exception_line(self) -> None:
+        self.write("docs/specs/spec-lint-exceptions.tsv", "docs/specs/legacy/spec.md\t²\n")
+        self.write("docs/specs/legacy/spec.md", "x" * 5)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertIn("malformed-size-exception", self.rules(violations))
+
+    def test_flags_a_duplicate_size_exception_path(self) -> None:
+        self.config["limits"]["legacy"] = 11
+        self.write(
+            "docs/specs/spec-lint-exceptions.tsv",
+            "docs/specs/legacy/spec.md\t12\ndocs/specs/legacy/spec.md\t13\n",
+        )
+        self.write("docs/specs/legacy/spec.md", "x" * 12)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertEqual(self.rules(violations), ["duplicate-size-exception"])
+
+    def test_rejects_a_residual_legacy_size_exceptions_key_in_config(self) -> None:
+        self.config["legacy_size_exceptions"] = {}
+
+        with self.assertRaisesRegex(ValueError, "legacy_size_exceptions"):
+            load_linter().lint_specs(self.root, self.config)
 
     def test_rejects_a_system_artifact_without_a_system_index(self) -> None:
         self.write("docs/specs/task-system/requirements/dependencies.md", self.valid_requirement())

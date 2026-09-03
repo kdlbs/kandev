@@ -35,6 +35,7 @@
   "executors:dockerfile": "Brand or product name, spelled the same in every language.",
   "executors:janeDeveloper": "Example/sample content, not product copy.",
   "executors:sshIdentitySourceAgent": "Nothing but interpolated values and punctuation; there is no prose to translate.",
+  "executors:typeKubernetes": "Brand or product name, spelled the same in every language.",
   "executors:typeLocal": "Technical term kept in English across localized developer tooling.",
   "executors:typeWorktree": "Technical term kept in English across localized developer tooling.",
   "github:githubCli": "Brand or product name, spelled the same in every language.",

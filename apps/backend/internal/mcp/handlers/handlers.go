@@ -4038,19 +4038,22 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
-	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
-	plan, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
-		TaskID:           req.TaskID,
-		Title:            req.Title,
-		Content:          req.Content,
-		CreatedBy:        createdBy,
-		ForceNewRevision: guard.forceNewRevision,
+	result, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID:             req.TaskID,
+		Title:              req.Title,
+		Content:            req.Content,
+		CreatedBy:          createdBy,
+		EvaluateTruncation: true,
 	})
 	if err != nil {
 		return planws.CreateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
+	warning := ""
+	if result.TruncationDetected {
+		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
 }
 
 // handleGetTaskPlan retrieves a task plan.
@@ -4092,19 +4095,22 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
-	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
-	plan, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
-		TaskID:           req.TaskID,
-		Title:            req.Title,
-		Content:          req.Content,
-		CreatedBy:        createdBy,
-		ForceNewRevision: guard.forceNewRevision,
+	result, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
+		TaskID:             req.TaskID,
+		Title:              req.Title,
+		Content:            req.Content,
+		CreatedBy:          createdBy,
+		EvaluateTruncation: true,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
+	warning := ""
+	if result.TruncationDetected {
+		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
 }
 
 // handleDeleteTaskPlan deletes a task plan.

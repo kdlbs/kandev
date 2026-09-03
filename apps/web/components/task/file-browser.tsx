@@ -22,6 +22,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useMultiSelect } from "@/hooks/use-multi-select";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { isEditableKeydownTarget } from "@/lib/keyboard/utils";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { FileBrowserHeader } from "./file-browser-header";
 import { insertNodeInTree, removeNodeFromTree, FileBrowserContentArea } from "./file-browser-parts";
@@ -346,7 +347,7 @@ function useKeyboardShortcuts(
         return;
       if (e.key === "Escape") {
         clearSelection();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "a" && !isEditableKeydownTarget(e)) {
         e.preventDefault();
         selectAll();
       }

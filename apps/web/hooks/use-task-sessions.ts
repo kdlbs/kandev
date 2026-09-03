@@ -4,6 +4,7 @@ import { listTaskSessions } from "@/lib/api";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
@@ -22,8 +23,12 @@ async function hydrateTaskSessions({
   getStoreState: () => AppState;
   setTaskSessionsForTask: AppState["setTaskSessionsForTask"];
 }): Promise<boolean> {
-  const sessionIdsAtRequestStart = new Set(
-    storedTaskSessions(getStoreState, taskId).map((session) => session.id),
+  const stateAtRequestStart = getStoreState();
+  const sessionsAtRequestStart = storedTaskSessions(() => stateAtRequestStart, taskId);
+  const sessionIdsAtRequestStart = new Set(sessionsAtRequestStart.map((session) => session.id));
+  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(
+    stateAtRequestStart,
+    taskId,
   );
   try {
     const response = await listTaskSessions(taskId, { cache: "no-store" });
@@ -32,11 +37,21 @@ async function hydrateTaskSessions({
     const sessionsAddedDuringLoad = storedTaskSessions(getStoreState, taskId).filter(
       (session) => !sessionIdsAtRequestStart.has(session.id) && !fetchedSessionIds.has(session.id),
     );
-    setTaskSessionsForTask(taskId, [...fetchedSessions, ...sessionsAddedDuringLoad]);
+    setTaskSessionsForTask(
+      taskId,
+      [...fetchedSessions, ...sessionsAddedDuringLoad],
+      activityEpochsAtRequestStart,
+    );
     return sessionsAddedDuringLoad.length > 0;
   } catch (error) {
     console.error("Failed to load task sessions:", error);
-    if (!force) setTaskSessionsForTask(taskId, storedTaskSessions(getStoreState, taskId));
+    if (!force) {
+      setTaskSessionsForTask(
+        taskId,
+        storedTaskSessions(getStoreState, taskId),
+        activityEpochsAtRequestStart,
+      );
+    }
     return false;
   }
 }
@@ -57,11 +72,12 @@ export function useTaskSessions(taskId: string | null) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   const pendingForcedReloadRef = useRef(false);
   const pendingForcedReloadWaitersRef = useRef<Array<() => void>>([]);
+  const requestInFlightRef = useRef(false);
 
   const loadSessions = useCallback(
     async (force = false) => {
       if (!taskId) return;
-      if (isLoading) {
+      if (isLoading || requestInFlightRef.current) {
         if (force) {
           pendingForcedReloadRef.current = true;
           return new Promise<void>((resolve) => {
@@ -71,6 +87,7 @@ export function useTaskSessions(taskId: string | null) {
         return;
       }
       if (!force && isLoaded) return;
+      requestInFlightRef.current = true;
       setTaskSessionsLoading(taskId, true);
       try {
         const needsFollowUp = await hydrateTaskSessions({
@@ -81,6 +98,7 @@ export function useTaskSessions(taskId: string | null) {
         });
         if (needsFollowUp) pendingForcedReloadRef.current = true;
       } finally {
+        requestInFlightRef.current = false;
         setTaskSessionsLoading(taskId, false);
         if (force && !pendingForcedReloadRef.current) {
           const waiters = pendingForcedReloadWaitersRef.current.splice(0);

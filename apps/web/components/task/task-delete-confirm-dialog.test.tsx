@@ -49,6 +49,33 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TaskDeleteConfirmDialog", () => {
+  it("contains long confirmation content in a scrolling body with touch-safe actions", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="A task with a title that needs to wrap inside a phone confirmation surface"
+        taskId="task-1"
+        executorType="sprites"
+        isInFlight
+        confirmTestId="confirm"
+        onConfirm={() => {}}
+      />,
+    );
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.className).toContain("max-h-[calc(100dvh-2rem)]");
+    expect(dialog.className).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(dialog.className).toContain("overflow-hidden");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("min-h-0");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("space-y-3");
+    expect(screen.getByTestId("task-confirmation-body").className).toContain("overflow-y-auto");
+    expect(screen.getByTestId("confirm").className).toContain("min-h-11");
+    expect(screen.getByTestId("confirm").className).toContain("w-full");
+    expect(screen.getByTestId("confirm").getAttribute("data-variant")).toBe("destructive");
+  });
+
   it("hides the cascade checkbox when the task has no subtasks", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
     const onConfirm = vi.fn();
@@ -127,6 +154,28 @@ describe("TaskDeleteConfirmDialog", () => {
 });
 
 describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
+  it("states the named delete outcome directly and separates cleanup effects", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("task-confirmation-outcome").textContent).toMatch(
+      /Delete [“"]?My task[”"]?\. This action cannot be undone\./i,
+    );
+    expect(screen.getByTestId("task-cleanup-effects").tagName).toBe("UL");
+    expect(screen.getByTestId("task-cleanup-effects").querySelectorAll("li")).toHaveLength(2);
+    expect(screen.getByTestId("task-cleanup-notes").tagName).toBe("DIV");
+    expect(screen.queryByText(/Are you sure/i)).toBeNull();
+  });
+
   it("local reassures repo is untouched", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
     renderDialog(

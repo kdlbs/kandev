@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
@@ -120,12 +121,26 @@ func (r *SpritesExecutor) uploadSkillFiles(
 	// init in /workspace just keeps the script's failures non-fatal.
 	r.cleanSpriteKandevSkills(stepCtx, sprite, projectSkillDir)
 
-	// Upload each skill into /workspace/<projectSkillDir>/kandev-<slug>/SKILL.md.
+	// Upload each skill into /workspace/<projectSkillDir>/<skill.DirName(slug)>/SKILL.md.
+	// skill.DirName is not injective (a "kandev-"-prefixed slug and its
+	// unprefixed counterpart collide on the same directory) — the first
+	// skill in manifest order claims a directory; later collisions are
+	// skipped and logged rather than overwriting the first upload.
+	claimedDirs := make(map[string]string, len(manifest.Skills))
 	for _, sk := range manifest.Skills {
 		if !validSlugRe.MatchString(sk.Slug) {
 			continue
 		}
-		skillRoot := fmt.Sprintf("/workspace/%s/kandev-%s", projectSkillDir, sk.Slug)
+		dirName := skill.DirName(sk.Slug)
+		if owner, ok := claimedDirs[dirName]; ok {
+			r.logger.Warn("skipping sprite skill upload: directory name collides with an already-uploaded skill",
+				zap.String("slug", sk.Slug),
+				zap.String("collides_with_slug", owner),
+				zap.String("dir", dirName))
+			continue
+		}
+		claimedDirs[dirName] = sk.Slug
+		skillRoot := fmt.Sprintf("/workspace/%s/%s", projectSkillDir, dirName)
 		skillPath := skillRoot + "/SKILL.md"
 		if err := r.writeFileWithRetry(stepCtx, sprite, skillPath, []byte(sk.Content), 0o644); err != nil {
 			r.logger.Warn("failed to upload skill file",

@@ -60,13 +60,20 @@ describe("ActionConfirmPopover", () => {
 
   it("supports a wider bounded surface without changing the default width", async () => {
     render(<Harness />);
-    expect(screen.getByRole("dialog").className).toContain("w-64");
+    const defaultDialog = screen.getByRole("dialog");
+    expect(defaultDialog.className).toContain("w-64");
+    expect(
+      defaultDialog.querySelector<HTMLElement>('[data-slot="popover-description"]')?.className,
+    ).not.toContain("text-pretty");
 
     cleanup();
     render(<Harness size="wide" />);
     const wideDialog = screen.getByRole("dialog");
     expect(wideDialog.className).toContain("w-72");
     expect(wideDialog.className).toContain("max-w-[calc(100vw-1rem)]");
+    expect(
+      wideDialog.querySelector<HTMLElement>('[data-slot="popover-description"]')?.className,
+    ).toContain("text-pretty");
   });
 
   it("closes before invoking an unresolved confirmation and returns focus on cancel", async () => {
