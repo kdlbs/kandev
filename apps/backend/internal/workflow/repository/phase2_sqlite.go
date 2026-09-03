@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -983,6 +984,13 @@ const decisionActiveDeciderIndexName = "uniq_workflow_step_decisions_active_deci
 
 const decisionLockNamespace = "workflow-step-decision:"
 
+// ErrParticipantSeatChanged indicates that an agent decision used a seat that
+// no longer belongs to that agent when the decision transaction acquired the
+// participant-role lock.
+var ErrParticipantSeatChanged = errors.New("participant seat changed")
+
+const agentDeciderType = "agent"
+
 // sqliteDecisionActiveDeciderViolationMessage is the substring go-sqlite3
 // puts in a UNIQUE-constraint error for this index's column list.
 const sqliteDecisionActiveDeciderViolationMessage = "UNIQUE constraint failed: workflow_step_decisions.task_id, " +
@@ -1093,6 +1101,11 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 			}
 		}
 	}
+	// The shared lock closes the transaction-local seat read/write gap. This
+	// validation also covers the caller's earlier role-resolution read.
+	if err := r.validateDecisionParticipantSeatTx(ctx, tx, d); err != nil {
+		return err
+	}
 
 	if d.DeciderID != "" && d.Role != "" {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`
@@ -1128,6 +1141,45 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// validateDecisionParticipantSeatTx verifies an agent decision against the
+// current participant row after the role lock is held. The pre-write role
+// resolution happens outside this transaction, so the seat can change before
+// the decision reaches this boundary.
+func (r *Repository) validateDecisionParticipantSeatTx(
+	ctx context.Context, tx *sqlx.Tx, d *models.WorkflowStepDecision,
+) error {
+	if d.DeciderType != agentDeciderType || d.DeciderID == "" || d.Role == "" {
+		return nil
+	}
+
+	var currentAgentID string
+	var decisionRequired int
+	err := tx.QueryRowContext(ctx, tx.Rebind(`
+		SELECT agent_profile_id, decision_required
+		FROM workflow_step_participants
+		WHERE id = ?
+		  AND step_id = ?
+		  AND role = ?
+		  AND (task_id = ? OR task_id = '')
+	`), d.ParticipantID, d.StepID, d.Role, d.TaskID).Scan(&currentAgentID, &decisionRequired)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Engine-side callers can intentionally record a decision with a
+		// participant identifier that has no row. Preserve that existing
+		// behavior while rejecting a row that changed identity in place.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("validate participant seat: %w", err)
+	}
+	if currentAgentID != d.DeciderID || decisionRequired != 1 {
+		return fmt.Errorf(
+			"%w: participant %q is not held by agent %q",
+			ErrParticipantSeatChanged, d.ParticipantID, d.DeciderID,
+		)
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -697,6 +698,81 @@ func TestRecordStepDecision_RejectsBadInput(t *testing.T) {
 		if err := repo.RecordStepDecision(ctx, d); err == nil {
 			t.Fatalf("case %d: expected error", i)
 		}
+	}
+}
+
+// TestRecordStepDecision_RejectsStaleParticipantSeatIdentity protects the
+// decision boundary after a manual registration claims an automatic seat.
+// The caller can resolve the old seat before the claim, so the write path must
+// verify the seat holder again inside its transaction.
+func TestRecordStepDecision_RejectsStaleParticipantSeatIdentity(t *testing.T) {
+	repo, db := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	const (
+		taskID        = "task-stale-seat"
+		participantID = "seat-stale"
+		oldAgentID    = "agent-old"
+		newAgentID    = "agent-new"
+	)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES (?, ?, ?, 'reviewer', ?, 1, 0, 'auto')
+	`, participantID, step.ID, taskID, oldAgentID); err != nil {
+		t.Fatalf("seed automatic seat: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE workflow_step_participants
+		SET agent_profile_id = ?, provenance = 'manual'
+		WHERE id = ?
+	`, newAgentID, participantID); err != nil {
+		t.Fatalf("claim automatic seat: %v", err)
+	}
+
+	err := repo.RecordStepDecision(ctx, &models.WorkflowStepDecision{
+		TaskID:        taskID,
+		StepID:        step.ID,
+		ParticipantID: participantID,
+		Decision:      "approved",
+		DeciderType:   "agent",
+		DeciderID:     oldAgentID,
+		Role:          string(models.ParticipantRoleReviewer),
+	})
+	if !errors.Is(err, ErrParticipantSeatChanged) {
+		t.Fatalf("error = %v, want ErrParticipantSeatChanged", err)
+	}
+}
+
+func TestRecordStepDecision_AcceptsCurrentParticipantSeatIdentity(t *testing.T) {
+	repo, db := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	const (
+		taskID        = "task-current-seat"
+		participantID = "seat-current"
+		agentID       = "agent-current"
+	)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES (?, ?, ?, 'reviewer', ?, 1, 0, 'manual')
+	`, participantID, step.ID, taskID, agentID); err != nil {
+		t.Fatalf("seed participant seat: %v", err)
+	}
+
+	if err := repo.RecordStepDecision(ctx, &models.WorkflowStepDecision{
+		TaskID:        taskID,
+		StepID:        step.ID,
+		ParticipantID: participantID,
+		Decision:      "approved",
+		DeciderType:   agentDeciderType,
+		DeciderID:     agentID,
+		Role:          string(models.ParticipantRoleReviewer),
+	}); err != nil {
+		t.Fatalf("record decision: %v", err)
 	}
 }
 
