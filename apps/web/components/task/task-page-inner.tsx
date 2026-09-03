@@ -27,6 +27,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  resolveTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -102,6 +103,7 @@ function resolveCurrentStepId(
 
 function buildTaskTopBarProps(params: {
   taskProps: ReturnType<typeof resolveTaskProps>;
+  actionsMenuBoardRow: ReturnType<typeof resolveTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
   showDebugOverlay: boolean;
   onToggleDebugOverlay: () => void;
@@ -132,6 +134,7 @@ function buildTaskTopBarProps(params: {
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
     onTaskUnarchived: params.onTaskUnarchived,
+    actionsMenuBoardRow: params.actionsMenuBoardRow,
   };
 }
 
@@ -253,6 +256,7 @@ function useTaskPageDerivedProps({
   });
   const topBarProps = buildTaskTopBarProps({
     taskProps,
+    actionsMenuBoardRow: resolveTaskActionsMenuBoardRow(task),
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,

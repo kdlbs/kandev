@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
+const NETWORK_ERROR_MESSAGE = "network error";
+
 const archiveTaskMock = vi.fn();
+const deleteTaskMock = vi.fn();
 const removeTaskFromBoardMock = vi.fn();
 const getStateMock = vi.fn();
 const storeMock = { getState: getStateMock };
@@ -16,7 +19,7 @@ let storeState: {
 
 vi.mock("@/lib/api", () => ({
   archiveTask: (...args: unknown[]) => archiveTaskMock(...args),
-  deleteTask: vi.fn(),
+  deleteTask: (...args: unknown[]) => deleteTaskMock(...args),
   moveTask: vi.fn(),
   updateTask: vi.fn(),
 }));
@@ -35,7 +38,7 @@ vi.mock("@/hooks/use-task-removal", () => ({
   }),
 }));
 
-import { useArchiveAndSwitchTask } from "./use-task-actions";
+import { useArchiveAndSwitchTask, useDeleteAndSwitchTask } from "./use-task-actions";
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -85,7 +88,7 @@ describe("useArchiveAndSwitchTask", () => {
   });
 
   it("restores active task when archive API rejects after switching", async () => {
-    const error = new Error("network error");
+    const error = new Error(NETWORK_ERROR_MESSAGE);
     archiveTaskMock.mockRejectedValueOnce(error);
     removeTaskFromBoardMock.mockImplementationOnce(async () => {
       storeState.tasks.activeTaskId = "task-B";
@@ -93,7 +96,7 @@ describe("useArchiveAndSwitchTask", () => {
     });
     const { result } = renderHook(() => useArchiveAndSwitchTask());
 
-    await expect(result.current("task-A")).rejects.toThrow("network error");
+    await expect(result.current("task-A")).rejects.toThrow(NETWORK_ERROR_MESSAGE);
 
     expect(removeTaskFromBoardMock).toHaveBeenCalledTimes(1);
     expect(removeTaskFromBoardMock).toHaveBeenCalledWith("task-A", {
@@ -143,5 +146,48 @@ describe("useArchiveAndSwitchTask", () => {
     expect(setActiveSessionMock).not.toHaveBeenCalled();
     expect(setActiveTaskMock).not.toHaveBeenCalled();
     expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDeleteAndSwitchTask", () => {
+  it("removes and switches away from the active task before delete API resolves", async () => {
+    const deletion = deferred<void>();
+    deleteTaskMock.mockReturnValueOnce(deletion.promise);
+    const { result } = renderHook(() => useDeleteAndSwitchTask());
+
+    let deleteAndSwitchPromise!: Promise<void>;
+    act(() => {
+      deleteAndSwitchPromise = result.current("task-A");
+    });
+
+    expect(removeTaskFromBoardMock).toHaveBeenCalledWith("task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
+      switchOnly: true,
+    });
+
+    deletion.resolve();
+    await deleteAndSwitchPromise;
+    expect(deleteTaskMock).toHaveBeenCalledWith("task-A", undefined);
+    expect(removeTaskFromBoardMock).toHaveBeenLastCalledWith("task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
+    });
+  });
+
+  it("restores active task when delete API rejects after switching", async () => {
+    const error = new Error(NETWORK_ERROR_MESSAGE);
+    deleteTaskMock.mockRejectedValueOnce(error);
+    removeTaskFromBoardMock.mockImplementationOnce(async () => {
+      storeState.tasks.activeTaskId = "task-B";
+      return { switchedTaskId: "task-B" };
+    });
+    const { result } = renderHook(() => useDeleteAndSwitchTask());
+
+    await expect(result.current("task-A")).rejects.toThrow(NETWORK_ERROR_MESSAGE);
+
+    expect(setActiveSessionMock).toHaveBeenCalledWith("task-A", "sess-A");
+    expect(replaceTaskUrlMock).toHaveBeenCalledWith("task-A");
+    expect(deleteTaskMock).toHaveBeenCalledWith("task-A", undefined);
   });
 });

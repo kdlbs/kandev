@@ -8,6 +8,8 @@ import {
 import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 import { repositorySlug } from "@/lib/repository-slug";
+import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
+import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
@@ -259,6 +261,24 @@ function buildPullRequestTargetsByRepository(
     if (slug) targets[slug] = target;
   }
   return targets;
+}
+
+/** The detail top bar's actions-menu subject: the open task's own record, not
+ * a board row, since the detail surface has no board subscription. */
+export function resolveTaskActionsMenuBoardRow(task: Task | null): TaskActionsMenuBoardRow | null {
+  if (!task) return null;
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    workflowStepId: task.workflow_step_id,
+    state: task.state,
+    repositoryId: task.repositories?.[0]?.repository_id,
+    repositories: task.repositories,
+    parentTaskId: task.parent_id ?? null,
+    primaryExecutorType: task.primary_executor_type ?? null,
+    workspaceMode: workspaceModeFromMetadata(task.metadata),
+  };
 }
 
 export function resolveTaskPullRequestProps(

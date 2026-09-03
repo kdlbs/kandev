@@ -22,10 +22,12 @@ import { ExecutorSettingsButton } from "@/components/task/executor-settings-butt
 import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import { TaskTopBarActionsMenu } from "@/components/task/task-top-bar-actions-menu";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { isDebugUI } from "@/lib/config";
 import { useTranslation } from "react-i18next";
+import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -49,6 +51,7 @@ type TaskTopBarProps = {
   onTaskUnarchived?: (taskId: string) => void;
   onMoveStart?: () => void;
   onMoveError?: (error: unknown) => void;
+  actionsMenuBoardRow?: TaskActionsMenuBoardRow | null;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -72,6 +75,7 @@ const TaskTopBar = memo(function TaskTopBar({
   onTaskUnarchived,
   onMoveStart,
   onMoveError,
+  actionsMenuBoardRow,
 }: TaskTopBarProps) {
   const { t } = useTranslation();
   // Projects only exist for office-owned tasks, so kanban-mode tasks render no
@@ -127,6 +131,7 @@ const TaskTopBar = memo(function TaskTopBar({
           issueNumber={issueNumber}
           officeTaskHref={officeTaskHref}
           onTaskUnarchived={onTaskUnarchived}
+          actionsMenuBoardRow={actionsMenuBoardRow}
         />
       }
     />
@@ -365,6 +370,7 @@ function TopBarRight({
   issueNumber,
   officeTaskHref,
   onTaskUnarchived,
+  actionsMenuBoardRow,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -378,6 +384,7 @@ function TopBarRight({
   issueNumber?: number;
   officeTaskHref?: string | null;
   onTaskUnarchived?: (taskId: string) => void;
+  actionsMenuBoardRow?: TaskActionsMenuBoardRow | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -426,6 +433,11 @@ function TopBarRight({
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
         embeddedVscodeSupported={embeddedVscodeSupported}
+      />
+      <TaskTopBarActionsMenu
+        boardRow={actionsMenuBoardRow ?? null}
+        workspaceId={workspaceId ?? null}
+        isArchived={isArchived}
       />
     </div>
   );
