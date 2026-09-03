@@ -480,6 +480,71 @@ func TestMaterializeRepository_RejectsSymlinkedGitMetadata(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMaterializeRepository_CleansUpFreshCheckoutOnAttestationFailure(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	locator := materializeRewrittenLocator(t, origin)
+	workDir := t.TempDir()
+	s := newMaterializeTestServer(t, workDir)
+
+	original := attestMaterializedGitMetadata
+	attestMaterializedGitMetadata = func(ctx context.Context, destination string) error {
+		return errors.New("simulated attestation failure")
+	}
+	defer func() { attestMaterializedGitMetadata = original }()
+
+	body, err := json.Marshal(MaterializeRepositoryRequest{RepositoryURL: locator, Destination: "repo", BaseBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/materialize-repository", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+s.cfg.AuthToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+	destination := filepath.Join(workDir, "repo")
+	if _, statErr := os.Stat(destination); !os.IsNotExist(statErr) {
+		t.Fatalf("expected fresh checkout %q to be removed after attestation failure, stat err: %v", destination, statErr)
+	}
+}
+
+func TestWorkspaceMaterializeRepository_PreservesReusedCheckoutOnAttestationFailure(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	locator := materializeRewrittenLocator(t, origin)
+	workDir := t.TempDir()
+	s := newMaterializeTestServer(t, workDir)
+	destination := filepath.Join(workDir, "repo")
+	if _, err := materializeRepository(context.Background(), locator, destination, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	original := attestMaterializedGitMetadata
+	attestMaterializedGitMetadata = func(ctx context.Context, destination string) error {
+		return errors.New("simulated attestation failure")
+	}
+	defer func() { attestMaterializedGitMetadata = original }()
+
+	body, err := json.Marshal(MaterializeRepositoryRequest{RepositoryURL: locator, Destination: "repo", BaseBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/materialize-repository", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+s.cfg.AuthToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, statErr := os.Stat(destination); statErr != nil {
+		t.Fatalf("expected reused checkout %q to survive attestation failure, stat err: %v", destination, statErr)
+	}
+}
+
 func TestWorkspaceRemoveMaterializedRepository_RemovesOwnedCheckout(t *testing.T) {
 	origin := createMaterializeOrigin(t)
 	workDir := t.TempDir()
@@ -696,6 +761,22 @@ func removeMaterializedRepositoryRequest(t *testing.T, s *Server, removal Remove
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 	return w
+}
+
+// materializeRewrittenLocator returns an https:// locator that validateRepositoryLocator
+// accepts, rewritten via a scoped GIT_CONFIG_GLOBAL insteadOf rule to the given
+// local origin so tests can exercise the full HTTP validation path without a
+// real network remote.
+func materializeRewrittenLocator(t *testing.T, origin string) string {
+	t.Helper()
+	locator := "https://example.invalid/fixture/" + filepath.Base(t.TempDir()) + ".git"
+	configPath := filepath.Join(t.TempDir(), "gitconfig")
+	config := "[url \"file://" + filepath.ToSlash(origin) + "\"]\n\tinsteadOf = " + locator + "\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatalf("write git config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+	return locator
 }
 
 func createMaterializeOrigin(t *testing.T) string {

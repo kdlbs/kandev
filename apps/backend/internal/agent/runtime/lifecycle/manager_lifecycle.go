@@ -51,12 +51,26 @@ func (m *Manager) Start(ctx context.Context) error {
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
 			execution := &AgentExecution{
-				ID:                   ri.InstanceID,
-				TaskID:               ri.TaskID,
-				SessionID:            ri.SessionID,
-				ContainerID:          ri.ContainerID,
-				ContainerIP:          ri.ContainerIP,
-				WorkspacePath:        ri.WorkspacePath,
+				ID:            ri.InstanceID,
+				TaskID:        ri.TaskID,
+				SessionID:     ri.SessionID,
+				ContainerID:   ri.ContainerID,
+				ContainerIP:   ri.ContainerIP,
+				WorkspacePath: ri.WorkspacePath,
+				// WorkspaceSourceRoots carries forward whatever roots the
+				// runtime backend already reconstructed for this instance.
+				// GitMetadataProjections is deliberately left nil here: no
+				// current runtime backend's RecoverInstances returns a
+				// non-empty result (Docker, SSH, Sprites, remote Docker, and
+				// Kubernetes all no-op; a restarted container is instead
+				// re-attached lazily through EnsureWorkspaceExecutionForSession,
+				// which derives a fresh, trust-validated projection through the
+				// normal resume path). A future backend that starts recovering
+				// live instances here must derive GitMetadataProjections the
+				// same way — from a separately trusted repository record, never
+				// from the recovered checkout's own .git pointer alone — before
+				// this execution is allowed to accept a workspace attach.
+				WorkspaceSourceRoots: append([]string(nil), ri.WorkspaceSourceRoots...),
 				RuntimeName:          ri.RuntimeName,
 				Status:               v1.AgentStatusRunning,
 				StartedAt:            time.Now(),

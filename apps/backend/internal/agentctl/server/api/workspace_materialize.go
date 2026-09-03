@@ -136,6 +136,18 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 	}
 	if err := attestMaterializedGitMetadata(c.Request.Context(), destination); err != nil {
 		s.logger.Warn("workspace repository Git metadata attestation failed", zap.String("destination", req.Destination), zap.Error(err))
+		// A fresh clone that fails attestation must not survive the failed
+		// response: the lifecycle rollback that runs after a successful batch
+		// only knows about repositories recorded on success, so an
+		// unattested fresh checkout left on disk here would never be cleaned
+		// up. A reused (pre-existing) checkout is left untouched — it
+		// predates this request and may still be owned by another in-flight
+		// operation or a prior successful attach.
+		if !reused {
+			if _, removeErr := removeMaterializedRepository(c.Request.Context(), s.procMgr.WorkDir(), destination, req.RepositoryURL); removeErr != nil {
+				s.logger.Warn("cleanup of unattested fresh checkout failed", zap.String("destination", req.Destination), zap.Error(removeErr))
+			}
+		}
 		c.JSON(http.StatusUnprocessableEntity, MaterializeRepositoryResponse{Error: "repository Git metadata validation failed"})
 		return
 	}
@@ -149,8 +161,10 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 // attestMaterializedGitMetadata proves a materialized checkout remains a
 // regular repository under agentctl's canonical workspace before lifecycle can
 // grant its .git directory to a mutable Codex session. It returns no path to
-// the caller, keeping executor filesystem details out of API errors.
-func attestMaterializedGitMetadata(ctx context.Context, destination string) error {
+// the caller, keeping executor filesystem details out of API errors. It is a
+// package var, like the quarantine hooks below, so tests can substitute a
+// failing stub without tampering with a real checkout mid-request.
+var attestMaterializedGitMetadata = func(ctx context.Context, destination string) error {
 	_, err := attestRegularGitMetadata(ctx, destination)
 	return err
 }

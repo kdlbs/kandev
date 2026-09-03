@@ -33,12 +33,17 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 // GitMetadataProjectionsForSession returns a snapshot of the active ephemeral
 // Git policy. Workspace attachment snapshots this before replacing a complete
 // projection set so a later materialization failure can restore the exact old
-// authority instead of retaining grants for an attached repository.
+// authority instead of retaining grants for an attached repository. The read
+// is taken under promptLifecycleMu, the same lock a concurrent rebind holds
+// while writing execution.GitMetadataProjections, so a snapshot is never torn
+// or observed mid-swap.
 func (m *Manager) GitMetadataProjectionsForSession(sessionID string) ([]*worktree.GitMetadataProjection, bool) {
 	execution, ok := m.executionStore.GetBySessionID(sessionID)
 	if !ok {
 		return nil, false
 	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
 	return append([]*worktree.GitMetadataProjection{}, execution.GitMetadataProjections...), true
 }
 
