@@ -81,10 +81,14 @@ Run these commands from the repository root.
 
 ## Results
 
-Implemented in commit `407e3df65`. Storage instructions and captions now point
-to `Settings > System > Storage`. The four affected screenshots were recaptured
-with an isolated Playwright fixture using fictional `/var/lib/kandev/...`
-paths, then visually inspected and copied into `docs/screenshots/`.
+Implemented across commits `407e3df65` (the route split) and `97de44c48`
+(the public documentation and screenshot refresh). Storage instructions and
+captions now point to `Settings > System > Storage`. The four affected
+screenshots were recaptured with an isolated Playwright fixture using fictional
+`/var/lib/kandev/...` paths, then visually inspected and copied into
+`docs/screenshots/`. The maintenance-policy and Docker-cleanup captures were
+subsequently reframed so each visibly retains the Storage breadcrumb or page
+heading alongside the relevant controls.
 
 Verification passed:
 
