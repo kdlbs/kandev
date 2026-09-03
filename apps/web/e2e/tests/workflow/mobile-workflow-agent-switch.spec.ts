@@ -50,6 +50,7 @@ test.describe("Workflow agent profile switching on mobile", () => {
         workflow_id: workflow.id,
         workflow_step_id: stepA.id,
         repository_ids: [seedData.repositoryId],
+        description: "Run the workflow session picker scenario",
       },
     );
     const originalASessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);

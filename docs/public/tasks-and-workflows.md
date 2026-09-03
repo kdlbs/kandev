@@ -74,7 +74,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 6. Choose the applicable action:
    - **Start Plan Mode** is the primary empty-description action and creates the task through the plan-mode path.
    - **Start task** requires a nonempty description, creates the task, and starts its agent. This path starts in the first positional step whose entry actions include **Auto-start agent**, falling back to **Start step** when the workflow automates no step.
-   - **Start task in plan mode** requires a nonempty description and starts the agent with plan mode enabled. This path starts in the first positional workflow step, even if another step is marked **Start step**.
+   - **Start task in plan mode** requires a nonempty description and starts the agent with plan mode enabled. Like **Start task**, this path starts in the first positional step whose entry actions include **Auto-start agent**, then falls back to **Start step**.
    - **Create without starting agent** requires a nonempty description and starts in **Start step**. A structured ACP profile prepares the session/workspace without starting an agent turn. Passthrough/TUI is an exception: the backend launches it immediately so its native PTY exists.
 
    On mobile, the two non-primary actions are separate buttons labeled **Plan mode** and **Create only**; they have the same plan-mode and create-without-agent behavior.
@@ -633,7 +633,7 @@ settled task in the still-working state.
 
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.
-- **Task starts in the wrong step:** the destination depends on the action. **Create without starting agent** uses **Start step** with first-step fallback; **Start task** uses the first **Auto-start agent** step and falls back to **Start step**; **Start task in plan mode** deliberately uses the first positional step. An explicit `workflow_step_id` from the creator outranks all three.
+- **Task starts in the wrong step:** the destination depends on whether an agent starts immediately. **Create without starting agent** uses **Start step** with first-step fallback. **Start task** and **Start task in plan mode** use the first **Auto-start agent** step, then fall back to **Start step**. An explicit `workflow_step_id` from the creator outranks these defaults.
 - **A task moves unexpectedly:** inspect **On Turn Start**, **On Turn Complete**, child completion, entry actions, and the destination step's entry actions.
 - **A task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.
 - **Move rejected:** check the target WIP limit and whether the task is already counted there.

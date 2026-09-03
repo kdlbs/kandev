@@ -2842,6 +2842,16 @@ func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", id)
 	}
+	// task_session_prompt_seq intentionally has no foreign key because it was
+	// added by a replay-safe migration. Remove its session-scoped admission
+	// state explicitly so a later session that reuses this ID starts fresh.
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_prompt_seq WHERE task_session_id = ?`), id); err != nil {
+		// Isolated unit tests may omit the prompt-sequence schema. Production
+		// always has it; treat a missing table as already-cleaned.
+		if !db.IsMissingTableError(err) {
+			return fmt.Errorf("purge prompt history for session %s: %w", id, err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), id); err != nil {
 		// Isolated unit tests may omit the messagequeue schema. Production
 		// always has queued_messages; treat a missing table as already-purged.

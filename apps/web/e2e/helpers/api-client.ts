@@ -2310,6 +2310,7 @@ export class ApiClient {
       state: string;
       is_primary: boolean;
       started_at: string;
+      updated_at: string;
       completed_at?: string | null;
       task_environment_id?: string;
       workspace_path?: string;
