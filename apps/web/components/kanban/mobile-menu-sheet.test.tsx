@@ -184,6 +184,12 @@ describe("MobileMenuSheet — board sort and priority filter", () => {
     expect(screen.getByTestId("mobile-priority-filter-option-low")).not.toBeNull();
   });
 
+  it("names the board sort select by what it selects, not its current value", () => {
+    renderSheet({ currentPage: "kanban" });
+
+    expect(screen.getByRole("combobox", { name: "Board sort" })).not.toBeNull();
+  });
+
   it("renders nothing on the tasks page", () => {
     renderSheet({ currentPage: "tasks" });
 

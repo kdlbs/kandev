@@ -732,7 +732,7 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 
 // applyKanbanSort validates and applies the board sort enum, defaulting an
 // empty value and rejecting the whole request on an invalid one, modeled on
-// applyTasksListPreferences (AC-004.9).
+// applyTasksListPreferences.
 func applyKanbanSort(settings *models.UserSettings, sortValue *string) error {
 	if sortValue == nil {
 		return nil
@@ -750,13 +750,9 @@ func applyKanbanSort(settings *models.UserSettings, sortValue *string) error {
 
 // normalizeKanbanPriorityFilterTokens drops any member outside the four
 // priority tokens, removes duplicates, and orders the remainder by priority
-// rank (AC-004.9). Unlike applyKanbanSort, an invalid member does not reject
-// the request: the field is a subset selection rather than an enum, "remove
-// duplicates from the remainder" only parses if a remainder survives an
-// invalid member, and a whole-request rejection would silently block this
-// settings record's other fields (repository filter, hidden step ids) on
-// every write until the stray token is cleared, since the caller applies this
-// value inside the same best-effort settings payload as those fields.
+// rank. An invalid member is dropped rather than rejecting the whole request,
+// since this field is a subset selection applied inside the same best-effort
+// settings payload as the record's other fields.
 func normalizeKanbanPriorityFilterTokens(tokens []string) []string {
 	valid := make([]string, 0, len(tokens))
 	seen := make(map[string]struct{}, len(tokens))

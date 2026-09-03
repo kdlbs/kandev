@@ -56,7 +56,7 @@ export function compareTasksByPriorityThenCreatedDesc(
 
 /**
  * Selects the within-step comparator for the kanban and mobile column views,
- * shared so both views apply the sort token identically (AC-002.5).
+ * shared so both views apply the sort token identically.
  */
 export function pickKanbanColumnComparator(
   sortToken: KanbanSort,

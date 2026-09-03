@@ -83,7 +83,7 @@ function priorityFilterTokensUnchanged(
   );
 }
 
-/** @internal Exported for testing the snapshot-not-delta commit semantics (AC-004.5). */
+/** @internal Exported for testing the snapshot-not-delta commit semantics. */
 export function buildNormalizedSettings(
   next: CommitPayload,
   current: DisplaySettings,
