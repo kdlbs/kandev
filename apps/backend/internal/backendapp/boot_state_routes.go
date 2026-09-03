@@ -676,6 +676,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"quickChatTabOrderByWorkspace":      settings.QuickChatTabOrderByWorkspace,
 		"hiddenWorkflowStepIds":             stringSliceMap(settings.KanbanHiddenStepIDs),
 		"workflowIdsWithAutoHideEmptySteps": stringSlice(settings.WorkflowIDsWithAutoHideEmptySteps),
+		"kanbanSort":                        usermodels.NormalizeKanbanSort(settings.KanbanSort),
+		"kanbanPriorityFilterTokens":        stringSlice(settings.KanbanPriorityFilterTokens),
 		"loaded":                            true,
 	}
 }
