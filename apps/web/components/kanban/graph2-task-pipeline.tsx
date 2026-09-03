@@ -257,6 +257,52 @@ function RowMenuTrigger({
   );
 }
 
+const TAGS_LANE_MAX_WIDTH = 120;
+
+/**
+ * task-card-tags is contractually spacious (its own row on the Kanban card),
+ * but this row has no spare row to give it. Rather than crop an arbitrary
+ * plugin contribution into a fading sliver, measure its natural width and
+ * drop the whole lane when it would not fit: an absent tag reads as "no
+ * tags" instead of a confusing, half-legible one.
+ *
+ * The outer element's own `max-width` is what toggles, never its `display`:
+ * `contentRef` stays mounted at its natural size throughout, so measuring it
+ * after a drop still reports the untouched content width instead of the 0
+ * a `display: none` ancestor would force, which would immediately flip the
+ * lane back on and loop.
+ */
+function RowTagsLane({ task }: { task: Task }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [fits, setFits] = useState(true);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const update = () => setFits(el.scrollWidth <= TAGS_LANE_MAX_WIDTH);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [task.id]);
+
+  return (
+    <div
+      data-testid="pipeline-row-tags-lane"
+      className="shrink-0 overflow-hidden"
+      style={{ maxWidth: fits ? TAGS_LANE_MAX_WIDTH : 0 }}
+    >
+      <div
+        ref={contentRef}
+        data-testid="pipeline-row-tags-lane-content"
+        className="inline-flex items-center"
+      >
+        <TaskCardTags task={task} />
+      </div>
+    </div>
+  );
+}
+
 /** The row's status strip: everything ordered after the title and before the step run. */
 function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<HTMLDivElement> }) {
   const { t } = useTranslation("common");
@@ -270,22 +316,7 @@ function RowInlineStatus({ task, innerRef }: { task: Task; innerRef: React.Ref<H
       <MRTaskIcon taskId={task.id} />
       <RegisteredChangeRequestTaskIcon taskId={task.id} />
       <TaskCardIndicators task={task} />
-      {/* task-card-tags is contractually spacious (its own row on the Kanban
-          card), but this row has no spare row to give it — cap the lane so
-          an arbitrary-width plugin contribution can't push the step tracker
-          off its column. A hidden-scrollbar scroll region here would be a
-          second, undiscoverable nested scroll surface inside the row's own
-          scroll behavior, so this is a static preview instead: clipped, with
-          a soft edge fade so a genuine overflow reads as "more exists" (open
-          the task or the Kanban card for the full row) rather than a hard
-          cut. The fade sits over blank space and is invisible whenever the
-          content already fits inside the cap. */}
-      <div
-        data-testid="pipeline-row-tags-lane"
-        className="shrink-0 max-w-[120px] overflow-hidden [mask-image:linear-gradient(to_right,black_calc(100%-14px),transparent)]"
-      >
-        <TaskCardTags task={task} />
-      </div>
+      <RowTagsLane task={task} />
       <KanbanCardBadges task={task} />
       {renderSubagentCountChip(
         task,
@@ -418,7 +449,12 @@ function PipelineRow({
       <div
         className="min-w-0"
         data-testid="pipeline-row-title"
-        style={{ flex: "1 1 auto", minWidth: "96px", maxWidth: "200px" }}
+        // Fixed, not flexible: a title column that grows/shrinks with each
+        // row's own content makes the step run start at a different x
+        // position row to row. Holding it at one width keeps every row's
+        // step run aligned; it still yields down to the 96px floor
+        // (AC-UI-PIPELINE-ROW-003.11) on a board too narrow to hold it.
+        style={{ flex: "0 1 220px", minWidth: "96px" }}
       >
         <CardTitle task={task} enableTitleHover />
       </div>

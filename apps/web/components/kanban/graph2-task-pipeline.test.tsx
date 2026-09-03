@@ -468,22 +468,59 @@ describe("Graph2TaskPipeline — plugin card slots on the row (AC-UI-PIPELINE-RO
     }
   });
 
-  it("bounds task-card-tags to a fixed lane so an arbitrary-width contribution can't push the step run off its column", () => {
+  it("keeps a task-card-tags contribution that fits within the lane's 120px cap", () => {
+    const PLUGIN_ID = "kandev-plugin-short-tags-fixture";
+    function ShortTag() {
+      return <span data-testid="row-short-tag">bug</span>;
+    }
+    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent("task-card-tags", ShortTag);
+
+    try {
+      renderPipeline(makeTask("step-2"), STEPS);
+
+      const lane = screen.getByTestId("pipeline-row-tags-lane");
+      expect(lane.style.maxWidth).toBe("120px");
+      expect(lane.contains(screen.getByTestId("row-short-tag"))).toBe(true);
+    } finally {
+      pluginRegistry.unregisterPlugin(PLUGIN_ID);
+    }
+  });
+
+  it("drops the tags lane entirely once its contribution would overflow the cap, instead of cropping it", () => {
     const PLUGIN_ID = "kandev-plugin-wide-tags-fixture";
     function WideTag() {
       return <span data-testid="row-wide-tag">A tag with a genuinely long label</span>;
     }
     pluginRegistry.forPlugin(PLUGIN_ID).registerComponent("task-card-tags", WideTag);
 
+    const observerEntries: Array<{ element: Element; callback: ResizeObserverCallback }> = [];
+    class CapturingResizeObserver {
+      private readonly callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(element: Element) {
+        observerEntries.push({ element, callback: this.callback });
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("ResizeObserver", CapturingResizeObserver);
+
     try {
       renderPipeline(makeTask("step-2"), STEPS);
-
       const lane = screen.getByTestId("pipeline-row-tags-lane");
-      expect(lane.className).toContain("max-w-[120px]");
-      expect(lane.className).toContain("overflow-hidden");
-      expect(lane.contains(screen.getByTestId("row-wide-tag"))).toBe(true);
+      const content = screen.getByTestId("pipeline-row-tags-lane-content");
+      Object.defineProperty(content, "scrollWidth", { configurable: true, value: 300 });
+      for (const entry of observerEntries) {
+        if (entry.element === content) act(() => entry.callback([], {} as ResizeObserver));
+      }
+
+      expect(lane.style.maxWidth).toBe("0");
+      expect(screen.getByTestId("row-wide-tag")).toBeTruthy();
     } finally {
       pluginRegistry.unregisterPlugin(PLUGIN_ID);
+      vi.unstubAllGlobals();
     }
   });
 });
