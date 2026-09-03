@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
@@ -114,9 +122,12 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 import { PreviewSessionBody, PreviewSessionTabs } from "./preview-session-tabs";
+import { usePreviewPlanSummary } from "./preview-plan-panel";
 
 const TASK_ID = "task-1";
+const TASK_ID_B = "task-2";
 const TIMESTAMP = "2026-07-21T00:00:00Z";
+const LATER_TIMESTAMP = "2026-07-22T00:00:00Z";
 const PLAN_INDICATOR_TESTID = "preview-plan-tab-indicator";
 const PLAN_TAB_TESTID = "preview-plan-tab";
 
@@ -367,11 +378,97 @@ describe("PreviewSessionTabs Plan tab reliability", () => {
 
     // Simulate a task.plan.updated WS event landing for this task while the
     // Plan tab is already the active view.
-    const updatedPlan = agentPlan({ updated_at: "2026-07-22T00:00:00Z" });
+    const updatedPlan = agentPlan({ updated_at: LATER_TIMESTAMP });
     act(() => {
       setTaskPlansState({ byTaskId: { [TASK_ID]: updatedPlan } });
     });
 
     expect(screen.queryByTestId(PLAN_INDICATOR_TESTID)).toBeNull();
+  });
+
+  it("does not mark the next task's plan seen when switching the previewed task while Plan is open", () => {
+    setTaskPlansState({
+      byTaskId: {
+        [TASK_ID]: agentPlan(),
+        [TASK_ID_B]: agentPlan({
+          id: "plan-2",
+          task_id: TASK_ID_B,
+          updated_at: LATER_TIMESTAMP,
+        }),
+      },
+      loadedByTaskId: { [TASK_ID]: true, [TASK_ID_B]: true },
+    });
+
+    const { rerender } = render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+    mocks.markTaskPlanSeen.mockReset();
+
+    act(() => {
+      rerender(<PreviewSessionTabs taskId={TASK_ID_B} sessionId={null} />);
+    });
+
+    expect(mocks.markTaskPlanSeen).not.toHaveBeenCalledWith(TASK_ID_B);
+    expect(fakeStore.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID_B]).toBeUndefined();
+    expect(screen.queryByTestId(PLAN_INDICATOR_TESTID)).toBeTruthy();
+  });
+});
+
+describe("usePreviewPlanSummary fetch race", () => {
+  beforeEach(() => {
+    fakeStore.setState({ taskPlans: emptyTaskPlans() });
+  });
+
+  afterEach(() => {
+    mocks.getTaskPlan.mockReset();
+    mocks.setTaskPlan.mockReset();
+  });
+
+  it("does not overwrite a newer WS-pushed plan with a stale null fetch response", async () => {
+    let resolveFetch: (value: TaskPlan | null) => void = () => {};
+    mocks.getTaskPlan.mockReturnValue(
+      new Promise<TaskPlan | null>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => usePreviewPlanSummary(TASK_ID));
+
+    const newerPlan = agentPlan({ updated_at: LATER_TIMESTAMP });
+    act(() => {
+      fakeStore.getState().setTaskPlan(TASK_ID, newerPlan);
+    });
+
+    await act(async () => {
+      resolveFetch(null);
+      await Promise.resolve();
+    });
+
+    expect(fakeStore.getState().taskPlans.byTaskId[TASK_ID]).toEqual(newerPlan);
+    expect(fakeStore.getState().taskPlans.loadingByTaskId[TASK_ID]).toBe(false);
+  });
+
+  it("does not overwrite a newer WS-pushed plan with a stale, older fetch response", async () => {
+    let resolveFetch: (value: TaskPlan | null) => void = () => {};
+    mocks.getTaskPlan.mockReturnValue(
+      new Promise<TaskPlan | null>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => usePreviewPlanSummary(TASK_ID));
+
+    const newerPlan = agentPlan({ updated_at: LATER_TIMESTAMP });
+    act(() => {
+      fakeStore.getState().setTaskPlan(TASK_ID, newerPlan);
+    });
+
+    const staleFetchedPlan = agentPlan({ updated_at: TIMESTAMP });
+    await act(async () => {
+      resolveFetch(staleFetchedPlan);
+      await Promise.resolve();
+    });
+
+    expect(fakeStore.getState().taskPlans.byTaskId[TASK_ID]).toEqual(newerPlan);
+    expect(fakeStore.getState().taskPlans.loadingByTaskId[TASK_ID]).toBe(false);
   });
 });

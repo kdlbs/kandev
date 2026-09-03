@@ -34,11 +34,22 @@ export function usePreviewPlanSummary(taskId: string) {
     setTaskPlanLoading(taskId, true);
     getTaskPlan(taskId)
       .then((result) => {
+        // Race guard: a WS `task.plan.created`/`task.plan.updated` push can
+        // land in the store while this HTTP request is in flight. Don't let
+        // a stale response (an older version, or `null` from before the
+        // server had written it) clobber a newer one already applied.
+        const live = storeApi.getState().taskPlans.byTaskId[taskId];
+        if (live) {
+          if (result === null) return;
+          if (Date.parse(result.updated_at) < Date.parse(live.updated_at)) return;
+        }
         storeApi.getState().setTaskPlan(taskId, result);
       })
       .catch(() => {
-        storeApi.getState().setTaskPlanLoading(taskId, false);
         setFailedTaskId(taskId);
+      })
+      .finally(() => {
+        storeApi.getState().setTaskPlanLoading(taskId, false);
       });
   }, [taskId, loaded, loading, failed, storeApi]);
 

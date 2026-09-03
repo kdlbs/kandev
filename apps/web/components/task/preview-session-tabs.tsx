@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { PanelLoadingState } from "@/components/panel-loading-state";
@@ -187,9 +187,16 @@ function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string 
 
   const [viewMode, setViewMode] = useState<"session" | "plan">("session");
   // A new preview task shouldn't inherit the previous task's Plan selection.
-  useEffect(() => {
+  // Reset during render (not a passive effect) because `PreviewSessionTabs`
+  // is reused across tasks on card click without remounting: a passive
+  // effect runs after the layout effect below, so it would still see
+  // `viewMode === "plan"` on the taskId-change render and mark the new
+  // task's plan seen before the reset took effect.
+  const [prevTaskId, setPrevTaskId] = useState(taskId);
+  if (prevTaskId !== taskId) {
+    setPrevTaskId(taskId);
     setViewMode("session");
-  }, [taskId]);
+  }
 
   // While the Plan tab is the active view, re-mark seen whenever the plan's
   // updated_at changes. Covers both clicking Plan before the fetch resolves
