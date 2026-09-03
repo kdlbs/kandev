@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TaskPriority } from "@/lib/types/http";
 import {
   compareTasksByCreatedDesc,
   compareTasksByPriorityThenCreatedDesc,
@@ -10,6 +11,11 @@ import {
 } from "./task-order";
 
 const BASE_CREATED_AT = "2026-01-01T00:00:00Z";
+// AC-001.10/002.3's "persistent" unranked origin: a stored value outside the
+// four tokens, as opposed to an absent field (the "transient" origin every
+// bare `priority: undefined` fixture in this file covers). Both must rank last.
+const PERSISTENT_UNRANKED = "urgent" as TaskPriority;
+const STORED_INVALID_ID = "stored-invalid";
 
 describe("compareTasksByCreatedDesc", () => {
   it("sorts newer created tasks first", () => {
@@ -139,6 +145,19 @@ describe("compareTasksByPriorityThenCreatedDesc", () => {
       "b",
     ]);
   });
+
+  it("ranks a persistent-origin unranked task (stored value outside the vocabulary) last, identically to the absent-field origin", () => {
+    const tasks = [
+      { id: STORED_INVALID_ID, createdAt: BASE_CREATED_AT, priority: PERSISTENT_UNRANKED },
+      { id: "absent", createdAt: BASE_CREATED_AT },
+      { id: "low", createdAt: BASE_CREATED_AT, priority: "low" as const },
+    ];
+    expect([...tasks].sort(compareTasksByPriorityThenCreatedDesc).map((t) => t.id)).toEqual([
+      "low",
+      "absent",
+      STORED_INVALID_ID,
+    ]);
+  });
 });
 
 describe("pickKanbanColumnComparator", () => {
@@ -191,6 +210,19 @@ describe("compareTasksByPriorityThenPositionAsc", () => {
     expect([...tasks].sort(compareTasksByPriorityThenPositionAsc).map((t) => t.id)).toEqual([
       "alpha",
       "zeta",
+    ]);
+  });
+
+  it("ranks a persistent-origin unranked task (stored value outside the vocabulary) last, identically to the absent-field origin", () => {
+    const tasks = [
+      { id: STORED_INVALID_ID, position: 0, priority: PERSISTENT_UNRANKED },
+      { id: "absent", position: 0 },
+      { id: "low", position: 0, priority: "low" as const },
+    ];
+    expect([...tasks].sort(compareTasksByPriorityThenPositionAsc).map((t) => t.id)).toEqual([
+      "low",
+      "absent",
+      STORED_INVALID_ID,
     ]);
   });
 });

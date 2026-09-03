@@ -4,6 +4,14 @@ import {
   taskMatchesPriorityFilter,
   toggleKanbanPriorityFilterToken,
 } from "./priority-filter-tokens";
+import type { TaskPriority } from "@/lib/types/http";
+
+// A row written before the priority writer existed, or written outside the
+// service's validated path, reads back with a stored value outside the four
+// tokens (AC-001.10's "persistent" origin) rather than an absent field (the
+// "transient" origin every `undefined` fixture below covers). Both must be
+// treated identically.
+const PERSISTENT_UNRANKED = "urgent" as TaskPriority;
 
 describe("parseKanbanPriorityFilterTokens", () => {
   it("keeps a fully valid selection, ordered by rank", () => {
@@ -82,5 +90,10 @@ describe("taskMatchesPriorityFilter", () => {
 
   it("excludes an unranked task under any non-empty selection", () => {
     expect(taskMatchesPriorityFilter(undefined, ["critical"])).toBe(false);
+  });
+
+  it("treats a persistent-origin unranked task (stored value outside the vocabulary) identically to the transient (absent) origin", () => {
+    expect(taskMatchesPriorityFilter(PERSISTENT_UNRANKED, [])).toBe(true);
+    expect(taskMatchesPriorityFilter(PERSISTENT_UNRANKED, ["critical"])).toBe(false);
   });
 });

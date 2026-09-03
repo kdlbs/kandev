@@ -250,6 +250,34 @@ func TestHTTPUpdateUserSettingsInvalidKanbanSortRejectsWholeRequest(t *testing.T
 	}
 }
 
+// TestHTTPUpdateUserSettingsWrongJSONTypeRejectsRequest verifies AC-004.8's fourth request-boundary
+// case (wrong JSON type) over the HTTP transport: a numeric kanban_sort and a bare-string
+// kanban_priority_filter_tokens each fail decode and reject the whole request with 400, distinct
+// from the correctly-typed-but-invalid-value "bogus" case covered above.
+func TestHTTPUpdateUserSettingsWrongJSONTypeRejectsRequest(t *testing.T) {
+	tests := []struct {
+		name  string
+		patch string
+	}{
+		{name: "numeric kanban_sort", patch: `{"kanban_sort":5}`},
+		{name: "bare-string kanban_priority_filter_tokens", patch: `{"kanban_priority_filter_tokens":"critical"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := newTestUserSettingsRouter(t)
+
+			request := httptest.NewRequest(http.MethodPatch, "/api/v1/user/settings", bytes.NewReader([]byte(tt.patch)))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("PATCH %s status = %d, want %d: %s", tt.patch, response.Code, http.StatusBadRequest, response.Body.String())
+			}
+		})
+	}
+}
+
 // TestWSUpdateUserSettingsKanbanSortAndPriorityFilterTokensRoundTrip verifies both new fields
 // persist over the WebSocket transport too (AC-004.1: "at every hop ... the transport").
 func TestWSUpdateUserSettingsKanbanSortAndPriorityFilterTokensRoundTrip(t *testing.T) {

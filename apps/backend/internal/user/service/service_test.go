@@ -741,6 +741,86 @@ func TestApplyWorkspaceAndTaskListPreferencesInvalidPriorityFilterMemberCommitsS
 	}
 }
 
+// TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensCount verifies the request is
+// rejected before normalization allocates on an attacker-controlled length, mirroring the count
+// caps already applied to the sibling kanban_hidden_step_ids and
+// workflow_ids_with_auto_hide_empty_steps fields.
+func TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensCount(t *testing.T) {
+	makeTokens := func(n int) []string {
+		tokens := make([]string, n)
+		for i := range tokens {
+			tokens[i] = "critical"
+		}
+		return tokens
+	}
+
+	tests := []struct {
+		name    string
+		value   []string
+		wantErr string
+	}{
+		{name: "exactly max is accepted", value: makeTokens(maxKanbanPriorityFilterTokens)},
+		{
+			name:    "exceeding max is rejected",
+			value:   makeTokens(maxKanbanPriorityFilterTokens + 1),
+			wantErr: fmt.Sprintf("kanban_priority_filter_tokens: max %d tokens allowed", maxKanbanPriorityFilterTokens),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{KanbanPriorityFilterTokens: []string{"low"}}
+			req := &UpdateUserSettingsRequest{KanbanPriorityFilterTokens: ptr(tt.value)}
+			err := applyWorkspaceAndTaskListPreferences(settings, req)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+				if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"low"}) {
+					t.Fatalf("expected settings unchanged on error, got %v", settings.KanbanPriorityFilterTokens)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensNilPreservesEmptyClears
+// verifies AC-004.8's request-boundary cases at the apply-step level (not just DTO decode): an
+// absent field pointer (nil, which a request-boundary null also decodes to, per
+// TestKanbanSortAndPriorityFilterTokensRequestDecode) preserves the stored selection, while an
+// explicit empty list clears it.
+func TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensNilPreservesEmptyClears(t *testing.T) {
+	t.Run("nil field pointer preserves the stored selection", func(t *testing.T) {
+		settings := &models.UserSettings{KanbanPriorityFilterTokens: []string{"critical", "high"}}
+		req := &UpdateUserSettingsRequest{}
+		if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"critical", "high"}) {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want unchanged [critical high]", settings.KanbanPriorityFilterTokens)
+		}
+	})
+
+	t.Run("explicit empty list clears the stored selection", func(t *testing.T) {
+		settings := &models.UserSettings{KanbanPriorityFilterTokens: []string{"critical", "high"}}
+		req := &UpdateUserSettingsRequest{KanbanPriorityFilterTokens: ptr([]string{})}
+		if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(settings.KanbanPriorityFilterTokens) != 0 {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want cleared to empty", settings.KanbanPriorityFilterTokens)
+		}
+	})
+}
+
 // TestApplyBasicSettings_TerminalFontFamily verifies the terminal font family is preserved, set, trimmed, and cleared.
 func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {

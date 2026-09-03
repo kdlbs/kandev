@@ -410,6 +410,12 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		return err
 	}
 	if req.KanbanPriorityFilterTokens != nil {
+		if len(*req.KanbanPriorityFilterTokens) > maxKanbanPriorityFilterTokens {
+			return fmt.Errorf(
+				"kanban_priority_filter_tokens: max %d tokens allowed",
+				maxKanbanPriorityFilterTokens,
+			)
+		}
 		settings.KanbanPriorityFilterTokens = normalizeKanbanPriorityFilterTokens(*req.KanbanPriorityFilterTokens)
 	}
 	return nil
@@ -432,6 +438,13 @@ const (
 	// transport-level guard.
 	maxKanbanHiddenStepIDsTotalBytes     = maxUserPreferenceBlobBytes
 	maxWorkflowIDsWithAutoHideEmptySteps = 200
+	// maxKanbanPriorityFilterTokens bounds the request before
+	// normalizeKanbanPriorityFilterTokens allocates a slice and map sized to the
+	// caller-supplied length. The vocabulary holds only 4 valid tokens, so this is a
+	// generous multiple rather than an exact fit — it exists to cap allocation and
+	// iteration cost on a WS payload (no per-field size guard, unlike the 2MB HTTP
+	// body cap), not to bound legitimate selections.
+	maxKanbanPriorityFilterTokens = 64
 )
 
 // validateQuickChatTabOrder bounds the client-supplied mixed-tab order before
