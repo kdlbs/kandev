@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -158,16 +157,17 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 	if err := rejectOperatorConfigKeys(req.Config); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	var expectedUpdatedAt *time.Time
-	if req.Config != nil {
-		current, err := h.taskSvc.GetExecutorProfile(ctx, req.ProfileID)
-		if err != nil {
-			h.logger.Error("failed to load executor profile before MCP update", zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor profile: "+err.Error(), nil)
-		}
-		req.Config = preserveOperatorConfigKeys(req.Config, current.Config)
-		expectedUpdatedAt = &current.UpdatedAt
+	// MCP updates rewrite the full profile row, so every update needs the
+	// profile version observed before the request's fields are applied.
+	current, err := h.taskSvc.GetExecutorProfile(ctx, req.ProfileID)
+	if err != nil {
+		h.logger.Error("failed to load executor profile before MCP update", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor profile: "+err.Error(), nil)
 	}
+	if req.Config != nil {
+		req.Config = preserveOperatorConfigKeys(req.Config, current.Config)
+	}
+	expectedUpdatedAt := &current.UpdatedAt
 
 	profile, err := h.taskSvc.UpdateExecutorProfile(ctx, req.ProfileID, &service.UpdateExecutorProfileRequest{
 		Name:              req.Name,

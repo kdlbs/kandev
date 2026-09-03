@@ -2,14 +2,51 @@ package handlers
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type blockingExecutorRepository struct {
+	repository.ExecutorRepository
+	firstUpdateStarted chan struct{}
+	releaseFirstUpdate chan struct{}
+	gateMu             sync.Mutex
+	firstUpdate        bool
+}
+
+func (r *blockingExecutorRepository) blockFirstUpdate() {
+	r.gateMu.Lock()
+	if r.firstUpdate {
+		r.gateMu.Unlock()
+		return
+	}
+	r.firstUpdate = true
+	r.gateMu.Unlock()
+	close(r.firstUpdateStarted)
+	<-r.releaseFirstUpdate
+}
+
+func (r *blockingExecutorRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	r.blockFirstUpdate()
+	return r.ExecutorRepository.UpdateExecutorProfile(ctx, profile)
+}
+
+func (r *blockingExecutorRepository) UpdateExecutorProfileIfUnmodified(
+	ctx context.Context,
+	profile *models.ExecutorProfile,
+	expectedUpdatedAt time.Time,
+) error {
+	r.blockFirstUpdate()
+	return r.ExecutorRepository.UpdateExecutorProfileIfUnmodified(ctx, profile, expectedUpdatedAt)
+}
 
 func TestRejectOperatorConfigKeys_RejectsReservedKey(t *testing.T) {
 	err := rejectOperatorConfigKeys(map[string]string{
@@ -136,4 +173,67 @@ func TestHandleUpdateExecutorProfilePreservesOperatorConfigDuringOrdinaryConfigU
 	require.NoError(t, err)
 	assert.Equal(t, "true", stored.Config[allowUserNamespacesProfileConfigKey])
 	assert.Equal(t, "kandev-agent:new", stored.Config["image_tag"])
+}
+
+func TestHandleUpdateExecutorProfileUsesCASWhenConfigIsOmitted(t *testing.T) {
+	ctx := context.Background()
+	_, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	blockingRepo := &blockingExecutorRepository{
+		ExecutorRepository: repo,
+		firstUpdateStarted: make(chan struct{}),
+		releaseFirstUpdate: make(chan struct{}),
+	}
+	svc := service.NewService(service.Repos{Executors: blockingRepo}, eventBus, testLogger(t).WithFields(), service.RepositoryDiscoveryConfig{})
+	executor, err := svc.CreateExecutor(ctx, &service.CreateExecutorRequest{
+		Name: "Docker", Type: models.ExecutorTypeLocalDocker, Status: models.ExecutorStatusActive, Resumable: true,
+	})
+	require.NoError(t, err)
+	profile, err := svc.CreateExecutorProfile(ctx, &service.CreateExecutorProfileRequest{
+		ExecutorID: executor.ID,
+		Name:       "Operator",
+		Config:     map[string]string{},
+	})
+	require.NoError(t, err)
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	updateMessage := makeWSMessage(t, ws.ActionMCPUpdateExecutorProfile, map[string]any{
+		"profile_id": profile.ID,
+		"name":       "MCP name",
+	})
+
+	resultCh := make(chan struct {
+		response *ws.Message
+		err      error
+	}, 1)
+	go func() {
+		response, updateErr := h.handleUpdateExecutorProfile(ctx, updateMessage)
+		resultCh <- struct {
+			response *ws.Message
+			err      error
+		}{response: response, err: updateErr}
+	}()
+
+	select {
+	case <-blockingRepo.firstUpdateStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("MCP update did not reach the write barrier")
+	}
+	operatorEnabled := map[string]string{allowUserNamespacesProfileConfigKey: "true"}
+	_, err = svc.UpdateExecutorProfile(ctx, profile.ID, &service.UpdateExecutorProfileRequest{Config: operatorEnabled})
+	require.NoError(t, err)
+	close(blockingRepo.releaseFirstUpdate)
+
+	var result struct {
+		response *ws.Message
+		err      error
+	}
+	select {
+	case result = <-resultCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("MCP update did not complete after the write barrier was released")
+	}
+	require.NoError(t, result.err)
+	assertWSError(t, result.response, ws.ErrorCodeInternalError)
+	stored, err := svc.GetExecutorProfile(ctx, profile.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "true", stored.Config[allowUserNamespacesProfileConfigKey])
 }
