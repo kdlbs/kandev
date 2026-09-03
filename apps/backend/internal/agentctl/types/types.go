@@ -383,3 +383,11 @@ type VscodeOpenFileResponse struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
 }
+
+// WorkspaceSourceRootsResolver re-resolves the canonical, lifecycle-owned
+// workspace source roots. Callers must pass the manager's own revalidating
+// accessor (e.g. ValidatedWorkspaceSourceRoots) rather than a pre-fetched
+// snapshot, so a session consumer reads the authorized set at the latest
+// possible moment instead of one that may have gone stale during MCP
+// filtering or other in-flight session setup work.
+type WorkspaceSourceRootsResolver func() ([]string, error)

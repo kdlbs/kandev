@@ -234,6 +234,8 @@ case "$ref" in
   refs/heads/*) ;;
   *) exit 18 ;;
 esac
+[ ! -L "$gitdir/refs" ]
+[ ! -L "$gitdir/logs" ]
 if [ -n "$ref" ]; then
   path=${ref#refs/heads/}
   case "$path" in ''|/*|*'//'*) exit 18 ;; esac
@@ -244,8 +246,6 @@ if [ -n "$ref" ]; then
   for part; do [ "$part" != . ] && [ "$part" != .. ]; done
   refpath="$gitdir/$ref"
   logpath="$gitdir/logs/$ref"
-  [ ! -L "$gitdir/refs" ]
-  [ ! -L "$gitdir/logs" ]
   while [ "$refpath" != "$gitdir" ]; do [ ! -L "$refpath" ]; refpath=${refpath%/*}; done
   while [ "$logpath" != "$gitdir" ]; do [ ! -L "$logpath" ]; logpath=${logpath%/*}; done
 fi

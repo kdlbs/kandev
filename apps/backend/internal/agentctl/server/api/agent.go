@@ -544,13 +544,13 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	var sessionID string
 	var err error
-	if sessioner, ok := agentAdapter.(adapter.AdditionalDirectoriesSessioner); ok {
-		workspaceRoots, rootsErr := s.procMgr.ValidatedWorkspaceSourceRoots()
-		if rootsErr != nil {
-			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "git_metadata_projection_unsupported: workspace roots must be revalidated before starting a session", nil)
-			return resp
-		}
-		sessionID, err = sessioner.NewSessionWithAdditionalDirectories(ctx, mcpServers, workspaceRoots)
+	if sessioner, ok := agentAdapter.(adapter.AdditionalDirectoriesSessioner); ok && len(s.procMgr.WorkspaceSourceRoots()) > 0 {
+		// Pass the revalidating accessor itself, not a pre-fetched snapshot,
+		// so the adapter re-reads the canonical roots immediately before
+		// consuming them instead of racing a concurrent root change that
+		// happens after this point but before the provider actually receives
+		// additionalDirectories.
+		sessionID, err = sessioner.NewSessionWithAdditionalDirectories(ctx, mcpServers, s.procMgr.ValidatedWorkspaceSourceRoots)
 	} else {
 		sessionID, err = agentAdapter.NewSession(ctx, mcpServers)
 	}

@@ -54,10 +54,35 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	return a.NewSessionWithAdditionalDirectories(ctx, mcpServers, nil)
 }
 
+// resolveAdditionalDirectoriesForSession invokes resolveRoots immediately
+// before the roots are consumed and converts the result into ACP
+// additionalDirectories. Isolating this in its own function keeps the
+// revalidation coupled tightly to the moment of use while keeping
+// NewSessionWithAdditionalDirectories's cyclomatic complexity in check.
+func (a *Adapter) resolveAdditionalDirectoriesForSession(resolveRoots types.WorkspaceSourceRootsResolver) ([]string, error) {
+	var roots []string
+	if resolveRoots != nil {
+		var err error
+		roots, err = resolveRoots()
+		if err != nil {
+			return nil, fmt.Errorf("%s: workspace roots must be revalidated before starting a session: %w", gitMetadataProjectionUnsupported, err)
+		}
+	}
+	directories, err := additionalDirectoriesForSession(a.cfg.WorkDir, roots)
+	if err != nil {
+		return nil, fmt.Errorf("validate additional directories: %w", err)
+	}
+	return directories, nil
+}
+
 // NewSessionWithAdditionalDirectories opens a session with the server-owned
 // source roots only when the connected provider explicitly advertised ACP
-// additionalDirectories support during initialize.
-func (a *Adapter) NewSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, roots []string) (string, error) {
+// additionalDirectories support during initialize. resolveRoots is invoked
+// immediately before the roots are consumed (after MCP filtering, right
+// before building the ACP request) so validation stays coupled to actual
+// provider consumption rather than racing a workspace root change that
+// happens after an earlier, pre-fetched snapshot was taken.
+func (a *Adapter) NewSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, resolveRoots types.WorkspaceSourceRootsResolver) (string, error) {
 	a.mu.Lock()
 	conn := a.acpConn
 	a.mu.Unlock()
@@ -81,9 +106,9 @@ func (a *Adapter) NewSessionWithAdditionalDirectories(ctx context.Context, mcpSe
 		}
 		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
 	}
-	additionalDirectories, err := additionalDirectoriesForSession(a.cfg.WorkDir, roots)
+	additionalDirectories, err := a.resolveAdditionalDirectoriesForSession(resolveRoots)
 	if err != nil {
-		return "", fmt.Errorf("validate additional directories: %w", err)
+		return "", err
 	}
 	if len(additionalDirectories) > 0 && a.capabilities.SessionCapabilities.AdditionalDirectories == nil {
 		return "", fmt.Errorf("%s: ACP provider does not support required additional workspace directories", gitMetadataProjectionUnsupported)

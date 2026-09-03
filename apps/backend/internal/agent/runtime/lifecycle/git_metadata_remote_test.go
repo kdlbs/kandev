@@ -357,6 +357,45 @@ func TestRemoteRegularGitMetadataProbeRunsAgainstRealCheckout(t *testing.T) {
 	}
 }
 
+// TestRemoteRegularGitMetadataProbeRejectsSymlinkedRefsOnDetachedHead guards
+// the refs/logs symlink checks against being skipped when HEAD is detached.
+// The checks previously lived inside `if [ -n "$ref" ]`, which is false for a
+// detached HEAD (symbolic-ref fails and ref becomes empty), so a symlinked
+// .git/refs directory would have passed attestation and let write access
+// redirect Git ref/log writes outside the task checkout.
+func TestRemoteRegularGitMetadataProbeRejectsSymlinkedRefsOnDetachedHead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on windows")
+	}
+	workspace := t.TempDir()
+	runContainerGit(t, "", "init", "-b", "main", workspace)
+	runContainerGit(t, workspace, "config", "user.email", "test@example.com")
+	runContainerGit(t, workspace, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(workspace, "tracked"), []byte("initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, workspace, "add", "tracked")
+	runContainerGit(t, workspace, "commit", "-m", "initial")
+	runContainerGit(t, workspace, "checkout", "--detach", "HEAD")
+
+	if _, err := runRemoteRegularGitMetadataProbe(t, workspace); err != nil {
+		t.Fatalf("remote probe on a clean detached-HEAD checkout: %v", err)
+	}
+
+	realRefs := filepath.Join(workspace, ".git", "refs")
+	elsewhere := t.TempDir()
+	if err := os.RemoveAll(realRefs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, realRefs); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runRemoteRegularGitMetadataProbe(t, workspace); err == nil {
+		t.Fatal("remote probe accepted a symlinked refs directory on a detached-HEAD checkout")
+	}
+}
+
 func runRemoteRegularGitMetadataProbe(t *testing.T, workspace string) (string, error) {
 	t.Helper()
 	home := t.TempDir()

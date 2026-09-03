@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"strings"
@@ -138,8 +139,8 @@ func TestNewSessionNegotiatesAdditionalDirectories(t *testing.T) {
 	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
 	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
 
-	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, []string{
-		"/tmp/test", "/tmp/test/api", "/tmp/test/api", "/tmp/test/web",
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, func() ([]string, error) {
+		return []string{"/tmp/test", "/tmp/test/api", "/tmp/test/api", "/tmp/test/web"}, nil
 	}); err != nil {
 		t.Fatalf("NewSessionWithAdditionalDirectories: %v", err)
 	}
@@ -152,11 +153,43 @@ func TestNewSessionNegotiatesAdditionalDirectories(t *testing.T) {
 func TestNewSessionDoesNotSendAdditionalDirectoriesWithoutCapability(t *testing.T) {
 	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
 
-	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, []string{"/tmp/test/api"}); err == nil || !strings.Contains(err.Error(), "git_metadata_projection_unsupported") {
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, func() ([]string, error) {
+		return []string{"/tmp/test/api"}, nil
+	}); err == nil || !strings.Contains(err.Error(), "git_metadata_projection_unsupported") {
 		t.Fatalf("NewSessionWithAdditionalDirectories error = %v, want unsupported projection", err)
 	}
 	if capture.newRequest.Cwd != "" {
 		t.Fatalf("ACP NewSession was called despite unsupported additional directories: %+v", capture.newRequest)
+	}
+}
+
+// TestNewSessionWithAdditionalDirectoriesResolvesRootsJustBeforeConsumption
+// guards the fix for the TOCTOU window where a caller pre-fetched
+// canonical workspace roots well before the ACP request was actually built.
+// The resolver must be invoked by the adapter itself, immediately before
+// the roots are consumed, so a resolver failure (e.g. the roots changed
+// concurrently) fails the session instead of silently using a stale
+// snapshot, and the resolver must never be called eagerly by the caller.
+func TestNewSessionWithAdditionalDirectoriesResolvesRootsJustBeforeConsumption(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+
+	resolveErr := errors.New("workspace source roots changed")
+	var resolverCalled bool
+	resolveRoots := func() ([]string, error) {
+		resolverCalled = true
+		return nil, resolveErr
+	}
+
+	_, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, resolveRoots)
+	if err == nil || !strings.Contains(err.Error(), "git_metadata_projection_unsupported") || !errors.Is(err, resolveErr) {
+		t.Fatalf("NewSessionWithAdditionalDirectories error = %v, want wrapped git_metadata_projection_unsupported", err)
+	}
+	if !resolverCalled {
+		t.Fatal("resolver was never invoked; roots must be re-validated at consumption time")
+	}
+	if capture.newRequest.Cwd != "" {
+		t.Fatalf("ACP NewSession was called despite a failed roots resolution: %+v", capture.newRequest)
 	}
 }
 
