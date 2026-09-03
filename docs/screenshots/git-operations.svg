@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="git-operations-title git-operations-desc" width="1200" height="560">
+      <title id="git-operations-title">A task's Git path has explicit gates</title>
+      <desc id="git-operations-desc">A Git lifecycle state machine moves from a working copy to inspected changes, a commit, a pushed branch, an open change request, and cleanup. A discard or reset path returns from changes to the working copy.</desc>
+      <defs><style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');</style>
+        <marker id="git-operations-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#a1a1a1"/></marker>
+        <marker id="git-operations-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6468f0"/></marker>
+      </defs>
+      <rect width="1200" height="560" fill="#0d0d10"/>
+
+      <!-- Transitions are painted before the states. -->
+      <circle cx="48" cy="236" r="6" fill="#ffffff"/>
+      <line x1="54" y1="236" x2="80" y2="236" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#git-operations-arrow)"/>
+      <line x1="240" y1="236" x2="280" y2="236" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#git-operations-arrow)"/>
+      <line x1="440" y1="236" x2="480" y2="236" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#git-operations-arrow)"/>
+      <line x1="640" y1="236" x2="680" y2="236" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#git-operations-arrow)"/>
+      <line x1="840" y1="236" x2="880" y2="236" stroke="#6468f0" stroke-width="1.4" marker-end="url(#git-operations-arrow-accent)"/>
+      <path d="M960 276 V368" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#git-operations-arrow)"/>
+      <line x1="1040" y1="408" x2="1120" y2="408" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#git-operations-arrow)"/>
+      <path d="M360 196 V128 H160 Q152 128 152 136 V196" fill="none" stroke="#a1a1a1" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#git-operations-arrow)"/>
+
+      <!-- Transition labels. -->
+      <rect x="244" y="214" width="32" height="12" rx="2" fill="#0d0d10"/>
+      <text x="260" y="223" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">DIFF</text>
+      <rect x="444" y="214" width="32" height="12" rx="2" fill="#0d0d10"/>
+      <text x="460" y="223" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">COMMIT</text>
+      <rect x="648" y="214" width="32" height="12" rx="2" fill="#0d0d10"/>
+      <text x="664" y="223" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">PUSH</text>
+      <rect x="848" y="214" width="24" height="12" rx="2" fill="#0d0d10"/>
+      <text x="860" y="223" text-anchor="middle" fill="#6468f0" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">PR</text>
+      <rect x="968" y="316" width="72" height="12" rx="2" fill="#0d0d10"/>
+      <text x="1004" y="325" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">CLEAN UP</text>
+      <rect x="204" y="112" width="96" height="12" rx="2" fill="#0d0d10"/>
+      <text x="252" y="121" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">DISCARD / RESET</text>
+
+      <g role="group" aria-label="Working copy state">
+        <rect x="80" y="196" width="160" height="80" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="88" y="204" width="56" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="116" y="213" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">STATE</text>
+        <text x="160" y="236" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Working copy</text>
+        <text x="160" y="254" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">worktree ready</text>
+      </g>
+      <g role="group" aria-label="Inspected changes state">
+        <rect x="280" y="196" width="160" height="80" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="288" y="204" width="56" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="316" y="213" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">STATE</text>
+        <text x="360" y="236" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Changes</text>
+        <text x="360" y="254" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">inspect · stage</text>
+      </g>
+      <g role="group" aria-label="Committed state">
+        <rect x="480" y="196" width="160" height="80" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="488" y="204" width="56" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="516" y="213" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">STATE</text>
+        <text x="560" y="236" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Committed</text>
+        <text x="560" y="254" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">local history</text>
+      </g>
+      <g role="group" aria-label="Pushed branch state">
+        <rect x="680" y="196" width="160" height="80" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="688" y="204" width="56" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="716" y="213" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">STATE</text>
+        <text x="760" y="236" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Pushed branch</text>
+        <text x="760" y="254" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">origin · remote</text>
+      </g>
+      <g role="group" aria-label="Open change request state">
+        <rect x="880" y="196" width="160" height="80" rx="8" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1.2"/>
+        <rect x="888" y="204" width="56" height="12" rx="2" fill="transparent" stroke="rgba(100,104,240,0.60)" stroke-width="0.8"/>
+        <text x="916" y="213" text-anchor="middle" fill="#6468f0" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">STATE</text>
+        <text x="960" y="236" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Change request</text>
+        <text x="960" y="254" text-anchor="middle" fill="#a1a1a1" font-size="9" font-family="'Geist Mono',monospace">review · merge</text>
+      </g>
+      <g role="group" aria-label="Cleaned up state">
+        <rect x="880" y="368" width="160" height="80" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="888" y="376" width="56" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="916" y="385" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">STATE</text>
+        <text x="960" y="408" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Cleaned up</text>
+        <text x="960" y="426" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">worktree retained or removed</text>
+      </g>
+      <circle cx="1136" cy="408" r="8" fill="none" stroke="#ffffff" stroke-width="1"/>
+      <circle cx="1136" cy="408" r="5" fill="#ffffff"/>
+
+      <line x1="48" y1="496" x2="1152" y2="496" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <line x1="64" y1="524" x2="96" y2="524" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#git-operations-arrow)"/>
+      <text x="112" y="528" fill="#a1a1a1" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.06em">DELIBERATE ACTION</text>
+      <line x1="336" y1="524" x2="368" y2="524" stroke="#6468f0" stroke-width="1.4" marker-end="url(#git-operations-arrow-accent)"/>
+      <text x="384" y="528" fill="#6468f0" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.06em">CHANGE REQUEST GATE</text>
+      <text x="704" y="528" fill="#737373" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.06em">DISCARD, RESET, FORCE-PUSH, AND CLEANUP CHANGE DATA</text>
+    </svg>

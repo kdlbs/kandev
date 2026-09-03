@@ -13,6 +13,14 @@ A task is the work to deliver. A workflow is the sequence of steps it follows. U
 2. Create a task with a clear outcome, a compatible agent, and an executor.
 3. Start the agent, review its changes, and move the task through the human gate.
 
+![Task journey from workspace scope to task definition, agent session, human review, and a completed workflow position.](../screenshots/tasks-and-workflows.svg)
+
+[Open full-size SVG diagram][tasks-and-workflows-diagram]
+
+[tasks-and-workflows-diagram]: ../../docs/screenshots/tasks-and-workflows.svg
+
+The task carries the outcome through the workflow. The repository and session provide the working context, while review remains an explicit human gate.
+
 ## Understand the model
 
 | Concept         | What it controls                                                                                                       |
