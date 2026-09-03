@@ -239,16 +239,16 @@ func TestCheckSinglePRWatch_OpenPR_SyncsOnChange(t *testing.T) {
 type mockTaskBranchProvider struct {
 	tasks    []TaskBranchInfo
 	err      error
-	branches map[string]string // sessionID -> branch
+	branches map[string]string // repositoryID -> branch
 }
 
 func (m *mockTaskBranchProvider) ListTasksNeedingPRWatch(_ context.Context) ([]TaskBranchInfo, error) {
 	return m.tasks, m.err
 }
 
-func (m *mockTaskBranchProvider) ResolveBranchForSession(_ context.Context, _, sessionID string) string {
+func (m *mockTaskBranchProvider) ResolveBranchForRepository(_ context.Context, _, repositoryID string) string {
 	if m.branches != nil {
-		return m.branches[sessionID]
+		return m.branches[repositoryID]
 	}
 	return ""
 }
@@ -413,21 +413,23 @@ func TestRefreshStaleBranches_UpdatesBranchWhenChanged(t *testing.T) {
 	// Create a watch with pr_number=0 on old branch.
 	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "myorg",
-		Repo:      "myrepo",
-		PRNumber:  0,
-		Branch:    "old-branch",
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-1",
+		Owner:        "myorg",
+		Repo:         "myrepo",
+		PRNumber:     0,
+		Branch:       "old-branch",
 	}
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
-	// Provider resolves a different branch for this session.
+	// Provider resolves a different branch for this repository, independent
+	// of session identity.
 	prov := &mockTaskBranchProvider{
 		branches: map[string]string{
-			"s1": "new-branch",
+			"repo-1": "new-branch",
 		},
 	}
 	poller.SetTaskBranchProvider(prov)
@@ -447,18 +449,80 @@ func TestRefreshStaleBranches_UpdatesBranchWhenChanged(t *testing.T) {
 	}
 }
 
+// TestRefreshStaleBranches_ResolvesByRepositoryNotSession locks in the fix for
+// a real multi-repo correctness bug: the branch resolver must be scoped to
+// watch.RepositoryID, not resolved once per session and reused for every
+// repository. Two still-searching watches on the SAME session but DIFFERENT
+// repositories must each pick up their own repository's branch.
+func TestRefreshStaleBranches_ResolvesByRepositoryNotSession(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	seedTask(t, store, "t1", false)
+	watchA := &PRWatch{
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-a",
+		Owner:        "myorg",
+		Repo:         "repo-a-name",
+		PRNumber:     0,
+		Branch:       "old-a",
+	}
+	watchB := &PRWatch{
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-b",
+		Owner:        "myorg",
+		Repo:         "repo-b-name",
+		PRNumber:     0,
+		Branch:       "old-b",
+	}
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watchA)); err != nil {
+		t.Fatalf("create PR watch A: %v", err)
+	}
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watchB)); err != nil {
+		t.Fatalf("create PR watch B: %v", err)
+	}
+
+	prov := &mockTaskBranchProvider{
+		branches: map[string]string{
+			"repo-a": "new-a",
+			"repo-b": "new-b",
+		},
+	}
+	poller.SetTaskBranchProvider(prov)
+
+	poller.refreshStaleBranches(ctx)
+
+	updatedA, err := store.GetPRWatchBySessionAndRepo(ctx, "s1", "repo-a")
+	if err != nil {
+		t.Fatalf("get watch A: %v", err)
+	}
+	if updatedA.Branch != "new-a" {
+		t.Errorf("expected repo-a branch %q, got %q", "new-a", updatedA.Branch)
+	}
+	updatedB, err := store.GetPRWatchBySessionAndRepo(ctx, "s1", "repo-b")
+	if err != nil {
+		t.Fatalf("get watch B: %v", err)
+	}
+	if updatedB.Branch != "new-b" {
+		t.Errorf("expected repo-b branch %q, got %q", "new-b", updatedB.Branch)
+	}
+}
+
 func TestRefreshStaleBranches_SkipsWhenBranchUnchanged(t *testing.T) {
 	poller, _, _, store := setupPollerTest(t)
 	ctx := context.Background()
 
 	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "myorg",
-		Repo:      "myrepo",
-		PRNumber:  0,
-		Branch:    "same-branch",
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-1",
+		Owner:        "myorg",
+		Repo:         "myrepo",
+		PRNumber:     0,
+		Branch:       "same-branch",
 	}
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
@@ -466,7 +530,7 @@ func TestRefreshStaleBranches_SkipsWhenBranchUnchanged(t *testing.T) {
 
 	prov := &mockTaskBranchProvider{
 		branches: map[string]string{
-			"s1": "same-branch",
+			"repo-1": "same-branch",
 		},
 	}
 	poller.SetTaskBranchProvider(prov)
@@ -486,12 +550,13 @@ func TestRefreshStaleBranches_SkipsWatchesWithPR(t *testing.T) {
 	// Watch that already found a PR (pr_number > 0).
 	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "myorg",
-		Repo:      "myrepo",
-		PRNumber:  42,
-		Branch:    "old-branch",
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-1",
+		Owner:        "myorg",
+		Repo:         "myrepo",
+		PRNumber:     42,
+		Branch:       "old-branch",
 	}
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
@@ -499,7 +564,7 @@ func TestRefreshStaleBranches_SkipsWatchesWithPR(t *testing.T) {
 
 	prov := &mockTaskBranchProvider{
 		branches: map[string]string{
-			"s1": "new-branch",
+			"repo-1": "new-branch",
 		},
 	}
 	poller.SetTaskBranchProvider(prov)
@@ -519,12 +584,13 @@ func TestRefreshStaleBranches_SkipsWhenResolverReturnsEmpty(t *testing.T) {
 
 	seedTask(t, store, "t1", false)
 	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "myorg",
-		Repo:      "myrepo",
-		PRNumber:  0,
-		Branch:    "old-branch",
+		SessionID:    "s1",
+		TaskID:       "t1",
+		RepositoryID: "repo-1",
+		Owner:        "myorg",
+		Repo:         "myrepo",
+		PRNumber:     0,
+		Branch:       "old-branch",
 	}
 	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
