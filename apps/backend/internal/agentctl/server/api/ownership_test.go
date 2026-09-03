@@ -1,0 +1,168 @@
+package api
+
+import (
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/instance"
+	"github.com/kandev/kandev/internal/common/logger"
+)
+
+// TestOwnershipStateRenewUpdatesLastRenewal pins that Renew advances the
+// tracked instant, which the unowned-period reaper (Layer 5.5) will measure
+// elapsed time against.
+func TestOwnershipStateRenewUpdatesLastRenewal(t *testing.T) {
+	o := newOwnershipState()
+	time.Sleep(2 * time.Millisecond)
+	before := o.UnownedFor()
+
+	if !o.Renew() {
+		t.Fatal("Renew() = false, want true")
+	}
+	after := o.UnownedFor()
+
+	if after >= before {
+		t.Fatalf("UnownedFor after Renew (%v) >= before (%v), want renewal to reset the elapsed duration", after, before)
+	}
+}
+
+// TestOwnershipStateNewStartsFromProcessLaunch pins design 01's "A server
+// spawned by a backend that then dies before completing the handshake has
+// no successful renewal at all, so its period runs from process start and it
+// reaps itself without special handling" -- the very first UnownedFor call,
+// before any Renew, must already report a small nonzero-or-zero duration
+// measured from construction, not an unset/zero-time sentinel that would
+// read as "just now" forever or as an enormous elapsed duration.
+func TestOwnershipStateNewStartsFromProcessLaunch(t *testing.T) {
+	o := newOwnershipState()
+	time.Sleep(2 * time.Millisecond)
+
+	elapsed := o.UnownedFor()
+	if elapsed <= 0 {
+		t.Fatalf("UnownedFor() = %v, want a small positive duration measured from construction", elapsed)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("UnownedFor() = %v, want a small duration (construction just happened), not a large one implying a zero-time baseline", elapsed)
+	}
+}
+
+// TestOwnershipStateBeginShutdownIsOneWay pins the one-way door: once a
+// shutdown has begun, Renew must refuse (never resurrect a decided
+// shutdown), and BeginShutdown itself is idempotent (a second call reports
+// it was already begun rather than restarting the decision).
+func TestOwnershipStateBeginShutdownIsOneWay(t *testing.T) {
+	o := newOwnershipState()
+
+	if !o.BeginShutdown() {
+		t.Fatal("first BeginShutdown() = false, want true")
+	}
+	if o.BeginShutdown() {
+		t.Fatal("second BeginShutdown() = true, want false (idempotent one-way latch)")
+	}
+	if !o.IsShuttingDown() {
+		t.Fatal("IsShuttingDown() = false after BeginShutdown, want true")
+	}
+	if o.Renew() {
+		t.Fatal("Renew() = true after shutdown began, want false (a decided shutdown must never be reversed)")
+	}
+}
+
+// TestHandleOwnershipClaimRenewsOwnership pins that a successful claim
+// renews the tracked ownership instant. The claim operation carries no
+// instance identity -- a server with zero instances is still owned.
+func TestHandleOwnershipClaimRenewsOwnership(t *testing.T) {
+	cfg := &config.Config{AuthToken: "test-token"}
+	log := logger.Default()
+	cs := NewControlServer(cfg, &instance.Manager{}, log)
+	server := httptest.NewServer(cs.Router())
+	defer server.Close()
+	host, port := parseHostPort(t, server.URL)
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("test-token"))
+
+	backdateOwnership(cs, time.Hour)
+
+	if err := client.ClaimOwnership(t.Context()); err != nil {
+		t.Fatalf("ClaimOwnership: %v", err)
+	}
+
+	if elapsed := cs.ownership.UnownedFor(); elapsed >= time.Minute {
+		t.Fatalf("UnownedFor after claim = %v, want well under the backdated hour (claim should have renewed)", elapsed)
+	}
+}
+
+// backdateOwnership sets a ControlServer's tracked last-renewal instant into
+// the past, so a test can assert that a subsequent operation renews it
+// without racing HTTP round-trip latency against a tiny real elapsed
+// duration.
+func backdateOwnership(cs *ControlServer, age time.Duration) {
+	cs.ownership.mu.Lock()
+	defer cs.ownership.mu.Unlock()
+	cs.ownership.lastRenewal = time.Now().Add(-age)
+}
+
+// TestHandleOwnershipClaimRequiresAuth pins that the claim operation sits
+// ABOVE identity/capability negotiation in design 01's gate ordering: unlike
+// /identity, it is a normal authenticated endpoint.
+func TestHandleOwnershipClaimRequiresAuth(t *testing.T) {
+	cfg := &config.Config{AuthToken: "test-token"}
+	log := logger.Default()
+	cs := NewControlServer(cfg, &instance.Manager{}, log)
+	server := httptest.NewServer(cs.Router())
+	defer server.Close()
+	host, port := parseHostPort(t, server.URL)
+	client := agentctl.NewControlClient(host, port, log) // no auth token
+
+	if err := client.ClaimOwnership(t.Context()); err == nil {
+		t.Fatal("ClaimOwnership without auth = nil error, want a rejection")
+	}
+}
+
+// TestHandleOwnershipClaimRefusedAfterShutdownBegun pins the one-way-door
+// refusal at the HTTP layer: a claim arriving after an unowned shutdown has
+// begun must be refused with a shutting-down outcome rather than reviving
+// ownership underneath a teardown in progress (design 02's failure table).
+func TestHandleOwnershipClaimRefusedAfterShutdownBegun(t *testing.T) {
+	cfg := &config.Config{AuthToken: "test-token"}
+	log := logger.Default()
+	cs := NewControlServer(cfg, &instance.Manager{}, log)
+	cs.ownership.BeginShutdown()
+	server := httptest.NewServer(cs.Router())
+	defer server.Close()
+	host, port := parseHostPort(t, server.URL)
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("test-token"))
+
+	if err := client.ClaimOwnership(t.Context()); err == nil {
+		t.Fatal("ClaimOwnership after shutdown began = nil error, want a rejection")
+	}
+}
+
+// TestHandleHandshakeRenewsOwnership pins design 01's "two other operations
+// renew it: the bootstrap handshake and a successful credential rotation" --
+// a fresh server's first renewal comes from the handshake that mints its
+// credential, giving the unowned-period timer a definite start without
+// requiring a separate claim call immediately after.
+func TestHandleHandshakeRenewsOwnership(t *testing.T) {
+	cfg := &config.Config{
+		AuthToken:      "test-generated-token",
+		BootstrapNonce: "test-nonce",
+	}
+	log := logger.Default()
+	cs := NewControlServer(cfg, &instance.Manager{}, log)
+	server := httptest.NewServer(cs.Router())
+	defer server.Close()
+	host, port := parseHostPort(t, server.URL)
+	client := agentctl.NewControlClient(host, port, log)
+
+	backdateOwnership(cs, time.Hour)
+
+	if _, err := client.Handshake(t.Context(), "test-nonce"); err != nil {
+		t.Fatalf("Handshake: %v", err)
+	}
+
+	if elapsed := cs.ownership.UnownedFor(); elapsed >= time.Minute {
+		t.Fatalf("UnownedFor after handshake = %v, want well under the backdated hour (handshake should have renewed)", elapsed)
+	}
+}

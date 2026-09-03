@@ -19,10 +19,11 @@ import (
 // It exposes the same API regardless of deployment context (Docker or host).
 // Each instance runs its own HTTP server with agent-specific endpoints.
 type ControlServer struct {
-	cfg     *config.Config
-	instMgr *instance.Manager
-	logger  *logger.Logger
-	router  *gin.Engine
+	cfg       *config.Config
+	instMgr   *instance.Manager
+	logger    *logger.Logger
+	router    *gin.Engine
+	ownership *ownershipState
 }
 
 // NewControlServer creates a new ControlServer for instance management.
@@ -30,10 +31,11 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	gin.SetMode(gin.ReleaseMode)
 
 	cs := &ControlServer{
-		cfg:     cfg,
-		instMgr: instMgr,
-		logger:  log.WithFields(zap.String("component", "control-server")),
-		router:  gin.New(),
+		cfg:       cfg,
+		instMgr:   instMgr,
+		logger:    log.WithFields(zap.String("component", "control-server")),
+		router:    gin.New(),
+		ownership: newOwnershipState(),
 	}
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
@@ -65,6 +67,7 @@ func (m *ControlServer) setupRoutes() {
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
+	api.POST("/ownership/claim", m.handleOwnershipClaim)
 }
 
 func (m *ControlServer) handleSubprocessAdmission(c *gin.Context) {
@@ -97,6 +100,7 @@ func (m *ControlServer) handleHandshake(c *gin.Context) {
 		return
 	}
 
+	m.ownership.Renew()
 	m.logger.Info("bootstrap handshake completed, auth token issued")
 	c.JSON(http.StatusOK, gin.H{"token": token})
 }

@@ -389,6 +389,28 @@ func (c *ControlClient) GetIdentity(ctx context.Context) (*IdentityInfo, error) 
 	return &info, nil
 }
 
+// ClaimOwnership establishes or renews this backend's ownership of the
+// control server. It carries no instance identity: a server with zero
+// instances is still owned. Refused (non-nil error) once the server's
+// unowned-shutdown one-way door has fired.
+func (c *ControlClient) ClaimOwnership(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/ownership/claim", nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to claim ownership: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to claim ownership: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ListInstances lists all running agent instances.
 func (c *ControlClient) ListInstances(ctx context.Context) ([]*InstanceInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/instances", nil)
