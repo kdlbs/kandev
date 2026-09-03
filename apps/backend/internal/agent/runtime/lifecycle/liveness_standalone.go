@@ -1,0 +1,125 @@
+package lifecycle
+
+import (
+	"context"
+
+	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+// standaloneLivenessScope is a single adopted-server enumeration snapshot
+// (design 02 "Persistence": "liveness for a standalone record is judged by
+// the presence of that record's instance in the adopted server's
+// enumeration"). Reachable is false when the enumeration attempt itself
+// failed -- nothing answered -- as distinct from a successful enumeration
+// that simply found no matching instance. Produced by
+// StandaloneExecutor.newLivenessScope and Manager.NewStandaloneLivenessScope;
+// consumed only by classifyStandaloneLiveness. Never memoized across calls:
+// a caller that wants one enumeration reused across many rows (a
+// reconciliation pass) must build it once and thread it through itself; any
+// other caller must build a fresh one for each classification (design 02
+// "two kinds of caller, and only one of them is a pass").
+type standaloneLivenessScope struct {
+	reachable     bool
+	liveBySession map[string]struct{}
+}
+
+// newLivenessScope takes one enumeration of the adopted server's live
+// instances, keyed by session ID for O(1) row lookups. Reuses the same
+// bounded per-attempt timeout/retry shape as listInstancesWithRetry's other
+// callers (AC-EXECUTORS-SURVIVAL-002.13).
+func (r *StandaloneExecutor) newLivenessScope(ctx context.Context) *standaloneLivenessScope {
+	instances, err := r.listInstancesWithRetry(ctx)
+	if err != nil {
+		return &standaloneLivenessScope{reachable: false}
+	}
+	live := make(map[string]struct{}, len(instances))
+	for _, inst := range instances {
+		if inst.SessionID != "" {
+			live[inst.SessionID] = struct{}{}
+		}
+	}
+	return &standaloneLivenessScope{reachable: true, liveBySession: live}
+}
+
+// NewStandaloneLivenessScope takes one adopted-server enumeration for reuse
+// across every row of a single reconciliation pass. Returns nil when no
+// standalone backend is registered; classifyStandaloneLiveness treats a nil
+// scope identically to an unreachable one (falls back to the
+// process-identifier probe).
+func (m *Manager) NewStandaloneLivenessScope(ctx context.Context) interface{} {
+	backend, err := m.executorRegistry.GetBackend(executor.NameStandalone)
+	if err != nil {
+		return (*standaloneLivenessScope)(nil)
+	}
+	standalone, ok := backend.(*StandaloneExecutor)
+	if !ok {
+		return (*standaloneLivenessScope)(nil)
+	}
+	return standalone.newLivenessScope(ctx)
+}
+
+// classifyStandaloneLiveness implements design 02's "Persistence" liveness
+// rule for a single row, given a (possibly nil/unreachable) enumeration
+// scope:
+//
+//   - non-standalone runtime: unchanged, delegates to RowProcessLiveness
+//     (Unknown -- never probed by a local process check).
+//   - scope nil or unreachable ("nothing answered"): falls back to today's
+//     process-identifier probe, so a genuinely dead row is still repaired on
+//     the common case of a first start with no survivor.
+//   - present in the enumeration, but this session's stop was still in
+//     flight when the enumeration was taken: Unknown, not Alive -- the
+//     snapshot predates the stop's actual completion.
+//   - present, no stop in flight: Alive.
+//   - absent, and this backend created the row during its own process
+//     lifetime: Dead -- this exact server is the only authority for it, so
+//     "not present" is determinate.
+//   - absent, and the row was inherited from an earlier launch: Unknown --
+//     the current server may simply never have known about it (e.g. this
+//     backend spawned a fresh server after a refused adoption), so absence
+//     is not determinate the way it is for an own record.
+func (m *Manager) classifyStandaloneLiveness(row *models.ExecutorRunning, scope *standaloneLivenessScope) models.ProcessLiveness {
+	if row == nil {
+		return models.ProcessLivenessUnknown
+	}
+	if !isLocalRuntime(row.Runtime) {
+		return RowProcessLiveness(row)
+	}
+	if scope == nil || !scope.reachable {
+		return RowProcessLiveness(row)
+	}
+	sessionID := row.SessionID
+	if _, present := scope.liveBySession[sessionID]; present {
+		if m.recoveryGuard.IsStopInFlight(sessionID) {
+			return models.ProcessLivenessUnknown
+		}
+		return models.ProcessLivenessAlive
+	}
+	if m.wasCreatedThisLifetime(sessionID) {
+		return models.ProcessLivenessDead
+	}
+	return models.ProcessLivenessUnknown
+}
+
+// RowLivenessScoped classifies row's liveness using scope (from
+// NewStandaloneLivenessScope), reused across every row of one reconciliation
+// pass. scope must be the interface{} value NewStandaloneLivenessScope
+// returned (or nil); any other type is treated as unreachable.
+func (m *Manager) RowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness {
+	s, _ := scope.(*standaloneLivenessScope)
+	return m.classifyStandaloneLiveness(row, s)
+}
+
+// RowLiveness classifies row's liveness for a caller outside a reconciliation
+// pass (e.g. the single-session idle reclaim path): it always takes its own
+// fresh enumeration rather than reading one a pass cached (design 02 "two
+// kinds of caller"), since such a caller can fire at any moment and a cached
+// answer would age without bound.
+func (m *Manager) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
+	if row == nil || !isLocalRuntime(row.Runtime) {
+		return RowProcessLiveness(row)
+	}
+	scope, _ := m.NewStandaloneLivenessScope(context.Background()).(*standaloneLivenessScope)
+	return m.classifyStandaloneLiveness(row, scope)
+}
