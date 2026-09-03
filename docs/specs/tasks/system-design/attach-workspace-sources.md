@@ -95,7 +95,7 @@ Decisions: [ADR-2026-07-22-runtime-mutable-task-workspace-sources](../../../deci
 [ADR-2026-07-23-workspace-source-root-move-boundary](../../../decisions/2026-07-23-workspace-source-root-move-boundary.md),
 and [ADR-2026-07-27-legacy-add-branch-live-rescan](../../../decisions/2026-07-27-legacy-add-branch-live-rescan.md).
 Repository attachments also refresh the complete task-scoped Git metadata permission projection at
-the same idle rebind boundary; see [task Git metadata permissions](../../platform/task-git-metadata-permissions.md).
+the same idle rebind boundary; see [task Git metadata permissions](../../task-git-metadata-permissions/spec.md).
 When a mutable linked-worktree task is running in a runtime with immutable mounts or no atomic
 filesystem-policy refresh, this refresh fails before agentctl is stopped or rebound and instructs
 the user to start a new session. The attachment remains durable but is not reported usable in the
@@ -266,8 +266,9 @@ persisted; every relaunch and resume of that task reuses the persisted name.
   agentctl-managed workspace processes restart or stop, recorded task context remains, and
   provider-private context that Kandev did not record may not carry over.
 - **GIVEN** an idle Docker, SSH, or Sprites task, **WHEN** the user opens **Add sources**, **THEN**
-  the consequence summary says repositories are attached and rescanned under the current remote
-  workspace without restarting the agent or changing its CWD.
+  the consequence summary says repositories clone independently in the live executor workspace and
+  the agent is paused, verified, and restored with the expanded workspace rather than left running
+  unchanged.
 - **GIVEN** configured source rows in either add-sources surface, **WHEN** the user chooses
   **Cancel** or closes the surface before submission, **THEN** no attachment request is sent and
   the task workspace remains unchanged.

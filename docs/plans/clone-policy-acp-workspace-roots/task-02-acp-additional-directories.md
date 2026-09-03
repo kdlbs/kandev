@@ -5,7 +5,7 @@ status: complete
 wave: 2
 depends_on: ["01-clone-policy-attestation"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 02: ACP Additional Directories

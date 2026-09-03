@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/task-git-metadata-permissions.md"
+spec: "../../specs/task-git-metadata-permissions/spec.md"
 ---
 
 # Task 01: Clone Policy Attestation

@@ -5,7 +5,7 @@ status: in_progress
 wave: 3
 depends_on: ["01-clone-policy-attestation", "02-acp-additional-directories"]
 plan: "plan.md"
-spec: "../../specs/platform/task-git-metadata-permissions.md"
+spec: "../../specs/task-git-metadata-permissions/spec.md"
 ---
 
 # Task 03: Regression and Documentation
@@ -31,8 +31,8 @@ pnpm e2e:run --project containers
 
 - `docs/public/executors.md`
 - `docs/public/tasks-and-workflows.md`
-- `docs/specs/platform/task-git-metadata-permissions.md`
-- `docs/specs/tasks/attach-workspace-sources.md`
+- `docs/specs/task-git-metadata-permissions/spec.md`
+- `docs/specs/tasks/system-design/attach-workspace-sources.md`
 - focused Docker/SSH/Sprites E2E files only when a deterministic regression is needed
 
 ## Dependencies

@@ -1,7 +1,7 @@
 ---
 specs:
-  - docs/specs/platform/task-git-metadata-permissions.md
-  - docs/specs/tasks/attach-workspace-sources.md
+  - docs/specs/task-git-metadata-permissions/spec.md
+  - docs/specs/tasks/system-design/attach-workspace-sources.md
 created: 2026-08-20
 status: in_progress
 ---
