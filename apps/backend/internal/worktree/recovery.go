@@ -65,16 +65,8 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 		return nil, fmt.Errorf("%w: recovery ownership validation failed: %w", ErrWorktreeCorrupted, err)
 	}
 	jobPath := wt.Path + ".kandev-recovery.json"
-	snapshotPath := wt.Path + ".kandev-recovery-" + uuid.NewString()
-	record := recoveryRecord{
-		OperationID: uuid.NewString(), TaskID: wt.TaskID, WorktreeID: wt.ID,
-		Original: wt.Path, Snapshot: snapshotPath, State: RecoveryStateSnapshotting,
-		UpdatedAt: time.Now().UTC(),
-	}
-	if existing, err := readRecoveryRecord(jobPath); err == nil && existing.TaskID == wt.TaskID && existing.WorktreeID == wt.ID {
-		record = existing
-		snapshotPath = existing.Snapshot
-	} else if err := writeRecoveryRecord(jobPath, record); err != nil {
+	record, snapshotPath, err := loadOrClaimRecovery(wt, jobPath)
+	if err != nil {
 		return nil, err
 	}
 	manifest, err := prepareRecoverySnapshot(wt.Path, snapshotPath, jobPath, record)
@@ -125,6 +117,60 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 		return nil, err
 	}
 	return &replacement, nil
+}
+
+func loadOrClaimRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, error) {
+	snapshotPath := wt.Path + ".kandev-recovery-" + uuid.NewString()
+	record := recoveryRecord{
+		OperationID: uuid.NewString(), TaskID: wt.TaskID, WorktreeID: wt.ID,
+		Original: wt.Path, Snapshot: snapshotPath, State: RecoveryStateSnapshotting,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if existing, err := readRecoveryRecord(jobPath); err == nil {
+		if existing.TaskID != wt.TaskID || existing.WorktreeID != wt.ID {
+			return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record ownership is ambiguous")
+		}
+		return recoveryRecord{}, "", recoveryStateError(wt, existing.State)
+	} else if !os.IsNotExist(err) {
+		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record is unreadable")
+	}
+	if err := claimRecoveryOperation(wt.Path+".kandev-recovery.claim", record.OperationID); err != nil {
+		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, err.Error())
+	}
+	if err := writeRecoveryRecord(jobPath, record); err != nil {
+		return recoveryRecord{}, "", err
+	}
+	return record, snapshotPath, nil
+}
+
+func claimRecoveryOperation(path, operationID string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	if _, writeErr := file.WriteString(operationID + "\n"); writeErr != nil {
+		_ = file.Close()
+		return writeErr
+	}
+	if syncErr := file.Sync(); syncErr != nil {
+		_ = file.Close()
+		return syncErr
+	}
+	return file.Close()
+}
+
+func recoveryStateError(wt *Worktree, state RecoveryState) error {
+	return &WorktreeRecoveryError{
+		TaskID: wt.TaskID, Checkout: wt.Path,
+		Reason: fmt.Sprintf("recovery operation is already %s", state),
+	}
+}
+
+func recoveryAlreadyClaimedError(wt *Worktree, reason string) error {
+	return &WorktreeRecoveryError{
+		TaskID: wt.TaskID, Checkout: wt.Path,
+		Reason: "recovery operation is already claimed: " + reason,
+	}
 }
 
 //nolint:nestif // Snapshot preparation must fail closed across each validation stage.

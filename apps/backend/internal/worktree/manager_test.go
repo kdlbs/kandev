@@ -474,6 +474,12 @@ func TestManager_RecoverWorktreeSnapshotsAndRematerializesCheckout(t *testing.T)
 	if err != nil || cached == nil || cached.Path != replacement.Path {
 		t.Fatalf("cached worktree = %+v, err=%v, want replacement", cached, err)
 	}
+	if _, err := mgr.RecoverWorktree(ctx, original, CreateRequest{
+		TaskID: original.TaskID, RepositoryID: original.RepositoryID,
+		RepositoryPath: repoPath, BaseBranch: "main",
+	}); err == nil || !strings.Contains(err.Error(), "already complete") {
+		t.Fatalf("repeated recovery error = %v, want terminal complete state", err)
+	}
 	if _, err := os.Stat(worktreePath + ".kandev-recovery.json"); err != nil {
 		t.Fatalf("durable recovery record missing: %v", err)
 	}
@@ -497,6 +503,20 @@ func TestIsAdminDirectoryMissing(t *testing.T) {
 	}
 	if !isAdminDirectoryMissing(worktreePath) {
 		t.Fatal("missing linked worktree admin directory was not detected")
+	}
+}
+
+func TestClaimRecoveryOperationIsExclusive(t *testing.T) {
+	claimPath := filepath.Join(t.TempDir(), "recovery.claim")
+	if err := claimRecoveryOperation(claimPath, "operation-1"); err != nil {
+		t.Fatalf("first recovery claim: %v", err)
+	}
+	if err := claimRecoveryOperation(claimPath, "operation-2"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("second recovery claim error = %v, want os.ErrExist", err)
+	}
+	content, err := os.ReadFile(claimPath)
+	if err != nil || string(content) != "operation-1\n" {
+		t.Fatalf("claim content = %q, err=%v, want first operation", content, err)
 	}
 }
 
