@@ -5,6 +5,7 @@ import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { clearLegacyTaskColors, readLegacyTaskColors, type TaskColor } from "@/lib/task-colors";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
 
@@ -40,6 +41,8 @@ export async function migrateLegacyTaskColors(store: StoreApi<AppState>): Promis
       },
     });
     const current = store.getState().userSettings;
+    const order = compareUserSettingsRevisions(response.settings.revision, current.revision);
+    if (order !== 1) continue;
     store.getState().setUserSettings(mapUserSettingsResponse(response, current));
   }
   clearLegacyTaskColors();

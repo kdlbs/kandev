@@ -2,6 +2,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
+import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import { TASK_COLORS_STORAGE_KEY } from "@/lib/task-colors";
 import type { UserSettingsResponse } from "@/lib/types/http";
 import { useTaskColorMigration } from "./use-task-color-migration";
@@ -34,6 +35,16 @@ let capturedStore: ReturnType<typeof useAppStoreApi> | null = null;
 function CaptureStore() {
   capturedStore = useAppStoreApi();
   return null;
+}
+
+function installUserSettingsSpy() {
+  const currentStore = capturedStore;
+  if (!currentStore) throw new Error("test store was not captured");
+  const setUserSettings = vi.fn((next: UserSettingsState) => {
+    currentStore.setState((state) => ({ ...state, userSettings: next }));
+  });
+  currentStore.setState({ setUserSettings });
+  return setUserSettings;
 }
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -111,6 +122,41 @@ describe("useTaskColorMigration", () => {
     expect(capturedStore?.getState().userSettings.sidebarTaskColors).toEqual({
       "task-existing": "red",
       "task-cleared": null,
+    });
+  });
+
+  it("does not overwrite a newer settings revision when a migration response is delayed", async () => {
+    let resolveUpdate: ((value: UserSettingsResponse) => void) | undefined;
+    window.localStorage.setItem(TASK_COLORS_STORAGE_KEY, JSON.stringify({ "task-new": "green" }));
+    mockUpdateUserSettings.mockReturnValue(
+      new Promise<UserSettingsResponse>((resolve) => {
+        resolveUpdate = resolve;
+      }),
+    );
+
+    renderHook(() => useTaskColorMigration(true), { wrapper });
+    await waitFor(() => expect(mockUpdateUserSettings).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      capturedStore?.setState((state) => ({
+        ...state,
+        userSettings: {
+          ...state.userSettings,
+          revision: 3,
+          sidebarTaskColors: { "task-existing": "purple", "task-new": "pink" },
+        },
+      }));
+    });
+
+    const setUserSettings = installUserSettingsSpy();
+
+    act(() => resolveUpdate?.(response({ "task-new": "green" }, 2)));
+    await waitFor(() => expect(window.localStorage.getItem(TASK_COLORS_STORAGE_KEY)).toBeNull());
+    expect(capturedStore?.getState().userSettings.revision).toBe(3);
+    expect(setUserSettings).not.toHaveBeenCalled();
+    expect(capturedStore?.getState().userSettings.sidebarTaskColors).toEqual({
+      "task-existing": "purple",
+      "task-new": "pink",
     });
   });
 

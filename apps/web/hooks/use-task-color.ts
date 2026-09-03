@@ -75,12 +75,13 @@ export function useSetTaskColor(): (taskId: string, color: TaskColor | null) => 
 
   useEffect(() => {
     const current = store.getState().userSettings;
+    const order = compareUserSettingsRevisions(current.revision, confirmedRevisionRef.current);
     if (pendingRef.current === 0) {
+      if (order === -1) return;
       confirmedColorsRef.current = cloneTaskColorMap(current.sidebarTaskColors);
       confirmedRevisionRef.current = current.revision;
       return;
     }
-    const order = compareUserSettingsRevisions(current.revision, confirmedRevisionRef.current);
     if (order === 1) {
       confirmedColorsRef.current = cloneTaskColorMap(current.sidebarTaskColors);
       confirmedRevisionRef.current = current.revision;
@@ -100,6 +101,16 @@ export function useSetTaskColor(): (taskId: string, color: TaskColor | null) => 
       void sync({ taskId, color })
         .then((response) => {
           const latest = store.getState().userSettings;
+          const mapped = mapUserSettingsResponse(response, latest);
+          const responseOrder = compareUserSettingsRevisions(
+            mapped.revision,
+            confirmedRevisionRef.current,
+          );
+          if (responseOrder !== 1) return;
+
+          confirmedColorsRef.current = cloneTaskColorMap(mapped.sidebarTaskColors);
+          confirmedRevisionRef.current = mapped.revision;
+
           if (
             operation !== operationRef.current ||
             !responseIsCurrent(
@@ -111,9 +122,6 @@ export function useSetTaskColor(): (taskId: string, color: TaskColor | null) => 
           ) {
             return;
           }
-          const mapped = mapUserSettingsResponse(response, latest);
-          confirmedColorsRef.current = cloneTaskColorMap(mapped.sidebarTaskColors);
-          confirmedRevisionRef.current = mapped.revision;
           store.getState().setUserSettings(mapped);
         })
         .catch(() => {
