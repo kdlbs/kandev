@@ -73,6 +73,10 @@ func TestTransferTaskPreservesIdentityAndIsIdempotent(t *testing.T) {
 		stored.ParentID != "parent-task" || stored.QueuedForStepID != "step-destination-blocked" {
 		t.Fatalf("stored durable identity changed = %+v", stored)
 	}
+	if !stored.UpdatedAt.Equal(receipt.TransferredAt) || !receipt.TaskGeneration.Equal(receipt.TransferredAt) {
+		t.Fatalf("transfer generation = task %v, receipt generation %v, transferred at %v; want all equal",
+			stored.UpdatedAt, receipt.TaskGeneration, receipt.TransferredAt)
+	}
 
 	for _, table := range []string{"task_status_summaries", "task_message_attachments", "github_task_prs"} {
 		var workspaceID string
@@ -84,16 +88,20 @@ func TestTransferTaskPreservesIdentityAndIsIdempotent(t *testing.T) {
 		}
 	}
 	var transition struct {
-		Trigger   string `db:"trigger"`
-		ActorKind string `db:"actor_kind"`
-		ActorID   string `db:"actor_id"`
+		Trigger    string    `db:"trigger"`
+		ActorKind  string    `db:"actor_kind"`
+		ActorID    string    `db:"actor_id"`
+		OccurredAt time.Time `db:"occurred_at"`
 	}
-	if err := repo.db.Get(&transition, `SELECT trigger, actor_kind, COALESCE(actor_id, '') AS actor_id
+	if err := repo.db.Get(&transition, `SELECT trigger, actor_kind, COALESCE(actor_id, '') AS actor_id, occurred_at
 		FROM task_step_transitions WHERE task_id = ? ORDER BY id DESC LIMIT 1`, task.ID); err != nil {
 		t.Fatalf("read transfer transition: %v", err)
 	}
 	if transition.Trigger != "task_transfer" || transition.ActorKind != "human" || transition.ActorID != "owner-1" {
 		t.Fatalf("transfer transition = %+v", transition)
+	}
+	if !transition.OccurredAt.Equal(receipt.TransferredAt) {
+		t.Fatalf("transfer transition timestamp = %v, want %v", transition.OccurredAt, receipt.TransferredAt)
 	}
 
 	retry, err := repo.TransferTask(ctx, command)

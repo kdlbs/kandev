@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type transferWorkspaceProjection struct {
@@ -96,6 +97,7 @@ type transferTaskPlacement struct {
 	WorkspaceID  string    `db:"workspace_id"`
 	WorkflowID   string    `db:"workflow_id"`
 	StepID       string    `db:"workflow_step_id"`
+	State        string    `db:"state"`
 	QueuedStepID string    `db:"queued_for_step_id"`
 	ProjectID    string    `db:"project_id"`
 	WIPAdmitted  int       `db:"wip_admitted"`
@@ -401,8 +403,12 @@ func (r *Repository) applyTaskTransfer(
 		return nil, err
 	}
 	transferredAt := r.nowUTC()
+	taskGeneration := transferredAt
+	if placement.State == string(v1.TaskStateCompleted) {
+		taskGeneration = placement.UpdatedAt
+	}
 	transitionID, err := r.updateTaskTransferPlacement(ctx, tx, command, destinationStepID, queuedStepID,
-		pendingStepIDs, agentProfileMappings, transferredAt, projections, inventory)
+		pendingStepIDs, agentProfileMappings, taskGeneration, projections, inventory)
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +435,7 @@ func (r *Repository) applyTaskTransfer(
 		SourceWorkspaceID: command.ExpectedSourceWorkspaceID, SourceWorkflowID: command.ExpectedSourceWorkflowID,
 		SourceStepID: command.ExpectedSourceStepID, DestinationWorkspaceID: command.DestinationWorkspaceID,
 		DestinationWorkflowID: command.DestinationWorkflowID, DestinationStepID: destinationStepID,
-		DestinationStepName: destinationStepName, TaskGeneration: placement.UpdatedAt, StepTransitionID: transitionID,
+		DestinationStepName: destinationStepName, TaskGeneration: taskGeneration, StepTransitionID: transitionID,
 		Sessions:           afterSessions,
 		PreservationCounts: afterCounts, PreservationDigest: afterDigest, IdempotencyKey: command.IdempotencyKey,
 		PreservationPolicy: command.PreservationPolicy, TransferredAt: transferredAt,
@@ -456,7 +462,7 @@ func (r *Repository) lockAndValidateTaskTransferSource(
 }
 
 func (r *Repository) lockTransferTask(ctx context.Context, tx *sqlx.Tx, taskID string) (*transferTaskPlacement, error) {
-	query := `SELECT workspace_id, workflow_id, workflow_step_id, COALESCE(queued_for_step_id, '') AS queued_for_step_id,
+	query := `SELECT workspace_id, workflow_id, workflow_step_id, state, COALESCE(queued_for_step_id, '') AS queued_for_step_id,
 		COALESCE(project_id, '') AS project_id, wip_admitted, updated_at FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += postgresForUpdateClause
@@ -800,9 +806,9 @@ func (r *Repository) updateTaskTransferPlacement(
 	inventory transferRelationInventory,
 ) (int64, error) {
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, queued_for_step_id = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, queued_for_step_id = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND workflow_id = ? AND workflow_step_id = ? AND updated_at = ?`),
-		command.DestinationWorkspaceID, command.DestinationWorkflowID, destinationStepID, queuedStepID,
+		command.DestinationWorkspaceID, command.DestinationWorkflowID, destinationStepID, queuedStepID, transferredAt,
 		command.TaskID, command.ExpectedSourceWorkspaceID, command.ExpectedSourceWorkflowID,
 		command.ExpectedSourceStepID, command.ExpectedTaskUpdatedAt)
 	if err != nil {
