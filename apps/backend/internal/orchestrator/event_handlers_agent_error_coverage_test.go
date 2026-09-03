@@ -431,6 +431,9 @@ func TestDispatchKanbanAgentErrorTrigger_WalkFailureAndEngineFailureLogsError(t 
 	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 0 {
 		t.Errorf("got a dispatch INFO record, want none")
 	}
+	if got := filterLogs(logs, msgAgentErrorNoActions); len(got) != 0 {
+		t.Errorf("got %d %q DEBUG record(s), want none (AC-E5's ERROR and AC-E2's DEBUG are disjoint)", len(got), msgAgentErrorNoActions)
+	}
 }
 
 func TestDispatchKanbanAgentErrorTrigger_RedeliveryIdempotentEngineNeverCallsLoadStep(t *testing.T) {

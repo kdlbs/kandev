@@ -98,6 +98,9 @@ func TestDispatchKanbanAgentErrorTrigger_ClearDecisionsDispatchesAndIsIdempotent
 	if fields["operation_id"] != "agent_error:session:s1:exec-1" {
 		t.Errorf("operation_id = %v, want agent_error:session:s1:exec-1", fields["operation_id"])
 	}
+	if got := filterLogs(logs, msgAgentErrorNoActions); len(got) != 0 {
+		t.Errorf("first delivery emitted %d %q record(s), want 0 (AC-A6's INFO and AC-E2's DEBUG are disjoint)", len(got), msgAgentErrorNoActions)
+	}
 
 	// AC-C3: a redelivery of the exact same failure must not re-run the
 	// action list and must emit no dispatch record of its own.
@@ -151,13 +154,20 @@ func TestDispatchKanbanAgentErrorTrigger_IdempotencyKeyShape(t *testing.T) {
 			Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionClearDecisions}}},
 		}
 		decisions := &spyDecisionStore{}
-		svc, _ := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
+		svc, logs := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
 
 		svc.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
 		svc.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
 
 		if decisions.clearCalls != 1 {
 			t.Fatalf("clearCalls = %d, want 1 (empty execution ids collapse to one key)", decisions.clearCalls)
+		}
+		infos := filterLogs(logs, msgAgentErrorDispatched)
+		if len(infos) != 1 {
+			t.Fatalf("got %d %q record(s), want 1", len(infos), msgAgentErrorDispatched)
+		}
+		if got := infos[0].ContextMap()["operation_id"]; got != "agent_error:session:s1" {
+			t.Errorf("operation_id = %v, want agent_error:session:s1 (AC-C2's empty-execution-id shape)", got)
 		}
 	})
 }
