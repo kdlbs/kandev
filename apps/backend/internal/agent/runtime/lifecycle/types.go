@@ -110,6 +110,22 @@ type AgentExecution struct {
 	// read from the stream-processing goroutine handleAgentEvent runs on.
 	recoveryAppliedControlTurnID atomic.Int64
 
+	// recoveredPromptGenerationPending is true when this execution was
+	// reconstructed by recovery with a turn believed still in flight (nothing
+	// retained per AC-EXECUTORS-SURVIVAL-004.2's outcome peek):
+	// promptGeneration was recreated from zero along with the rest of this
+	// execution object, so it cannot match the nonzero PromptGeneration the
+	// live completion for that pre-restart turn will carry. claimPromptCompletion
+	// adopts the event's own PromptGeneration as this execution's generation
+	// the first time this flag is observed true, mirroring what
+	// applyRecoveredTurnOutcome already does explicitly for a turn that
+	// completed while the backend was detached -- there is nothing to
+	// supersede yet, since no prompt has ever been dispatched through this
+	// object. beginExecutionPrompt clears it the moment a prompt IS
+	// dispatched through this object, so a late, genuinely-stale completion
+	// from before that dispatch cannot clobber the newly assigned generation.
+	recoveredPromptGenerationPending atomic.Bool
+
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
 	PrepareResult *EnvPrepareResult `json:"-"`

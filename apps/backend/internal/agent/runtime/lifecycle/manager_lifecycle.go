@@ -133,6 +133,14 @@ func (m *Manager) Start(ctx context.Context) error {
 				// stale relative to what the instance actually resumed.
 				ACPSessionID: ri.ProviderSessionID,
 			}
+			// A recovered instance is resuming a live provider session (its
+			// ACPSessionID above comes straight from the adopted instance), so
+			// ACP session setup is already complete -- unlike a fresh launch,
+			// there is no InitializeAndPrompt call on this path to mark it.
+			// Leaving this false blocks SetSessionMode/SetSessionModel/
+			// SetSessionConfigOption ("ACP session is not ready") on every
+			// re-tracked execution until its next full relaunch.
+			execution.setSessionInitialized(true)
 			execution.setRuntimeEnvironment(ri.Env)
 			m.hydrateRecoveredTaskEnvironmentID(ctx, execution)
 			// AC-EXECUTORS-SURVIVAL-002.14: Office profile identity is a new key

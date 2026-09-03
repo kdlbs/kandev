@@ -116,5 +116,11 @@ func (m *Manager) applyRecoveredTurnOutcome(
 // "nothing retained" case: publish the session as running exactly as an
 // ordinary launch's first activity would.
 func (m *Manager) publishRecoveredExecutionRunning(ctx context.Context, execution *AgentExecution) {
+	// Nothing was retained, so any turn still in flight across the restart
+	// carries a PromptGeneration this freshly reconstructed execution object
+	// has never seen (its own counter was recreated from zero). Let the first
+	// live completion adopt it instead of being rejected as superseded --
+	// see recoveredPromptGenerationPending.
+	execution.recoveredPromptGenerationPending.Store(true)
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentRunning, execution)
 }

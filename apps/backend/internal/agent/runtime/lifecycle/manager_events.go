@@ -239,7 +239,13 @@ func (m *Manager) claimPromptCompletion(
 	claim.locked = true
 	claimed := false
 	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
-		if current != execution || current.promptGeneration != event.PromptGeneration {
+		if current != execution {
+			return
+		}
+		if current.recoveredPromptGenerationPending.CompareAndSwap(true, false) {
+			current.promptGeneration = event.PromptGeneration
+		}
+		if current.promptGeneration != event.PromptGeneration {
 			return
 		}
 		if current.promptCompletionGeneration == event.PromptGeneration {

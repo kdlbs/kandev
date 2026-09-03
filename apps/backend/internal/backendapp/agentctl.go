@@ -85,6 +85,7 @@ func adoptSurvivingAgentctl(
 	cfg.Agent.StandaloneHost = host
 	cfg.Agent.StandalonePort = port
 	cfg.Agent.StandaloneAuthToken = outcome.Credential
+	cfg.Agent.StandaloneInstanceAuthToken = outcome.InstanceCredential
 	// This process never spawned the adopted server, so it has no PID to
 	// record here. Standalone liveness for an adopted record is judged by
 	// enumeration against the adopted server (design 02, "Persistence"),
@@ -144,8 +145,11 @@ func spawnFreshAgentctl(
 			zap.Int("actual_port", actualPort))
 		cfg.Agent.StandalonePort = actualPort
 	}
-	// Store the per-launch auth token so downstream clients can authenticate
+	// Store the per-launch auth token so downstream clients can authenticate.
+	// No rotation has happened yet, so the control and per-instance
+	// credentials both start out equal to it.
 	cfg.Agent.StandaloneAuthToken = l.AuthToken()
+	cfg.Agent.StandaloneInstanceAuthToken = l.AuthToken()
 	// Store the agentctl control-server PID so local/standalone executor rows can
 	// carry a real host-local liveness handle (executors_running.local_pid).
 	cfg.Agent.StandalonePID = l.Pid()

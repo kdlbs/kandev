@@ -39,6 +39,7 @@ func provideLifecycleManager(
 	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 	recoveryDeadlineStart time.Time,
 	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
+	runningWriter lifecycle.ExecutorRunningWriter,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
@@ -59,7 +60,10 @@ func provideLifecycleManager(
 		cfg.Agent.StandalonePort,
 		log,
 	)
-	standaloneExec.SetAuthToken(cfg.Agent.StandaloneAuthToken)
+	// Per-instance servers enforce the pre-rotation credential
+	// (StandaloneInstanceAuthToken), not the control server's own rotating
+	// one -- see the field doc on config.AgentConfig.
+	standaloneExec.SetAuthToken(cfg.Agent.StandaloneInstanceAuthToken)
 
 	// Create InteractiveRunner for passthrough mode (no WorkspaceTracker, uses callbacks)
 	interactiveRunner := process.NewInteractiveRunner(nil, log, 2*1024*1024) // 2MB buffer
@@ -118,6 +122,16 @@ func provideLifecycleManager(
 		cfg.ResolvedHomeDir(),
 		log,
 	)
+
+	// Persistence writer for executors_running, wired before Start runs its
+	// recovery pass: Start reads ListLiveStandaloneExecutorsRunning to build
+	// the recovery-inventory correlation guard (AC-EXECUTORS-SURVIVAL-002), and
+	// that read silently returns no candidates when no writer is set yet. This
+	// must happen here rather than after provideLifecycleManager returns, or
+	// every recovery pass sees an empty inventory regardless of what is
+	// actually durable, misclassifying every live standalone instance as an
+	// orphan.
+	lifecycleMgr.SetExecutorRunningWriter(runningWriter)
 
 	// Wire recovery's bounded stop-retry budget (AC-EXECUTORS-SURVIVAL-002.13/
 	// 002.15) and the AC-EXECUTORS-SURVIVAL-002.16 unstoppable-session sink

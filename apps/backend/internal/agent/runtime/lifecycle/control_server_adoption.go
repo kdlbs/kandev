@@ -91,18 +91,29 @@ const (
 )
 
 // AdoptionOutcome is the result of attempting to adopt a previously-detached
-// control server. Endpoint and Credential are populated only when Adopted.
-// ContactedAt is the instant this attempt first reached the recorded control
-// endpoint (the GetIdentity call) -- the AC-EXECUTORS-SURVIVAL-003.7 recovery
-// deadline's clock start. It is left zero when no live server was ever
-// reached (no record, or the client/transport itself could not be built),
-// since nothing recovery-relevant is running in that case.
+// control server. Endpoint, Credential, and InstanceCredential are populated
+// only when Adopted. ContactedAt is the instant this attempt first reached
+// the recorded control endpoint (the GetIdentity call) -- the
+// AC-EXECUTORS-SURVIVAL-003.7 recovery deadline's clock start. It is left
+// zero when no live server was ever reached (no record, or the
+// client/transport itself could not be built), since nothing
+// recovery-relevant is running in that case.
 type AdoptionOutcome struct {
-	Adopted     bool
-	Reason      AdoptionReason
-	Endpoint    string
-	Credential  string
-	ContactedAt time.Time
+	Adopted  bool
+	Reason   AdoptionReason
+	Endpoint string
+	// Credential is the freshly rotated control-server credential
+	// (AC-EXECUTORS-CONTROL-OWNERSHIP-002): use it for control-plane calls
+	// (create/list/delete instance, health, further rotation).
+	Credential string
+	// InstanceCredential is the credential this backend presented to the
+	// rotate call -- i.e. the pre-rotation credential every already-running
+	// per-instance agentctl server still enforces, since a control-server
+	// credential rotation never touches an instance's own static auth
+	// token. Use it for clients built against a per-instance server
+	// (agentctl.NewClient / WithAuthToken), not Credential.
+	InstanceCredential string
+	ContactedAt        time.Time
 }
 
 // AttemptAdoptControlServer implements startup steps 4 through 6 of design
@@ -195,7 +206,13 @@ func AttemptAdoptControlServer(
 			zap.String("endpoint", record.Endpoint), zap.Error(err))
 	}
 
-	return AdoptionOutcome{Adopted: true, Endpoint: record.Endpoint, Credential: rotated.Credential, ContactedAt: contactedAt}
+	return AdoptionOutcome{
+		Adopted:            true,
+		Endpoint:           record.Endpoint,
+		Credential:         rotated.Credential,
+		InstanceCredential: credential,
+		ContactedAt:        contactedAt,
+	}
 }
 
 // RecordFreshControlServer durably records a freshly spawned (not adopted)

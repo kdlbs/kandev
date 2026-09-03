@@ -1046,11 +1046,19 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 // session whose agent is still running, corrupting the very state recovery
 // depends on. The executors_running row is intentionally left untouched so
 // AC-EXECUTORS-SURVIVAL-002's recovery-inventory read still finds it live.
+//
+// Also deliberately does NOT call client.Close(): closing the client tears
+// down the agentctl updates stream, which makes any in-flight SendPrompt's
+// stream-reader goroutine observe a disconnect and report it through the
+// same error path a genuine agent crash uses (handleInitialPromptFailure /
+// handleErrorEvent) -- persisting the executors_running row as failed out
+// from under the very read this function's contract promises to leave
+// untouched, and racing RemoveExecution below to do it. Simply dropping the
+// local reference lets this backend's process exit (moments later, in the
+// same shutdown) reclaim the socket without disturbing the still-running
+// agentctl instance or its live stream.
 func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecution) error {
 	execution.agentctlLifecycleMu.Lock()
-	if client := execution.currentAgentCtlClient(); client != nil {
-		client.Close()
-	}
 	execution.detachAgentctlClient()
 	execution.agentctlLifecycleMu.Unlock()
 
