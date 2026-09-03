@@ -469,10 +469,10 @@ func ensureRemoteTaskDir(ctx context.Context, client *ssh.Client, workdirRoot, t
 // directory through the later mkdir -p for that session directory.
 func ensureReuseRequiredRemoteTaskDirExists(ctx context.Context, client *ssh.Client, taskDir string) error {
 	if strings.TrimSpace(taskDir) == "" {
-		return fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+		return &models.MissingTaskWorkspaceError{Detail: "missing remote task directory"}
 	}
 	if _, _, err := runSSHCommand(ctx, client, "test -d "+shellQuote(taskDir)); err != nil {
-		return fmt.Errorf("%w: remote task directory is unavailable", models.ErrWorkspaceReuseUnsafe)
+		return &models.MissingTaskWorkspaceError{Detail: "remote task directory is unavailable"}
 	}
 	return nil
 }

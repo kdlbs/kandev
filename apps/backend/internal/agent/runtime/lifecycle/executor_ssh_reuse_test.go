@@ -25,6 +25,9 @@ func TestReuseRequiredRemoteTaskDir(t *testing.T) {
 				if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 					t.Fatalf("error = %v, want workspace reuse unsafe", err)
 				}
+				if !models.IsMissingTaskWorkspace(err) {
+					t.Fatalf("error = %v, want typed missing task workspace", err)
+				}
 				return
 			}
 			if err != nil || got != test.want {

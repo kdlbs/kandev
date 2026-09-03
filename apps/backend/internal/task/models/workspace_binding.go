@@ -9,9 +9,31 @@ import (
 // They deliberately describe state rather than filesystem details: callers can
 // offer a bounded retry without exposing a checkout path or branch name.
 var (
-	ErrWorkspacePreparing   = errors.New("workspace is preparing")
-	ErrWorkspaceReuseUnsafe = errors.New("workspace reuse is unsafe")
+	ErrWorkspacePreparing                = errors.New("workspace is preparing")
+	ErrWorkspaceReuseUnsafe              = errors.New("workspace reuse is unsafe")
+	ErrWorkspaceRehomeNeedsAuthorization = errors.New("fresh workspace may discard unique repository work; human authorization is required")
 )
+
+// MissingTaskWorkspaceError identifies the one reuse-unsafe condition that can
+// be recovered by provisioning a fresh task binding. Other reuse failures must
+// remain fail-closed and must never be selected through message parsing.
+type MissingTaskWorkspaceError struct {
+	Detail string
+}
+
+func (e *MissingTaskWorkspaceError) Error() string {
+	if e == nil || e.Detail == "" {
+		return "workspace reuse is unsafe: missing remote task directory"
+	}
+	return "workspace reuse is unsafe: " + e.Detail
+}
+
+func (e *MissingTaskWorkspaceError) Unwrap() error { return ErrWorkspaceReuseUnsafe }
+
+func IsMissingTaskWorkspace(err error) bool {
+	var target *MissingTaskWorkspaceError
+	return errors.As(err, &target)
+}
 
 // DescribeInheritedEnvironmentUnavailable builds the reason clause for an
 // inherit_parent task whose inherited task_environments row cannot be used

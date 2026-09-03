@@ -23,6 +23,17 @@ func TestClassifyLaunchFailureUsesTypedBaseBranchCategory(t *testing.T) {
 	}
 }
 
+func TestBuildLastAgentErrorExposesAuthorizedWorkspaceRehome(t *testing.T) {
+	exec := &Executor{}
+	errorValue := exec.buildLastAgentError(context.Background(), "task-1", "task-repo-1", &WorkspaceRehomeError{
+		Original: &models.MissingTaskWorkspaceError{}, Recovery: models.ErrWorkspaceRehomeNeedsAuthorization,
+	})
+	if errorValue.Code != models.LaunchErrorCategoryWorkspaceRehomeRequired ||
+		len(errorValue.RecoveryActions) != 1 || errorValue.RecoveryActions[0] != models.RecoveryActionRehomeFresh {
+		t.Fatalf("workspace rehome error = %#v", errorValue)
+	}
+}
+
 func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-1"] = &models.TaskSession{

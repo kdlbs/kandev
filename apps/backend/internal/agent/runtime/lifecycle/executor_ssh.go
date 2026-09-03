@@ -296,11 +296,11 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 
 func reuseRequiredRemoteTaskDir(req *ExecutorCreateRequest) (string, error) {
 	if req == nil {
-		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+		return "", &models.MissingTaskWorkspaceError{Detail: "missing remote task directory"}
 	}
 	taskDir := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir))
 	if taskDir == "" {
-		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+		return "", &models.MissingTaskWorkspaceError{Detail: "missing remote task directory"}
 	}
 	return taskDir, nil
 }

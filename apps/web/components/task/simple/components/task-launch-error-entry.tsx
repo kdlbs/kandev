@@ -31,6 +31,7 @@ const TASK_LAUNCH_ERROR_CATEGORIES = new Set([
   "default_branch_unresolved",
   "pr_already_closed",
   "generic_launch_failure",
+  "workspace_rehome_required",
 ]);
 
 export function isLaunchErrorCategory(category: string | undefined): boolean {
@@ -51,6 +52,8 @@ function categoryTitle(category: string | undefined, t: (key: string) => string)
       return t("task:launchErrorDefaultBranchUnresolved");
     case "pr_already_closed":
       return t("task:launchErrorPrAlreadyClosed");
+    case "workspace_rehome_required":
+      return t("task:launchErrorWorkspaceRehomeRequired");
     default:
       return t("task:launchErrorGeneric");
   }
@@ -64,6 +67,8 @@ function actionLabel(action: TaskLaunchRecoveryAction, t: (key: string) => strin
       return t("task:pickBaseBranch");
     case "mark_review_done":
       return t("task:markReviewDone");
+    case "rehome_fresh":
+      return t("task:rehomeFreshWorkspace");
   }
 }
 

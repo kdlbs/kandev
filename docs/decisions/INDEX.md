@@ -98,6 +98,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-18-context-reset-preserves-runtime-configuration | [Preserve ACP Runtime Configuration Across Context Reset](2026-08-18-context-reset-preserves-runtime-configuration.md) | accepted | backend, protocol, workflow | 2026-08-18 |
 | 2026-08-19-parent-authorized-child-workspace-sources | [Parent-authorized child workspace sources](2026-08-19-parent-authorized-child-workspace-sources.md) | accepted | backend, protocol, security | 2026-08-19 |
 | 2026-08-24-task-snapshotted-branch-policies | [Snapshot Repository Branch Policies on Tasks](2026-08-24-task-snapshotted-branch-policies.md) | proposed | backend, frontend, persistence | 2026-08-24 |
+| 2026-09-03-task-environment-rehome-generations | [Rehome missing task workspaces with atomic binding epochs](2026-09-03-task-environment-rehome-generations.md) | accepted | backend, frontend, workflow | 2026-09-03 |
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
 | 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |

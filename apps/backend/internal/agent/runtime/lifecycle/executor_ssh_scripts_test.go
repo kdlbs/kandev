@@ -146,6 +146,56 @@ func TestSSHDefaultPrepareScriptExecutesCheckoutAndSetup(t *testing.T) {
 	}
 }
 
+// @covers AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.4
+func TestSSHDefaultPrepareScriptInitializesExactTaskRootBelowParentCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	seed := filepath.Join(root, "seed")
+	parent := filepath.Join(root, "jumprope-fullstack")
+	workspace := filepath.Join(parent, ".kandev", "tasks", "task-1")
+	runIn(t, root, "git", "init", "--quiet", "--bare", "--initial-branch=main", origin)
+	runIn(t, root, "git", "init", "--quiet", "--initial-branch=main", seed)
+	runIn(t, seed, "git", "config", "user.email", "test@example.com")
+	runIn(t, seed, "git", "config", "user.name", "Test")
+	runIn(t, seed, "git", "commit", "--quiet", "--allow-empty", "-m", "init")
+	runIn(t, seed, "git", "remote", "add", "origin", origin)
+	runIn(t, seed, "git", "push", "--quiet", "origin", "main")
+	runIn(t, root, "git", "init", "--quiet", parent)
+	runIn(t, parent, "git", "remote", "add", "origin", "https://example.invalid/parent.git")
+	runIn(t, root, "mkdir", "-p", filepath.Join(workspace, ".kandev", "sessions", "session-1"))
+
+	script, err := (&SSHExecutor{}).resolvePrepareScript(&ExecutorCreateRequest{
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			"repository_clone_url":    origin,
+			MetadataKeyBaseBranch:     "main",
+			MetadataKeyWorktreeBranch: "feature/task-1",
+		},
+	}, workspace, "/remote/bin/agentctl")
+	if err != nil {
+		t.Fatalf("resolvePrepareScript() error = %v", err)
+	}
+	if output, runErr := exec.Command("bash", "-e", "-c", script).CombinedOutput(); runErr != nil {
+		t.Fatalf("nested SSH prepare failed: %v\n%s", runErr, output)
+	}
+
+	gotRoot := strings.TrimSpace(string(runIn(t, workspace, "git", "rev-parse", "--show-toplevel")))
+	wantRoot, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(workspace): %v", err)
+	}
+	if gotRoot != wantRoot {
+		t.Fatalf("repository root = %q, want exact task root %q", gotRoot, wantRoot)
+	}
+}
+
 func TestSSHDefaultPrepareScriptRejectsConflictingOrigin(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

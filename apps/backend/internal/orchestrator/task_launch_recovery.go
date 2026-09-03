@@ -27,6 +27,7 @@ const (
 	taskLaunchRecoveryRetryDefault = models.RecoveryActionRetryDefault
 	taskLaunchRecoveryPickBranch   = models.RecoveryActionPickBaseBranch
 	taskLaunchRecoveryMarkDone     = models.RecoveryActionMarkReviewDone
+	taskLaunchRecoveryRehomeFresh  = models.RecoveryActionRehomeFresh
 )
 
 // TaskLaunchRecoveryRequest is the server-side shape of task.launch.recover.
@@ -126,6 +127,15 @@ func (s *Service) RecoverTaskLaunch(ctx context.Context, req *TaskLaunchRecovery
 		if err := s.clearTaskLaunchRecoverySource(ctx, source); err != nil {
 			return nil, err
 		}
+	case taskLaunchRecoveryRehomeFresh:
+		if source.session == nil {
+			return nil, fmt.Errorf("session_id is required for %s", req.Action)
+		}
+		response, recoverErr := s.RecoverSession(ctx, req.TaskID, source.session.ID, "rehome_fresh")
+		if recoverErr != nil {
+			return nil, recoverErr
+		}
+		responseSessionID = response.SessionID
 	default:
 		return nil, ErrTaskLaunchRecoveryInvalid
 	}
@@ -159,11 +169,11 @@ func (s *Service) validateTaskLaunchRecoveryRequest(req *TaskLaunchRecoveryReque
 		return ErrTaskLaunchRecoveryInvalid
 	}
 	switch req.Action {
-	case taskLaunchRecoveryRetryDefault, taskLaunchRecoveryPickBranch, taskLaunchRecoveryMarkDone:
+	case taskLaunchRecoveryRetryDefault, taskLaunchRecoveryPickBranch, taskLaunchRecoveryMarkDone, taskLaunchRecoveryRehomeFresh:
 	default:
 		return fmt.Errorf("unsupported task launch recovery action %q", req.Action)
 	}
-	if req.Action != taskLaunchRecoveryMarkDone && strings.TrimSpace(req.TaskRepositoryID) == "" {
+	if req.Action != taskLaunchRecoveryMarkDone && req.Action != taskLaunchRecoveryRehomeFresh && strings.TrimSpace(req.TaskRepositoryID) == "" {
 		return fmt.Errorf("task_repository_id is required for %s", req.Action)
 	}
 	if req.Action == taskLaunchRecoveryPickBranch && strings.TrimSpace(req.BaseBranch) == "" {
@@ -195,7 +205,7 @@ func (s *Service) loadTaskLaunchRecoverySource(ctx context.Context, req *TaskLau
 			return nil, err
 		}
 	}
-	if req.Action != taskLaunchRecoveryMarkDone {
+	if req.Action != taskLaunchRecoveryMarkDone && req.Action != taskLaunchRecoveryRehomeFresh {
 		activeRepositoryID := source.taskRepositoryID()
 		if activeRepositoryID == "" || activeRepositoryID != req.TaskRepositoryID {
 			return nil, fmt.Errorf("task_repository_id does not match the active launch error")

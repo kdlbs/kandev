@@ -1331,6 +1331,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	if models.IsMissingTaskWorkspace(err) {
+		resp, err = e.retryLaunchAfterMissingWorkspace(ctx, task.ID, sessionID, existingEnv, req, err, false)
+	}
 	if err != nil || resp == nil {
 		if err == nil {
 			err = errors.New("agent launch returned no response")

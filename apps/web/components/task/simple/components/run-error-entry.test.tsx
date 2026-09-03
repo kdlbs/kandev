@@ -15,6 +15,9 @@ vi.mock("@/lib/state/slices/office/selectors", () => ({
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: requestMock }),
 }));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
 
 afterEach(() => cleanup());
 
@@ -33,6 +36,17 @@ function runError(failureCode: string): RunError {
 }
 
 describe("RunErrorEntry", () => {
+  it("exposes the explicit data-loss rehome action for a missing workspace", () => {
+    const error = runError("workspace_rehome_required");
+    error.recoveryActions = ["rehome_fresh"];
+    render(<RunErrorEntry taskId="task-1" workspaceId="workspace-1" error={error} />);
+
+    expect(
+      screen.getByText("The previous workspace is missing and may contain unpushed work."),
+    ).toBeTruthy();
+    expect(screen.getByTestId("task-launch-rehome_fresh-button")).toBeTruthy();
+  });
+
   it.each(["provider_auth_required", "model_capacity"])(
     "keeps ordinary failure code %s on the resumable error surface",
     (failureCode) => {

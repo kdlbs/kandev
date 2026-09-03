@@ -210,7 +210,9 @@ mkdir -p "$workspace"
 # The task directory already contains .kandev session files, so initialize the
 # repository in place rather than using git clone into a non-empty directory.
 if [ -n "$repository_url" ]; then
-  if git -C "$workspace" rev-parse --git-dir >/dev/null 2>&1; then
+  workspace_root=$(cd "$workspace" && pwd -P)
+  discovered_root=$(git -C "$workspace" rev-parse --show-toplevel 2>/dev/null || true)
+  if [ -n "$discovered_root" ] && [ "$(cd "$discovered_root" && pwd -P)" = "$workspace_root" ]; then
     configured_url=$(git -C "$workspace" config --get remote.origin.url 2>/dev/null || true)
     if [ -z "$configured_url" ]; then
       git -C "$workspace" remote add origin "$repository_url"

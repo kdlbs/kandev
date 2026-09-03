@@ -719,6 +719,9 @@ func TestEnsureReuseRequiredRemoteTaskDirExists(t *testing.T) {
 		if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 			t.Fatalf("error = %v, want workspace reuse unsafe", err)
 		}
+		if !models.IsMissingTaskWorkspace(err) {
+			t.Fatalf("error = %v, want typed missing task workspace", err)
+		}
 		for _, command := range server.commands() {
 			if strings.Contains(command, "mkdir -p") {
 				t.Fatalf("reuse probe created remote state: %q", command)

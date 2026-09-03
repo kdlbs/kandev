@@ -20,6 +20,11 @@ type launchFailureClassification struct {
 
 func classifyLaunchFailure(err error) launchFailureClassification {
 	switch {
+	case errors.Is(err, models.ErrWorkspaceRehomeNeedsAuthorization):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryWorkspaceRehomeRequired,
+			message: "The previous workspace is missing and may contain unpushed work.",
+		}
 	case errors.Is(err, worktree.ErrInvalidBaseBranch):
 		return launchFailureClassification{
 			code:    models.LaunchErrorCategoryBaseBranchMissing,
@@ -58,6 +63,15 @@ func (e *Executor) buildLastAgentError(
 	launchErr error,
 ) models.LastAgentError {
 	classification := classifyLaunchFailure(launchErr)
+	if classification.code == models.LaunchErrorCategoryWorkspaceRehomeRequired {
+		occurredAt := time.Now().UTC()
+		return models.LastAgentError{
+			Message: classification.message, OccurredAt: occurredAt, Code: classification.code,
+			Details: routingerr.Sanitize(launchErr.Error()), RecoveryActions: []string{models.RecoveryActionRehomeFresh},
+			TaskRepositoryID: taskRepositoryID,
+			StampValue:       models.StableLaunchErrorStamp(taskID, classification.code, taskRepositoryID, occurredAt.Format(time.RFC3339Nano)),
+		}
+	}
 	markReviewDone := false
 	if e.launchFailureReviewEligibility != nil {
 		eligible, err := e.launchFailureReviewEligibility(ctx, taskID)

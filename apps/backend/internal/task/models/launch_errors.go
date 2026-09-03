@@ -21,6 +21,7 @@ const (
 	LaunchErrorCategoryPRAlreadyClosed         = "pr_already_closed"
 	LaunchErrorCategoryDefaultBranchUnresolved = "default_branch_unresolved"
 	LaunchErrorCategoryGenericLaunchFailure    = "generic_launch_failure"
+	LaunchErrorCategoryWorkspaceRehomeRequired = "workspace_rehome_required"
 )
 
 // Recovery actions are stable wire values shared by backend and frontend.
@@ -28,6 +29,7 @@ const (
 	RecoveryActionRetryDefault   = "retry_default"
 	RecoveryActionPickBaseBranch = "pick_base_branch"
 	RecoveryActionMarkReviewDone = "mark_review_done"
+	RecoveryActionRehomeFresh    = "rehome_fresh"
 )
 
 const (
@@ -76,7 +78,7 @@ func NormalizeRecoveryActions(actions []string) []string {
 
 func isKnownRecoveryAction(action string) bool {
 	switch action {
-	case RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone:
+	case RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone, RecoveryActionRehomeFresh:
 		return true
 	default:
 		return false

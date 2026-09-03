@@ -743,6 +743,7 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 // original worktree branch and reports when it is unrecoverable.
 type ResumeOptions struct {
 	AllowBranchReplacement bool
+	AllowWorkspaceRehome   bool
 }
 
 // ResumeSession restarts an existing task session using its stored worktree.
@@ -841,6 +842,11 @@ func (e *Executor) resumeSession(
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	if models.IsMissingTaskWorkspace(err) {
+		resp, err = e.retryLaunchAfterMissingWorkspace(
+			ctx, task.ID, session.ID, existingEnv, req, err, options.AllowWorkspaceRehome,
+		)
+	}
 	if err != nil && isAgentAlreadyRunningError(err) {
 		// "already has an agent running" fires both for live executions (a concurrent
 		// resume raced us) and stale ones (agent never started or exited without

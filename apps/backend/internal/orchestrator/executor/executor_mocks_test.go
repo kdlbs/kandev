@@ -283,6 +283,7 @@ type mockRepository struct {
 	createTaskEnvironmentRepoErr   error
 	finalizeTaskEnvironmentErr     error
 	createTaskSessionFunc          func(ctx context.Context, session *models.TaskSession) error
+	claimTaskEnvironmentRehomeFunc func(context.Context, string, string, string, bool) (bool, error)
 	// getTaskSessionByTaskAndAgentFunc, when non-nil, overrides
 	// GetTaskSessionByTaskAndAgent entirely — used to simulate a transient
 	// lookup failure (e.g. the AC-003.7 re-read-after-conflict arm in
@@ -329,6 +330,13 @@ type mockRepository struct {
 	// can pin ordering invariants that a call-count assertion alone cannot
 	// catch — see TestPersistTaskEnvironment_NonMaterializerSiblingPersistsReposBeforeReady.
 	writeCallLog []string
+}
+
+func (m *mockRepository) ClaimTaskEnvironmentRehome(ctx context.Context, taskID, environmentID, sessionID string, allow bool) (bool, error) {
+	if m.claimTaskEnvironmentRehomeFunc != nil {
+		return m.claimTaskEnvironmentRehomeFunc(ctx, taskID, environmentID, sessionID, allow)
+	}
+	return false, models.ErrWorkspaceRehomeNeedsAuthorization
 }
 
 type sharedWorkspaceBindingCall struct {

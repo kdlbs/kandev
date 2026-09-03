@@ -82,6 +82,9 @@ type LaunchSessionRequest struct {
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement bool `json:"-"`
+	// AllowWorkspaceRehome is granted only by the explicit rehome_fresh
+	// recovery action after the user accepts the possible data-loss warning.
+	AllowWorkspaceRehome bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -344,6 +347,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
 		AllowBranchReplacement: req.AllowBranchReplacement,
+		AllowWorkspaceRehome:   req.AllowWorkspaceRehome,
 	})
 	if err != nil {
 		return nil, err
@@ -427,6 +431,10 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		if err := s.clearResumeToken(ctx, sessionID); err != nil {
 			return nil, fmt.Errorf("failed to clear resume token for fresh start: %w", err)
 		}
+	case "rehome_fresh":
+		if err := s.clearResumeToken(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("failed to clear resume token for fresh workspace: %w", err)
+		}
 	case "resume":
 		// no-op — relaunch with existing resume token
 	case "resume_new_branch":
@@ -441,6 +449,7 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		SessionID:              sessionID,
 		Intent:                 IntentResume,
 		AllowBranchReplacement: action == "resume_new_branch",
+		AllowWorkspaceRehome:   action == "rehome_fresh",
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)
