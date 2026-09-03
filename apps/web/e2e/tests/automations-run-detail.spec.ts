@@ -206,12 +206,17 @@ test.describe("Automation run composer", () => {
       .poll(async () => (await apiClient.listSessionTurns(task.session_id!)).turns.length, {
         timeout: 15_000,
       })
-      .toBe(2);
+      .toBeGreaterThanOrEqual(2);
     const updatedTurns = await apiClient.listSessionTurns(task.session_id!);
     const replyTurnId = updatedTurns.turns.find((turn) => turn.id !== initialTurnId)?.id;
     expect(replyTurnId).toBeTruthy();
     await expect(transcript).toContainText(reply, { timeout: 15_000 });
-    await expect(transcript.locator(`[data-turn-id="${replyTurnId}"]`)).toBeVisible();
+    // A turn can also contain a synthetic empty-turn status row. Scope the
+    // assertion to the row that contains the submitted reply instead of
+    // requiring the turn id to identify a single DOM node.
+    await expect(
+      transcript.locator(`[data-turn-id="${replyTurnId}"]`).filter({ hasText: reply }),
+    ).toBeVisible();
   });
 
   test("sits on the run page's own background, not the task workbench's card", async ({

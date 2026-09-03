@@ -349,6 +349,33 @@ func TestSchedulerIntegration_BuildPromptContext_TaskComment(t *testing.T) {
 	}
 }
 
+func TestSchedulerIntegration_BuildPromptContext_TaskChangesRequestedIncludesDecisionComment(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	insertTaskForPrompt(t, svc, "task-rework", "ws-1", "Fix the rejected change", "Implement the requested fix", 3)
+	pc := service.BuildPromptContextForTest(
+		svc,
+		ctx,
+		service.RunReasonTaskChangesRequested,
+		`{"task_id":"task-rework","decision_comment":"The retry path still drops the error."}`,
+	)
+
+	if pc.ReviewFeedback != "The retry path still drops the error." {
+		t.Fatalf("ReviewFeedback = %q, want decision comment", pc.ReviewFeedback)
+	}
+	prompt := service.BuildPrompt(pc)
+	if !containsIgnoreCase(prompt, "The retry path still drops the error.") {
+		t.Fatalf("changes-requested prompt missing decision comment: %s", prompt)
+	}
+	if !containsIgnoreCase(prompt, "Address the feedback") {
+		t.Fatalf("changes-requested prompt missing rework instruction: %s", prompt)
+	}
+	if strings.HasPrefix(prompt, "You have been woken for reason:") {
+		t.Fatalf("changes-requested prompt fell through to generic wake text: %s", prompt)
+	}
+}
+
 func TestSchedulerIntegration_BuildPromptContext_ApprovalStageIncludesRecentComments(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

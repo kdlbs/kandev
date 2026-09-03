@@ -44,6 +44,40 @@ export type SidebarTaskPrefsApi = {
   subtask_order_by_parent_id: Record<string, string[]>;
 };
 
+export type ThreadTaskScopeApi = {
+  mode: "all" | "selected";
+  task_ids: string[];
+};
+
+export type ThreadViewClauseApi = {
+  id: string;
+  dimension: string;
+  op: string;
+  value: unknown;
+};
+
+export type ThreadViewSortApi = {
+  key: string;
+  direction: string;
+};
+
+export type ThreadViewApi = {
+  id: string;
+  name: string;
+  task_scope: ThreadTaskScopeApi;
+  filters: ThreadViewClauseApi[];
+  sort: ThreadViewSortApi;
+  max_columns: number | null;
+};
+
+export type ThreadViewDraftApi = {
+  base_view_id: string;
+  task_scope: ThreadTaskScopeApi;
+  filters: ThreadViewClauseApi[];
+  sort: ThreadViewSortApi;
+  max_columns: number | null;
+};
+
 export type TaskCreateLastUsedApi = {
   repository_id?: string;
   branch?: string;
@@ -94,6 +128,9 @@ export type UserSettings = {
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
+  thread_views?: ThreadViewApi[];
+  thread_active_view_id?: string;
+  thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown;
@@ -161,6 +198,9 @@ export type UserSettingsUpdatePayload = {
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
+  thread_views?: ThreadViewApi[];
+  thread_active_view_id?: string;
+  thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown[] | null;

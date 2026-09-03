@@ -33,6 +33,14 @@ type mockRepository struct {
 	executors     map[string]*models.Executor
 }
 
+func (m *mockRepository) HasUserPromptHistory(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockRepository) ClaimInitialPromptFallback(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 func (m *mockRepository) DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error) {
 	return false, nil
 }

@@ -31,6 +31,11 @@ export type {
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
+  ThreadTaskScopeApi,
+  ThreadViewClauseApi,
+  ThreadViewSortApi,
+  ThreadViewApi,
+  ThreadViewDraftApi,
   LspStatusLocation,
   LastSeenDisplay,
   MCPTaskAgentProfileDefault,
@@ -426,6 +431,7 @@ export type Task = ActiveSubagentCountFields & {
   primary_executor_type?: ExecutorType | null;
   primary_executor_name?: string | null;
   primary_agent_name?: string | null;
+  primary_agent_profile_id?: string | null;
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   is_ephemeral?: boolean;
@@ -434,6 +440,8 @@ export type Task = ActiveSubagentCountFields & {
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;
+  /** JSON-encoded normalized task labels from the backend. */
+  labels?: string;
   // Office extensions (mirror TaskDTO Go fields). Empty/undefined for kanban-origin tasks.
   origin?: TaskOrigin;
   project_id?: string;

@@ -85,6 +85,18 @@ function DraftContributor({
   );
 }
 
+function InvalidWithoutReasonContributor() {
+  useSettingsSaveContributor({
+    id: "invalid-without-reason",
+    revision: 1,
+    isDirty: true,
+    canSave: false,
+    save: vi.fn(),
+    discard: vi.fn(),
+  });
+  return null;
+}
+
 /** A contributor that starts clean (revision equals savedRevision) and dirties on Edit. */
 function CleanStartDraftContributor({
   id,
@@ -404,6 +416,17 @@ describe("SettingsSaveProvider save state", () => {
     const save = await screen.findByRole("button", { name: SAVE_CHANGES_LABEL });
     expect(save.hasAttribute("disabled")).toBe(true);
     expect(screen.getByText("invalid-profile is invalid")).toBeTruthy();
+  });
+
+  it("disables saving when an invalid contributor has no reason text", async () => {
+    render(
+      <SettingsSaveProvider>
+        <InvalidWithoutReasonContributor />
+      </SettingsSaveProvider>,
+    );
+
+    const save = await screen.findByRole("button", { name: SAVE_CHANGES_LABEL });
+    expect(save.hasAttribute("disabled")).toBe(true);
   });
 
   it("briefly confirms a successful save", async () => {
