@@ -268,6 +268,8 @@ Each flag entry has a raw value, description, enabled state, and an agent-specif
 
 The field is not a shell script. Pipes, redirects, variable expansion, and command substitution do not run as shell syntax. Empty or malformed quoting is rejected. Keep separate profiles for materially different permission or workspace flags, and recheck customized flags after upgrading the CLI.
 
+Claude CLI passthrough uses standard output by default. Add an enabled `--verbose` entry to the profile CLI flags when you need diagnostic output.
+
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
 
 ### ACP command prefixes
