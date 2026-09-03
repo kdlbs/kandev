@@ -471,4 +471,29 @@ describe("usePreviewPlanSummary fetch race", () => {
     expect(fakeStore.getState().taskPlans.byTaskId[TASK_ID]).toEqual(newerPlan);
     expect(fakeStore.getState().taskPlans.loadingByTaskId[TASK_ID]).toBe(false);
   });
+
+  it("does not resurrect a plan deleted over WS while the fetch was in flight", async () => {
+    let resolveFetch: (value: TaskPlan | null) => void = () => {};
+    mocks.getTaskPlan.mockReturnValue(
+      new Promise<TaskPlan | null>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => usePreviewPlanSummary(TASK_ID));
+
+    act(() => {
+      fakeStore.getState().setTaskPlan(TASK_ID, null);
+      fakeStore.getState().markTaskPlanSeen(TASK_ID);
+    });
+
+    const staleFetchedPlan = agentPlan({ updated_at: TIMESTAMP });
+    await act(async () => {
+      resolveFetch(staleFetchedPlan);
+      await Promise.resolve();
+    });
+
+    expect(fakeStore.getState().taskPlans.byTaskId[TASK_ID]).toBeNull();
+    expect(fakeStore.getState().taskPlans.loadingByTaskId[TASK_ID]).toBe(false);
+  });
 });

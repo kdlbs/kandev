@@ -34,12 +34,19 @@ export function usePreviewPlanSummary(taskId: string) {
     setTaskPlanLoading(taskId, true);
     getTaskPlan(taskId)
       .then((result) => {
-        // Race guard: a WS `task.plan.created`/`task.plan.updated` push can
-        // land in the store while this HTTP request is in flight. Don't let
-        // a stale response (an older version, or `null` from before the
-        // server had written it) clobber a newer one already applied.
-        const live = storeApi.getState().taskPlans.byTaskId[taskId];
-        if (live) {
+        // Race guard: a WS `task.plan.created`/`task.plan.updated`/
+        // `task.plan.deleted` push can land in the store while this HTTP
+        // request is in flight. `loadedByTaskId` (not `byTaskId` truthiness)
+        // tells us whether the store already holds an authoritative entry —
+        // a deleted plan is stored as `null` on purpose, and that tombstone
+        // is a real entry, not "nothing arrived yet". Once an entry exists,
+        // only ever move forward in time: never resurrect a tombstone, and
+        // never replace a real plan with `null` or an older version.
+        const state = storeApi.getState();
+        const hasLiveEntry = state.taskPlans.loadedByTaskId[taskId] ?? false;
+        const live = state.taskPlans.byTaskId[taskId] ?? null;
+        if (hasLiveEntry) {
+          if (live === null) return;
           if (result === null) return;
           if (Date.parse(result.updated_at) < Date.parse(live.updated_at)) return;
         }
