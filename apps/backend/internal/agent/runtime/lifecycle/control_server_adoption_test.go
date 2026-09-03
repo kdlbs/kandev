@@ -416,3 +416,87 @@ func TestAttemptAdoptControlServerRotationStorageFailureIsIncomplete(t *testing.
 		t.Fatal("control server record was rewritten despite the durable secret write failing")
 	}
 }
+
+// TestRecordFreshControlServerReusesPriorSecretID pins the "own server
+// started after a refused or failed adoption" failure-table row: the record
+// is rewritten to name the new server, and the existing secret row is
+// reused in place (updated to the new server's bootstrap token) rather than
+// leaving the old row orphaned.
+func TestRecordFreshControlServerReusesPriorSecretID(t *testing.T) {
+	secretStore := newInMemorySecretStore()
+	priorSecretID, err := storeControlServerCredential(context.Background(), secretStore, "", "old-servers-token")
+	if err != nil {
+		t.Fatalf("seed prior credential: %v", err)
+	}
+	store := &fakeAdoptionRecordStore{record: &models.ControlServerRecord{
+		Endpoint:           "127.0.0.1:8888",
+		CredentialSecretID: priorSecretID,
+	}}
+	client := &fakeAdoptionControlClient{identity: validIdentity()}
+
+	err = RecordFreshControlServer(context.Background(), store, secretStore, client, "127.0.0.1:9001", "new-servers-token")
+	if err != nil {
+		t.Fatalf("RecordFreshControlServer: %v", err)
+	}
+
+	if len(store.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(store.upserts))
+	}
+	written := store.upserts[0]
+	if written.Endpoint != "127.0.0.1:9001" {
+		t.Fatalf("Endpoint = %q, want the new server's endpoint", written.Endpoint)
+	}
+	if written.CredentialSecretID != priorSecretID {
+		t.Fatalf("CredentialSecretID = %q, want reused %q", written.CredentialSecretID, priorSecretID)
+	}
+
+	got, err := secretStore.Reveal(context.Background(), priorSecretID)
+	if err != nil {
+		t.Fatalf("Reveal: %v", err)
+	}
+	if got != "new-servers-token" {
+		t.Fatalf("stored credential = %q, want new-servers-token", got)
+	}
+}
+
+// TestRecordFreshControlServerCreatesSecretWhenNoPriorRecord pins the
+// first-ever-launch case: no prior record exists at all, so a brand new
+// secret is created rather than a reuse being attempted.
+func TestRecordFreshControlServerCreatesSecretWhenNoPriorRecord(t *testing.T) {
+	secretStore := newInMemorySecretStore()
+	store := &fakeAdoptionRecordStore{}
+	client := &fakeAdoptionControlClient{identity: validIdentity()}
+
+	err := RecordFreshControlServer(context.Background(), store, secretStore, client, "127.0.0.1:9001", "fresh-token")
+	if err != nil {
+		t.Fatalf("RecordFreshControlServer: %v", err)
+	}
+
+	if len(store.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(store.upserts))
+	}
+	got, err := secretStore.Reveal(context.Background(), store.upserts[0].CredentialSecretID)
+	if err != nil {
+		t.Fatalf("Reveal: %v", err)
+	}
+	if got != "fresh-token" {
+		t.Fatalf("stored credential = %q, want fresh-token", got)
+	}
+}
+
+// TestRecordFreshControlServerPropagatesIdentityFailure pins that a failure
+// to read the freshly spawned server's own identity aborts before any
+// durable write, rather than writing a record with blank fields.
+func TestRecordFreshControlServerPropagatesIdentityFailure(t *testing.T) {
+	secretStore := newInMemorySecretStore()
+	store := &fakeAdoptionRecordStore{}
+	client := &fakeAdoptionControlClient{identityErr: errors.New("connection refused")}
+
+	err := RecordFreshControlServer(context.Background(), store, secretStore, client, "127.0.0.1:9001", "fresh-token")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if len(store.upserts) != 0 {
+		t.Fatal("record was written despite the identity read failing")
+	}
+}

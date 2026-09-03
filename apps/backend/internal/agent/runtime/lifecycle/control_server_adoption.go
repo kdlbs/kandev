@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -184,6 +185,48 @@ func AttemptAdoptControlServer(
 	}
 
 	return AdoptionOutcome{Adopted: true, Endpoint: record.Endpoint, Credential: rotated.Credential}
+}
+
+// RecordFreshControlServer durably records a freshly spawned (not adopted)
+// control server as the new installation-scoped record. Per the failure
+// table's "Own server started after a refused or failed adoption" row, the
+// single control-server record is always rewritten to name the new server:
+// the record cannot keep pointing at a server that is about to reap itself
+// through its own unowned shutdown. credential is the server's initial
+// ownership credential (the bootstrap auth token minted at launch). A
+// prior record's CredentialSecretID, when one is readable, is reused so a
+// spawn-after-refused-adoption does not leave an orphaned secret row behind.
+func RecordFreshControlServer(
+	ctx context.Context,
+	store AdoptionRecordStore,
+	secretStore secrets.SecretStore,
+	client AdoptionControlClient,
+	endpoint string,
+	credential string,
+) error {
+	identity, err := client.GetIdentity(ctx)
+	if err != nil {
+		return fmt.Errorf("read freshly spawned control server identity: %w", err)
+	}
+
+	var priorSecretID string
+	if prior, err := store.GetControlServerRecord(ctx); err == nil {
+		priorSecretID = prior.CredentialSecretID
+	}
+
+	secretID, err := storeControlServerCredential(ctx, secretStore, priorSecretID, credential)
+	if err != nil {
+		return fmt.Errorf("store freshly spawned control server credential: %w", err)
+	}
+
+	record := &models.ControlServerRecord{
+		Endpoint:           endpoint,
+		ServerIdentity:     identity.ServerIdentity,
+		CredentialSecretID: secretID,
+		Capabilities:       identity.Capabilities,
+		DiagnosticLogPath:  identity.DiagnosticLogPath,
+	}
+	return store.UpsertControlServerRecord(ctx, record)
 }
 
 func capabilitiesSatisfy(required, advertised []string) bool {
