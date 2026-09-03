@@ -24,6 +24,19 @@ test.describe("Create task dependency selector on mobile", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      task_id: predecessor.id,
+      owner: "kandev-e2e",
+      repo: "dependency-fixtures",
+      pr_number: 188,
+      pr_url: "https://github.test/kandev-e2e/dependency-fixtures/pull/188",
+      pr_title: "Dependency fixture PR",
+      head_branch: "feature/dependency-fixture",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+    });
 
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
@@ -88,8 +101,14 @@ test.describe("Create task dependency selector on mobile", () => {
     const option = picker.getByTestId(`task-create-dependency-option-${predecessor.id}`);
     await expect(option).toBeVisible();
     await expect(option.getByTestId("task-create-dependency-task-icon")).toBeVisible();
+    const search = picker.getByPlaceholder("Search tasks or #PR/MR number...");
+    await search.fill("188");
+    await expect(option).toBeVisible();
+    await expect(option.locator('[aria-label="Linked pull or merge request #188"]')).toHaveText(
+      "#188",
+    );
     await option.tap();
-    await expect(trigger).toContainText("Mobile dependency predecessor");
+    await expect(trigger).toContainText("#188 · Mobile dependency predecessor");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile dependency selection");
   });
 });

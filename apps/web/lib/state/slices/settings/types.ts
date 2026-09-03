@@ -442,6 +442,7 @@ export type UserSettingsState = {
   gitlabSavedPresets: unknown;
   azureDevOpsBrowsePreferences: unknown;
   defaultUtilityAgentId: string | null;
+  defaultUtilityAgentProfileId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";
   terminalFontFamily: string | null;
