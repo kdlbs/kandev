@@ -625,13 +625,29 @@ func normalizeRuntimeStopError(err error) error {
 }
 
 // RowLiveness classifies the liveness of the OS process backing an
-// executors_running row using the runtime-aware host-local probe. It is the
-// orchestrator's window into the platform-split liveness check (kept in the
-// lifecycle package) used by startup reconciliation
-// (#1597 runtime-aware liveness). A local check never runs against a
+// executors_running row. It is the orchestrator's window into the
+// platform-split liveness check (kept in the lifecycle package) used outside
+// a reconciliation pass — e.g. the single-session idle reclaim path — and
+// always takes its own fresh adopted-server enumeration for a standalone row
+// rather than reusing one a pass cached (see RowLivenessScoped for the
+// pass-scoped sibling). A local/enumeration check never runs against a
 // remote/SSH row — such rows return Unknown.
 func (a *lifecycleAdapter) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
-	return lifecycle.RowProcessLiveness(row)
+	return a.mgr.RowLiveness(row)
+}
+
+// NewStandaloneLivenessScope takes one adopted-server enumeration for reuse
+// across every row of a single reconciliation pass (design 02 "Persistence":
+// "It has two kinds of caller, and only one of them is a pass"). Satisfies
+// the orchestrator's optional standaloneLivenessScoper capability.
+func (a *lifecycleAdapter) NewStandaloneLivenessScope(ctx context.Context) interface{} {
+	return a.mgr.NewStandaloneLivenessScope(ctx)
+}
+
+// RowLivenessScoped classifies row's liveness reusing scope (from
+// NewStandaloneLivenessScope) instead of taking a fresh enumeration.
+func (a *lifecycleAdapter) RowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness {
+	return a.mgr.RowLivenessScoped(row, scope)
 }
 
 // GetAgentStatus returns the status of an agent execution
