@@ -341,7 +341,10 @@ func TestStandaloneExecutorStopInstance(t *testing.T) {
 func TestStandaloneExecutorRecoverInstancesReTracksWinnerAndStopsOrphan(t *testing.T) {
 	control := newStandaloneControlServer(t, true)
 	control.listInstances = []*agentctlclient.InstanceInfo{
-		{ID: "instance-1", Port: 5001, SessionID: "session-1", TaskID: "task-1", WorkspacePath: "/ws/1"},
+		{
+			ID: "instance-1", Port: 5001, SessionID: "session-1", TaskID: "task-1", WorkspacePath: "/ws/1",
+			Env: map[string]string{"KANDEV_RUN_ID": "run-42", "PATH": "/usr/bin"},
+		},
 		{ID: "orphan-instance", Port: 5002, SessionID: "session-orphan"},
 	}
 	exec := control.executor(t)
@@ -367,6 +370,9 @@ func TestStandaloneExecutorRecoverInstancesReTracksWinnerAndStopsOrphan(t *testi
 	}
 	if got.Metadata["k"] != "v" {
 		t.Fatalf("Metadata = %+v, want the record's persisted metadata", got.Metadata)
+	}
+	if got.Env["KANDEV_RUN_ID"] != "run-42" || got.Env["PATH"] != "/usr/bin" {
+		t.Fatalf("Env = %+v, want the adopted instance's own runtime environment read back (AC-EXECUTORS-SURVIVAL-002.14)", got.Env)
 	}
 	if got.Client == nil {
 		t.Fatal("recovered instance must carry a usable agentctl client")

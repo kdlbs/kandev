@@ -38,6 +38,7 @@ func provideLifecycleManager(
 	mcpIdentityScoper lifecycle.MCPIdentityScoper,
 	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 	recoveryDeadlineStart time.Time,
+	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
@@ -176,6 +177,13 @@ func provideLifecycleManager(
 	}
 	if mcpPrincipalScoper != nil {
 		lifecycleMgr.SetMCPPrincipalScoper(mcpPrincipalScoper)
+	}
+	// AC-EXECUTORS-SURVIVAL-002.14: wire the workspace info provider before
+	// Start so a recovered execution's task-environment identity is
+	// reconstructed from the durable store during this same startup pass,
+	// instead of staying empty until something else happens to resolve it.
+	if workspaceInfoProvider != nil {
+		lifecycleMgr.SetWorkspaceInfoProvider(workspaceInfoProvider)
 	}
 
 	if err := lifecycleMgr.Start(ctx); err != nil {

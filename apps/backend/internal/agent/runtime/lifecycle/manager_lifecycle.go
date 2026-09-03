@@ -107,7 +107,15 @@ func (m *Manager) Start(ctx context.Context) error {
 				standaloneInstanceID: ri.StandaloneInstanceID,
 				standalonePort:       ri.StandalonePort,
 				promptDoneCh:         make(chan PromptCompletionSignal, 1),
+				// AC-EXECUTORS-SURVIVAL-002.14: run identity is re-derived from
+				// the runtime environment, which is itself read back from the
+				// adopted instance rather than the database (both deliberately
+				// memory-only, per design 03's "runtime environment" /
+				// "run identity" rows).
+				RunID: ri.Env["KANDEV_RUN_ID"],
 			}
+			execution.setRuntimeEnvironment(ri.Env)
+			m.hydrateRecoveredTaskEnvironmentID(ctx, execution)
 			// Create trace span for the recovered session
 			_, recoverySpan := tracing.TraceSessionRecovered(
 				context.Background(), execution.TaskID, execution.SessionID, execution.ID,
@@ -192,6 +200,28 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// hydrateRecoveredTaskEnvironmentID fills in a recovered execution's
+// task-environment identity (AC-EXECUTORS-SURVIVAL-002.14): the declared
+// source is the durable store, via the session's own task-environment
+// reference, not the adopted instance -- ExecutorInstance carries no such
+// field at all. A lookup failure or absent provider is logged and otherwise
+// ignored; losing this one reconstructed field must never cost the session
+// its recovery.
+func (m *Manager) hydrateRecoveredTaskEnvironmentID(ctx context.Context, execution *AgentExecution) {
+	if m.workspaceInfoProvider == nil {
+		return
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, execution.TaskID, execution.SessionID)
+	if err != nil {
+		m.logger.Warn("failed to resolve task-environment identity for recovered session",
+			zap.String("session_id", execution.SessionID), zap.Error(err))
+		return
+	}
+	if info != nil {
+		execution.TaskEnvironmentID = info.TaskEnvironmentID
+	}
 }
 
 // defaultRecoveryDeadline is the AC-EXECUTORS-SURVIVAL-003.7 fallback used

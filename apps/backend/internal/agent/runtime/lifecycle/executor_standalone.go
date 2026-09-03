@@ -551,6 +551,7 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 			StandalonePort:       inst.Port,
 			WorkspacePath:        inst.WorkspacePath,
 			Metadata:             metadata,
+			Env:                  inst.Env,
 		})
 	}
 	return recovered

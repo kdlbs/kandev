@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -146,6 +147,98 @@ func TestManagerStartRecoversInstancesIntoStore(t *testing.T) {
 	require.Equal(t, "exec-recovered", execution.ID)
 	require.Equal(t, "container-1", execution.ContainerID)
 	require.Equal(t, "/workspace", execution.WorkspacePath)
+}
+
+// TestManagerStartRecoveredExecutionCarriesEnvAndRunID pins
+// AC-EXECUTORS-SURVIVAL-002.14's "runtime environment" and "run identity"
+// reconstruction rows: both are sourced from the adopted instance's own
+// environment (never the database), with run identity re-derived from its
+// KANDEV_RUN_ID key.
+func TestManagerStartRecoveredExecutionCarriesEnvAndRunID(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:  "exec-recovered",
+			TaskID:      "task-1",
+			SessionID:   "session-1",
+			RuntimeName: executor.NameStandalone,
+			Env:         map[string]string{"KANDEV_RUN_ID": "run-42", "PATH": "/usr/bin"},
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	require.NoError(t, mgr.Start(context.Background()))
+
+	execution, ok := mgr.GetExecutionBySessionID("session-1")
+	require.True(t, ok)
+	require.Equal(t, "run-42", execution.RunID)
+	require.Equal(t, map[string]string{"KANDEV_RUN_ID": "run-42", "PATH": "/usr/bin"}, execution.RuntimeEnvironment())
+}
+
+// TestManagerStartRecoveredExecutionCarriesTaskEnvironmentID pins
+// AC-EXECUTORS-SURVIVAL-002.14's "task-environment identity" reconstruction
+// row: sourced from the durable store via the session's own task-environment
+// reference (WorkspaceInfoProvider), never re-derived from the adopted
+// instance, which carries no such identity at all.
+func TestManagerStartRecoveredExecutionCarriesTaskEnvironmentID(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:  "exec-recovered",
+			TaskID:      "task-1",
+			SessionID:   "session-1",
+			RuntimeName: executor.NameStandalone,
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+	mgr.SetWorkspaceInfoProvider(&mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-1": {TaskEnvironmentID: "env-9"},
+	}})
+
+	require.NoError(t, mgr.Start(context.Background()))
+
+	execution, ok := mgr.GetExecutionBySessionID("session-1")
+	require.True(t, ok)
+	require.Equal(t, "env-9", execution.TaskEnvironmentID)
+}
+
+// TestManagerStartRecoveredExecutionToleratesWorkspaceInfoLookupFailure pins
+// that a durable-store read failure during recovery is a soft failure: the
+// session is still re-tracked (a missing task-environment identity is far
+// better than losing the recovered execution entirely).
+func TestManagerStartRecoveredExecutionToleratesWorkspaceInfoLookupFailure(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:  "exec-recovered",
+			TaskID:      "task-1",
+			SessionID:   "session-1",
+			RuntimeName: executor.NameStandalone,
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+	mgr.SetWorkspaceInfoProvider(&mockWorkspaceInfoProvider{err: errors.New("db down")})
+
+	require.NoError(t, mgr.Start(context.Background()))
+
+	execution, ok := mgr.GetExecutionBySessionID("session-1")
+	require.True(t, ok, "recovery must still re-track the session despite the lookup failure")
+	require.Empty(t, execution.TaskEnvironmentID)
 }
 
 func TestManagerStartWithoutRegistryIsNoOp(t *testing.T) {

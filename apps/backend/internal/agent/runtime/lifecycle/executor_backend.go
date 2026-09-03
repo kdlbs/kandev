@@ -651,6 +651,14 @@ type ExecutorInstance struct {
 	StopReason      string
 	AgentStopFailed bool
 
+	// Env is the adopted instance's own runtime environment, read back rather
+	// than pushed (AC-EXECUTORS-SURVIVAL-002.14's "runtime environment" row:
+	// deliberately memory-only, so it is only ever populated by a recovery
+	// path -- StandaloneExecutor.RecoverInstances -- reading it back from the
+	// live instance; a fresh launch's environment flows through
+	// ExecutorCreateRequest.Env instead, never through this field.
+	Env map[string]string
+
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by authenticated container/remote executors for encrypted storage in SecretStore.
 	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
