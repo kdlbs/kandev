@@ -314,7 +314,7 @@ func (r *Repository) ListStepParticipantsForTask(
 		return nil, errors.New("step_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance
 		FROM workflow_step_participants
 		WHERE step_id = ? AND (task_id = '' OR task_id = ?)
 		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
@@ -327,13 +327,14 @@ func (r *Repository) ListStepParticipantsForTask(
 	all := make([]*models.WorkflowStepParticipant, 0)
 	for rows.Next() {
 		p := &models.WorkflowStepParticipant{}
-		var role string
+		var role, provenance string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
 		p.DecisionRequired = decisionRequired == 1
+		p.Provenance = models.ParticipantProvenance(provenance)
 		all = append(all, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -354,7 +355,7 @@ func (r *Repository) ListParticipantsForTaskAnyStep(
 		return nil, errors.New("task_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance
 		FROM workflow_step_participants
 		WHERE task_id = ?
 		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
@@ -367,13 +368,14 @@ func (r *Repository) ListParticipantsForTaskAnyStep(
 	all := make([]*models.WorkflowStepParticipant, 0)
 	for rows.Next() {
 		p := &models.WorkflowStepParticipant{}
-		var role string
+		var role, provenance string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
 		p.DecisionRequired = decisionRequired == 1
+		p.Provenance = models.ParticipantProvenance(provenance)
 		all = append(all, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -396,7 +398,7 @@ func (r *Repository) ListParticipantsForTaskWorkflow(
 		return nil, errors.New("workflow_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position, p.created_at
+		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position, p.created_at, p.provenance
 		FROM workflow_step_participants p
 		JOIN workflow_steps ws ON ws.id = p.step_id
 		WHERE p.task_id = ? AND ws.workflow_id = ?
@@ -410,13 +412,14 @@ func (r *Repository) ListParticipantsForTaskWorkflow(
 	all := make([]*models.WorkflowStepParticipant, 0)
 	for rows.Next() {
 		p := &models.WorkflowStepParticipant{}
-		var role string
+		var role, provenance string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
 		p.DecisionRequired = decisionRequired == 1
+		p.Provenance = models.ParticipantProvenance(provenance)
 		all = append(all, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -478,7 +481,7 @@ func (r *Repository) ListStepParticipants(ctx context.Context, stepID string) ([
 		return nil, errors.New("step_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance
 		FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ''
 		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
@@ -491,13 +494,14 @@ func (r *Repository) ListStepParticipants(ctx context.Context, stepID string) ([
 	var result []*models.WorkflowStepParticipant
 	for rows.Next() {
 		p := &models.WorkflowStepParticipant{}
-		var role string
+		var role, provenance string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
 		p.DecisionRequired = decisionRequired == 1
+		p.Provenance = models.ParticipantProvenance(provenance)
 		result = append(result, p)
 	}
 	return result, rows.Err()

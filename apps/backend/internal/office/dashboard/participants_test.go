@@ -526,6 +526,74 @@ func TestAddTaskReviewer_PromotingOwnAutoSeatRaisesNoActivityOrNotification(t *t
 	}
 }
 
+// TestAddTaskReviewer_ClaimingAutoSeatPublishesTaskUpdatedNamingReviewers is
+// AC-OFFICE-SEAT-PROVENANCE-002.13: a claim publishes the same task-changed
+// notification, naming the same participant field, that writing a new seat
+// in that role publishes. Unlike the promotion case above (not a claim, no
+// notification at all), a genuine claim must publish exactly one
+// OfficeTaskUpdated event naming "reviewers" — the same field an ordinary
+// insert-path registration publishes.
+func TestAddTaskReviewer_ClaimingAutoSeatPublishesTaskUpdatedNamingReviewers(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "claim-pub1", "ws-claim-pub", "C", "todo", 2)
+	stepID := "step-claim-pub1"
+
+	if _, err := deps.db.Exec(`
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES ('agent-claiming', '', 'agent-claiming', 'agent-claiming', 'ws-claim-pub', '', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed claiming agent profile: %v", err)
+	}
+	if _, err := deps.db.Exec(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES ('auto-seat-claim-pub1', ?, 'claim-pub1', 'reviewer', 'agent-auto', 1, 0, 'auto')
+	`, stepID); err != nil {
+		t.Fatalf("seed auto seat: %v", err)
+	}
+
+	eb := bus.NewMemoryEventBus(logger.Default())
+	deps.svc.SetEventBus(eb)
+	var publishedFields [][]any
+	if _, err := eb.Subscribe(events.OfficeTaskUpdated, func(_ context.Context, evt *bus.Event) error {
+		data, ok := evt.Data.(map[string]any)
+		if !ok {
+			t.Fatalf("event data = %T, want map[string]any", evt.Data)
+		}
+		fields, ok := data["fields"].([]string)
+		if !ok {
+			t.Fatalf("event fields = %T, want []string", data["fields"])
+		}
+		asAny := make([]any, len(fields))
+		for i, f := range fields {
+			asAny[i] = f
+		}
+		publishedFields = append(publishedFields, asAny)
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	body := `{"agent_profile_id":"agent-claiming"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/office/tasks/claim-pub1/reviewers", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+
+	if len(publishedFields) != 1 {
+		t.Fatalf("published OfficeTaskUpdated events = %d, want 1 on claim: %+v", len(publishedFields), publishedFields)
+	}
+	got := publishedFields[0]
+	if len(got) != 1 || got[0] != "reviewers" {
+		t.Fatalf("published fields = %+v, want [\"reviewers\"] (the same field a plain insert publishes)", got)
+	}
+}
+
 func TestAddTaskApprover_HappyPath_NoCaller(t *testing.T) {
 	deps := newTestDeps(t)
 	insertTestTask(t, deps.db, "app1", "ws-app", "A", "todo", 2)

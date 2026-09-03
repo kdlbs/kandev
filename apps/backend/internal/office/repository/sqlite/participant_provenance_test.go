@@ -248,42 +248,31 @@ func TestAddTaskParticipant_DecisionStoreReadFailureAbortsTheTransaction(t *test
 	}
 }
 
-// TestAddTaskParticipant_FallsThroughToInsertWhenClaimTargetVanishes is
-// AC-OFFICE-SEAT-PROVENANCE-004.8: when the seat a registration selected to
-// claim is removed before the claim is applied, the registration writes a
-// new manual seat for its named agent rather than completing having
-// written nothing.
-func TestAddTaskParticipant_FallsThroughToInsertWhenClaimTargetVanishes(t *testing.T) {
-	repo := newSearchTestRepo(t)
-	ctx := context.Background()
-
-	seedParticipantTask(t, repo, "vanish-1", "step-1")
-	seedAutoSeat(t, repo, "auto-vanish", "step-1", "vanish-1", "reviewer", "agent-auto")
-	seedParticipantAgent(t, repo, "agent-human")
-
-	// Simulate the claim target being decided (equivalent to removed, for
-	// the conditional UPDATE's purposes: the row still exists but is no
-	// longer claimable) after findClaimableAutoSeat's own upfront check
-	// would have selected it. A recorded decision closes the same window
-	// the conditional UPDATE guards against a genuine removal.
-	if _, err := repo.ExecRaw(ctx, `
-		INSERT INTO workflow_step_decisions (id, task_id, step_id, participant_id, decision, decided_at)
-		VALUES ('dec-vanish', 'vanish-1', 'step-1', 'auto-vanish', 'approved', datetime('now'))
-	`); err != nil {
-		t.Fatalf("seed decision: %v", err)
-	}
-
-	result, err := repo.AddTaskParticipant(ctx, "vanish-1", "agent-human", "reviewer")
-	if err != nil {
-		t.Fatalf("AddTaskParticipant: %v", err)
-	}
-	if result.Outcome != sqlite.ParticipantWriteOutcomeInserted {
-		t.Fatalf("outcome = %q, want %q", result.Outcome, sqlite.ParticipantWriteOutcomeInserted)
-	}
-	if n := participantRowCount(t, repo, "vanish-1"); n != 2 {
-		t.Fatalf("rows = %d, want 2 (the decided auto seat plus a fresh manual seat)", n)
-	}
-}
+// AC-OFFICE-SEAT-PROVENANCE-004.8 ("the seat a registration selected to
+// claim is removed before the claim is applied") is NOT the same scenario
+// as a decision landing on the seat before the claim search runs — that is
+// TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat
+// (participants_ops_test.go), where findClaimableAutoSeat's own decision
+// check excludes the seat before any candidate is even selected, so
+// claimAutoSeat's conditional UPDATE is never reached at all. A prior
+// version of this file had a test with this AC's name that seeded a
+// decision and asserted the fallthrough — that test never actually
+// exercised claimAutoSeat's zero-rows-affected branch; it was a duplicate
+// of the DoesNotClaimADecidedAutoSeat case above under the wrong name.
+//
+// AC-004.8's actual scenario — a candidate already selected by
+// findClaimableAutoSeat, then vanishing before claimAutoSeat's UPDATE
+// commits — cannot be forced deterministically against this single-writer
+// SQLite pool: RemoveTaskParticipant takes no lock, but SQLite still
+// serializes the whole transaction, so a second call can only run strictly
+// before or strictly after AddTaskParticipant's transaction, never inside
+// it. The real proof is
+// TestPostgresAddTaskParticipant_ConvergesWithConcurrentRemoveOfClaimTarget
+// (participant_claim_postgres_test.go): RemoveTaskParticipant does not
+// acquire ParticipantRoleSeatLockKey, so on PostgreSQL it can commit its
+// DELETE between AddTaskParticipant's SELECT and its conditional UPDATE
+// under genuine cross-connection concurrency, hitting exactly the
+// zero-rows-affected branch this AC protects.
 
 // TestAddTaskParticipant_DoesNotClaimAnAutoSeatAtAnEarlierStep is
 // AC-OFFICE-SEAT-PROVENANCE-003.1/003.3: the claim search is scoped to the
@@ -333,6 +322,94 @@ func TestAddTaskParticipant_DoesNotClaimAnAutoSeatAtAnEarlierStep(t *testing.T) 
 	}
 	if newSeatStepID != "step-2" {
 		t.Errorf("new manual seat step_id = %q, want %q (the task's current step)", newSeatStepID, "step-2")
+	}
+}
+
+// TestAddTaskParticipant_MultipleAutoSeatsClaimsNoneInsertsFresh is
+// AC-OFFICE-SEAT-PROVENANCE-002.6: when the role slate holds more than one
+// "auto" seat, the registration claims none of them and writes a new
+// "manual" seat — the count alone decides, with no ordering or tiebreak.
+// findClaimableAutoSeat's len(candidates) != 1 guard is the only production
+// branch this exercises; before this test, every seeded scenario in this
+// package used exactly one auto seat per slate.
+func TestAddTaskParticipant_MultipleAutoSeatsClaimsNoneInsertsFresh(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "multi-auto-1", "step-1")
+	seedAutoSeat(t, repo, "auto-multi-a", "step-1", "multi-auto-1", "reviewer", "agent-auto-a")
+	seedAutoSeat(t, repo, "auto-multi-b", "step-1", "multi-auto-1", "reviewer", "agent-auto-b")
+	seedParticipantAgent(t, repo, "agent-human")
+
+	result, err := repo.AddTaskParticipant(ctx, "multi-auto-1", "agent-human", "reviewer")
+	if err != nil {
+		t.Fatalf("AddTaskParticipant: %v", err)
+	}
+	if result.Outcome != sqlite.ParticipantWriteOutcomeInserted {
+		t.Fatalf("outcome = %q, want %q (two auto seats means neither is claimable)", result.Outcome, sqlite.ParticipantWriteOutcomeInserted)
+	}
+	if n := participantRowCount(t, repo, "multi-auto-1"); n != 3 {
+		t.Fatalf("rows = %d, want 3 (both auto seats untouched, one new manual seat)", n)
+	}
+
+	for _, seatID := range []string{"auto-multi-a", "auto-multi-b"} {
+		var provenance string
+		if err := repo.ReaderDB().Get(&provenance,
+			`SELECT provenance FROM workflow_step_participants WHERE id = ?`, seatID); err != nil {
+			t.Fatalf("read provenance for %s: %v", seatID, err)
+		}
+		if provenance != "auto" {
+			t.Errorf("seat %s provenance = %q, want unchanged %q", seatID, provenance, "auto")
+		}
+	}
+}
+
+// TestAddTaskParticipant_NonStandardProvenanceIsNotClaimable is
+// AC-OFFICE-SEAT-PROVENANCE-005.3: a seat whose stored provenance is
+// neither "auto" nor "manual" is not claimable, and reading it does not
+// fail the read. findClaimableAutoSeat's positive `provenance = 'auto'`
+// filter satisfies this by construction; this test pins that a row outside
+// the two known values is inert rather than crashing the query or being
+// silently treated as claimable.
+func TestAddTaskParticipant_NonStandardProvenanceIsNotClaimable(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "legacy-prov-1", "step-1")
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES ('legacy-seat', 'step-1', 'legacy-prov-1', 'reviewer', 'agent-legacy', 1, 0, 'legacy')
+	`); err != nil {
+		t.Fatalf("seed legacy-provenance seat: %v", err)
+	}
+	seedParticipantAgent(t, repo, "agent-human")
+
+	result, err := repo.AddTaskParticipant(ctx, "legacy-prov-1", "agent-human", "reviewer")
+	if err != nil {
+		t.Fatalf("AddTaskParticipant: %v", err)
+	}
+	if result.Outcome != sqlite.ParticipantWriteOutcomeInserted {
+		t.Fatalf("outcome = %q, want %q (a non-auto, non-manual seat is not claimable)", result.Outcome, sqlite.ParticipantWriteOutcomeInserted)
+	}
+	if n := participantRowCount(t, repo, "legacy-prov-1"); n != 2 {
+		t.Fatalf("rows = %d, want 2 (legacy seat untouched, one new manual seat)", n)
+	}
+
+	var provenance, agent string
+	if err := repo.ReaderDB().Get(&provenance,
+		`SELECT provenance FROM workflow_step_participants WHERE id = 'legacy-seat'`); err != nil {
+		t.Fatalf("read provenance: %v", err)
+	}
+	if provenance != "legacy" {
+		t.Errorf("legacy seat provenance = %q, want unchanged %q", provenance, "legacy")
+	}
+	if err := repo.ReaderDB().Get(&agent,
+		`SELECT agent_profile_id FROM workflow_step_participants WHERE id = 'legacy-seat'`); err != nil {
+		t.Fatalf("read agent: %v", err)
+	}
+	if agent != "agent-legacy" {
+		t.Errorf("legacy seat agent = %q, want unchanged %q (not displaced)", agent, "agent-legacy")
 	}
 }
 

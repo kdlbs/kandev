@@ -524,3 +524,265 @@ func TestPostgresAddTaskParticipantVsAddTaskParticipantOneClaimsOneInserts(t *te
 		}
 	}
 }
+
+// TestPostgresAddTaskParticipant_ConvergesWithConcurrentRemoveOfClaimTarget
+// is AC-OFFICE-SEAT-PROVENANCE-004.8's actual proof obligation: the seat a
+// registration selected to claim is removed before the claim is applied.
+// RemoveTaskParticipant (unlike EnsureRoleSeat, AddTaskParticipant and
+// recordStepDecisionTx) never acquires ParticipantRoleSeatLockKey — it is a
+// plain unguarded DELETE — so it is the one writer that can genuinely
+// commit in the middle of AddTaskParticipant's transaction, between
+// findClaimableAutoSeat's SELECT and claimAutoSeat's conditional UPDATE,
+// under PostgreSQL's READ COMMITTED isolation. This is the only writer
+// pairing this package's SQLite-level tests cannot force: SQLite's
+// single-writer pool serializes both calls' entire transactions, so a
+// second call can only land strictly before or strictly after, never
+// inside, the first.
+//
+// Whichever way the two calls interleave, the end state converges to the
+// same thing: exactly one seat for (task, role), naming the manually
+// registered agent, provenance "manual". The three orderings collapse to
+// this identically:
+//   - Remove commits before Add's transaction starts: findClaimableAutoSeat
+//     sees no candidate, Add falls through to insertManualParticipant.
+//   - Remove commits after Add's transaction commits: by then the row's
+//     agent_profile_id has already changed to the claiming agent, so
+//     Remove's own WHERE clause (still naming the original auto-cast
+//     agent) matches nothing and no-ops.
+//   - Remove commits between Add's SELECT and its UPDATE (the AC-004.8
+//     window): claimAutoSeat's conditional UPDATE affects zero rows, and
+//     attemptClaim falls through to insertManualParticipant exactly as the
+//     first two cases do.
+//
+// Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresAddTaskParticipant_ConvergesWithConcurrentRemoveOfClaimTarget(t *testing.T) {
+	const iterations = 15
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := openIsolatedPostgresMultiConnForClaimRace(t, dsn, 4)
+	ctx := context.Background()
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
+	workflowRepo, err := workflowrepo.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init workflow repo: %v", err)
+	}
+	officeRepo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES (?, '', 'Vanish Race', ?, ?)
+	`), "wf-vanish-race", now, now); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	step := &models.WorkflowStep{
+		WorkflowID: "wf-vanish-race", Name: "Review", Position: 0, StageType: models.StageTypeReview,
+	}
+	if err := workflowRepo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+
+	for _, agentID := range []string{"agent-auto-vanish", "agent-human-vanish"} {
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
+		`), agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent %s: %v", agentID, err)
+		}
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'ws-vanish-race', '', ?, ?)
+		`), agentID, agentID, agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent profile %s: %v", agentID, err)
+		}
+	}
+
+	claimedInPlace, insertedFresh := 0, 0
+	for i := 0; i < iterations; i++ {
+		taskID := fmt.Sprintf("task-vanish-race-%d", i)
+		seatID := fmt.Sprintf("seat-vanish-race-%d", i)
+		seedNow := time.Now().UTC()
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO tasks (id, workflow_step_id, title, created_at, updated_at) VALUES (?, ?, 'race', ?, ?)
+		`), taskID, step.ID, seedNow, seedNow); err != nil {
+			t.Fatalf("iteration %d: seed task: %v", i, err)
+		}
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO workflow_step_participants
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+			VALUES (?, ?, ?, 'reviewer', 'agent-auto-vanish', 1, 0, 'auto')
+		`), seatID, step.ID, taskID); err != nil {
+			t.Fatalf("iteration %d: seed auto seat: %v", i, err)
+		}
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var claimResult sqlite.ParticipantWriteResult
+		var claimErr, removeErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			claimResult, claimErr = officeRepo.AddTaskParticipant(ctx, taskID, "agent-human-vanish", "reviewer")
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			removeErr = officeRepo.RemoveTaskParticipant(ctx, taskID, "agent-auto-vanish", "reviewer")
+		}()
+		close(start)
+		wg.Wait()
+
+		if claimErr != nil {
+			t.Fatalf("iteration %d: AddTaskParticipant: %v", i, claimErr)
+		}
+		if removeErr != nil {
+			t.Fatalf("iteration %d: RemoveTaskParticipant: %v", i, removeErr)
+		}
+		if claimResult.Outcome != sqlite.ParticipantWriteOutcomeClaimed && claimResult.Outcome != sqlite.ParticipantWriteOutcomeInserted {
+			t.Fatalf("iteration %d: unexpected outcome %q", i, claimResult.Outcome)
+		}
+
+		var seats []struct {
+			ID             string `db:"id"`
+			AgentProfileID string `db:"agent_profile_id"`
+			Provenance     string `db:"provenance"`
+		}
+		if err := db.SelectContext(ctx, &seats, db.Rebind(`
+			SELECT id, agent_profile_id, provenance FROM workflow_step_participants
+			WHERE task_id = ? AND role = 'reviewer'
+		`), taskID); err != nil {
+			t.Fatalf("iteration %d: list seats: %v", i, err)
+		}
+		if len(seats) != 1 {
+			t.Fatalf("iteration %d: AC-OFFICE-SEAT-PROVENANCE-004.8: expected exactly one seat afterward, got %d: %+v", i, len(seats), seats)
+		}
+		if seats[0].AgentProfileID != "agent-human-vanish" {
+			t.Fatalf("iteration %d: expected the registering agent to hold the seat, got %q", i, seats[0].AgentProfileID)
+		}
+		if seats[0].Provenance != "manual" {
+			t.Fatalf("iteration %d: expected provenance manual, got %q", i, seats[0].Provenance)
+		}
+		if seats[0].ID == seatID {
+			claimedInPlace++
+		} else {
+			insertedFresh++
+		}
+	}
+
+	// Split is scheduler noise: claimedInPlace covers the "remove committed
+	// outside the window" orderings (the original row survived, reassigned
+	// in place); insertedFresh covers both "remove won before Add started"
+	// and the AC-004.8 mid-transaction window itself (the original row is
+	// gone, a fresh one was inserted). Every iteration is asserted above
+	// regardless of which branch it took.
+	t.Logf("claimed-in-place=%d inserted-fresh=%d", claimedInPlace, insertedFresh)
+}
+
+// TestPostgresAddTaskParticipantVsAddTaskParticipantSameAgentConvergesOnOneSeat
+// is AC-OFFICE-SEAT-PROVENANCE-004.4's proof obligation: two manual
+// registrations naming the SAME agent profile racing for the same role.
+// Exactly one seat shall exist afterward. Under
+// ParticipantRoleSeatLockKey's shared exclusion, the second caller's own
+// probeExistingIdentity (run inside the lock, after the first caller has
+// committed) is expected to find the first caller's row and report
+// Unchanged rather than reach insertManualParticipant's natural-key
+// backstop at all — this test proves the observable convergence, not which
+// internal branch produced it. Skips unless KANDEV_TEST_POSTGRES_DSN is
+// set.
+func TestPostgresAddTaskParticipantVsAddTaskParticipantSameAgentConvergesOnOneSeat(t *testing.T) {
+	const iterations = 15
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := openIsolatedPostgresMultiConnForClaimRace(t, dsn, 4)
+	ctx := context.Background()
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
+	workflowRepo, err := workflowrepo.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init workflow repo: %v", err)
+	}
+	officeRepo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES (?, '', 'Same Agent Race', ?, ?)
+	`), "wf-same-agent-race", now, now); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	step := &models.WorkflowStep{
+		WorkflowID: "wf-same-agent-race", Name: "Review", Position: 0, StageType: models.StageTypeReview,
+	}
+	if err := workflowRepo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
+	`), "agent-same-race", "agent-same-race", now, now); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'ws-same-agent-race', '', ?, ?)
+	`), "agent-same-race", "agent-same-race", "agent-same-race", "agent-same-race", now, now); err != nil {
+		t.Fatalf("seed agent profile: %v", err)
+	}
+
+	for i := 0; i < iterations; i++ {
+		taskID := fmt.Sprintf("task-same-agent-race-%d", i)
+		seedNow := time.Now().UTC()
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO tasks (id, workflow_step_id, title, created_at, updated_at) VALUES (?, ?, 'race', ?, ?)
+		`), taskID, step.ID, seedNow, seedNow); err != nil {
+			t.Fatalf("iteration %d: seed task: %v", i, err)
+		}
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var errA, errB error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, errA = officeRepo.AddTaskParticipant(ctx, taskID, "agent-same-race", "reviewer")
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, errB = officeRepo.AddTaskParticipant(ctx, taskID, "agent-same-race", "reviewer")
+		}()
+		close(start)
+		wg.Wait()
+
+		if errA != nil {
+			t.Fatalf("iteration %d: AddTaskParticipant (A): %v", i, errA)
+		}
+		if errB != nil {
+			t.Fatalf("iteration %d: AddTaskParticipant (B): %v", i, errB)
+		}
+
+		var count int
+		if err := db.GetContext(ctx, &count, db.Rebind(`
+			SELECT COUNT(*) FROM workflow_step_participants WHERE task_id = ? AND role = 'reviewer'
+		`), taskID); err != nil {
+			t.Fatalf("iteration %d: count seats: %v", i, err)
+		}
+		if count != 1 {
+			t.Fatalf("iteration %d: AC-OFFICE-SEAT-PROVENANCE-004.4: expected exactly one seat, got %d", i, count)
+		}
+	}
+}
