@@ -19,6 +19,7 @@ import "github.com/kandev/kandev/internal/agentctl/server/adapter"
 func (m *Manager) sendUpdateBlocking(event adapter.AgentEvent) bool {
 	select {
 	case m.updatesCh <- event:
+		m.recordTerminalOutcome(event)
 		return true
 	default:
 	}
@@ -31,6 +32,7 @@ func (m *Manager) sendUpdateBlocking(event adapter.AgentEvent) bool {
 
 	select {
 	case m.updatesCh <- event:
+		m.recordTerminalOutcome(event)
 		return true
 	case <-stopCh:
 		return false

@@ -212,6 +212,13 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
+	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
+	// anything that could reach Start(): this manager satisfies
+	// process.TurnOutcomeRecorder via RetainTurnOutcome above, and nothing
+	// outside this function can start the process manager until
+	// CreateInstance returns, so setting it here happens-before any
+	// terminal event the instance could ever produce.
+	procMgr.SetTurnOutcomeRecorder(id, m)
 	// Materialize provider-qualified comparison targets before any tracker
 	// polling starts. Failures remain explicit unavailable tracker state.
 	procMgr.PrepareComparisonTargets(ctx)
