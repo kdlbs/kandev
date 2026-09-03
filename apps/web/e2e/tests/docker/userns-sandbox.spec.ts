@@ -29,7 +29,6 @@ test.describe("Docker executor user namespace sandbox", () => {
         env_vars: gitConfigEnvVars,
         prepare_script: "",
         cleanup_script: "",
-        env_vars: [],
       }),
       apiClient.createExecutorProfile(executor!.id, {
         name: "User namespaces disabled",
@@ -37,7 +36,6 @@ test.describe("Docker executor user namespace sandbox", () => {
         env_vars: gitConfigEnvVars,
         prepare_script: "",
         cleanup_script: "",
-        env_vars: [],
       }),
     ]);
     try {
