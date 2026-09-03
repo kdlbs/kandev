@@ -95,6 +95,13 @@ func (s *Service) CoalesceRoutineWakeupForTest(
 	}
 }
 
+// RepoForTest exposes the service's underlying repository so external test
+// packages can share its DB connection with another package's store (e.g.
+// configsync.NewStore) instead of standing up a second, disconnected schema.
+func (s *Service) RepoForTest() *sqlite.Repository {
+	return s.repo
+}
+
 // ExecSQL executes raw SQL against the service's database for test setup.
 func (s *Service) ExecSQL(t *testing.T, query string, args ...interface{}) {
 	t.Helper()

@@ -218,6 +218,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-27-preserve-legacy-sqlite-before-default-initialization | [Preserve Legacy SQLite Data Before Default Initialization](2026-08-27-preserve-legacy-sqlite-before-default-initialization.md) | accepted | backend, cli, operations | 2026-08-27 |
 | 2026-08-27-mixed-git-change-facets | [Preserve mixed Git changes as path facets](2026-08-27-mixed-git-change-facets.md) | accepted | backend, agentctl, frontend, protocol | 2026-08-27 |
 | 2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head | [Bind GitHub Auto-Merge Attempts to the Reviewed Head](2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head.md) | accepted | backend, frontend, protocol, security, GitHub | 2026-08-28 |
+| 2026-08-28-viewport-activation-owns-thread-streams | [Viewport Activation Owns Threads Session Streams](2026-08-28-viewport-activation-owns-thread-streams.md) | proposed | backend, frontend, protocol | 2026-08-28 |
 | 2026-08-30-context-reset-quiesces-active-turn | [Quiesce Active Turns Before Context Reset](2026-08-30-context-reset-quiesces-active-turn.md) | accepted | backend, workflow | 2026-08-30 |
 | 2026-08-30-empty-remote-bootstrap-publication | [Keep Empty Remote Bootstrap Local Until Publication](2026-08-30-empty-remote-bootstrap-publication.md) | accepted | backend, frontend, protocol, security | 2026-08-30 |
 | 2026-08-30-bound-untracked-dependency-enumeration | [Bound Untracked Dependency Enumeration](2026-08-30-bound-untracked-dependency-enumeration.md) | accepted | backend | 2026-08-30 |
@@ -229,6 +230,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-31-local-worktree-refresh-best-effort | [Local Worktree Refresh Is Best Effort](2026-08-31-local-worktree-refresh-best-effort.md) | accepted | backend, security, operations | 2026-08-31 |
 | 2026-08-31-revoke-merge-approval-after-untrusted-push | [Revoke merge approval after an untrusted pull-request push](2026-08-31-revoke-merge-approval-after-untrusted-push.md) | accepted | workflow, security | 2026-08-31 |
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |
+| 2026-08-31-surface-owned-saved-task-views | [Keep Saved Task Views Surface Owned](2026-08-31-surface-owned-saved-task-views.md) | proposed | backend, frontend | 2026-08-31 |
 | 2026-08-31-agent-aware-mcp-tool-names | [Preserve Canonical MCP Tool Names Through Agent Namespacing](2026-08-31-agent-aware-mcp-tool-names.md) | accepted | backend, agentctl, protocol | 2026-08-31 |
 | 2026-08-31-workflow-profile-session-switch-policy | [Make Workflow Profile-Session Switching Explicit](2026-08-31-workflow-profile-session-switch-policy.md) | accepted | workflow | 2026-08-31 |
 | 2026-09-01-server-owned-saved-prompt-expansion | [Keep Saved-Prompt Expansion Server-Owned](2026-09-01-server-owned-saved-prompt-expansion.md) | accepted | backend, frontend, protocol, security | 2026-09-01 |

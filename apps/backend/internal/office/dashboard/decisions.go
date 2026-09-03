@@ -422,10 +422,10 @@ func (s *DashboardService) logDecisionActivity(ctx context.Context, d *DecisionR
 }
 
 // runReactivityForDecision queues the appropriate run after a
-// decision lands. For changes_requested, the assignee is woken with
-// the comment passed through. For approved, when all approvers now
-// have current approved decisions AND the task is in_review, the
-// assignee is woken with task_ready_to_close.
+// decision lands. For changes_requested and rejected (synonyms), the
+// assignee is woken with the comment passed through. For approved,
+// when all approvers now have current approved decisions AND the task
+// is in_review, the assignee is woken with task_ready_to_close.
 //
 // Best-effort — failures are logged, never propagated.
 func (s *DashboardService) runReactivityForDecision(ctx context.Context, d *DecisionRecord) {
@@ -456,7 +456,7 @@ func (s *DashboardService) buildDecisionRuns(
 	ctx context.Context, d *DecisionRecord, exec *sqlite.TaskExecutionFields,
 ) []ApprovalRun {
 	switch d.Decision {
-	case models.DecisionChangesRequested:
+	case models.DecisionChangesRequested, models.DecisionRejected:
 		return []ApprovalRun{{
 			AgentID:         exec.AssigneeAgentProfileID,
 			Reason:          runTaskChangesRequested,
@@ -465,6 +465,7 @@ func (s *DashboardService) buildDecisionRuns(
 			ActorID:         d.DeciderID,
 			ActorType:       d.DeciderType,
 			DecisionComment: d.Comment,
+			IdempotencyKey:  decisionRunIdempotencyKey(d),
 		}}
 	case models.DecisionApproved:
 		if !s.allApproversApproved(ctx, d.TaskID) {
@@ -474,15 +475,26 @@ func (s *DashboardService) buildDecisionRuns(
 			return nil
 		}
 		return []ApprovalRun{{
-			AgentID:     exec.AssigneeAgentProfileID,
-			Reason:      runTaskReadyToClose,
-			TaskID:      d.TaskID,
-			WorkspaceID: exec.WorkspaceID,
-			ActorID:     d.DeciderID,
-			ActorType:   d.DeciderType,
+			AgentID:        exec.AssigneeAgentProfileID,
+			Reason:         runTaskReadyToClose,
+			TaskID:         d.TaskID,
+			WorkspaceID:    exec.WorkspaceID,
+			ActorID:        d.DeciderID,
+			ActorType:      d.DeciderType,
+			IdempotencyKey: decisionRunIdempotencyKey(d),
 		}}
 	}
 	return nil
+}
+
+// decisionRunIdempotencyKey scopes an approval-flow wake to the durable
+// decision that produced it. A task may enter review more than once, so the
+// scheduler's default (reason, task, agent) key would suppress later rounds.
+func decisionRunIdempotencyKey(d *DecisionRecord) string {
+	if d == nil || d.ID == "" {
+		return ""
+	}
+	return "decision:" + d.ID
 }
 
 // isReviewState returns true when a stored task state represents the

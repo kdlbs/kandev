@@ -123,14 +123,14 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 
-	appliedTransition := s.applyEngineTransition(
+	appliedTransition := s.applyEngineTransitionWithMode(
 		ctx,
 		parentID,
 		session,
 		result,
 		engine.TriggerOnChildrenCompleted,
 		parent.Description,
-		true,
+		transitionLifecycleWithOnEnter,
 	)
 	if !appliedTransition {
 		return false

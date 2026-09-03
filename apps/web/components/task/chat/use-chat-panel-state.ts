@@ -91,6 +91,7 @@ function useRefocusChatAfterLayout() {
 }
 
 type AutoApplyPlanLayoutOpts = {
+  enabled?: boolean;
   resolvedSessionId: string | null;
   taskId: string | null;
   sessionMetaPlanMode: boolean;
@@ -106,6 +107,7 @@ type AutoApplyPlanLayoutOpts = {
  *  sessionMetaPlanMode from deepMerge hydration preserving deleted metadata keys. */
 function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
   const {
+    enabled = true,
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
@@ -116,7 +118,7 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
     addContextFile,
   } = opts;
   useEffect(() => {
-    if (!resolvedSessionId || !taskId) return;
+    if (!enabled || !resolvedSessionId || !taskId) return;
     // Reset the guard when plan mode is disabled so future plan-mode steps
     // in the same session can be auto-applied (e.g. after proceeding away and back).
     if (!sessionMetaPlanMode && autoAppliedPlanSessions.has(resolvedSessionId)) {
@@ -137,6 +139,7 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
   }, [
     resolvedSessionId,
     taskId,
+    enabled,
     sessionMetaPlanMode,
     currentStepHasPlanMode,
     setActiveDocument,
@@ -146,7 +149,12 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
   ]);
 }
 
-export function usePlanMode(resolvedSessionId: string | null, taskId: string | null) {
+export function usePlanMode(
+  resolvedSessionId: string | null,
+  taskId: string | null,
+  options: { enableLayoutEffects?: boolean } = {},
+) {
+  const enableLayoutEffects = options.enableLayoutEffects ?? true;
   const activeDocument = useAppStore((state) =>
     resolvedSessionId
       ? (state.documentPanel.activeDocumentBySessionId[resolvedSessionId] ?? null)
@@ -179,6 +187,7 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
   const planLayoutVisible = activeDocument?.type === "plan";
 
   useAutoApplyPlanLayout({
+    enabled: enableLayoutEffects,
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
@@ -190,6 +199,7 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
   });
 
   useAutoDisablePlanMode({
+    enabled: enableLayoutEffects,
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
@@ -203,6 +213,7 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
 
   const refocusChatAfterLayout = useRefocusChatAfterLayout();
   const { togglePlanLayout, handlePlanModeChange } = usePlanLayoutHandlers({
+    enabled: enableLayoutEffects,
     resolvedSessionId,
     taskId,
     setActiveDocument,
@@ -512,6 +523,8 @@ function deriveQueueAwareSessionInput(
 export type UseChatPanelStateOptions = {
   sessionId: string | null;
   taskId?: string | null;
+  /** Disable Dockview and plan-layout mutations for embedded multi-panel hosts. */
+  disableWorkbenchEffects?: boolean;
   onOpenFile?: (path: string, repo?: string) => void;
   onOpenFileAtLine?: (filePath: string) => void;
 };
@@ -519,12 +532,15 @@ export type UseChatPanelStateOptions = {
 export function useChatPanelState({
   sessionId,
   taskId: taskIdHint = null,
+  disableWorkbenchEffects = false,
   onOpenFile,
   onOpenFileAtLine,
 }: UseChatPanelStateOptions) {
   const sessionState = useSessionState(sessionId, { taskIdHint });
   const { resolvedSessionId, taskId } = sessionState;
-  const planMode = usePlanMode(resolvedSessionId, taskId);
+  const planMode = usePlanMode(resolvedSessionId, taskId, {
+    enableLayoutEffects: !disableWorkbenchEffects,
+  });
   const {
     supportsMcp,
     mcpServers,
@@ -542,12 +558,9 @@ export function useChatPanelState({
   } = planMode;
   const guardedHandlePlanModeChange = useCallback(
     (enabled: boolean) => {
-      if (planModeAvailable) {
-        rawHandlePlanModeChange(enabled);
-      } else {
-        // Toggle based on current layout state, ignoring the passed value
-        togglePlanLayout(!planLayoutVisible);
-      }
+      if (planModeAvailable) return rawHandlePlanModeChange(enabled);
+      // Toggle based on current layout state, ignoring the passed value
+      togglePlanLayout(!planLayoutVisible);
     },
     [planModeAvailable, rawHandlePlanModeChange, togglePlanLayout, planLayoutVisible],
   );

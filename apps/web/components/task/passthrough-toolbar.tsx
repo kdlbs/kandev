@@ -107,7 +107,7 @@ export function PassthroughToolbar({
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
 
   const { pendingComments, pendingCount } = usePendingPassthroughComments(sessionId);
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isFinePointer: finePointer } = useResponsiveBreakpoint();
   const { openFile } = useFileEditors();
   const panelState = useChatPanelState({ sessionId: sessionId ?? null, onOpenFile: openFile });
   const planActions = usePlanActions({
@@ -157,7 +157,7 @@ export function PassthroughToolbar({
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
       <div className="flex-1 min-h-0">
-        <PassthroughTerminal sessionId={sessionId} mode="agent" enableTouchScroll={isMobile} />
+        <PassthroughTerminal sessionId={sessionId} mode="agent" enableTouchScroll={!finePointer} />
       </div>
 
       {commentsOpen && pendingCount > 0 && (

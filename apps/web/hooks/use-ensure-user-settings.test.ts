@@ -79,6 +79,9 @@ function makeUnloadedSettings(): UserSettingsState {
     sidebarViews: [],
     sidebarActiveViewId: null,
     sidebarDraft: null,
+    threadViews: [],
+    threadActiveViewId: null,
+    threadViewDraft: null,
     sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
     taskCreateLastUsed: {
       repositoryId: null,
@@ -94,6 +97,7 @@ function makeUnloadedSettings(): UserSettingsState {
     gitlabSavedPresets: undefined,
     azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
+    defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
     terminalFontFamily: null,

@@ -16,6 +16,7 @@ func TestClassifyRouteSPARoutes(t *testing.T) {
 		wantParams map[string]string
 	}{
 		{name: "home", path: "/", wantRoute: RouteHome},
+		{name: "threads", path: "/threads", wantRoute: RouteThreads},
 		{name: "tasks", path: "/tasks", wantRoute: RouteTasks},
 		{name: "task detail", path: "/t/task-123", wantRoute: RouteTaskDetail, wantParams: map[string]string{"taskId": "task-123"}},
 		{name: "task detail compat", path: "/tasks/task-123", wantRoute: RouteTaskDetail, wantParams: map[string]string{"taskId": "task-123"}},

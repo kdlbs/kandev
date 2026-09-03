@@ -281,7 +281,11 @@ type ApprovalRun struct {
 	ActorID         string
 	ActorType       string
 	Role            string // reviewer|approver, when relevant
-	DecisionComment string // for changes_requested
+	DecisionComment string // for changes_requested/rejected
+	// IdempotencyKey identifies the decision event that caused this wake.
+	// Decision reactivity can recur for the same task, so the scheduler
+	// must not fall back to its once-per-task reason key.
+	IdempotencyKey string
 }
 
 // ApprovalReactivityQueuer queues approval-flow runs (review

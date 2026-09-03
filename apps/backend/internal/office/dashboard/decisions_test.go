@@ -165,6 +165,9 @@ func TestRequestTaskChanges_QueuesAssigneeRun(t *testing.T) {
 	if got.DecisionComment != "tighten the diff" {
 		t.Errorf("comment lost: %q", got.DecisionComment)
 	}
+	if got.IdempotencyKey == "" || !strings.HasPrefix(got.IdempotencyKey, "decision:") {
+		t.Errorf("idempotency key = %q, want a decision-scoped key", got.IdempotencyKey)
+	}
 }
 
 // TestApproveTask_QueuesReadyToCloseOnFinalApproval — when the last

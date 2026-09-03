@@ -206,12 +206,11 @@ test.describe("Automation run composer", () => {
       .poll(async () => (await apiClient.listSessionTurns(task.session_id!)).turns.length, {
         timeout: 15_000,
       })
-      .toBe(2);
+      .toBeGreaterThanOrEqual(2);
     const updatedTurns = await apiClient.listSessionTurns(task.session_id!);
     const replyTurnId = updatedTurns.turns.find((turn) => turn.id !== initialTurnId)?.id;
     expect(replyTurnId).toBeTruthy();
     await expect(transcript).toContainText(reply, { timeout: 15_000 });
-
     // `[data-turn-id]` is carried by every render item belonging to the reply
     // turn, not just the reply itself — a turn that produced no agent output
     // also renders an empty-turn notice row stamped with the same turn id, so

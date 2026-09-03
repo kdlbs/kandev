@@ -575,6 +575,10 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	if sidebarViews == nil {
 		sidebarViews = []models.SidebarView{}
 	}
+	threadViews := settings.ThreadViews
+	if threadViews == nil {
+		threadViews = []models.ThreadView{}
+	}
 	sidebarTaskPrefs := normalizeSidebarTaskPrefs(settings.SidebarTaskPrefs)
 	keyboardShortcuts := settings.KeyboardShortcuts
 	if keyboardShortcuts == nil {
@@ -617,6 +621,9 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"sidebar_views":                            sidebarViews,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
+		"thread_views":                             threadViews,
+		"thread_active_view_id":                    settings.ThreadActiveViewID,
+		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       sidebarTaskPrefs,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
@@ -715,6 +722,8 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		LastSeenDisplay:                   models.LastSeenDisplayAbsolute,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
+		ThreadViews:                       DefaultThreadViews(),
+		ThreadActiveViewID:                DefaultThreadViewID,
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarEnabled:               false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
@@ -784,6 +793,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SidebarViews                      json.RawMessage                     `json:"sidebar_views"`
 		SidebarActiveViewID               json.RawMessage                     `json:"sidebar_active_view_id"`
 		SidebarDraft                      *models.SidebarViewDraft            `json:"sidebar_draft"`
+		ThreadViews                       json.RawMessage                     `json:"thread_views"`
+		ThreadActiveViewID                json.RawMessage                     `json:"thread_active_view_id"`
+		ThreadViewDraft                   *models.ThreadViewDraft             `json:"thread_view_draft"`
 		SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
 		TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
 		JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views"`
@@ -904,6 +916,33 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		}
 	}
 	settings.SidebarDraft = payload.SidebarDraft
+	if len(payload.ThreadViews) > 0 {
+		var threadViews []models.ThreadView
+		if err := json.Unmarshal(payload.ThreadViews, &threadViews); err != nil {
+			return nil, err
+		}
+		if len(threadViews) > 0 {
+			settings.ThreadViews = threadViews
+		} else {
+			settings.ThreadViews = DefaultThreadViews()
+		}
+	}
+	if len(payload.ThreadActiveViewID) > 0 {
+		var activeViewID *string
+		if err := json.Unmarshal(payload.ThreadActiveViewID, &activeViewID); err != nil {
+			return nil, err
+		}
+		if activeViewID != nil {
+			settings.ThreadActiveViewID = *activeViewID
+		}
+	}
+	if !threadViewIDExists(settings.ThreadViews, settings.ThreadActiveViewID) {
+		if len(settings.ThreadViews) == 0 {
+			settings.ThreadViews = DefaultThreadViews()
+		}
+		settings.ThreadActiveViewID = settings.ThreadViews[0].ID
+	}
+	settings.ThreadViewDraft = payload.ThreadViewDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
 	settings.JiraSavedViews = payload.JiraSavedViews
