@@ -21,9 +21,10 @@ import (
 func TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabilities(t *testing.T) {
 	log := logger.Default()
 	cfg := &config.Config{
-		AuthToken:      "some-configured-token",
-		HomeDir:        "/home/kandev-test/.kandev",
-		ServerIdentity: "server-identity-abc",
+		AuthToken:         "some-configured-token",
+		HomeDir:           "/home/kandev-test/.kandev",
+		ServerIdentity:    "server-identity-abc",
+		DiagnosticLogPath: "/home/kandev-test/.kandev/logs/agentctl-diagnostic.log",
 	}
 	mgr := instance.NewManager(cfg, log)
 	t.Cleanup(func() { _ = mgr.Shutdown(t.Context()) })
@@ -43,9 +44,10 @@ func TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabiliti
 	}
 
 	var body struct {
-		HomeDir        string   `json:"home_dir"`
-		ServerIdentity string   `json:"server_identity"`
-		Capabilities   []string `json:"capabilities"`
+		HomeDir           string   `json:"home_dir"`
+		ServerIdentity    string   `json:"server_identity"`
+		Capabilities      []string `json:"capabilities"`
+		DiagnosticLogPath string   `json:"diagnostic_log_path"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -59,6 +61,9 @@ func TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabiliti
 	if len(body.Capabilities) == 0 {
 		t.Error("Capabilities is empty, want the advertised capability set")
 	}
+	if body.DiagnosticLogPath != cfg.DiagnosticLogPath {
+		t.Errorf("DiagnosticLogPath = %q, want %q", body.DiagnosticLogPath, cfg.DiagnosticLogPath)
+	}
 }
 
 // TestGetIdentityRoundTripsThroughTheRealClient drives GET /identity through
@@ -68,8 +73,9 @@ func TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabiliti
 func TestGetIdentityRoundTripsThroughTheRealClient(t *testing.T) {
 	log := logger.Default()
 	cfg := &config.Config{
-		HomeDir:        "/home/kandev-test/.kandev",
-		ServerIdentity: "server-identity-xyz",
+		HomeDir:           "/home/kandev-test/.kandev",
+		ServerIdentity:    "server-identity-xyz",
+		DiagnosticLogPath: "/home/kandev-test/.kandev/logs/agentctl-diagnostic.log",
 	}
 	mgr := instance.NewManager(cfg, log)
 	t.Cleanup(func() { _ = mgr.Shutdown(t.Context()) })
@@ -92,5 +98,8 @@ func TestGetIdentityRoundTripsThroughTheRealClient(t *testing.T) {
 	}
 	if len(identity.Capabilities) == 0 {
 		t.Error("Capabilities is empty, want the advertised capability set")
+	}
+	if identity.DiagnosticLogPath != cfg.DiagnosticLogPath {
+		t.Errorf("DiagnosticLogPath = %q, want %q", identity.DiagnosticLogPath, cfg.DiagnosticLogPath)
 	}
 }

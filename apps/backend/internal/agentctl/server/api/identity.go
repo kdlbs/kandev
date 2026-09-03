@@ -20,8 +20,9 @@ var SurvivalCapabilities = []string{"agent-survival.v1"}
 // auth and capability negotiation, since it is what decides both.
 func (m *ControlServer) handleIdentity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"home_dir":        m.cfg.HomeDir,
-		"server_identity": m.cfg.ServerIdentity,
-		"capabilities":    SurvivalCapabilities,
+		"home_dir":            m.cfg.HomeDir,
+		"server_identity":     m.cfg.ServerIdentity,
+		"capabilities":        SurvivalCapabilities,
+		"diagnostic_log_path": m.cfg.DiagnosticLogPath,
 	})
 }

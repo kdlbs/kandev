@@ -39,6 +39,14 @@ const (
 
 	defaultUnownedPeriod      = 10 * time.Minute
 	defaultDetachedEventLimit = 100
+
+	// diagnosticLogFileName is the fixed name of agentctl's own detached
+	// diagnostic log file (AC-EXECUTORS-SURVIVAL-001.3). It lives under
+	// HomeDir/logs alongside the backend's own "backend-logs.log" and the
+	// per-session ACP debug logs under logs/acp/ -- a distinct file, so two
+	// processes never rotate the same file or share one set of rollover
+	// journals.
+	diagnosticLogFileName = "agentctl-diagnostic.log"
 )
 
 // Config is the agentctl configuration.
@@ -123,6 +131,16 @@ type Config struct {
 	// logged. It answers "is this the process a previous launch started",
 	// distinct from AuthToken which answers "is the caller authorized".
 	ServerIdentity string
+
+	// DiagnosticLogPath is the durable file agentctl's own diagnostic
+	// output is written to while it may be running detached from any
+	// backend (AC-EXECUTORS-SURVIVAL-001.3). Derived from HomeDir with a
+	// fixed filename -- the sink adds no configuration key and no
+	// environment variable of its own. Empty only when HomeDir itself
+	// could not be resolved. Echoed on GET /identity so an adopting or
+	// freshly-spawning backend records it into the control-server record
+	// without independently re-deriving the same path formula.
+	DiagnosticLogPath string
 
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
@@ -370,6 +388,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	unownedPeriod := getEnvDuration("KANDEV_ACP_UNOWNED_PERIOD", defaultUnownedPeriod)
 	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
+	homeDir := resolveHomeDir()
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
@@ -413,8 +432,9 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		OTLPEndpoint:              otlpEndpoint,
 		UnownedPeriod:             unownedPeriod,
 		DetachedEventLimit:        detachedEventLimit,
-		HomeDir:                   resolveHomeDir(),
+		HomeDir:                   homeDir,
 		ServerIdentity:            generateSelfToken(),
+		DiagnosticLogPath:         resolveDiagnosticLogPath(homeDir),
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -485,6 +505,17 @@ func resolveHomeDir() string {
 		return cwd
 	}
 	return ""
+}
+
+// resolveDiagnosticLogPath derives agentctl's own detached diagnostic log
+// path from the resolved home directory (AC-EXECUTORS-SURVIVAL-001.3): a
+// fixed filename under HomeDir/logs, not an operator-configurable value.
+// Empty when homeDir itself could not be resolved.
+func resolveDiagnosticLogPath(homeDir string) string {
+	if homeDir == "" {
+		return ""
+	}
+	return filepath.Join(homeDir, "logs", diagnosticLogFileName)
 }
 
 // generateSelfToken creates a cryptographically random 32-byte hex-encoded token.

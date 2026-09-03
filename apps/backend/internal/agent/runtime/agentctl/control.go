@@ -357,9 +357,10 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 // IdentityInfo is the response from GET /identity: installation identity and
 // the capability set this control server advertises.
 type IdentityInfo struct {
-	HomeDir        string   `json:"home_dir"`
-	ServerIdentity string   `json:"server_identity"`
-	Capabilities   []string `json:"capabilities"`
+	HomeDir           string   `json:"home_dir"`
+	ServerIdentity    string   `json:"server_identity"`
+	Capabilities      []string `json:"capabilities"`
+	DiagnosticLogPath string   `json:"diagnostic_log_path"`
 }
 
 // GetIdentity fetches the control server's identity and capability set. It
