@@ -11,6 +11,13 @@ requirements:
 
 # Pipeline Task Row Parity System Design
 
+> **Revision (2026-09-03):** REQ-UI-PIPELINE-ROW-001 was revised after this
+> design shipped: collapsed (unlabelled) past/future markers proved illegible.
+> Every step now renders its own pill; no-growth comes from scrolling the step
+> run, anchored to the current step, instead of collapsing. See the
+> requirements doc's REQ-UI-PIPELINE-ROW-001 revision for current ACs; sections
+> below describing the collapsed-marker mode document the superseded design.
+
 ## Purpose and boundaries
 
 The UI system owns this design because every outcome is a presentation and
@@ -129,7 +136,7 @@ This is a frontend-only design under `apps/web/`. No backend component changes.
   step run, actions cluster. Its current `TaskActions` (archive and delete only)
   is replaced by the shared menu.
 - **`components/kanban/graph2-step-node.tsx`** (`Graph2StepNode`). Gains a
-  labelled/collapsed rendering mode and a hidden-step marking. Its unused
+  labelled past/future pill mode and a hidden-step marking. Its unused
   `onPreviewTask` declaration is 09404bae's, not ours.
 - **`components/kanban/swimlane-graph2-content.tsx`** (`SwimlaneGraph2Content`).
   Gains the deterministic sort tiebreak, resolves workspace-scoped values once,
@@ -267,7 +274,7 @@ wider signature.
 ### Step marker model
 
 Each entry in the step run carries: the step id, its title, and its phase
-(`completed`, `current`, `future`). Only the `current` entry renders a label.
+(`completed`, `current`, `future`). Every entry renders its own label.
 Phase is derived from the entry's index in the displayed steps against the
 current step's index in that same list, which is today's derivation. There is no
 "hidden" flag on an entry, because no row can render with its current step
@@ -292,17 +299,14 @@ Per row, at a 1280px board surface with 9 steps (AC-UI-PIPELINE-ROW-001.3):
 | Padding and gaps | ~48px | ~48px |
 | **Row total** | **~1646px** | **~984px** |
 
-The title's 200px, the current pill's 130px and the repository chips' 120px are
-the truncation widths AC-UI-PIPELINE-ROW-001.3 measures at, so those three are
-contract. The step run's ~400px assumes eight collapsed markers at roughly 20px
-each plus roughly 14px connectors; those per-marker figures are the
-implementation's to choose, bounded below by AC-UI-PIPELINE-ROW-001.8's floors
-of 12px per marker and 6px per gap, and bounded above by the 1280px fit. At
-those floors a nine-step run is 130px for the labelled pill plus eight collapsed
-markers at 12px and eight gaps at 6px, so 274px; that is the width at which the
-run scrolls instead of compressing further. The actions
-cluster's ~56px is the Branch A case with a full-page affordance; Branch B is
-~28px.
+The title's 200px and the repository chips' 120px are the truncation widths
+AC-UI-PIPELINE-ROW-001.3 measures at, so those are contract. The step run
+budget above is superseded by the REQ-UI-PIPELINE-ROW-001 revision: every step
+is a 130px pill (not a collapsed marker), so a nine-step run is ~1170px plus
+connectors and routinely exceeds what is left, which is exactly when
+AC-UI-PIPELINE-ROW-001.8 has it scroll, anchored to the current step, instead
+of compressing. The actions cluster is ~56px for Branch A's full-page
+affordance, ~28px for Branch B.
 
 **Past the budget.** The inline status strip's ~160px assumes no plugin
 contribution, and plugin width is third-party and unbounded, so the budget can
@@ -497,8 +501,8 @@ nothing a person could not already see.
 
 No new metrics or logs. Behavior is observed through tests:
 
-- **Component tests** for the collapse rule, the labelled-marker invariants
-  including the no-current-step case and its leading position, the empty-steps
+- **Component tests** for the labelled-pill invariants, including the
+  no-current-step case and its leading position, the empty-steps
   case taking precedence over it, the fixed inline order, absent-state
   rendering, the sort tiebreak including the no-current-step group sorting last,
   the row-local in-flight move guard and its release on every terminal outcome,
@@ -529,14 +533,13 @@ No new metrics or logs. Behavior is observed through tests:
   and the inline indicator set and order, match the rendering at this contract's
   base commit. The disclosure change AC-UI-PIPELINE-ROW-004.4 makes is the one
   sanctioned difference and is asserted separately.
-- **E2E** for the 1280px nine-step fit (AC-UI-PIPELINE-ROW-001.3), measured on
-  the row and the actions cluster and not on the task list's scroll container:
-  the row's width no greater than the list's `clientWidth`, the row's own scroll
-  region reporting `scrollWidth` no greater than its `clientWidth`, and the
-  cluster's right edge inside the board surface; the pointer hover paths that component tests cannot exercise (step
-  tooltips, chip paths, the disclosure surface); right-click opening the context
-  menu; and one narrow-surface case proving the actions cluster stays reachable
-  once the row reaches AC-UI-PIPELINE-ROW-003.11's scroll terminus. Follow
+- **E2E** for the 1280px nine-step fit (AC-UI-PIPELINE-ROW-001.3): the row's
+  width no greater than the list's `clientWidth`, and the current step's pill
+  within the step run's visible bounds without further scrolling; the pointer
+  hover paths that component tests cannot exercise (chip paths, the disclosure
+  surface); right-click opening the context menu; and one narrow-surface case
+  proving the actions cluster stays reachable once the row reaches
+  AC-UI-PIPELINE-ROW-003.11's scroll terminus. Follow
   `e2e/README.md`: arm a causal wait before the action, then assert with default
   timeouts.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IconDots } from "@tabler/icons-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -153,6 +153,15 @@ function PipelineStepNodes({
   // run, so the row keeps its single-label invariant. An empty `steps` list
   // is a distinct case and renders no run at all.
   const showUnassignedMarker = currentStepIndex === -1 && steps.length > 0;
+  const currentNodeRef = useRef<HTMLDivElement>(null);
+
+  // Every step keeps its own labelled pill (no dot-collapsing), so a
+  // many-step run routinely overflows its lane. When it does, the current
+  // step must stay the anchor: scroll it to the lane's leading edge so past
+  // steps are what falls off-screen, never the step the task is actually on.
+  useEffect(() => {
+    currentNodeRef.current?.scrollIntoView({ inline: "start", block: "nearest" });
+  }, [task.id, currentStepIndex, steps]);
 
   return (
     <div
@@ -178,7 +187,11 @@ function PipelineStepNodes({
         const moveTargets = getStepMoveTargets(moveTargetSteps, step.id);
 
         return (
-          <div key={step.id} className="flex items-center">
+          <div
+            key={step.id}
+            ref={phase === "current" ? currentNodeRef : undefined}
+            className="flex items-center"
+          >
             <Graph2StepNode
               step={step}
               phase={phase}

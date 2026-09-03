@@ -154,7 +154,7 @@ test.describe("Pipeline view", () => {
     await expect(kanban.multiSelectToolbar).not.toBeVisible();
   });
 
-  test("fits a nine-step workflow's row on a 1280px board surface without scrolling", async ({
+  test("keeps a nine-step workflow's row within the board surface, scrolling the step run to the current step instead of growing", async ({
     testPage,
     apiClient,
     seedData,
@@ -164,8 +164,6 @@ test.describe("Pipeline view", () => {
     for (let i = 0; i < 9; i++) {
       steps.push(await apiClient.createWorkflowStep(workflow.id, `Step ${i + 1}`, i));
     }
-    // AC-UI-PIPELINE-ROW-001.3's own fixture: one repository, one pull request
-    // indicator, the blocked indicator, no plugin contribution.
     const predecessor = await apiClient.createTask(seedData.workspaceId, "Nine Step Predecessor", {
       workflow_id: workflow.id,
       workflow_step_id: steps[0].id,
@@ -194,6 +192,7 @@ test.describe("Pipeline view", () => {
     });
 
     const kanban = new KanbanPage(testPage);
+    await testPage.setViewportSize({ width: 1280, height: 800 });
     await testPage.goto(`/?workflowId=${workflow.id}`);
     await expect(kanban.board).toBeVisible();
     await kanban.switchToPipelineView();
@@ -205,79 +204,37 @@ test.describe("Pipeline view", () => {
       kanban.pipelineTask(task.id).getByTestId("kanban-card-blocked-badge"),
     ).toBeVisible();
 
-    const measure = () =>
-      testPage.evaluate((taskId) => {
-        const row = document.querySelector(`[data-testid="pipeline-task-${taskId}"]`);
-        const list = row?.closest(".overflow-x-auto:not(.min-w-0)");
-        // The region AC-UI-PIPELINE-ROW-001.3 measures at this (non-terminus)
-        // width is the step run's own scroll container: the outer combined
-        // region only becomes scrollable at AC-UI-PIPELINE-ROW-003.11's
-        // terminus, so measuring it here would pass regardless of whether the
-        // collapse rule (AC-UI-PIPELINE-ROW-001.1) actually holds.
-        const scrollRegion = row?.querySelector('[data-testid="pipeline-step-run-scroll"]');
-        if (!row || !list || !scrollRegion) return null;
-        const listRect = list.getBoundingClientRect();
-        return {
-          rowWidth: row.getBoundingClientRect().width,
-          listClientWidth: list.clientWidth,
-          listRight: listRect.left + list.clientWidth,
-          scrollRegionScrollWidth: scrollRegion.scrollWidth,
-          scrollRegionClientWidth: scrollRegion.clientWidth,
-        };
-      }, task.id);
+    // Every step keeps its own labelled pill (no collapsing), so a nine-step
+    // run routinely needs more width than the row has: the step-run lane
+    // scrolls internally instead. The row itself must still never grow past
+    // the task list, and the current step's pill -- not an earlier one --
+    // must be the part that stays in view without further scrolling.
+    const row = kanban.pipelineTask(task.id);
+    await expect
+      .poll(async () =>
+        testPage.evaluate((taskId) => {
+          const rowEl = document.querySelector(`[data-testid="pipeline-task-${taskId}"]`);
+          const list = rowEl?.closest(".overflow-x-auto:not(.min-w-0)");
+          if (!rowEl || !list) return null;
+          return rowEl.getBoundingClientRect().width <= list.clientWidth + 1;
+        }, task.id),
+      )
+      .toBe(true);
 
-    // The board surface is the task list's own clientWidth, not the viewport
-    // (Terminology: "the width available to the task list after app chrome...
-    // not viewport width"). The sidebar claims a viewport-proportional share
-    // of chrome, so a 1280px viewport does not produce a 1280px board
-    // surface. Calibrate from two measurements so the resulting board surface
-    // reaches the AC's 1280px minimum regardless of that ratio.
-    const BOARD_SURFACE_TARGET = 1280;
-    const waitForListWidthChange = (fromWidth: number) =>
-      expect.poll(async () => (await measure())?.listClientWidth).not.toBe(fromWidth);
-
-    let measurements = await measure();
-    expect(measurements).not.toBeNull();
-    if (measurements!.listClientWidth < BOARD_SURFACE_TARGET) {
-      const baseViewport = testPage.viewportSize()!.width;
-      const baseListClientWidth = measurements!.listClientWidth;
-      const probeViewport = baseViewport + (BOARD_SURFACE_TARGET - baseListClientWidth);
-      await testPage.setViewportSize({ width: probeViewport, height: 800 });
-      // Dockview recalculates sidebar/board sizing asynchronously after a
-      // resize; poll until the list has actually re-rendered at the new width
-      // instead of reading a stale pre-resize measurement.
-      await waitForListWidthChange(baseListClientWidth);
-      const probeMeasurements = await measure();
-      expect(probeMeasurements).not.toBeNull();
-
-      const slope =
-        (probeMeasurements!.listClientWidth - baseListClientWidth) / (probeViewport - baseViewport);
-      expect(slope).toBeGreaterThan(0);
-
-      const targetViewport = Math.ceil(
-        probeViewport + (BOARD_SURFACE_TARGET - probeMeasurements!.listClientWidth) / slope,
-      );
-      if (targetViewport === probeViewport) {
-        measurements = probeMeasurements;
-      } else {
-        await testPage.setViewportSize({ width: targetViewport, height: 800 });
-        await waitForListWidthChange(probeMeasurements!.listClientWidth);
-        measurements = await measure();
-        expect(measurements).not.toBeNull();
-      }
-    }
-    expect(measurements!.listClientWidth).toBeGreaterThanOrEqual(BOARD_SURFACE_TARGET);
-
-    expect(measurements!.rowWidth).toBeLessThanOrEqual(measurements!.listClientWidth);
-    expect(measurements!.scrollRegionScrollWidth).toBeLessThanOrEqual(
-      measurements!.scrollRegionClientWidth,
-    );
+    const currentPill = row.getByText(steps[4].name, { exact: true });
+    await expect(currentPill).toBeVisible();
+    const scrollRegion = kanban.pipelineStepRunScroll(task.id);
+    const [pillBox, scrollBox] = await Promise.all([
+      currentPill.boundingBox(),
+      scrollRegion.boundingBox(),
+    ]);
+    expect(pillBox).not.toBeNull();
+    expect(scrollBox).not.toBeNull();
+    expect(pillBox!.x).toBeGreaterThanOrEqual(scrollBox!.x - 1);
+    expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(scrollBox!.x + scrollBox!.width + 1);
 
     const menuTrigger = kanban.pipelineTaskMenuTrigger(task.id);
     await expect(menuTrigger).toBeVisible();
-    const menuBox = await menuTrigger.boundingBox();
-    expect(menuBox).not.toBeNull();
-    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(measurements!.listRight);
   });
 
   test("collapses the status strip into the step run's single scroll region and keeps the actions cluster reachable when the row cannot fit", async ({
@@ -314,7 +271,7 @@ test.describe("Pipeline view", () => {
     await expect(testPage.getByRole("menuitem", { name: "Edit" })).toBeVisible();
   });
 
-  test("shows step title and destination tooltips on hover, the fine-pointer route to every step", async ({
+  test("shows every step's title inline and destination tooltips on hover of the current step", async ({
     testPage,
     apiClient,
     seedData,
@@ -335,10 +292,9 @@ test.describe("Pipeline view", () => {
     const row = kanban.pipelineTask(task.id);
     await expect(row).toBeVisible();
 
-    const collapsedMarker = row.getByTestId("graph2-step-node-collapsed-future").first();
-    await expect(collapsedMarker).toBeVisible();
-    await collapsedMarker.hover();
-    await expect(testPage.getByRole("tooltip", { name: nextStep.name })).toBeVisible();
+    // Every step keeps a visible labelled pill, so the next step's title
+    // needs no hover disclosure -- only the current step's move controls do.
+    await expect(row.getByTestId("graph2-step-node-future").first()).toContainText(nextStep.name);
 
     await row.getByText(seedData.steps[currentIndex].name, { exact: true }).hover();
     await expect(row.getByLabel(`Move to ${nextStep.name}`)).toBeVisible();

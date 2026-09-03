@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { IconChevronLeft, IconChevronRight, IconHelpCircle } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconCircleDashed,
+  IconChevronLeft,
+  IconChevronRight,
+  IconHelpCircle,
+} from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Task } from "@/components/kanban-card";
@@ -33,31 +39,33 @@ export type Graph2StepNodeProps = {
 const NODE_CLASS =
   "w-[130px] h-[36px] rounded-lg shrink-0 px-2.5 flex flex-col items-start justify-center";
 
-const COLLAPSED_MARKER_CLASS = "h-3 w-3 shrink-0 rounded-full";
-
-/**
- * A collapsed step marker (AC-UI-PIPELINE-ROW-001.1). Not a button: a plain
- * `span` carries no tab stop (AC-UI-PIPELINE-ROW-001.5) and no click target
- * (AC-UI-PIPELINE-ROW-001.9); the Tooltip still opens on hover for the
- * fine-pointer route of AC-UI-PIPELINE-ROW-001.4 without one.
- */
-function CollapsedNode({ step, phase }: { step: WorkflowStep; phase: "past" | "future" }) {
+/** A completed step: every step keeps its own labelled pill, matching the Kanban card's step run. */
+function PastNode({ step }: { step: WorkflowStep }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          aria-hidden="true"
-          data-testid={`graph2-step-node-collapsed-${phase}`}
-          className={cn(
-            COLLAPSED_MARKER_CLASS,
-            phase === "past"
-              ? "border border-green-500/60 bg-green-500/25"
-              : "border border-dashed border-muted-foreground/30 bg-transparent",
-          )}
-        />
-      </TooltipTrigger>
-      <TooltipContent side="top">{step.title}</TooltipContent>
-    </Tooltip>
+    <div
+      data-testid="graph2-step-node-past"
+      className={cn(NODE_CLASS, "border border-muted-foreground/20 bg-muted/30")}
+    >
+      <div className="flex items-center gap-1.5 w-full">
+        <IconCheck className="h-3 w-3 text-green-500 shrink-0" />
+        <span className="text-[11px] text-muted-foreground truncate">{step.title}</span>
+      </div>
+    </div>
+  );
+}
+
+/** A not-yet-reached step: dashed to distinguish it from a completed one. */
+function FutureNode({ step }: { step: WorkflowStep }) {
+  return (
+    <div
+      data-testid="graph2-step-node-future"
+      className={cn(NODE_CLASS, "border border-dashed border-muted-foreground/20 bg-muted/10")}
+    >
+      <div className="flex items-center gap-1.5 w-full">
+        <IconCircleDashed className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+        <span className="text-[11px] text-muted-foreground/40 truncate">{step.title}</span>
+      </div>
+    </div>
   );
 }
 
@@ -148,8 +156,8 @@ export function Graph2StepNode({
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
 
-  if (phase === "past") return <CollapsedNode step={step} phase="past" />;
-  if (phase === "future") return <CollapsedNode step={step} phase="future" />;
+  if (phase === "past") return <PastNode step={step} />;
+  if (phase === "future") return <FutureNode step={step} />;
 
   // Current phase
   const running = isRunningState(task.state);

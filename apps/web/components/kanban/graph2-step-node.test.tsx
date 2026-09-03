@@ -149,11 +149,11 @@ describe("Graph2StepNode — waiting-for-input variants", () => {
   });
 });
 
-describe("Graph2StepNode — collapsed step markers (AC-UI-PIPELINE-ROW-001)", () => {
+describe("Graph2StepNode — past/future step pills", () => {
   const PAST_STEP: WorkflowStep = { id: "step-0", title: "Triage", color: "#888" };
   const FUTURE_STEP: WorkflowStep = { id: "step-2", title: "Review", color: "#888" };
 
-  function renderCollapsed(phase: "past" | "future", onMoveTask = vi.fn()) {
+  function renderPill(phase: "past" | "future", onMoveTask = vi.fn()) {
     const step = phase === "past" ? PAST_STEP : FUTURE_STEP;
     const result = render(
       <StateProvider>
@@ -172,60 +172,43 @@ describe("Graph2StepNode — collapsed step markers (AC-UI-PIPELINE-ROW-001)", (
     return { step, onMoveTask, unmount: result.unmount };
   }
 
-  function getMarker(phase: "past" | "future") {
-    return screen.getByTestId(`graph2-step-node-collapsed-${phase}`);
+  function getNode(phase: "past" | "future") {
+    return screen.getByTestId(`graph2-step-node-${phase}`);
   }
 
-  it("renders a completed step as a collapsed marker with no visible text label", () => {
-    const { step } = renderCollapsed("past");
-    expect(getMarker("past").textContent).not.toBe(step.title);
-    expect(screen.queryByText(step.title)).toBeNull();
+  it("renders a completed step as a labelled pill showing its title", () => {
+    const { step } = renderPill("past");
+    expect(getNode("past").textContent).toContain(step.title);
   });
 
-  it("renders a not-yet-reached step as a collapsed marker with no visible text label", () => {
-    const { step } = renderCollapsed("future");
-    expect(getMarker("future").textContent).not.toBe(step.title);
-    expect(screen.queryByText(step.title)).toBeNull();
+  it("renders a not-yet-reached step as a labelled pill showing its title", () => {
+    const { step } = renderPill("future");
+    expect(getNode("future").textContent).toContain(step.title);
   });
 
-  it("renders completed and not-yet-reached markers with visually distinct styling", () => {
-    const { unmount } = renderCollapsed("past");
-    const pastClassName = getMarker("past").className;
+  it("renders completed and not-yet-reached pills with visually distinct styling", () => {
+    const { unmount } = renderPill("past");
+    const pastClassName = getNode("past").className;
     unmount();
 
-    renderCollapsed("future");
-    const futureClassName = getMarker("future").className;
+    renderPill("future");
+    const futureClassName = getNode("future").className;
 
     expect(pastClassName).not.toBe(futureClassName);
   });
 
-  it("never renders a collapsed marker narrower than the 12px floor", () => {
-    renderCollapsed("past");
-    const marker = getMarker("past");
-    // jsdom performs no layout, so the 12px (w-3/h-3, 0.75rem @ 16px root) floor
-    // is verified via the sizing classes rather than a computed pixel value.
-    expect(marker.className).toMatch(/\bw-3\b/);
-    expect(marker.className).toMatch(/\bh-3\b/);
-  });
-
   it("is not individually focusable, so tab stop count does not grow with step count", () => {
-    renderCollapsed("past");
-    const marker = getMarker("past");
-    expect(marker.tagName).not.toBe("BUTTON");
-    expect(marker.getAttribute("role")).not.toBe("button");
-    expect(marker.hasAttribute("tabindex")).toBe(false);
+    renderPill("past");
+    const node = getNode("past");
+    expect(node.tagName).not.toBe("BUTTON");
+    expect(node.getAttribute("role")).not.toBe("button");
+    expect(node.hasAttribute("tabindex")).toBe(false);
   });
 
   it("is not a click target for moving the task", () => {
-    const { onMoveTask } = renderCollapsed("past");
-    fireEvent.click(getMarker("past"));
+    const { onMoveTask } = renderPill("past");
+    fireEvent.click(getNode("past"));
     expect(onMoveTask).not.toHaveBeenCalled();
-  });
-
-  it("discloses the step title in a hover tooltip on a fine pointer", async () => {
-    const { step } = renderCollapsed("future");
-    fireEvent.pointerMove(getMarker("future"), { pointerType: "mouse" });
-    await waitFor(() => expect(screen.getByRole("tooltip").textContent).toBe(step.title));
   });
 });
 

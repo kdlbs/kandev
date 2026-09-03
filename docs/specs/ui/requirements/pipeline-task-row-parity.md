@@ -39,7 +39,10 @@ contract changing.
 - **Step run:** The ordered step markers between title and actions cluster.
 - **Current step:** The step whose id equals the task's `workflowStepId`. A
   task whose `workflowStepId` is empty has none.
-- **Collapsed marker:** A step marker rendered without a visible text label.
+- **Collapsed marker:** Historical term from this contract's initial
+  implementation. Superseded 2026-09-03: every step marker now renders its own
+  labelled pill (past, current, and future alike); none collapse to an
+  unlabelled marker.
 - **Actions cluster:** The trailing group holding status affordances and the
   task menu trigger. Card 09404bae pins it to the trailing edge, which this
   contract assumes.
@@ -51,45 +54,45 @@ contract changing.
 
 ## Requirements
 
-### REQ-UI-PIPELINE-ROW-001: The step run fits the board surface
+### REQ-UI-PIPELINE-ROW-001: The step run never grows the row
 
-**Intent:** 155px per step is why nothing else fits on the row. Reducing it
-buys the space for every other requirement here.
+**Revision (2026-09-03):** This requirement originally collapsed every
+non-current step to a 12px unlabelled marker so a nine-step run fit the board
+with no scrolling. Design review after shipping found that illegible: a person
+scanning the board could not tell which steps existed without hovering each
+one. Every step now keeps its own labelled pill; the no-growth guarantee comes
+from scrolling the step run instead, anchored so the current pill (not an
+earlier one) stays in view by default. AC-UI-PIPELINE-ROW-001.1/.3/.8/.9 below
+reflect this revision; as originally written they no longer apply.
 
-**User story:** As a person scanning a nine-step workflow, I want to see where
-every task sits without scrolling sideways.
+**Intent:** A row that grows with the workflow's step count pushes the actions
+cluster off the board surface. Constraining growth, not step legibility, is
+what this requirement protects.
+
+**User story:** As a person scanning a nine-step workflow, I want to see every
+step's name at a glance, with the row never growing wider than the board.
 
 #### Acceptance criteria
 
-- **AC-UI-PIPELINE-ROW-001.1:** Exactly one step marker in the run renders with
-  a visible text label: the current step. Every other step renders as a
-  collapsed marker.
-- **AC-UI-PIPELINE-ROW-001.2:** Collapsed markers remain visually distinct
-  between completed and not-yet-reached steps.
-- **AC-UI-PIPELINE-ROW-001.3:** At a 1280px board surface with 9 workflow steps,
-  a row fits without engaging any scroll: the row element's own width does not
-  exceed the task list's `clientWidth`, the scroll region
-  AC-UI-PIPELINE-ROW-003.11 defines reports a `scrollWidth` no greater than its
-  `clientWidth`, and the actions cluster's right edge falls within the board
-  surface. The row sizes to the list, not to its own content, and carries no
-  max-content minimum width, which is what puts the cluster off-screen today.
-  Measured at 100% zoom, device pixel ratio 1, the default font stack, and
-  truncation widths of 200px for the title, 130px for the labelled current-step
-  pill and 120px for the repository chip area, against a fixture with one
-  repository, one pull request indicator, the blocked indicator, and no plugin
-  contribution, whose width is third-party and unbounded. Measuring the task
-  list's own scroll container does not satisfy this criterion: an inner scroll
-  region never widens its parent, so a list-level measurement passes whether or
-  not the collapse rule works. 1280px is the guaranteed minimum board surface; a
-  narrower one, or plugin contributions exhausting AC-UI-PIPELINE-ROW-003.11's
-  yield order, does not violate this criterion but reaches its terminus.
+- **AC-UI-PIPELINE-ROW-001.1:** Every step marker in the run renders with a
+  visible text label, including past and future steps, not only the current
+  one.
+- **AC-UI-PIPELINE-ROW-001.2:** Past and future step pills remain visually
+  distinct from each other and from the current step's pill.
+- **AC-UI-PIPELINE-ROW-001.3:** At a 1280px board surface with 9 workflow
+  steps, the row element's own width never exceeds the task list's
+  `clientWidth` and the actions cluster's right edge falls within the board
+  surface, regardless of step count. The step run itself is permitted to
+  scroll horizontally (AC-UI-PIPELINE-ROW-001.8) when it does not fit; the row
+  sizes to the list, not to its own content, and carries no max-content minimum
+  width, which is what puts the cluster off-screen today.
 - **AC-UI-PIPELINE-ROW-001.4:** Every step's title is reachable from the row
-  whenever the row's menus are available: on a fine pointer by hovering its
-  marker, and without a pointer through the menu's move-to-step entries, which
+  whenever the row's menus are available: inline on its own pill for a fine
+  pointer, and without a pointer through the menu's move-to-step entries, which
   list every step and mark the current one. Multi-select suppresses both menus
   (AC-UI-PIPELINE-ROW-002.3, 002.8), suspending the pointer-free route until
   exited, matching the Kanban card.
-- **AC-UI-PIPELINE-ROW-001.5:** Collapsed markers are not individually
+- **AC-UI-PIPELINE-ROW-001.5:** Past and future step pills are not individually
   focusable, so a row's tab stop count does not grow with step count.
 - **AC-UI-PIPELINE-ROW-001.6:** The row exposes its position as accessible text
   naming the current step title and its ordinal in the visible run.
@@ -98,12 +101,15 @@ every task sits without scrolling sideways.
   destination step in a visible tooltip. At the first displayed step the
   previous-step control is absent, at the last the next-step control is; neither
   wraps, and their absence does not shift the run.
-- **AC-UI-PIPELINE-ROW-001.8:** A collapsed marker never renders narrower than
-  12px, and the gap between two adjacent markers never renders narrower than
-  6px. When the step count or board surface would push the run below either
-  floor, the run scrolls horizontally instead of compressing further.
-- **AC-UI-PIPELINE-ROW-001.9:** A collapsed marker is not a click target for
-  moving the task; movement stays on the move controls and move-to menu.
+- **AC-UI-PIPELINE-ROW-001.8:** When the step run's full-pill width exceeds the
+  space available to it, the run scrolls horizontally rather than growing the
+  row or shrinking pills below their fixed size. The run is kept scrolled so
+  the current step's pill stays within the visible lane by default; only past
+  steps are permitted to scroll out of view, never the current or (space
+  permitting) next steps.
+- **AC-UI-PIPELINE-ROW-001.9:** Past and future step pills are not a click
+  target for moving the task; movement stays on the move controls and
+  move-to menu.
 
 ### REQ-UI-PIPELINE-ROW-002: The row offers the full task menu
 
@@ -338,8 +344,9 @@ Each criterion is directly testable, so this section carries only flows
 spanning more than one.
 
 - **GIVEN** a 1280px board surface and a 9-step workflow, **WHEN** a task at
-  step 4 renders, **THEN** one labelled pill names step 4, the other eight
-  render collapsed, and neither the row nor the list overflows.
+  step 4 renders, **THEN** all nine steps render as labelled pills, the step
+  run scrolls internally to keep step 4's pill in view, and the row itself
+  never overflows the list.
 - **GIVEN** a title longer than the row's title width, **WHEN** the person
   hovers or focuses it, **THEN** the disclosure surface shows the full title
   plus description, parent, and subtasks where present, and the task is neither

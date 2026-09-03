@@ -115,14 +115,14 @@ function renderPipelineWithWorkflowSnapshot(
 }
 
 describe("Graph2TaskPipeline — no resolvable current step (AC-UI-PIPELINE-ROW-005.6)", () => {
-  it("renders exactly one labelled unassigned marker and every displayed step collapsed", () => {
+  it("renders exactly one labelled unassigned marker and every displayed step as a future pill", () => {
     renderPipeline(makeTask(""), STEPS);
 
     const marker = screen.getByTestId("graph2-step-node-unassigned");
     expect(marker.textContent).toContain(t("kanban:pipelineUnassignedStep"));
 
-    expect(screen.queryByTestId("graph2-step-node-collapsed-past")).toBeNull();
-    expect(screen.getAllByTestId("graph2-step-node-collapsed-future")).toHaveLength(STEPS.length);
+    expect(screen.queryAllByTestId("graph2-step-node-past")).toHaveLength(0);
+    expect(screen.getAllByTestId("graph2-step-node-future")).toHaveLength(STEPS.length);
     for (const step of STEPS) {
       expect(screen.queryByRole("button", { name: step.title })).toBeNull();
     }
