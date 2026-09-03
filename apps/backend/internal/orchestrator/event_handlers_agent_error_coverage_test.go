@@ -303,8 +303,13 @@ func TestDispatchKanbanAgentErrorTrigger_WIPLimitedDestinationDefersOnEnter(t *t
 	}
 
 	svc, _ := newAgentErrorTestService(t, repo, stepGetter, nil)
-	onEnterCalled := false
-	svc.onProcessOnEnterComplete = func() { onEnterCalled = true }
+	onEnterCalled := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterCalled <- struct{}{}:
+		default:
+		}
+	}
 
 	svc.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{
 		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", ErrorMessage: "boom",
@@ -323,8 +328,10 @@ func TestDispatchKanbanAgentErrorTrigger_WIPLimitedDestinationDefersOnEnter(t *t
 	if task.QueuedForStepID != "step2" {
 		t.Errorf("QueuedForStepID = %q, want step2", task.QueuedForStepID)
 	}
-	if onEnterCalled {
+	select {
+	case <-onEnterCalled:
 		t.Error("expected on_enter dispatch to be deferred for a WIP-queued destination")
+	case <-time.After(250 * time.Millisecond):
 	}
 }
 

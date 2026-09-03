@@ -12,7 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
-// Stable, dispatch-owned log messages (AC-F9). Kept distinct from every
+// Stable, dispatch-owned log messages. Kept distinct from every
 // other log line in this package so a test can key on the dispatch's own
 // records without also matching a line the surrounding handler or a shared
 // helper (e.g. otherWorkingSessionID) writes for itself.
@@ -35,7 +35,7 @@ const (
 )
 
 // agentErrorDispatchDeps bundles the workflow engine, the callback registry
-// AC-E4's walk checks against, and the store both read — the three
+// the pre-engine walk checks against, and the store both read — the three
 // collaborators initWorkflowEngine rebuilds together on every reinit.
 // Holding them as one struct, published through Service.agentErrorDeps in a
 // single atomic.Pointer write and read exactly once per dispatch, closes the
@@ -49,7 +49,7 @@ type agentErrorDispatchDeps struct {
 }
 
 // agentErrorOperationID derives on_agent_error's idempotency key from the
-// failure's identity rather than from a run (AC-C1/AC-C2). Both components
+// failure's identity rather than from a run. Both components
 // matter: a session can host several executions in sequence (rotation,
 // resume, dynamic re-route), each of which can fail, so a session-only key
 // would suppress every failure after the first for the life of the process.
@@ -60,8 +60,8 @@ func agentErrorOperationID(sessionID, agentExecutionID string) string {
 	return fmt.Sprintf("agent_error:session:%s:%s", sessionID, agentExecutionID)
 }
 
-// agentErrorFailedAgentID resolves OnAgentErrorPayload.FailedAgentID
-// (AC-D2). The synthetic failure events built by handleAgentStartFailed and
+// agentErrorFailedAgentID resolves OnAgentErrorPayload.FailedAgentID.
+// The synthetic failure events built by handleAgentStartFailed and
 // the transient-loop exits carry no AgentProfileID, so the session fallback
 // is the normal path for four of the five dispatching routes.
 func agentErrorFailedAgentID(data watcher.AgentEventData, session *models.TaskSession) string {
@@ -74,7 +74,7 @@ func agentErrorFailedAgentID(data watcher.AgentEventData, session *models.TaskSe
 	return ""
 }
 
-// agentErrorMessage resolves OnAgentErrorPayload.ErrorMessage (AC-D3).
+// agentErrorMessage resolves OnAgentErrorPayload.ErrorMessage.
 func agentErrorMessage(data watcher.AgentEventData) string {
 	if data.ErrorMessage != "" {
 		return data.ErrorMessage
@@ -84,8 +84,7 @@ func agentErrorMessage(data watcher.AgentEventData) string {
 
 // isAgentErrorTransitionActionKind reports whether kind is one of the three
 // structural transition kinds, which the engine executes without a
-// registered callback (AC-E4's carve-out) regardless of position, guard, or
-// requires_approval — see AC-E7/AC-E9.
+// registered callback regardless of position, guard, or requires_approval.
 func isAgentErrorTransitionActionKind(kind engine.ActionKind) bool {
 	switch kind {
 	case engine.ActionMoveToNext, engine.ActionMoveToPrevious, engine.ActionMoveToStep:
@@ -95,10 +94,10 @@ func isAgentErrorTransitionActionKind(kind engine.ActionKind) bool {
 	}
 }
 
-// warnUnregisteredAgentErrorActions is AC-E4's pre-engine walk: it reads the
+// warnUnregisteredAgentErrorActions is the pre-engine walk: it reads the
 // current step's compiled on_agent_error actions through the same store the
-// engine will use (AC-E12) and warns on any non-transition action with no
-// registered callback. A failed read is advisory-only (AC-E14) — the walk is
+// engine will use and warns on any non-transition action with no
+// registered callback. A failed read is advisory-only — the walk is
 // skipped silently and the dispatch still proceeds to the engine.
 func (s *Service) warnUnregisteredAgentErrorActions(
 	ctx context.Context, deps *agentErrorDispatchDeps, task *models.Task, sessionID string,
@@ -125,10 +124,10 @@ func (s *Service) warnUnregisteredAgentErrorActions(
 }
 
 // resolveAgentErrorDispatchTarget reloads the session and task for a failure
-// and evaluates the ownership/shape guards (AC-B1/B2/F2/F3/F4/F5). ok is
+// and evaluates the ownership/shape guards. ok is
 // false when dispatch must stop; every stop path has already logged at the
 // correct level (or, for the silent shape guards, deliberately logs
-// nothing — see AC-F2/F3/F4).
+// nothing).
 func (s *Service) resolveAgentErrorDispatchTarget(
 	ctx context.Context, data watcher.AgentEventData,
 ) (session *models.TaskSession, task *models.Task, ok bool) {
@@ -184,15 +183,20 @@ func (s *Service) resolveAgentErrorDispatchTarget(
 // dispatchKanbanAgentErrorTrigger is the non-Office fire site for
 // engine.TriggerOnAgentError — the counterpart to Office's
 // dispatchAgentErrorTrigger. It is called as the final action of terminal
-// agent-session-failure handling (AC-A3), after that failure's own
+// agent-session-failure handling, after that failure's own
 // bookkeeping is already committed, so a dispatch failure here must never
-// mask it (AC-E5).
+// mask it.
 //
 // Guards run first-match-wins in the order fixed by "Guard evaluation
 // order" in docs/specs/workflow-on-agent-error-dispatch/spec.md: the engine
 // snapshot, the session id, the user-initiated marker, then a single
 // session-then-task reload feeding the ownership and shape guards
 // (resolveAgentErrorDispatchTarget).
+//
+// ctx is stripped of the caller's cancellation (see the call site in
+// handleRecoverableFailureLocked): this dispatch is the recovery path for an
+// already-failed session, so a canceled request context must not suppress
+// the recovery it exists to run.
 func (s *Service) dispatchKanbanAgentErrorTrigger(ctx context.Context, data watcher.AgentEventData) {
 	deps := s.agentErrorDeps.Load()
 	if deps == nil || deps.engine == nil {

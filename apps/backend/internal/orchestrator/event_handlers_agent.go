@@ -1822,9 +1822,11 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 
-	// Last action of terminal-failure handling (AC-A3): does not wait on the
-	// cleanup goroutine above nor assume it completed.
-	s.dispatchKanbanAgentErrorTrigger(ctx, data)
+	// Last action of terminal-failure handling: does not wait on the
+	// cleanup goroutine above nor assume it completed. Uses a context stripped
+	// of the caller's cancellation so a canceled request cannot suppress this
+	// recovery dispatch — see dispatchKanbanAgentErrorTrigger's doc comment.
+	s.dispatchKanbanAgentErrorTrigger(context.WithoutCancel(ctx), data)
 }
 
 func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) {
