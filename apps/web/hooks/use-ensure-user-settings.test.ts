@@ -97,6 +97,7 @@ function makeUnloadedSettings(): UserSettingsState {
     gitlabSavedPresets: undefined,
     azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
+    defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
     terminalFontFamily: null,

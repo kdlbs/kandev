@@ -10,10 +10,7 @@ owners:
 
 ## Scope
 
-UI owns responsive behavior.
-[Tasks](../tasks/README.md), [Agents](../agents/README.md),
-[Plugins](../plugins/README.md), and [Integrations](../integrations/README.md) own
-behavior/state.
+UI owns responsive behavior; other systems own behavior/state.
 ## Map
 
 ### Requirements
@@ -129,6 +126,7 @@ behavior/state.
 - [Task Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
 - [Terminal Rendering](requirements/terminal-rendering.md)
+- [Terminal Touch Scrolling](requirements/terminal-touch-scrolling.md)
 - [Thinking Message Preview](requirements/thinking-message-preview.md)
 - [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
 - [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
@@ -180,6 +178,7 @@ behavior/state.
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
 - [Command-panel activity icons](system-design/command-panel-task-activity-icons.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
+- [Terminal Touch Scrolling](system-design/terminal-touch-scrolling.md)
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
 - [Transcript history visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)

@@ -85,7 +85,9 @@ place for dependency selection and future less-common options.
 - The row exposes `aria-expanded="true"`, and the expanded content is connected
   to it through the normal collapsible relationship.
 - Closing the section preserves every selected predecessor. Reopening it
-  reveals the existing selected title or localized count.
+  reveals the existing selected task's trigger label (its title, or
+  `#N · Title` when the task has a linked change-request number) or the
+  localized dependency count for multiple predecessors.
 - The selector's search-row info control continues to explain dependency wait
   behavior without changing the disclosure state or selection.
 
@@ -124,8 +126,10 @@ place for dependency selection and future less-common options.
 - **GIVEN** the expanded selector with no predecessors, **THEN** its trigger
   shows the existing `No dependency` label and dependency icon.
 - **GIVEN** a selected predecessor, **WHEN** the user collapses and reopens the
-  advanced section, **THEN** the selected task title or localized dependency
-  count remains visible in the selector and the form state is unchanged.
+  advanced section, **THEN** the selected task's trigger label (its title, its
+  `#N · Title` change-request form, or a localized dependency count for
+  multiple predecessors) remains visible in the selector and the form state is
+  unchanged.
 - **GIVEN** a workflow selector that is visible, hidden for a single workflow,
   or locked by a caller, **WHEN** the create dialog renders, **THEN** the
   workflow's existing behavior is preserved and the advanced dependency

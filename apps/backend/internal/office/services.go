@@ -6,6 +6,7 @@ import (
 	"github.com/kandev/kandev/internal/office/channels"
 	"github.com/kandev/kandev/internal/office/config"
 	"github.com/kandev/kandev/internal/office/configloader"
+	"github.com/kandev/kandev/internal/office/configsync"
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/infra"
@@ -31,6 +32,7 @@ type Services struct {
 	Approvals    *approvals.ApprovalService
 	Channels     *channels.ChannelService
 	Config       *config.ConfigService
+	ConfigSync   *configsync.Service
 	Dashboard    *dashboard.DashboardService
 	Labels       *labels.LabelService
 	Onboarding   *onboarding.OnboardingService
