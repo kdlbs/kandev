@@ -112,6 +112,18 @@ type Config struct {
 	// agent-survival capability is active; unused otherwise.
 	DetachedEventLimit int
 
+	// HomeDir is the resolved Kandev root directory this agentctl process was
+	// started for. It is installation identity: the adopting backend compares
+	// it against its own resolved home before ever authenticating, per design
+	// 01's "Ownership identity and credential". Reported on GET /identity.
+	HomeDir string
+
+	// ServerIdentity is an opaque value generated once per process launch,
+	// echoed on GET /identity and compared by the adopting backend, never
+	// logged. It answers "is this the process a previous launch started",
+	// distinct from AuthToken which answers "is the caller authorized".
+	ServerIdentity string
+
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
 }
@@ -401,6 +413,8 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		OTLPEndpoint:              otlpEndpoint,
 		UnownedPeriod:             unownedPeriod,
 		DetachedEventLimit:        detachedEventLimit,
+		HomeDir:                   resolveHomeDir(),
+		ServerIdentity:            generateSelfToken(),
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -451,6 +465,26 @@ func (c *Config) ConsumeNonce(nonce string) string {
 	// Burn the nonce — only one handshake allowed
 	c.BootstrapNonce = ""
 	return c.AuthToken
+}
+
+// resolveHomeDir determines the Kandev root directory this agentctl process
+// was started for, honoring KANDEV_HOME_DIR (already the Kandev root) ahead
+// of $HOME so dev/e2e isolation and Docker/K8s roots resolve consistently.
+// This duplicates adapter/transport/shared.resolveACPLogDir's precedence
+// rather than importing it: config is a leaf package with no dependency on
+// adapter/transport/shared, and pulling that dependency in for one four-line
+// primitive would invert the layering.
+func resolveHomeDir() string {
+	if home := os.Getenv("KANDEV_HOME_DIR"); home != "" {
+		return home
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".kandev")
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return ""
 }
 
 // generateSelfToken creates a cryptographically random 32-byte hex-encoded token.

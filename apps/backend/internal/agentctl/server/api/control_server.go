@@ -37,7 +37,7 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	}
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
-	cs.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/auth/handshake"))
+	cs.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/auth/handshake", "/identity"))
 
 	cs.setupRoutes()
 	return cs
@@ -54,6 +54,9 @@ func (m *ControlServer) setupRoutes() {
 
 	// Bootstrap handshake — nonce-authenticated, returns the self-generated auth token
 	m.router.POST("/auth/handshake", m.handleHandshake)
+
+	// Identity/capability — unauthenticated, decides adoption compatibility
+	m.router.GET("/identity", m.handleIdentity)
 
 	// Instance management API - same endpoints regardless of mode
 	api := m.router.Group("/api/v1")

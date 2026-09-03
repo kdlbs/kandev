@@ -354,6 +354,41 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 	return &info, nil
 }
 
+// IdentityInfo is the response from GET /identity: installation identity and
+// the capability set this control server advertises.
+type IdentityInfo struct {
+	HomeDir        string   `json:"home_dir"`
+	ServerIdentity string   `json:"server_identity"`
+	Capabilities   []string `json:"capabilities"`
+}
+
+// GetIdentity fetches the control server's identity and capability set. It
+// deliberately does not require a valid auth token to succeed server-side
+// (see agentctl's identity handler): identity retrieval decides adoption
+// compatibility, so it cannot itself be gated behind the answer.
+func (c *ControlClient) GetIdentity(ctx context.Context) (*IdentityInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/identity", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get identity: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get identity: status %d", resp.StatusCode)
+	}
+
+	var info IdentityInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &info, nil
+}
+
 // ListInstances lists all running agent instances.
 func (c *ControlClient) ListInstances(ctx context.Context) ([]*InstanceInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/instances", nil)
