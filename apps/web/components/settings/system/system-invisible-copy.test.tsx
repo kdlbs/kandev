@@ -118,7 +118,14 @@ describe("System menu labels", () => {
   it("renders every System row label through the catalog", () => {
     const labels = SYSTEM_MENU_ITEMS.map((item) => t(item.labelKey));
     expect(labels).toEqual(
-      expect.arrayContaining(["Status", "Data & Logs", "Feature Toggles", "Updates", "About"]),
+      expect.arrayContaining([
+        "Status",
+        "Data & Logs",
+        "Storage",
+        "Feature Toggles",
+        "Updates",
+        "About",
+      ]),
     );
   });
 });
