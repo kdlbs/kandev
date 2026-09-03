@@ -71,6 +71,11 @@ type Instance struct {
 	stopMu           sync.Mutex
 	statusMu         sync.RWMutex
 	portReleased     bool
+
+	// turnOutcome holds this instance's single retained last-terminal-turn
+	// slot (AC-EXECUTORS-SURVIVAL-004.1/.6). Zero value is ready to use --
+	// no outcome retained.
+	turnOutcome turnOutcomeState
 }
 
 // MarkActivity stamps the current time as the most recent activity on this

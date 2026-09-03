@@ -112,6 +112,8 @@ func (m *ControlServer) setupRoutes() {
 	api.GET("/instances", m.handleListInstances)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
+	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
 	api.POST("/ownership/claim", m.handleOwnershipClaim)
 	api.POST("/ownership/rotate", m.handleCredentialRotate)

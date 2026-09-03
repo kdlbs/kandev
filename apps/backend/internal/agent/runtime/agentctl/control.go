@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -530,4 +531,80 @@ func (c *ControlClient) ListInstances(ctx context.Context) ([]*InstanceInfo, err
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	return result.Instances, nil
+}
+
+// TurnOutcome is a retained terminal turn outcome for one instance
+// (AC-EXECUTORS-SURVIVAL-004.1): the turn identifier the control server
+// assigned, and the terminal event itself.
+type TurnOutcome struct {
+	TurnID int64              `json:"turn_id"`
+	Event  streams.AgentEvent `json:"event"`
+}
+
+// GetTurnOutcome retrieves the named instance's retained last terminal turn
+// outcome, if any. Returns (nil, nil) when the instance exists but nothing
+// is retained -- the AC-EXECUTORS-SURVIVAL-004.5 case that publishes the
+// session as running. The read is repeatable: it never discards what it
+// returns (AC-EXECUTORS-SURVIVAL-004.6); only AckTurnOutcome does.
+func (c *ControlClient) GetTurnOutcome(ctx context.Context, instanceID string) (*TurnOutcome, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/instances/"+instanceID+"/turn-outcome", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get turn outcome: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("instance %q not found", instanceID)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get turn outcome: status %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Retained bool               `json:"retained"`
+		TurnID   int64              `json:"turn_id"`
+		Event    streams.AgentEvent `json:"event"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if !body.Retained {
+		return nil, nil
+	}
+	return &TurnOutcome{TurnID: body.TurnID, Event: body.Event}, nil
+}
+
+// AckTurnOutcome acknowledges the named instance's retained outcome by turn
+// identifier, discarding it. Naming an identifier the control server no
+// longer holds, or never held, is accepted and changes nothing
+// (AC-EXECUTORS-SURVIVAL-004.6), so a retried acknowledgement is always safe.
+func (c *ControlClient) AckTurnOutcome(ctx context.Context, instanceID string, turnID int64) error {
+	body, err := json.Marshal(struct {
+		TurnID int64 `json:"turn_id"`
+	}{TurnID: turnID})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/instances/"+instanceID+"/turn-outcome/ack", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to ack turn outcome: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to ack turn outcome: status %d", resp.StatusCode)
+	}
+	return nil
 }

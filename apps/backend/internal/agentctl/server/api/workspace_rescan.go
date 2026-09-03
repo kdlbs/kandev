@@ -11,6 +11,11 @@ import (
 // out to satisfy goconst's repeated-string rule across the api package.
 const errKey = "error"
 
+// instanceNotFoundMessage is the shared 404 body for every instance-scoped
+// handler that looks an instance up by ID. Hoisted out to satisfy goconst's
+// repeated-string rule across the api package.
+const instanceNotFoundMessage = "instance not found"
+
 // RescanWorkspaceRequest is the body for POST /api/v1/workspace/rescan.
 //
 // work_dir is optional. When supplied, the manager updates its tracking

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,6 +72,14 @@ type Manager struct {
 	// racing cancellation against tracker startup and accepting whichever
 	// outcome it happens to get.
 	afterTrackerStart func()
+
+	// turnIDSeq allocates the turn identifiers retained terminal outcomes
+	// are keyed by (AC-EXECUTORS-SURVIVAL-004.1). It is shared across every
+	// instance this Manager supervises and lives for this process's whole
+	// lifetime, matching the AC's "unique across every turn of every
+	// instance the control server supervises for as long as that control
+	// server runs" -- deliberately NOT reset per instance.
+	turnIDSeq atomic.Int64
 }
 
 // NewManager creates a new instance manager.
