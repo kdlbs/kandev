@@ -81,7 +81,7 @@ Wave 1 (sequential, shared schema and state contracts):
 
 Wave 2 (sequential, depends on stable event/storage contracts):
 
-- [ ] [task-04-github-auth-backoff-observability](task-04-github-auth-backoff-observability.md)
+- [x] [task-04-github-auth-backoff-observability](task-04-github-auth-backoff-observability.md)
 - [ ] [task-05-bounded-history-storage](task-05-bounded-history-storage.md)
 
 Wave 3 (sequential, destructive operator surface depends on retention implementation):
