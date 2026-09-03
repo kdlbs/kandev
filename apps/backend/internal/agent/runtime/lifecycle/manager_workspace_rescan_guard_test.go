@@ -328,6 +328,35 @@ func TestManagerStartRecoveredExecutionCarriesWorkspaceSourceRoots(t *testing.T)
 	require.Equal(t, []string{"/ws/task-1/backend", "/ws/task-1/frontend"}, execution.WorkspaceSourceRoots)
 }
 
+// TestManagerStartRecoveredExecutionCarriesProviderSessionID pins
+// AC-EXECUTORS-SURVIVAL-002.14's "provider session identity" reconstruction
+// row: sourced from the adopted instance, which holds the live provider
+// session, never from a durable/database value.
+func TestManagerStartRecoveredExecutionCarriesProviderSessionID(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:        "exec-recovered",
+			TaskID:            "task-1",
+			SessionID:         "session-1",
+			RuntimeName:       executor.NameStandalone,
+			ProviderSessionID: "provider-session-9",
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	require.NoError(t, mgr.Start(context.Background()))
+
+	execution, ok := mgr.GetExecutionBySessionID("session-1")
+	require.True(t, ok)
+	require.Equal(t, "provider-session-9", execution.ACPSessionID)
+}
+
 func TestManagerStartWithoutRegistryIsNoOp(t *testing.T) {
 	mgr := newTestManager(t)
 

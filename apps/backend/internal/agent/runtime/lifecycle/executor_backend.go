@@ -669,6 +669,11 @@ type ExecutorInstance struct {
 	// "workspace source roots" row). Same recovery-only shape as Env above.
 	WorkspaceSourceRoots []string
 
+	// ProviderSessionID is the adopted instance's own live agent-CLI session
+	// identity, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
+	// "provider session identity" row). Same recovery-only shape as Env above.
+	ProviderSessionID string
+
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by authenticated container/remote executors for encrypted storage in SecretStore.
 	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)

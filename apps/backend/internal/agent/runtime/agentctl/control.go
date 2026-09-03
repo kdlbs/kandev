@@ -116,6 +116,10 @@ type InstanceInfo struct {
 	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
 	// "workspace source roots" reconstruction row).
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// ProviderSessionID is the live agent CLI's own session identity, read
+	// back from the adopted instance (AC-EXECUTORS-SURVIVAL-002.14's
+	// "provider session identity" reconstruction row).
+	ProviderSessionID string `json:"provider_session_id,omitempty"`
 }
 
 // ControlClientOption configures optional ControlClient settings.

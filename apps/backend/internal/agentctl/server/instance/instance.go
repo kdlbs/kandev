@@ -20,6 +20,11 @@ type processManager interface {
 	// rescan/rebind may have changed since creation (AC-EXECUTORS-SURVIVAL-
 	// 002.14's "workspace source roots" reconstruction row).
 	WorkspaceSourceRoots() []string
+	// GetSessionID returns the provider's own session identity, held by the
+	// live adapter (AC-EXECUTORS-SURVIVAL-002.14's "provider session
+	// identity" reconstruction row). Empty before the agent's session/new or
+	// session/load completes.
+	GetSessionID() string
 }
 
 // Instance represents a single agent instance running as a subprocess.
@@ -257,6 +262,13 @@ type InstanceInfo struct {
 	// snapshot (AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots"
 	// reconstruction row: read back, never pushed).
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+
+	// ProviderSessionID is the live agent CLI's own session identity, held by
+	// the adapter (AC-EXECUTORS-SURVIVAL-002.14's "provider session identity"
+	// reconstruction row: the adopted instance, which holds the provider
+	// session -- never the database). Distinct from SessionID above, which is
+	// this Kandev task session's identity, not the underlying agent's.
+	ProviderSessionID string `json:"provider_session_id,omitempty"`
 }
 
 // Info returns a safe copy of the instance data for API serialization.
@@ -275,8 +287,10 @@ func (i *Instance) Info() *InstanceInfo {
 	}
 
 	var sourceRoots []string
+	var providerSessionID string
 	if i.manager != nil {
 		sourceRoots = i.manager.WorkspaceSourceRoots()
+		providerSessionID = i.manager.GetSessionID()
 	}
 
 	return &InstanceInfo{
@@ -290,6 +304,7 @@ func (i *Instance) Info() *InstanceInfo {
 		SessionID:            i.SessionID,
 		TaskID:               i.TaskID,
 		WorkspaceSourceRoots: sourceRoots,
+		ProviderSessionID:    providerSessionID,
 	}
 }
 

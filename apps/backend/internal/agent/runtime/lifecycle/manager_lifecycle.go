@@ -117,6 +117,11 @@ func (m *Manager) Start(ctx context.Context) error {
 				// back from the adopted instance, never pushed -- agentctl owns
 				// this allowlist and a rebind may have changed it since launch.
 				WorkspaceSourceRoots: ri.WorkspaceSourceRoots,
+				// AC-EXECUTORS-SURVIVAL-002.14: provider session identity comes
+				// from the adopted instance, which holds the live provider
+				// session -- never from a durable/database value, which could be
+				// stale relative to what the instance actually resumed.
+				ACPSessionID: ri.ProviderSessionID,
 			}
 			execution.setRuntimeEnvironment(ri.Env)
 			m.hydrateRecoveredTaskEnvironmentID(ctx, execution)

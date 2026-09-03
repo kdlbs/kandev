@@ -553,6 +553,7 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 			Metadata:             metadata,
 			Env:                  inst.Env,
 			WorkspaceSourceRoots: inst.WorkspaceSourceRoots,
+			ProviderSessionID:    inst.ProviderSessionID,
 		})
 	}
 	return recovered
