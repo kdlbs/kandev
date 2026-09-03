@@ -550,9 +550,13 @@ func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer
 const closeSupersededSessionTimeout = 10 * time.Second
 
 // closeSupersededSession releases the session a successful reset just replaced.
-// It fails closed: absent capability, an empty or unchanged previous id, or a
-// nil connection all skip the close silently rather than risk closing the live
-// session. A close error is logged and never surfaces to the caller, since the
+// It fails closed: absent capability, an empty or unchanged previous id, a nil
+// connection, or a.sessionID no longer matching newID all skip the close
+// silently rather than risk closing the live session. The last case guards a
+// concurrent session transition: WS requests are dispatched to the adapter
+// without serialization, so a LoadSession or another ResetSession can replace
+// newID with a different session between NewSession returning and this check
+// running. A close error is logged and never surfaces to the caller, since the
 // reset itself already succeeded.
 func (a *Adapter) closeSupersededSession(ctx context.Context, conn *acp.ClientSideConnection, previous, newID string) {
 	if previous == "" || previous == newID || conn == nil {
@@ -560,8 +564,9 @@ func (a *Adapter) closeSupersededSession(ctx context.Context, conn *acp.ClientSi
 	}
 	a.mu.RLock()
 	supportsClose := a.capabilities.SessionCapabilities.Close != nil
+	stillCurrent := a.sessionID == newID
 	a.mu.RUnlock()
-	if !supportsClose {
+	if !supportsClose || !stillCurrent {
 		return
 	}
 

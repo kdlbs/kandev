@@ -263,6 +263,46 @@ func TestResetSessionClosesSupersededSessionWhenAdvertised(t *testing.T) {
 	}
 }
 
+// TestResetSessionSkipsCloseWhenSessionChangedConcurrently pins the guard
+// against the interleaving where agentctl's per-request WS dispatch (each
+// request runs in its own unserialized goroutine) lets a concurrent
+// LoadSession make the superseded session live again before the reset's
+// close check runs. It replays that exact sequence of adapter-visible state
+// transitions deterministically instead of racing goroutines against an
+// unobservable two-statement gap in ResetSession, then invokes
+// closeSupersededSession with the stale (previous, newID) pair a real reset
+// would have captured.
+func TestResetSessionSkipsCloseWhenSessionChangedConcurrently(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.Close = &acpsdk.SessionCloseCapabilities{}
+
+	firstID, err := adapter.NewSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	// Reset's session/new succeeds, producing the new session that should
+	// become current.
+	secondID, err := adapter.NewSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NewSession (reset): %v", err)
+	}
+
+	// A concurrent request on another goroutine loads the superseded session
+	// back in, making it current again before the reset's close check runs.
+	if err := adapter.LoadSession(context.Background(), firstID, nil); err != nil {
+		t.Fatalf("LoadSession (concurrent): %v", err)
+	}
+
+	// The reset now runs its close check against the (previous, newID) pair
+	// it captured before either of the above happened.
+	adapter.closeSupersededSession(context.Background(), adapter.acpConn, firstID, secondID)
+
+	if closes := capture.recordedCloseRequests(); len(closes) != 0 {
+		t.Fatalf("closeSupersededSession closed %v even though session %q is current again, would have killed a live session", closes, firstID)
+	}
+}
+
 func TestResetSessionSkipsCloseWithoutCapability(t *testing.T) {
 	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
 	// newSessionRequestCaptureAdapter does not set SessionCapabilities.Close.
