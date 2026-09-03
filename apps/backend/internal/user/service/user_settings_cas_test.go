@@ -592,6 +592,64 @@ func TestConcurrentPatchMergesLastSeenDisplay(t *testing.T) {
 	assertOneStaleConflictAndRetry(t, repo)
 }
 
+// TestConcurrentKanbanSortAndPriorityFilterTokensPatchMerge verifies AC-004.5's convergence-by-
+// commit-order requirement for the two new fields: two concurrent PATCHes, one to kanban_sort and
+// one to kanban_priority_filter_tokens, both commit via a single CAS retry, and a third settings
+// field (tasks_list_sort) outside either payload survives the concurrent write untouched.
+func TestConcurrentKanbanSortAndPriorityFilterTokensPatchMerge(t *testing.T) {
+	repo := newCASFakeRepo(&models.UserSettings{
+		UserID:                     store.DefaultUserID,
+		KanbanSort:                 models.KanbanSortCreatedDesc,
+		KanbanPriorityFilterTokens: []string{},
+		TasksListSort:              "title_asc",
+	})
+	repo.readDone = make(chan struct{}, 4)
+	repo.blockUpsert = make(chan struct{})
+	eventBus := &casEventBus{}
+	svc := newCASService(repo, eventBus)
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := svc.UpdateUserSettings(ctx, &UpdateUserSettingsRequest{KanbanSort: ptr(models.KanbanSortPriorityDesc)}); err != nil {
+			t.Errorf("kanban_sort patch: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := svc.UpdateUserSettings(ctx, &UpdateUserSettingsRequest{KanbanPriorityFilterTokens: ptr([]string{"critical", "high"})}); err != nil {
+			t.Errorf("kanban_priority_filter_tokens patch: %v", err)
+		}
+	}()
+
+	// Barrier: both initial reads must observe the same revision before either
+	// write commits, so one stale upsert is forced to conflict and retry.
+	<-repo.readDone
+	<-repo.readDone
+	close(repo.blockUpsert)
+	wg.Wait()
+
+	row := repo.snapshot()
+	if row.KanbanSort != models.KanbanSortPriorityDesc {
+		t.Fatalf("final KanbanSort = %q, want %q", row.KanbanSort, models.KanbanSortPriorityDesc)
+	}
+	if !reflect.DeepEqual(row.KanbanPriorityFilterTokens, []string{"critical", "high"}) {
+		t.Fatalf("final KanbanPriorityFilterTokens = %#v, want [critical high]", row.KanbanPriorityFilterTokens)
+	}
+	if row.TasksListSort != "title_asc" {
+		t.Fatalf("final TasksListSort = %q, want unchanged title_asc (outside either concurrent payload)", row.TasksListSort)
+	}
+	if row.Revision != 2 {
+		t.Fatalf("final revision = %d, want 2", row.Revision)
+	}
+	if got := eventBus.count(); got != 2 {
+		t.Fatalf("events = %d, want 2", got)
+	}
+	assertOneStaleConflictAndRetry(t, repo)
+}
+
 // TestCASFakeCloneIsDeep pins the fake's clone contract: mutating a read
 // result's nested maps must not corrupt the fake's stored row.
 func TestCASFakeCloneIsDeep(t *testing.T) {

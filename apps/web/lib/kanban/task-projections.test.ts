@@ -64,6 +64,23 @@ describe("filterTasks — priority filter", () => {
     });
     expect(result).toEqual([]);
   });
+
+  it("renders an empty result rather than omitting the workflow when a non-empty priority selection alone admits nothing (AC-001.5)", () => {
+    // Every task in this step is "low"; selecting only "critical" must empty
+    // the step via the priority filter itself, not via searchQuery (which
+    // stays blank here) — the case the prior version of this test never
+    // actually drove.
+    const noMatchSnapshots = {
+      [WORKFLOW_ID]: {
+        tasks: [task("low-only-1", "low"), task("low-only-2", "low")],
+        steps: [{ id: "step-1" }],
+      },
+    };
+    const result = filterTasks(noMatchSnapshots, WORKFLOW_ID, new Set(), {
+      priorityFilterTokens: ["critical"],
+    });
+    expect(result).toEqual([]);
+  });
 });
 
 describe("projectWorkflowTasks — priority filter scoping", () => {

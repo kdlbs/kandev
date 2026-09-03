@@ -269,6 +269,19 @@ test.describe("Board priority sort and filter", () => {
     await closeDisplayDropdown(kanban);
   });
 
+  // AC-001.9's own claim is "from the board itself" as distinct from AC-001.7's
+  // "any other source" — but the board-card priority-changing UI it needs
+  // (`feat(tasks): add a priority action to the kanban card menu`, commit
+  // 5982636f06) lives only on the unmerged `feature/surface-task-priorit-x5h`
+  // branch; this capability's own `## Out of scope` names that UI as owned by
+  // `requirements/task-priority-visibility.md` and "adds no writer of its own".
+  // There is therefore no on-board UI trigger to drive in this branch that
+  // differs from the API call below, and no separate code path to distinguish:
+  // the reactive filter (`swimlane-container.tsx`) and the WS merge
+  // (`kanban.ts`'s `fallbackToSnapshot`) apply uniformly to every incoming
+  // priority value regardless of what wrote it. This test exercises that
+  // shared mechanism, which AC-001.9's own trigger will also rely on once it
+  // ships; it is not a substitute for a future test driving that UI directly.
   test("AC-001.7/001.9: a priority change from another source adds to and removes from an active filter without a reload", async ({
     apiClient,
     testPage,
