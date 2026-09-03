@@ -23,6 +23,7 @@ type resolverDeliveryMessageCreator struct {
 	publishErr       error
 	claimHasDeadline bool
 	claimContextErr  error
+	claimDeadlineIn  time.Duration
 	restoreCalls     int
 	published        [][]*taskmodels.Message
 }
@@ -44,7 +45,11 @@ func (s *resolverDeliveryMessageCreator) CompleteActiveClarificationBundle(
 	pendingID, status string,
 	responses map[string]interface{},
 ) ([]*taskmodels.Message, bool, error) {
-	_, s.claimHasDeadline = ctx.Deadline()
+	deadline, hasDeadline := ctx.Deadline()
+	s.claimHasDeadline = hasDeadline
+	if hasDeadline {
+		s.claimDeadlineIn = time.Until(deadline)
+	}
 	s.claimContextErr = ctx.Err()
 	stored := s.repo.messages[pendingID]
 	claimed := make([]*taskmodels.Message, 0, len(stored))
@@ -588,6 +593,40 @@ func TestResolverDetachedResumeUsesFreshBoundedContextAfterCallerCancellation(t 
 	}
 	if len(eventBus.resumeHasDeadline) != 1 || !eventBus.resumeHasDeadline[0] || eventBus.resumeContextErrs[0] != nil {
 		t.Fatalf("resume contexts = deadlines %v errors %v, want fresh bounded context", eventBus.resumeHasDeadline, eventBus.resumeContextErrs)
+	}
+}
+
+// TestResolverClaimUsesShortDedicatedTimeoutNotThePersistenceTimeout covers
+// Defect 3: the interactive claim used to share the generic 30s
+// clarificationPersistenceTimeout with every other durability phase, so a
+// user stuck behind SQLite's single-writer connection pool queue could wait
+// out the full 30s (or, chained with a detached resume/restore retry,
+// 60-75s+) before ever seeing feedback. The claim now gets its own much
+// shorter budget so the caller fails fast into Defect 1's retry affordance
+// instead of a dead wait; every other phase (resume, restore, the loser
+// re-read) is unaffected.
+func TestResolverClaimUsesShortDedicatedTimeoutNotThePersistenceTimeout(t *testing.T) {
+	const pendingID = "pending-claim-timeout"
+	message := resolverDeliveryMessage(pendingID, "message-claim-timeout", "turn-1")
+	resolver, _, _, creator, _ := newResolverDeliveryFixture(t, pendingID, []*taskmodels.Message{message})
+
+	questions := []Question{{
+		ID: "q1", Prompt: "Continue?",
+		Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
+	}}
+	_, claimed, err := resolver.claimAndDeliver(context.Background(), pendingID, "session-1", "task-1", questions, resolverAnswer())
+	if err != nil || !claimed {
+		t.Fatalf("response = claimed %v, err %v", claimed, err)
+	}
+	if !creator.claimHasDeadline {
+		t.Fatal("claim context has no deadline, want a bounded context")
+	}
+	if creator.claimDeadlineIn <= 0 || creator.claimDeadlineIn > clarificationClaimTimeout {
+		t.Fatalf("claim deadline remaining = %v, want (0, %v]", creator.claimDeadlineIn, clarificationClaimTimeout)
+	}
+	if creator.claimDeadlineIn >= clarificationPersistenceTimeout {
+		t.Fatalf("claim deadline remaining = %v, want strictly less than the %v persistence timeout",
+			creator.claimDeadlineIn, clarificationPersistenceTimeout)
 	}
 }
 

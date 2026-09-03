@@ -461,7 +461,11 @@ export type AppState = KanbanSlice & {
     revision?: TaskPendingActionRevision,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
-  setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
+  setTaskSessionsForTask: (
+    taskId: string,
+    sessions: TaskSession[],
+    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+  ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;

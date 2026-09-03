@@ -6,6 +6,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { CreateTaskResponse } from "../../../lib/types/http";
+import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
 
 const SLOW_COMMAND = {
   name: "slow",
@@ -84,9 +85,7 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   }
   await dialog.getByTestId("quick-chat-start").click();
 
-  const editor = chatEditor(dialog);
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  await waitForQuickChatComposerReady(dialog);
   return dialog;
 }
 

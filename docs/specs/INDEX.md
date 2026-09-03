@@ -6,7 +6,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 
 | System | Index | Migration | Canonical documents |
 | --- | --- | --- | --- |
-| Agents | [README](agents/README.md) | complete | 26 requirements, 16 designs |
+| Agents | [README](agents/README.md) | complete | 27 requirements, 17 designs |
 | Auth | [README](auth/README.md) | complete | 7 requirements, 2 designs |
 | CLI | [README](cli/README.md) | complete | 2 requirements, 0 designs |
 | Costs | [README](costs/README.md) | complete | 2 requirements, 0 designs |
@@ -37,6 +37,7 @@ The following specifications were added after this migration and remain in the l
 - [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
 - [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
 - [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
+- [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
 
 ## Authoring rule

@@ -150,6 +150,7 @@ func (h *MessageHandlers) injectMessageContext(
 	startCreatedSession bool,
 	titleOwner bool,
 	content string,
+	trustedPromptContext string,
 ) string {
 	requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
 	referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
@@ -160,7 +161,7 @@ func (h *MessageHandlers) injectMessageContext(
 	if task.IsFromOffice {
 		return sysprompt.InjectOfficeContextWithOptions(
 			req.TaskID, req.TaskSessionID, content, requiresSignal,
-			referenceContext, pullRequestTargetContext,
+			referenceContext, trustedPromptContext, pullRequestTargetContext,
 		)
 	}
 	if sessionResp.Session.IsPassthrough {
@@ -176,7 +177,24 @@ func (h *MessageHandlers) injectMessageContext(
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
-	}, referenceContext, pullRequestTargetContext)
+	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
+}
+
+func (h *MessageHandlers) prepareDirectPrompt(
+	ctx context.Context,
+	content string,
+	isPassthrough bool,
+) (string, string) {
+	if h.orchestrator == nil || isPassthrough {
+		return content, ""
+	}
+	preparer, ok := h.orchestrator.(orchestrator.DirectPromptPreparer)
+	if !ok {
+		// Keep test and compatibility doubles that do not provide the optional
+		// seam functional. The production wrapper always implements it.
+		return content, ""
+	}
+	return preparer.PrepareDirectPrompt(ctx, content, isPassthrough)
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
@@ -551,6 +569,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
+	var trustedPromptContext string
+	storedContent, trustedPromptContext = h.prepareDirectPrompt(
+		ctx, storedContent, sessionResp.Session.IsPassthrough,
+	)
 	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 	titleOwner := false
 	hasMessageContent := req.Content != "" || len(req.Attachments) > 0
@@ -567,6 +589,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		// receives (and "Show formatted" reveals it).
 		storedContent = h.injectMessageContext(
 			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, storedContent,
+			trustedPromptContext,
 		)
 	}
 	req.Content = storedContent
@@ -623,7 +646,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// respond immediately. Plan mode changes the execution prompt and agent
 	// behavior; it does not make message.add a record-only operation.
 	if h.orchestrator != nil && !turnStartResult.Queued {
-		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer)
+		h.dispatchPromptAsync(
+			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
+		)
 	}
 
 	return response, nil
@@ -804,7 +829,13 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID strin
 // background goroutine. The caller (wsAddMessage) is responsible for running
 // on_turn_start synchronously BEFORE wrapping the prompt, so this function
 // only handles the agent-facing dispatch.
-func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession, steer bool) {
+func (h *MessageHandlers) dispatchPromptAsync(
+	ctx context.Context,
+	req wsAddMessageRequest,
+	agentProfileID string,
+	isCreatedSession, steer bool,
+	trustedPromptContext string,
+) {
 	taskID := req.TaskID
 	sessionID := req.TaskSessionID
 	content := req.Content
@@ -820,6 +851,7 @@ func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMess
 		h.forwardMessageAsPrompt(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
+			trustedPromptContext,
 		)
 	}()
 }
@@ -858,7 +890,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		// agentProfileID/references/startCreated are irrelevant: a steer only
 		// targets a RUNNING session, never a CREATED one, so this takes the
 		// ordinary prompt branch (PromptTask + resume + error handling).
-		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false)
+		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "")
 		return
 	}
 	if !isAgentReportedError(err) {
@@ -876,13 +908,23 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	startCreated bool,
+	trustedPromptContext string,
 ) {
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
-		if err := h.orchestrator.StartCreatedSession(
-			ctx, taskID, sessionID, agentProfileID,
-			content, true, planMode, false, attachments, references,
-		); err != nil {
+		var err error
+		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarter); ok {
+			_, err = starter.StartCreatedSessionWithPromptContext(
+				ctx, taskID, sessionID, agentProfileID,
+				content, true, planMode, false, attachments, references, trustedPromptContext,
+			)
+		} else {
+			err = h.orchestrator.StartCreatedSession(
+				ctx, taskID, sessionID, agentProfileID,
+				content, true, planMode, false, attachments, references,
+			)
+		}
+		if err != nil {
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),

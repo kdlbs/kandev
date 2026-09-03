@@ -716,19 +716,21 @@ func mapWorkflowItemState(workflow taskdto.WorkflowDTO) map[string]any {
 // mapKanbanStepState maps a workflow step DTO to the kanban step boot shape.
 func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 	return map[string]any{
-		"id":                    step.ID,
-		"title":                 step.Name,
-		"color":                 defaultString(step.Color, "bg-neutral-400"),
-		"position":              step.Position,
-		"events":                step.Events,
-		"allow_manual_move":     step.AllowManualMove,
-		"prompt":                step.Prompt,
-		"is_start_step":         step.IsStartStep,
-		"show_in_command_panel": step.ShowInCommandPanel,
-		"agent_profile_id":      nullString(step.AgentProfileID),
-		"stage_type":            nullString(step.StageType),
-		"wip_limit":             step.WIPLimit,
-		"pull_from_step_id":     nullString(step.PullFromStepID),
+		"id":                           step.ID,
+		"title":                        step.Name,
+		"color":                        defaultString(step.Color, "bg-neutral-400"),
+		"position":                     step.Position,
+		"events":                       step.Events,
+		"allow_manual_move":            step.AllowManualMove,
+		"prompt":                       step.Prompt,
+		"is_start_step":                step.IsStartStep,
+		"show_in_command_panel":        step.ShowInCommandPanel,
+		"agent_profile_id":             nullString(step.AgentProfileID),
+		"profile_session_start_policy": string(step.ProfileSessionStartPolicy),
+		"profile_session_end_policy":   string(step.ProfileSessionEndPolicy),
+		"stage_type":                   nullString(step.StageType),
+		"wip_limit":                    step.WIPLimit,
+		"pull_from_step_id":            nullString(step.PullFromStepID),
 	}
 }
 

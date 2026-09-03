@@ -668,6 +668,7 @@ func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, recor
 	lcRecords := make([]lifecycle.RemoteStatusPollRecord, len(records))
 	for i, r := range records {
 		lcRecords[i] = lifecycle.RemoteStatusPollRecord{
+			TaskID:           r.TaskID,
 			SessionID:        r.SessionID,
 			Runtime:          r.Runtime,
 			AgentExecutionID: r.AgentExecutionID,
@@ -744,7 +745,8 @@ func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit 
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -757,7 +759,8 @@ func (a *lifecycleAdapter) GetCumulativeDiff(ctx context.Context, sessionID, bas
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -773,7 +776,8 @@ func (a *lifecycleAdapter) GetGitStatus(ctx context.Context, sessionID string) (
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -786,7 +790,8 @@ func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID stri
 	if !ok {
 		return nil, nil
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -820,6 +825,28 @@ func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, tas
 func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error {
 	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)
 	return err
+}
+
+// PrepareDirectPrompt forwards the backend-owned direct-message preparation
+// seam used by the WebSocket message handler.
+func (w *orchestratorWrapper) PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string) {
+	return w.svc.PrepareDirectPrompt(ctx, prompt, isPassthrough)
+}
+
+// StartCreatedSessionWithPromptContext forwards direct-message startup while
+// preserving the trusted saved-prompt context through the second canonicalizer.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContext(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+	)
 }
 
 type githubTaskIssueStoreAdapter struct {

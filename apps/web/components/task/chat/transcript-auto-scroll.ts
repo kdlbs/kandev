@@ -1,7 +1,9 @@
+import { useEffect, useRef } from "react";
+
 /**
- * Pure decision logic for the native transcript auto-scroll toggle. Kept
- * side-effect free for direct unit testing — the renderer owns all DOM calls
- * and just consults these functions.
+ * Pure decision logic for the native transcript auto-scroll toggle, plus small
+ * visibility lifecycle primitives. The renderer owns all DOM calls and just
+ * consults these functions or refs.
  */
 
 /**
@@ -153,5 +155,48 @@ export function createFrameCoalescer(run: () => void): {
       }
       run();
     },
+  };
+}
+
+/**
+ * Tracks a hidden-to-visible transition without consuming it until the caller
+ * completes its activation work. This keeps every activation owner aligned on
+ * the same visibility and pending-transition contract.
+ */
+export function useActivationPending(isVisible: boolean) {
+  const isVisibleRef = useRef(isVisible);
+  const previousVisibleRef = useRef(isVisible);
+  const activationPendingRef = useRef(false);
+  isVisibleRef.current = isVisible;
+
+  useEffect(() => {
+    const becameVisible = !previousVisibleRef.current && isVisible;
+    previousVisibleRef.current = isVisible;
+    activationPendingRef.current = isVisible
+      ? becameVisible || activationPendingRef.current
+      : false;
+  }, [isVisible]);
+
+  return { isVisibleRef, activationPendingRef };
+}
+
+/**
+ * Schedules work after the generic Dockview panel restore's current one-frame
+ * write. The generic restore also guards stale offsets, so this is a bounded
+ * coordination window rather than the sole correctness mechanism.
+ */
+export function scheduleAfterPanelRestore(run: () => void): () => void {
+  let cancelled = false;
+  let secondFrame: number | null = null;
+  const firstFrame = requestAnimationFrame(() => {
+    if (cancelled) return;
+    secondFrame = requestAnimationFrame(() => {
+      if (!cancelled) run();
+    });
+  });
+  return () => {
+    cancelled = true;
+    cancelAnimationFrame(firstFrame);
+    if (secondFrame !== null) cancelAnimationFrame(secondFrame);
   };
 }

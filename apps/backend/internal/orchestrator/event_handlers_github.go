@@ -1019,6 +1019,12 @@ func (s *Service) backfillRepoProvider(store repoStore, repo *models.Repository)
 // AND the session worktree for that repo has no branch (rare; ensures
 // backwards compatibility with single-repo callers that pass the resolved
 // branch directly).
+//
+// The watch's task_id is redirected via resolveEffectivePushTaskID, same as
+// push detection: this runs on every session start, so without the redirect
+// a subtask sharing its parent's worktree gets its own member-attributed
+// watch here even when push detection itself is fixed — the watch the
+// poller then associates the PR under (see poller.go's detectPRForWatch).
 func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, fallbackBranch string) {
 	if s.githubService == nil {
 		return
@@ -1029,8 +1035,9 @@ func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, f
 	}
 	targets := s.resolveSessionWatchTargets(ctx, taskID, sessionID, fallbackBranch)
 	for _, t := range targets {
+		effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, t.RepositoryID)
 		if _, err := s.githubService.EnsurePRWatchForWorkspace(
-			ctx, workspaceID, sessionID, taskID, t.RepositoryID, t.Owner, t.Repo, t.Branch,
+			ctx, workspaceID, sessionID, effectiveTaskID, t.RepositoryID, t.Owner, t.Repo, t.Branch,
 		); err != nil {
 			s.logger.Warn("failed to ensure PR watch for session",
 				zap.String("session_id", sessionID),
@@ -1359,13 +1366,26 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 
-	// Check if a PR is already associated with this task
-	existing, err := s.githubService.GetTaskPR(ctx, taskID)
+	// The watch/association write destination is redirected the same way as
+	// push detection (resolveEffectivePushTaskID): this is the frontend's
+	// on-demand alternative to that same detection, so without the redirect a
+	// user opening a shared-worktree subtask reproduces the multi-binding on
+	// demand. Resolved first, ahead of resolveTaskRepo/branch below, so the
+	// already-associated short-circuit only needs a repositoryID lookup, not
+	// a full owner/repo/branch resolution.
+	repositoryID := s.resolvePrimaryTaskRepositoryID(ctx, taskID)
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+
+	// Check if a PR is already associated with the effective task.
+	existing, err := s.githubService.GetTaskPR(ctx, effectiveTaskID)
 	if err == nil && existing != nil {
 		return true, nil
 	}
 
-	// Resolve the GitHub owner/repo from the task's repository
+	// Resolve the GitHub owner/repo from the task's repository. This, and
+	// branch resolution below, stay keyed off the observing taskID: the
+	// physical checkout and task_repositories rows belong to whichever task's
+	// session the frontend is checking, same as dispatchPushDetection.
 	owner, repoName := s.resolveTaskRepo(ctx, taskID)
 	if owner == "" || repoName == "" {
 		return false, nil
@@ -1377,13 +1397,12 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 	}
 
 	// Ensure a PR watch exists so the background poller will keep checking
-	repositoryID := s.resolvePrimaryTaskRepositoryID(ctx, taskID)
 	workspaceID := s.taskWorkspaceID(ctx, taskID)
 	if workspaceID == "" {
 		return false, github.ErrGitHubWorkspaceRequired
 	}
 	if _, watchErr := s.githubService.EnsurePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, branch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repoName, branch,
 	); watchErr != nil {
 		s.logger.Warn("failed to ensure PR watch during check",
 			zap.String("session_id", sessionID),
@@ -1398,8 +1417,8 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 
-	// Found a PR — associate it with the task
-	s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, owner, repoName, repositoryID, branch, pr)
+	// Found a PR — associate it with the effective task.
+	s.associatePRFromPushScoped(ctx, workspaceID, sessionID, effectiveTaskID, owner, repoName, repositoryID, branch, pr)
 	return true, nil
 }
 
@@ -1426,6 +1445,11 @@ func (s *Service) ResolveBranchForSession(ctx context.Context, taskID, sessionID
 // TaskBranchInfo per (session, repository) that doesn't already have a PR
 // watch. Multi-repo: previously dedup was keyed by sessionID, which silently
 // dropped non-primary repos as soon as the primary one got a watch.
+//
+// TaskID is redirected via resolveEffectivePushTaskID before the caller
+// (poller.reconcileWatches) creates the watch, same as ensureSessionPRWatch:
+// this is the third and last producer that would otherwise write a
+// member-attributed watch for a shared-worktree subtask.
 func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]github.TaskBranchInfo, error) {
 	sessions, err := store.ListSessionsWithBranches(ctx)
 	if err != nil {
@@ -1448,9 +1472,10 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 			if watchedKeys[watchedSessionRepoKey(sess.SessionID, t.RepositoryID, t.Branch)] {
 				continue
 			}
+			effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sess.SessionID, sess.TaskID, t.RepositoryID)
 			result = append(result, github.TaskBranchInfo{
 				WorkspaceID:  sess.WorkspaceID,
-				TaskID:       sess.TaskID,
+				TaskID:       effectiveTaskID,
 				SessionID:    sess.SessionID,
 				RepositoryID: t.RepositoryID,
 				Owner:        t.Owner,

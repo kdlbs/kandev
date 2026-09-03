@@ -841,7 +841,10 @@ func (r *Repository) loadInitialSessionRuntimeSeedTx(
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
 // the task's initial session when no earlier session exists. The task row lock
 // serializes callers across PostgreSQL connections; SQLite's single writer
-// connection serializes the transaction.
+// connection serializes the transaction. Within that same transaction it also
+// enforces office-session uniqueness for the (task_id, agent_profile_id) pair:
+// if a live row already exists for the pair, the insert is refused with
+// ErrOfficeSessionRaceConflict rather than creating a second live session.
 func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *models.TaskSession) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -869,6 +872,20 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 			session.Metadata = make(map[string]interface{})
 		}
 		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
+
+	if session.AgentProfileID != "" {
+		var liveCount int
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT COUNT(*) FROM task_sessions
+			WHERE task_id = ? AND agent_profile_id = ?
+			  AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+		`), session.TaskID, session.AgentProfileID).Scan(&liveCount); err != nil {
+			return fmt.Errorf("check live office session for pair: %w", err)
+		}
+		if liveCount > 0 {
+			return ErrOfficeSessionRaceConflict
+		}
 	}
 
 	if err := r.createTaskSession(ctx, tx, session); err != nil {
@@ -949,14 +966,6 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	if err != nil && isOfficeTaskSessionUniqueViolation(err) {
-		// Two callers raced past their SELECT-then-INSERT for the same
-		// (task_id, agent_profile_id) — surface a typed sentinel so callers
-		// can classify with errors.Is rather than driver-message matching.
-		// Currently unreachable: no index enforces this pair yet (see
-		// ErrOfficeSessionRaceConflict's doc comment).
-		return fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
-	}
 	return err
 }
 
@@ -1214,10 +1223,15 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 
 // GetTaskSessionByTaskAndAgent retrieves the office task session for the given
 // (task_id, agent_profile_id) pair. This pair is NOT unique at the schema
-// level — no index enforces it (see ErrOfficeSessionRaceConflict's doc
-// comment for why) — so both live and terminal rows can accumulate for the
-// same pair, and ORDER BY started_at DESC LIMIT 1 is load-bearing to pick the
-// most recent one. Returns nil, nil when no session exists for the pair.
+// level — the office creation guard (CreateOfficeTaskSession) constrains it
+// only at the moment of insert, so legacy duplicate-pair data and rows
+// created outside that guard can still leave multiple rows for the same
+// pair. The ORDER BY therefore prefers a live row over a terminal one
+// regardless of which is newer — a terminal row created after a live row
+// (e.g. a stale duplicate resolving while the real session is still running)
+// must not shadow the live one — then falls back to started_at DESC, then id
+// DESC as a total tiebreak. Returns nil, nil when no session exists for the
+// pair.
 func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error) {
 	if taskID == "" || agentInstanceID == "" {
 		return nil, nil
@@ -1225,7 +1239,11 @@ func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, a
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
 		 WHERE ts.task_id = ? AND ts.agent_profile_id = ?
-		 ORDER BY ts.started_at DESC LIMIT 1`,
+		 ORDER BY
+		   CASE WHEN ts.state IN ('COMPLETED', 'FAILED', 'CANCELLED') THEN 1 ELSE 0 END,
+		   ts.started_at DESC,
+		   ts.id DESC
+		 LIMIT 1`,
 	), taskID, agentInstanceID)
 	session, err := r.scanTaskSession(ctx, row, "task_sessions: no matching row")
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
@@ -1422,9 +1440,9 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	// caller's in-memory copy may be stale.
 
 	// agent_profile_id is stored as NULL when empty. No unique index
-	// currently constrains (task_id, agent_profile_id) — see
-	// ErrOfficeSessionRaceConflict's doc comment (errors.go) for why, and
-	// for what still guards this pair despite that.
+	// constrains (task_id, agent_profile_id) at this UPDATE path — office
+	// session-uniqueness enforcement lives only in CreateOfficeTaskSession's
+	// in-transaction guard (see ErrOfficeSessionRaceConflict's doc comment).
 	var agentProfileID interface{}
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
@@ -1452,16 +1470,6 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	}
 	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
-		if isOfficeTaskSessionUniqueViolation(err) {
-			// A terminal-session resume (updateSessionStarting) or another
-			// full-row update raced another live row into the same
-			// (task_id, agent_profile_id) slot — same classification as the
-			// createTaskSession INSERT path, so callers can errors.Is this
-			// regardless of which write hit the constraint. Currently
-			// unreachable: no index enforces this pair yet (see
-			// ErrOfficeSessionRaceConflict's doc comment).
-			return false, fmt.Errorf("%w: %w", ErrOfficeSessionRaceConflict, err)
-		}
 		return false, err
 	}
 	rows, err := result.RowsAffected()

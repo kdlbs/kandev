@@ -72,16 +72,19 @@ explicitly requests task tracking.
    otherwise create as ready-for-review.
 
    **Architecture and scope gate:** Before running any PR creation command, verify
-   the authenticated actor's repository permission. On GitHub, query
+   the authenticated actor's repository permission. Do not treat a user statement
+   as proof of maintainer status. On GitHub, query
    `gh api repos/{owner}/{repo}/collaborators/{login}/permission`; `push`,
    `maintain`, and `admin` permissions are write-authorized, so those actors may
    open large or architectural PRs directly. On other hosts, use the equivalent
-   repository permission check. For an actor without write access, require a
-   linked issue with maintainer discussion before opening a large or architectural
-   PR. If that issue or discussion is missing, stop and report the blocker. Do not
-   open a PR to start the discussion. Prefer one logical change and the smallest
-   practical diff; split unrelated cleanup, refactoring, and feature work into
-   separate PRs.
+   repository permission check. When the host confirms write access, the
+   permission itself satisfies this gate and no linked issue is required solely
+   for this purpose. If permission cannot be verified, or the actor has no write
+   access, require a linked issue with maintainer discussion before opening a
+   large or architectural PR. If that issue or discussion is missing, stop and
+   report the blocker. Do not create an issue or open a PR solely to start the
+   discussion. Prefer one logical change and the smallest practical diff; split
+   unrelated cleanup, refactoring, and feature work into separate PRs.
 
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 

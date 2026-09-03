@@ -3,10 +3,13 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -117,6 +120,27 @@ func (r *Repository) ListSystemSkills(
 	return skills, nil
 }
 
+// ListNonSystemSkills returns all is_system = false skills for a
+// workspace, ordered by slug. Used by the system-skill sync's
+// slug-migration pass: user/provider-imported rows that need a
+// well-formed-but-non-canonical slug normalized to canonical, and the
+// conflict check before inserting a newly-bundled canonical slug.
+func (r *Repository) ListNonSystemSkills(
+	ctx context.Context, workspaceID string,
+) ([]*models.Skill, error) {
+	var skills []*models.Skill
+	err := r.ro.SelectContext(ctx, &skills, r.ro.Rebind(
+		`SELECT * FROM office_skills WHERE workspace_id = ? AND is_system = 0 ORDER BY slug`),
+		workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if skills == nil {
+		return []*models.Skill{}, nil
+	}
+	return skills, nil
+}
+
 // UpdateSkill updates an existing skill.
 func (r *Repository) UpdateSkill(ctx context.Context, skill *models.Skill) error {
 	skill.UpdatedAt = time.Now().UTC()
@@ -139,6 +163,176 @@ func (r *Repository) UpdateSkill(ctx context.Context, skill *models.Skill) error
 		skill.IsSystem, skill.SystemVersion, skill.DefaultForRoles,
 		skill.UpdatedAt, skill.ID)
 	return err
+}
+
+// NormalizeSkillSlug atomically changes a non-system skill's slug and
+// rewrites matching desired_skills references on all active office agents.
+// The skill ID and old slug are both part of the update predicate, so a
+// concurrent writer cannot cause references to be rewritten for a different
+// row. It returns false when the row no longer matches that identity.
+func (r *Repository) NormalizeSkillSlug(
+	ctx context.Context,
+	workspaceID, skillID, oldSlug, newSlug string,
+) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin skill slug normalization: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE office_skills
+		SET slug = ?, updated_at = ?
+		WHERE id = ? AND workspace_id = ? AND slug = ? AND is_system = 0
+	`), newSlug, time.Now().UTC(), skillID, workspaceID, oldSlug)
+	if err != nil {
+		return false, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("check skill slug normalization: %w", err)
+	}
+	if updated == 0 {
+		return false, nil
+	}
+
+	updates, err := collectAgentDesiredSkillUpdates(ctx, tx, workspaceID, oldSlug, newSlug)
+	if err != nil {
+		return false, err
+	}
+	if err := applyAgentDesiredSkillUpdates(ctx, tx, workspaceID, updates); err != nil {
+		return false, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit skill slug normalization: %w", err)
+	}
+	return true, nil
+}
+
+type agentDesiredSkillUpdate struct {
+	id       string
+	original string
+	desired  string
+}
+
+func collectAgentDesiredSkillUpdates(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	workspaceID, oldSlug, newSlug string,
+) ([]agentDesiredSkillUpdate, error) {
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT id, COALESCE(desired_skills, '') AS desired_skills
+		FROM agent_profiles
+		WHERE workspace_id = ? AND deleted_at IS NULL
+	`), workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list agents for skill slug normalization: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	updates := make([]agentDesiredSkillUpdate, 0)
+	for rows.Next() {
+		var update agentDesiredSkillUpdate
+		if err := rows.Scan(&update.id, &update.original); err != nil {
+			return nil, fmt.Errorf("scan agent for skill slug normalization: %w", err)
+		}
+		update.desired, _ = replaceSkillSlugInAgentList(update.original, oldSlug, newSlug)
+		if update.desired != update.original {
+			updates = append(updates, update)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read agents for skill slug normalization: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close agents for skill slug normalization: %w", err)
+	}
+	return updates, nil
+}
+
+func applyAgentDesiredSkillUpdates(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	workspaceID string,
+	updates []agentDesiredSkillUpdate,
+) error {
+	now := time.Now().UTC()
+	for _, update := range updates {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE agent_profiles
+			SET desired_skills = ?, updated_at = ?
+			WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+				AND COALESCE(desired_skills, '') = ?
+		`), update.desired, now, update.id, workspaceID, update.original)
+		if err != nil {
+			return fmt.Errorf("update agent %s for skill slug normalization: %w", update.id, err)
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("check agent %s for skill slug normalization: %w", update.id, err)
+		}
+		if rowsAffected != 1 {
+			return fmt.Errorf("agent %s changed during skill slug normalization", update.id)
+		}
+	}
+	return nil
+}
+
+// replaceSkillSlugInAgentList mirrors the office desired_skills reader. It
+// accepts both the canonical JSON-array format and the legacy CSV format, and
+// emits a deduplicated JSON array only when a value changes.
+func replaceSkillSlugInAgentList(raw, oldSlug, newSlug string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return raw, false
+	}
+	values, ok := parseAgentSkillList(raw)
+	if !ok {
+		return raw, false
+	}
+
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	changed := false
+	for _, value := range values {
+		if value == oldSlug {
+			value = newSlug
+			changed = true
+		}
+		if value == "" || seen[value] {
+			if value != "" {
+				changed = true
+			}
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	if !changed {
+		return raw, false
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return raw, false
+	}
+	return string(encoded), true
+}
+
+func parseAgentSkillList(raw string) ([]string, bool) {
+	if strings.HasPrefix(raw, "[") {
+		var values []string
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return nil, false
+		}
+		return values, true
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, len(parts))
+	for i, part := range parts {
+		values[i] = strings.TrimSpace(part)
+	}
+	return values, true
 }
 
 // SkillConfigFields is the subset of office_skills columns a config import

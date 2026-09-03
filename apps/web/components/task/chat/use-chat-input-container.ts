@@ -139,23 +139,26 @@ function computeDerivedState(params: {
   steerPlaceholder: string | undefined;
 }) {
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
-  // STARTING blocks regular messages until the session reaches RUNNING. An
+  // Keep the editor available during STARTING so the user can prepare a draft.
+  // Regular submission remains blocked until the session reaches RUNNING. An
   // interactive clarification is different: its queue path is persistence-only,
   // so it remains safe while stale lifecycle metadata says STARTING.
+  const startupSubmitDisabled = params.isStarting && !hasClarification;
   const isDisabled =
-    (params.isStarting && !hasClarification) ||
     params.isMoving ||
     params.isSending ||
     params.isFailed ||
     params.needsRecovery ||
     params.executorUnavailable;
-  const submitDisabled = isDisabled || params.hasPendingAttachmentUploads;
+  const submitDisabled = isDisabled || startupSubmitDisabled || params.hasPendingAttachmentUploads;
   // The "agent still being set up" tooltip is only meaningful while a
   // container/sandbox is actively bootstrapping. The brief STARTING
   // transition for local quick-chat sessions doesn't deserve its own
-  // tooltip — the editor is disabled, that's the signal.
+  // tooltip. The disabled send action is sufficient feedback.
   const submitDisabledReason =
-    isDisabled && params.isPreparingEnvironment ? t("task:agentStillBeingSetUp") : undefined;
+    (isDisabled || startupSubmitDisabled) && params.isPreparingEnvironment
+      ? t("task:agentStillBeingSetUp")
+      : undefined;
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
   );

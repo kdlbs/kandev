@@ -54,6 +54,7 @@ func (s *Service) createPRWatch(
 	if existing != nil {
 		return existing, nil // already watching this (session, repo, branch)
 	}
+	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	w := &PRWatch{
 		WorkspaceID:  workspaceID,
 		SessionID:    sessionID,
@@ -271,6 +272,7 @@ func (s *Service) ensurePRWatch(
 	if existing != nil {
 		return existing, nil
 	}
+	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	w := &PRWatch{
 		WorkspaceID:  workspaceID,
 		SessionID:    sessionID,
@@ -306,7 +308,7 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID 
 	// pr here comes from branch-search discovery (poller.detectPRForWatch) or
 	// a batched status result of unknown populated-ness — never assert
 	// outcomeFieldsPopulated for this wrapper's callers (AC-11).
-	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false)
+	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false, TaskPRSourceWatch)
 }
 
 // AssociatePRWithTaskForWorkspace is the workspace-scoped variant of
@@ -317,7 +319,127 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
-	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false, false)
+	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false, false, TaskPRSourceWatch)
+}
+
+// resolveEffectiveAssociationTaskID redirects a watch-sourced association
+// write to the workspace-group owner task, independently of whatever
+// producer called in. It exists as defense-in-depth alongside
+// internal/orchestrator's resolveEffectivePushTaskID: that helper redirects
+// every watch/association call site the orchestrator package controls, but
+// Review Round 2 (F4) found a fifth orchestrator producer it had missed, and
+// F5 found that redirect alone does nothing for github_pr_watches rows that
+// already carry a member task_id from before the fix existed — those stale
+// watches keep feeding poller.go's AssociatePRWithTask(watch.TaskID, ...)
+// forever, since nothing ever rewrites a watch's task_id. Applying the same
+// redirect again at this single private write funnel closes both gaps at
+// once: it does not matter which orchestrator producer supplied taskID, or
+// whether the watch driving it predates this fix, because every watch-sourced
+// write is re-checked here before it lands.
+//
+// Only applied to source == TaskPRSourceWatch. TaskPRSourceURLLink
+// (AssociateExistingPRByURL/ForWorkspace) is a deliberate cross-task action —
+// the user explicitly chose to link a specific PR to the task whose card they
+// were viewing, independent of worktree sharing — and must never be
+// silently rerouted to a different task.
+//
+// Falls back to taskID unchanged (matching the orchestrator resolver's
+// fallback semantics) whenever the redirect can't be safely applied: no
+// resolver wired, taskID empty, no group/no distinct owner, the lookup
+// errors, the owner task can't be loaded or is archived, or the owner
+// doesn't hold repositoryID itself (redirecting would just make
+// validateTaskRepositoryID reject the owner and drop the association, which
+// is worse than leaving it under the observing task — the same reasoning
+// Round 2 applied to resolveEffectivePushTaskID's own repository check).
+func (s *Service) resolveEffectiveAssociationTaskIDForSession(
+	ctx context.Context, sessionID, taskID, repositoryID string,
+) string {
+	if taskID == "" {
+		return taskID
+	}
+	resolver := s.workspaceGroupOwnerResolver
+	if resolver == nil {
+		return taskID
+	}
+	var ownerTaskID string
+	var err error
+	if sessionID != "" {
+		if sessionResolver, ok := any(resolver).(WorkspaceGroupOwnerSessionResolver); ok {
+			ownerTaskID, err = sessionResolver.GetWorkspaceGroupOwnerTaskIDForSession(ctx, taskID, sessionID)
+		} else {
+			// Keep compatibility with older adapters and focused test doubles.
+			ownerTaskID, err = resolver.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+		}
+	} else {
+		ownerTaskID, err = resolver.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	}
+	if err != nil || ownerTaskID == "" || ownerTaskID == taskID {
+		return taskID
+	}
+	store := s.getTaskIssueStore()
+	if store == nil {
+		return taskID
+	}
+	ownerTask, err := store.GetTask(ctx, ownerTaskID)
+	if err != nil || ownerTask == nil || ownerTask.ArchivedAt != nil {
+		return taskID
+	}
+	if repositoryID != "" && !s.associationOwnerHoldsRepository(ctx, store, ownerTaskID, repositoryID) {
+		return taskID
+	}
+	s.logger.Info("redirecting watch-sourced PR association to workspace group owner",
+		zap.String("from_task_id", taskID),
+		zap.String("to_task_id", ownerTaskID),
+		zap.String("repository_id", repositoryID))
+	return ownerTaskID
+}
+
+// associationOwnerHoldsRepository reports whether taskID has a
+// task_repositories row for repositoryID. Used by
+// resolveEffectiveAssociationTaskID to avoid redirecting into a write that
+// validateTaskRepositoryID would reject and associatePRWithTask would then
+// silently drop.
+func (s *Service) associationOwnerHoldsRepository(ctx context.Context, store TaskIssueStore, taskID, repositoryID string) bool {
+	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return false
+	}
+	for _, tr := range taskRepos {
+		if tr != nil && tr.RepositoryID == repositoryID {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileTaskPROwnership repairs an active member-owned row before a
+// watch-sourced sync writes the effective owner. The store operation is
+// atomic and does not publish an intermediate member event, so one upstream
+// observation produces one owner-scoped update.
+func (s *Service) reconcileTaskPROwnership(
+	ctx context.Context, sessionID, memberTaskID, repositoryID string, prNumber int,
+) string {
+	ownerTaskID := s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, memberTaskID, repositoryID)
+	if ownerTaskID == "" || ownerTaskID == memberTaskID || prNumber == 0 || s.store == nil {
+		return ownerTaskID
+	}
+	reconciler, ok := any(s.store).(TaskPROwnershipReconciler)
+	if !ok {
+		return ownerTaskID
+	}
+	if _, err := reconciler.ReconcileTaskPROwnership(
+		ctx, memberTaskID, ownerTaskID, repositoryID, prNumber,
+	); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to reconcile legacy member task PR",
+				zap.String("member_task_id", memberTaskID),
+				zap.String("owner_task_id", ownerTaskID),
+				zap.String("repository_id", repositoryID),
+				zap.Int("pr_number", prNumber),
+				zap.Error(err))
+		}
+	}
+	return ownerTaskID
 }
 
 // associatePRWithTask creates the task-PR association. outcomeFieldsPopulated
@@ -325,10 +447,31 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 // direct GetPR-based callers in this file set it true; the two public
 // wrappers above always pass false, preserving their existing callers'
 // behavior exactly, because a branch-search or batched-status pr may not
-// carry real observations for these fields (AC-11).
+// carry real observations for these fields (AC-11). source is only applied
+// when this call creates a brand-new row (see TaskPRSourceWatch /
+// TaskPRSourceURLLink) — an existing or restored row keeps its original
+// source classification (no backfill). taskID is redirected to the
+// workspace-group owner before anything else runs when source is
+// TaskPRSourceWatch — see resolveEffectiveAssociationTaskID.
 func (s *Service) associatePRWithTask(
-	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR, restoreDetached, outcomeFieldsPopulated bool,
+	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR,
+	restoreDetached, outcomeFieldsPopulated bool, source string,
 ) (*TaskPR, error) {
+	return s.associatePRWithTaskForSession(ctx, workspaceID, "", taskID, repositoryID, pr,
+		restoreDetached, outcomeFieldsPopulated, source)
+}
+
+func (s *Service) associatePRWithTaskForSession(
+	ctx context.Context, workspaceID, sessionID, taskID, repositoryID string, pr *PR,
+	restoreDetached, outcomeFieldsPopulated bool, source string,
+) (*TaskPR, error) {
+	originalTaskID := taskID
+	if source == TaskPRSourceWatch {
+		taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+		if taskID != originalTaskID {
+			s.reconcileTaskPROwnership(ctx, sessionID, originalTaskID, repositoryID, pr.Number)
+		}
+	}
 	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
 		return nil, err
 	}
@@ -388,6 +531,7 @@ func (s *Service) associatePRWithTask(
 		CreatedAt:    pr.CreatedAt,
 		MergedAt:     pr.MergedAt,
 		ClosedAt:     pr.ClosedAt,
+		Source:       source,
 	}
 	// ReplaceTaskPR upserts the row matching (task, repository, pr_number)
 	// and resolves the five outcome-attribution columns itself, inside its
@@ -447,7 +591,7 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true)
+	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true, TaskPRSourceURLLink)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -477,7 +621,7 @@ func (s *Service) AssociateExistingPRByURLForWorkspace(
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true)
+	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true, TaskPRSourceURLLink)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -516,15 +660,20 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 	if branch == "" {
 		branch = pr.HeadBranch
 	}
-	if _, watchErr := s.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch); watchErr != nil {
+	// Resolved once and reused for both writes below: the watch's task_id is
+	// its only sync handle (get-or-create, never re-pointed on a hit), so it
+	// must agree with the association's task_id or the redirected owner's
+	// row never syncs.
+	effectiveTaskID := s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+	if _, watchErr := s.CreatePRWatch(ctx, sessionID, effectiveTaskID, repositoryID, owner, repo, prNumber, branch); watchErr != nil {
 		s.logger.Error("failed to create PR watch after PR creation",
 			zap.String("session_id", sessionID), zap.Error(watchErr))
 	}
 
 	// Associate PR with task (persists + publishes WS event)
-	if _, assocErr := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true); assocErr != nil {
+	if _, assocErr := s.associatePRWithTaskForSession(ctx, "", sessionID, taskID, repositoryID, pr, true, true, TaskPRSourceWatch); assocErr != nil {
 		s.logger.Error("failed to associate PR with task after creation",
-			zap.String("task_id", taskID), zap.Error(assocErr))
+			zap.String("task_id", effectiveTaskID), zap.Error(assocErr))
 	}
 }
 
@@ -552,12 +701,17 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	if branch == "" {
 		branch = pr.HeadBranch
 	}
+	// Resolved once and reused for both writes below: the watch's task_id is
+	// its only sync handle (get-or-create, never re-pointed on a hit), so it
+	// must agree with the association's task_id or the redirected owner's
+	// row never syncs.
+	effectiveTaskID := s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	if _, err := s.CreatePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repo, prNumber, branch,
 	); err != nil {
 		return fmt.Errorf("create PR watch: %w", err)
 	}
-	if _, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true); err != nil {
+	if _, err := s.associatePRWithTaskForSession(ctx, workspaceID, sessionID, taskID, repositoryID, pr, true, true, TaskPRSourceWatch); err != nil {
 		return fmt.Errorf("associate PR with task: %w", err)
 	}
 	return nil
@@ -1421,7 +1575,8 @@ func (s *Service) detectPRForWatchOnce(
 	// re-hits `gh` on every on-demand sync, and the frontend re-syncs every 5s
 	// while no PR is found — flooding the logs with identical failures.
 	if watch.LastCheckedAt != nil && time.Since(*watch.LastCheckedAt) < PRSyncFreshnessWindow {
-		return s.store.GetTaskPRByRepository(ctx, taskID, watch.RepositoryID)
+		effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
+		return s.store.GetTaskPRByRepository(ctx, effectiveTaskID, watch.RepositoryID)
 	}
 
 	// Snapshot the negative-cache generation BEFORE the fetch so an
@@ -1467,9 +1622,12 @@ func (s *Service) detectPRForWatchOnce(
 			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
 		return nil, fmt.Errorf("update PR watch: %w", err)
 	}
-	if _, assocErr := s.AssociatePRWithTaskForWorkspace(ctx, watch.WorkspaceID, taskID, watch.RepositoryID, pr); assocErr != nil {
+	if _, assocErr := s.associatePRWithTaskForSession(
+		ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, pr,
+		false, false, TaskPRSourceWatch,
+	); assocErr != nil {
 		s.logger.Error("failed to associate PR with task during sync",
-			zap.String("task_id", taskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
+			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
 		return nil, fmt.Errorf("associate PR: %w", assocErr)
 	}
 	// Also fetch status so the first response includes review/check state
@@ -1481,6 +1639,18 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	// taskID is derived from the watch (callers fetch watches by task_id), so
+	// a numbered watch that found its PR before this fix existed still carries
+	// the observing member's task_id — watches are never re-pointed once they
+	// have a PR (see apps/backend/CLAUDE.md's "PR status sync coverage").
+	// Resolve the effective owner the same way associatePRWithTask does for
+	// the association write, so an on-demand sync keeps landing on the
+	// owner's github_task_prs row instead of silently updating nothing.
+	rawTaskID := taskID
+	if watch.TaskID != "" {
+		rawTaskID = watch.TaskID
+	}
+	taskID = s.reconcileTaskPROwnership(ctx, watch.SessionID, rawTaskID, watch.RepositoryID, watch.PRNumber)
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
 	if err != nil {
 		return nil, err
@@ -1542,7 +1712,10 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 			// created. AssociatePRWithTask publishes the creation event; the
 			// following SyncTaskPR may publish again if status fields changed.
 			// That double event is harmless because clients re-fetch state.
-			if _, assocErr := s.AssociatePRWithTask(bgCtx, taskID, watch.RepositoryID, status.PR); assocErr != nil {
+			if _, assocErr := s.associatePRWithTaskForSession(
+				bgCtx, watch.WorkspaceID, watch.SessionID, rawTaskID, watch.RepositoryID, status.PR,
+				false, false, TaskPRSourceWatch,
+			); assocErr != nil {
 				return nil, assocErr
 			}
 		}
