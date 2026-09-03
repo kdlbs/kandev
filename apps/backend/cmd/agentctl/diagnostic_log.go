@@ -1,6 +1,9 @@
 package main
 
-import "github.com/kandev/kandev/internal/common/logger"
+import (
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/common/logger"
+)
 
 // F71 bound values for agentctl's own detached diagnostic log
 // (AC-EXECUTORS-SURVIVAL-001.3): fixed implementation constants, not
@@ -30,5 +33,22 @@ func diagnosticLoggingConfig(level, format, diagnosticLogPath string) logger.Log
 		MaxSizeMB:  diagnosticLogMaxSizeMB,
 		MaxBackups: diagnosticLogMaxBackups,
 		MaxAgeDays: diagnosticLogMaxAgeDays,
+	}
+}
+
+// resolveRunLoggingConfig is Layer 5.9's kill-path #6 gate ("inherited
+// stdout", design 01's kill paths): stdout is only a liveness hazard once
+// the agent-survival capability is actually engaged for this launch, so
+// every other case -- capability disabled, or a diagnostic log path that
+// failed to resolve for some reason -- keeps today's stdout logging
+// unchanged rather than risk an unwritable sink.
+func resolveRunLoggingConfig(cfg *config.Config) logger.LoggingConfig {
+	if cfg.AgentSurvivalEnabled && cfg.DiagnosticLogPath != "" {
+		return diagnosticLoggingConfig(cfg.LogLevel, cfg.LogFormat, cfg.DiagnosticLogPath)
+	}
+	return logger.LoggingConfig{
+		Level:      cfg.LogLevel,
+		Format:     cfg.LogFormat,
+		OutputPath: "stdout",
 	}
 }

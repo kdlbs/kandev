@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -55,5 +56,46 @@ func TestDiagnosticLoggingConfigWritesToADurableFile(t *testing.T) {
 	}
 	if !strings.Contains(string(contents), "agentctl running detached") {
 		t.Fatalf("diagnostic log file contents = %q, want it to contain the logged message", contents)
+	}
+}
+
+// TestResolveRunLoggingConfigStaysOnStdoutUnlessSurvivalIsEngaged pins the
+// Layer 5.9 gate: kill-path #6 ("inherited stdout", see design 01's kill
+// paths) is only a problem once the capability is actually active for this
+// launch, so every other case -- disabled, or a diagnostic log path that
+// somehow failed to resolve -- must keep today's stdout behavior byte-for-
+// byte rather than silently switching sinks.
+func TestResolveRunLoggingConfigStaysOnStdoutUnlessSurvivalIsEngaged(t *testing.T) {
+	cases := []struct {
+		name                 string
+		agentSurvivalEnabled bool
+		diagnosticLogPath    string
+		wantStdout           bool
+	}{
+		{"disabled with a resolved path", false, "/home/kandev-test/.kandev/logs/agentctl-diagnostic.log", true},
+		{"enabled but path unresolved", true, "", true},
+		{"enabled with a resolved path", true, "/home/kandev-test/.kandev/logs/agentctl-diagnostic.log", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				LogLevel:             "debug",
+				LogFormat:            "json",
+				AgentSurvivalEnabled: tc.agentSurvivalEnabled,
+				DiagnosticLogPath:    tc.diagnosticLogPath,
+			}
+			got := resolveRunLoggingConfig(cfg)
+			if tc.wantStdout {
+				want := logger.LoggingConfig{Level: "debug", Format: "json", OutputPath: "stdout"}
+				if got != want {
+					t.Fatalf("resolveRunLoggingConfig() = %+v, want %+v", got, want)
+				}
+				return
+			}
+			want := diagnosticLoggingConfig("debug", "json", tc.diagnosticLogPath)
+			if got != want {
+				t.Fatalf("resolveRunLoggingConfig() = %+v, want %+v", got, want)
+			}
+		})
 	}
 }

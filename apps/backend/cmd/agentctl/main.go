@@ -110,11 +110,7 @@ func runMain() int {
 	}
 
 	// Initialize logger
-	log, err := logger.NewLogger(logger.LoggingConfig{
-		Level:      cfg.LogLevel,
-		Format:     cfg.LogFormat,
-		OutputPath: "stdout",
-	})
+	log, err := logger.NewLogger(resolveRunLoggingConfig(cfg))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		return 1
@@ -227,6 +223,8 @@ func run(cfg *config.Config, log *logger.Logger) {
 
 	// Create control server
 	controlServer := api.NewControlServer(cfg, instMgr, log)
+	stopUnownedReaper := startUnownedReaperIfEnabled(cfg, controlServer)
+	defer stopUnownedReaper()
 
 	// Start HTTP server. When no auth token is configured (auth disabled),
 	// ListenHost binds to loopback only so the unauthenticated command/shell/
