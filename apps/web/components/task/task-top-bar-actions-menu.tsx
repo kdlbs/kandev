@@ -3,10 +3,33 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { TaskActionsMenuTrigger } from "@/components/task/task-actions-menu-trigger";
 import { TaskActionsMenuDialogs } from "@/components/task/task-actions-menu-dialogs";
 import { useTaskActionsMenu, type TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { useArchiveAndSwitchTask, useDeleteAndSwitchTask } from "@/hooks/use-task-actions";
+
+/**
+ * The detail surface has no board of its own to lean on, so a workflow move
+ * (Move to / Send to workflow) landing the subject in a workflow this client
+ * has never tracked would otherwise leave it absent from every board
+ * collection even though it still exists. Subscribing to the task directly
+ * guarantees its `task.updated` reaches this client regardless of workflow
+ * tracking, and the resulting cache update (removal from the old workflow,
+ * placeholder-snapshot insertion into the new one) lands in the same state
+ * transition, so `existsInBoard` below never observes a false gap for it.
+ */
+function useSubscribeToTask(taskId: string | null) {
+  useEffect(() => {
+    if (!taskId) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    const unsubscribe = client.subscribe(taskId);
+    return () => {
+      unsubscribe();
+    };
+  }, [taskId]);
+}
 
 /**
  * Closes the menu when the subject leaves the board's task collections
@@ -25,6 +48,7 @@ function useCloseMenuOnTaskRemoved(
   setOpen: (open: boolean) => void,
   closeDialogs: () => void,
 ) {
+  useSubscribeToTask(taskId);
   const existsInBoard = useAppStore((state) => {
     if (!taskId) return false;
     if (state.kanban.tasks.some((task) => task.id === taskId)) return true;

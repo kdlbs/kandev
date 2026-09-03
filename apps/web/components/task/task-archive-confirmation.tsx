@@ -210,6 +210,7 @@ type ArchiveDialogProps = Pick<
   | "executorTypes"
   | "onConfirm"
   | "confirmTestId"
+  | "focusReturnRef"
 > & {
   subtaskClassification: SubtaskCountResult;
 };
@@ -247,7 +248,13 @@ function ArchiveConfirmationContent({
     subtaskClassification.total > 0;
 
   if (shouldUseDialog) {
-    return <ArchiveDialog {...dialogProps} subtaskClassification={subtaskClassification} />;
+    return (
+      <ArchiveDialog
+        {...dialogProps}
+        focusReturnRef={focusReturnRef}
+        subtaskClassification={subtaskClassification}
+      />
+    );
   }
 
   if (subtaskClassification.status !== "resolved") {

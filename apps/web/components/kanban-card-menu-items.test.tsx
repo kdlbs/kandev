@@ -478,3 +478,57 @@ describe("useKanbanCardMoveTargets — hidden step fallback (AC-TASKS-TASK-ACTIO
     expect(stepIds).toEqual([HIDDEN_STEP_ID]);
   });
 });
+
+describe("useKanbanCardMoveTargets — flat-list fallback for a WS-arrived task (AC-TASKS-TASK-ACTIONS-MENU-002.1/002.2)", () => {
+  const WORKFLOW_ID = "wf-1";
+  const TASK_ID = "task-1";
+
+  function wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <StateProvider
+        initialState={
+          {
+            kanban: {
+              tasks: [
+                {
+                  id: TASK_ID,
+                  workflowId: WORKFLOW_ID,
+                  workflowStepId: "step-a",
+                  title: "Task 1",
+                  position: 0,
+                },
+              ],
+            },
+            kanbanMulti: {
+              // The workflow's own snapshot has already loaded (steps present),
+              // but this task has not yet been merged into `snapshot.tasks` -
+              // the exact WS-arrived-before-snapshot-catch-up race.
+              snapshots: {
+                [WORKFLOW_ID]: {
+                  workflowId: WORKFLOW_ID,
+                  workflowName: "Workflow 1",
+                  steps: [
+                    { id: "step-a", title: "Todo", color: "blue", position: 0 },
+                    { id: "step-b", title: "Done", color: "green", position: 1 },
+                  ],
+                  tasks: [],
+                },
+              },
+              isLoading: false,
+            },
+          } as never
+        }
+      >
+        {children}
+      </StateProvider>
+    );
+  }
+
+  it("resolves currentWorkflowId from the flat kanban.tasks list when no snapshot lists the task yet", () => {
+    const { result } = renderHook(() => useKanbanCardMoveTargets(TASK_ID), { wrapper });
+
+    expect(result.current.currentWorkflowId).toBe(WORKFLOW_ID);
+    const stepIds = result.current.stepsByWorkflowId[WORKFLOW_ID].map((step) => step.id);
+    expect(stepIds).toEqual(["step-a", "step-b"]);
+  });
+});

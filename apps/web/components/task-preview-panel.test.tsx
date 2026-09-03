@@ -6,17 +6,20 @@ import { TaskPreviewPanel } from "./task-preview-panel";
 import type { Task } from "./kanban-card";
 
 const detachTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "task-1" }));
+const getSubtaskCountMock = vi.hoisted(() => vi.fn().mockResolvedValue({ count: 0 }));
 vi.mock("@/lib/api/domains/kanban-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/kanban-api")>(
     "@/lib/api/domains/kanban-api",
   );
-  return { ...actual, detachTask: detachTaskMock };
+  return { ...actual, detachTask: detachTaskMock, getSubtaskCount: getSubtaskCountMock };
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   detachTaskMock.mockClear();
+  getSubtaskCountMock.mockClear();
+  getSubtaskCountMock.mockResolvedValue({ count: 0 });
 });
 
 vi.mock("./task/preview-session-tabs", () => ({
@@ -196,6 +199,27 @@ describe("TaskPreviewPanel actions menu — focus return to trigger (AC-TASKS-TA
     fireEvent.click(within(popover).getByRole("button", { name: "Cancel" }));
 
     await waitFor(() => expect(screen.queryByTestId(DETACH_CONFIRM_POPOVER_TEST_ID)).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("returns focus to the trigger once a cancelled Archive confirmation closes for a task with subtasks", async () => {
+    getSubtaskCountMock.mockResolvedValue({ count: 2 });
+    vi.useFakeTimers();
+    renderPanel(<TaskPreviewPanel task={TASK} onClose={vi.fn()} />);
+
+    const trigger = openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    vi.useRealTimers();
+
+    // The subtask count resolves to >0, so this is the AlertDialog cascade
+    // branch (`shouldUseDialog`), not the popover.
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { IconLoader } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -47,6 +47,10 @@ type TaskArchiveConfirmDialogProps = {
   confirmTestId?: string;
   /** Preflight result supplied by the local confirmation adapter. */
   subtaskClassification?: SubtaskCountResult;
+  /** Element to return keyboard focus to on close, confirmed or cancelled
+   * (AC-TASKS-TASK-ACTIONS-MENU-001.12). Omitted callers keep Radix's
+   * default restore-to-previously-focused-element behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 type ArchiveOpenMode = "pending" | "confirm" | "bypass";
@@ -118,6 +122,7 @@ export function TaskArchiveConfirmDialog({
   onConfirm,
   confirmTestId,
   subtaskClassification,
+  focusReturnRef,
 }: TaskArchiveConfirmDialogProps) {
   const { t } = useTranslation();
   const confirmTaskArchive = useAppStore((state) => state.userSettings?.confirmTaskArchive ?? true);
@@ -160,7 +165,17 @@ export function TaskArchiveConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
+      <AlertDialogContent
+        size="lg"
+        className={TASK_CONFIRM_CLASS}
+        onClick={stopDialogPropagation}
+        onCloseAutoFocus={(event) => {
+          const target = focusReturnRef?.current;
+          if (!target || !document.contains(target)) return;
+          event.preventDefault();
+          target.focus();
+        }}
+      >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
         </AlertDialogHeader>

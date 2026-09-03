@@ -495,14 +495,19 @@ export function useKanbanCardMoveTargets(
 ): KanbanCardMoveTargets {
   const workflows = useAppStore((state) => state.workflows.items);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
   const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
 
+  // A snapshot's own `tasks` list can lag a WS-arrived task update, the same
+  // race `findTaskInSnapshots` falls back for (`lib/kanban/find-task.ts`), so
+  // consult the flat `kanban.tasks` list before concluding the task has no
+  // current workflow.
   const currentWorkflowId = useMemo(() => {
     for (const [workflowId, snapshot] of Object.entries(snapshots)) {
       if (snapshot.tasks.some((task) => task.id === taskId)) return workflowId;
     }
-    return null;
-  }, [snapshots, taskId]);
+    return kanbanTasks.find((task) => task.id === taskId)?.workflowId ?? null;
+  }, [snapshots, kanbanTasks, taskId]);
 
   const workflowItems = useMemo<TaskMoveWorkflow[]>(() => {
     const current = workflows.find((workflow) => workflow.id === currentWorkflowId);
