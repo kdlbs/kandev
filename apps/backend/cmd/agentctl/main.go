@@ -258,8 +258,9 @@ func run(cfg *config.Config, log *logger.Logger) {
 	// Returns a channel that closes when the parent dies.
 	parentDied := monitorParentLiveness(log)
 
-	// Wait for shutdown signal (OS signal or parent death)
-	waitForShutdown(log, parentDied, func(ctx context.Context) {
+	// Wait for shutdown signal (OS signal, parent death, or an authenticated
+	// ownership-shutdown operation from an adopting/owning backend).
+	waitForShutdown(log, parentDied, controlServer.ShutdownRequested(), func(ctx context.Context) {
 		// Flush pending traces before stopping instances
 		if err := shared.ShutdownTracing(ctx); err != nil {
 			log.Error("error shutting down tracing", zap.Error(err))
@@ -277,23 +278,24 @@ func run(cfg *config.Config, log *logger.Logger) {
 	})
 }
 
-// waitForShutdown waits for a shutdown trigger (OS signal or parent death) and
-// runs the cleanup function. parentDied may be nil when no parent monitor is active.
-func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, cleanup func(ctx context.Context)) {
+// waitForShutdown waits for a shutdown trigger (OS signal, parent death, or
+// an ownership-shutdown operation) and runs the cleanup function. parentDied
+// may be nil when no parent monitor is active. ownershipShutdown may be nil
+// in tests that don't exercise a control server.
+func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, ownershipShutdown <-chan struct{}, cleanup func(ctx context.Context)) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	if parentDied == nil {
-		// No parent monitor — wait for OS signal only.
-		sig := <-sigCh
+	// A nil channel (no parent monitor, no control server) blocks forever in
+	// a select, so that case is simply never chosen -- no separate branching
+	// needed for the "not active" cases.
+	select {
+	case sig := <-sigCh:
 		log.Info("received signal", zap.String("signal", sig.String()))
-	} else {
-		select {
-		case sig := <-sigCh:
-			log.Info("received signal", zap.String("signal", sig.String()))
-		case <-parentDied:
-			log.Warn("parent process died, initiating shutdown")
-		}
+	case <-parentDied:
+		log.Warn("parent process died, initiating shutdown")
+	case <-ownershipShutdown:
+		log.Warn("ownership-shutdown operation invoked, initiating shutdown")
 	}
 
 	log.Info("shutting down agentctl...")

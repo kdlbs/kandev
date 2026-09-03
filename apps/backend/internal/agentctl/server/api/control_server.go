@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,16 +25,19 @@ import (
 // authenticated route accepts only the current highest-numbered rotation's
 // credential.
 var adoptionOnlyPaths = map[string]bool{
-	"/api/v1/ownership/rotate": true,
+	"/api/v1/ownership/rotate":   true,
+	"/api/v1/ownership/shutdown": true,
 }
 
 type ControlServer struct {
-	cfg         *config.Config
-	instMgr     *instance.Manager
-	logger      *logger.Logger
-	router      *gin.Engine
-	ownership   *ownershipState
-	credentials *credentialState
+	cfg               *config.Config
+	instMgr           *instance.Manager
+	logger            *logger.Logger
+	router            *gin.Engine
+	ownership         *ownershipState
+	credentials       *credentialState
+	shutdownRequested chan struct{}
+	shutdownOnce      sync.Once
 }
 
 // NewControlServer creates a new ControlServer for instance management.
@@ -41,12 +45,13 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	gin.SetMode(gin.ReleaseMode)
 
 	cs := &ControlServer{
-		cfg:         cfg,
-		instMgr:     instMgr,
-		logger:      log.WithFields(zap.String("component", "control-server")),
-		router:      gin.New(),
-		ownership:   newOwnershipState(),
-		credentials: newCredentialState(cfg.AuthToken),
+		cfg:               cfg,
+		instMgr:           instMgr,
+		logger:            log.WithFields(zap.String("component", "control-server")),
+		router:            gin.New(),
+		ownership:         newOwnershipState(),
+		credentials:       newCredentialState(cfg.AuthToken),
+		shutdownRequested: make(chan struct{}),
 	}
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
@@ -59,6 +64,21 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 // Router returns the HTTP handler for the control server.
 func (m *ControlServer) Router() http.Handler {
 	return m.router
+}
+
+// ShutdownRequested returns a channel that closes exactly once the
+// ownership-shutdown operation (AC-EXECUTORS-CONTROL-OWNERSHIP-002.9) has
+// been invoked. The run loop (cmd/agentctl/main.go) selects on this
+// alongside its OS-signal and parent-death triggers and runs the same
+// stop-every-instance-and-exit sequence.
+func (m *ControlServer) ShutdownRequested() <-chan struct{} {
+	return m.shutdownRequested
+}
+
+// requestShutdown signals ShutdownRequested exactly once. Safe to call more
+// than once (a repeated ownership-shutdown call is a no-op beyond the first).
+func (m *ControlServer) requestShutdown() {
+	m.shutdownOnce.Do(func() { close(m.shutdownRequested) })
 }
 
 func (m *ControlServer) setupRoutes() {
@@ -81,6 +101,7 @@ func (m *ControlServer) setupRoutes() {
 	api.POST("/ownership/claim", m.handleOwnershipClaim)
 	api.POST("/ownership/rotate", m.handleCredentialRotate)
 	api.POST("/ownership/confirm", m.handleCredentialConfirm)
+	api.POST("/ownership/shutdown", m.handleOwnershipShutdown)
 }
 
 func (m *ControlServer) handleSubprocessAdmission(c *gin.Context) {

@@ -297,3 +297,100 @@ func TestHandleCredentialRotateRefusedAfterShutdownBegun(t *testing.T) {
 		t.Fatal("RotateCredential after shutdown began = nil error, want a rejection")
 	}
 }
+
+// --- ownership-shutdown operation (AC-EXECUTORS-CONTROL-OWNERSHIP-002.9) ---
+
+// TestHandleOwnershipShutdownAcceptsTheLatestCredentialWithNoPriorRotation
+// pins that shutdown requires no prior adoption or rotation: a backend
+// holding only the original bootstrap credential can still invoke it.
+func TestHandleOwnershipShutdownAcceptsTheLatestCredentialWithNoPriorRotation(t *testing.T) {
+	_, _, host, port := newRotationTestServer(t)
+	log := logger.Default()
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("initial-token"))
+
+	if err := client.ShutdownControlServer(t.Context()); err != nil {
+		t.Fatalf("ShutdownControlServer: %v", err)
+	}
+}
+
+// TestHandleOwnershipShutdownAcceptsSupersededUnconfirmedCredential pins
+// AC-002.9's carve-out: the credential a rotation superseded still
+// authenticates shutdown, on its adoption-only terms, until confirmed.
+func TestHandleOwnershipShutdownAcceptsSupersededUnconfirmedCredential(t *testing.T) {
+	_, _, host, port := newRotationTestServer(t)
+	log := logger.Default()
+	rotatingClient := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("initial-token"))
+	if _, err := rotatingClient.RotateCredential(t.Context()); err != nil {
+		t.Fatalf("RotateCredential: %v", err)
+	}
+
+	supersededClient := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("initial-token"))
+	if err := supersededClient.ShutdownControlServer(t.Context()); err != nil {
+		t.Fatalf("ShutdownControlServer with superseded credential: %v", err)
+	}
+}
+
+// TestHandleOwnershipShutdownRejectsUnknownCredential pins that shutdown is
+// still authenticated: a token outside the acceptable set is refused.
+func TestHandleOwnershipShutdownRejectsUnknownCredential(t *testing.T) {
+	_, _, host, port := newRotationTestServer(t)
+	log := logger.Default()
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("some-other-token"))
+
+	if err := client.ShutdownControlServer(t.Context()); err == nil {
+		t.Fatal("ShutdownControlServer with unknown credential = nil error, want a rejection")
+	}
+}
+
+// TestHandleOwnershipShutdownSignalsShutdownRequested pins that a
+// successful shutdown call closes the channel the run loop selects on.
+func TestHandleOwnershipShutdownSignalsShutdownRequested(t *testing.T) {
+	cs, _, host, port := newRotationTestServer(t)
+	log := logger.Default()
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("initial-token"))
+
+	if err := client.ShutdownControlServer(t.Context()); err != nil {
+		t.Fatalf("ShutdownControlServer: %v", err)
+	}
+
+	select {
+	case <-cs.ShutdownRequested():
+	case <-time.After(time.Second):
+		t.Fatal("ShutdownRequested() channel not closed within 1s of a successful shutdown call")
+	}
+}
+
+// TestHandleOwnershipShutdownLatchesTheOneWayDoor pins that shutdown fires
+// the same one-way ownership latch as the unowned-period reaper: once
+// invoked, a subsequent claim is refused with the shutting-down outcome.
+func TestHandleOwnershipShutdownLatchesTheOneWayDoor(t *testing.T) {
+	cs, _, host, port := newRotationTestServer(t)
+	log := logger.Default()
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("initial-token"))
+
+	if err := client.ShutdownControlServer(t.Context()); err != nil {
+		t.Fatalf("ShutdownControlServer: %v", err)
+	}
+	if !cs.ownership.IsShuttingDown() {
+		t.Fatal("IsShuttingDown() = false after ownership-shutdown call, want true")
+	}
+	if err := client.ClaimOwnership(t.Context()); err == nil {
+		t.Fatal("ClaimOwnership after ownership-shutdown = nil error, want a rejection")
+	}
+}
+
+// TestHandleOwnershipShutdownIsIdempotent pins that a second shutdown call
+// after the first still succeeds without panicking (the channel close is
+// guarded by sync.Once) and without re-latching anything.
+func TestHandleOwnershipShutdownIsIdempotent(t *testing.T) {
+	_, _, host, port := newRotationTestServer(t)
+	log := logger.Default()
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("initial-token"))
+
+	if err := client.ShutdownControlServer(t.Context()); err != nil {
+		t.Fatalf("first ShutdownControlServer: %v", err)
+	}
+	if err := client.ShutdownControlServer(t.Context()); err != nil {
+		t.Fatalf("second ShutdownControlServer: %v", err)
+	}
+}

@@ -482,6 +482,29 @@ func (c *ControlClient) ConfirmCredentialRotation(ctx context.Context, rotationI
 	return nil
 }
 
+// ShutdownControlServer invokes the ownership-shutdown operation: the
+// control server stops every instance it supervises, together with their
+// agent subprocesses, and exits. It requires no prior adoption or rotation
+// and is authenticated by any credential in the acceptable set, including a
+// superseded one that has not yet been confirmed away.
+func (c *ControlClient) ShutdownControlServer(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/ownership/shutdown", nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to shut down control server: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to shut down control server: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ListInstances lists all running agent instances.
 func (c *ControlClient) ListInstances(ctx context.Context) ([]*InstanceInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/instances", nil)

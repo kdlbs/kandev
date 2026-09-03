@@ -85,3 +85,21 @@ func (m *ControlServer) handleOwnershipClaim(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{lspStatusKey: "claimed"})
 }
+
+// handleOwnershipShutdown is the ownership-shutdown operation of
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.9: it sits below capability negotiation
+// (registered as an adoption-only path, so the superseded credential
+// authenticates it too, per AC-002.7) and requires no prior adoption or
+// rotation. It only destroys -- it cannot drive an instance or outlive the
+// call -- which is why the wider credential set is safe to admit here.
+//
+// The actual "stop every instance and exit" work happens in the run loop
+// (cmd/agentctl/main.go), which already owns that sequence for signal- and
+// parent-death-triggered shutdown; this handler only latches the one-way
+// shutdown door and signals the loop to run it, mirroring the existing
+// parent-liveness trigger rather than duplicating teardown here.
+func (m *ControlServer) handleOwnershipShutdown(c *gin.Context) {
+	m.ownership.BeginShutdown()
+	m.requestShutdown()
+	c.JSON(http.StatusOK, gin.H{lspStatusKey: "shutting_down"})
+}
