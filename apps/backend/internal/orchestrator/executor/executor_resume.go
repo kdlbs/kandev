@@ -1290,9 +1290,8 @@ func (e *Executor) prepareResumeRepositorySettings(
 			return "", existingEnv, nil, validateErr
 		}
 	} else if options.RepairWorkspaceInventory {
-		receipt, repairErr := e.existingAttestedWorkspaceInventoryRepairReceipt(
+		receipt, repairErr := e.attestedWorkspaceInventoryRowsReceipt(
 			ctx, task, session, req, existingEnv, allRepos,
-			options.WorkspaceInventoryIdempotencyKey,
 		)
 		if repairErr != nil {
 			return "", existingEnv, nil, repairErr

@@ -1355,9 +1355,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			return nil, validateErr
 		}
 	} else if req.WorkspaceReuseRequired && req.UseWorktree {
-		receipt, repairErr := e.existingAttestedWorkspaceInventoryRepairReceipt(
+		receipt, repairErr := e.attestedWorkspaceInventoryRowsReceipt(
 			ctx, task, session, req, existingEnv, allRepos,
-			workspaceInventoryLaunchIdempotencyKey(session.ID),
 		)
 		if repairErr != nil {
 			if e.logger != nil {

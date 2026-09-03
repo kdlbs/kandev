@@ -20,6 +20,7 @@ import (
 type workspaceInventoryRepairRepository interface {
 	RepairWorkspaceInventory(context.Context, *models.WorkspaceInventoryRepair) (*models.WorkspaceInventoryRecoveryReceipt, error)
 	GetWorkspaceInventoryRepairReceipt(ctx context.Context, taskID, idempotencyKey string) (*models.WorkspaceInventoryRecoveryReceipt, error)
+	GetWorkspaceInventoryRepairReceiptForRow(ctx context.Context, taskID, environmentRepoID string) (*models.WorkspaceInventoryRecoveryReceipt, error)
 	RecordWorkspaceInventoryPostRepairAttestation(ctx context.Context, taskID, idempotencyKey string, evidence *models.WorkspaceInventoryPreservation, matched bool, verifiedAt time.Time) error
 }
 
@@ -132,20 +133,87 @@ func (e *Executor) existingWorkspaceInventoryRepairReceipt(
 	return e.attestedExistingWorkspaceInventoryReceipt(ctx, repairer, existing, spec, session, info, candidate)
 }
 
-func (e *Executor) existingAttestedWorkspaceInventoryRepairReceipt(
+func (e *Executor) workspaceInventoryRepairerForRows(
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	env *models.TaskEnvironment,
+) (workspaceInventoryRepairRepository, error) {
+	if task == nil || session == nil || env == nil ||
+		!req.WorkspaceReuseRequired || !req.UseWorktree {
+		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	repairer, ok := e.repo.(workspaceInventoryRepairRepository)
+	if !ok {
+		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	return repairer, nil
+}
+
+// attestedWorkspaceInventoryRowsReceipt gates launch on an already-valid
+// canonical inventory row that a guarded repair EVER produced, regardless of
+// which session performed that repair. validateReuseEnvironmentInventory
+// only proves the row's CURRENT identity matches; it proves nothing about
+// whether an earlier repair of that exact physical row completed durable
+// post-repair attestation. A session-scoped idempotency-key lookup (as used
+// by a same-session repair retry) can only ever find a receipt the CALLER's
+// own repair attempt produced, so it silently misses a receipt a DIFFERENT
+// session wrote — exactly the case where that other session's repair
+// committed but crashed (or failed) before its attestation write landed.
+// This instead looks the receipt up by the row's own identity
+// (environment_repo_id), independent of session or idempotency key, so any
+// session admitted through the already-valid path is gated on the same
+// durable positive attestation a same-session retry already requires.
+func (e *Executor) attestedWorkspaceInventoryRowsReceipt(
 	ctx context.Context,
 	task *v1.Task,
 	session *models.TaskSession,
 	req *LaunchAgentRequest,
 	env *models.TaskEnvironment,
 	repositories []*repoInfo,
-	idempotencyKey string,
 ) (*models.WorkspaceInventoryRecoveryReceipt, error) {
-	repairer, err := e.workspaceInventoryRepairer(task, session, req, env, idempotencyKey)
+	repairer, err := e.workspaceInventoryRepairerForRows(task, session, req, env)
 	if err != nil {
 		return nil, err
 	}
-	return e.existingWorkspaceInventoryRepairReceipt(ctx, repairer, task, session, req, env, repositories, idempotencyKey)
+	specs := req.Repositories
+	if len(specs) == 0 {
+		if spec, ok := topLevelLaunchRepoSpec(req); ok {
+			specs = []RepoSpec{spec}
+		}
+	}
+	var latest *models.WorkspaceInventoryRecoveryReceipt
+	for _, spec := range specs {
+		rows := matchingCanonicalEnvironmentRepoRows(spec, env.Repos, req.UseWorktree)
+		if len(rows) != 1 {
+			// validateReuseEnvironmentInventory already required exactly one
+			// canonical match for every spec to reach this branch; a
+			// mismatch here would mean the inventory changed concurrently
+			// under us, which the caller's own re-validation already covers.
+			continue
+		}
+		candidate := rows[0]
+		existing, err := repairer.GetWorkspaceInventoryRepairReceiptForRow(ctx, task.ID, candidate.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load workspace inventory repair receipt for row: %w", err)
+		}
+		if existing == nil {
+			// This physical row was never touched by a guarded repair —
+			// nothing to attest, safe to proceed exactly as before this
+			// feature existed.
+			continue
+		}
+		info, ok := workspaceInventoryRetryRepoInfo(repositories, spec)
+		if !ok {
+			return nil, fmt.Errorf("%w: no server-owned repository identity for attested row", models.ErrWorkspaceInventoryRecoveryConflict)
+		}
+		attested, err := e.attestedExistingWorkspaceInventoryReceipt(ctx, repairer, existing, spec, session, info, candidate)
+		if err != nil {
+			return nil, err
+		}
+		latest = attested
+	}
+	return latest, nil
 }
 
 // attestedExistingWorkspaceInventoryReceipt gates an already-committed
@@ -205,7 +273,8 @@ func preservationEvidenceFromModel(p models.WorkspaceInventoryPreservation) *wor
 	return &worktree.PreservationEvidence{
 		ObservedBranch: p.ObservedBranch, RefName: p.RefName, HeadOID: p.HeadOID,
 		WorktreeID: p.WorktreeID, PathHash: p.PathHash, StatusHash: p.StatusHash,
-		ContentHash: p.ContentHash, DirtyCount: p.DirtyCount, UntrackedCount: p.UntrackedCount,
+		ContentHash: p.ContentHash, IndexHash: p.IndexHash,
+		DirtyCount: p.DirtyCount, UntrackedCount: p.UntrackedCount,
 	}
 }
 
@@ -437,7 +506,8 @@ func workspaceInventoryPreservation(
 		ObservedBranch:     evidence.ObservedBranch, RefName: evidence.RefName,
 		HeadOID: evidence.HeadOID, WorktreeID: evidence.WorktreeID,
 		PathHash: evidence.PathHash, StatusHash: evidence.StatusHash,
-		ContentHash: evidence.ContentHash, DirtyCount: evidence.DirtyCount,
+		ContentHash: evidence.ContentHash, IndexHash: evidence.IndexHash,
+		DirtyCount:     evidence.DirtyCount,
 		UntrackedCount: evidence.UntrackedCount, RuntimeState: string(session.State),
 	}
 	if running != nil {
@@ -561,6 +631,15 @@ func matchingPhysicalCandidates(rows []*models.TaskEnvironmentRepo, repositoryID
 // directory cannot make a path outside the task workspace lexically compare
 // as scoped to it; a path that does not exist, or does not canonically
 // resolve under the task root, is never treated as task-scoped.
+//
+// A normal single-repository worktree launch populates env.TaskDirName (see
+// applyRepositoryConfig) while also persisting the worktree's own path as
+// env.WorkspacePath (see WorktreePreparer.Prepare's WorkspaceReuseRequired
+// branch): the two are the exact same canonical directory. Only a multi-repo
+// task-directory layout nests each repository's worktree under a shared
+// env.WorkspacePath task root. Root-equals-candidate must therefore always be
+// accepted regardless of TaskDirName; a proper nested subdirectory is only
+// accepted when TaskDirName identifies that shared-root layout.
 func repairPathIsTaskScoped(env *models.TaskEnvironment, worktreePath string) bool {
 	if env.WorkspacePath == "" || worktreePath == "" {
 		return false
@@ -573,14 +652,24 @@ func repairPathIsTaskScoped(env *models.TaskEnvironment, worktreePath string) bo
 	if err != nil {
 		return false
 	}
+	if root == candidate {
+		return true
+	}
 	if env.TaskDirName == "" {
-		return root == candidate
+		return false
 	}
 	relative, err := filepath.Rel(root, candidate)
 	return err == nil && relative != "." && relative != ".." &&
 		!filepath.IsAbs(relative) && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
+// rejectCompetingWorkspaceWriters proves no other writer can race the
+// repair. A session's lifecycle status can already be failed/cancelled
+// while its executors_running row is still live — a crash before cleanup
+// ran, or cleanup itself still in flight — so ListActiveTaskSessionsByTaskID
+// alone cannot see that writer. Every non-terminal executors_running row for
+// the task is checked directly, independent of the owning session's own
+// lifecycle status.
 func (e *Executor) rejectCompetingWorkspaceWriters(ctx context.Context, taskID, sessionID string) error {
 	sessions, err := e.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
 	if err != nil {
@@ -591,7 +680,29 @@ func (e *Executor) rejectCompetingWorkspaceWriters(ctx context.Context, taskID, 
 			return fmt.Errorf("%w: another task session is active", models.ErrWorkspaceInventoryRecoveryConflict)
 		}
 	}
+	runners, err := e.repo.ListExecutorsRunningByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("%w: cannot prove exclusive task writer", models.ErrWorkspaceInventoryRecoveryConflict)
+	}
+	for _, running := range runners {
+		if running != nil && running.SessionID != sessionID && executorRunningIsLiveWriter(running.Status) {
+			return fmt.Errorf("%w: another executor is running for this task", models.ErrWorkspaceInventoryRecoveryConflict)
+		}
+	}
 	return nil
+}
+
+// executorRunningIsLiveWriter reports whether an executors_running status
+// still represents a potential live writer against the checkout. Only the
+// explicitly terminal statuses are safe to ignore; every other value
+// (including one this code does not yet recognize) fails closed as live.
+func executorRunningIsLiveWriter(status string) bool {
+	switch status {
+	case models.ExecutorRunningStatusFailed, models.ExecutorRunningStatusStopped, models.ExecutorRunningStatusComplete:
+		return false
+	default:
+		return true
+	}
 }
 
 // workspaceInventoryLaunchIdempotencyKey derives a stable, server-owned
@@ -605,14 +716,14 @@ func workspaceInventoryLaunchIdempotencyKey(sessionID string) string {
 }
 
 func workspaceInventoryRepairHash(repair *models.WorkspaceInventoryRepair) string {
-	value := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%s",
+	value := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%s\x00%s",
 		repair.TaskID, repair.WorkspaceID, repair.SessionID, repair.TaskEnvironmentID,
 		repair.TaskRepositoryID, repair.RepositoryID, repair.EnvironmentRepoID,
 		repair.BranchSlug, repair.WorktreeID, repair.WorktreePath, repair.WorktreeBranch, repair.Position,
 		repair.Preservation.ExpectedBranchSlug, repair.Preservation.ObservedBranch,
 		repair.Preservation.RefName, repair.Preservation.HeadOID, repair.Preservation.PathHash,
 		repair.Preservation.StatusHash, repair.Preservation.DirtyCount,
-		repair.Preservation.UntrackedCount, repair.Preservation.ContentHash)
+		repair.Preservation.UntrackedCount, repair.Preservation.ContentHash, repair.Preservation.IndexHash)
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
@@ -622,6 +733,7 @@ func samePreservationEvidence(before, after *worktree.PreservationEvidence) bool
 		before.ObservedBranch == after.ObservedBranch && before.RefName == after.RefName &&
 		before.HeadOID == after.HeadOID && before.WorktreeID == after.WorktreeID &&
 		before.PathHash == after.PathHash && before.StatusHash == after.StatusHash &&
-		before.ContentHash == after.ContentHash && before.DirtyCount == after.DirtyCount &&
+		before.ContentHash == after.ContentHash && before.IndexHash == after.IndexHash &&
+		before.DirtyCount == after.DirtyCount &&
 		before.UntrackedCount == after.UntrackedCount
 }

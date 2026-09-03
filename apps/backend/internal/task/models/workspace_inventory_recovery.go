@@ -30,6 +30,7 @@ type WorkspaceInventoryPreservation struct {
 	PathHash           string `json:"path_hash"`
 	StatusHash         string `json:"status_hash"`
 	ContentHash        string `json:"content_hash"`
+	IndexHash          string `json:"index_hash"`
 	DirtyCount         int    `json:"dirty_count"`
 	UntrackedCount     int    `json:"untracked_count"`
 	RuntimeState       string `json:"runtime_state"`

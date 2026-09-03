@@ -34,16 +34,23 @@ func (r *Repository) RepairWorkspaceInventory(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Lock the task row before checking for an existing receipt. On
+	// PostgreSQL, checking first and locking later lets two concurrent
+	// transactions both observe "no receipt" before either commits, so the
+	// loser's insert collides with the winner's committed row and surfaces
+	// as an occupied-slot conflict instead of a deduplicated
+	// success/conflict. SQLite's single-writer transaction serializes this
+	// implicitly, so lockTaskRowInTx is a no-op there.
+	if err := r.lockTaskRowInTx(ctx, tx, repair.TaskID); err != nil {
+		return nil, err
+	}
+
 	existing, err := r.loadWorkspaceInventoryReceiptTx(ctx, tx, repair.TaskID, repair.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil {
-		if existing.RequestHash != repair.RequestHash {
-			return nil, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict
-		}
-		existing.ResultCode = models.WorkspaceInventoryRecoveryDeduplicated
-		return existing, nil
+	if dedup, dedupErr := dedupedWorkspaceInventoryReceipt(existing, repair.RequestHash); dedup != nil || dedupErr != nil {
+		return dedup, dedupErr
 	}
 	if err := r.validateWorkspaceInventoryRepairTx(ctx, tx, repair); err != nil {
 		return nil, err
@@ -52,24 +59,53 @@ func (r *Repository) RepairWorkspaceInventory(
 	if err := r.insertWorkspaceInventoryReceiptTx(ctx, tx, receipt); err != nil {
 		return nil, err
 	}
-	if repair.ExpectedEnvironmentRepoUpdate.IsZero() {
-		row := &models.TaskEnvironmentRepo{
-			ID: repair.EnvironmentRepoID, TaskEnvironmentID: repair.TaskEnvironmentID,
-			RepositoryID: repair.RepositoryID, BranchSlug: repair.BranchSlug,
-			WorktreeID: repair.WorktreeID, WorktreePath: repair.WorktreePath,
-			WorktreeBranch: repair.WorktreeBranch, Position: repair.Position,
-			Status: worktreeRepoStatusActive,
-		}
-		if err := r.insertTaskEnvironmentRepoTx(ctx, tx, row); err != nil {
-			return nil, fmt.Errorf("repair workspace inventory row: %w", err)
-		}
-	} else if err := r.updateTaskEnvironmentRepoIdentityTx(ctx, tx, repair); err != nil {
+	if err := r.applyWorkspaceInventoryRepairRowTx(ctx, tx, repair); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return receipt, nil
+}
+
+// dedupedWorkspaceInventoryReceipt returns a non-nil receipt or error only
+// when an existing receipt for this idempotency key already resolves the
+// call: a matching request hash returns the deduplicated receipt, and a
+// mismatched one returns the idempotency conflict. It returns (nil, nil) when
+// there is no existing receipt and the caller should proceed with a fresh
+// repair.
+func dedupedWorkspaceInventoryReceipt(
+	existing *models.WorkspaceInventoryRecoveryReceipt,
+	requestHash string,
+) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	if existing == nil {
+		return nil, nil
+	}
+	if existing.RequestHash != requestHash {
+		return nil, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict
+	}
+	existing.ResultCode = models.WorkspaceInventoryRecoveryDeduplicated
+	return existing, nil
+}
+
+// applyWorkspaceInventoryRepairRowTx inserts a new environment-repo row when
+// the repair targets a missing slot, or updates the existing row's identity
+// in place when it targets a stale one.
+func (r *Repository) applyWorkspaceInventoryRepairRowTx(ctx context.Context, tx *sqlx.Tx, repair *models.WorkspaceInventoryRepair) error {
+	if !repair.ExpectedEnvironmentRepoUpdate.IsZero() {
+		return r.updateTaskEnvironmentRepoIdentityTx(ctx, tx, repair)
+	}
+	row := &models.TaskEnvironmentRepo{
+		ID: repair.EnvironmentRepoID, TaskEnvironmentID: repair.TaskEnvironmentID,
+		RepositoryID: repair.RepositoryID, BranchSlug: repair.BranchSlug,
+		WorktreeID: repair.WorktreeID, WorktreePath: repair.WorktreePath,
+		WorktreeBranch: repair.WorktreeBranch, Position: repair.Position,
+		Status: worktreeRepoStatusActive,
+	}
+	if err := r.insertTaskEnvironmentRepoTx(ctx, tx, row); err != nil {
+		return fmt.Errorf("repair workspace inventory row: %w", err)
+	}
+	return nil
 }
 
 func newWorkspaceInventoryReceipt(repair *models.WorkspaceInventoryRepair) *models.WorkspaceInventoryRecoveryReceipt {
@@ -282,6 +318,44 @@ func (r *Repository) GetWorkspaceInventoryRepairReceipt(
 	}
 	receipt.RequestHash = requestHash
 	receipt.ResultCode = models.WorkspaceInventoryRecoveryDeduplicated
+	return receipt, nil
+}
+
+// GetWorkspaceInventoryRepairReceiptForRow returns the most recently
+// committed repair receipt recorded against a specific environment-repo row,
+// regardless of which session or idempotency key produced it, or nil if the
+// row was never repaired. Launch admission for an already-canonical row must
+// attest the physical slot itself: a session-scoped idempotency-key lookup
+// (GetWorkspaceInventoryRepairReceipt) only ever finds a receipt the CURRENT
+// session's own repair attempt produced, so a different session can observe
+// a row an earlier session repaired without ever seeing that receipt — and
+// without ever checking whether its post-repair attestation was durably
+// written. This lookup closes that gap by keying on the row's own identity.
+func (r *Repository) GetWorkspaceInventoryRepairReceiptForRow(
+	ctx context.Context,
+	taskID string,
+	environmentRepoID string,
+) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	if taskID == "" || environmentRepoID == "" {
+		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	var payload, requestHash string
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT receipt_json, request_hash FROM workspace_inventory_recovery_receipts
+		WHERE task_id = ? AND environment_repo_id = ?
+		ORDER BY created_at DESC LIMIT 1
+	`), taskID, environmentRepoID).Scan(&payload, &requestHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	receipt := &models.WorkspaceInventoryRecoveryReceipt{}
+	if err := json.Unmarshal([]byte(payload), receipt); err != nil {
+		return nil, err
+	}
+	receipt.RequestHash = requestHash
 	return receipt, nil
 }
 

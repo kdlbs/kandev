@@ -64,7 +64,25 @@ func seedWorkspaceInventoryRecovery(t *testing.T, repo *Repository) (*models.Tas
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return env, taskRepo
+	// Reload env and taskRepo from the DB rather than trusting the
+	// nanosecond-precision in-memory timestamps CreateTaskEnvironment/
+	// CreateTaskRepository just assigned: PostgreSQL's TIMESTAMP column only
+	// stores microsecond precision, so an "expected updated_at" optimistic
+	// -concurrency check built from the raw create-time value would never
+	// match what a genuine repair caller (which always reloads the entity
+	// before repairing it) observes back from the same column. Real launch
+	// callers already reload every entity through a repository Get/List call
+	// before capturing repair identity, so reloading here mirrors production
+	// and lets every dialect compare like for like.
+	reloadedEnv, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadedTaskRepo, err := repo.GetTaskRepository(ctx, taskRepo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reloadedEnv, reloadedTaskRepo
 }
 
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2

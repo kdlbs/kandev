@@ -47,11 +47,23 @@ worktree recovery validates all of these facts:
 - `git worktree list --porcelain`, the checkout's common Git directory, HEAD,
   symbolic branch, and repository path are reciprocal;
 - the expected branch slot and observed branch/ref identity agree;
-- no competing session or runtime claims a live writer.
+- no competing session or runtime claims a live writer: this checks every
+  `executors_running` row for the task directly, independent of the owning
+  session's own lifecycle status, because a session can already be
+  failed/cancelled while its executor row has not yet reached a terminal
+  status (failed, stopped, or completed) — a crash before cleanup ran, or
+  cleanup still in flight.
 
 The inspector captures HEAD, ref containment, porcelain status counts and
-hash, a bounded content hash over tracked, untracked, and ignored files,
-executor state, and source record revisions. Host paths remain internal; public
+hash, a bounded content hash over tracked, untracked, and ignored files, a
+staged-index hash over every index entry's path/mode/blob identity,
+executor state, and source record revisions. The staged-index hash exists
+because the content hash alone reads only working-tree bytes: a low-level
+index write (for example `git update-index --cacheinfo`) can repoint a
+path's staged blob without ever touching the working-tree file, which the
+content hash and the porcelain status can both miss. The inspection itself
+never mutates `.git/index`, including its own status call's normal
+opportunistic index refresh. Host paths remain internal; public
 receipts expose only a path hash.
 
 ## Repair transaction and idempotency
@@ -64,6 +76,13 @@ the receipt when its request hash matches and conflicts otherwise. The task is
 the receipt's lifecycle owner; session and environment identifiers remain
 immutable audit facts rather than cascading foreign keys, so routine lifecycle
 deletion and the legacy environment-ownership cutover cannot erase receipts.
+On PostgreSQL the task row lock (`SELECT ... FOR UPDATE`, a no-op under
+SQLite's single-writer serialization) is taken before the existing-receipt
+check, not after: locking second would let two concurrent transactions for
+the same idempotency key both observe "no receipt exists" before either
+commits, so the loser's insert collides with the winner's already-committed
+row and surfaces as an occupied-slot conflict instead of a deduplicated
+success.
 
 A same-idempotency-key retry is resolved before candidate selection runs:
 the executor looks up an existing receipt for `(task_id, idempotency_key)`
@@ -97,6 +116,20 @@ retryable, but the repair result is not launchable until a later retry durably
 records positive matching evidence. Attestation persistence is monotonic for
 divergence: once a negative observation is durable, a concurrent or later
 positive observation cannot overwrite it.
+
+This attestation gate is not scoped to the session or idempotency key that
+performed the repair: launch admission for a row that already canonically
+matches (no mismatch left for `validateReuseEnvironmentInventory` to find) is
+looked up by the row's own `environment_repo_id`, independent of which
+session or idempotency key produced it. A session-scoped lookup alone would
+only ever find a receipt the *current* session's own repair attempt
+produced, so a different session observing a row an earlier session repaired
+could otherwise launch without the earlier repair's post-repair attestation
+ever being checked — exactly the case where that other repair committed but
+crashed, or its attestation write itself failed, before attestation landed.
+Any session reaching the already-valid branch instead completes (or is
+blocked by, if already negative) the same durable attestation a same-session
+retry already requires, before it is ever handed back as an admitted launch.
 
 ## Fresh and additional-session launch integration
 

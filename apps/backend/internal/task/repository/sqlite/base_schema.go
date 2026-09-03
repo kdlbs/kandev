@@ -81,6 +81,9 @@ const workspaceInventoryRecoverySchemaDDL = `
 
 	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment
 		ON workspace_inventory_recovery_receipts(task_environment_id, created_at);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment_repo
+		ON workspace_inventory_recovery_receipts(task_id, environment_repo_id, created_at);
 `
 
 func (r *Repository) initWorkspaceInventoryRecoverySchema() error {

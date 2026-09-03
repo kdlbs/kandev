@@ -296,8 +296,10 @@ type mockRepository struct {
 	getTaskSessionByTaskAndAgentFunc                  func(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	updateTaskSessionStateFunc                        func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	listActiveTaskSessionsByTaskIDFunc                func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	listExecutorsRunningByTaskIDFunc                  func(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
 	repairWorkspaceInventoryFunc                      func(ctx context.Context, repair *models.WorkspaceInventoryRepair) (*models.WorkspaceInventoryRecoveryReceipt, error)
 	getWorkspaceInventoryRepairReceiptFunc            func(ctx context.Context, taskID, idempotencyKey string) (*models.WorkspaceInventoryRecoveryReceipt, error)
+	getWorkspaceInventoryRepairReceiptForRowFunc      func(ctx context.Context, taskID, environmentRepoID string) (*models.WorkspaceInventoryRecoveryReceipt, error)
 	recordWorkspaceInventoryPostRepairAttestationFunc func(ctx context.Context, taskID, idempotencyKey string, evidence *models.WorkspaceInventoryPreservation, matched bool, verifiedAt time.Time) error
 	// workspaceInventoryReceipts is the default in-memory store used by
 	// RepairWorkspaceInventory/GetWorkspaceInventoryRepairReceipt/
@@ -1153,6 +1155,18 @@ func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sess
 	}
 	return nil, nil
 }
+func (m *mockRepository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
+	if m.listExecutorsRunningByTaskIDFunc != nil {
+		return m.listExecutorsRunningByTaskIDFunc(ctx, taskID)
+	}
+	var result []*models.ExecutorRunning
+	for _, running := range m.executorsRunning {
+		if running != nil && running.TaskID == taskID {
+			result = append(result, running)
+		}
+	}
+	return result, nil
+}
 func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
 	return nil
 }
@@ -1353,6 +1367,35 @@ func (m *mockRepository) GetWorkspaceInventoryRepairReceipt(ctx context.Context,
 	found.ResultCode = models.WorkspaceInventoryRecoveryDeduplicated
 	return &found, nil
 }
+
+// GetWorkspaceInventoryRepairReceiptForRow returns the latest receipt
+// recorded against a specific environment-repo row, regardless of which
+// session or idempotency key produced it — mirrors the sqlite repository's
+// row-scoped lookup used to gate an already-valid canonical row on durable
+// attestation independent of the current caller's own idempotency key.
+func (m *mockRepository) GetWorkspaceInventoryRepairReceiptForRow(ctx context.Context, taskID, environmentRepoID string) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	if m.getWorkspaceInventoryRepairReceiptForRowFunc != nil {
+		return m.getWorkspaceInventoryRepairReceiptForRowFunc(ctx, taskID, environmentRepoID)
+	}
+	if m.workspaceInventoryReceipts == nil {
+		return nil, nil
+	}
+	var found *models.WorkspaceInventoryRecoveryReceipt
+	for _, existing := range m.workspaceInventoryReceipts {
+		if existing == nil || existing.TaskID != taskID || existing.EnvironmentRepoID != environmentRepoID {
+			continue
+		}
+		if found == nil || existing.CreatedAt.After(found.CreatedAt) {
+			found = existing
+		}
+	}
+	if found == nil {
+		return nil, nil
+	}
+	copied := *found
+	return &copied, nil
+}
+
 func (m *mockRepository) RecordWorkspaceInventoryPostRepairAttestation(
 	ctx context.Context,
 	taskID, idempotencyKey string,

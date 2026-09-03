@@ -30,6 +30,7 @@ type PreservationEvidence struct {
 	PathHash       string
 	StatusHash     string
 	ContentHash    string
+	IndexHash      string
 	DirtyCount     int
 	UntrackedCount int
 }
@@ -49,7 +50,11 @@ func InspectPreservedCheckout(ctx context.Context, req PreservationRequest) (*Pr
 	if err != nil {
 		return nil, err
 	}
-	status, err := gitBytes(ctx, worktreePath, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	// --no-optional-locks tells Git to skip any action that would require
+	// taking a lock — in particular, status's normal opportunistic index
+	// refresh (updating cached stat info) — so this inspection can never
+	// write to .git/index even incidentally.
+	status, err := gitBytes(ctx, worktreePath, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}
@@ -57,11 +62,15 @@ func InspectPreservedCheckout(ctx context.Context, req PreservationRequest) (*Pr
 	if err != nil {
 		return nil, err
 	}
+	indexHash, err := stagedIndexHash(ctx, worktreePath)
+	if err != nil {
+		return nil, err
+	}
 	dirty, untracked := statusCounts(status)
 	return &PreservationEvidence{
 		ObservedBranch: identity.branch, RefName: identity.refName, HeadOID: identity.headOID,
 		WorktreeID: req.WorktreeID, PathHash: hashBytes([]byte(worktreePath)),
-		StatusHash: hashBytes(status), ContentHash: contentHash,
+		StatusHash: hashBytes(status), ContentHash: contentHash, IndexHash: indexHash,
 		DirtyCount: dirty, UntrackedCount: untracked,
 	}, nil
 }
@@ -216,6 +225,25 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 		_, _ = hash.Write(contents)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// stagedIndexHash proves the exact staged blob identity of every path in
+// the index — mode, object SHA, and path — without reading a single working
+// tree file. checkoutContentHash alone hashes on-disk bytes, so it cannot
+// see a change that only touches the index: for example, a low-level
+// `git update-index --cacheinfo` write that repoints a path's staged blob
+// SHA while the working tree file, and therefore its bytes, its `git status`
+// classification, and its dirty/untracked counts, are all left untouched.
+// `git ls-files --stage` output is already sorted by path, and each path's
+// SHA already commits to that blob's content, so hashing it directly proves
+// staged identity without ever writing to .git/index or the object
+// database.
+func stagedIndexHash(ctx context.Context, worktreePath string) (string, error) {
+	output, err := gitBytes(ctx, worktreePath, "--no-optional-locks", "ls-files", "--stage", "-z")
+	if err != nil {
+		return "", err
+	}
+	return hashBytes(output), nil
 }
 
 func hashBytes(value []byte) string {

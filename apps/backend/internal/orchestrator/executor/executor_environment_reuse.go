@@ -51,7 +51,16 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 }
 
 func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) int {
-	matches := 0
+	return len(matchingCanonicalEnvironmentRepoRows(spec, rows, useWorktree))
+}
+
+// matchingCanonicalEnvironmentRepoRows returns every canonical environment
+// row that satisfies spec's repository/branch identity, shared by
+// canonicalInventoryMatches (admission count) and callers that need the
+// matched row itself, such as the row-scoped post-repair attestation lookup
+// for an already-valid inventory (see attestedWorkspaceInventoryRowsReceipt).
+func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) []*models.TaskEnvironmentRepo {
+	var matched []*models.TaskEnvironmentRepo
 	expectedBranchSlug := launchRepoBranchIdentitySlug(spec)
 	allowLegacyEmptyBranch := expectedBranchSlug != "" && !hasBranchScopedEnvironmentRepoRows(rows)
 	for _, row := range rows {
@@ -65,9 +74,9 @@ func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo
 		if row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed || row.Status == taskEnvironmentRepoStatusDeleted || (useWorktree && row.WorktreeID == "") {
 			continue
 		}
-		matches++
+		matched = append(matched, row)
 	}
-	return matches
+	return matched
 }
 
 // reuseExistingEnvironment carries forward worktree, container, sandbox, and
