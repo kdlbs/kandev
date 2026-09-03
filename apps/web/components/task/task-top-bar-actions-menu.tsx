@@ -16,9 +16,15 @@ import { useArchiveAndSwitchTask, useDeleteAndSwitchTask } from "@/hooks/use-tas
  * not the page's own task prop, are the observation this criterion names.
  * Guarded by "seen present, now absent" rather than "currently absent" so a
  * task that simply has not loaded into the board yet never falsely closes
- * the menu.
+ * the menu. Also resets any pending confirm/link dialog: a subject the board
+ * just pruned must not leave a stale, still-actionable confirmation open
+ * (AC-TASKS-TASK-ACTIONS-MENU-004.5a's no-retarget rule applies here too).
  */
-function useCloseMenuOnTaskRemoved(taskId: string | null, setOpen: (open: boolean) => void) {
+function useCloseMenuOnTaskRemoved(
+  taskId: string | null,
+  setOpen: (open: boolean) => void,
+  closeDialogs: () => void,
+) {
   const existsInBoard = useAppStore((state) => {
     if (!taskId) return false;
     if (state.kanban.tasks.some((task) => task.id === taskId)) return true;
@@ -30,11 +36,20 @@ function useCloseMenuOnTaskRemoved(taskId: string | null, setOpen: (open: boolea
       seenRef.current = true;
       return;
     }
-    if (seenRef.current) setOpen(false);
-  }, [existsInBoard, setOpen]);
+    if (seenRef.current) {
+      setOpen(false);
+      closeDialogs();
+    }
+  }, [existsInBoard, setOpen, closeDialogs]);
 }
 
 type TaskTopBarActionsMenuProps = {
+  /** The subject's own identifier/title, independent of `boardRow`: known as
+   * soon as the detail page has loaded the task, even when the board row is
+   * unresolvable, so the identifier-only tier (AC-TASKS-TASK-ACTIONS-MENU-002.5)
+   * stays reachable instead of the trigger disappearing entirely. */
+  taskId: string | null;
+  taskTitle: string;
   boardRow: TaskActionsMenuBoardRow | null;
   workspaceId: string | null;
   isArchived?: boolean;
@@ -69,6 +84,8 @@ function useTrackedSwitchAfterAction(
  * detail-surface entry point (AC-TASKS-TASK-ACTIONS-MENU-003.4/003.5).
  */
 export function TaskTopBarActionsMenu({
+  taskId,
+  taskTitle,
   boardRow,
   workspaceId,
   isArchived,
@@ -79,11 +96,9 @@ export function TaskTopBarActionsMenu({
   const archiving = useTrackedSwitchAfterAction(archiveAndSwitch);
   const deleting = useTrackedSwitchAfterAction(deleteAndSwitch);
 
-  const taskId = boardRow?.id ?? null;
-  useCloseMenuOnTaskRemoved(taskId, setOpen);
   const menu = useTaskActionsMenu({
     taskId,
-    taskTitle: boardRow?.title ?? "",
+    taskTitle,
     workspaceId,
     isArchived: Boolean(isArchived),
     boardRow,
@@ -92,6 +107,7 @@ export function TaskTopBarActionsMenu({
     onArchive: (opts) => (taskId ? archiving.invoke(taskId, opts) : undefined),
     onDelete: (opts) => (taskId ? deleting.invoke(taskId, opts) : undefined),
   });
+  useCloseMenuOnTaskRemoved(taskId, setOpen, menu.closeDialogs);
 
   if (!taskId) return null;
 
@@ -106,7 +122,7 @@ export function TaskTopBarActionsMenu({
       />
       <TaskActionsMenuDialogs
         taskId={taskId}
-        taskTitle={boardRow?.title ?? ""}
+        taskTitle={taskTitle}
         workspaceId={workspaceId}
         boardRow={boardRow}
         isArchiving={archiving.pending}

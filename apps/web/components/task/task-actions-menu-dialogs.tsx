@@ -135,6 +135,7 @@ export function TaskActionsMenuDialogs({
         executorType={boardRow?.primaryExecutorType}
         isDeleting={isDeleting}
         onConfirm={(opts) => menu.onConfirmDelete(opts)}
+        focusReturnRef={menu.triggerRef}
       />
       <TaskDetachConfirmationSurface
         open={menu.showDetachConfirm}

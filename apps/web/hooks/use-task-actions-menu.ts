@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { KanbanPresentation } from "@/components/kanban-card";
 import { useKanbanCardMoveTargets } from "@/components/kanban-card-menu-items";
 import type { WorkflowStep } from "@/components/kanban-card";
@@ -112,6 +112,56 @@ function computeTaskActionsMenuEntries(args: ComputeEntriesArgs) {
   });
 }
 
+/**
+ * Keeps every confirm/link dialog scoped to the subject that opened it
+ * (AC-TASKS-TASK-ACTIONS-MENU-004.5a's no-retarget rule): resets them all on
+ * a subject-identity change, and guards the two 300ms-delayed confirmations
+ * so a subject swap during that window silently drops the request instead of
+ * opening for the new subject.
+ */
+function useSubjectScopedDialogs(
+  taskId: string | null,
+  dialogs: ReturnType<typeof useTaskMenuDialogState>,
+  editDialog: ReturnType<typeof useTaskMenuEditDialogState>,
+) {
+  const taskIdRef = useRef(taskId);
+  taskIdRef.current = taskId;
+
+  const closeDialogs = useCallback(() => {
+    dialogs.closeAll();
+    editDialog.closeAll();
+  }, [dialogs, editDialog]);
+
+  // The preview panel re-renders this hook with a new `task` prop without
+  // unmounting, and the confirm/link popovers are non-modal, so nothing else
+  // would close a dialog opened for the previous subject.
+  useEffect(() => {
+    closeDialogs();
+    // Only the subject identity should trigger this; `closeDialogs` is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
+  const requestDetachConfirmation = useCallback(() => {
+    // Let Radix finish the menu's pointer sequence before the non-modal
+    // popover opens; otherwise the initiating menu event is an outside click.
+    const requestedForTaskId = taskId;
+    window.setTimeout(() => {
+      if (taskIdRef.current !== requestedForTaskId) return;
+      dialogs.setShowDetachConfirm(true);
+    }, 300);
+  }, [dialogs, taskId]);
+
+  const requestArchiveConfirmation = useCallback(() => {
+    const requestedForTaskId = taskId;
+    window.setTimeout(() => {
+      if (taskIdRef.current !== requestedForTaskId) return;
+      dialogs.setShowArchiveConfirm(true);
+    }, 300);
+  }, [dialogs, taskId]);
+
+  return { closeDialogs, requestDetachConfirmation, requestArchiveConfirmation };
+}
+
 type UseTaskActionsMenuArgs = {
   taskId: string | null;
   taskTitle: string;
@@ -157,6 +207,9 @@ export function useTaskActionsMenu({
 
   const disabled = Boolean(isArchiving || isDeleting || isDetaching);
 
+  const { closeDialogs, requestDetachConfirmation, requestArchiveConfirmation } =
+    useSubjectScopedDialogs(taskId, dialogs, editDialog);
+
   const handleDetachConfirm = useCallback(async () => {
     if (!taskId) return;
     try {
@@ -166,16 +219,6 @@ export function useTaskActionsMenu({
       console.error("Failed to detach task:", error);
     }
   }, [detachTask, dialogs, taskId]);
-
-  const requestDetachConfirmation = useCallback(() => {
-    // Let Radix finish the menu's pointer sequence before the non-modal
-    // popover opens; otherwise the initiating menu event is an outside click.
-    window.setTimeout(() => dialogs.setShowDetachConfirm(true), 300);
-  }, [dialogs]);
-
-  const requestArchiveConfirmation = useCallback(() => {
-    window.setTimeout(() => dialogs.setShowArchiveConfirm(true), 300);
-  }, [dialogs]);
 
   const onMoveToStep = useCallback(
     (stepId: string) => {
@@ -228,10 +271,17 @@ export function useTaskActionsMenu({
     pluginMenuContext,
   });
 
+  // Strip each state slice's own `closeAll` before spreading: `closeDialogs`
+  // above is the single composed reset callers should use, and leaving both
+  // `dialogs.closeAll`/`editDialog.closeAll` in the spread would collide under
+  // one `closeAll` key that only resets the edit dialog (last spread wins).
+  const { closeAll: _dialogsCloseAll, ...dialogsRest } = dialogs;
+  const { closeAll: _editDialogCloseAll, ...editDialogRest } = editDialog;
+
   return {
     entries,
-    ...dialogs,
-    ...editDialog,
+    ...dialogsRest,
+    ...editDialogRest,
     isDetaching,
     handleDetachConfirm,
     triggerRef,
@@ -239,5 +289,6 @@ export function useTaskActionsMenu({
     stepsByWorkflowId: moveTargets.stepsByWorkflowId,
     onConfirmArchive: onArchive,
     onConfirmDelete: onDelete,
+    closeDialogs,
   };
 }

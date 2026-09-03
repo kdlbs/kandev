@@ -98,7 +98,15 @@ function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string
 function useEscapeKey(isOpen: boolean, close: () => void, isDisclosureOpen: () => boolean) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen && !isDisclosureOpen()) {
+      // `e.defaultPrevented` is the authoritative signal that an open actions
+      // menu already consumed this exact keypress (its `onEscapeKeyDown`
+      // calls `preventDefault()` during document-capture, which always runs
+      // before this window-bubble listener sees the same event). Do not gate
+      // on menu-open state read at listener-fire time instead: Radix's
+      // Escape handling can synchronously re-render and re-attach this very
+      // listener mid-dispatch, so that state can already read "closed" for
+      // the SAME keypress that closed it (AC-TASKS-TASK-ACTIONS-MENU-001.11).
+      if (e.key === "Escape" && isOpen && !isDisclosureOpen() && !e.defaultPrevented) {
         close();
       }
     };

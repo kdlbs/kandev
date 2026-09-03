@@ -435,6 +435,8 @@ function TopBarRight({
         embeddedVscodeSupported={embeddedVscodeSupported}
       />
       <TaskTopBarActionsMenu
+        taskId={taskId ?? null}
+        taskTitle={taskTitle ?? ""}
         boardRow={actionsMenuBoardRow ?? null}
         workspaceId={workspaceId ?? null}
         isArchived={isArchived}

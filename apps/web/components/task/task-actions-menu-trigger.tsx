@@ -41,7 +41,23 @@ export function TaskActionsMenuTrigger({
           <IconDots className="h-4 w-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent
+        align="end"
+        className="w-56"
+        onEscapeKeyDown={(event) => {
+          // Consume this Escape ourselves instead of letting Radix's default
+          // dismiss handle it: closing the menu via `onOpenChange` still
+          // triggers Radix's synchronous focus-restoration flush, but calling
+          // `preventDefault()` here (during document capture, before this
+          // same event reaches any bubble-phase `window` listener a host
+          // surface owns) lets that listener check `event.defaultPrevented`
+          // and know this keypress was already handled by the menu, rather
+          // than racing a state update that may not have re-rendered yet
+          // (AC-TASKS-TASK-ACTIONS-MENU-001.11).
+          event.preventDefault();
+          onOpenChange(false);
+        }}
+      >
         <KanbanCardDropdownMenuItems entries={entries} />
       </DropdownMenuContent>
     </DropdownMenu>

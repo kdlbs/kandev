@@ -31,6 +31,10 @@ const baseArgs = {
   parentTaskId: "parent-1",
   onMoveToStep: vi.fn(),
   onSendToWorkflow: vi.fn(),
+  // A real card always wires at least one link handler; omitting it here
+  // would silently drop "link" from the entries array and let the order
+  // assertion below pass without ever exercising its actual position.
+  onLinkPullRequest: vi.fn(),
 };
 
 describe("buildTaskActionsMenuEntries — normal tier", () => {
@@ -56,11 +60,50 @@ describe("buildTaskActionsMenuEntries — normal tier", () => {
       "edit",
       "move-to",
       "send-to-workflow",
+      "link",
       "archive",
       "detach",
       DELETE_SEPARATOR,
       "delete",
     ]);
+  });
+});
+
+describe("buildTaskActionsMenuEntries — in-flight disabling (AC-TASKS-TASK-ACTIONS-MENU-004.1)", () => {
+  function itemByKey(entries: KanbanCardMenuEntry[], key: string) {
+    return entries.find((entry) => entry.key === key);
+  }
+
+  it("disables Archive, Detach, and Delete while an archive request from this menu is in flight", () => {
+    const entries = buildTaskActionsMenuEntries("normal", { ...baseArgs, isArchiving: true });
+
+    expect(itemByKey(entries, "archive")).toMatchObject({ disabled: true });
+    expect(itemByKey(entries, "detach")).toMatchObject({ disabled: true });
+    expect(itemByKey(entries, "delete")).toMatchObject({ disabled: true });
+  });
+
+  it("disables Archive, Detach, and Delete while a delete request from this menu is in flight", () => {
+    const entries = buildTaskActionsMenuEntries("normal", { ...baseArgs, isDeleting: true });
+
+    expect(itemByKey(entries, "archive")).toMatchObject({ disabled: true });
+    expect(itemByKey(entries, "detach")).toMatchObject({ disabled: true });
+    expect(itemByKey(entries, "delete")).toMatchObject({ disabled: true });
+  });
+
+  it("disables Archive, Detach, and Delete while a detach request from this menu is in flight", () => {
+    const entries = buildTaskActionsMenuEntries("normal", { ...baseArgs, isDetaching: true });
+
+    expect(itemByKey(entries, "archive")).toMatchObject({ disabled: true });
+    expect(itemByKey(entries, "detach")).toMatchObject({ disabled: true });
+    expect(itemByKey(entries, "delete")).toMatchObject({ disabled: true });
+  });
+
+  it("leaves every entry enabled when nothing from this menu is in flight", () => {
+    const entries = buildTaskActionsMenuEntries("normal", baseArgs);
+
+    expect(itemByKey(entries, "archive")).toMatchObject({ disabled: false });
+    expect(itemByKey(entries, "detach")).toMatchObject({ disabled: false });
+    expect(itemByKey(entries, "delete")).toMatchObject({ disabled: false });
   });
 });
 

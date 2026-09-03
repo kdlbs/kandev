@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   taskId as toTaskId,
   workflowId as toWorkflowId,
@@ -8,8 +9,9 @@ import {
 import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 import { repositorySlug } from "@/lib/repository-slug";
-import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
+import { useAppStore } from "@/components/state-provider";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
@@ -263,22 +265,37 @@ function buildPullRequestTargetsByRepository(
   return targets;
 }
 
-/** The detail top bar's actions-menu subject: the open task's own record, not
- * a board row, since the detail surface has no board subscription. */
-export function resolveTaskActionsMenuBoardRow(task: Task | null): TaskActionsMenuBoardRow | null {
-  if (!task) return null;
-  return {
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    workflowStepId: task.workflow_step_id,
-    state: task.state,
-    repositoryId: task.repositories?.[0]?.repository_id,
-    repositories: task.repositories,
-    parentTaskId: task.parent_id ?? null,
-    primaryExecutorType: task.primary_executor_type ?? null,
-    workspaceMode: workspaceModeFromMetadata(task.metadata),
-  };
+/**
+ * The detail top bar's actions-menu subject: a live board-row lookup against
+ * the workflow snapshots with the flat task list as fallback (the same lookup
+ * `useSidebarTaskEdit` performs), NOT the detail page's own task record. The
+ * page's own record stays loaded on tasks the board has pruned (e.g. after a
+ * peer archives/deletes it, or for a task that was never on any board, such
+ * as an Office-managed task), so using it directly would make the
+ * "unresolved-row" identifier-only tier (AC-TASKS-TASK-ACTIONS-MENU-002.5)
+ * unreachable. Returns null when the subject genuinely has no board row.
+ */
+export function useTaskActionsMenuBoardRow(task: Task | null): TaskActionsMenuBoardRow | null {
+  const taskId = task?.id ?? null;
+  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  return useMemo(() => {
+    if (!taskId) return null;
+    const boardTask = findTaskInSnapshots(taskId, snapshots, kanbanTasks);
+    if (!boardTask) return null;
+    return {
+      id: boardTask.id,
+      title: boardTask.title,
+      description: boardTask.description,
+      workflowStepId: boardTask.workflowStepId,
+      state: boardTask.state,
+      repositoryId: boardTask.repositoryId,
+      repositories: boardTask.repositories,
+      parentTaskId: boardTask.parentTaskId,
+      primaryExecutorType: boardTask.primaryExecutorType,
+      workspaceMode: boardTask.workspaceMode,
+    };
+  }, [taskId, snapshots, kanbanTasks]);
 }
 
 export function resolveTaskPullRequestProps(

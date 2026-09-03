@@ -27,7 +27,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
-  resolveTaskActionsMenuBoardRow,
+  useTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -103,7 +103,7 @@ function resolveCurrentStepId(
 
 function buildTaskTopBarProps(params: {
   taskProps: ReturnType<typeof resolveTaskProps>;
-  actionsMenuBoardRow: ReturnType<typeof resolveTaskActionsMenuBoardRow>;
+  actionsMenuBoardRow: ReturnType<typeof useTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
   showDebugOverlay: boolean;
   onToggleDebugOverlay: () => void;
@@ -238,6 +238,7 @@ function useTaskPageDerivedProps({
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
   const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
+  const actionsMenuBoardRow = useTaskActionsMenuBoardRow(task);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -256,7 +257,7 @@ function useTaskPageDerivedProps({
   });
   const topBarProps = buildTaskTopBarProps({
     taskProps,
-    actionsMenuBoardRow: resolveTaskActionsMenuBoardRow(task),
+    actionsMenuBoardRow,
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,

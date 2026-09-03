@@ -266,6 +266,18 @@ describe("TaskTopBar actions menu trigger", () => {
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
   });
 
+  it("renders the trigger and identifier-only tier (Archive/Delete only) when the board row can't be resolved (AC-TASKS-TASK-ACTIONS-MENU-002.5)", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" taskTitle={TASK_TITLE} actionsMenuBoardRow={null} />);
+
+    expect(screen.queryByTestId(TRIGGER_TEST_ID)).toBeTruthy();
+    openMenu();
+
+    expect(screen.getByRole("menuitem", { name: "Archive" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Move to" })).toBeNull();
+  });
+
   it("presents only Delete (no Archive, no Edit) for an archived subject", () => {
     renderTopBar(
       <TaskTopBar
