@@ -350,7 +350,14 @@ test.describe("Preview Plan tab", () => {
     await expect(previewPanel).toBeVisible({ timeout: 10_000 });
 
     // Chat is the default body, and the agent's plan-creation reply is visible.
-    await expect(previewPanel.getByText("plan created", { exact: false })).toBeVisible({
+    // Scoped to the agent's message (not any getByText match) because the raw
+    // script description is itself echoed as a user message and contains the
+    // literal substring `e2e:message("plan created")`.
+    await expect(
+      previewPanel.getByTestId("agent-message-highlight").getByText("plan created", {
+        exact: false,
+      }),
+    ).toBeVisible({
       timeout: 15_000,
     });
 
@@ -365,7 +372,11 @@ test.describe("Preview Plan tab", () => {
     // Selecting the Plan tab swaps the chat body for the read-only plan.
     await planTab.click();
     await expect(planTab).toHaveAttribute("data-state", "active");
-    await expect(previewPanel.getByText("plan created", { exact: false })).not.toBeVisible();
+    await expect(
+      previewPanel.getByTestId("agent-message-highlight").getByText("plan created", {
+        exact: false,
+      }),
+    ).not.toBeVisible();
     await expect(previewPanel.getByTestId("preview-plan-panel")).toBeVisible({ timeout: 10_000 });
     await expect(previewPanel.getByText("Step one")).toBeVisible({ timeout: 10_000 });
 
