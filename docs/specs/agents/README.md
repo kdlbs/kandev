@@ -56,10 +56,12 @@ surface shared by task and Office consumers.
 - [Agent Roles — Security, QA, and DevOps](requirements/roles.md)
 - [Managed npm runtime recovery](requirements/managed-npm-runtime-recovery.md)
 - [Managed Agent Runtime Versions and Updates](requirements/runtime-updates.md)
+- [MCP Protocol Compatibility](requirements/mcp-protocol-compatibility.md)
 - [Simplify the agent settings profile layout](requirements/settings-profile-layout.md)
 - [Spawn Session Effective Agent Profile](requirements/spawn-session-effective-profile.md)
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
 - [Profile-backed Utility Agents](requirements/utility-agent-profiles.md)
+- [Plan injection budget](requirements/plan-injection-budget-01.md)
 
 ### System design
 
@@ -74,6 +76,7 @@ surface shared by task and Office consumers.
 - [Managed Agent Runtime Versions and Updates System Design Part 1](system-design/runtime-updates-01.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 2](system-design/runtime-updates-02.md)
 - [Managed npm runtime recovery](system-design/managed-npm-runtime-recovery.md)
+- [MCP Protocol Compatibility](system-design/mcp-protocol-compatibility.md)
 - [Subagent context persistence System Design Part 1](system-design/subagent-context-persistence-01.md)
 - [Subagent context persistence System Design Part 2](system-design/subagent-context-persistence-02.md)
 - [Subagent context persistence System Design Part 3](system-design/subagent-context-persistence-03.md)
@@ -83,6 +86,8 @@ surface shared by task and Office consumers.
 - [Subagent context persistence System Design Part 7](system-design/subagent-context-persistence-07.md)
 - [Subagent context persistence System Design Part 8](system-design/subagent-context-persistence-08.md)
 - [Profile-backed Utility Agents](system-design/utility-agent-profiles.md)
+- [Plan injection budget System Design Part 1](system-design/plan-injection-budget-01.md)
+- [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
 
 ## Migration record
 

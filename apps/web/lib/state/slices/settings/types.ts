@@ -16,6 +16,7 @@ import type {
   StartupPage,
 } from "@/lib/types/http";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
+import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
@@ -429,6 +430,9 @@ export type UserSettingsState = {
   sidebarViews: SidebarView[];
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
+  threadViews: ThreadView[];
+  threadActiveViewId: string | null;
+  threadViewDraft: ThreadViewDraft | null;
   sidebarTaskPrefs: SidebarTaskPrefsState;
   taskCreateLastUsed: TaskCreateLastUsedState;
   jiraSavedViews: unknown;

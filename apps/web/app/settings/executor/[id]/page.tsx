@@ -67,6 +67,7 @@ function executorDescriptionKey(type: ExecutorType): string {
   if (type === "local_docker") return "executors:descriptionLocalDocker";
   if (type === "remote_docker") return "executors:descriptionRemoteDocker";
   if (type === "sprites") return "executors:descriptionSprites";
+  if (type === "k8s") return "executors:descriptionKubernetes";
   return "executors:descriptionCustom";
 }
 

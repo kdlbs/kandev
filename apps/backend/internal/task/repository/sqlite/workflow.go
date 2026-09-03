@@ -129,7 +129,6 @@ func (r *Repository) prepareWorkflow(workflow *models.Workflow) {
 	now := time.Now().UTC()
 	workflow.CreatedAt = now
 	workflow.UpdatedAt = now
-
 }
 
 func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, workflow *models.Workflow) error {
@@ -175,7 +174,8 @@ func normalizeWorkflowStyle(style string) string {
 
 const workflowSelectColumns = `
 	id, workspace_id, name, description, prompt, agent_profile_id,
-	workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at
+	workflow_template_id, sort_order, hidden, style, source, source_path,
+	created_at, updated_at
 `
 
 type workflowScanner interface {
@@ -253,7 +253,6 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 // UpdateWorkflow updates an existing workflow
 func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	workflow.UpdatedAt = time.Now().UTC()
-
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?
 	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.UpdatedAt, workflow.ID)

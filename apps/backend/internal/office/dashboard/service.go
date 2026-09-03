@@ -76,6 +76,7 @@ type Repository interface {
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
+	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
 	UpdateTaskParentID(ctx context.Context, taskID, parentID string) error
 	GetProjectWorkspaceID(ctx context.Context, projectID string) (string, error)
 	GetTaskWorkspaceID(ctx context.Context, taskID string) (string, error)
@@ -143,6 +144,15 @@ type GovernanceSettingsStore interface {
 // RetryCanceller is the interface used to cancel pending retries when a task is reassigned.
 type RetryCanceller interface {
 	CancelPendingRetriesForTask(ctx context.Context, taskID string) error
+}
+
+// ProjectBudgetEvaluator evaluates project-scoped budget policies for a
+// destination project. Wired to costs.CostService.EvaluateProjectBudget so
+// reassigning a task into a project re-checks that project's policies —
+// otherwise a notify_only threshold crossed purely by moving historical
+// spend (not a new cost event or agent launch) would never fire an alert.
+type ProjectBudgetEvaluator interface {
+	EvaluateProjectBudget(ctx context.Context, workspaceID, projectID string) error
 }
 
 // RunResolver resolves the originating office run id for a task, used
@@ -271,7 +281,11 @@ type ApprovalRun struct {
 	ActorID         string
 	ActorType       string
 	Role            string // reviewer|approver, when relevant
-	DecisionComment string // for changes_requested
+	DecisionComment string // for changes_requested/rejected
+	// IdempotencyKey identifies the decision event that caused this wake.
+	// Decision reactivity can recur for the same task, so the scheduler
+	// must not fall back to its once-per-task reason key.
+	IdempotencyKey string
 }
 
 // ApprovalReactivityQueuer queues approval-flow runs (review
@@ -361,6 +375,7 @@ type DashboardService struct {
 	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver      RunResolver                     // optional; nil means status-change activity rows have no run_id
+	projectBudget    ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	// officeSessionIdentity gates RecordAgentDecision's use of the caller's
 	// own session id. Defaults false (zero value); set via
 	// SetOfficeSessionIdentity, wired from features.officeSessionIdentity.
@@ -478,6 +493,13 @@ func (s *DashboardService) SetRetryCanceller(c RetryCanceller) {
 // rows are logged with an empty run_id.
 func (s *DashboardService) SetRunResolver(r RunResolver) {
 	s.runResolver = r
+}
+
+// SetProjectBudgetEvaluator wires the seam used to re-evaluate a
+// destination project's budget policies on task reassignment. Optional;
+// when unset, UpdateTaskProjectID does not check budgets.
+func (s *DashboardService) SetProjectBudgetEvaluator(e ProjectBudgetEvaluator) {
+	s.projectBudget = e
 }
 
 // LogTaskStateChange records a task state transition for Office tasks before

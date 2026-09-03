@@ -79,6 +79,9 @@ function makeUnloadedSettings(): UserSettingsState {
     sidebarViews: [],
     sidebarActiveViewId: null,
     sidebarDraft: null,
+    threadViews: [],
+    threadActiveViewId: null,
+    threadViewDraft: null,
     sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
     taskCreateLastUsed: {
       repositoryId: null,

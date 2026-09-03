@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CommandPanelLiveTask } from "@/lib/commands/task-result-activity";
@@ -13,17 +13,31 @@ const LIVE_UPDATED_AT = "2026-08-24T09:01:00Z";
 vi.mock("@kandev/ui/command", () => ({
   CommandEmpty: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandGroup: ({ children }: { children: ReactNode }) => <section>{children}</section>,
-  CommandItem: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CommandItem: ({
+    children,
+    className,
+    onSelect,
+  }: {
+    children: ReactNode;
+    className?: string;
+    onSelect?: () => void;
+  }) => (
+    <div role="option" className={className} onClick={onSelect}>
+      {children}
+    </div>
+  ),
   CommandShortcut: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
 
 vi.mock("@kandev/ui/badge", () => ({
-  Badge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  Badge: ({ children, className }: { children: ReactNode; className?: string }) => (
+    <span className={className}>{children}</span>
+  ),
 }));
 
 import { CommandsListContent } from "./command-panel-results";
 
-function task(id: string, title: string): Task {
+function task(id: string, title: string, overrides: Partial<Task> = {}): Task {
   return {
     id: taskId(id),
     workspace_id: workspaceId("workspace-1"),
@@ -36,6 +50,7 @@ function task(id: string, title: string): Task {
     priority: "medium",
     created_at: "2026-08-24T09:00:00Z",
     updated_at: "2026-08-24T09:00:00Z",
+    ...overrides,
   };
 }
 
@@ -44,6 +59,7 @@ function taskResults(
   liveTasksById = new Map<string, CommandPanelLiveTask>(),
   lastStepIdByWorkflowId = new Map<string, string>(),
   stepMap = new Map<string, { name: string; color: string }>(),
+  onTaskSelect = vi.fn(),
 ) {
   return (
     <CommandsListContent
@@ -57,7 +73,7 @@ function taskResults(
       repoMap={new Map()}
       liveTasksById={liveTasksById}
       lastStepIdByWorkflowId={lastStepIdByWorkflowId}
-      onTaskSelect={vi.fn()}
+      onTaskSelect={onTaskSelect}
     />
   );
 }
@@ -234,5 +250,56 @@ describe("command panel task activity icon edge cases", () => {
     render(taskResults([loadedTask], new Map([[loadedTask.id, liveTask]])));
 
     expect(screen.getByTestId(RUNNING_ICON_TEST_ID)).toBeTruthy();
+  });
+});
+
+describe("command panel archived task results", () => {
+  // @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.1, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.2,
+  // AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.3, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.4,
+  // AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.5
+  it("uses archived_at for the archive cues instead of terminal state", () => {
+    const archivedInProgress = task("archived-in-progress", "Archived in progress", {
+      state: "IN_PROGRESS",
+      archived_at: "2026-08-24T09:05:00Z",
+    });
+    const unarchivedCompleted = task("unarchived-completed", "Unarchived completed", {
+      state: "COMPLETED",
+    });
+
+    render(
+      taskResults(
+        [archivedInProgress, unarchivedCompleted],
+        new Map(),
+        new Map(),
+        new Map([["step-1", { name: "In Progress", color: "bg-blue-500" }]]),
+      ),
+    );
+
+    const archivedBadge = screen.getByText("Archived", { exact: true });
+    const archivedRow = archivedBadge.closest('[role="option"]');
+    const archivedTitle = screen.getByText("Archived in progress", { exact: true });
+
+    expect(archivedRow).not.toBeNull();
+    expect(archivedRow!.className).not.toContain("opacity-60");
+    expect(archivedRow!.contains(screen.getByText("In Progress", { exact: true }))).toBe(false);
+    expect(archivedTitle.className).toContain("text-muted-foreground");
+    expect(archivedBadge.className).toContain("text-muted-foreground");
+    expect(screen.getByTestId("task-state-archived")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Archived" })).toBeTruthy();
+  });
+
+  // @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.7
+  it("keeps archived result selection on the existing row action", () => {
+    const archivedTask = task("archived-task", "Archived task", {
+      state: "IN_PROGRESS",
+      archived_at: "2026-08-24T09:05:00Z",
+    });
+    const onTaskSelect = vi.fn();
+
+    render(taskResults([archivedTask], new Map(), new Map(), new Map(), onTaskSelect));
+
+    fireEvent.click(screen.getByRole("option"));
+
+    expect(onTaskSelect).toHaveBeenCalledWith(archivedTask);
   });
 });

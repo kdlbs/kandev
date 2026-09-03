@@ -5,13 +5,12 @@ import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentsBrowsePage from "@/app/settings/agents/browse/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
 import AgentProfileRoute from "@/app/settings/agents/[agentId]/profiles/[profileId]/page";
-import ExecutorEditPage from "@/app/settings/executor/[id]/page";
-import ProfileDetailPage from "@/app/settings/executor/[id]/profile/[profileId]/page";
 import ExecutorCreatePage from "@/app/settings/executor/new/page";
 import ExecutorsPage from "@/app/settings/executors/page";
 import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
+import KubernetesExecutorPage from "@/app/settings/executors/k8s/[executorId]/page";
 import ExternalMcpPage from "@/app/settings/external-mcp/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
@@ -28,6 +27,7 @@ import {
   KeyboardShortcutsSettings,
 } from "@/components/settings/general-settings";
 import { SettingsIndex } from "@/components/settings/settings-index";
+import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
 import { readLastSettingsPath } from "@/lib/settings/last-settings-page";
 import { SettingsRedirect, useRememberSettingsPath } from "./settings-route-helpers";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
@@ -319,36 +319,34 @@ function renderDynamicSettingsRoute(pathname: string) {
     return <AgentSetupPage />;
   }
 
+  const executorRoute = renderExecutorSettingsRoute(pathname);
+  if (executorRoute) return executorRoute;
+
+  return null;
+}
+
+function renderExecutorSettingsRoute(pathname: string): ReactNode {
   const executorProfile = matchDouble(
     pathname,
     /^\/settings\/executor\/([^/]+)\/profile\/([^/]+)$/,
   );
   if (executorProfile) {
     const [id, profileId] = executorProfile;
-    return <ProfileDetailPage executorId={id} profileId={profileId} />;
+    return <LegacyExecutorSettingsRoute executorId={id} profileId={profileId} />;
   }
 
   const executorId = matchSingle(pathname, /^\/settings\/executor\/([^/]+)$/);
   if (executorId && executorId !== "new") {
-    return <ExecutorEditPage executorId={executorId} />;
+    return <LegacyExecutorSettingsRoute executorId={executorId} />;
   }
-
   const profileId = matchSingle(pathname, /^\/settings\/executors\/([^/]+)$/);
-  if (profileId) {
-    return <ProfileEditPage profileId={profileId} />;
-  }
-
+  if (profileId) return <ProfileEditPage profileId={profileId} />;
   const executorType = matchSingle(pathname, /^\/settings\/executors\/new\/([^/]+)$/);
-  if (executorType) {
-    return <CreateProfilePage executorType={executorType} />;
-  }
-
+  if (executorType) return <CreateProfilePage executorType={executorType} />;
   const sshExecutorId = matchSingle(pathname, /^\/settings\/executors\/ssh\/([^/]+)$/);
-  if (sshExecutorId) {
-    return <SSHExecutorPage executorId={sshExecutorId} />;
-  }
-
-  return null;
+  if (sshExecutorId) return <SSHExecutorPage executorId={sshExecutorId} />;
+  const kubernetesExecutorId = matchSingle(pathname, /^\/settings\/executors\/k8s\/([^/]+)$/);
+  return kubernetesExecutorId ? <KubernetesExecutorPage executorId={kubernetesExecutorId} /> : null;
 }
 
 // One component per workspace sub-page tab. A lookup rather than a ternary

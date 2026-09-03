@@ -38,6 +38,7 @@ type MonacoCodeEditorProps = {
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onDownload?: () => void;
 };
 
 function getMonacoTheme(resolvedTheme: string | undefined): string {
@@ -241,6 +242,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         onSave={props.onSave}
         onReloadFromAgent={props.onReloadFromAgent}
         onDelete={props.onDelete}
+        onDownload={props.onDownload}
         onToggleMarkdownPreview={props.onToggleMarkdownPreview}
       />
       <div className="flex-1 overflow-hidden relative" ref={editorAreaRef}>

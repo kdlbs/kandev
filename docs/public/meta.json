@@ -25,6 +25,7 @@
     "---Deploy and Operate---",
     "docker",
     "run-as-a-service",
+    "mobile-remote-access",
     "windows-support",
     "k8s",
     "operations",

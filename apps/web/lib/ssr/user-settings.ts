@@ -6,6 +6,12 @@ import {
 } from "@/lib/tasks/tasks-list-options";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
+import { fromApiThreadDraft, fromApiThreadView } from "@/lib/state/slices/ui/thread-view-wire";
+import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
+import {
+  DEFAULT_THREAD_VIEW,
+  DEFAULT_THREAD_VIEW_ID,
+} from "@/lib/state/slices/ui/thread-view-builtins";
 import { type UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { SidebarTaskPrefsApi, UserSettings, UserSettingsResponse } from "@/lib/types/http";
 import type {
@@ -58,6 +64,9 @@ export function createDefaultUserSettings(): UserSettingsState {
     sidebarViews: [],
     sidebarActiveViewId: null,
     sidebarDraft: null,
+    threadViews: [DEFAULT_THREAD_VIEW],
+    threadActiveViewId: DEFAULT_THREAD_VIEW_ID,
+    threadViewDraft: null,
     sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
     taskCreateLastUsed: {
       repositoryId: null,
@@ -296,6 +305,13 @@ export function buildCoreFields(
     sidebarActiveViewId: mapNullableString(s.sidebar_active_view_id, current.sidebarActiveViewId),
     sidebarDraft: mapDefined(s.sidebar_draft, current.sidebarDraft, (draft) =>
       draft ? (fromApiSidebarDraft(draft) as SidebarViewDraft) : null,
+    ),
+    threadViews: mapDefined(s.thread_views, current.threadViews, (views) =>
+      views.map(fromApiThreadView),
+    ) as ThreadView[],
+    threadActiveViewId: mapNullableString(s.thread_active_view_id, current.threadActiveViewId),
+    threadViewDraft: mapDefined(s.thread_view_draft, current.threadViewDraft, (draft) =>
+      draft ? (fromApiThreadDraft(draft) as ThreadViewDraft) : null,
     ),
     sidebarTaskPrefs: mapDefined(
       s.sidebar_task_prefs,

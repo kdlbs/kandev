@@ -3,7 +3,10 @@ package gitlab
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 
@@ -284,6 +287,12 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	page, perPage := paginationFromQuery(ctx)
 	filter := ctx.Query("filter")
 	customQuery := ctx.Query("custom_query")
+	if customQuery != "" {
+		if _, err := url.ParseQuery(customQuery); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "custom_query must be a valid URL query"})
+			return
+		}
+	}
 	if customQuery == "" {
 		if filter == filterTokenReviewRequested {
 			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "review_requested is not supported for issues"})
@@ -297,8 +306,9 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	if !ok {
 		return
 	}
+	milestone := trimGitLabWhitespace(ctx.Query("milestone"))
 	result, err := client.ListIssuesPaged(
-		ctx.Request.Context(), filter, customQuery, page, perPage,
+		ctx.Request.Context(), filter, customQuery, milestone, page, perPage,
 	)
 	if err != nil {
 		writeWorkspaceClientActionError(ctx, err, "issue search")
@@ -335,6 +345,16 @@ func (c *Controller) translateMRFilter(ctx *gin.Context, filter string) (string,
 		username = u
 	}
 	return translateUserSearchFilter(filter, username), nil
+}
+
+// trimGitLabWhitespace trims Unicode White_Space plus U+FEFF (byte order
+// mark). strings.TrimSpace already covers Unicode White_Space, including
+// U+0085 (NEL), but it does not trim U+FEFF. The extra rune keeps a pasted BOM
+// from surviving as a non-empty milestone that cannot match.
+func trimGitLabWhitespace(s string) string {
+	return strings.TrimFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '\uFEFF'
+	})
 }
 
 // paginationFromQuery reads ?page=&per_page= with the same clamps SearchMRsPaged

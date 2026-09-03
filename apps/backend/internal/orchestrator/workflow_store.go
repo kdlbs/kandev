@@ -646,7 +646,7 @@ func (s *workflowStore) pullOneFeederTask(
 		if candidate.Metadata == nil {
 			candidate.Metadata = make(map[string]interface{})
 		}
-		candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+		candidate.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{"from_step_id": fromStepID}
 		candidate.Position = position
 		oldState, stateChanged, err := s.syncQueuedPromotionState(ctx, candidate, vacatedStep)
 		if err != nil {
@@ -711,7 +711,7 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
-	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+	candidate.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{"from_step_id": fromStepID}
 	candidate.Position = position
 	candidate.UpdatedAt = time.Now().UTC()
 	oldState, stateChanged, err := s.syncQueuedPromotionState(ctx, candidate, step)

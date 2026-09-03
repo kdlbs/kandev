@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
@@ -78,6 +79,7 @@ type pendingTaskTitleSetter interface {
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
+	runtime     agentruntime.Runtime
 	// terminal records the session state observed when the cleanup snapshot was
 	// taken. It is retained for snapshot compatibility, but it must never
 	// suppress a non-not-found runtime stop failure.
@@ -732,15 +734,14 @@ func (s *Service) resolveOfficeWorkflow(ctx context.Context, req *CreateTaskRequ
 //
 // Three destinations, picked by what the caller is asking for:
 //
-//   - plan mode → the first step by position. Planning happens before the work,
-//     so the task belongs at the head of the board even when a later step is
-//     marked as the start step.
 //   - starting an agent now → the first step that runs agents
 //     (on_enter: auto_start_agent). A task that is about to run does not belong
-//     in a parking column that was never configured to run anything.
+//     in a parking column that was never configured to run anything. Agent mode
+//     does not change this destination.
+//   - plan mode without an immediate agent start → the first step by position.
 //   - everything else → the workflow's start step (is_start_step).
 //
-// The middle case is the one that is easy to get wrong: `is_start_step` and
+// The first case is the one that is easy to get wrong: `is_start_step` and
 // `auto_start_agent` are separate settings, and routing an agent start through
 // the start step silently made the two synonymous. It went unnoticed because
 // every built-in template puts both on the same step.
@@ -750,10 +751,10 @@ func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskReques
 		var resolvedID string
 		var err error
 		switch {
-		case req.PlanMode:
-			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
 		case req.StartAgent:
 			resolvedID, err = s.startStepResolver.ResolveAutoStartStep(ctx, req.WorkflowID)
+		case req.PlanMode:
+			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
 		default:
 			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
 		}
@@ -2816,6 +2817,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 			target := taskStopTarget{
 				sessionID:   running.SessionID,
 				executionID: strings.TrimSpace(running.AgentExecutionID),
+				runtime:     running.Runtime,
 				terminal:    isCleanableSessionState(sessionStates[running.SessionID]),
 			}
 			targets = append(targets, target)
@@ -2883,6 +2885,7 @@ func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []tas
 		targets = append(targets, taskStopTarget{
 			sessionID:   strings.TrimSpace(running.SessionID),
 			executionID: strings.TrimSpace(running.AgentExecutionID),
+			runtime:     running.Runtime,
 		})
 	}
 	return targets
@@ -2906,6 +2909,9 @@ func mergeTaskStopTargets(live, snapshot []taskStopTarget) []taskStopTarget {
 		key := target.sessionID + "\x00" + target.executionID
 		if index, exists := seen[key]; exists {
 			targets[index].terminal = targets[index].terminal || target.terminal
+			if targets[index].runtime == "" {
+				targets[index].runtime = target.runtime
+			}
 			return
 		}
 		seen[key] = len(targets)

@@ -7,16 +7,16 @@ owners:
   - kandev
 ---
 
-# UI system
+# UI
 
-## Ownership
+## Scope
 
-UI owns reusable presentation and responsive interaction.
+UI owns responsive behavior.
 [Tasks](../tasks/README.md), [Agents](../agents/README.md),
 [Plugins](../plugins/README.md), and [Integrations](../integrations/README.md) own
-feature behavior and state.
+behavior/state.
 
-## Specification map
+## Map
 
 ### Requirements
 
@@ -25,23 +25,23 @@ feature behavior and state.
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
 - [Task Add-Panel PR Submenu](requirements/add-panel-pr-submenu.md)
 - [Agent Launch Prompt Composer](requirements/agent-launch-prompt-composer.md)
-- [Growing dialog content containment](requirements/dialog-content-containment.md)
+- [Dialog containment](requirements/dialog-content-containment.md)
 - [Surface text](requirements/surface-text-hierarchy.md)
-- [Agent-message inline comments](requirements/agent-message-comments.md)
+- [Message comments](requirements/agent-message-comments.md)
 - [Agent Todo List Panel](requirements/agent-todo-list-panel.md)
 - [App Status Bar](requirements/app-status-bar.md)
-- [Workflow column visibility](requirements/board-step-visibility-filter.md)
-- [Browser inspect annotation submission](requirements/browser-inspect-annotations-save.md)
-- [Backend-owned cancel-turn progress](requirements/cancel-turn-progress.md)
+- [Column visibility](requirements/board-step-visibility-filter.md)
+- [Inspect annotation submission](requirements/browser-inspect-annotations-save.md)
+- [Cancel-turn progress](requirements/cancel-turn-progress.md)
 - [Changes File Row Containment](requirements/changes-file-row-containment.md)
-- [Responsive Changes Walkthrough Action](requirements/changes-walkthrough-toolbar-width.md)
+- [Changes walkthrough](requirements/changes-walkthrough-toolbar-width.md)
 - [Task PR Automation Controls](requirements/ci-pr-automation.md)
 - [Merge Queue Recovery Controls](requirements/ci-pr-merge-queue-recovery-controls.md)
-- [Clarification Shared Context](requirements/clarification-context.md)
+- [Clarification context](requirements/clarification-context.md)
 - [Clarification submit feedback](requirements/clarification-submit-feedback.md)
-- [Command-panel Sidebar Task Reveal](requirements/command-panel-sidebar-task-reveal.md)
-- [Command Panel Task Activity Icons](requirements/command-panel-task-activity-icons.md)
-- [Compact Workflow Step Navigation](requirements/compact-workflow-step-navigation.md)
+- [Command-panel task reveal](requirements/command-panel-sidebar-task-reveal.md)
+- [Task activity icons](requirements/command-panel-task-activity-icons.md)
+- [Workflow step navigation](requirements/compact-workflow-step-navigation.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
 - [Mention recency](requirements/composer-mention-recency.md)
 - [Composer Suggestion Overlays](requirements/composer-suggestion-overlays.md)
@@ -66,17 +66,18 @@ feature behavior and state.
 - [Mermaid Rendering](requirements/mermaid-rendering.md)
 - [Message favorite star mobile sizing](requirements/message-favorite-star-mobile-size.md)
 - [Message metadata dialog scroll containment](requirements/message-metadata-overflow.md)
-- [Automatically Merge Consecutive Queued Messages](requirements/message-queue-auto-merge.md)
-- [Manage Pending Message Queues](requirements/message-queue-management.md)
+- [Queue auto-merge](requirements/message-queue-auto-merge.md)
+- [Message queue management](requirements/message-queue-management.md)
 - [Merge Enqueued Messages Individually](requirements/message-queue-merge.md)
 - [Pin the Message Queue Panel](requirements/message-queue-pin.md)
 - [Reorder Queued Messages](requirements/message-queue-reorder.md)
 - [Control Pending Message Auto-run](requirements/message-queue-run.md)
 - [Send Queued Messages Now](requirements/message-queue-send-now.md)
-- [Mobile Workspace Topbar Actions](requirements/mobile-quick-chat-topbar.md)
+- [Mobile topbar actions](requirements/mobile-quick-chat-topbar.md)
 - [Mobile Task Chrome](requirements/mobile-task-chrome.md)
 - [Mobile Task Navigation](requirements/mobile-task-navigation.md)
-- [Task-scoped port-forwarding discovery](requirements/port-forwarding-discovery.md)
+- [Plan comments](requirements/plan-comment-drafts.md)
+- [Port-forwarding discovery](requirements/port-forwarding-discovery.md)
 - [Open proxy URLs in the browser panel](requirements/port-proxy-browser-panel.md)
 - [Responsive PR Detail Header](requirements/pr-detail-header-width.md)
 - [Repair PR-only commit details](requirements/pr-only-commit-details.md)
@@ -85,8 +86,8 @@ feature behavior and state.
 - [Preview Sprites Transient Retry](requirements/preview-sprites-transient-retry.md)
 - [Persistent status motion](requirements/persistent-status-motion.md)
 - [Prompt History Panel](requirements/prompt-history-panel.md)
-- [Render Nerd Font glyphs pasted from a styled terminal](requirements/prompt-paste-nerd-font-glyphs.md)
-- [Prompt Turn Duration on Message Hover](requirements/prompt-turn-duration.md)
+- [Prompt paste: Nerd Font glyphs](requirements/prompt-paste-nerd-font-glyphs.md)
+- [Prompt turn duration](requirements/prompt-turn-duration.md)
 - [Published Docs Preview Reliability](requirements/published-docs-preview-reliability.md)
 - [Quick Chat elevation](requirements/quick-chat-elevation.md)
 - [Quick Chat viewport layout](requirements/quick-chat-viewport-layout.md)
@@ -99,6 +100,7 @@ feature behavior and state.
 - [Review Markdown Preview](requirements/review-markdown-preview.md)
 - [Search/filter dropdown scroll reset](requirements/search-filter-scroll-reset.md)
 - [Selected option prominence](requirements/selected-option-picker-prominence.md)
+- [Session](requirements/session-start-composer-readiness.md)
 - [Session tab delete feedback](requirements/session-tab-delete-feedback.md)
 - [Settings Discovery](requirements/settings-discovery.md)
 - [Settings Manual Save](requirements/settings-manual-save.md)
@@ -120,6 +122,7 @@ feature behavior and state.
 - [Confirmations](requirements/confirmation-warning-hierarchy.md)
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](requirements/task-agent-tab-reconciliation.md)
+- [Threads Deck](requirements/threads-conversation-deck.md)
 - [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
@@ -137,7 +140,7 @@ feature behavior and state.
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 
-### System design
+### Design
 
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Growing Dialog Content Containment](system-design/dialog-content-containment.md)
@@ -167,11 +170,14 @@ feature behavior and state.
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
 - [Quick Chat viewport layout](system-design/quick-chat-viewport-layout.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
+- [Plan comments](system-design/plan-comment-drafts.md)
 - [Responsive Plan Formatting](system-design/responsive-plan-formatting.md)
 - [Confirmations](system-design/confirmation-warning-hierarchy.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
+- [Session](system-design/session-start-composer-readiness.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
+- [Threads Deck](system-design/threads-conversation-deck.md)
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
 - [Command Panel Task Activity Icons](system-design/command-panel-task-activity-icons.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
@@ -179,8 +185,6 @@ feature behavior and state.
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 
-## Related systems
+## Related
 
-- [Tasks](../tasks/README.md)
-- [Plugins](../plugins/README.md)
 - [Platform](../platform/README.md)

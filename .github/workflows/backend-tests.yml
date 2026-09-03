@@ -464,7 +464,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-    timeout-minutes: 10
+    # The env-gated package suite runs with the race detector and can exceed
+    # ten minutes on a hosted runner as the repository test set grows.
+    timeout-minutes: 20
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
@@ -529,9 +531,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
-    # The race-sensitive Windows package suite can exceed 15 minutes on a
-    # busy hosted runner; keep the cap finite while allowing normal completion.
-    timeout-minutes: 20
+    # The race-sensitive Windows package suite can approach 20 minutes on a
+    # busy hosted runner; keep the cap finite while allowing runner variance.
+    timeout-minutes: 30
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.

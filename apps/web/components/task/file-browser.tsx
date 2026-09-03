@@ -35,6 +35,8 @@ import {
   fetchAndOpenFile,
 } from "./file-browser-hooks";
 import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
+import { useFileUploadEntryPoints } from "./use-file-upload-entry-points";
+import { FileUploadStatusList } from "./file-upload-status-list";
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
 import { computeMoveTargets, getVisiblePaths, moveNodesInTree } from "./file-tree-utils";
 import { useFileTreeReveal } from "./file-tree-reveal";
@@ -47,6 +49,7 @@ type FileBrowserProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   activeFilePath?: string | null;
   onAddSources?: (opener: HTMLButtonElement) => void;
   addSourcesButtonRef?: Ref<HTMLButtonElement>;
@@ -462,6 +465,7 @@ function FileBrowserTreeContent({
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
+  onUploadFilesHere,
   showTouchActions,
 }: Omit<FileBrowserProps, "sessionId" | "environmentId" | "onOpenFile" | "onCreateFile"> & {
   scrollAreaRef: React.RefObject<HTMLDivElement | null>;
@@ -494,6 +498,7 @@ function FileBrowserTreeContent({
         onDeleteFile={onDeleteFile}
         onRenameFile={onRenameFile}
         onDownloadFile={onDownloadFile}
+        onUploadFilesHere={onUploadFilesHere}
         onAddToChatContext={handlers.handleAddToChatContext}
         showTouchActions={showTouchActions}
         onCreateFileSubmit={handlers.handleCreateFileSubmit}
@@ -544,6 +549,15 @@ export function FileBrowser({
     containerRef,
   });
   const { openFolder, copied, copyPath, search, treeState, fullPath, displayPath } = data;
+  const upload = useFileUploadEntryPoints(sessionId);
+  const handleToolbarUpload = useCallback(
+    (mode: "files" | "folder") => upload.openPicker(mode, handlers.activeFolderPath ?? ""),
+    [upload, handlers.activeFolderPath],
+  );
+  const handleUploadHere = useCallback(
+    (path: string) => upload.openPicker("files", path),
+    [upload],
+  );
   return (
     <FileTreeEditorProvider sessionId={sessionId} treeRootName={treeState.tree?.name}>
       <div
@@ -564,6 +578,7 @@ export function FileBrowser({
           onOpenFolder={openFolder}
           onCollapseAll={treeState.collapseAll}
           showCreateButton={Boolean(onCreateFile)}
+          onUploadFiles={sessionId ? handleToolbarUpload : undefined}
           onAddSources={onAddSources}
           addSourcesButtonRef={addSourcesButtonRef}
           addSourcesDisabledReason={addSourcesDisabledReason}
@@ -578,8 +593,11 @@ export function FileBrowser({
           onDeleteFile={onDeleteFile}
           onRenameFile={onRenameFile}
           onDownloadFile={onDownloadFile}
+          onUploadFilesHere={sessionId ? handleUploadHere : undefined}
           showTouchActions={showTouchActions}
         />
+        <FileUploadStatusList uploads={upload.uploads} />
+        {upload.elements}
       </div>
     </FileTreeEditorProvider>
   );
