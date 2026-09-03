@@ -285,6 +285,57 @@ func TestAddTaskParticipant_FallsThroughToInsertWhenClaimTargetVanishes(t *testi
 	}
 }
 
+// TestAddTaskParticipant_DoesNotClaimAnAutoSeatAtAnEarlierStep is
+// AC-OFFICE-SEAT-PROVENANCE-003.1/003.3: the claim search is scoped to the
+// task's current step only, deliberately narrower than EnsureRoleSeat's
+// any-step existence check. An auto seat cast at a step the task has since
+// left must not be claimable; the registration writes a new manual seat at
+// the current step instead, leaving the earlier auto seat untouched.
+func TestAddTaskParticipant_DoesNotClaimAnAutoSeatAtAnEarlierStep(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "step-scope-1", "step-2") // task now stands at step-2
+	seedAutoSeat(t, repo, "auto-step1", "step-1", "step-scope-1", "reviewer", "agent-auto")
+	seedParticipantAgent(t, repo, "agent-human")
+
+	result, err := repo.AddTaskParticipant(ctx, "step-scope-1", "agent-human", "reviewer")
+	if err != nil {
+		t.Fatalf("AddTaskParticipant: %v", err)
+	}
+	if result.Outcome != sqlite.ParticipantWriteOutcomeInserted {
+		t.Fatalf("outcome = %q, want %q (the earlier-step auto seat is not claimable)", result.Outcome, sqlite.ParticipantWriteOutcomeInserted)
+	}
+	if n := participantRowCount(t, repo, "step-scope-1"); n != 2 {
+		t.Fatalf("rows = %d, want 2 (earlier-step auto seat untouched, new manual seat at the current step)", n)
+	}
+
+	var provenance, agent string
+	if err := repo.ReaderDB().Get(&provenance,
+		`SELECT provenance FROM workflow_step_participants WHERE id = 'auto-step1'`); err != nil {
+		t.Fatalf("read provenance: %v", err)
+	}
+	if provenance != "auto" {
+		t.Errorf("earlier-step seat provenance = %q, want unchanged %q", provenance, "auto")
+	}
+	if err := repo.ReaderDB().Get(&agent,
+		`SELECT agent_profile_id FROM workflow_step_participants WHERE id = 'auto-step1'`); err != nil {
+		t.Fatalf("read agent: %v", err)
+	}
+	if agent != "agent-auto" {
+		t.Errorf("earlier-step seat agent = %q, want unchanged %q (not displaced)", agent, "agent-auto")
+	}
+
+	var newSeatStepID string
+	if err := repo.ReaderDB().Get(&newSeatStepID,
+		`SELECT step_id FROM workflow_step_participants WHERE task_id = 'step-scope-1' AND agent_profile_id = 'agent-human'`); err != nil {
+		t.Fatalf("read new seat step: %v", err)
+	}
+	if newSeatStepID != "step-2" {
+		t.Errorf("new manual seat step_id = %q, want %q (the task's current step)", newSeatStepID, "step-2")
+	}
+}
+
 // TestCancelDisplacedParticipantRun_CancelsOnlyTheFanOutRunForThatAgentStep
 // is AC-OFFICE-SEAT-PROVENANCE-006.6: a claim cancels the queued/claimed
 // run the step-entry fan-out addressed to the displaced agent at that step,
