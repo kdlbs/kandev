@@ -7,27 +7,79 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
+import { MCPSelectionPicker } from "@/components/mcp/mcp-selection-picker";
+import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
 import { cn } from "@/lib/utils";
 
 type TaskCreateAdvancedSettingsProps = {
   isCreateMode: boolean;
+  isEditMode?: boolean;
   isTaskStarted: boolean;
   blockedBy: string[];
   onBlockedByChange: (next: string[]) => void;
   dependenciesDisabled?: boolean;
+  mcpDefinitions?: MCPServerDefinition[];
+  mcpDefinitionsLoading?: boolean;
+  mcpSelectionIds?: string[];
+  onMcpSelectionIdsChange?: (ids: string[]) => void;
+  mcpInheritedSelections?: MCPInheritedSelection[];
 };
+
+function TaskCreateMCPSettingRow({
+  definitions,
+  loading,
+  selectedIds,
+  onSelectedIdsChange,
+  inherited,
+  disabled,
+}: {
+  definitions: MCPServerDefinition[];
+  loading: boolean;
+  selectedIds: string[];
+  onSelectedIdsChange: (ids: string[]) => void;
+  inherited: MCPInheritedSelection[];
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="min-w-0 md:col-span-2" data-testid="task-create-mcp-setting-row">
+      {loading ? (
+        <p className="min-h-11 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          {t("settings:mcpLoading")}
+        </p>
+      ) : (
+        <MCPSelectionPicker
+          definitions={definitions}
+          selectedIds={selectedIds}
+          onSelectedIdsChange={onSelectedIdsChange}
+          inherited={inherited}
+          disabled={disabled}
+          label={t("settings:mcpServers")}
+          description={t("settings:mcpSelectionDescription")}
+          testId="task-create-mcp-selection"
+        />
+      )}
+    </div>
+  );
+}
 
 export function TaskCreateAdvancedSettings({
   isCreateMode,
+  isEditMode = false,
   isTaskStarted,
   blockedBy,
   onBlockedByChange,
   dependenciesDisabled,
+  mcpDefinitions = [],
+  mcpDefinitionsLoading = false,
+  mcpSelectionIds = [],
+  onMcpSelectionIdsChange = () => undefined,
+  mcpInheritedSelections = [],
 }: TaskCreateAdvancedSettingsProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
-  if (!isCreateMode || isTaskStarted) return null;
+  if ((!isCreateMode && !isEditMode) || isTaskStarted) return null;
 
   return (
     <Collapsible
@@ -93,6 +145,14 @@ export function TaskCreateAdvancedSettings({
               />
             </div>
           </div>
+          <TaskCreateMCPSettingRow
+            definitions={mcpDefinitions}
+            loading={mcpDefinitionsLoading}
+            selectedIds={mcpSelectionIds}
+            onSelectedIdsChange={onMcpSelectionIdsChange}
+            inherited={mcpInheritedSelections}
+            disabled={dependenciesDisabled}
+          />
         </div>
       </CollapsibleContent>
     </Collapsible>

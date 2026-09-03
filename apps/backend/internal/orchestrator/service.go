@@ -607,6 +607,11 @@ type Service struct {
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
 
+	// mcpSelectionWriter persists task-session MCP selections at the launch
+	// boundary. It is optional so focused orchestrator tests and older callers
+	// retain the legacy runtime path.
+	mcpSelectionWriter MCPSelectionWriter
+
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have
 	// crossed the process boundary and remains manual until reconciled.

@@ -6,6 +6,7 @@ import {
   IconKey,
   IconLayoutGrid,
   IconPlugConnected,
+  IconServer,
 } from "@tabler/icons-react";
 
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
@@ -26,7 +27,8 @@ export type WorkspaceSettingsTab =
   | "workflows"
   | "integrations"
   | "automations"
-  | "secrets";
+  | "secrets"
+  | "mcp-servers";
 
 export function workspaceSettingsHref(workspaceId: string, tab: WorkspaceSettingsTab): string {
   const base = `${WORKSPACES_SETTINGS_HREF}/${encodeURIComponent(workspaceId)}`;
@@ -52,6 +54,7 @@ export const WORKSPACE_SETTINGS_TABS: ReadonlyArray<WorkspaceTabSpec> = [
   { tab: "integrations", labelKey: "common:integrations", icon: IconPlugConnected },
   { tab: "automations", labelKey: "common:automations", icon: IconBolt },
   { tab: "secrets", labelKey: "settings:secrets", icon: IconKey },
+  { tab: "mcp-servers", labelKey: "settings:workspaceMcpServers", icon: IconServer },
 ];
 
 /** The name and mark for a tab, for the surfaces that render one tab at a time. */

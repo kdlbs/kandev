@@ -29,6 +29,8 @@ export type FormResetters = {
   setFreshBranchEnabled: (value: boolean) => void;
   setCurrentLocalBranch: (value: string) => void;
   setBlockedBy: (value: string[]) => void;
+  setMcpServerIds: (value: string[]) => void;
+  setMcpServerIdsDirty: (value: boolean) => void;
 };
 
 export function resetTaskForm(
@@ -69,4 +71,6 @@ export function resetTaskForm(
   resetters.setSelectedWorkflowId(workflowId);
   resetters.setFetchedSteps(null);
   resetters.setAutopilot(false);
+  resetters.setMcpServerIds([]);
+  resetters.setMcpServerIdsDirty(false);
 }

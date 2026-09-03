@@ -96,6 +96,7 @@ type wsCreateTaskRequest struct {
 	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position          int                       `json:"position,omitempty"`
 	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
+	MCPServerIDs      []string                  `json:"mcp_server_ids,omitempty"`
 	StartAgent        bool                      `json:"start_agent,omitempty"`
 	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
 	ExecutorID        string                    `json:"executor_id,omitempty"`
@@ -187,6 +188,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:                convertToServiceRepos(repos),
 		Position:                    req.Position,
 		Metadata:                    req.Metadata,
+		MCPServerIDs:                req.MCPServerIDs,
 		DeferredLaunch:              deferredLaunch,
 		RecordAgentProfileRecentUse: true,
 		PlanMode:                    req.PlanMode,

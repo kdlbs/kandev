@@ -13,3 +13,4 @@ export * from "./domains/workflow-api";
 export * from "./domains/workflow-sync-api";
 export * from "./domains/github-api";
 export * from "./domains/runtime-flags-api";
+export * from "./domains/mcp-api";

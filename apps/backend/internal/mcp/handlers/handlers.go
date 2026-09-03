@@ -733,6 +733,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		StartWhenUnblocked     *bool                `json:"start_when_unblocked"`      // nil = derive from start_agent when BlockedBy is set
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
 		ExternalID             string               `json:"external_id"`               // caller-supplied create-idempotency key
+		MCPServerIDs           []string             `json:"mcp_server_ids"`            // task-scope MCP additions
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -889,6 +890,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		DeferredLaunch:         deferredLaunch,
 		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
+		MCPServerIDs:           req.MCPServerIDs,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))

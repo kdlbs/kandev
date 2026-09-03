@@ -332,6 +332,43 @@ describe("useSessionLaunchSubmit", () => {
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
   });
 
+  it("passes session MCP additions to the launch request", async () => {
+    const promptRef = createPromptRef("hello");
+    const mockSetActiveSession = vi.fn();
+    const mockActivateSession = vi.fn();
+    const mockSetIsCreating = vi.fn();
+    const mockOnClose = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessionLaunchSubmit({
+        promptRef,
+        taskId: TASK_ID,
+        selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
+        executorId: EXECUTOR_ID,
+        contextValue: "blank",
+        initialPrompt: null,
+        agentProfiles: [AGENT_PROFILE_A],
+        mcpServerIds: ["mcp-server-1"],
+        onClose: mockOnClose,
+        toast: mockToast,
+        setActiveSession: mockSetActiveSession,
+        activateSession: mockActivateSession,
+        setIsCreating: mockSetIsCreating,
+      }),
+    );
+
+    await act(async () => {
+      await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
+    });
+
+    expect(mockBuildStartRequest).toHaveBeenCalledWith(
+      TASK_ID,
+      PROFILE_ID,
+      expect.objectContaining({ mcpServerIds: ["mcp-server-1"] }),
+    );
+  });
+
   it("marks the picker profile explicit and labels the tab from the effective response profile", async () => {
     mockLaunchSession.mockResolvedValueOnce({
       session_id: SESSION_ID,

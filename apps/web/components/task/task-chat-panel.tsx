@@ -43,6 +43,7 @@ import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-wi
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { TaskSessionMCPSettings } from "./task-session-mcp-settings";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -293,6 +294,7 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
+  workspaceId?: string | null;
   /**
    * Task this panel belongs to, independent of whether it has a session yet.
    * Only the status row uses it, so a task with no session still shows its
@@ -461,6 +463,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
+  workspaceId = null,
   statusTaskId = null,
   onOpenFile,
   showRequestChangesTooltip = false,
@@ -564,6 +567,16 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
   const { isMobile } = useResponsiveBreakpoint();
+  const mcpWorkspaceId = useAppStore((state) => {
+    const currentTaskId = taskId ?? taskIdHint;
+    if (!currentTaskId) return null;
+    return (
+      workspaceId ??
+      state.kanban.tasks.find((item) => item.id === currentTaskId)?.workspaceId ??
+      state.workspaces.activeId ??
+      null
+    );
+  });
   // The anchored bar is a desktop-only, opt-in affordance; mobile always
   // falls back to the scroll button.
   const showAnchoredBar = !isMobile && showAnchoredPromptBar;
@@ -643,6 +656,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             statusSummary={launchStatusSummary}
             runErrors={[]}
             repositories={launchErrorContext.repositories}
+          />
+        )}
+        {resolvedSessionId && taskId && (
+          <TaskSessionMCPSettings
+            sessionId={resolvedSessionId}
+            taskId={taskId}
+            workspaceId={mcpWorkspaceId}
+            profileId={session?.agent_profile_id}
           />
         )}
         <MessageList

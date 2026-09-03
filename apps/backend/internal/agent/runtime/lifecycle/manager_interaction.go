@@ -883,6 +883,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	// which would fire on_turn_complete against the current step — the original
 	// boot-vs-turn ambiguity bug).
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
+	m.RequestSessionMCPReconfiguration(context.WithoutCancel(ctx), execution.SessionID)
 	return nil
 }
 
@@ -1173,6 +1174,7 @@ func (m *Manager) restartAgentProcess(
 		return fmt.Errorf("failed to mark restarted agent ready: %w", err)
 	}
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
+	m.RequestSessionMCPReconfiguration(context.WithoutCancel(ctx), execution.SessionID)
 
 	m.logger.Info("agent process restarted with fresh context",
 		zap.String("execution_id", executionID),
@@ -1838,6 +1840,9 @@ func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, ev
 		go m.eventPublisher.publishAgentEventPayload(context.Background(), eventType, payload)
 	} else {
 		m.eventPublisher.publishAgentEventPayload(ctx, eventType, payload)
+	}
+	if eventType == events.AgentReady || eventType == events.AgentBootReady {
+		m.RequestSessionMCPReconfiguration(context.WithoutCancel(ctx), updated.SessionID)
 	}
 	return nil
 }

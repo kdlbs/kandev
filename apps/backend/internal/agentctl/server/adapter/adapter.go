@@ -98,6 +98,14 @@ type StderrLineSanitizer interface {
 	SanitizeStderrLine(line string) (safeLine string, keep bool)
 }
 
+// SessionCapabilityProvider exposes capabilities negotiated by ACP initialize.
+// It is optional so adapters and focused tests that do not expose capability
+// details retain the existing AgentAdapter contract.
+type SessionCapabilityProvider interface {
+	SupportsSessionResume() bool
+	SupportsSessionLoad() bool
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.
@@ -249,6 +257,11 @@ type McpServerConfig struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Headers holds HTTP headers for SSE/HTTP transport
 	Headers map[string]string `json:"headers,omitempty"`
+	// DefinitionID, DefinitionRevision, and Origins are sanitized backend
+	// provenance carried through adapter construction for attachment evidence.
+	DefinitionID       string                  `json:"definition_id,omitempty"`
+	DefinitionRevision int64                   `json:"definition_revision,omitempty"`
+	Origins            []types.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // Config holds configuration for creating adapters
@@ -306,13 +319,15 @@ func (c *Config) ToSharedConfig() *shared.Config {
 	mcpServers := make([]shared.McpServerConfig, len(c.McpServers))
 	for i, srv := range c.McpServers {
 		mcpServers[i] = shared.McpServerConfig{
-			Name:    srv.Name,
-			URL:     srv.URL,
-			Type:    srv.Type,
-			Command: srv.Command,
-			Args:    srv.Args,
-			Env:     srv.Env,
-			Headers: srv.Headers,
+			Name:         srv.Name,
+			URL:          srv.URL,
+			Type:         srv.Type,
+			Command:      srv.Command,
+			Args:         srv.Args,
+			Env:          srv.Env,
+			Headers:      srv.Headers,
+			DefinitionID: srv.DefinitionID, DefinitionRevision: srv.DefinitionRevision,
+			Origins: append([]types.McpServerOrigin(nil), srv.Origins...),
 		}
 	}
 	return &shared.Config{

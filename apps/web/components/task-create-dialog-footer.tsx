@@ -139,6 +139,7 @@ function StartTaskSplitButton({
         className="w-full h-11 cursor-pointer gap-1.5 sm:hidden"
         disabled={altDisabled}
         onClick={onAltAction}
+        data-testid="mobile-submit-create-without-agent"
       >
         <IconPlus className="h-3.5 w-3.5" />
         {altLabel}

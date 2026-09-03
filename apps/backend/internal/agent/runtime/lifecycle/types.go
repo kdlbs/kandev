@@ -37,6 +37,8 @@ type AgentExecution struct {
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
+	WorkspaceID       string
+	RepositoryIDs     []string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
@@ -1134,6 +1136,13 @@ type BootMessageRequest struct {
 // McpConfigProvider returns MCP configuration for a given agent profile ID.
 type McpConfigProvider interface {
 	GetConfigByProfileID(ctx context.Context, profileID string) (*mcpconfig.ProfileConfig, error)
+}
+
+// MCPResolutionProvider is the typed effective-set boundary used when catalog
+// and scope-selection storage is available. Legacy providers remain supported
+// for unimported workspaces and focused test managers.
+type MCPResolutionProvider interface {
+	Resolve(context.Context, mcpconfig.ResolutionContext, mcpconfig.Policy) (*mcpconfig.EffectiveMCPResolution, error)
 }
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation

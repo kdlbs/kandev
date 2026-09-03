@@ -41,8 +41,10 @@ type InitializeRequest struct {
 
 // AgentInfoResponse contains information about the connected agent.
 type AgentInfoResponse struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name                  string `json:"name"`
+	Version               string `json:"version"`
+	SupportsSessionResume bool   `json:"supports_session_resume,omitempty"`
+	SupportsSessionLoad   bool   `json:"supports_session_load,omitempty"`
 }
 
 // InitializeResponse is the response to an initialize call
@@ -60,10 +62,11 @@ type NewSessionRequest struct {
 
 // NewSessionResponse is the response to a new session call
 type NewSessionResponse struct {
-	Success    bool                       `json:"success"`
-	SessionID  string                     `json:"session_id,omitempty"`
-	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
-	Error      string                     `json:"error,omitempty"`
+	Success             bool                       `json:"success"`
+	SessionID           string                     `json:"session_id,omitempty"`
+	ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+	AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+	Error               string                     `json:"error,omitempty"`
 }
 
 // LoadSessionRequest is a request to load an existing ACP session
@@ -74,10 +77,28 @@ type LoadSessionRequest struct {
 
 // LoadSessionResponse is the response to a load session call
 type LoadSessionResponse struct {
-	Success    bool                       `json:"success"`
-	SessionID  string                     `json:"session_id,omitempty"`
-	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
-	Error      string                     `json:"error,omitempty"`
+	Success             bool                       `json:"success"`
+	SessionID           string                     `json:"session_id,omitempty"`
+	ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+	AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+	Error               string                     `json:"error,omitempty"`
+}
+
+// ResumeSessionRequest is a request to reconnect an existing ACP session
+// without replaying its transcript.
+type ResumeSessionRequest struct {
+	SessionID  string            `json:"session_id"`
+	Cwd        string            `json:"cwd,omitempty"`
+	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+}
+
+// ResumeSessionResponse is the response to a session resume call.
+type ResumeSessionResponse struct {
+	Success             bool                       `json:"success"`
+	SessionID           string                     `json:"session_id,omitempty"`
+	ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+	AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+	Error               string                     `json:"error,omitempty"`
 }
 
 // PromptRequest is a request to send a prompt to the agent
@@ -265,6 +286,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSNewSession(ctx, msg)
 	case "agent.session.load":
 		return s.handleWSLoadSession(ctx, msg)
+	case "agent.session.resume":
+		return s.handleWSResumeSession(ctx, msg)
 	case "agent.prompt":
 		return s.handleWSPrompt(ctx, msg)
 	case "agent.cancel":
@@ -397,6 +420,16 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 			Name:    info.Name,
 			Version: info.Version,
 		}
+	}
+	if capabilities, ok := adapter.(interface {
+		SupportsSessionResume() bool
+		SupportsSessionLoad() bool
+	}); ok {
+		if agentInfoResp == nil {
+			agentInfoResp = &AgentInfoResponse{}
+		}
+		agentInfoResp.SupportsSessionResume = capabilities.SupportsSessionResume()
+		agentInfoResp.SupportsSessionLoad = capabilities.SupportsSessionLoad()
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, InitializeResponse{
@@ -551,9 +584,10 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
-		Success:    true,
-		SessionID:  sessionID,
-		ModelState: sessionModelState(adapter),
+		Success:             true,
+		SessionID:           sessionID,
+		ModelState:          sessionModelState(adapter),
+		AttachmentAttemptID: attachmentContext.Attempt.AttemptID,
 	})
 	return resp
 }
@@ -602,9 +636,66 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
-		Success:    true,
-		SessionID:  req.SessionID,
-		ModelState: sessionModelState(adapter),
+		Success:             true,
+		SessionID:           req.SessionID,
+		ModelState:          sessionModelState(adapter),
+		AttachmentAttemptID: attachmentContext.Attempt.AttemptID,
+	})
+	return resp
+}
+
+func (s *Server) handleWSResumeSession(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req ResumeSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+	if req.SessionID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session_id is required", nil)
+		return resp
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
+	defer cancel()
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+	capabilities, ok := adapter.(interface {
+		SupportsSessionResume() bool
+		SupportsSessionLoad() bool
+	})
+	if !ok || !capabilities.SupportsSessionResume() {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "agent does not support session resume", nil)
+		return resp
+	}
+	if s.mcpBackendClient != nil {
+		s.mcpBackendClient.Reset()
+	}
+	mcpServers := req.McpServers
+	if s.mcpServer != nil {
+		mcpServers = s.injectKandevMcpServers(mcpServers)
+	}
+	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
+	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
+	resumer, ok := adapter.(interface {
+		ResumeSession(context.Context, string, []types.McpServer) error
+	})
+	if !ok {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "agent adapter does not support session resume", nil)
+		return resp
+	}
+	if err := resumer.ResumeSession(ctx, req.SessionID, mcpServers); err != nil {
+		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
+		s.logger.Error("resume session failed", zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session resume failed", nil)
+		return resp
+	}
+	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, ResumeSessionResponse{
+		Success: true, SessionID: req.SessionID, ModelState: sessionModelState(adapter),
+		AttachmentAttemptID: attachmentContext.Attempt.AttemptID,
 	})
 	return resp
 }
@@ -850,9 +941,10 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
-		Success:    true,
-		SessionID:  sessionID,
-		ModelState: sessionModelState(agentAdapter),
+		Success:             true,
+		SessionID:           sessionID,
+		ModelState:          sessionModelState(agentAdapter),
+		AttachmentAttemptID: attachmentContext.Attempt.AttemptID,
 	})
 	return resp
 }

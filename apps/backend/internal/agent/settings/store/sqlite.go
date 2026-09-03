@@ -119,6 +119,98 @@ func (r *sqliteRepository) initSchema() error {
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS mcp_server_definitions (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		runtime_name TEXT NOT NULL,
+		normalized_runtime_name TEXT NOT NULL,
+		display_name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		enabled INTEGER NOT NULL DEFAULT 1,
+		execution_mode TEXT NOT NULL,
+		transport TEXT NOT NULL,
+		configuration_json TEXT NOT NULL DEFAULT '{}',
+		secret_bindings_json TEXT NOT NULL DEFAULT '[]',
+		source TEXT NOT NULL,
+		source_identity TEXT NOT NULL DEFAULT '',
+		revision INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		UNIQUE (workspace_id, normalized_runtime_name)
+	);
+
+	CREATE TABLE IF NOT EXISTS mcp_registry_entries (
+		identity TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		version TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'active',
+		status_message TEXT NOT NULL DEFAULT '',
+		payload_json TEXT NOT NULL,
+		revision INTEGER NOT NULL DEFAULT 1,
+		updated_at TIMESTAMP NOT NULL,
+		synced_at TIMESTAMP NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS mcp_registry_sync_state (
+		id INTEGER PRIMARY KEY,
+		last_successful_at TIMESTAMP,
+		last_attempt_at TIMESTAMP,
+		updated_since TIMESTAMP,
+		degraded INTEGER NOT NULL DEFAULT 0,
+		last_error TEXT NOT NULL DEFAULT ''
+	);
+
+	CREATE TABLE IF NOT EXISTS workspace_agent_profile_mcp_selections (
+		workspace_id TEXT NOT NULL,
+		profile_id TEXT NOT NULL,
+		mcp_server_id TEXT NOT NULL,
+		PRIMARY KEY (workspace_id, profile_id, mcp_server_id),
+		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE,
+		FOREIGN KEY (mcp_server_id) REFERENCES mcp_server_definitions(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS repository_mcp_selections (
+		repository_id TEXT NOT NULL,
+		mcp_server_id TEXT NOT NULL,
+		PRIMARY KEY (repository_id, mcp_server_id),
+		FOREIGN KEY (mcp_server_id) REFERENCES mcp_server_definitions(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS task_mcp_selections (
+		task_id TEXT NOT NULL,
+		mcp_server_id TEXT NOT NULL,
+		PRIMARY KEY (task_id, mcp_server_id),
+		FOREIGN KEY (mcp_server_id) REFERENCES mcp_server_definitions(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS task_session_mcp_selections (
+		task_session_id TEXT NOT NULL,
+		mcp_server_id TEXT NOT NULL,
+		PRIMARY KEY (task_session_id, mcp_server_id),
+		FOREIGN KEY (mcp_server_id) REFERENCES mcp_server_definitions(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS mcp_task_session_apply_state (
+		task_session_id TEXT PRIMARY KEY,
+		desired_revision INTEGER NOT NULL DEFAULT 0,
+		applied_revision INTEGER NOT NULL DEFAULT 0,
+		apply_state TEXT NOT NULL DEFAULT '',
+		failure_code TEXT NOT NULL DEFAULT '',
+		failure_summary TEXT NOT NULL DEFAULT '',
+		attachment_attempt_id TEXT NOT NULL DEFAULT '',
+		updated_at TIMESTAMP NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS mcp_legacy_import_state (
+		workspace_id TEXT NOT NULL,
+		profile_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		failure_code TEXT NOT NULL DEFAULT '',
+		failure_reason TEXT NOT NULL DEFAULT '',
+		updated_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (workspace_id, profile_id)
+	);
+
 	CREATE TABLE IF NOT EXISTS dynamic_agent_profiles (
 		profile_id TEXT PRIMARY KEY,
 		version INTEGER NOT NULL DEFAULT 1,
@@ -143,6 +235,18 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id);
 	CREATE INDEX IF NOT EXISTS idx_dynamic_agent_routes_execution_profile
 		ON dynamic_agent_routes(execution_profile_id);
+	CREATE INDEX IF NOT EXISTS idx_mcp_server_definitions_workspace
+		ON mcp_server_definitions(workspace_id);
+	CREATE INDEX IF NOT EXISTS idx_mcp_registry_entries_name
+		ON mcp_registry_entries(name);
+	CREATE INDEX IF NOT EXISTS idx_workspace_agent_profile_mcp_selections_definition
+		ON workspace_agent_profile_mcp_selections(mcp_server_id);
+	CREATE INDEX IF NOT EXISTS idx_repository_mcp_selections_definition
+		ON repository_mcp_selections(mcp_server_id);
+	CREATE INDEX IF NOT EXISTS idx_task_mcp_selections_definition
+		ON task_mcp_selections(mcp_server_id);
+	CREATE INDEX IF NOT EXISTS idx_task_session_mcp_selections_definition
+		ON task_session_mcp_selections(mcp_server_id);
 	`
 	// Note: indexes on new office-enrichment columns (workspace_id, role,
 	// reports_to) are created later in migrateOfficeEnrichmentColumns —

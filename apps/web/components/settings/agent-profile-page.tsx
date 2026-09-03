@@ -375,6 +375,7 @@ function ProfileEditorBody({
 
       <ProfileMcpConfigCard
         profileId={draft.id}
+        workspaceId={agent.workspace_id}
         supportsMcp={agent.supports_mcp}
         cliPassthrough={draft.cliPassthrough}
         mcpInjection={passthroughConfig?.mcp_injection}

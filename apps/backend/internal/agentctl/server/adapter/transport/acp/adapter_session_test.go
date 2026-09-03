@@ -12,10 +12,11 @@ import (
 )
 
 type sessionRequestCaptureAgent struct {
-	newRequest  acpsdk.NewSessionRequest
-	loadRequest acpsdk.LoadSessionRequest
-	newStarted  chan struct{}
-	releaseNew  chan struct{}
+	newRequest    acpsdk.NewSessionRequest
+	loadRequest   acpsdk.LoadSessionRequest
+	resumeRequest acpsdk.ResumeSessionRequest
+	newStarted    chan struct{}
+	releaseNew    chan struct{}
 }
 
 var (
@@ -64,7 +65,8 @@ func (*sessionRequestCaptureAgent) Prompt(context.Context, acpsdk.PromptRequest)
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 
-func (*sessionRequestCaptureAgent) ResumeSession(context.Context, acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
+func (a *sessionRequestCaptureAgent) ResumeSession(_ context.Context, request acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
+	a.resumeRequest = request
 	return acpsdk.ResumeSessionResponse{}, nil
 }
 
@@ -109,6 +111,25 @@ func TestMCPSessionNewAndLoadUseHTTPWithSSEFallback(t *testing.T) {
 			}
 			assertCapturedKandevTransport(t, capture.loadRequest.McpServers, tt.wantType)
 		})
+	}
+}
+
+func TestMCPSessionResumeUsesAdvertisedCapabilityAndMCPList(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{Http: true})
+	adapter.capabilities.SessionCapabilities.Resume = &acpsdk.SessionResumeCapabilities{}
+	servers := []types.McpServer{{Name: "tools", Type: "http", URL: "https://mcp.example.test"}}
+
+	if err := adapter.ResumeSession(context.Background(), "acp-session", servers); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if string(capture.resumeRequest.SessionId) != "acp-session" {
+		t.Fatalf("session ID = %q, want acp-session", capture.resumeRequest.SessionId)
+	}
+	if capture.resumeRequest.Cwd != "/tmp/test" {
+		t.Fatalf("cwd = %q, want /tmp/test", capture.resumeRequest.Cwd)
+	}
+	if len(capture.resumeRequest.McpServers) != 1 || capture.resumeRequest.McpServers[0].Http == nil {
+		t.Fatalf("resume MCP servers = %+v", capture.resumeRequest.McpServers)
 	}
 }
 

@@ -959,6 +959,9 @@ type startTaskOptions struct {
 	// SpawnOrigin is set when another agent session spawned this launch; it
 	// produces the spawner-attribution system block on the first turn.
 	SpawnOrigin *SpawnOrigin
+	// MCPServerIDs replaces the selections for the task session. Nil means the
+	// caller did not request a session-scoped change.
+	MCPServerIDs []string
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1137,6 +1140,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
 	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.applyMCPServerSelectionsForTask(ctx, task, sessionID, opts.MCPServerIDs); err != nil {
 		return nil, err
 	}
 	// Seed a matching conditional session configuration before lifecycle

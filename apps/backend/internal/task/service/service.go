@@ -10,6 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
@@ -30,6 +31,12 @@ type WorktreeCleanup interface {
 // for isolated task-service users.
 type WorkspaceSecretDeleter interface {
 	DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error
+}
+
+// MCPSelectionWriter persists task-scope MCP additions after the task row has
+// been created and validated by the task service.
+type MCPSelectionWriter interface {
+	Replace(context.Context, mcpconfig.SelectionScope, string, string, []string) error
 }
 
 type transactionalWorkspaceCascade interface {
@@ -384,6 +391,7 @@ type Service struct {
 	taskStateActivity      TaskStateActivityLogger
 	secretStore            secrets.SecretStore
 	workspaceSecretDeleter WorkspaceSecretDeleter
+	mcpSelectionWriter     MCPSelectionWriter
 	baseBranchPusher       AgentBaseBranchPusher
 	comparisonTargetPusher AgentComparisonTargetPusher
 	runtimeOverridesMu     sync.Mutex
@@ -461,6 +469,12 @@ func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
 // deletion. The callback runs only after the repository cascade succeeds.
 func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
 	s.workspaceSecretDeleter = deleter
+}
+
+// SetMCPSelectionWriter wires task-scope MCP persistence. It is optional so
+// focused task-service users can keep the existing task contract.
+func (s *Service) SetMCPSelectionWriter(writer MCPSelectionWriter) {
+	s.mcpSelectionWriter = writer
 }
 
 // NewService creates a new task service

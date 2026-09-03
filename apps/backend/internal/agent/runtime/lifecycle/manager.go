@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -46,6 +47,8 @@ type Manager struct {
 	profileResolver ProfileResolver
 	worktreeMgr     *worktree.Manager
 	mcpProvider     McpConfigProvider
+	mcpResolver     MCPResolutionProvider
+	mcpStateRepo    mcpconfig.SessionMCPSelectionStateRepository
 	logger          *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
@@ -207,6 +210,18 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	m.managedRuntimeSelections = store
+}
+
+// SetMCPResolver wires the workspace catalog and additive scope resolver.
+// Leaving it unset preserves legacy profile JSON behavior for compatibility.
+func (m *Manager) SetMCPResolver(resolver MCPResolutionProvider) {
+	m.mcpResolver = resolver
+}
+
+// SetMCPSelectionStateRepository wires durable desired/applied state for
+// task-session MCP reconfiguration. It is optional for embedded managers.
+func (m *Manager) SetMCPSelectionStateRepository(repo mcpconfig.SessionMCPSelectionStateRepository) {
+	m.mcpStateRepo = repo
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.

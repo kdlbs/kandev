@@ -3,6 +3,7 @@
   "kanban:menu": "\"Menu\" is the ordinary Portuguese word; translating it would change nothing.",
   "office:desc": "\"Desc\" is the same abbreviation for descending order in Portuguese.",
   "office:total": "\"Total\" is the ordinary Portuguese word; translating it would change nothing.",
+  "settings:mcpMarketplace": "Marketplace is the established Portuguese product term for a software catalog.",
   "stats:summaryGit": "The only word is the tool name Git; the rest of the line is the interpolated value.",
   "system:diskTotal": "\"Total\" is the ordinary Portuguese word; translating it would change nothing.",
   "system:featureToggleExperimental": "\"Experimental\" is spelled identically in Portuguese.",

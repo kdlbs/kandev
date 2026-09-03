@@ -332,27 +332,38 @@ Passthrough preserves the CLI's native PTY interface. It is useful when the nati
 > **MCP credential exposure:** MCP headers and environment values are stored in profile configuration. Codex may place them in process arguments, and Cursor or Pi may leave them in project files after teardown. Use short-lived, narrowly scoped credentials and review persisted files.
 
 <details>
-<summary>Configure external MCP servers</summary>
+<summary>Configure workspace MCP servers</summary>
 
-## Add external MCP servers to a profile
+## Add MCP servers to a workspace
 
-When an agent advertises MCP support, open its profile's **MCP** section. The editor accepts either a servers map or an object containing `mcpServers`.
+Open **Settings > Workspaces > _workspace_ > MCP servers**. The **Configured** view stores reusable MCP definitions for that workspace. The existing **External MCP** page is different: it exposes Kandev's own MCP endpoint to outside clients.
 
-Supported server types are `stdio`, `http`, `sse`, and `streamable_http`. If `type` is absent, a `command` implies `stdio` and a `url` implies `http`. Connection mode can be:
+Choose **Add custom** for one of these setup modes:
 
-- `auto`: per-session for stdio and shared for a network transport;
-- `per_session`: create a connection for each agent session;
-- `shared`: reuse a network connection. Stdio cannot use shared mode.
+- **Remote endpoint** connects to an HTTP or SSE endpoint when an agent uses the definition.
+- **Managed npm package** pins an exact package name and version. Kandev materializes it in a task executor's managed cache when an agent first uses it.
+- **Existing executable** runs a command that must already exist in the task executor. Kandev does not install it.
 
-The built-in task-aware server is injected separately. A profile server named `kandev` is ignored so it cannot replace the task server.
+Add non-secret settings and bind required values to workspace secrets. Saving a definition validates and stores it, but does not download, connect to, or start the server. MCP headers and environment values can reach the agent process, so use short-lived, narrowly scoped credentials.
 
-Executor policy can allow or deny transports or server names, rewrite URLs, and inject environment values. In the current launch wiring, profile MCP resolution starts from the standalone allow-all baseline for every executor and then overlays the selected executor profile's explicit MCP policy. A blank SSH, Sprites, or other remote policy therefore inherits allowed `stdio`, HTTP, SSE, and streamable HTTP transports; it does **not** receive the deny-all remote default defined elsewhere in the runtime. Set an explicit restrictive executor MCP policy before relying on remote isolation.
+The **Marketplace** view combines Kandev-curated templates with cached public Registry discovery. Registry metadata is publisher supplied and is not a Kandev security review. Review the publisher, transport, endpoint or exact package version, requested settings, and secret bindings before selecting **Add**. A marketplace action stores the reviewed workspace definition only; it does not install or start the server.
 
-MCP JSON, including `headers` and server `env`, is stored as profile configuration. The raw editor has no secret-reference field for those values, so do not paste long-lived credentials into it unless access to the profile store is an acceptable boundary. Prefer a server that can inherit a narrowly scoped profile environment secret.
+If public Registry discovery is unavailable, Kandev shows the most recent successful cache and marks it stale or degraded. Deprecated or deleted entries cannot be newly installed. Existing installed definitions remain available until you edit or disable them.
 
-Passthrough injection adds CLI-specific exposure. Codex encodes MCP environment values and HTTP headers into `-c` process arguments, which another local user may read through process inspection. Cursor and Pi write project-local `.cursor/mcp.json` or `.pi/mcp.json`; when either file already exists, Kandev merges its entries and deliberately does not remove them at teardown because it does not own the user's file. Review and remove persisted entries or credentials yourself.
+## Select workspace MCP servers for agents
 
-Kandev does not validate a server-name syntax centrally, so blank or unusual names can fail or be transformed differently by each CLI. A missing command/URL, unsupported or denied transport, or server-name policy denial skips that server with a warning. Configuring `shared` mode for a stdio server is different: it aborts profile MCP resolution with an error. Review launch/session logs when an expected tool is missing.
+After a definition is configured, select it where it should apply:
+
+- In an agent profile, choose the workspace context first when the profile is global. The selection applies only to that profile in that workspace.
+- In repository settings, open the collapsed **MCP servers** section.
+- In **New Task**, open **Advanced** and choose task-level additions.
+- When starting another agent session, choose session-level additions.
+
+Selections are additive. The effective set combines every selected repository, profile, task, and session definition, includes every repository attached to the task, and reports duplicate origins once. A lower scope cannot remove an inherited server. Changing a definition or selection does not alter an active turn.
+
+For an existing task session, MCP changes save as a desired revision. Kandev applies them after the current turn is idle. A compatible ACP provider reconnects the same session; otherwise the UI says the change will apply on the next start. If reconnect fails, the previous applied selection remains active and the UI offers retry.
+
+Existing legacy profile MCP JSON is imported into workspace definitions when possible. During migration, the legacy profile configuration remains the fallback for a profile-workspace pair that has not imported successfully. New persistent profile selections use the workspace catalog.
 
 </details>
 

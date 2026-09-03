@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	mcpregistry "github.com/kandev/kandev/internal/agent/mcpconfig/registry"
 	"github.com/kandev/kandev/internal/agent/registry"
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -1297,6 +1298,38 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 }
 
+func configureMCPServices(
+	p routeParams,
+) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
+	if !ok {
+		return nil, nil, nil
+	}
+	mcpCatalog := mcpconfig.NewCatalogService(catalogRepo)
+	mcpCatalog.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	selectionRepo, ok := p.agentSettingsRepo.(mcpconfig.SelectionRepository)
+	if !ok {
+		return catalogRepo, mcpCatalog, nil
+	}
+	mcpSelectionService := mcpconfig.NewSelectionService(selectionRepo, catalogRepo)
+	mcpSelectionService.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	mcpSelectionService.SetOwnerValidator(mcpSelectionOwnerValidator(p))
+	if stateRepo, ok := p.agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
+		mcpSelectionService.SetSessionMCPStateRepository(stateRepo)
+	}
+	if p.lifecycleMgr != nil {
+		mcpSelectionService.SetSessionMCPChangeNotifier(func(ctx context.Context, sessionID string) {
+			p.lifecycleMgr.RequestSessionMCPReconfiguration(ctx, sessionID)
+		})
+	}
+	mcpCatalog.SetSelectionRepository(selectionRepo)
+	p.taskSvc.SetMCPSelectionWriter(mcpSelectionService)
+	if p.orchestratorSvc != nil {
+		p.orchestratorSvc.SetMCPSelectionWriter(mcpSelectionService)
+	}
+	return catalogRepo, mcpCatalog, mcpSelectionService
+}
+
 // registerSecondaryRoutes registers workflow, agent settings, user, notification, editor,
 // prompt, clarification, MCP, and debug routes.
 func registerSecondaryRoutes(
@@ -1311,7 +1344,34 @@ func registerSecondaryRoutes(
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
-	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log, p.interimSettingsInterlockToken)
+	mcpCatalogRepo, mcpCatalog, mcpSelectionService := configureMCPServices(p)
+	var marketplace *mcpregistry.MarketplaceService
+	if cache, ok := p.agentSettingsRepo.(mcpregistry.CacheStore); ok && mcpCatalogRepo != nil {
+		client, clientErr := mcpregistry.NewClient(mcpregistry.DefaultRegistryURL, nil)
+		if clientErr == nil {
+			syncer := mcpregistry.NewSyncService(client, cache)
+			marketplace = mcpregistry.NewMarketplaceService(syncer, mcpCatalog)
+			if p.addCleanup != nil {
+				marketplaceCtx, cancelMarketplace := context.WithCancel(context.Background())
+				syncer.Start(marketplaceCtx, time.Hour)
+				p.addCleanup(func() error {
+					cancelMarketplace()
+					return nil
+				})
+			}
+		}
+	}
+	agentsettingshandlers.RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+		p.router,
+		p.agentSettingsController,
+		p.gateway.Hub,
+		p.log,
+		p.interimSettingsInterlockToken,
+		mcpCatalogRepo,
+		p.taskSvc.AuthorizeWorkspaceAccess,
+		marketplace,
+		mcpSelectionService,
+	)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host

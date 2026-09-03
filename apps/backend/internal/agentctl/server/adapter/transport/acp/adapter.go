@@ -574,6 +574,23 @@ func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
+// SupportsSessionResume reports the ACP session/resume capability negotiated
+// during initialize. It is intentionally distinct from the static registry
+// resume setting used by Kandev's own conversation fallback.
+func (a *Adapter) SupportsSessionResume() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.SessionCapabilities.Resume != nil
+}
+
+// SupportsSessionLoad reports the ACP session/load capability negotiated during
+// initialize.
+func (a *Adapter) SupportsSessionLoad() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.LoadSession
+}
+
 // SetPendingContext sets the context to be injected into the next prompt.
 // This is used by the fork_session pattern for ACP agents that don't support session/load.
 // The context will be prepended to the first prompt sent to this session.

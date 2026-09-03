@@ -79,6 +79,7 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	MCPServerIDs   []string               `json:"mcp_server_ids,omitempty"`
 	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector

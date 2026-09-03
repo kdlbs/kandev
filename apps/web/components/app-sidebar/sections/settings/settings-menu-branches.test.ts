@@ -77,6 +77,7 @@ describe("buildWorkspacesBranch", () => {
       `/settings/workspaces/${WORKSPACE_ID}/integrations`,
       `/settings/workspaces/${WORKSPACE_ID}/automations`,
       `/settings/workspaces/${WORKSPACE_ID}/secrets`,
+      `/settings/workspaces/${WORKSPACE_ID}/mcp-servers`,
     ]);
   });
 

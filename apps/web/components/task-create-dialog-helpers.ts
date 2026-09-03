@@ -169,30 +169,49 @@ export type BuildCreatePayloadArgs = {
   autopilot?: boolean;
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
+  /** Task-scoped MCP additions. */
+  mcpServerIds?: string[];
 };
+
+function optionalValue<T>(value: T | null | undefined | ""): T | undefined {
+  return value || undefined;
+}
+
+function nonEmptyList<T>(value: T[] | undefined): T[] | undefined {
+  return value?.length ? value : undefined;
+}
+
+function buildTaskTitleFields(autoTitle: boolean | undefined, trimmedTitle: string) {
+  return autoTitle ? { auto_title: true as const } : { title: trimmedTitle };
+}
+
+function buildTaskLifecycleFields(withAgent: boolean) {
+  return withAgent
+    ? { state: "IN_PROGRESS" as const, start_agent: true as const }
+    : { state: "CREATED" as const, prepare_session: true as const };
+}
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
   return {
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
-    ...(args.autoTitle ? { auto_title: true } : { title: args.trimmedTitle }),
+    ...buildTaskTitleFields(args.autoTitle, args.trimmedTitle),
     description: args.trimmedDescription,
     repositories: args.repositoriesPayload,
-    state: args.withAgent ? "IN_PROGRESS" : "CREATED",
-    start_agent: args.withAgent ? true : undefined,
-    prepare_session: args.withAgent ? undefined : true,
-    agent_profile_id: args.agentProfileId || undefined,
-    executor_id: args.executorId || undefined,
-    executor_profile_id: args.executorProfileId || undefined,
-    plan_mode: args.planMode || undefined,
+    ...buildTaskLifecycleFields(args.withAgent),
+    agent_profile_id: optionalValue(args.agentProfileId),
+    executor_id: optionalValue(args.executorId),
+    executor_profile_id: optionalValue(args.executorProfileId),
+    plan_mode: optionalValue(args.planMode),
     attachments: args.attachments,
-    parent_id: args.parentId || undefined,
-    workspace_path: args.workspacePath || undefined,
-    autopilot: args.autopilot || undefined,
+    parent_id: optionalValue(args.parentId),
+    workspace_path: optionalValue(args.workspacePath),
+    autopilot: optionalValue(args.autopilot),
     // Dependencies declared at creation time. With edges present the backend
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
-    blocked_by: args.blockedBy && args.blockedBy.length > 0 ? args.blockedBy : undefined,
+    blocked_by: nonEmptyList(args.blockedBy),
+    mcp_server_ids: nonEmptyList(args.mcpServerIds),
   };
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/agent/mcpconfig/registry"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/common/httpmw"
@@ -25,10 +26,13 @@ const queryTrue = "true"
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
 type Handlers struct {
-	controller *controller.Controller
-	hub        Broadcaster
-	logger     *logger.Logger
-	interlock  gin.HandlerFunc
+	controller  *controller.Controller
+	hub         Broadcaster
+	logger      *logger.Logger
+	interlock   gin.HandlerFunc
+	catalog     *mcpconfig.CatalogService
+	selections  *mcpconfig.SelectionService
+	marketplace *registry.MarketplaceService
 }
 
 type Broadcaster interface {
@@ -45,11 +49,73 @@ func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logge
 }
 
 func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) {
+	RegisterRoutesWithMCPCatalog(router, ctrl, hub, log, interlockToken, nil, nil)
+}
+
+// RegisterRoutesWithMCPCatalog registers agent settings and the workspace MCP catalog.
+func RegisterRoutesWithMCPCatalog(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+) {
+	RegisterRoutesWithMCPCatalogAndMarketplace(router, ctrl, hub, log, interlockToken, repo, authorizer, nil)
+}
+
+// RegisterRoutesWithMCPCatalogAndMarketplace registers catalog and discovery dependencies.
+func RegisterRoutesWithMCPCatalogAndMarketplace(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+	marketplace *registry.MarketplaceService,
+) {
+	RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+		router, ctrl, hub, log, interlockToken, repo, authorizer, marketplace, nil,
+	)
+}
+
+// RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections registers the MCP
+// catalog, marketplace, and typed scope-selection APIs.
+func RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+	marketplace *registry.MarketplaceService,
+	selections *mcpconfig.SelectionService,
+) {
 	// Wire the install job store with the same broadcaster used by other
 	// agent-settings notifications so streaming install events reach the UI.
-	ctrl.SetJobBroadcaster(hub)
+	if ctrl != nil {
+		ctrl.SetJobBroadcaster(hub)
+	}
 	handlers := NewHandlers(ctrl, hub, log, interlockToken)
+	if repo != nil {
+		catalog := mcpconfig.NewCatalogService(repo)
+		catalog.SetWorkspaceAuthorizer(authorizer)
+		catalog.SetSelectionRepository(selectionRepositoryForCatalog(selections))
+		handlers.catalog = catalog
+	}
+	handlers.marketplace = marketplace
+	handlers.selections = selections
 	handlers.registerHTTP(router)
+}
+
+func selectionRepositoryForCatalog(selections *mcpconfig.SelectionService) mcpconfig.SelectionRepository {
+	if selections == nil {
+		return nil
+	}
+	return selections.Repository()
 }
 
 func (h *Handlers) registerHTTP(router *gin.Engine) {
@@ -82,6 +148,23 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-profiles/:id/duplicate", h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", h.interlock, h.httpUpdateProfileMcpConfig)
+	api.GET("/agent-profiles/:id/mcp-selections", h.httpListProfileMCPSelections)
+	api.PUT("/agent-profiles/:id/mcp-selections", h.interlock, h.httpReplaceProfileMCPSelections)
+	api.GET("/repositories/:id/mcp-selections", h.httpListRepositoryMCPSelections)
+	api.PUT("/repositories/:id/mcp-selections", h.interlock, h.httpReplaceRepositoryMCPSelections)
+	api.GET("/tasks/:id/mcp-selections", h.httpListTaskMCPSelections)
+	api.PUT("/tasks/:id/mcp-selections", h.interlock, h.httpReplaceTaskMCPSelections)
+	api.GET("/task-sessions/:id/mcp-selections", h.httpListTaskSessionMCPSelections)
+	api.PUT("/task-sessions/:id/mcp-selections", h.interlock, h.httpReplaceTaskSessionMCPSelections)
+	api.GET("/workspaces/:id/mcp-servers", h.httpListMCPCatalog)
+	api.POST("/workspaces/:id/mcp-servers", h.interlock, h.httpCreateMCPCatalog)
+	api.GET("/workspaces/:id/mcp-servers/:serverID", h.httpGetMCPCatalog)
+	api.PATCH("/workspaces/:id/mcp-servers/:serverID", h.interlock, h.httpUpdateMCPCatalog)
+	api.DELETE("/workspaces/:id/mcp-servers/:serverID", h.interlock, h.httpDeleteMCPCatalog)
+	api.GET("/mcp-marketplace", h.httpSearchMCPMarketplace)
+	api.GET("/mcp-marketplace/entry", h.httpGetMCPMarketplaceEntry)
+	api.POST("/mcp-marketplace/refresh", h.interlock, h.httpRefreshMCPMarketplace)
+	api.POST("/workspaces/:id/mcp-marketplace/install", h.interlock, h.httpInstallMCPMarketplace)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {

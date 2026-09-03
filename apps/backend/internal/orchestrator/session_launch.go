@@ -44,16 +44,17 @@ type LaunchSessionRequest struct {
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
 	// behavior.
-	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
-	Prompt            string `json:"prompt,omitempty"`
-	PlanMode          bool   `json:"plan_mode,omitempty"`
-	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
-	Priority          string `json:"priority,omitempty"`
-	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
-	AutoStart         bool   `json:"auto_start,omitempty"`
+	ProfileExplicit   bool     `json:"profile_explicit,omitempty"`
+	ExecutorID        string   `json:"executor_id,omitempty"`
+	ExecutorProfileID string   `json:"executor_profile_id,omitempty"`
+	Prompt            string   `json:"prompt,omitempty"`
+	PlanMode          bool     `json:"plan_mode,omitempty"`
+	WorkflowStepID    string   `json:"workflow_step_id,omitempty"`
+	Priority          string   `json:"priority,omitempty"`
+	LaunchWorkspace   bool     `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool     `json:"skip_message_record,omitempty"`
+	AutoStart         bool     `json:"auto_start,omitempty"`
+	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -230,6 +231,9 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 	if err != nil {
 		return nil, err
 	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, sessionID, req.MCPServerIDs); err != nil {
+		return nil, err
+	}
 	return &LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -280,7 +284,11 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{
+			ProfileExplicit: req.ProfileExplicit,
+			SpawnOrigin:     req.SpawnOrigin,
+			MCPServerIDs:    req.MCPServerIDs,
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -330,6 +338,9 @@ func (s *Service) shouldBlockAutoStart(ctx context.Context, req *LaunchSessionRe
 
 // launchStartCreated starts agent execution on an existing CREATED session.
 func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, req.SessionID, req.MCPServerIDs); err != nil {
+		return nil, err
+	}
 	execution, err := s.StartCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
 		req.Prompt, req.SkipMessageRecord, req.PlanMode, req.AutoStart, req.Attachments, nil,

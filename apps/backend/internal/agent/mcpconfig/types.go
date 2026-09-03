@@ -48,6 +48,11 @@ type ResolvedServer struct {
 	Env     map[string]string
 	URL     string
 	Headers map[string]string
+	// Definition identity and origins are backend-owned evidence metadata.
+	// They are not part of the provider MCP protocol payload.
+	DefinitionID       string
+	DefinitionRevision int64
+	Origins            []SelectionOrigin
 }
 
 // Policy controls which MCP transports are allowed and how they should be rewritten.

@@ -66,7 +66,15 @@ function useChatSessionTitle(panelId: string, sessionId: string | null) {
 
 /** Render the chat panel for the session from `params` or the active session,
  *  or a passthrough toolbar for passthrough sessions. */
-function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
+function ChatContent({
+  panelId,
+  params,
+  workspaceId,
+}: {
+  panelId: string;
+  params: Record<string, unknown>;
+  workspaceId?: string | null;
+}) {
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
@@ -91,6 +99,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     <TaskChatPanel
       sessionId={sessionId}
       taskId={sessionId ? taskId : null}
+      workspaceId={workspaceId}
       statusTaskId={taskId}
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
@@ -230,11 +239,17 @@ function resolveComponent(component: string): string {
  * switch, so adding a panel type (like "plugin-panel") never trips the
  * function-complexity lint ceiling (R3, docs/plans/plugins).
  */
-type PanelRenderer = (panelId: string, params: Record<string, unknown>) => React.ReactNode;
+type PanelRenderer = (
+  panelId: string,
+  params: Record<string, unknown>,
+  workspaceId?: string | null,
+) => React.ReactNode;
 
 const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   sidebar: () => null,
-  chat: (panelId, params) => <ChatContent panelId={panelId} params={params} />,
+  chat: (panelId, params, workspaceId) => (
+    <ChatContent panelId={panelId} params={params} workspaceId={workspaceId} />
+  ),
   "diff-viewer": (panelId, params) => <DiffViewerContent panelId={panelId} params={params} />,
   "file-editor": (panelId, params) => <FileEditorPanel panelId={panelId} params={params} />,
   "commit-detail": (panelId, params) => <CommitDetailPanel panelId={panelId} params={params} />,
@@ -274,8 +289,9 @@ export function renderPanel(
   panelId: string,
   component: string,
   params: Record<string, unknown>,
+  workspaceId?: string | null,
 ): React.ReactNode {
   const renderer = PANEL_RENDERERS[resolveComponent(component)];
-  if (renderer) return renderer(panelId, params);
+  if (renderer) return renderer(panelId, params, workspaceId);
   return <div className="p-4 text-muted-foreground">{t("common:unknownPanel", { component })}</div>;
 }

@@ -23,6 +23,15 @@ import type {
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
 import type {
+  MCPDefinitionInput,
+  MCPDefinitionPatch,
+  MCPMarketplaceInstallInput,
+  MCPMarketplaceSearchResponse,
+  MCPServerDefinition,
+  MCPSelectionResponse,
+  MCPSelectionScope,
+} from "../../lib/types/http-mcp";
+import type {
   GitLabMRApproval,
   GitLabMRCommit,
   GitLabMRDiscussion,
@@ -203,6 +212,7 @@ type CreateTaskOpts = {
   blocked_by?: string[];
   /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
   start_when_unblocked?: boolean;
+  mcp_server_ids?: string[];
 };
 
 export type TaskDependencyRef = {
@@ -269,6 +279,7 @@ function buildCreateTaskBody(
   setIf(body, "workspace_mode", options.workspace_mode);
   setIf(body, "workspace_group_id", options.workspace_group_id);
   setIf(body, "blocked_by", options.blocked_by);
+  setIf(body, "mcp_server_ids", options.mcp_server_ids);
   if (options.start_when_unblocked !== undefined) {
     body.start_when_unblocked = options.start_when_unblocked;
   }
@@ -324,6 +335,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   if (opts.autopilot) fields.autopilot = true;
   setIf(fields, "attachments", opts.attachments);
   setIf(fields, "blocked_by", opts.blocked_by);
+  setIf(fields, "mcp_server_ids", opts.mcp_server_ids);
   if (opts.start_when_unblocked !== undefined) {
     fields.start_when_unblocked = opts.start_when_unblocked;
   }
@@ -408,6 +420,96 @@ export class ApiClient {
 
   async listWorkspaces(): Promise<{ workspaces: Workspace[]; total: number }> {
     return this.request("GET", "/api/v1/workspaces");
+  }
+
+  async listMCPServers(workspaceId: string): Promise<MCPServerDefinition[]> {
+    const response = await this.request<{ servers?: MCPServerDefinition[] }>(
+      "GET",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+    );
+    return response.servers ?? [];
+  }
+
+  async createMCPServer(
+    workspaceId: string,
+    payload: MCPDefinitionInput,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "POST",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+      payload,
+    );
+  }
+
+  async updateMCPServer(
+    workspaceId: string,
+    serverId: string,
+    payload: MCPDefinitionPatch,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "PATCH",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+      payload,
+    );
+  }
+
+  async deleteMCPServer(workspaceId: string, serverId: string, revision: number): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}?expected_revision=${revision}&confirm=true`,
+    );
+  }
+
+  async searchMCPMarketplace(query = ""): Promise<MCPMarketplaceSearchResponse> {
+    const search = query.trim() ? `?search=${encodeURIComponent(query.trim())}` : "";
+    return this.request("GET", `/api/v1/mcp-marketplace${search}`);
+  }
+
+  async installMCPMarketplaceEntry(
+    workspaceId: string,
+    payload: MCPMarketplaceInstallInput,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "POST",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-marketplace/install`,
+      payload,
+    );
+  }
+
+  async getMCPSelections(
+    scope: MCPSelectionScope,
+    ownerId: string,
+    workspaceId: string,
+  ): Promise<MCPSelectionResponse> {
+    const resources: Record<MCPSelectionScope, string> = {
+      profile: "agent-profiles",
+      repository: "repositories",
+      task: "tasks",
+      task_session: "task-sessions",
+    };
+    return this.request(
+      "GET",
+      `/api/v1/${resources[scope]}/${encodeURIComponent(ownerId)}/mcp-selections?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async replaceMCPSelections(
+    scope: MCPSelectionScope,
+    ownerId: string,
+    workspaceId: string,
+    definitionIds: string[],
+  ): Promise<MCPSelectionResponse> {
+    const resources: Record<MCPSelectionScope, string> = {
+      profile: "agent-profiles",
+      repository: "repositories",
+      task: "tasks",
+      task_session: "task-sessions",
+    };
+    return this.request(
+      "PUT",
+      `/api/v1/${resources[scope]}/${encodeURIComponent(ownerId)}/mcp-selections`,
+      { workspace_id: workspaceId, definition_ids: definitionIds },
+    );
   }
 
   async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {
@@ -503,6 +605,7 @@ export class ApiClient {
       blocked_by?: string[];
       /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
       start_when_unblocked?: boolean;
+      mcp_server_ids?: string[];
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));

@@ -14,6 +14,7 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
@@ -66,6 +67,7 @@ export interface TaskCreateDialogProps {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    mcpServerIds?: string[];
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -333,6 +335,11 @@ export type DialogFormState = {
   /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
   blockedBy: string[];
   setBlockedBy: (v: string[]) => void;
+  /** Task-level MCP additions. Empty means no additions at this scope. */
+  mcpServerIds: string[];
+  setMcpServerIds: (v: string[]) => void;
+  mcpServerIdsDirty: boolean;
+  setMcpServerIdsDirty: (dirty: boolean) => void;
   taskName: string;
   setTaskName: (v: string) => void;
   hasTitle: boolean;
@@ -484,6 +491,7 @@ export type SubmitHandlersDeps = {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    mcpServerIds?: string[];
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -506,6 +514,8 @@ export type SubmitHandlersDeps = {
   setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
+  setMcpServerIds: (v: string[]) => void;
+  setMcpServerIdsDirty: (v: boolean) => void;
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
   clearDraft: () => void;
@@ -517,6 +527,11 @@ export type SubmitHandlersDeps = {
   noRepository: boolean;
   /** Predecessor task IDs to link at creation time. */
   blockedBy?: string[];
+  /** Task-level MCP additions selected in the Advanced section. */
+  mcpServerIds?: string[];
+  mcpServerIdsDirty: boolean;
+  /** Persists task-level selections when editing an existing task. */
+  saveTaskMCPSelections?: (definitionIds: string[]) => Promise<unknown>;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
   /**
@@ -625,6 +640,10 @@ export type DialogFormBodyProps = {
   descriptionPlaceholder?: string;
   /** When true, hides the workflow picker so the enforced workflow can't be swapped. */
   workflowLocked?: boolean;
+  /** Workspace MCP definitions available to the task selector. */
+  mcpDefinitions: MCPServerDefinition[];
+  mcpDefinitionsLoading: boolean;
+  mcpInheritedSelections: MCPInheritedSelection[];
   /**
    * Called by a plugin composer action after it inserted text into the
    * description and wants the form submitted the native way. The dialog

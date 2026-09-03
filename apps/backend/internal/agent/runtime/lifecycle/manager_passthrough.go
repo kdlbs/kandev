@@ -416,7 +416,7 @@ func (m *Manager) passthroughMCPServers(ctx context.Context, execution *AgentExe
 		Type: string(mcpconfig.ServerTypeHTTP),
 		URL:  fmt.Sprintf("http://localhost:%d/mcp", port),
 	}}
-	profileServers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
+	profileServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
 	if err != nil {
 		return nil, err
 	}

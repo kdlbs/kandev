@@ -1328,13 +1328,15 @@ func (m *Manager) buildAdapterConfig() error {
 	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
 	for i, mcp := range m.cfg.McpServers {
 		mcpServers[i] = adapter.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-			Env:     mcp.Env,
-			Headers: mcp.Headers,
+			Name:         mcp.Name,
+			URL:          mcp.URL,
+			Type:         mcp.Type,
+			Command:      mcp.Command,
+			Args:         mcp.Args,
+			Env:          mcp.Env,
+			Headers:      mcp.Headers,
+			DefinitionID: mcp.DefinitionID, DefinitionRevision: mcp.DefinitionRevision,
+			Origins: append([]types.McpServerOrigin(nil), mcp.Origins...),
 		}
 	}
 	m.adapterCfg = &adapter.Config{
