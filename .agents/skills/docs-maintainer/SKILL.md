@@ -76,7 +76,9 @@ teaches more than prose, a table, or bullets. If it does, use
   raster fallback is required. Store the published image under
   `docs/screenshots/` and reference it relatively.
 - If labels are dense at docs-column width, tighten the SVG viewBox and raise
-  the readable type ramp before publishing. Link the SVG image to itself so
+  the readable type ramp before publishing. Use a plain Markdown image so the
+  landing publisher copies it to `/docs/screenshots`; do not nest it inside a
+  Markdown link. Add a separate HTML link to `./screenshots/<file>.svg` so
   readers can open the full-size vector asset.
 - Give every image precise alt text and explain the diagram's essential result
   in nearby prose. Use real Kandev names from authoritative source material.

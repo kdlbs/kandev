@@ -45,8 +45,10 @@ For a normal docs-column figure, use the `doc-inline` size preset,
 another choice. Keep the result readable at docs-column width. Split an
 overview from detail when the complexity budget is exceeded.
 When technical labels remain small at that width, use a tighter `fit`-style
-viewBox and a larger readable type ramp, then link the published SVG to itself
-for full-size inspection.
+viewBox and a larger readable type ramp. Publish the image as a plain Markdown
+image because the landing publisher copies that form to `/docs/screenshots`;
+do not nest it inside a Markdown link. Add a separate HTML link to
+`./screenshots/<file>.svg` for full-size inspection.
 
 ## Content and accessibility
 
