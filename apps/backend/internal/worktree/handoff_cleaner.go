@@ -106,9 +106,9 @@ func (c *HandoffCleaner) CleanupMultiRepoRoot(ctx context.Context, rootPath stri
 			c.logger.Warn("multi-repo worktree remove failed",
 				zap.String("worktree_id", id), zap.Error(err))
 		}
-		if childReceipt.Retained > 0 {
+		if childReceipt.RetainedReasons[RetainedActiveReference] > 0 {
 			cleanupErrs = append(cleanupErrs,
-				fmt.Errorf("multi-repo worktree %s retained %d resource(s)", id, childReceipt.Retained))
+				fmt.Errorf("multi-repo worktree %s retained by an active reference", id))
 		}
 	}
 	c.logger.Info("multi-repo worktree cleanup receipt", receipt.reasonFields()...)

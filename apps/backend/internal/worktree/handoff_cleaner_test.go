@@ -168,6 +168,23 @@ func TestCleanupMultiRepoRoot_PreservesRootWhenChildIsShared(t *testing.T) {
 	}
 }
 
+func TestCleanupMultiRepoRoot_RemovesRootWhenOnlyBranchIsRetained(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-branch", "session-branch", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-branch", "session-branch")
+	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "unintegrated branch")
+	root := filepath.Dir(wt.Path)
+	cleaner := NewHandoffCleaner(mgr, newTestLogger())
+
+	if err := cleaner.CleanupMultiRepoRoot(ctx, root, []string{wt.ID}); err != nil {
+		t.Fatalf("cleanup should remove root after removing child: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("multi-repo root remains after child removal, stat error = %v", err)
+	}
+}
+
 func TestIsDescendant_HappyAndUnhappyPaths(t *testing.T) {
 	cases := []struct {
 		root, path string
