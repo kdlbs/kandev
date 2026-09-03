@@ -32,7 +32,10 @@ import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import { resolveMobileColumnIndex } from "@/lib/kanban/mobile-column-index";
-import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import {
+  compareTasksByCreatedDesc,
+  compareTasksByPriorityThenCreatedDesc,
+} from "@/lib/kanban/task-order";
 import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
@@ -235,10 +238,14 @@ function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: 
 }
 
 function useTasksByStep(tasks: Task[]) {
+  const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
+  const comparator =
+    kanbanSort === "priority_desc"
+      ? compareTasksByPriorityThenCreatedDesc
+      : compareTasksByCreatedDesc;
   return useCallback(
-    (stepId: string) =>
-      tasks.filter((t) => t.workflowStepId === stepId).sort(compareTasksByCreatedDesc),
-    [tasks],
+    (stepId: string) => tasks.filter((t) => t.workflowStepId === stepId).sort(comparator),
+    [tasks, comparator],
   );
 }
 

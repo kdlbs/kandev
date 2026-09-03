@@ -115,5 +115,9 @@
   "noWorkflowsAvailableYet": "Ainda não há fluxos de trabalho disponíveis.",
   "pullToRefreshPull": "Puxe para atualizar",
   "pullToRefreshRefreshing": "A atualizar tarefas",
-  "pullToRefreshRelease": "Largue para atualizar"
+  "pullToRefreshRelease": "Largue para atualizar",
+  "boardSort": "Ordenação do quadro",
+  "boardSortCreatedDesc": "Mais recentes primeiro",
+  "boardSortPriorityDesc": "Prioridade",
+  "priorityFilter": "Filtro de prioridade"
 }

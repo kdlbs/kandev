@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { multiSelectReducer, INITIAL_STATE } from "./use-task-multi-select";
+import {
+  multiSelectReducer,
+  INITIAL_STATE,
+  buildPipelineStepIndexOf,
+} from "./use-task-multi-select";
 
 describe("multiSelectReducer", () => {
   it("reset returns initial state", () => {
@@ -98,5 +102,37 @@ describe("multiSelectReducer", () => {
       expect(afterSelect.selectedIds).toEqual(new Set(["t1", "t2"]));
       expect(afterSelect.isMultiSelectEnabled).toBe(true);
     });
+  });
+});
+
+describe("buildPipelineStepIndexOf", () => {
+  const snapshots = {
+    "wf-1": {
+      steps: [
+        { id: "todo", position: 0 },
+        { id: "review", position: 1 },
+        { id: "done", position: 2 },
+      ],
+    },
+  };
+
+  it("indexes steps by their displayed (position) order", () => {
+    const indexOf = buildPipelineStepIndexOf(snapshots, {});
+    expect(indexOf("todo")).toBe(0);
+    expect(indexOf("review")).toBe(1);
+    expect(indexOf("done")).toBe(2);
+  });
+
+  it("skips a hidden step when indexing the displayed order", () => {
+    const indexOf = buildPipelineStepIndexOf(snapshots, { "wf-1": ["review"] });
+    expect(indexOf("todo")).toBe(0);
+    expect(indexOf("done")).toBe(1);
+    expect(indexOf("review")).toBe(Infinity);
+  });
+
+  it("sorts an unknown or undefined step id last", () => {
+    const indexOf = buildPipelineStepIndexOf(snapshots, {});
+    expect(indexOf("unknown-step")).toBe(Infinity);
+    expect(indexOf(undefined)).toBe(Infinity);
   });
 });
