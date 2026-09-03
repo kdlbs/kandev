@@ -3,12 +3,39 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
+
+// backendErrorToolResult converts a BackendClient.RequestPayload failure into
+// a CallToolResult. When the backend returned a structured websocket error
+// (BackendError), its code/message/details survive the MCP callable boundary
+// as both JSON text content and StructuredContent, so a caller can branch on
+// a stable machine-readable reason (e.g. details.reason=
+// related_task_scope_required) instead of only matching a flattened error
+// string. Errors without structured details fall back to the plain message.
+func backendErrorToolResult(err error) *mcp.CallToolResult {
+	var backendErr *BackendError
+	if errors.As(err, &backendErr) && len(backendErr.Details) > 0 {
+		payload := map[string]interface{}{
+			"code":    backendErr.Code,
+			"message": backendErr.Message,
+			"details": backendErr.Details,
+		}
+		if data, marshalErr := json.MarshalIndent(payload, "", "  "); marshalErr == nil {
+			return &mcp.CallToolResult{
+				Content:           []mcp.Content{mcp.TextContent{Type: mcp.ContentTypeText, Text: string(data)}},
+				StructuredContent: payload,
+				IsError:           true,
+			}
+		}
+	}
+	return mcp.NewToolResultError(err.Error())
+}
 
 // registerRelatedTasksTool registers list_related_tasks_kandev, which lets an
 // agent discover parent / child / sibling / blocker task IDs. Useful in both
@@ -90,7 +117,7 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListRelatedTasks, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return backendErrorToolResult(err), nil
 		}
 		// The backend authorizes and constructs the compact projection. Keep this
 		// defensive response shaping for older backends during rolling upgrades;
@@ -150,7 +177,7 @@ func (s *Server) listTaskDocumentsHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskDocuments, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return backendErrorToolResult(err), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
@@ -174,7 +201,7 @@ func (s *Server) getTaskDocumentHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskDocument, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return backendErrorToolResult(err), nil
 		}
 		// If a 'content' field is present, return it directly so the agent
 		// reads markdown — same affordance get_task_plan_kandev offers.
@@ -210,7 +237,7 @@ func (s *Server) writeTaskDocumentHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPWriteTaskDocument, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return backendErrorToolResult(err), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil

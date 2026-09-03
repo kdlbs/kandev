@@ -2,9 +2,11 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -131,4 +133,47 @@ func TestRelatedReadScopeRequiresOfficeSurface(t *testing.T) {
 	}, nil)
 	s := NewWithProfile(&testBackend{}, "session", "task", 10005, newTestLogger(t), "", false, profile)
 	assert.Equal(t, "relation", s.relatedReadScope())
+}
+
+// TestListRelatedTasks_SurfacesStructuredDenialReason is a regression test for
+// a bug where a backend denial's structured Details (e.g.
+// details.reason=related_task_scope_required) were discarded between the
+// BackendClient and the MCP tool result, leaving the caller with only a
+// flattened "backend error [FORBIDDEN]: ..." string and no machine-readable
+// reason to branch on.
+func TestListRelatedTasks_SurfacesStructuredDenialReason(t *testing.T) {
+	backend := &testBackend{err: &BackendError{
+		Code:    ws.ErrorCodeForbidden,
+		Message: "related task access denied",
+		Details: map[string]interface{}{"reason": "related_task_scope_required"},
+	}}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	result := callTool(t, s, "list_related_tasks_kandev", map[string]interface{}{"task_id": "task-B"})
+	require.True(t, result.IsError)
+	require.Len(t, result.Content, 1)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"reason": "related_task_scope_required"`)
+
+	structured, ok := result.StructuredContent.(map[string]interface{})
+	require.True(t, ok, "structured content must carry the denial details for programmatic branching")
+	details, ok := structured["details"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "related_task_scope_required", details["reason"])
+}
+
+// TestListRelatedTasks_FallsBackToPlainErrorWithoutDetails preserves the
+// pre-existing behavior for backend errors that carry no structured details.
+func TestListRelatedTasks_FallsBackToPlainErrorWithoutDetails(t *testing.T) {
+	backend := &testBackend{err: errors.New("boom")}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	result := callTool(t, s, "list_related_tasks_kandev", map[string]interface{}{"task_id": "task-B"})
+	require.True(t, result.IsError)
+	require.Len(t, result.Content, 1)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "boom", text.Text)
+	assert.Nil(t, result.StructuredContent)
 }
