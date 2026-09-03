@@ -70,6 +70,13 @@ The lifecycle manager starts prompt generation before materialization. A
 materialization error therefore uses the same terminal prompt-error path as an
 ACP submission error.
 
+Delivery into a turn that is already generating uses the same materialization
+step. The steer route resolves descriptors before it acquires the prompt
+lifecycle lock, because materialization streams file bytes over the network and
+the lock is held only for a bounded dispatch. A steer whose materialization
+fails does not dispatch and does not fall through to an ordinary prompt
+carrying unresolved descriptors.
+
 ## Failure and recovery
 
 A claim error returns from `session.launch` before the intent changes runtime

@@ -110,17 +110,28 @@ export async function selectAgentIfNeeded(dialog: Locator, page: Page) {
   }).toPass({ timeout: 10_000, intervals: [250, 500, 1_000] });
 }
 
+export async function waitForQuickChatComposerReady(dialog: Locator): Promise<Locator> {
+  const editor = dialog.locator(".tiptap.ProseMirror:visible").first();
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await expect(dialog.locator('[data-testid="submit-message-button"]:visible').first()).toBeEnabled(
+    {
+      timeout: 30_000,
+    },
+  );
+  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  return editor;
+}
+
 export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
   await selectAgentIfNeeded(dialog, page);
   await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
   await dialog.getByTestId("quick-chat-start").click();
 
-  // Wait for chat input to appear AND become editable. Eager init means the
-  // agent starts during the HTTP request, so the input is briefly disabled
-  // while the FE store catches up to the RUNNING session state.
-  const editor = dialog.locator(".tiptap.ProseMirror");
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  // The composer is intentionally editable during STARTING, so editability
+  // alone is no longer a readiness signal. Wait for the submit gate to clear
+  // before callers begin a turn; this keeps tests from typing into a draft that
+  // cannot yet be submitted.
+  await waitForQuickChatComposerReady(dialog);
 }
 
 export async function openQuickChatWithAgent(page: Page, navigateHome = true): Promise<Locator> {

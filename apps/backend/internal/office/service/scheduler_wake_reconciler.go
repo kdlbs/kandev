@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -94,8 +94,7 @@ func (h *ParentWakeReconciler) reconcileOne(
 	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate,
 ) {
 	// No dispatcher wired means there is nothing to admit: bail out before
-	// IncrementWakeDeliverySeq below, which otherwise bumps the counter for
-	// an attempt that was never going anywhere.
+	// any of the work below.
 	if svc.engineDispatcher == nil {
 		return
 	}
@@ -127,17 +126,7 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	deliverySeq, err := svc.repo.IncrementWakeDeliverySeq(ctx, c.ParentTaskID)
-	if err != nil {
-		if ctx.Err() != nil {
-			return
-		}
-		h.logger.Error("wake sweep: increment delivery sequence failed",
-			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
-		return
-	}
-
-	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey, deliverySeq)
+	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey, c.NewestChildUpdatedAt)
 	accepted, err := svc.dispatchEngineTriggerForRecovery(
 		ctx,
 		c.ParentTaskID,
@@ -258,19 +247,31 @@ func (h *ParentWakeReconciler) recordReceipt(
 	svc.recordWakeEmitted(c.ParentTaskID, operationID)
 }
 
-// wakeOperationID includes deliverySeq (IncrementWakeDeliverySeq), a
-// per-parent counter bumped once for every admitted dispatch attempt.
-// tasks.updated_at has only one-second resolution, so two genuinely distinct
-// deliveries landing in the same wall-clock second would hash identically on
-// child set + generation alone, and the engine's permanent operation ledger
-// would treat the second as already applied. Trading a stable, replayable id
-// for a counter that never repeats means a dispatch that is admitted but
-// whose receipt then fails to persist before the next tick's sweep gets a
-// fresh id (and therefore a fresh, possibly duplicate, engine dispatch) on
-// retry rather than one that could collide with a different, later delivery
-// — ListStuckParents' own admission predicate remains the dedup gate for the
-// common case where nothing changed.
-func wakeOperationID(parentTaskID, childSetKey string, deliverySeq int64) string {
-	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + childSetKey + "\x00" + strconv.FormatInt(deliverySeq, 10)))
+// wakeOperationID identifies one task_children_completed dispatch. Two
+// independent producers can race for the same completion wave — the
+// edge-triggered path (queueChildrenCompletedRun, event_subscribers.go) and
+// this reconciler's own sweep — so both must derive the same id from the
+// same observed state for idx_run_idempotency to actually collapse the
+// race; a per-caller counter could never do that. A completion wave is
+// identified by the child IDs, not by the terminal state each child
+// reached: a terminal-to-terminal edit (for example, CANCELLED to
+// COMPLETED) must not mint a new wake, so only the state suffix is
+// stripped, not the id. generation (child_generation /
+// NewestChildUpdatedAt, both dialect.SecondPrecisionText-rendered so every
+// caller sees the same text) distinguishes a reopen-and-recomplete that
+// lands on the same terminal child set from the delivery it invalidates.
+func wakeOperationID(parentTaskID, childSetKey, generation string) string {
+	childIDs := make([]string, 0)
+	for _, child := range strings.Split(childSetKey, ",") {
+		if child == "" {
+			continue
+		}
+		if separator := strings.LastIndexByte(child, ':'); separator >= 0 {
+			child = child[:separator]
+		}
+		childIDs = append(childIDs, child)
+	}
+	canonicalChildSet := strings.Join(childIDs, ",")
+	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + canonicalChildSet + "\x00" + generation))
 	return fmt.Sprintf("task_children_completed:%s:%s", parentTaskID, hex.EncodeToString(sum[:]))
 }

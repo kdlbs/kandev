@@ -23,6 +23,10 @@ const runtimeSubdir = "runtime"
 // rationale as runtimeSubdir.
 const spritesRuntimeBase = "/root/.kandev/runtime"
 
+// kubernetesRuntimeBase mirrors
+// internal/agent/runtime/lifecycle/skill.KubernetesRuntimeBase.
+const kubernetesRuntimeBase = "/opt/kandev/runtime"
+
 // resolveInstructionsForPrompt returns the path the agent will see at
 // instructionsDir (host or sprite-side, depending on executor) and
 // the AGENTS.md content for prompt embedding. Pure data — no disk I/O.
@@ -50,13 +54,20 @@ func (si *SchedulerIntegration) resolveInstructionsForPrompt(manifest *SkillMani
 // will materialise instruction files at, given an executor type.
 //
 //   - sprites          → /root/.kandev/runtime/<ws>/instructions/<agent>
+//   - k8s              → /opt/kandev/runtime/<ws>/instructions/<agent>
 //   - local_pc/docker  → <basePath>/runtime/<ws>/instructions/<agent>
 //
 // The returned path is used both by office's prompt builder (embeds
 // it as a hint string) and matches what skill.Deployer writes to.
 func instructionsDirForExecutor(basePath, workspaceSlug, agentID, executorType string) string {
-	if executorType == "sprites" {
+	switch executorType {
+	case "sprites":
 		return fmt.Sprintf("%s/%s/instructions/%s", spritesRuntimeBase, workspaceSlug, agentID)
+	case "k8s":
+		return fmt.Sprintf("%s/%s/instructions/%s", kubernetesRuntimeBase, workspaceSlug, agentID)
+	case "", "local", "local_pc", "worktree", "local_docker", "remote_docker", "ssh", "mock_remote":
+		return filepath.Join(basePath, runtimeSubdir, workspaceSlug, "instructions", agentID)
+	default:
+		return ""
 	}
-	return filepath.Join(basePath, runtimeSubdir, workspaceSlug, "instructions", agentID)
 }

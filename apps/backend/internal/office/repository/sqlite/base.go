@@ -727,28 +727,5 @@ func (r *Repository) createParentChildWakeReceiptsTable() error {
 		child_generation      TEXT NOT NULL DEFAULT ''
 	);
 	`)
-	if err != nil {
-		return err
-	}
-	return r.createParentWakeDeliverySeqTable()
-}
-
-// createParentWakeDeliverySeqTable creates the per-parent counter
-// IncrementWakeDeliverySeq bumps once for every admitted dispatch attempt
-// (see scheduler_wake_reconciler.go's wakeOperationID). Deliberately a
-// separate table from parent_child_wake_receipts above, not an extra column
-// on it: several call sites read "no row in parent_child_wake_receipts yet"
-// as "nothing has been recorded for this parent" (recordReceipt's
-// still-open-second defer path, TestParentWakeReconciler_SkipsWithoutEngineDispatcher).
-// A shared row would make that reasoning false, since the counter bumps on
-// every attempt — including one whose receipt is later deferred or never
-// persisted — independently of whether a receipt's delivery fields are set.
-func (r *Repository) createParentWakeDeliverySeqTable() error {
-	_, err := r.db.Exec(`
-	CREATE TABLE IF NOT EXISTS parent_wake_delivery_seq (
-		parent_task_id TEXT PRIMARY KEY,
-		seq            INTEGER NOT NULL DEFAULT 0
-	);
-	`)
 	return err
 }

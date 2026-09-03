@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -57,6 +58,60 @@ func TestAgentInstallProvider(t *testing.T) {
 			t.Fatalf("got %q, want %q", got, want)
 		}
 	})
+}
+
+func TestAgentctlProviderSupportsExecutorBinaryPath(t *testing.T) {
+	vars := AgentctlProviderWithOptions(8765, "/workspace", AgentctlProviderOptions{
+		BinaryPath: "/opt/kandev/agentctl",
+		Start:      true,
+	})()
+
+	if got, want := vars["kandev.agentctl.install"], "chmod +x '/opt/kandev/agentctl'"; got != want {
+		t.Fatalf("kandev.agentctl.install = %q, want %q", got, want)
+	}
+}
+
+func TestAgentctlProviderShellQuotesExecutorBinaryAndWorkspacePaths(t *testing.T) {
+	binaryPath := "/opt/kandev agentctl'$(touch /tmp/pwned)"
+	workspacePath := "/workspace/project name'$(touch /tmp/workspace-pwned)"
+	vars := AgentctlProviderWithOptions(8765, workspacePath, AgentctlProviderOptions{
+		BinaryPath: binaryPath,
+		Start:      true,
+	})()
+
+	if got, want := vars["kandev.agentctl.install"], "chmod +x "+shellQuote(binaryPath); got != want {
+		t.Fatalf("kandev.agentctl.install = %q, want %q", got, want)
+	}
+	wantStart := "nohup " + shellQuote(binaryPath) +
+		" --port 8765 --workdir " + shellQuote(workspacePath) +
+		" > /tmp/agentctl.log 2>&1 &\nsleep 1"
+	if got := vars["kandev.agentctl.start"]; got != wantStart {
+		t.Fatalf("kandev.agentctl.start = %q, want %q", got, wantStart)
+	}
+}
+
+func TestAgentctlProviderCanLeaveStartToManagedBootstrap(t *testing.T) {
+	vars := AgentctlProviderWithOptions(8765, "/workspace", AgentctlProviderOptions{
+		BinaryPath: "/opt/kandev/agentctl",
+		Start:      false,
+	})()
+
+	if got := vars["kandev.agentctl.start"]; got != "" {
+		t.Fatalf("kandev.agentctl.start = %q, want empty managed-bootstrap expansion", got)
+	}
+}
+
+func TestAgentctlProviderPreservesLegacyExpansions(t *testing.T) {
+	got := AgentctlProvider(8765, "/workspace")()
+	want := map[string]string{
+		"kandev.agentctl.port":    "8765",
+		"kandev.agentctl.install": "chmod +x '/usr/local/bin/agentctl'",
+		"kandev.agentctl.start":   "nohup 'agentctl' --port 8765 --workdir '/workspace' > /tmp/agentctl.log 2>&1 &\nsleep 1",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AgentctlProvider() = %#v, want %#v", got, want)
+	}
 }
 
 func TestRepositoryProvider_UsesRepositorySetupScriptKey(t *testing.T) {

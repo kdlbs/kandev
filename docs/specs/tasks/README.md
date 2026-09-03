@@ -61,6 +61,7 @@ signals, and task-scoped scheduling contracts.
 - [Parent-Child Message Interrupt](requirements/parent-child-message-interrupt.md)
 - [Parent-Child Task Stop](requirements/parent-child-task-stop.md)
 - [Passthrough Queued Prompt Dispatch](requirements/passthrough-queued-prompt-dispatch.md)
+- [Task plan content size limit](requirements/plan-content-size-limit.md)
 - [Task plan write consistency](requirements/plan-write-consistency.md)
 - [Passthrough Initial Prompt Turn Boundary](requirements/passthrough-initial-prompt-turn-boundary.md)
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
@@ -96,6 +97,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
 - [Workflow Duplication](requirements/workflow-duplication.md)
 - [Explicit Workflow-Step Completion Signal](requirements/workflow-explicit-completion-signal.md)
+- [Workflow Profile Session Lifecycle](requirements/workflow-profile-session-lifecycle.md)
 - [Agent decision recording](requirements/workflow-quorum-decision-recording-agent-surface.md)
 - [Quorum ordering and concurrency](requirements/workflow-quorum-decision-recording-concurrency.md)
 - [Quorum diagnostics](requirements/workflow-quorum-decision-recording-diagnostics.md)
@@ -130,6 +132,7 @@ signals, and task-scoped scheduling contracts.
 - [Passthrough Initial Prompt Turn Boundary](system-design/passthrough-initial-prompt-turn-boundary.md)
 - [Prompt attachments](system-design/prompt-attachments.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
+- [Task plan content size limit](system-design/plan-content-size-limit.md)
 - [Task plan write consistency](system-design/plan-write-consistency.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
@@ -142,6 +145,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
+- [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 
 ## Migration record

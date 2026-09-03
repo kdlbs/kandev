@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentctlshared "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -284,6 +285,15 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 const stopReasonPassthrough = "passthrough_dispatched"
 
 var ErrPromptDispatchCallbackUnsupported = errors.New("agent manager does not support prompt dispatch callback")
+
+// ErrSteerNotDispatched reports that no active prompt generation accepted a
+// steer. The orchestrator must route this outcome through ordinary admission.
+var ErrSteerNotDispatched = lifecycle.ErrSteerNotDispatched
+
+// ErrSteerAttachmentMaterialization identifies a steer attachment failure that
+// happened before agentctl accepted the request. The orchestrator uses it to
+// retry queued draining after it releases the steer slot.
+var ErrSteerAttachmentMaterialization = lifecycle.ErrSteerAttachmentMaterialization
 
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
@@ -624,12 +634,20 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 	e.logger.Debug("in-place model switch not available, falling back to agent restart",
 		zap.String("session_id", sessionID))
 
-	session, task, acpSessionID, existingRunning, err := e.prepareModelSwitch(ctx, taskID, sessionID)
+	session, task, acpSessionID, executionID, existingRunning, err := e.prepareModelSwitch(ctx, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, nil)
+	execConfig, err := e.resolveModelSwitchExecutorConfig(ctx, task, session, existingRunning)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateKubernetesModelSwitchAuthority(
+		task, session, executionID, existingRunning, execConfig,
+	); err != nil {
+		return nil, err
+	}
 
 	req, err := e.buildSwitchModelRequest(ctx, task, session, sessionID, newModel, prompt, acpSessionID, execConfig, existingRunning)
 	if err != nil {
@@ -637,6 +655,9 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 	}
 
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
+	if err := e.stopPreparedModelSwitchAgent(ctx, executionID); err != nil {
+		return nil, err
+	}
 
 	e.logger.Info("launching new agent with model override",
 		zap.String("task_id", task.ID),
@@ -659,43 +680,153 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 	}, nil
 }
 
-// prepareModelSwitch validates the session/task and stops the current agent.
-// Returns the session, task, ACP session ID, existing ExecutorRunning record, and any error.
-func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID string) (*models.TaskSession, *models.Task, string, *models.ExecutorRunning, error) {
+// prepareModelSwitch loads the authoritative state needed to build and
+// validate a replacement request. It deliberately does not stop the current
+// agent; Kubernetes must prove exact recorded authority first.
+func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID string) (*models.TaskSession, *models.Task, string, string, *models.ExecutorRunning, error) {
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return nil, nil, "", nil, fmt.Errorf("failed to get session: %w", err)
+		return nil, nil, "", "", nil, fmt.Errorf("failed to get session: %w", err)
 	}
 	if session.TaskID != taskID {
-		return nil, nil, "", nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+		return nil, nil, "", "", nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
 	}
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
-		return nil, nil, "", nil, ErrExecutionNotFound
+		return nil, nil, "", "", nil, ErrExecutionNotFound
 	}
 
 	task, err := e.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return nil, nil, "", nil, fmt.Errorf("failed to get task: %w", err)
+		return nil, nil, "", "", nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
-	var acpSessionID string
-	var existingRunning *models.ExecutorRunning
-	if running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); runErr == nil && running != nil {
-		existingRunning = running
-		acpSessionID = running.ResumeToken
+	existingRunning, runErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if runErr != nil && !errors.Is(runErr, models.ErrExecutorRunningNotFound) {
+		probe := e.resolveExecutorConfig(
+			ctx, session.ExecutorID, task.WorkspaceID, cloneMetadata(session.Metadata),
+		)
+		if models.ExecutorType(probe.ExecutorType) == models.ExecutorTypeKubernetes ||
+			hasKubernetesRuntimeMetadata(session.Metadata) {
+			return nil, nil, "", "", nil, fmt.Errorf("load model-switch runtime inventory: %w", runErr)
+		}
+		existingRunning = nil
 	}
+	acpSessionID := ""
+	if existingRunning != nil {
+		acpSessionID = existingRunning.ResumeToken
+	}
+	return session, task, acpSessionID, executionID, existingRunning, nil
+}
 
+func hasKubernetesRuntimeMetadata(metadata map[string]interface{}) bool {
+	for key := range metadata {
+		if strings.HasPrefix(key, "kubernetes_") {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Executor) resolveModelSwitchExecutorConfig(
+	ctx context.Context,
+	task *models.Task,
+	session *models.TaskSession,
+	running *models.ExecutorRunning,
+) (executorConfig, error) {
+	if running == nil || running.Runtime != agentruntime.RuntimeKubernetes {
+		return e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, nil), nil
+	}
+	metadata := cloneMetadata(session.Metadata)
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	if session.ExecutorProfileID != "" {
+		metadata[lifecycle.MetadataKeyExecutorProfileID] = session.ExecutorProfileID
+	}
+	applyAuthoritativeKubernetesRunningMetadata(metadata, running.Metadata)
+	config, err := e.applyRecordedKubernetesExecutorConfigToResumeRequest(
+		ctx, &LaunchAgentRequest{}, session, metadata, running,
+	)
+	if err != nil {
+		return executorConfig{}, err
+	}
+	return config, nil
+}
+
+func validateKubernetesModelSwitchAuthority(
+	task *models.Task,
+	session *models.TaskSession,
+	executionID string,
+	running *models.ExecutorRunning,
+	config executorConfig,
+) error {
+	resolvedKubernetes := models.ExecutorType(config.ExecutorType) == models.ExecutorTypeKubernetes
+	recordedKubernetes := running != nil && running.Runtime == agentruntime.RuntimeKubernetes
+	if !resolvedKubernetes && !recordedKubernetes {
+		return nil
+	}
+	if err := validateKubernetesModelSwitchRunningIdentity(task, session, executionID, running); err != nil {
+		return err
+	}
+	return validateKubernetesModelSwitchConfig(task, session, running, config)
+}
+
+func validateKubernetesModelSwitchRunningIdentity(
+	task *models.Task,
+	session *models.TaskSession,
+	executionID string,
+	running *models.ExecutorRunning,
+) error {
+	if running == nil {
+		return errors.New("switch Kubernetes model: authoritative running inventory is missing")
+	}
+	if running.Runtime != agentruntime.RuntimeKubernetes {
+		return fmt.Errorf("switch Kubernetes model: recorded runtime is %q", running.Runtime)
+	}
+	if running.TaskID == "" || running.TaskID != task.ID {
+		return errors.New("switch Kubernetes model: recorded task identity does not match")
+	}
+	if running.SessionID == "" || running.SessionID != session.ID {
+		return errors.New("switch Kubernetes model: recorded session identity does not match")
+	}
+	if running.AgentExecutionID == "" || running.AgentExecutionID != executionID {
+		return errors.New("switch Kubernetes model: recorded execution identity does not match")
+	}
+	return nil
+}
+
+func validateKubernetesModelSwitchConfig(
+	task *models.Task,
+	session *models.TaskSession,
+	running *models.ExecutorRunning,
+	config executorConfig,
+) error {
+	if config.ExecutorType != string(models.ExecutorTypeKubernetes) ||
+		config.ExecutorID == "" || config.ExecutorID != running.ExecutorID {
+		return errors.New("switch Kubernetes model: recorded executor is not an available Kubernetes executor")
+	}
+	if err := lifecycle.ValidateKubernetesResumeMetadata(
+		config.Metadata, task.ID, session.ID, config.ExecutorCfg,
+	); err != nil {
+		return fmt.Errorf("switch Kubernetes model: validate recorded runtime: %w", err)
+	}
+	return nil
+}
+
+func (e *Executor) stopPreparedModelSwitchAgent(
+	ctx context.Context,
+	executionID string,
+) error {
 	e.logger.Info("stopping current agent for model switch",
 		zap.String("agent_execution_id", executionID))
 	if err := e.agentManager.StopAgent(ctx, executionID, false); err != nil {
 		e.logger.Warn("failed to stop agent for model switch",
 			zap.Error(err),
 			zap.String("agent_execution_id", executionID))
-		return nil, nil, "", nil, fmt.Errorf("failed to stop agent for model switch: %w", err)
+		return fmt.Errorf("failed to stop agent for model switch: %w", err)
 	}
-
-	return session, task, acpSessionID, existingRunning, nil
+	return nil
 }
 
 // launchModelSwitchAgent launches the new agent, persists state, and starts the process.
@@ -752,10 +883,15 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		ModelOverride:     newModel,
 		ACPSessionID:      acpSessionID,
 		ExecutorType:      execConfig.ExecutorType,
+		ExecutorConfig:    execConfig.ExecutorCfg,
 		Metadata:          execConfig.Metadata,
+		SetupScript:       execConfig.SetupScript,
 		IsEphemeral:       task.IsEphemeral,
 		IsPassthrough:     session.IsPassthrough,
 		TaskEnvironmentID: session.TaskEnvironmentID,
+	}
+	if running != nil && running.Runtime == agentruntime.RuntimeKubernetes {
+		req.PreviousExecutionID = running.AgentExecutionID
 	}
 
 	mcpMode, err := e.resolveTaskSessionMCPMode(ctx, task.ID, session, true)

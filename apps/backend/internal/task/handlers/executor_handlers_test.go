@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -34,6 +35,7 @@ type executorRepo struct {
 	updateErr         error
 	deleteErr         error
 	hasActiveSessions bool
+	running           []*models.ExecutorRunning
 
 	created        []*models.Executor
 	updated        []*models.Executor
@@ -83,6 +85,10 @@ func (r *executorRepo) DeleteExecutor(_ context.Context, id string) error {
 
 func (r *executorRepo) HasActiveTaskSessionsByExecutor(context.Context, string) (bool, error) {
 	return r.hasActiveSessions, nil
+}
+
+func (r *executorRepo) ListExecutorsRunning(context.Context) ([]*models.ExecutorRunning, error) {
+	return r.running, nil
 }
 
 func (r *executorRepo) ListAllExecutorProfiles(context.Context) ([]*models.ExecutorProfile, error) {
@@ -365,6 +371,24 @@ func TestHTTPUpdateExecutorRejectsInvalidMCPPolicy(t *testing.T) {
 	require.Empty(t, repo.updated)
 }
 
+func TestHTTPUpdateExecutorReturnsConflictForRetainedKubernetesInventory(t *testing.T) {
+	repo := kubernetesHandlerFixture()
+	repo.running = []*models.ExecutorRunning{{
+		SessionID: "session-retained", TaskID: "task-retained",
+		ExecutorID: "ex-kubernetes", Runtime: agentruntime.RuntimeKubernetes,
+	}}
+	h := newExecutorHandlers(t, repo)
+	c, rec := newWorkflowRequest(t, http.MethodPatch, "/api/v1/executors/ex-kubernetes", `{"type":"local"}`)
+	c.Params = gin.Params{{Key: "id", Value: "ex-kubernetes"}}
+	c.Request = c.Request.WithContext(kubernetesAdminContext())
+
+	h.httpUpdateExecutor(c)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.JSONEq(t, `{"error":"executor is used by an active agent session"}`, rec.Body.String())
+	require.Empty(t, repo.updated)
+}
+
 // TestHTTPUpdateExecutorRefusesToRenameSystemExecutor covers the service-side
 // system guard reaching the handler as a plain 500 rather than a 400 — the
 // error is not an ErrInvalidExecutorConfig, so it takes the generic branch.
@@ -485,7 +509,7 @@ func TestWSCreateExecutorRejectsInvalidMCPPolicy(t *testing.T) {
 	require.NoError(t, err)
 	payload := wsWorkflowError(t, resp)
 	require.Equal(t, string(ws.ErrorCodeValidation), payload.Code)
-	require.Contains(t, payload.Message, "mcp_policy must be valid JSON")
+	require.Equal(t, service.ErrInvalidExecutorConfig.Error(), payload.Message)
 	require.Empty(t, repo.created)
 }
 
@@ -552,6 +576,26 @@ func TestWSUpdateExecutorSurfacesRepositoryFailure(t *testing.T) {
 	payload := wsWorkflowError(t, resp)
 	require.Equal(t, string(ws.ErrorCodeInternalError), payload.Code)
 	require.Equal(t, "Failed to update executor", payload.Message)
+}
+
+func TestWSUpdateExecutorReturnsValidationForRetainedKubernetesInventory(t *testing.T) {
+	repo := kubernetesHandlerFixture()
+	repo.running = []*models.ExecutorRunning{{
+		SessionID: "session-retained", TaskID: "task-retained",
+		ExecutorID: "ex-kubernetes", Runtime: agentruntime.RuntimeKubernetes,
+	}}
+	h := newExecutorHandlers(t, repo)
+
+	resp, err := h.wsUpdateExecutor(kubernetesAdminContext(),
+		wsWorkflowRequest(t, ws.ActionExecutorUpdate, map[string]any{
+			"id": "ex-kubernetes", "type": string(models.ExecutorTypeLocal),
+		}))
+
+	require.NoError(t, err)
+	payload := wsWorkflowError(t, resp)
+	require.Equal(t, string(ws.ErrorCodeValidation), payload.Code)
+	require.Equal(t, "executor is used by an active agent session", payload.Message)
+	require.Empty(t, repo.updated)
 }
 
 func TestWSDeleteExecutorDeletesAndReportsActiveSessions(t *testing.T) {

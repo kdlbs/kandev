@@ -9,6 +9,22 @@ const sharedSentinelCalls = vi.hoisted(() => [] as unknown[][]);
 const sharedSentinelUserGesture = vi.hoisted(() => vi.fn());
 const sharedSentinelRetry = vi.hoisted(() => vi.fn());
 const sharedSentinelRecheck = vi.hoisted(() => vi.fn());
+const transcriptScrollTopBySessionId = vi.hoisted(() => new Map<string, number>());
+const transcriptScrollTopWrites = vi.hoisted(() =>
+  vi.fn((sessionId: string, scrollTop: number) => {
+    transcriptScrollTopBySessionId.set(sessionId, scrollTop);
+  }),
+);
+const mockDockviewState = vi.hoisted(
+  () =>
+    ({
+      pendingChatScrollTop: null,
+      scrollTarget: null,
+    }) as {
+      pendingChatScrollTop: number | null;
+      scrollTarget: { sessionId: string } | null;
+    },
+);
 
 vi.mock("@/hooks/use-lazy-load-sentinel", () => ({
   useLazyLoadSentinel: (...args: unknown[]) => {
@@ -24,15 +40,19 @@ vi.mock("@/hooks/use-lazy-load-sentinel", () => ({
 
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: Object.assign(
-    (selector: (state: { pendingChatScrollTop: number | null }) => unknown) =>
-      selector({ pendingChatScrollTop: null }),
-    { getState: () => ({ pendingChatScrollTop: null }) },
+    (selector: (state: typeof mockDockviewState) => unknown) => selector(mockDockviewState),
+    { getState: () => mockDockviewState },
   ),
 }));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
-    getState: () => ({ setTranscriptScrollTop: vi.fn() }),
+    getState: () => ({
+      setTranscriptScrollTop: transcriptScrollTopWrites,
+      transcriptAutoScroll: {
+        scrollTopBySessionId: Object.fromEntries(transcriptScrollTopBySessionId),
+      },
+    }),
   }),
 }));
 
@@ -54,6 +74,7 @@ const TARGET_MESSAGE_ID = "target";
 const HANDLE_RENDER_ERROR = "handle did not render";
 const HARNESS_RENDER_ERROR = "harness did not render";
 const NATIVE_SCROLL_MANAGEMENT_TEST_ID = "native-scroll-management-container";
+const AUTO_SCROLL_CONTAINER_TEST_ID = "auto-scroll-container";
 const TEST_MESSAGES = [{} as Message];
 /** Always returns false: the harness never locks programmatic scrolling. */
 const NEVER_LOCKED = () => false;
@@ -72,6 +93,11 @@ function Harness({
   onDividerScroll,
   scrollLayoutKey = "initial",
   dividerDocumentTop = 250,
+  isVisible = true,
+  scrollHeight = 0,
+  enabled = true,
+  sessionId = null,
+  isProgrammaticScrollLocked = NEVER_LOCKED,
 }: {
   itemCount: number;
   anchoredBarOffsetPx: number;
@@ -79,11 +105,20 @@ function Harness({
   onDividerScroll?: () => void;
   scrollLayoutKey?: string;
   dividerDocumentTop?: number;
+  isVisible?: boolean;
+  scrollHeight?: number;
+  enabled?: boolean;
+  sessionId?: string | null;
+  isProgrammaticScrollLocked?: () => boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const scrollContainer = scrollRef.current;
     if (!scrollContainer) return;
+    Object.defineProperty(scrollContainer, "scrollHeight", {
+      configurable: true,
+      value: scrollHeight,
+    });
     Object.defineProperty(scrollContainer, "getBoundingClientRect", {
       configurable: true,
       value: () => createRect(100, 400),
@@ -95,10 +130,15 @@ function Harness({
       value: () => createRect(dividerDocumentTop - scrollContainer.scrollTop, 20),
     });
   }, [dividerDocumentTop]);
-  useScrollToDividerOrBottom(scrollRef, itemCount, dividerKey, anchoredBarOffsetPx, {
+  const scrollOptions = {
     onDividerScroll,
     scrollLayoutKey,
-  });
+    enabled,
+    sessionId,
+    isProgrammaticScrollLocked,
+    isVisible,
+  } as Parameters<typeof useScrollToDividerOrBottom>[4];
+  useScrollToDividerOrBottom(scrollRef, itemCount, dividerKey, anchoredBarOffsetPx, scrollOptions);
   return (
     <div ref={scrollRef} data-testid={DIVIDER_SCROLL_CONTAINER_TEST_ID}>
       <div id="msg-m1" />
@@ -129,25 +169,36 @@ function AutoScrollHarness({
   messages = TEST_MESSAGES,
   markRef,
   enabled = true,
+  isVisible = true,
+  sessionId = null,
+  metrics,
 }: {
   isWorking: boolean;
   hasUnreadDivider: boolean;
   messages?: Message[];
   markRef?: { current?: () => void };
   enabled?: boolean;
+  isVisible?: boolean;
+  sessionId?: string | null;
+  metrics?: NativeScrollMetrics;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { markNotNearBottom } = useAutoScroll({
+  const useAutoScrollWithVisibility = useAutoScroll as unknown as (
+    params: Parameters<typeof useAutoScroll>[0] & { isVisible: boolean },
+  ) => ReturnType<typeof useAutoScroll>;
+  const { markNotNearBottom } = useAutoScrollWithVisibility({
     scrollRef,
     messages,
     isWorking,
-    sessionId: null,
+    sessionId,
     enabled,
     hasUnreadDivider,
     isProgrammaticScrollLocked: NEVER_LOCKED,
+    isVisible,
   });
+  useNativeScrollMetrics(scrollRef, metrics);
   if (markRef) markRef.current = markNotNearBottom;
-  return <div ref={scrollRef} data-testid="auto-scroll-container" />;
+  return <div ref={scrollRef} data-testid={AUTO_SCROLL_CONTAINER_TEST_ID} />;
 }
 
 /** Stubs scrollHeight (1000) and clientHeight (400) onto an element. */
@@ -158,10 +209,14 @@ function setScrollMetrics(element: HTMLElement) {
 
 afterEach(() => {
   cleanup();
+  mockDockviewState.pendingChatScrollTop = null;
+  mockDockviewState.scrollTarget = null;
   sharedSentinelCalls.length = 0;
   sharedSentinelUserGesture.mockReset();
   sharedSentinelRetry.mockReset();
   sharedSentinelRecheck.mockReset();
+  transcriptScrollTopBySessionId.clear();
+  transcriptScrollTopWrites.mockClear();
   vi.restoreAllMocks();
 });
 
@@ -208,6 +263,7 @@ function NativeScrollManagementHarness({
   isLoadingMore = false,
   recoveryRef,
   isVisible = true,
+  enabled = false,
 }: {
   items: RenderItem[];
   metrics?: NativeScrollMetrics;
@@ -216,15 +272,17 @@ function NativeScrollManagementHarness({
   isLoadingMore?: boolean;
   recoveryRef?: { current: boolean };
   isVisible?: boolean;
+  enabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  useNativeScrollMetrics(scrollRef, metrics);
   const { sentinelRef, showRecovery } = useNativeScrollManagement({
     scrollRef,
     items,
     messages: [],
     isWorking: false,
     sessionId,
-    enabled: false,
+    enabled,
     hasUnreadDivider: false,
     messagesLoading: false,
     hasMore: true,
@@ -233,7 +291,6 @@ function NativeScrollManagementHarness({
     isVisible,
   });
   if (recoveryRef) recoveryRef.current = showRecovery;
-  useNativeScrollMetrics(scrollRef, metrics);
   return (
     <div data-testid={NATIVE_SCROLL_MANAGEMENT_TEST_ID} ref={scrollRef}>
       <div ref={sentinelRef} />
@@ -280,6 +337,44 @@ describe("isElementInPreloadRegion", () => {
 
 // eslint-disable-next-line max-lines-per-function -- pagination invariants share one fixture and lifecycle.
 describe("useNativeScrollManagement transcript pagination", () => {
+  it("defers the native initial placement until a hidden transcript is active", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const metrics = { scrollHeight: 1000, scrollTop: 250, clientHeight: 400 };
+    try {
+      const { rerender } = render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage("initial-message")]}
+          metrics={metrics}
+          enabled
+          isVisible={false}
+        />,
+      );
+      const scrollContainer = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
+      expect(scrollContainer.scrollTop).toBe(250);
+
+      rerender(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage("initial-message")]}
+          metrics={metrics}
+          enabled
+          isVisible
+        />,
+      );
+      metrics.scrollTop = 250;
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      expect(scrollContainer.scrollTop).toBe(1000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rechecks restored geometry once when a hidden transcript becomes visible", () => {
     const requestAnimationFrame = vi
       .spyOn(window, "requestAnimationFrame")
@@ -667,6 +762,302 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
 // eslint-disable-next-line max-lines-per-function -- this suite keeps the related scroll invariants together.
 describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
+  it("waits for an inactive transcript to become visible before placing the initial view", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const { rerender } = render(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          isVisible={false}
+          scrollHeight={1000}
+        />,
+      );
+      const scrollContainer = screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID) as HTMLElement;
+
+      expect(scrollContainer.scrollTop).toBe(0);
+
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          isVisible
+          scrollHeight={1000}
+        />,
+      );
+      // Model SessionPanelContent restoring its saved absolute offset after
+      // the panel becomes measurable. The activation placement must happen
+      // after that restore, not before it.
+      scrollContainer.scrollTop = 250;
+      expect(scrollContainer.scrollTop).toBe(250);
+
+      act(() => frames.shift()?.(0));
+      expect(scrollContainer.scrollTop).toBe(250);
+
+      act(() => frames.shift()?.(0));
+      expect(scrollContainer.scrollTop).toBe(1000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("starts and bounds the divider settling window at hidden-session activation", () => {
+    vi.useFakeTimers();
+    let currentTime = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => currentTime);
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const { rerender } = render(
+        <Harness itemCount={2} anchoredBarOffsetPx={0} isVisible={false} scrollHeight={1000} />,
+      );
+      const scrollContainer = screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID) as HTMLElement;
+
+      vi.advanceTimersByTime(4001);
+      currentTime = 4001;
+
+      rerender(<Harness itemCount={2} anchoredBarOffsetPx={0} isVisible scrollHeight={1000} />);
+      act(() => {
+        let frame = frames.shift();
+        while (frame) {
+          frame(0);
+          frame = frames.shift();
+        }
+      });
+      // The deadline starts at activation, so the divider still wins even
+      // though the persistent hidden portal was mounted for more than 4s.
+      expect(scrollContainer.scrollTop).toBe(150);
+
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={76}
+          isVisible
+          scrollHeight={1000}
+          scrollLayoutKey="activation-window"
+        />,
+      );
+      expect(scrollContainer.scrollTop).toBe(74);
+
+      vi.advanceTimersByTime(4001);
+      currentTime = 8002;
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={100}
+          isVisible
+          scrollHeight={1000}
+          scrollLayoutKey="settled"
+        />,
+      );
+      expect(scrollContainer.scrollTop).toBe(74);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not replace a pending layout restore with activation placement", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    mockDockviewState.pendingChatScrollTop = 42;
+    try {
+      const { rerender } = render(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          isVisible={false}
+          scrollHeight={1000}
+        />,
+      );
+      const scrollContainer = screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID);
+      scrollContainer.scrollTop = 250;
+
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          isVisible
+          scrollHeight={1000}
+        />,
+      );
+      act(() => {
+        for (const frame of frames.splice(0)) frame(0);
+      });
+
+      expect(scrollContainer.scrollTop).toBe(250);
+      mockDockviewState.pendingChatScrollTop = null;
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          isVisible
+          scrollHeight={1000}
+          scrollLayoutKey="restored"
+        />,
+      );
+      expect(scrollContainer.scrollTop).toBe(250);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not replace an explicit message target with activation placement", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    mockDockviewState.scrollTarget = { sessionId: "session-1" };
+    try {
+      const { rerender } = render(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          sessionId="session-1"
+          isVisible={false}
+          scrollHeight={1000}
+        />,
+      );
+      const scrollContainer = screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID);
+      scrollContainer.scrollTop = 250;
+
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          sessionId="session-1"
+          isVisible
+          scrollHeight={1000}
+        />,
+      );
+      act(() => {
+        for (const frame of frames.splice(0)) frame(0);
+      });
+
+      expect(scrollContainer.scrollTop).toBe(250);
+      mockDockviewState.scrollTarget = null;
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          sessionId="session-1"
+          isVisible
+          scrollHeight={1000}
+          scrollLayoutKey="target-consumed"
+        />,
+      );
+      expect(scrollContainer.scrollTop).toBe(250);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not bottom-place a disabled transcript during activation", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const { rerender } = render(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          enabled={false}
+          isVisible={false}
+          scrollHeight={1000}
+        />,
+      );
+      const scrollContainer = screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID);
+      scrollContainer.scrollTop = 250;
+
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          enabled={false}
+          isVisible
+          scrollHeight={1000}
+        />,
+      );
+      act(() => {
+        for (const frame of frames.splice(0)) frame(0);
+      });
+
+      expect(scrollContainer.scrollTop).toBe(250);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("cancels pending activation placement when the transcript becomes inactive again", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const { rerender } = render(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          isVisible={false}
+          scrollHeight={1000}
+        />,
+      );
+      const scrollContainer = screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID) as HTMLElement;
+      scrollContainer.scrollTop = 250;
+
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          isVisible
+          scrollHeight={1000}
+        />,
+      );
+      rerender(
+        <Harness
+          itemCount={2}
+          anchoredBarOffsetPx={0}
+          dividerKey={null}
+          isVisible={false}
+          scrollHeight={1000}
+        />,
+      );
+
+      act(() => {
+        for (const frame of frames.splice(0)) frame(0);
+      });
+      expect(scrollContainer.scrollTop).toBe(250);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("re-scrolls the divider when the anchored bar's measured height arrives", () => {
     const { rerender } = render(<Harness itemCount={2} anchoredBarOffsetPx={0} />);
     const scrollContainer = document.querySelector<HTMLElement>(
@@ -713,7 +1104,7 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
   it("does not follow the bottom when work starts with an unread divider", () => {
     const { rerender } = render(<AutoScrollHarness isWorking={false} hasUnreadDivider={true} />);
     const scrollContainer = document.querySelector<HTMLElement>(
-      '[data-testid="auto-scroll-container"]',
+      `[data-testid="${AUTO_SCROLL_CONTAINER_TEST_ID}"]`,
     );
     if (!scrollContainer) throw new Error("auto-scroll container did not render");
     setScrollMetrics(scrollContainer);
@@ -730,7 +1121,7 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
       <AutoScrollHarness isWorking={false} hasUnreadDivider={true} markRef={markRef} />,
     );
     const scrollContainer = document.querySelector<HTMLElement>(
-      '[data-testid="auto-scroll-container"]',
+      `[data-testid="${AUTO_SCROLL_CONTAINER_TEST_ID}"]`,
     );
     if (!scrollContainer) throw new Error("auto-scroll container did not render");
     setScrollMetrics(scrollContainer);
@@ -753,7 +1144,7 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     const { rerender } = render(
       <AutoScrollHarness isWorking={false} hasUnreadDivider={false} messages={TEST_MESSAGES} />,
     );
-    const scrollContainer = screen.getByTestId("auto-scroll-container");
+    const scrollContainer = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
     let scrollTop = 600;
     let writes = 0;
     Object.defineProperties(scrollContainer, {
@@ -792,7 +1183,7 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
       <AutoScrollHarness isWorking={false} hasUnreadDivider={false} enabled />,
     );
     const scrollContainer = document.querySelector<HTMLElement>(
-      '[data-testid="auto-scroll-container"]',
+      `[data-testid="${AUTO_SCROLL_CONTAINER_TEST_ID}"]`,
     );
     if (!scrollContainer) throw new Error("auto-scroll container did not render");
     setScrollMetrics(scrollContainer);
@@ -812,6 +1203,155 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     );
 
     expect(scrollContainer.scrollTop).toBe(600);
+  });
+
+  it("persists the last visible disabled offset through hide, unmount, and remount", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 300, clientHeight: 400 };
+    const sessionId = "session-1";
+    const { rerender, unmount } = render(
+      <AutoScrollHarness
+        isWorking={false}
+        hasUnreadDivider={false}
+        enabled={false}
+        isVisible
+        sessionId={sessionId}
+        metrics={metrics}
+      />,
+    );
+    const scrollContainer = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    metrics.scrollTop = 275;
+    scrollContainer.dispatchEvent(new Event("scroll"));
+
+    rerender(
+      <AutoScrollHarness
+        isWorking={false}
+        hasUnreadDivider={false}
+        enabled={false}
+        isVisible={false}
+        sessionId={sessionId}
+        metrics={metrics}
+      />,
+    );
+    unmount();
+
+    expect(transcriptScrollTopWrites).toHaveBeenLastCalledWith(sessionId, 275);
+
+    metrics.scrollTop = 0;
+    render(
+      <NativeScrollManagementHarness
+        items={[transcriptMessage("restored-message")]}
+        metrics={metrics}
+        sessionId={sessionId}
+        enabled={false}
+      />,
+    );
+
+    expect(metrics.scrollTop).toBe(275);
+  });
+
+  it("does not write hidden appended content and catches up after activation", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    try {
+      const { rerender } = render(
+        <AutoScrollHarness isWorking={false} hasUnreadDivider={false} metrics={metrics} />,
+      );
+      const scrollContainer = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      metrics.scrollTop = 600;
+
+      rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          messages={[...TEST_MESSAGES, {} as Message]}
+          isVisible={false}
+          metrics={metrics}
+        />,
+      );
+      expect(scrollContainer.scrollTop).toBe(600);
+
+      rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          messages={[...TEST_MESSAGES, {} as Message]}
+          isVisible
+          metrics={metrics}
+        />,
+      );
+      metrics.scrollTop = 600;
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      expect(scrollContainer.scrollTop).toBe(2_147_483_647);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    { label: "disabled", enabled: false },
+    { label: "manually away while enabled", enabled: true },
+  ])("preserves the $label reader position on activation", ({ enabled }) => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const metrics = { scrollHeight: 1000, scrollTop: 300, clientHeight: 400 };
+    try {
+      const markRef: { current?: () => void } = {};
+      const { rerender } = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          enabled={enabled}
+          markRef={markRef}
+          metrics={metrics}
+        />,
+      );
+      const scrollContainer = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      metrics.scrollTop = 300;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      if (!enabled) markRef.current?.();
+
+      rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          enabled={enabled}
+          markRef={markRef}
+          isVisible={false}
+          messages={[...TEST_MESSAGES, {} as Message]}
+          metrics={metrics}
+        />,
+      );
+      metrics.scrollTop = 300;
+      rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          enabled={enabled}
+          markRef={markRef}
+          isVisible
+          messages={[...TEST_MESSAGES, {} as Message]}
+          metrics={metrics}
+        />,
+      );
+      metrics.scrollTop = 300;
+      act(() => {
+        for (const frame of frames.splice(0)) frame(0);
+      });
+
+      expect(scrollContainer.scrollTop).toBe(300);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("never re-scrolls once the reader has started scrolling, even if the anchored bar's height changes afterward", () => {

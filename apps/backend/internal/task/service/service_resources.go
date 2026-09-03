@@ -15,6 +15,9 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
@@ -1492,8 +1495,43 @@ func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []stri
 
 // Executor operations
 
+var ErrKubernetesAdminRequired = errors.New("administrator identity required for Kubernetes settings")
+
+func requireKubernetesAdmin(ctx context.Context) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || !identity.IsAdmin() {
+		return ErrKubernetesAdminRequired
+	}
+	return nil
+}
+
+func validateExecutorForType(executorType models.ExecutorType, config map[string]string) error {
+	if err := validateExecutorConfig(config); err != nil {
+		return err
+	}
+	if executorType != models.ExecutorTypeKubernetes {
+		return nil
+	}
+	if _, err := agentkubernetes.ParseExecutorConfig(config); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+	}
+	return nil
+}
+
+func validateKubernetesProfileConfig(config map[string]string) error {
+	if _, err := agentkubernetes.ParseProfileConfig(config); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+	}
+	return nil
+}
+
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
-	if err := validateExecutorConfig(req.Config); err != nil {
+	if req.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if err := validateExecutorForType(req.Type, req.Config); err != nil {
 		return nil, err
 	}
 	executor := &models.Executor{
@@ -1522,8 +1560,29 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if err != nil {
 		return nil, err
 	}
+	targetType := executor.Type
+	if req.Type != nil {
+		targetType = *req.Type
+	}
+	if executor.Type == models.ExecutorTypeKubernetes || targetType == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateExecutorUpdateRequest(executor, req); err != nil {
 		return nil, err
+	}
+	if req.Type != nil && *req.Type != executor.Type &&
+		(executor.Type == models.ExecutorTypeKubernetes || *req.Type == models.ExecutorTypeKubernetes) {
+		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
+		if inventoryErr != nil {
+			s.logger.Error("failed to check retained Kubernetes inventory before executor type change",
+				zap.String("executor_id", id), zap.Error(inventoryErr))
+			return nil, inventoryErr
+		}
+		if retained {
+			return nil, ErrActiveTaskSessions
+		}
 	}
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
@@ -1536,8 +1595,16 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 
 // validateExecutorUpdateRequest validates config and system executor constraints.
 func validateExecutorUpdateRequest(executor *models.Executor, req *UpdateExecutorRequest) error {
+	targetType := executor.Type
+	if req.Type != nil {
+		targetType = *req.Type
+	}
 	if req.Config != nil {
-		if err := validateExecutorConfig(req.Config); err != nil {
+		if err := validateExecutorForType(targetType, req.Config); err != nil {
+			return err
+		}
+	} else if targetType == models.ExecutorTypeKubernetes {
+		if err := validateExecutorForType(targetType, executor.Config); err != nil {
 			return err
 		}
 	}
@@ -1583,6 +1650,11 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return err
+		}
+	}
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
 	}
@@ -1594,11 +1666,50 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
+		if inventoryErr != nil {
+			s.logger.Error("failed to check retained Kubernetes inventory for executor",
+				zap.String("executor_id", id), zap.Error(inventoryErr))
+			return inventoryErr
+		}
+		if retained {
+			return ErrActiveTaskSessions
+		}
+	}
 	if err := s.executors.DeleteExecutor(ctx, id); err != nil {
 		return err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
 	return nil
+}
+
+func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
+	running, err := s.executors.ListExecutorsRunning(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range running {
+		if row == nil {
+			continue
+		}
+		currentID := strings.TrimSpace(row.ExecutorID)
+		recordedID, recordedOK := row.Metadata[agentkubernetes.MetadataKeyResourceExecutorID].(string)
+		recordedID = strings.TrimSpace(recordedID)
+		if currentID == executorID {
+			return true, nil
+		}
+		if recordedID == executorID {
+			return true, nil
+		}
+		// Only two matching, nonempty associations can prove that a Kubernetes
+		// row belongs to some other executor. Anything less must block cleanup.
+		if row.Runtime == agentruntime.RuntimeKubernetes &&
+			(currentID == "" || !recordedOK || recordedID == "" || currentID != recordedID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
@@ -1614,13 +1725,21 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if req.ExecutorID == "" {
 		return nil, fmt.Errorf("executor_id is required")
 	}
-	if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
-		return nil, err
-	}
 	// Verify executor exists
 	executor, err := s.executors.GetExecutor(ctx, req.ExecutorID)
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
+	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+		if err := validateKubernetesProfileConfig(req.Config); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
+		return nil, err
 	}
 	if executor.Type == models.ExecutorTypeSprites && !hasSpritesToken(req.EnvVars) {
 		return nil, fmt.Errorf("sprites profiles require %s env var", spritesTokenEnvKey)
@@ -1653,6 +1772,18 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil {
 		return nil, err
+	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+		config := profile.Config
+		if req.Config != nil {
+			config = req.Config
+		}
+		if err := validateKubernetesProfileConfig(config); err != nil {
+			return nil, err
+		}
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name
@@ -1754,6 +1885,15 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	profile, err := s.executors.GetExecutorProfile(ctx, id)
 	if err != nil {
 		return err
+	}
+	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
+		return err
+	}
+	if executor != nil && executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return err
+		}
 	}
 	if err := s.executors.DeleteExecutorProfile(ctx, id); err != nil {
 		return err

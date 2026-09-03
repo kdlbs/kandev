@@ -54,6 +54,7 @@ import (
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/integrations/workspacescope"
 	"github.com/kandev/kandev/internal/jira"
+	kuberneteshandlers "github.com/kandev/kandev/internal/kubernetes"
 	"github.com/kandev/kandev/internal/linear"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
@@ -372,7 +373,8 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 }
 
 func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		log.Debug("no agentctl client available for live git status",
 			zap.String("source_session_id", sourceSessionID))
@@ -1374,6 +1376,15 @@ func registerSecondaryRoutes(
 	}
 
 	if p.taskRepo != nil {
+		kuberneteshandlers.RegisterRoutes(
+			p.router,
+			p.gateway.Dispatcher,
+			p.taskRepo,
+			p.services.Task,
+			p.log,
+		)
+		p.log.Debug("Registered Kubernetes handlers (HTTP + WebSocket)")
+
 		sshhandlers.RegisterRoutes(
 			p.router,
 			p.gateway.Dispatcher,

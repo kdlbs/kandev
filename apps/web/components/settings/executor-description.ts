@@ -19,5 +19,6 @@ export function getExecutorDescription(type: ExecutorType): string {
   if (type === "remote_docker") return t("executors:descriptionRemoteDocker");
   if (type === "sprites") return t("executors:descriptionSprites");
   if (type === "ssh") return t("executors:descriptionSsh");
+  if (type === "k8s") return t("executors:descriptionKubernetes");
   return t("executors:descriptionCustom");
 }

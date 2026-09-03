@@ -157,9 +157,8 @@ func seedPostgresRunner(t *testing.T, repo *sqlite.Repository, ctx context.Conte
 // TestPostgresWakeReceiptMigrations_ApplyAndReplay is the PostgreSQL twin
 // required by apps/backend/AGENTS.md for a schema-changing repository
 // change: this branch added parent_child_wake_receipts.child_generation
-// (ALTER TABLE ... ADD COLUMN) and the parent_wake_delivery_seq table
-// (CREATE TABLE). Confirms both apply on a fresh database and are
-// idempotent when the schema init runs again against the same database
+// (ALTER TABLE ... ADD COLUMN). Confirms it applies on a fresh database and
+// is idempotent when the schema init runs again against the same database
 // (mirroring production boot order). Skips unless KANDEV_TEST_POSTGRES_DSN
 // is set.
 func TestPostgresWakeReceiptMigrations_ApplyAndReplay(t *testing.T) {
@@ -183,55 +182,10 @@ func TestPostgresWakeReceiptMigrations_ApplyAndReplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := repo.IncrementWakeDeliverySeq(ctx, "pg-migration-parent"); err != nil {
-		t.Fatalf("increment wake delivery seq after replay: %v", err)
-	}
 	// Proves parent_child_wake_receipts.child_generation exists: this SELECT
 	// names the column explicitly (GetWakeReceipt, wake_receipts.go).
 	if _, err := repo.GetWakeReceipt(ctx, "pg-migration-parent"); err != nil {
 		t.Fatalf("read wake receipt after replay: %v", err)
-	}
-}
-
-// TestPostgresIncrementWakeDeliverySeq_Monotonic is
-// TestIncrementWakeDeliverySeq_Monotonic's PostgreSQL twin: the
-// `INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING` upsert
-// (IncrementWakeDeliverySeq, wake_receipts.go) must behave identically on
-// Postgres. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
-func TestPostgresIncrementWakeDeliverySeq_Monotonic(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
-		t.Fatalf("init task repo: %v", err)
-	}
-	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
-		t.Fatalf("settings store init: %v", err)
-	}
-	repo, err := sqlite.NewWithDB(db, db, nil)
-	if err != nil {
-		t.Fatalf("init office repo: %v", err)
-	}
-	ctx := context.Background()
-
-	first, err := repo.IncrementWakeDeliverySeq(ctx, "pg-parent-1")
-	if err != nil {
-		t.Fatalf("increment 1: %v", err)
-	}
-	if first != 1 {
-		t.Fatalf("first increment = %d, want 1", first)
-	}
-	second, err := repo.IncrementWakeDeliverySeq(ctx, "pg-parent-1")
-	if err != nil {
-		t.Fatalf("increment 2: %v", err)
-	}
-	if second != 2 {
-		t.Fatalf("second increment = %d, want 2", second)
-	}
-	otherFirst, err := repo.IncrementWakeDeliverySeq(ctx, "pg-parent-2")
-	if err != nil {
-		t.Fatalf("increment parent-2: %v", err)
-	}
-	if otherFirst != 1 {
-		t.Fatalf("parent-2 first increment = %d, want 1", otherFirst)
 	}
 }
 

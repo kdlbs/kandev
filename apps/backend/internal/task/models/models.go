@@ -251,6 +251,10 @@ func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
 const (
 	SessionMetaKeyCreatedBy        = "created_by"
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
+	// SessionMetaKeyWorkflowProfileSwitchStopIntent identifies the transient
+	// coordination record used to suppress the lifecycle event caused by a
+	// parked workflow profile switch.
+	SessionMetaKeyWorkflowProfileSwitchStopIntent = "workflow_profile_switch_stop_intent"
 	// SessionMetaKeyOrigin identifies immutable task-session provenance. Unlike
 	// IsPrimary, it never changes when the user selects another conversation tab.
 	SessionMetaKeyOrigin                 = "origin"
@@ -262,6 +266,18 @@ const (
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
+
+// WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
+// one exact runtime execution. Stamp is compared before the metadata value is
+// marked consumed, so a delayed event cannot consume a newer switch intent.
+type WorkflowProfileSwitchStopIntent struct {
+	ExecutionID string `json:"execution_id"`
+	Stamp       string `json:"stamp"`
+	// Consumed is a durable tombstone for the matching terminal callback. It
+	// remains in session metadata so delayed callbacks after a restart cannot
+	// advance the workflow.
+	Consumed bool `json:"consumed,omitempty"`
+}
 
 // SessionMetaKeySessionMode records the agent's last-known session permission
 // mode (auto / default / accept-edits, etc.) so it survives a backend restart or
@@ -920,6 +936,27 @@ func (t *Task) IsOfficeOwnedAndAssigned() bool {
 	return t != nil && t.IsFromOffice && t.AssigneeAgentProfileID != ""
 }
 
+// OfficeDecisionWaitCandidate is the compact projection the Office
+// decision-waiting detector scans (REQ-OFFICE-STALL-VISIBILITY-002). It is a
+// candidate, not a finding: the repository query only establishes that the
+// task is Office-owned, sits at a step carrying a decision-required seat, and
+// has been quiet since UpdatedAt. Whether a decision was already recorded and
+// whether a run is still in flight are judged by the detector, so each
+// rejection has its own countable reason.
+type OfficeDecisionWaitCandidate struct {
+	TaskID    string    `db:"id"`
+	StepID    string    `db:"workflow_step_id"`
+	UpdatedAt time.Time `db:"updated_at"`
+}
+
+// OfficeDecisionWaitCursor identifies the last candidate in one ordered page.
+// The task repository uses it to continue a bounded scan without repeatedly
+// returning the same oldest rows.
+type OfficeDecisionWaitCursor struct {
+	UpdatedAt time.Time
+	TaskID    string
+}
+
 // ChildCompletionRow is the compact active-child projection used to decide
 // whether a parent task's on_children_completed trigger is ready to fire.
 type ChildCompletionRow struct {
@@ -996,6 +1033,44 @@ const (
 	WorkflowStyleOffice = "office"
 	WorkflowStyleCustom = "custom"
 )
+
+// WorkflowProfileSessionStartPolicy controls how a fixed-profile workflow step
+// obtains a session when it starts after a profile switch.
+type WorkflowProfileSessionStartPolicy string
+
+const (
+	WorkflowProfileSessionStartPolicyReuse WorkflowProfileSessionStartPolicy = "reuse"
+	WorkflowProfileSessionStartPolicyNew   WorkflowProfileSessionStartPolicy = "new"
+)
+
+// NormalizeWorkflowProfileSessionStartPolicy returns the safe default for empty
+// and unknown workflow step session-start policy values.
+func NormalizeWorkflowProfileSessionStartPolicy(value string) WorkflowProfileSessionStartPolicy {
+	value = strings.TrimSpace(value)
+	if WorkflowProfileSessionStartPolicy(value) == WorkflowProfileSessionStartPolicyNew {
+		return WorkflowProfileSessionStartPolicyNew
+	}
+	return WorkflowProfileSessionStartPolicyReuse
+}
+
+// WorkflowProfileSessionEndPolicy controls what happens to a fixed-profile
+// workflow step's session when the workflow leaves it for another profile.
+type WorkflowProfileSessionEndPolicy string
+
+const (
+	WorkflowProfileSessionEndPolicyComplete WorkflowProfileSessionEndPolicy = "complete"
+	WorkflowProfileSessionEndPolicyPark     WorkflowProfileSessionEndPolicy = "park"
+)
+
+// NormalizeWorkflowProfileSessionEndPolicy returns the safe default for empty
+// and unknown workflow step session-end policy values.
+func NormalizeWorkflowProfileSessionEndPolicy(value string) WorkflowProfileSessionEndPolicy {
+	value = strings.TrimSpace(value)
+	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyPark {
+		return WorkflowProfileSessionEndPolicyPark
+	}
+	return WorkflowProfileSessionEndPolicyComplete
+}
 
 // WorkflowSource values are persisted in workflows.source and record where a
 // workflow definition came from. Manual workflows are user-managed; GitHub
@@ -1825,6 +1900,7 @@ const (
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
 	ExecutorTypeSprites      ExecutorType = "sprites"
 	ExecutorTypeSSH          ExecutorType = "ssh"
+	ExecutorTypeKubernetes   ExecutorType = "k8s"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
 )
 
@@ -1833,7 +1909,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote:
 		return true
 	default:
 		return false
@@ -1857,6 +1933,8 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSprites
 	case ExecutorTypeSSH:
 		return agentruntime.RuntimeSSH
+	case ExecutorTypeKubernetes:
+		return agentruntime.RuntimeKubernetes
 	default:
 		return agentruntime.RuntimeStandalone
 	}
@@ -1874,7 +1952,7 @@ func IsContainerizedExecutorType(t ExecutorType) bool {
 // IsAlwaysResumableRuntime reports whether the given runtime represents
 // an executor that can always be resumed even without an explicit resume token.
 func IsAlwaysResumableRuntime(runtime agentruntime.Runtime) bool {
-	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH
+	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH || runtime == agentruntime.RuntimeKubernetes
 }
 
 const (

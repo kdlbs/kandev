@@ -517,6 +517,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     groupedItems,
     isInitialMessagesLoading,
   );
+  // Kanban previews intentionally pass `isVisible=false` so they do not
+  // advance the read cursor, but their transcript is rendered in a visible
+  // non-Dockview host. Keep read visibility separate from scroll geometry.
+  const transcriptIsVisible = panelId === null || isVisible;
   const isDockviewJumpLoading = useScrollTargetConsumption({
     resolvedSessionId,
     isVisible,
@@ -617,6 +621,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       ref={panelRef}
       data-testid="session-chat"
       data-panel-kind="session"
+      data-session-id={resolvedSessionId ?? undefined}
       tabIndex={-1}
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
@@ -651,7 +656,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           firstMessageId={firstMessageId}
           onFirstMessageHiddenChange={setIsFirstMessageHidden}
           anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-          isVisible={isVisible}
+          isVisible={transcriptIsVisible}
           stickyPromptBar={
             showAnchoredBar && lastPromptMessage ? (
               <AnchoredLastPromptBar

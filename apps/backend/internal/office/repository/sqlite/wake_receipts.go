@@ -273,39 +273,6 @@ func (r *Repository) UpsertWakeReceiptTx(
 	return err
 }
 
-// IncrementWakeDeliverySeq bumps and returns parentTaskID's per-parent
-// delivery sequence in parent_wake_delivery_seq, a table dedicated to this
-// counter (see createParentChildWakeReceiptsTable's comment on why it is
-// not a column on parent_child_wake_receipts). Call once per admitted
-// dispatch attempt, immediately before computing the dispatch's operation
-// id: tasks.updated_at has only one-second resolution, so a
-// reopen+recomplete landing in the same wall-clock second as the wake it
-// invalidated produces a child_generation byte-identical to the one already
-// on file, and hashing an operation id from generation alone would make the
-// engine's permanent operation ledger treat the second, genuinely different
-// delivery as already applied. This counter never repeats for the same
-// parent, so two admitted deliveries always compute distinct operation ids
-// regardless of generation.
-func (r *Repository) IncrementWakeDeliverySeq(ctx context.Context, parentTaskID string) (int64, error) {
-	var seq int64
-	// The SET expression must qualify seq with the table name: on Postgres,
-	// the bare "seq = seq + 1" form raises "column reference \"seq\" is
-	// ambiguous" (confirmed against a live PostgreSQL 15 instance) even
-	// though only one seq column is in scope — SQLite accepts the
-	// unqualified form, so this dialect difference is silent without a
-	// Postgres run.
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
-		INSERT INTO parent_wake_delivery_seq (parent_task_id, seq) VALUES (?, 1)
-		ON CONFLICT (parent_task_id) DO UPDATE
-			SET seq = parent_wake_delivery_seq.seq + 1
-		RETURNING seq
-	`), parentTaskID).Scan(&seq)
-	if err != nil {
-		return 0, err
-	}
-	return seq, nil
-}
-
 type childSetKeyRow struct {
 	ID    string `db:"id"`
 	State string `db:"state"`
@@ -325,6 +292,39 @@ func (r *Repository) GetChildSetKey(ctx context.Context, parentTaskID string) (s
 		return "", err
 	}
 	return formatChildSetKey(rows), nil
+}
+
+// GetChildSetKeyAndGeneration returns both the deterministic child-set key
+// and the generation (newest non-archived child updated_at, rendered via
+// dialect.SecondPrecisionText) for a parent's current children. The edge
+// path (queueChildrenCompletedRun) needs both: the key for the trigger
+// payload identity, the generation as a wakeOperationID input so its
+// operation id matches what the reconciler (ListStuckParents,
+// StuckParentCandidate.NewestChildUpdatedAt) would compute for the same
+// completion wave.
+func (r *Repository) GetChildSetKeyAndGeneration(ctx context.Context, parentTaskID string) (string, string, error) {
+	var rows []childSetKeyRow
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, state
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL
+		ORDER BY id
+	`), parentTaskID); err != nil {
+		return "", "", err
+	}
+
+	driver := r.ro.DriverName()
+	generationText := dialect.SecondPrecisionText(driver, "MAX(updated_at)")
+	var generation sql.NullString
+	if err := r.ro.GetContext(ctx, &generation, r.ro.Rebind(`
+		SELECT `+generationText+`
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL
+	`), parentTaskID); err != nil {
+		return "", "", err
+	}
+
+	return formatChildSetKey(rows), generation.String, nil
 }
 
 // GetChildSetKeyTx is the transaction-scoped counterpart to GetChildSetKey.
