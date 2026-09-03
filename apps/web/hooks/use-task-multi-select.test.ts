@@ -1,8 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TaskPriority } from "@/lib/types/http";
+import type { DisplayOrderTask } from "@/lib/kanban/task-order";
 import {
   multiSelectReducer,
   INITIAL_STATE,
   buildPipelineStepIndexOf,
+  filterIdsByPriorityFilter,
 } from "./use-task-multi-select";
 
 describe("multiSelectReducer", () => {
@@ -134,5 +138,213 @@ describe("buildPipelineStepIndexOf", () => {
     const indexOf = buildPipelineStepIndexOf(snapshots, {});
     expect(indexOf("unknown-step")).toBe(Infinity);
     expect(indexOf(undefined)).toBe(Infinity);
+  });
+});
+
+describe("filterIdsByPriorityFilter", () => {
+  const taskById = new Map<string, DisplayOrderTask>([
+    ["high", { id: "high", priority: "high" }],
+    ["low", { id: "low", priority: "low" }],
+    ["unranked", { id: "unranked" }],
+  ]);
+
+  it("keeps every id when the priority filter is empty", () => {
+    expect(filterIdsByPriorityFilter(["high", "low", "unranked"], taskById, [])).toEqual([
+      "high",
+      "low",
+      "unranked",
+    ]);
+  });
+
+  it("drops an id whose task's priority is outside the active selection", () => {
+    expect(filterIdsByPriorityFilter(["high", "low"], taskById, ["high"])).toEqual(["high"]);
+  });
+
+  it("drops an unranked task under a non-empty selection", () => {
+    expect(filterIdsByPriorityFilter(["high", "unranked"], taskById, ["high"])).toEqual(["high"]);
+  });
+
+  it("keeps an id whose task isn't in the map — visibility can't be determined, so it isn't excluded", () => {
+    expect(filterIdsByPriorityFilter(["ghost"], taskById, ["high"])).toEqual(["ghost"]);
+  });
+});
+
+const moveTaskById = vi.fn();
+const deleteTaskById = vi.fn();
+const archiveTaskById = vi.fn();
+
+vi.mock("@/hooks/use-task-actions", () => ({
+  useTaskActions: () => ({
+    moveTaskById,
+    deleteTaskById,
+    archiveTaskById,
+    renameTaskById: vi.fn(),
+  }),
+}));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: false }),
+}));
+
+function makeTask(id: string, priority?: TaskPriority) {
+  return {
+    id,
+    workflowId: "wf1",
+    workflowStepId: "step1",
+    title: id,
+    position: 0,
+    priority,
+  };
+}
+
+function makeStoreApi(
+  tasks: (ReturnType<typeof makeTask> & { createdAt?: string })[],
+  priorityFilterTokens: TaskPriority[] = [],
+  kanbanSort: "created_desc" | "priority_desc" = "created_desc",
+) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let state: any = {
+    kanban: { workflowId: "wf1", steps: [], tasks: [] },
+    kanbanMulti: {
+      snapshots: {
+        wf1: {
+          workflowId: "wf1",
+          workflowName: "wf1",
+          steps: [{ id: "step1", position: 0 }],
+          tasks,
+        },
+      },
+      isLoading: false,
+    },
+    userSettings: {
+      kanbanSort,
+      kanbanPriorityFilterTokens: priorityFilterTokens,
+      kanbanViewMode: "kanban",
+      hiddenWorkflowStepIds: {},
+    },
+  };
+  state.hydrate = (patch: Partial<typeof state>) => {
+    state = { ...state, ...patch };
+  };
+  state.setWorkflowSnapshot = (wfId: string, snapshot: unknown) => {
+    state = {
+      ...state,
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: { ...state.kanbanMulti.snapshots, [wfId]: snapshot },
+      },
+    };
+  };
+  return { getState: () => state };
+}
+
+let storeApi: ReturnType<typeof makeStoreApi>;
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => storeApi,
+}));
+
+describe("useTaskMultiSelect — bulk actions exclude priority-filtered-out tasks (AC-002.11)", () => {
+  beforeEach(() => {
+    moveTaskById.mockReset().mockResolvedValue(undefined);
+    deleteTaskById.mockReset().mockResolvedValue(undefined);
+    archiveTaskById.mockReset().mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("bulkDelete skips a selected task the active priority filter hides, without clearing it from the selection", async () => {
+    storeApi = makeStoreApi([makeTask("visible", "high"), makeTask("hidden", "low")], ["high"]);
+    const { useTaskMultiSelect } = await import("./use-task-multi-select");
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+
+    act(() => result.current.toggleSelect("visible"));
+    act(() => result.current.toggleSelect("hidden"));
+
+    await act(async () => {
+      await result.current.bulkDelete();
+    });
+
+    expect(deleteTaskById).toHaveBeenCalledTimes(1);
+    expect(deleteTaskById).toHaveBeenCalledWith("visible", undefined);
+    expect(result.current.selectedIds.has("hidden")).toBe(true);
+  });
+
+  it("bulkMove skips a filtered-out selected task and doesn't consume a position index for it", async () => {
+    storeApi = makeStoreApi([makeTask("visible", "high"), makeTask("hidden", "low")], ["high"]);
+    const { useTaskMultiSelect } = await import("./use-task-multi-select");
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+
+    act(() => result.current.toggleSelect("visible"));
+    act(() => result.current.toggleSelect("hidden"));
+
+    await act(async () => {
+      await result.current.bulkMove("step2");
+    });
+
+    expect(moveTaskById).toHaveBeenCalledTimes(1);
+    expect(moveTaskById).toHaveBeenCalledWith("visible", {
+      workflow_id: "wf1",
+      workflow_step_id: "step2",
+      position: 0,
+    });
+  });
+
+  it("bulkMove assigns positions in the live board sort order, not a fixed created-desc order (AC-002.10)", async () => {
+    // Under created_desc these would land oldest-last; under priority_desc a
+    // backward range selection must still land in priority-rank order.
+    storeApi = makeStoreApi(
+      [
+        { ...makeTask("low", "low"), createdAt: "2026-01-03T00:00:00Z" },
+        { ...makeTask("critical", "critical"), createdAt: "2026-01-01T00:00:00Z" },
+        { ...makeTask("high", "high"), createdAt: "2026-01-02T00:00:00Z" },
+      ],
+      [],
+      "priority_desc",
+    );
+    const { useTaskMultiSelect } = await import("./use-task-multi-select");
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+
+    // Select in reverse-of-priority order to prove the assigned index comes
+    // from the sort token, not selection order.
+    act(() => result.current.toggleSelect("low"));
+    act(() => result.current.toggleSelect("critical"));
+    act(() => result.current.toggleSelect("high"));
+
+    await act(async () => {
+      await result.current.bulkMove("step2");
+    });
+
+    expect(moveTaskById).toHaveBeenCalledTimes(3);
+    expect(moveTaskById).toHaveBeenNthCalledWith(1, "critical", {
+      workflow_id: "wf1",
+      workflow_step_id: "step2",
+      position: 0,
+    });
+    expect(moveTaskById).toHaveBeenNthCalledWith(2, "high", {
+      workflow_id: "wf1",
+      workflow_step_id: "step2",
+      position: 1,
+    });
+    expect(moveTaskById).toHaveBeenNthCalledWith(3, "low", {
+      workflow_id: "wf1",
+      workflow_step_id: "step2",
+      position: 2,
+    });
+  });
+
+  it("acts on every selected task when the priority filter is empty", async () => {
+    storeApi = makeStoreApi([makeTask("a", "high"), makeTask("b", "low")], []);
+    const { useTaskMultiSelect } = await import("./use-task-multi-select");
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+
+    act(() => result.current.toggleSelect("a"));
+    act(() => result.current.toggleSelect("b"));
+
+    await act(async () => {
+      await result.current.bulkArchive();
+    });
+
+    expect(archiveTaskById).toHaveBeenCalledTimes(2);
   });
 });

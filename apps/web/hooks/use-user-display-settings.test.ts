@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import {
+  buildNormalizedSettings,
   buildSettingsUpdatePayload,
   isSettingsUnchanged,
   normalizeHiddenStepIds,
@@ -176,6 +177,34 @@ describe("buildSettingsUpdatePayload", () => {
     expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
       kanban_sort: "priority_desc",
       kanban_priority_filter_tokens: ["critical", "high"],
+    });
+  });
+});
+
+describe("buildNormalizedSettings — snapshot-not-delta commit semantics (AC-004.5)", () => {
+  it("carries a sibling field's current-but-possibly-stale value verbatim when only a different field changes", () => {
+    // This client's local state hasn't yet seen a concurrent change another
+    // client made to kanbanPriorityFilterTokens — it still holds ["critical"].
+    const current = settingsWithKanbanBoard("created_desc", ["critical"]);
+
+    // This client changes only kanbanSort; it never touches the priority filter.
+    const normalized = buildNormalizedSettings(
+      {
+        workspaceId: WORKSPACE_ID,
+        workflowId: null,
+        repositoryIds: [],
+        kanbanSort: "priority_desc",
+      },
+      current,
+    );
+
+    // The resulting payload is a full snapshot: it carries this client's
+    // stale copy of the sibling field, not just the field that changed. A
+    // later-committing write built this way would silently overwrite a
+    // concurrent client's still-in-flight change to that sibling field.
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_sort: "priority_desc",
+      kanban_priority_filter_tokens: ["critical"],
     });
   });
 });
