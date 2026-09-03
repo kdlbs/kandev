@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/auth/authn"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -39,9 +40,8 @@ func (h *Handlers) handleCancelPendingMove(ctx context.Context, msg *ws.Message)
 	}
 	var req cancelPendingMoveRequest
 	if err := decodePendingMoveRequest(msg.Payload, &req); err != nil {
-		_, auditErr := h.pendingMoveCanceller.ExactCancelPendingMove(
-			ctx, actor, messagequeue.ExactPendingMoveMatch{}, msg.ID,
-		)
+		present, canonical := pendingMoveRequestShape(msg.Payload)
+		auditErr := h.pendingMoveCanceller.AuditInvalidPendingMoveCancellation(ctx, actor, msg.ID, present, canonical)
 		if auditErr != nil {
 			return pendingMoveCancellationError(msg, auditErr)
 		}
@@ -60,6 +60,30 @@ func (h *Handlers) handleCancelPendingMove(ctx context.Context, msg *ws.Message)
 		return pendingMoveCancellationError(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+func pendingMoveRequestShape(payload []byte) (bool, bool) {
+	var fields map[string]json.RawMessage
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	if err := decoder.Decode(&fields); err != nil {
+		return false, false
+	}
+	keys := []string{"pending_move_id", "session_id", "task_id", "move_id", "workflow_id", "expected_current_workflow_step_id", "expected_target_workflow_step_id"}
+	for _, key := range keys {
+		value, ok := fields[key]
+		if !ok {
+			return false, false
+		}
+		var text string
+		if err := json.Unmarshal(value, &text); err != nil || text == "" {
+			return true, false
+		}
+		parsed, err := uuid.Parse(text)
+		if err != nil || parsed.String() != text {
+			return true, false
+		}
+	}
+	return true, true
 }
 
 func decodePendingMoveRequest(payload json.RawMessage, target any) error {

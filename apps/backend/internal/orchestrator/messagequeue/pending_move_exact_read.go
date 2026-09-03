@@ -79,7 +79,7 @@ func (r *sqliteRepository) ReadPendingMoveCensus(
 		WorkflowID:            target.workflowID,
 		CurrentWorkflowStepID: target.currentStepID,
 		TargetWorkflowStepID:  target.targetStepID,
-		QueuedAt:              target.queuedAt,
+		QueuedAt:              timePtr(target.queuedAt),
 	}, nil
 }
 
@@ -89,6 +89,8 @@ func pendingMoveCensusTxOptions() *sql.TxOptions {
 	// snapshot for each authorization and target-relation statement.
 	return &sql.TxOptions{Isolation: sql.LevelRepeatableRead}
 }
+
+func timePtr(value time.Time) *time.Time { return &value }
 
 func (r *sqliteRepository) readPendingMoveCensusTarget(
 	ctx context.Context,
@@ -141,7 +143,7 @@ func (r *sqliteRepository) readLatestPendingMoveIDByTask(
 		SELECT id
 		FROM pending_moves
 		WHERE task_id = ?
-		ORDER BY queued_at DESC
+		ORDER BY queued_at DESC, id DESC
 		LIMIT 1
 	`), taskID).Scan(&pendingMoveID)
 	if err != nil {
@@ -179,7 +181,7 @@ func (r *sqliteRepository) readExactCancelTargetByTask(
 		JOIN workflow_steps target_step
 			ON target_step.id = pending.workflow_step_id AND target_step.workflow_id = target_workflow.id
 		WHERE pending.task_id = ?
-		ORDER BY pending.queued_at DESC
+		ORDER BY pending.queued_at DESC, pending.id DESC
 		LIMIT 1
 	`), taskID).Scan(
 		&target.rowID, &target.moveID, &target.sessionID, &target.taskID,

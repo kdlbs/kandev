@@ -375,16 +375,16 @@ const (
 // authoritative "no row" answer — not a permission-masked null — so a caller
 // can distinguish a genuinely empty state from being denied.
 type PendingMoveCensusResult struct {
-	Found                 bool      `json:"found"`
-	CorrelationID         string    `json:"correlation_id"`
-	ActorKind             string    `json:"actor_kind"`
-	ActorID               string    `json:"actor_id"`
-	PendingMoveID         string    `json:"pending_move_id,omitempty"`
-	MoveID                string    `json:"move_id,omitempty"`
-	TaskID                string    `json:"task_id"`
-	SessionID             string    `json:"session_id,omitempty"`
-	WorkflowID            string    `json:"workflow_id,omitempty"`
-	CurrentWorkflowStepID string    `json:"current_workflow_step_id,omitempty"`
-	TargetWorkflowStepID  string    `json:"target_workflow_step_id,omitempty"`
-	QueuedAt              time.Time `json:"queued_at,omitempty"`
+	Found                 bool       `json:"found"`
+	CorrelationID         string     `json:"correlation_id"`
+	ActorKind             string     `json:"actor_kind"`
+	ActorID               string     `json:"actor_id"`
+	PendingMoveID         string     `json:"pending_move_id,omitempty"`
+	MoveID                string     `json:"move_id,omitempty"`
+	TaskID                string     `json:"task_id"`
+	SessionID             string     `json:"session_id,omitempty"`
+	WorkflowID            string     `json:"workflow_id,omitempty"`
+	CurrentWorkflowStepID string     `json:"current_workflow_step_id,omitempty"`
+	TargetWorkflowStepID  string     `json:"target_workflow_step_id,omitempty"`
+	QueuedAt              *time.Time `json:"queued_at,omitempty"`
 }

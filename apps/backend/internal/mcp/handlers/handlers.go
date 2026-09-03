@@ -215,6 +215,7 @@ type AgentPermissionService interface {
 // PendingMoveCanceller is the narrow privileged deferred-move cancellation seam.
 type PendingMoveCanceller interface {
 	ExactCancelPendingMove(context.Context, messagequeue.PendingMoveCancellationActor, messagequeue.ExactPendingMoveMatch, string) (*messagequeue.PendingMoveCancellationResult, error)
+	AuditInvalidPendingMoveCancellation(context.Context, messagequeue.PendingMoveCancellationActor, string, bool, bool) error
 }
 
 // PendingMoveReader is the narrow privileged deferred-move read seam. It

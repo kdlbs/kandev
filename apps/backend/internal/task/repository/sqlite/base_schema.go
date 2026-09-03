@@ -391,7 +391,7 @@ func (r *Repository) initTaskSchema() error {
 	CREATE UNIQUE INDEX IF NOT EXISTS uniq_tasks_workspace_id_id
 		ON tasks(workspace_id, id);
 	CREATE TABLE IF NOT EXISTS workspace_coordinator_grants (
-		workspace_id TEXT PRIMARY KEY CHECK (workspace_id <> ''),
+		workspace_id TEXT NOT NULL PRIMARY KEY CHECK (workspace_id <> ''),
 		coordinator_task_id TEXT NOT NULL CHECK (coordinator_task_id <> ''),
 		created_by_user_id TEXT NOT NULL,
 		created_at TIMESTAMP NOT NULL,

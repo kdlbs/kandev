@@ -14,11 +14,20 @@ import (
 )
 
 type recordingPendingMoveCanceller struct {
-	actor  messagequeue.PendingMoveCancellationActor
-	match  messagequeue.ExactPendingMoveMatch
-	result *messagequeue.PendingMoveCancellationResult
-	err    error
-	calls  int
+	actor      messagequeue.PendingMoveCancellationActor
+	match      messagequeue.ExactPendingMoveMatch
+	result     *messagequeue.PendingMoveCancellationResult
+	err        error
+	calls      int
+	auditCalls int
+	auditErr   error
+}
+
+func (c *recordingPendingMoveCanceller) AuditInvalidPendingMoveCancellation(
+	_ context.Context, _ messagequeue.PendingMoveCancellationActor, _ string, _, _ bool,
+) error {
+	c.auditCalls++
+	return c.auditErr
 }
 
 func (c *recordingPendingMoveCanceller) ExactCancelPendingMove(
@@ -88,8 +97,8 @@ func TestHandleCancelPendingMoveRejectsAndAuditsCallerFields(t *testing.T) {
 		t.Fatalf("handleCancelPendingMove: %v", err)
 	}
 	assertWSError(t, resp, PendingMoveInvalidArgumentCode)
-	if canceller.calls != 1 || canceller.match != (messagequeue.ExactPendingMoveMatch{}) {
-		t.Fatalf("invalid caller fields were not audited safely: calls=%d match=%#v", canceller.calls, canceller.match)
+	if canceller.auditCalls != 1 || canceller.calls != 0 {
+		t.Fatalf("invalid caller fields were not audited safely: auditCalls=%d calls=%d", canceller.auditCalls, canceller.calls)
 	}
 }
 
@@ -112,13 +121,13 @@ func TestHandleCancelPendingMoveRejectsTrailingJSON(t *testing.T) {
 		t.Fatalf("handleCancelPendingMove: %v", err)
 	}
 	assertWSError(t, resp, PendingMoveInvalidArgumentCode)
-	if canceller.calls != 1 || canceller.match != (messagequeue.ExactPendingMoveMatch{}) {
-		t.Fatalf("trailing JSON was not audited safely: calls=%d match=%#v", canceller.calls, canceller.match)
+	if canceller.auditCalls != 1 || canceller.calls != 0 {
+		t.Fatalf("trailing JSON was not audited safely: auditCalls=%d calls=%d", canceller.auditCalls, canceller.calls)
 	}
 }
 
 func TestHandleCancelPendingMoveInvalidAuditFailureIsInternal(t *testing.T) {
-	canceller := &recordingPendingMoveCanceller{err: messagequeue.ErrPendingMoveCancelFailed}
+	canceller := &recordingPendingMoveCanceller{auditErr: messagequeue.ErrPendingMoveCancelFailed}
 	h := &Handlers{pendingMoveCanceller: canceller, logger: testLogger(t)}
 	payload := exactCancelPayload()
 	payload["force"] = true
@@ -129,6 +138,19 @@ func TestHandleCancelPendingMoveInvalidAuditFailureIsInternal(t *testing.T) {
 		t.Fatalf("handleCancelPendingMove: %v", err)
 	}
 	assertWSError(t, resp, PendingMoveCancelFailedCode)
+}
+
+func TestPendingMoveRequestShapePreservesSafeIdentifierEvidence(t *testing.T) {
+	valid := `{"pending_move_id":"11111111-1111-4111-8111-111111111111","session_id":"22222222-2222-4222-8222-222222222222","task_id":"33333333-3333-4333-8333-333333333333","move_id":"44444444-4444-4444-8444-444444444444","workflow_id":"55555555-5555-4555-8555-555555555555","expected_current_workflow_step_id":"66666666-6666-4666-8666-666666666666","expected_target_workflow_step_id":"77777777-7777-4777-8777-777777777777","unknown":true}`
+	present, canonical := pendingMoveRequestShape([]byte(valid))
+	if !present || !canonical {
+		t.Fatalf("shape=(%v,%v), want all identifiers present and canonical", present, canonical)
+	}
+	numeric := []byte(`{"pending_move_id":1,"session_id":"22222222-2222-4222-8222-222222222222","task_id":"33333333-3333-4333-8333-333333333333","move_id":"44444444-4444-4444-8444-444444444444","workflow_id":"55555555-5555-4555-8555-555555555555","expected_current_workflow_step_id":"66666666-6666-4666-8666-666666666666","expected_target_workflow_step_id":"77777777-7777-4777-8777-777777777777"}`)
+	present, canonical = pendingMoveRequestShape(numeric)
+	if !present || canonical {
+		t.Fatalf("shape=(%v,%v), want present and non-canonical", present, canonical)
+	}
 }
 
 func TestHandleCancelPendingMoveDeniesOrdinaryAndSyntheticCallersIdentically(t *testing.T) {

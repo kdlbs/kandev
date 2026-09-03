@@ -90,7 +90,7 @@ principal and review lifecycle with equivalent workspace scoping and audit.
 
 ## Addendum: Read-Only Exact Pending-Move Census
 
-**Date:** current session
+**Date:** 2026-08-30
 **Area:** backend, protocol, security, workflow
 
 ### Context

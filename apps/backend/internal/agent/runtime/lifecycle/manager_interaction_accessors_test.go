@@ -366,17 +366,13 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 
 	require.True(t, stopTracker.forced, "force must be forwarded to StopInstance")
 	require.Equal(t, StopReasonBackendShutdown, stopTracker.stopReason)
-	require.NotNil(t, writer.running, "a stopped execution must durably revoke its MCP attestation before removal")
-	require.Equal(t, models.ExecutorRunningStatusStopped, writer.running.Status)
+	require.Equal(t, models.ExecutorRunningStatusStopped, writer.status)
 }
 
 func TestStopAgentWithReasonRetainsExecutionWhenTerminalPersistenceFails(t *testing.T) {
 	tests := map[string]func(*captureExecutorRunningWriter, error){
-		"prior row read": func(writer *captureExecutorRunningWriter, failure error) {
-			writer.getErr = failure
-		},
-		"terminal upsert": func(writer *captureExecutorRunningWriter, failure error) {
-			writer.upsertErr = failure
+		"terminal status update": func(writer *captureExecutorRunningWriter, failure error) {
+			writer.statusErr = failure
 		},
 	}
 	for name, injectFailure := range tests {
@@ -412,7 +408,7 @@ func TestStopAgentWithReasonRetainsExecutionWhenTerminalPersistenceFails(t *test
 			require.Empty(t, bus.PublishedEvents, "failed terminal persistence must not publish agent.stopped")
 
 			writer.getErr = nil
-			writer.upsertErr = nil
+			writer.statusErr = nil
 			require.NoError(t, mgr.StopAgentWithReason(
 				context.Background(), "exec-terminal-persist", StopReasonBackendShutdown, true,
 			))

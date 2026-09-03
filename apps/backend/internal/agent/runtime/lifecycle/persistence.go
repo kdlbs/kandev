@@ -243,6 +243,15 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 	_ = m.persistExecutorRunningResult(ctx, execution)
 }
 
+func (m *Manager) persistStoppedExecutorRunning(ctx context.Context, execution *AgentExecution) error {
+	if statusWriter, ok := m.runningWriter.(interface {
+		UpdateExecutorRunningStatus(context.Context, string, string) error
+	}); ok {
+		return statusWriter.UpdateExecutorRunningStatus(ctx, execution.SessionID, models.ExecutorRunningStatusStopped)
+	}
+	return m.persistExecutorRunningResult(ctx, execution)
+}
+
 func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *AgentExecution) error {
 	if m.runningWriter == nil {
 		// Permitted in tests that don't exercise persistence; logged so a

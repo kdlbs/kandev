@@ -440,6 +440,23 @@ func (s *Service) ExactCancelPendingMove(
 	return result, nil
 }
 
+// AuditInvalidPendingMoveCancellation records the safe shape of a malformed
+// request without allowing any of its values to reach the repository.
+func (s *Service) AuditInvalidPendingMoveCancellation(
+	ctx context.Context,
+	actor PendingMoveCancellationActor,
+	correlationID string,
+	present, canonical bool,
+) error {
+	if correlationID == "" {
+		correlationID = uuid.New().String()
+	}
+	if err := s.repo.AuditInvalidPendingMoveCancellation(ctx, actor, correlationID, present, canonical); err != nil {
+		return ErrPendingMoveCancelFailed
+	}
+	return nil
+}
+
 func exactCancellationIdentifiersValid(
 	_ PendingMoveCancellationActor,
 	match ExactPendingMoveMatch,
