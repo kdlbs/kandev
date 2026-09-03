@@ -13,6 +13,7 @@ import {
 import { Kbd, KbdGroup } from "@kandev/ui/kbd";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import type { Task } from "@/lib/types/http";
+import type { CommandPanelLiveTask } from "@/lib/commands/task-result-activity";
 import type { FileSearchResult } from "@/lib/types/backend";
 import { WorkspaceContentSearch } from "@/components/workspace-content-search";
 import {
@@ -143,6 +144,8 @@ export type CommandPanelViewProps = {
   taskResults: Task[];
   stepMap: StepMap;
   repoMap: Map<string, string>;
+  liveTasksById: Map<string, CommandPanelLiveTask>;
+  lastStepIdByWorkflowId: ReadonlyMap<string, string>;
   handleTaskSelect: (task: Task) => void;
 };
 
@@ -228,6 +231,8 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
     taskResults,
     stepMap,
     repoMap,
+    liveTasksById,
+    lastStepIdByWorkflowId,
     handleTaskSelect,
   } = props;
   const { confirmationCommand, visibleCommands, visibleGroups } = getCommandConfirmationState(
@@ -247,6 +252,8 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
           isSearching={isSearching}
           stepMap={stepMap}
           repoMap={repoMap}
+          liveTasksById={liveTasksById}
+          lastStepIdByWorkflowId={lastStepIdByWorkflowId}
           onTaskSelect={handleTaskSelect}
         />
       )}
@@ -257,6 +264,8 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
           search={search}
           stepMap={stepMap}
           repoMap={repoMap}
+          liveTasksById={liveTasksById}
+          lastStepIdByWorkflowId={lastStepIdByWorkflowId}
           onSelect={handleTaskSelect}
         />
       )}

@@ -6,10 +6,105 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
+	officeenginedispatcher "github.com/kandev/kandev/internal/office/engine_dispatcher"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
+
+// spyDecisionDispatcher satisfies shared.WorkflowEngineDispatcher plus the
+// package-local decisionRecordingDispatcher/roleResolvingDispatcher/
+// quorumEvaluatingDispatcher capabilities RecordAgentDecision reaches via
+// type assertion (all exported methods, so a type from this external test
+// package can still satisfy those unexported interfaces structurally).
+// Unlike newTestEngineDispatcher's real engine, this spy captures the exact
+// RecordDecisionInput it was called with, so a test can assert whether
+// SessionID was forwarded without needing a live session row to observe an
+// engine-side behavior difference.
+type spyDecisionDispatcher struct {
+	role          string
+	participantID string
+	lastInput     officeenginedispatcher.RecordDecisionInput
+}
+
+func (s *spyDecisionDispatcher) HandleTrigger(
+	_ context.Context, _ string, _ engine.Trigger, _ any, _ string,
+) error {
+	return nil
+}
+
+func (s *spyDecisionDispatcher) ResolveParticipantRole(
+	_ context.Context, _, _, _ string,
+) (string, string, error) {
+	return s.role, s.participantID, nil
+}
+
+func (s *spyDecisionDispatcher) RecordDecision(
+	_ context.Context, in officeenginedispatcher.RecordDecisionInput,
+) (officeenginedispatcher.RecordDecisionResult, error) {
+	s.lastInput = in
+	return officeenginedispatcher.RecordDecisionResult{DecisionID: "decision-spy"}, nil
+}
+
+func (s *spyDecisionDispatcher) EvaluateStepQuorum(
+	_ context.Context, _ string,
+) (engine.QuorumSnapshot, error) {
+	return engine.QuorumSnapshot{}, nil
+}
+
+// TestRecordAgentDecision_SessionIDNotForwardedWhenFlagOff is the default
+// (flag-off) case: even though the caller supplies a SessionID, the
+// dispatcher never sees it, so RecordDecision falls back to its existing
+// resolveActiveSessionID path — the pre-office-session-identity behavior.
+func TestRecordAgentDecision_SessionIDNotForwardedWhenFlagOff(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "sid1", "ws-d", "SID1", "in_review", 2)
+	mustAddParticipant(t, deps, "sid1", "agent-1", models.ParticipantRoleApprover)
+	spy := &spyDecisionDispatcher{role: models.ParticipantRoleApprover, participantID: "participant-1"}
+	deps.svc.SetWorkflowEngineDispatcher(spy)
+
+	_, err := deps.svc.RecordAgentDecision(context.Background(), dashboard.RecordAgentDecisionInput{
+		TaskID:         "sid1",
+		AgentProfileID: "agent-1",
+		Decision:       engine.DecisionApproved,
+		Reason:         "lgtm",
+		SessionID:      "sess-caller",
+	})
+	if err != nil {
+		t.Fatalf("RecordAgentDecision: %v", err)
+	}
+	if spy.lastInput.SessionID != "" {
+		t.Errorf("SessionID = %q, want blank (flag is off)", spy.lastInput.SessionID)
+	}
+}
+
+// TestRecordAgentDecision_SessionIDForwardedWhenFlagOn proves that once
+// features.officeSessionIdentity is enabled, RecordAgentDecision forwards
+// the caller's own SessionID into RecordDecisionInput, so RecordDecision
+// re-evaluates against the decider's own session instead of the task's
+// most-recently-started ("active") one.
+func TestRecordAgentDecision_SessionIDForwardedWhenFlagOn(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "sid2", "ws-d", "SID2", "in_review", 2)
+	mustAddParticipant(t, deps, "sid2", "agent-1", models.ParticipantRoleApprover)
+	spy := &spyDecisionDispatcher{role: models.ParticipantRoleApprover, participantID: "participant-1"}
+	deps.svc.SetWorkflowEngineDispatcher(spy)
+	deps.svc.SetOfficeSessionIdentity(true)
+
+	_, err := deps.svc.RecordAgentDecision(context.Background(), dashboard.RecordAgentDecisionInput{
+		TaskID:         "sid2",
+		AgentProfileID: "agent-1",
+		Decision:       engine.DecisionApproved,
+		Reason:         "lgtm",
+		SessionID:      "sess-caller",
+	})
+	if err != nil {
+		t.Fatalf("RecordAgentDecision: %v", err)
+	}
+	if spy.lastInput.SessionID != "sess-caller" {
+		t.Errorf("SessionID = %q, want sess-caller (flag is on)", spy.lastInput.SessionID)
+	}
+}
 
 // insertTestTaskNoStep inserts a task row with no workflow_step_id bound
 // (the schema default is ” — see tasks.workflow_step_id NOT NULL DEFAULT

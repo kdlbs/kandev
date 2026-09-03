@@ -53,6 +53,14 @@ type WorktreeProvider interface {
 	GetAllByTaskID(ctx context.Context, taskID string) ([]*worktree.Worktree, error)
 }
 
+// WorktreeCleanupIdentityProvider captures immutable checkout identities before
+// a durable cleanup snapshot is stored. Implementations that do not provide it
+// remain compatible with legacy cleanup wiring, which uses the older live-state
+// fallback in the worktree manager.
+type WorktreeCleanupIdentityProvider interface {
+	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
+}
+
 // WorktreeBatchCleaner extends WorktreeProvider with batch cleanup.
 type WorktreeBatchCleaner interface {
 	WorktreeProvider
@@ -80,6 +88,13 @@ type TaskExecutionStopper interface {
 	// RegisterExecutionStopOwner records exact teardown ownership before a
 	// terminal session mutation. It never replaces the explicit stop call.
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
+}
+
+// synchronousTaskExecutionStopper is an optional cleanup-only extension. The
+// normal StopSession contract schedules process teardown asynchronously, but
+// destructive resource cleanup must wait until the process exits.
+type synchronousTaskExecutionStopper interface {
+	StopSessionSynchronously(ctx context.Context, sessionID, reason string, force bool) error
 }
 
 // TerminalClarificationCanceller expires durable input requests after a task

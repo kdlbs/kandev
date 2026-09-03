@@ -82,13 +82,13 @@ func (r *Repository) insertTemplateSteps(ctx context.Context, tx *sqlx.Tx, workf
 			INSERT INTO workflow_steps (
 				id, workflow_id, name, position, color, prompt, events,
 				allow_manual_move, is_start_step, show_in_command_panel,
-				auto_archive_after_hours, agent_profile_id, stage_type,
+				auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type,
 				auto_advance_requires_signal, cancel_triggers_turn_complete, wip_limit, pull_from_step_id,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`), idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color, stepDef.Prompt, string(events),
 			dialect.BoolToInt(stepDef.AllowManualMove), dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel),
-			stepDef.AutoArchiveAfterHours, stepDef.AgentProfileID, normalizeBootstrapStageType(stepDef.StageType),
+			stepDef.AutoArchiveAfterHours, stepDef.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), normalizeBootstrapStageType(stepDef.StageType),
 			dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), stepDef.WIPLimit, wfmodels.RemapStepID(stepDef.PullFromStepID, idMap), now, now); err != nil {
 			return fmt.Errorf("create Kanban step %q: %w", stepDef.Name, err)
 		}

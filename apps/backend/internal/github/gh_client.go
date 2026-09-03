@@ -694,6 +694,7 @@ func (c *GHClient) ListPRReviews(ctx context.Context, owner, repo string, number
 // ghComment is the JSON shape for review comments from the GitHub API.
 type ghComment struct {
 	ID        int64     `json:"id"`
+	HTMLURL   string    `json:"html_url"`
 	Path      string    `json:"path"`
 	Line      int       `json:"line"`
 	Side      string    `json:"side"`

@@ -100,7 +100,10 @@ type AgentExecution struct {
 	PrepareResult *EnvPrepareResult `json:"-"`
 
 	// agentctl client for this execution
-	agentctl *agentctl.Client
+	agentctl                  *agentctl.Client
+	agentctlOverride          atomic.Pointer[agentctl.Client]
+	agentctlLifecycleMu       sync.RWMutex
+	remoteInstanceLifecycleMu sync.Mutex
 	// agentctlReady records the successful health check independently of the
 	// agent process and workspace stream lifecycles. Prepared sessions have a
 	// healthy agentctl before either of those is started or attached.
@@ -128,6 +131,9 @@ type AgentExecution struct {
 	passthroughLifecycleMu sync.Mutex
 	PassthroughProcessID   string    // Process ID in the interactive runner (empty if not in passthrough mode)
 	PassthroughStartedAt   time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
+	// passthroughInitialPromptProcessID identifies the fresh PTY process that
+	// still needs its initial task prompt through stdin.
+	passthroughInitialPromptProcessID string
 	// passthroughLaunchUsedResume is true if the current passthrough process was
 	// launched via ResumePassthroughSession with the resume flag attached. The
 	// fast-fail handler reads this to decide whether to retry once with a fresh
@@ -376,6 +382,20 @@ func (e *AgentExecution) promptActivitySnapshot() (time.Time, bool, uint64) {
 	return e.lastActivityAt, e.agentEventSincePrompt, e.promptActivityEpoch
 }
 
+// promptAttemptEvidenceSnapshot captures the replay-safety state before a
+// terminal completion handler marks that completion as activity. A genuine
+// turn-content event is deliberately conservative evidence of both output and
+// effects because lifecycle does not own the downstream persistence boundary.
+func (e *AgentExecution) promptAttemptEvidenceSnapshot() PromptAttemptEvidence {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	return PromptAttemptEvidence{
+		EvidenceKnown:  true,
+		OutputObserved: e.agentEventSincePrompt,
+		EffectObserved: e.agentEventSincePrompt,
+	}
+}
+
 func (e *AgentExecution) promptActivityEpochSnapshot() uint64 {
 	e.lastActivityAtMu.Lock()
 	defer e.lastActivityAtMu.Unlock()
@@ -466,9 +486,56 @@ func (e *AgentExecution) setPromptTurnID(turnID string) {
 	e.promptLifecycleMu.Unlock()
 }
 
-// GetAgentCtlClient returns the agentctl client for this execution
-func (ae *AgentExecution) GetAgentCtlClient() *agentctl.Client {
+// currentAgentCtlClient returns the unpinned client snapshot. Callers must
+// already hold agentctlLifecycleMu or be implementing the scoped lease.
+func (ae *AgentExecution) currentAgentCtlClient() *agentctl.Client {
+	if ae == nil {
+		return nil
+	}
+	if current := ae.agentctlOverride.Load(); current != nil {
+		return current
+	}
 	return ae.agentctl
+}
+
+// AcquireAgentCtlClient pins the current client for one bounded operation.
+// Remote replacement takes the write side before publishing a client, while
+// terminal stop takes it while closing and detaching the client. An in-flight
+// operation therefore never observes its client being closed underneath it.
+// Callers must invoke the returned release function as soon as the bounded
+// client operation finishes.
+func (ae *AgentExecution) AcquireAgentCtlClient() (*agentctl.Client, func()) {
+	if ae == nil {
+		return nil, func() {}
+	}
+	ae.agentctlLifecycleMu.RLock()
+	client := ae.currentAgentCtlClient()
+	if client == nil {
+		ae.agentctlLifecycleMu.RUnlock()
+		return nil, func() {}
+	}
+	return client, ae.agentctlLifecycleMu.RUnlock
+}
+
+// replaceAgentctlClient atomically publishes a replacement connection while
+// retaining the construction-time field for test/source compatibility.
+func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentctl.Client {
+	if ae == nil || client == nil {
+		return nil
+	}
+	previous := ae.currentAgentCtlClient()
+	ae.agentctlOverride.Store(client)
+	return previous
+}
+
+// detachAgentctlClient clears every lookup tier after terminal teardown.
+// Callers must hold agentctlLifecycleMu for writing.
+func (ae *AgentExecution) detachAgentctlClient() {
+	if ae == nil {
+		return
+	}
+	ae.agentctl = nil
+	ae.agentctlOverride.Store(nil)
 }
 
 // MarkAgentctlReady records that agentctl passed its startup health check.
@@ -485,10 +552,12 @@ func (ae *AgentExecution) IsAgentctlReady() bool {
 // execution. Returns an empty string when no agentctl client is set (e.g.
 // before the execution has been wired to an agentctl instance).
 func (ae *AgentExecution) AgentctlURL() string {
-	if ae.agentctl == nil {
+	client, release := ae.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
 		return ""
 	}
-	return ae.agentctl.BaseURL()
+	return client.BaseURL()
 }
 
 // SetWorkspaceStream sets the unified workspace stream for this execution
@@ -751,17 +820,20 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	TaskRepositoryID       string
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string // Clone URL for remote executors that need to clone
-	RepoName               string // Repository name used as subdirectory inside TaskDirName
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
+	TaskRepositoryID   string
+	RepositoryID       string
+	RepositoryPath     string
+	RepositoryURL      string // Clone URL for remote executors that need to clone
+	RepoName           string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch         string
+	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch     string
+	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution *models.RemoteContribution
+	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
+	// AllowBranchReplacement permits the explicit new-branch recovery action for
+	// this repository while retaining its environment record.
+	AllowBranchReplacement bool
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
@@ -835,6 +907,9 @@ type LaunchRequest struct {
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is an explicit user-selected recovery permission.
+	// Normal resume leaves it false so a missing branch remains a visible error.
+	AllowBranchReplacement bool
 	TaskTitle              string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
@@ -881,7 +956,7 @@ type LaunchRequest struct {
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
-	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
+	McpMode             string            // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders        []string          // Normalized provider capabilities attached to the task
 	McpProfile          *mcpprofile.Context
 
@@ -963,6 +1038,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		ComparisonTarget:           r.ComparisonTarget,
 		ContributionDestination:    r.ContributionDestination,
 		WorktreeID:                 r.WorktreeID,
+		AllowBranchReplacement:     r.AllowBranchReplacement,
 		WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       r.WorktreeBranchTicket,

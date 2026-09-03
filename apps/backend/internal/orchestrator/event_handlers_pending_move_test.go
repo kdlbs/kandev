@@ -123,6 +123,109 @@ func TestPendingMove_StaleSourceCannotReopenCompletedTask(t *testing.T) {
 	}
 }
 
+// TestApplyPendingMove_DuplicateDeliveryDoesNotRepeatRouteEffect proves that
+// the two overlapping routing invariants this task and upstream PR #3147 each
+// added survive together: (a) a redelivered pending move whose source
+// generation already advanced is recognized as "already satisfied" rather
+// than replayed (upstream's stale/duplicate pending-move handling), and (b)
+// the on_exit/on_enter route effect for the winning transition is claimed
+// exactly once (this task's non-reclaimable route-effect design) — so a
+// duplicate delivery can neither reopen the transition nor double-run its
+// side effects.
+func TestApplyPendingMove_DuplicateDeliveryDoesNotRepeatRouteEffect(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "dup-move-task", "dup-move-session", "source-step")
+	if err := baseRepo.SetSessionMetadataKey(ctx, "dup-move-session", "plan_mode", true); err != nil {
+		t.Fatalf("seed plan_mode: %v", err)
+	}
+	countingRepo := &countingLifecycleRepository{Repository: baseRepo}
+
+	steps := newMockStepGetter()
+	steps.steps["source-step"] = &wfmodels.WorkflowStep{
+		ID: "source-step", WorkflowID: "wf1", Name: "Source",
+		Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{{
+			Type: wfmodels.OnExitDisablePlanMode,
+		}}},
+	}
+	steps.steps["destination-step"] = &wfmodels.WorkflowStep{
+		ID: "destination-step", WorkflowID: "wf1", Name: "Destination",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "destination"},
+		}}},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["dup-move-task"] = &v1.Task{
+		ID: "dup-move-task", WorkspaceID: "ws1", WorkflowID: "wf1",
+		Title: "Test", Description: "Test", State: v1.TaskStateInProgress,
+	}
+	svc := createTestService(baseRepo, steps, taskRepo)
+	svc.repo = countingRepo
+	svc.SetWorkflowStepGetter(steps)
+
+	session, err := baseRepo.GetTaskSession(ctx, "dup-move-session")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	rowsBefore := stepTransitionRowsForTaskOrchestrator(t, baseRepo, "dup-move-task")
+
+	move := &messagequeue.PendingMove{
+		TaskID:                 "dup-move-task",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         "destination-step",
+		ExpectedWorkflowStepID: "source-step",
+	}
+
+	// First delivery: applies the transition and runs on_exit/on_enter
+	// asynchronously.
+	if !svc.applyPendingMove(ctx, "dup-move-task", "dup-move-session", session, move) {
+		t.Fatal("first pending move delivery was not accepted")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for countingRepo.destinationEntryCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := countingRepo.destinationEntryCount(); got != 1 {
+		t.Fatalf("destinationEntryCount = %d after first delivery, want 1", got)
+	}
+	if got := countingRepo.disableCount(); got != 1 {
+		t.Fatalf("disableCount = %d after first delivery, want 1", got)
+	}
+
+	// Second, duplicate delivery of the SAME move (e.g. a redelivered
+	// message-queue event or a retried turn-end apply). The task's source
+	// generation has already advanced past move.ExpectedWorkflowStepID, so
+	// this must resolve as "already satisfied" rather than replaying the
+	// transition or its route effect.
+	if !svc.applyPendingMove(ctx, "dup-move-task", "dup-move-session", session, move) {
+		t.Fatal("duplicate pending move delivery must resolve as idempotent success")
+	}
+
+	// Give any (incorrect) second async apply time to run before asserting.
+	time.Sleep(200 * time.Millisecond)
+
+	if got := countingRepo.destinationEntryCount(); got != 1 {
+		t.Fatalf("destinationEntryCount = %d after duplicate delivery, want 1 (route effect must not repeat)", got)
+	}
+	if got := countingRepo.disableCount(); got != 1 {
+		t.Fatalf("disableCount = %d after duplicate delivery, want 1 (on_exit must not repeat)", got)
+	}
+
+	task, err := baseRepo.GetTask(ctx, "dup-move-task")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if task.WorkflowStepID != "destination-step" {
+		t.Fatalf("workflow_step_id = %q, want %q", task.WorkflowStepID, "destination-step")
+	}
+	rows := stepTransitionRowsForTaskOrchestrator(t, baseRepo, "dup-move-task")
+	if len(rows)-len(rowsBefore) != 1 {
+		t.Fatalf("duplicate delivery wrote %d transition rows, want 1", len(rows)-len(rowsBefore))
+	}
+}
+
 func TestPendingMove_LegacyRowWithoutSourceGenerationFailsClosed(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)

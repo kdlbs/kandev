@@ -66,8 +66,8 @@ spec's load-bearing deliverable.
    scoped (`ListMessagesPaginated` calls `AuthorizeSessionAccess`).
 
 3. **A losing caller is told the wrong thing — STILL OPEN, this spec closes it.** Upstream's
-   `httpRespond` returns **409 "clarification request is no longer active"** when the claim is lost
-   (`internal/clarification/handlers.go`, `claimClarificationResponse`). For a human clicking Submit
+   `httpRespond` returns **409 {"error": "clarification request is no longer active", "code": "not_active"}`
+   when the claim is lost (`internal/clarification/handlers.go`, `claimClarificationResponse`). For a human clicking Submit
    twice that is survivable; for a machine answerer racing the browser it is not, because the caller
    cannot tell "someone else answered, here is what they said" from "this bundle is gone". Adding an
    MCP answerer makes that distinction load-bearing.

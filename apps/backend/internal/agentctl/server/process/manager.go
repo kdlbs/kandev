@@ -179,6 +179,20 @@ type Manager struct {
 	// from branch-only overrides. Updating one target must not race tracker
 	// creation or rewrite siblings' authoritative state.
 	comparisonTargetsMu sync.RWMutex
+	// trackerGitEnv is the process manager's detached snapshot of the instance
+	// environment used by workspace trackers. Each tracker receives its own
+	// copy so tracker-local changes cannot affect another tracker.
+	trackerGitEnv   []string
+	trackerGitEnvMu sync.RWMutex
+
+	// comparisonTargetOps tracks one cancellable materialization per
+	// repository scope. The wait group lets teardown observe all operations
+	// that were admitted before shutdown.
+	comparisonTargetOps          map[string]*comparisonTargetOperation
+	comparisonTargetOpsMu        sync.Mutex
+	comparisonTargetOpsWG        sync.WaitGroup
+	comparisonTargetOpsStopping  bool
+	comparisonTargetOpsPermanent bool
 
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
@@ -282,6 +296,14 @@ func (m *Manager) admitStart() (func(), error) {
 // CloseAdmission rejects new process owners without waiting for in-flight
 // handlers. Instance teardown calls it before shutting down HTTP.
 func (m *Manager) CloseAdmission() {
+	m.comparisonTargetOpsMu.Lock()
+	m.comparisonTargetOpsStopping = true
+	m.comparisonTargetOpsPermanent = true
+	for _, operation := range m.comparisonTargetOps {
+		operation.cancel()
+	}
+	m.comparisonTargetOpsMu.Unlock()
+
 	m.admissionMu.Lock()
 	m.stopping = true
 	lifetimeCancel := m.lifetimeCancel
@@ -353,6 +375,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		lifetimeCtx:          lifetimeCtx,
 		lifetimeCancel:       lifetimeCancel,
 		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		trackerGitEnv:        append([]string(nil), cfg.AgentEnv...),
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -715,9 +738,9 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
 		return t, nil
 	}
-	t := NewWorkspaceTracker(full, m.logger)
+	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
 	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
-	m.prepareTrackerComparisonTarget(context.Background(), t)
+	m.prepareTrackerComparisonTarget(t)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
@@ -898,7 +921,9 @@ func (m *Manager) findRepositoryTracker(repositoryName string) *WorkspaceTracker
 // otherwise sit at its construction default and be demoted by the grace timer
 // 60s later, while the user is looking at it.
 func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
-	return NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker := NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker.SetGitEnvironment(m.trackerGitEnvironment())
+	return tracker
 }
 
 // applyWorkspacePollModeLocked gives newly built trackers the last mode the
@@ -1047,6 +1072,27 @@ func (m *Manager) gitEnvironment() []string {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	return append([]string(nil), m.cfg.AgentEnv...)
+}
+
+func (m *Manager) trackerGitEnvironment() []string {
+	m.trackerGitEnvMu.RLock()
+	defer m.trackerGitEnvMu.RUnlock()
+	return append([]string(nil), m.trackerGitEnv...)
+}
+
+func (m *Manager) setTrackerGitEnvironment(env []string) {
+	detached := append([]string(nil), env...)
+	m.trackerGitEnvMu.Lock()
+	m.trackerGitEnv = detached
+	m.trackerGitEnvMu.Unlock()
+
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.SetGitEnvironment(detached)
+	}
+	for _, tracker := range trackers {
+		tracker.SetGitEnvironment(detached)
+	}
 }
 
 // resolveSubpath normalises and validates a repo subpath relative to
@@ -1294,7 +1340,6 @@ func (m *Manager) buildAdapterConfig() error {
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
 		AutoApprove:               m.cfg.AutoApprovePermissions,
-		ApprovalPolicy:            m.cfg.ApprovalPolicy,
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,
@@ -1350,6 +1395,7 @@ func (m *Manager) buildAdapterConfig() error {
 	if m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 	return nil
 }
 
@@ -1375,7 +1421,7 @@ func (m *Manager) buildFinalCommand() error {
 	m.cmd.Dir = m.cfg.WorkDir
 	m.cmd.Env = m.cfg.AgentEnv
 	// Create a new process group so we can kill all child processes together.
-	// This is important for adapters like OpenCode that spawn child processes
+	// This is important for agents like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
 	setAgentProcGroup(m.cmd)
 
@@ -1625,7 +1671,7 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
-	// Set approval policy if provided (for Codex)
+	// Set approval policy if provided
 	if approvalPolicy != "" {
 		m.cfg.ApprovalPolicy = approvalPolicy
 	}
@@ -1671,7 +1717,7 @@ func (m *Manager) createAdapter() error {
 	}
 	m.adapter = adpt
 
-	// Set stderr provider for adapters that support it (Codex, StreamJSON)
+	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
@@ -1822,6 +1868,10 @@ func (m *Manager) stop(ctx context.Context) error {
 
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
+	comparisonStopErr, comparisonTargetsDrained := m.stopComparisonTargetOperations(ctx)
+	if comparisonTargetsDrained {
+		defer m.reopenComparisonTargetOperations()
+	}
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
@@ -1837,18 +1887,18 @@ func (m *Manager) stop(ctx context.Context) error {
 			// after a normal stop, in which case behaviour is unchanged.
 			tornDown := m.closeAdapterAndStdin()
 			if err := m.stopShellAndProcesses(ctx); err != nil {
-				return err
+				return errors.Join(comparisonStopErr, err)
 			}
 			switch {
 			case m.mainReapPending.Load():
 				if err := m.waitForProcessExit(ctx); err != nil {
-					return err
+					return errors.Join(comparisonStopErr, err)
 				}
 				m.mainReapPending.Store(false)
 			case tornDown:
 				m.drainAfterLateTeardown(ctx)
 			}
-			return nil
+			return comparisonStopErr
 		}
 		return nil
 	}
@@ -1861,7 +1911,7 @@ func (m *Manager) stop(ctx context.Context) error {
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
 
-	auxiliaryStopErr := m.stopShellAndProcesses(ctx)
+	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
 	m.closeAdapterAndStdin()
 	m.killProcessGroupIfRequired()
 	mainStopErr := m.waitForProcessExit(ctx)
@@ -2004,7 +2054,7 @@ func (m *Manager) drainAfterLateTeardown(ctx context.Context) {
 }
 
 // killProcessGroupIfRequired immediately kills the entire process group for
-// adapters (such as OpenCode) that are known not to exit when stdin is closed.
+// agents (such as OpenCode) that are known not to exit when stdin is closed.
 // Other adapters still get process-group cleanup in waitForProcessExit after
 // their graceful stdin-close path has had a chance to finish.
 func (m *Manager) killProcessGroupIfRequired() {

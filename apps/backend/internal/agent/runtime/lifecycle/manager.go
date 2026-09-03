@@ -104,6 +104,7 @@ type Manager struct {
 
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
+	remoteRefreshGroup   singleflight.Group
 
 	// Background remote status polling
 	remoteStatusPollInterval time.Duration
@@ -334,6 +335,7 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
+	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 
@@ -342,6 +344,28 @@ func NewManager(
 	}
 
 	return mgr
+}
+
+func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
+	execution, exists := m.executionStore.Get(failure.ExecutionID)
+	if !exists {
+		m.logger.Debug("ignoring stale initial prompt delivery failure",
+			zap.String("execution_id", failure.ExecutionID),
+			zap.Uint64("prompt_generation", failure.PromptGeneration))
+		return
+	}
+	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
+		Type:             "error",
+		Error:            "initial prompt delivery failed",
+		SessionID:        failure.SessionID,
+		PromptGeneration: failure.PromptGeneration,
+		TurnID:           failure.TurnID,
+	})
+	if !settled {
+		m.logger.Debug("ignoring superseded initial prompt delivery failure",
+			zap.String("execution_id", failure.ExecutionID),
+			zap.Uint64("prompt_generation", failure.PromptGeneration))
+	}
 }
 
 // HandleSessionMode routes a session-level mode transition (from the gateway

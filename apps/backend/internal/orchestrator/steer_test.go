@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -333,6 +334,97 @@ func TestSteerTask_DispatchesAndReleasesInFlightSlot(t *testing.T) {
 			t.Fatal("in-flight slot was not released after a dispatch error")
 		}
 	})
+
+	t.Run("maps a lifecycle no-dispatch result to ordinary admission", func(t *testing.T) {
+		svc, agentMgr := steerDispatchService(t, taskID, sessionID)
+		agentMgr.steerErr = executor.ErrSteerNotDispatched
+
+		if _, err := svc.SteerTask(ctx, taskID, sessionID, "steer", "", false, nil); !errors.Is(err, ErrSteerNotEligible) {
+			t.Fatalf("SteerTask error = %v, want ErrSteerNotEligible", err)
+		}
+		if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
+			t.Fatal("lifecycle no-dispatch left an in-flight slot claimed")
+		}
+	})
+}
+
+// TestSteerTask_PreDispatchFailureDrainsSuccessor proves that a queued message
+// cannot remain stranded when the admitted steer fails before agentctl accepts
+// it. A completion can observe steerInFlight during the materialization or
+// dispatch window and skip its drain, so the failed owner must trigger a new
+// drain after it releases the slot.
+func TestSteerTask_PreDispatchFailureDrainsSuccessor(t *testing.T) {
+	ctx := context.Background()
+	const taskID = "task-steer-pre-dispatch-failure"
+	const sessionID = "session-steer-pre-dispatch-failure"
+
+	steerStarted := make(chan struct{})
+	steerRelease := make(chan struct{})
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		steerErr:       executor.ErrSteerAttachmentMaterialization,
+		steerStarted:   steerStarted,
+		steerRelease:   steerRelease,
+		promptDone:     promptDone,
+	}
+	repo := setupTestRepo(t)
+	agentMgr.repoForExecutionLookup = repo
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-steer-pre-dispatch-failure")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.config.ClaudeMidTurnSteering = true
+	advertisePromptQueueingForTest(t, svc, sessionID)
+	svc.registerBackgroundTask(sessionID, "bg-1")
+	svc.markForegroundIdle(sessionID)
+	svc.completeBackgroundTask(sessionID, "bg-1")
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := svc.SteerTask(ctx, taskID, sessionID, "first steer", "", false, nil)
+		firstDone <- err
+	}()
+	<-steerStarted
+
+	result, err := svc.SteerTask(ctx, taskID, sessionID, "successor", "", false, nil)
+	if err != nil {
+		t.Fatalf("successor steer errored: %v", err)
+	}
+	if result == nil || result.StopReason != steerQueuedStopReason {
+		t.Fatalf("successor result = %+v, want queued steer", result)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, sessionID); status == nil || status.Count != 1 {
+		t.Fatalf("queue before predecessor failure = %+v, want one successor", status)
+	}
+
+	// The predecessor turn ends while the steer still owns the admission slot.
+	if err := repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+		t.Fatalf("set session promptable: %v", err)
+	}
+	if svc.drainQueuedMessageForPromptableSession(ctx, sessionID) {
+		t.Fatal("completion drain dispatched while the steer was still in flight")
+	}
+
+	close(steerRelease)
+	if err := <-firstDone; err == nil {
+		t.Fatal("predecessor steer failure was not returned")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if status := svc.messageQueue.GetStatus(ctx, sessionID); status != nil && status.Count == 0 {
+			select {
+			case <-promptDone:
+				return
+			case <-time.After(2 * time.Second):
+				t.Fatal("queued successor was removed but its prompt did not dispatch")
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, sessionID); status == nil || status.Count != 0 {
+		t.Fatalf("successor remained queued after pre-dispatch failure: %+v", status)
+	}
 }
 
 // TestSteerTask_NotEligibleReturnsSentinel pins that an ineligible session yields

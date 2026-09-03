@@ -33,12 +33,16 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 
 const fetchMock = vi.fn();
+const TESTID_OPTION = "clarification-option";
+const TESTID_STEP = "clarification-step";
+const TESTID_SUBMIT_ERROR = "clarification-submit-error";
 
 function clarMessage(opts: {
   id: string;
   questionId: string;
   index: number;
   total: number;
+  pendingId?: string;
 }): Message {
   return {
     id: opts.id,
@@ -49,7 +53,7 @@ function clarMessage(opts: {
     type: "clarification_request",
     created_at: "2026-05-04T00:00:00Z",
     metadata: {
-      pending_id: "p1",
+      pending_id: opts.pendingId ?? "p1",
       question_id: opts.questionId,
       question_index: opts.index,
       question_total: opts.total,
@@ -122,7 +126,7 @@ describe("ClarificationInputOverlay — Escape key", () => {
     ];
     const { onDismiss, scopeRef } = renderOverlay(messages);
 
-    fireEvent.click(screen.getAllByTestId("clarification-step")[1]);
+    fireEvent.click(screen.getAllByTestId(TESTID_STEP)[1]);
     fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -346,6 +350,139 @@ describe("ClarificationInputOverlay — labelled Skip button", () => {
       rejected: true,
       reject_reason: "User skipped",
     });
+  });
+});
+
+describe("ClarificationInputOverlay — submit failure feedback", () => {
+  it("shows a retry banner on a failed submit, preserves the answer, and never resolves", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    const { onResolved } = renderOverlay([
+      clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => screen.getByTestId(TESTID_SUBMIT_ERROR));
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute("data-selected")).toBe("true");
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fireEvent.click(screen.getByTestId("clarification-retry"));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const [retryUrl, retryInit] = fetchMock.mock.calls[1];
+    expect(String(retryUrl)).toBe("https://api.test/api/v1/clarification/p1/respond");
+    expect(JSON.parse(String(retryInit.body))).toEqual({
+      answers: [{ question_id: "q1", selected_options: ["o1"] }],
+      rejected: false,
+    });
+    await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId(TESTID_SUBMIT_ERROR)).toBeNull();
+  });
+
+  it("uses response-neutral copy when a Skip request fails", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    renderOverlay([clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })]);
+
+    fireEvent.click(screen.getByTestId("clarification-skip"));
+
+    await vi.waitFor(() => expect(screen.queryByTestId(TESTID_SUBMIT_ERROR)).not.toBeNull());
+    expect(screen.getByTestId(TESTID_SUBMIT_ERROR).textContent).toContain(
+      "Could not send your response.",
+    );
+  });
+
+  it("shows a non-retryable expired banner when the bundle is no longer active", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ code: "not_active", error: "clarification request is no longer active" }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const { onResolved } = renderOverlay([
+      clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => screen.getByTestId("clarification-expired"));
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("clarification-retry")).toBeNull();
+  });
+
+  // Regression: a new bundle (different pending_id) arriving after a failed
+  // submit must not render the previous bundle's stale banner over the live
+  // question, and must not let Retry POST the old bundle's answers to the new
+  // bundle's pendingId.
+  it("clears the stale error banner when a new bundle (different pending_id) replaces a failed one", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    const { scopeRef, onResolved, onDismiss, rerender } = renderOverlay([
+      clarMessage({ id: "m-a", questionId: "qA", index: 0, total: 1, pendingId: "pA" }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await vi.waitFor(() => screen.getByTestId(TESTID_SUBMIT_ERROR));
+
+    rerender(
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationInputOverlay
+          messages={[
+            // Reusing a question ID must still reset the old bundle's local
+            // retry state instead of treating it as the same answer.
+            clarMessage({ id: "m-b", questionId: "qA", index: 0, total: 1, pendingId: "pB" }),
+          ]}
+          onResolved={onResolved}
+          onDismiss={onDismiss}
+          shortcutScopeRef={scopeRef}
+        />
+      </div>,
+    );
+
+    expect(screen.queryByTestId(TESTID_SUBMIT_ERROR)).toBeNull();
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute("data-selected")).not.toBe("true");
+
+    fetchMock.mockClear();
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("https://api.test/api/v1/clarification/pB/respond");
+  });
+});
+
+describe("ClarificationInputOverlay — bundle-local state", () => {
+  it("resets custom drafts and the active question when the bundle changes", async () => {
+    const bundleA = [
+      clarMessage({ id: "m-a1", questionId: "q1", index: 0, total: 2, pendingId: "pA" }),
+      clarMessage({ id: "m-a2", questionId: "q2", index: 1, total: 2, pendingId: "pA" }),
+    ];
+    const bundleB = [
+      clarMessage({ id: "m-b1", questionId: "q1", index: 0, total: 2, pendingId: "pB" }),
+      clarMessage({ id: "m-b2", questionId: "q3", index: 1, total: 2, pendingId: "pB" }),
+    ];
+    const { rerender, scopeRef, onResolved, onDismiss } = renderOverlay(bundleA);
+
+    fireEvent.change(screen.getByTestId("clarification-input"), {
+      target: { value: "stale draft" },
+    });
+    fireEvent.click(screen.getAllByTestId(TESTID_STEP)[1]);
+    expect(screen.getAllByTestId(TESTID_STEP)[1].getAttribute("data-active")).toBe("true");
+
+    rerender(
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationInputOverlay
+          messages={bundleB}
+          onResolved={onResolved}
+          onDismiss={onDismiss}
+          shortcutScopeRef={scopeRef}
+        />
+      </div>,
+    );
+
+    await vi.waitFor(() =>
+      expect(screen.getAllByTestId(TESTID_STEP)[0].getAttribute("data-active")).toBe("true"),
+    );
+    expect((screen.getByTestId("clarification-input") as HTMLTextAreaElement).value).toBe("");
   });
 });
 

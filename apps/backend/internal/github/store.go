@@ -152,6 +152,7 @@ const createTablesSQL = `
 		merged_by_login TEXT,
 		closed_by_login TEXT,
 		auto_merge_observed_at DATETIME,
+		source TEXT NOT NULL DEFAULT '',
 		UNIQUE(task_id, repository_id, pr_number)
 	);
 
@@ -612,6 +613,9 @@ func (s *Store) initSchemaUpgrades() error {
 	if err := s.addTaskPRMergeQueueColumns(); err != nil {
 		return err
 	}
+	if err := s.addTaskPRSourceColumn(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -644,6 +648,28 @@ func (s *Store) addTaskPRMergeQueueColumns() error {
 		if _, err := s.db.Exec(stmt); err != nil && !dbutil.IsDuplicateColumnError(err) {
 			return fmt.Errorf("add github_task_prs.%s: %w", column.name, err)
 		}
+	}
+	return nil
+}
+
+// addTaskPRSourceColumn adds github_task_prs.source, which records which
+// write path created the association ("watch" or "url_link"; empty for rows
+// written before this column existed). It joins taskPRColumns like the
+// outcome-attribution columns above, so a driver-level ALTER failure here
+// must also abort startup rather than surface as a scan error on the next
+// read. Only dbutil.IsDuplicateColumnError is tolerated, per ADR 0027; no
+// backfill runs against existing rows.
+func (s *Store) addTaskPRSourceColumn() error {
+	cols, err := s.tableColumns("github_task_prs")
+	if err != nil {
+		return fmt.Errorf("read github_task_prs columns: %w", err)
+	}
+	if _, ok := cols["source"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN source TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!dbutil.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add github_task_prs.source: %w", err)
 	}
 	return nil
 }
@@ -1433,13 +1459,15 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			merged_by_login TEXT,
 			closed_by_login TEXT,
 			auto_merge_observed_at DATETIME,
+			source TEXT NOT NULL DEFAULT '',
 			UNIQUE(task_id, repository_id, pr_number)
 		)`,
-		// The five outcome-attribution columns are selected directly, not
-		// via COALESCE: addTaskPROutcomeColumns runs earlier in
-		// initSchemaUpgrades, before this data-migration step, so the old
-		// table being rebuilt here already has them (fail-loud — startup
-		// would have aborted otherwise).
+		// The five outcome-attribution columns and source are selected
+		// directly, not via COALESCE: addTaskPROutcomeColumns and
+		// addTaskPRSourceColumn both run earlier in initSchemaUpgrades,
+		// before this data-migration step, so the old table being rebuilt
+		// here already has them (fail-loud — startup would have aborted
+		// otherwise).
 		`INSERT INTO github_task_prs_new (
 			id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, head_sha, author_login, state, review_state, checks_state,
@@ -1448,7 +1476,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source
 		) SELECT
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, COALESCE(head_sha, ''), author_login, state, review_state, checks_state,
@@ -1457,7 +1485,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			COALESCE(merge_queue_last_removal_reason, ''), COALESCE(merge_queue_last_removal_before_sha, ''),
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source
 		FROM github_task_prs`,
 	)
 }
@@ -1790,7 +1818,8 @@ const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr
 	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
 	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
 	head_sha, merge_queue_entry_id, merge_queue_entry_head_sha, merge_queue_last_removal_id,
-	merge_queue_last_removed_at, merge_queue_last_removal_reason, merge_queue_last_removal_before_sha`
+	merge_queue_last_removed_at, merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
+	source`
 
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
@@ -1802,7 +1831,8 @@ const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repos
 	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.detached_at, gtp.updated_at,
 	gtp.is_draft, gtp.changed_files, gtp.merged_by_login, gtp.closed_by_login, gtp.auto_merge_observed_at,
 	gtp.head_sha, gtp.merge_queue_entry_id, gtp.merge_queue_entry_head_sha, gtp.merge_queue_last_removal_id,
-	gtp.merge_queue_last_removed_at, gtp.merge_queue_last_removal_reason, gtp.merge_queue_last_removal_before_sha`
+	gtp.merge_queue_last_removed_at, gtp.merge_queue_last_removal_reason, gtp.merge_queue_last_removal_before_sha,
+	gtp.source`
 
 type taskPRWriter interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -1844,6 +1874,7 @@ func taskPRValues(tp *TaskPR) []any {
 		tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt, tp.HeadSHA,
 		tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueLastRemovalID,
 		tp.MergeQueueLastRemovedAt, tp.MergeQueueLastRemovalReason, tp.MergeQueueLastRemovalBeforeSHA,
+		tp.Source,
 	}
 }
 

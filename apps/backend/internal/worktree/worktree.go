@@ -20,10 +20,12 @@ const (
 
 // SyncProgressEvent reports pre-worktree base-branch synchronization progress.
 type SyncProgressEvent struct {
-	StepName string
-	Status   SyncProgressStatus
-	Output   string
-	Error    string
+	StepName      string
+	Status        SyncProgressStatus
+	Output        string
+	Error         string
+	Warning       string
+	WarningDetail string
 }
 
 // SyncProgressCallback is called when base-branch sync status changes.
@@ -70,6 +72,12 @@ type Worktree struct {
 	// Branch is the Git branch name checked out in this worktree.
 	Branch string `json:"branch"`
 
+	// CleanupHeadOID is the immutable checkout identity captured by the durable
+	// task-cleanup snapshot. It is intentionally internal: ordinary worktree
+	// callers do not need to provide it, while durable cleanup uses it to fail
+	// closed if the recorded path or branch advanced before teardown.
+	CleanupHeadOID string `json:"-"`
+
 	// BaseBranch is the branch this worktree was created from.
 	BaseBranch string `json:"base_branch"`
 
@@ -97,10 +105,9 @@ type Worktree struct {
 	// Shown as collapsible content alongside the user-friendly FetchWarning.
 	FetchWarningDetail string `json:"fetch_warning_detail,omitempty"`
 
-	// BaseBranchFallbackWarning is set when the requested BaseBranch did not
-	// exist in the repository and the worktree was created from a fallback
-	// branch (typically the repository's default_branch) instead. Empty when
-	// the original BaseBranch was used.
+	// BaseBranchFallbackWarning is set when the requested base was unavailable
+	// or could not be refreshed and the worktree used a verified local fallback.
+	// Empty when the requested base was used after a successful refresh.
 	BaseBranchFallbackWarning string `json:"base_branch_fallback_warning,omitempty"`
 
 	// BaseBranchFallbackDetail mirrors FetchWarningDetail: a longer message
@@ -152,6 +159,12 @@ type CreateRequest struct {
 	// miss, invalid directory, or mismatched canonical record may create or
 	// recreate a worktree in this mode.
 	ReuseRequired bool
+
+	// AllowBranchReplacement explicitly permits recovery to create a new branch
+	// when the persisted worktree branch no longer exists. It is only set by the
+	// user-selected resume-new-branch action; ordinary resume keeps the original
+	// branch and returns ErrBranchUnrecoverable.
+	AllowBranchReplacement bool
 
 	// TaskTitle is the human-readable task title (optional).
 	// If provided, it will be used to generate semantic worktree/branch names.
@@ -226,6 +239,14 @@ type CreateRequest struct {
 	// RemoteRefState is the result of the authenticated remote advertisement
 	// used for this materialization.
 	RemoteRefState repoclone.RemoteRefState
+
+	// These fields are manager-internal state used when a provider refresh
+	// fails after a local base was verified. They keep the original refresh
+	// policy for checkout-branch materialization while preventing a second
+	// unauthenticated base refresh.
+	baseRefreshFallback        bool
+	baseRefreshFallbackWarning string
+	baseRefreshFallbackDetail  string
 
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.

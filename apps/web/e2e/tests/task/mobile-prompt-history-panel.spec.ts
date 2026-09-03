@@ -187,6 +187,17 @@ test.describe("Prompt history panel on mobile", () => {
     await expect(firstRow).toBeAttached({ timeout: 10_000 });
     await expect(firstRow.locator('[data-testid^="prompt-history-number-"]')).toHaveText("#1");
 
+    // The first prompt is outside the initial transcript page. Selecting it
+    // must load its around-window before Chat attempts to scroll.
+    const firstPromptMessageId = await firstRow
+      .locator("[data-message-id]")
+      .getAttribute("data-message-id");
+    if (!firstPromptMessageId) throw new Error("First prompt row has no message id");
+    await firstRow.locator('[role="button"]').first().tap();
+    await expect(testPage.locator(`#msg-${firstPromptMessageId}`)).toBeAttached({
+      timeout: 10_000,
+    });
+
     // No load-more button inside the panel.
     await expect(panel.getByTestId("load-older-messages")).toHaveCount(0);
   });

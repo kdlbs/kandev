@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
@@ -78,6 +79,7 @@ type pendingTaskTitleSetter interface {
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
+	runtime     agentruntime.Runtime
 	// terminal records the session state observed when the cleanup snapshot was
 	// taken. It is retained for snapshot compatibility, but it must never
 	// suppress a non-not-found runtime stop failure.
@@ -2244,6 +2246,17 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 5. Publish task.updated event so frontend removes from board
 	s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
+	// 5b. Archive cleanup tears down this task's runtime resources (worktree,
+	// container/sandbox) but preserves its task_environments row
+	// (deleteRow: false above) — the row is deleted only by a DELETE cascade
+	// or an explicit ResetTaskEnvironment, never by archive. An inherit_parent
+	// child that has not yet launched and still depends on this task's
+	// environment is therefore left pointing at a row that either dangles
+	// later (if something does delete it) or, more immediately, survives but
+	// now names a workspace whose worktree is gone. Mark those children now,
+	// while we still know which task was archived, instead of letting them
+	// silently strand.
+	s.markOrphanedInheritParentChildren(finalizeCtx, task)
 	s.pullNextTaskOnVacate(finalizeCtx, task.WorkflowStepID, task.ID)
 	s.logger.Info("task archived",
 		zap.String("task_id", id),
@@ -2261,6 +2274,84 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// markOrphanedInheritParentChildren stamps an orphan marker on archived's
+// direct, non-archived inherit_parent children that have not materialized
+// their own workspace. Archive tears down archived's runtime resources
+// (worktree, container/sandbox) but deliberately preserves its own
+// task_environments row (deleteRow: false; the row is deleted only by a
+// DELETE cascade or an explicit ResetTaskEnvironment) — so a child's
+// session.TaskEnvironmentID (task_sessions.task_environment_id has no
+// foreign key) is left pointing at a row that either dangles later, if
+// something else deletes it, or survives but now names a workspace whose
+// worktree is gone. Before this, the child kept rendering as an ordinary
+// launchable CREATED card and only discovered the problem days later, at
+// launch time. The fail-closed check in internal/orchestrator's
+// resolveInheritedEnvironment covers the dangling-row case at launch time;
+// this covers detection at archive time so the card itself can be told
+// apart later, and the worktree-layer ownership-marker message (see
+// internal/worktree/manager_lifecycle.go) covers the live-but-useless case
+// this marker cannot detect on its own.
+// Markers land under the already-open metadata.workspace map (new keys
+// alongside the existing "mode") rather than a new mode value or DTO field,
+// so they stay inert for existing frontend consumers.
+func (s *Service) markOrphanedInheritParentChildren(ctx context.Context, archived *models.Task) {
+	if archived == nil {
+		return
+	}
+	children, err := s.tasks.ListChildren(ctx, archived.ID)
+	if err != nil {
+		s.logger.Warn("list children for orphan marking failed",
+			zap.String("task_id", archived.ID), zap.Error(err))
+		return
+	}
+	for _, child := range children {
+		s.markOrphanedInheritParentChild(ctx, archived, child)
+	}
+}
+
+// markOrphanedInheritParentChild marks a single child, skipping any child
+// that is not an unmaterialized inherit_parent workspace. A child that
+// already has its own task_environments row is not orphaned: the executor's
+// by-task-id environment lookup finds that row first and never falls
+// through to the (now-gone) inherited one.
+func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, child *models.Task) {
+	if child == nil || taskWorkspaceMode(child.Metadata) != workspaceModeInheritParent {
+		return
+	}
+	ownEnv, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, child.ID)
+	if err != nil {
+		s.logger.Warn("check child task environment for orphan marking failed",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	if ownEnv != nil {
+		return
+	}
+
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
+
+	if err := s.updateTaskWorkspaceMetadata(ctx, child); err != nil {
+		s.logger.Warn("mark orphaned inherit_parent child failed",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, child, nil)
+	s.logger.Info("marked inherit_parent child orphaned by parent archive",
+		zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
+}
+
+func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.Task) error {
+	if task == nil {
+		return nil
+	}
+	workspace, _ := task.Metadata["workspace"].(map[string]interface{})
+	if setter, ok := s.tasks.(taskMetadataKeySetter); ok {
+		return setter.SetTaskMetadataKey(ctx, task.ID, "workspace", workspace)
+	}
+	return s.tasks.UpdateTask(ctx, task)
 }
 
 // finalizeCancelledSessions finalizes an archived task's active sessions in
@@ -2670,7 +2761,7 @@ func (s *Service) runTaskCleanup(
 	stopTargets = refreshedTargets
 	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
-	stopOutcome := s.stopTaskRuntimeTargetsWithTaskDeleted(cleanupCtx, id, stopTargets, stopReason, stopFailMsg, taskDeleted)
+	stopOutcome := s.stopTaskRuntimeTargetsWithTaskDeleted(cleanupCtx, id, stopTargets, stopReason, stopFailMsg, taskDeleted, true)
 
 	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup,
 		taskCleanupPreserveRows(stopOutcome))
@@ -2727,6 +2818,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 			target := taskStopTarget{
 				sessionID:   running.SessionID,
 				executionID: strings.TrimSpace(running.AgentExecutionID),
+				runtime:     running.Runtime,
 				terminal:    isCleanableSessionState(sessionStates[running.SessionID]),
 			}
 			targets = append(targets, target)
@@ -2794,6 +2886,7 @@ func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []tas
 		targets = append(targets, taskStopTarget{
 			sessionID:   strings.TrimSpace(running.SessionID),
 			executionID: strings.TrimSpace(running.AgentExecutionID),
+			runtime:     running.Runtime,
 		})
 	}
 	return targets
@@ -2817,6 +2910,9 @@ func mergeTaskStopTargets(live, snapshot []taskStopTarget) []taskStopTarget {
 		key := target.sessionID + "\x00" + target.executionID
 		if index, exists := seen[key]; exists {
 			targets[index].terminal = targets[index].terminal || target.terminal
+			if targets[index].runtime == "" {
+				targets[index].runtime = target.runtime
+			}
 			return
 		}
 		seen[key] = len(targets)
@@ -2883,6 +2979,7 @@ func (s *Service) stopTaskRuntimeTargetsWithTaskDeleted(
 	stopTargets []taskStopTarget,
 	stopReason, stopFailMsg string,
 	taskDeleted bool,
+	waitForStop ...bool,
 ) taskRuntimeStopOutcome {
 	outcome := taskRuntimeStopOutcome{
 		failed:   make(map[string]struct{}),
@@ -2891,11 +2988,12 @@ func (s *Service) stopTaskRuntimeTargetsWithTaskDeleted(
 	if s.executionStopper == nil || len(stopTargets) == 0 {
 		return outcome
 	}
+	wait := len(waitForStop) > 0 && waitForStop[0]
 	for _, target := range stopTargets {
 		if context.Cause(ctx) != nil {
 			return outcome
 		}
-		s.stopTaskRuntimeTarget(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, &outcome)
+		s.stopTaskRuntimeTarget(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, wait, &outcome)
 	}
 	return outcome
 }
@@ -2905,14 +3003,14 @@ func (s *Service) stopTaskRuntimeTarget(
 	taskID string,
 	target taskStopTarget,
 	stopReason, stopFailMsg string,
-	taskDeleted bool,
+	taskDeleted, waitForStop bool,
 	outcome *taskRuntimeStopOutcome,
 ) {
 	if target.executionID != "" {
 		s.stopTaskRuntimeExecution(ctx, taskID, target, stopReason, stopFailMsg, outcome)
 		return
 	}
-	s.stopTaskRuntimeSession(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, outcome)
+	s.stopTaskRuntimeSession(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, waitForStop, outcome)
 }
 
 func (s *Service) stopTaskRuntimeExecution(
@@ -2940,9 +3038,19 @@ func (s *Service) stopTaskRuntimeSession(
 	target taskStopTarget,
 	stopReason, stopFailMsg string,
 	taskDeleted bool,
+	waitForStop bool,
 	outcome *taskRuntimeStopOutcome,
 ) {
-	err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+	var err error
+	if waitForStop {
+		if synchronous, ok := s.executionStopper.(synchronousTaskExecutionStopper); ok {
+			err = synchronous.StopSessionSynchronously(ctx, target.sessionID, stopReason, true)
+		} else {
+			err = s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+		}
+	} else {
+		err = s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+	}
 	if err == nil {
 		return
 	}
