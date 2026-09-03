@@ -175,7 +175,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               interrupted: existing?.interrupted,
               autoStartFailed: existing?.autoStartFailed,
               foregroundActivity: existing?.foregroundActivity,
-              priority: task.priority ?? existing?.priority,
+              priority: preserveIfUndefined(task.priority, existing?.priority),
               ...queueFields(task, existing),
               ...dependencyFields(task, existing),
             };
