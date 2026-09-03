@@ -218,3 +218,29 @@ func TestAdoptSurvivingAgentctlAdoptsAndUpdatesConfig(t *testing.T) {
 		t.Fatalf("upserts = %d, want 1", len(store.upserts))
 	}
 }
+
+// TestStartOwnershipRenewalReturnsNilOnMalformedEndpoint pins that a
+// malformed endpoint is logged and non-fatal: startup already succeeded by
+// the time this is called, so the caller must not fail the whole launch
+// over a renewal-loop wiring problem.
+func TestStartOwnershipRenewalReturnsNilOnMalformedEndpoint(t *testing.T) {
+	cfg := &config.Config{}
+	renewer := startOwnershipRenewal(context.Background(), cfg, newSurvivalTestLogger(t), "not-a-valid-endpoint", "cred")
+	if renewer != nil {
+		t.Fatal("renewer = non-nil, want nil for a malformed endpoint")
+	}
+}
+
+// TestStartOwnershipRenewalStartsAndStopsCleanly pins the Start/Stop wiring
+// itself (the renewal cadence and retry behaviour are covered by the
+// lifecycle package's own OwnershipRenewer tests): a well-formed endpoint
+// yields a running renewer, and Stop returns promptly rather than blocking
+// for anything resembling the resolved renewal interval.
+func TestStartOwnershipRenewalStartsAndStopsCleanly(t *testing.T) {
+	cfg := &config.Config{}
+	renewer := startOwnershipRenewal(context.Background(), cfg, newSurvivalTestLogger(t), "127.0.0.1:0", "cred")
+	if renewer == nil {
+		t.Fatal("renewer = nil, want a started renewer for a well-formed endpoint")
+	}
+	renewer.Stop()
+}

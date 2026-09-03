@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ownershipperiod"
 	"github.com/kandev/kandev/internal/secrets"
 	"go.uber.org/zap"
 )
@@ -84,11 +85,23 @@ func adoptSurvivingAgentctl(
 	// not by a stale PID probe -- a later layer of this feature.
 	cfg.Agent.StandalonePID = 0
 
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-003.8: the rotation AttemptAdoptControlServer
+	// just performed already counted as the first renewal, but nothing renews
+	// ownership again after that without this loop.
+	renewer := startOwnershipRenewal(ctx, cfg, log, outcome.Endpoint, outcome.Credential)
+
 	return &agentctlLauncherResult{
 		// Survival is enabled and this server was adopted, not spawned: the
 		// registered cleanup must not stop it (AC-EXECUTORS-SURVIVAL-001.1),
 		// and there is no local process for this launcher to own regardless.
-		cleanup:    func() error { return nil },
+		// It must still stop the renewal loop this backend started, or the
+		// goroutine leaks past backend shutdown.
+		cleanup: func() error {
+			if renewer != nil {
+				renewer.Stop()
+			}
+			return nil
+		},
 		binaryPath: launcher.FindAgentctlBinary(),
 	}
 }
@@ -130,6 +143,7 @@ func spawnFreshAgentctl(
 	// carry a real host-local liveness handle (executors_running.local_pid).
 	cfg.Agent.StandalonePID = l.Pid()
 
+	var renewer *lifecycle.OwnershipRenewer
 	if cfg.Features.AgentSurvival {
 		endpoint := net.JoinHostPort(cfg.Agent.StandaloneHost, strconv.Itoa(cfg.Agent.StandalonePort))
 		client, err := controlClientFactory(log)(endpoint)
@@ -138,12 +152,49 @@ func spawnFreshAgentctl(
 		} else if err := lifecycle.RecordFreshControlServer(ctx, store, secretStore, client, endpoint, l.AuthToken()); err != nil {
 			log.Warn("failed to record freshly spawned control server", zap.Error(err))
 		}
+		// AC-EXECUTORS-CONTROL-OWNERSHIP-003.8: the bootstrap handshake this
+		// launch just completed already counted as the first renewal, but
+		// nothing renews ownership again after that without this loop.
+		renewer = startOwnershipRenewal(ctx, cfg, log, endpoint, l.AuthToken())
 	}
 
 	return &agentctlLauncherResult{
-		cleanup:    cleanup,
+		cleanup: func() error {
+			if renewer != nil {
+				renewer.Stop()
+			}
+			return cleanup()
+		},
 		binaryPath: l.BinaryPath(),
 	}, nil
+}
+
+// startOwnershipRenewal builds a dedicated control client authenticated with
+// the given credential and starts the periodic ownership-claim loop against
+// it (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/.8), computing the renewal
+// interval from the same resolved unowned period agentctl itself enforces
+// so the two sides can never disagree about it. Returns nil (logged, not
+// fatal) when the endpoint can't be parsed; startup already succeeded by
+// this point, so refusing to run the surviving server over a renewal-loop
+// failure would trade a smaller problem for a bigger one.
+func startOwnershipRenewal(
+	ctx context.Context,
+	cfg *config.Config,
+	log *logger.Logger,
+	endpoint string,
+	credential string,
+) *lifecycle.OwnershipRenewer {
+	host, port, err := splitEndpoint(endpoint)
+	if err != nil {
+		log.Warn("failed to start ownership renewal loop; endpoint malformed", zap.Error(err))
+		return nil
+	}
+	client := agentctlclient.NewControlClient(host, port, log)
+	client.SetAuthToken(credential)
+	period, _ := ownershipperiod.Resolve(cfg.Agentctl.UnownedPeriod, cfg.Agentctl.IdleTimeout)
+	renewer := lifecycle.NewOwnershipRenewer(client, ownershipperiod.RenewalInterval(period), log)
+	renewer.Start(ctx)
+	return renewer
 }
 
 // controlClientFactory builds the real lifecycle.AdoptionControlClientFactory
