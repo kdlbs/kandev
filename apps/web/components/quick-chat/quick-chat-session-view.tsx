@@ -56,7 +56,7 @@ export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChat
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {recoveryFeedback}
-      <div className="min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
         <QuickChatContent
           sessionId={session.sessionId}
           minimalToolbar={isConfig}

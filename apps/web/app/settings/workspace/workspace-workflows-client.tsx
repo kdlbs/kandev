@@ -190,7 +190,12 @@ function useWorkflowActions({
 
   const handleUpdateWorkflow = (
     workflowId: string,
-    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+    updates: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+    },
   ) => {
     setWorkflowItems((prev) =>
       prev.map((wf) =>
@@ -292,7 +297,12 @@ type WorkflowListProps = {
   isImproveWorkspace?: boolean;
   onUpdate: (
     id: string,
-    u: { name?: string; description?: string; agent_profile_id?: string },
+    u: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+    },
   ) => void;
   onDelete: (id: string) => void;
   onDuplicate: (workflow: Workflow, steps: WorkflowStep[]) => void;

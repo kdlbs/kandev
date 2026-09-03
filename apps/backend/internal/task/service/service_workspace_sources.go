@@ -22,8 +22,9 @@ import (
 type WorkspaceSourceKind string
 
 const (
-	WorkspaceSourceRepository WorkspaceSourceKind = "repository"
-	WorkspaceSourceFolder     WorkspaceSourceKind = "folder"
+	WorkspaceSourceRepository       WorkspaceSourceKind = "repository"
+	WorkspaceSourceFolder           WorkspaceSourceKind = "folder"
+	workspaceSourceRemoteProjection models.ExecutorType = "remote"
 )
 
 type WorkspaceSourceInput struct {
@@ -518,6 +519,9 @@ func WorkspaceSourceRuntimeEntryName(executorType string, repository *models.Rep
 		}
 		return name, nil
 	}
+	if !supportsBranchedWorkspaceSources(executorType) {
+		return "", fmt.Errorf("%w: executor %q cannot materialize repository sources", ErrUnsupportedWorkspaceSource, executorType)
+	}
 	branch := worktree.SanitizeBranchSlug(taskRepository.CheckoutBranch)
 	if branch == "" {
 		branch = worktree.SanitizeBranchSlug(taskRepository.BaseBranch)
@@ -530,6 +534,13 @@ func WorkspaceSourceRuntimeEntryName(executorType string, repository *models.Rep
 
 func isLocalWorkspaceExecutor(executorType string) bool {
 	return executorType == string(models.ExecutorTypeLocal) || executorType == "local_pc"
+}
+
+func supportsBranchedWorkspaceSources(executorType string) bool {
+	t := models.ExecutorType(executorType)
+	// "remote" is the backend materializer's explicit executor-agnostic
+	// projection mode. Unknown persisted executor types still fail closed.
+	return t == "" || t == workspaceSourceRemoteProjection || t == models.ExecutorTypeWorktree || models.IsRemoteExecutorType(t)
 }
 
 func (s *Service) workspaceSourceExecutorType(ctx context.Context, taskID string) (string, error) {

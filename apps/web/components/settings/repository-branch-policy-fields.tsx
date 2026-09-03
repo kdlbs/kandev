@@ -14,12 +14,12 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import { BranchSelector } from "@/components/task-create-dialog-selectors";
+import { BranchSelector } from "@/components/branch-selector";
 import {
   branchToOption,
   buildBranchKeywords,
   sortBranches,
-} from "@/components/task-create-dialog-branch-options";
+} from "@/components/branch-picker-options";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { Branch, RepositoryBranchPolicy } from "@/lib/types/http";
 

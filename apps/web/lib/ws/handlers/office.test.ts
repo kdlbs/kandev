@@ -390,6 +390,21 @@ describe("office WS handler — costs refetch gating on office.task.updated", ()
     expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
   });
 
+  it("refreshes inbox and activity after a task project change", () => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers[ACTION_TASK_UPDATED]!;
+
+    handler({
+      type: "notification",
+      action: ACTION_TASK_UPDATED,
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", fields: ["project_id"] },
+    } as Parameters<typeof handler>[0]);
+
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("inbox");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("activity");
+  });
+
   it("maps a project_id update to the task store field", () => {
     const { store, patchTaskInStore } = makeStore(ACTIVE_WS);
     const handlers = registerOfficeHandlers(store);

@@ -38,6 +38,14 @@ func TestAppendLabelsToQuery_DoesNotMatchSimilarKeys(t *testing.T) {
 	}
 }
 
+func TestAppendLabelsToQuery_InsertsBeforeFragment(t *testing.T) {
+	got := appendLabelsToQuery("state=opened#client-fragment", []string{"bug"})
+	want := "state=opened&labels=bug#client-fragment"
+	if got != want {
+		t.Fatalf("got %q, want %q (labels must precede the URL fragment)", got, want)
+	}
+}
+
 func TestIsValidCleanupPolicy(t *testing.T) {
 	cases := map[string]bool{
 		"":        true,

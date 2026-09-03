@@ -741,6 +741,108 @@ func TestMemoryEventBus_PublishStampsSubject(t *testing.T) {
 	}
 }
 
+// TestMemoryEventBus_PanicSubscriberDoesNotStopDelivery is the regression
+// test for the panic guard: before invokeHandler existed, a panicking
+// regular subscriber unwound out of Publish's dispatch loop, so subscribers
+// ordered after it never ran and Publish itself panicked into its caller.
+// A panicking subscriber is registered first (slice order is deterministic,
+// unlike map iteration) so a broken guard fails this test rather than
+// happening to still call the healthy one.
+func TestMemoryEventBus_PanicSubscriberDoesNotStopDelivery(t *testing.T) {
+	log := newTestLogger(t)
+	bus := NewMemoryEventBus(log)
+	defer bus.Close()
+
+	ctx := context.Background()
+	secondCalled := make(chan struct{}, 1)
+
+	subPanic, err := bus.Subscribe("test.panic", func(ctx context.Context, event *Event) error {
+		panic("subscriber blew up")
+	})
+	if err != nil {
+		t.Fatalf("Subscribe (panicking) failed: %v", err)
+	}
+	defer func() { _ = subPanic.Unsubscribe() }()
+
+	subHealthy, err := bus.Subscribe("test.panic", func(ctx context.Context, event *Event) error {
+		secondCalled <- struct{}{}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe (healthy) failed: %v", err)
+	}
+	defer func() { _ = subHealthy.Unsubscribe() }()
+
+	publishReturnedNormally := func() (ok bool) {
+		defer func() {
+			if r := recover(); r != nil {
+				ok = false
+			}
+		}()
+		if err := bus.Publish(ctx, "test.panic", NewEvent("test.type", "test-source", nil)); err != nil {
+			t.Fatalf("Publish returned an error: %v", err)
+		}
+		return true
+	}()
+
+	if !publishReturnedNormally {
+		t.Fatal("Publish panicked into its caller instead of being contained")
+	}
+
+	select {
+	case <-secondCalled:
+	default:
+		t.Fatal("healthy subscriber ordered after the panicking one was never called")
+	}
+}
+
+// TestMemoryEventBus_QueuePanicSubscriberDoesNotEscapePublish is the queue-path
+// counterpart: publishToQueue must contain a panicking queue handler the same
+// way the regular dispatch loop does, so Publish still returns normally.
+func TestMemoryEventBus_QueuePanicSubscriberDoesNotEscapePublish(t *testing.T) {
+	log := newTestLogger(t)
+	bus := NewMemoryEventBus(log)
+	defer bus.Close()
+
+	ctx := context.Background()
+
+	sub, err := bus.QueueSubscribe("test.queue.panic", "workers", func(ctx context.Context, event *Event) error {
+		panic("queue subscriber blew up")
+	})
+	if err != nil {
+		t.Fatalf("QueueSubscribe failed: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	patternKey := metricLabel("pattern", "test.queue.panic", "mode", "queue")
+	queueKeyLabel := metricLabel("pattern", "workers:test.queue.panic", "mode", "queue")
+	before := snapshotPanicCounter(t, patternKey)
+
+	publishReturnedNormally := func() (ok bool) {
+		defer func() {
+			if r := recover(); r != nil {
+				ok = false
+			}
+		}()
+		if err := bus.Publish(ctx, "test.queue.panic", NewEvent("test.type", "test-source", nil)); err != nil {
+			t.Fatalf("Publish returned an error: %v", err)
+		}
+		return true
+	}()
+
+	if !publishReturnedNormally {
+		t.Fatal("Publish panicked into its caller instead of being contained")
+	}
+
+	if after := snapshotPanicCounter(t, patternKey); after != before+1 {
+		t.Fatalf("subscriberPanicTotal[%q] = %d, want %d (before %d + 1)", patternKey, after, before+1, before)
+	}
+	if got := snapshotPanicCounter(t, queueKeyLabel); got != 0 {
+		t.Fatalf("subscriberPanicTotal incremented a queueKey-labelled key %q (value %d); "+
+			"the label must be the bare subscription pattern, never queue+\":\"+pattern", queueKeyLabel, got)
+	}
+}
+
 func TestEvent_EffectiveSubject(t *testing.T) {
 	cases := []struct {
 		name  string

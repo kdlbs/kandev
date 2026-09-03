@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001
 created: 2026-08-24
+updated: 2026-09-01
 owners:
   - cfl12
 ---
@@ -21,7 +22,7 @@ task-owned projection.
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001 | PR gate, error projection, recovery actions, responsive surface |
+| REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001 | PR gate, initial prompt admission, error projection, recovery actions, responsive surface |
 
 ## PR gate and launch paths
 
@@ -71,6 +72,24 @@ preserves the source error record, keeps it visible, and updates its typed
 category, bounded details, and valid actions. A successful recovery clears the
 source error only after its write and relaunch or move succeed.
 
+## Initial prompt admission
+
+The lifecycle manager owns initial prompt submission after an agent process
+starts. Materialization and ACP submission errors occur inside that asynchronous
+boundary.
+
+The lifecycle manager sends each error to the existing terminal execution path.
+That path publishes `agent.failed` with the execution and prompt evidence.
+
+The orchestrator accepts the failure only for the current execution and prompt.
+It completes the active turn and persists the safe session failure.
+
+The task moves to `FAILED` only while the same session still owns its runtime
+state. A successor execution or prompt remains unchanged.
+
+Backend shutdown keeps its existing stopped-session behavior. A shutdown error
+does not create a durable user-visible launch failure.
+
 ## Branch resolution and persistence
 
 Local default detection remains a pure helper and returns empty when only a
@@ -87,6 +106,10 @@ network, missing branch, and unresolved default remain distinct diagnostics.
 Ambiguous repository identity omits repository-scoped actions. Foreign session
 or repository IDs and stale stamps fail without mutation.
 
+Initial-prompt errors use a safe generic durable message and the same
+stale-event checks as other agent failures. Raw attachment paths and provider
+details remain in backend diagnostics and do not reach the durable projection.
+
 ## Responsive presentation
 
 The task Chat surface renders one persistent error card from the shared
@@ -101,3 +124,7 @@ authorization and remain free of horizontal overflow.
 - Test error projection limits, stamps, persistence, and recovery authorization.
 - Test branch self-healing and mark-review-done terminal-step checks.
 - Cover desktop and mobile recovery actions with the existing task Chat tests.
+
+## Related decisions
+
+- [ADR-2026-08-18-never-started-agent-stall-terminal](../../../decisions/2026-08-18-never-started-agent-stall-terminal.md)

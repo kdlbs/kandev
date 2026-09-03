@@ -4,18 +4,52 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // inMemorySecretStore implements secrets.SecretStore for testing.
 type inMemorySecretStore struct {
-	store     map[string]*secrets.SecretWithValue
-	err       error
-	revealErr error
+	mu                  sync.RWMutex
+	store               map[string]*secrets.SecretWithValue
+	err                 error
+	revealErr           error
+	rejectCanceledCalls bool
+}
+
+type failNthCreateSecretStore struct {
+	*inMemorySecretStore
+	failAt int
+	calls  int
+}
+
+func (s *failNthCreateSecretStore) Create(ctx context.Context, secret *secrets.SecretWithValue) error {
+	s.calls++
+	if s.calls == s.failAt {
+		return errors.New("injected secret create failure")
+	}
+	return s.inMemorySecretStore.Create(ctx, secret)
+}
+
+type stopTrackingExecutor struct {
+	MockExecutor
+	stopCalls int
+	forces    []bool
+}
+
+func (e *stopTrackingExecutor) StopInstance(_ context.Context, _ *ExecutorInstance, force bool) error {
+	e.stopCalls++
+	e.forces = append(e.forces, force)
+	return nil
 }
 
 var _ secrets.SecretStore = (*inMemorySecretStore)(nil)
@@ -27,7 +61,12 @@ func newInMemorySecretStore() *inMemorySecretStore {
 }
 
 // Create stores the secret, returning the injected error when set.
-func (s *inMemorySecretStore) Create(_ context.Context, secret *secrets.SecretWithValue) error {
+func (s *inMemorySecretStore) Create(ctx context.Context, secret *secrets.SecretWithValue) error {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return s.err
 	}
@@ -39,31 +78,67 @@ func (s *inMemorySecretStore) Create(_ context.Context, secret *secrets.SecretWi
 }
 
 // Get returns the stored secret for the given ID, or an error when absent.
-func (s *inMemorySecretStore) Get(_ context.Context, id string) (*secrets.Secret, error) {
+func (s *inMemorySecretStore) Get(ctx context.Context, id string) (*secrets.Secret, error) {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if sw, ok := s.store[id]; ok {
 		return &sw.Secret, nil
 	}
-	return nil, fmt.Errorf("not found")
+	return nil, fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
 }
 
 // Reveal returns the plaintext value for the given ID, or an error when absent.
-func (s *inMemorySecretStore) Reveal(_ context.Context, id string) (string, error) {
+func (s *inMemorySecretStore) Reveal(ctx context.Context, id string) (string, error) {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.revealErr != nil {
 		return "", s.revealErr
 	}
 	if sw, ok := s.store[id]; ok {
 		return sw.Value, nil
 	}
-	return "", fmt.Errorf("not found")
+	return "", fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
 }
 
-// Update is a no-op for the in-memory store.
-func (s *inMemorySecretStore) Update(_ context.Context, _ string, _ *secrets.UpdateSecretRequest) error {
+// Update changes the stored name/value.
+func (s *inMemorySecretStore) Update(ctx context.Context, id string, req *secrets.UpdateSecretRequest) error {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored, ok := s.store[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
+	}
+	if req.Name != nil {
+		stored.Name = *req.Name
+	}
+	if req.Value != nil {
+		stored.Value = *req.Value
+	}
 	return nil
 }
 
-// Delete is a no-op for the in-memory store.
-func (s *inMemorySecretStore) Delete(_ context.Context, _ string) error { return nil }
+// Delete removes a stored secret.
+func (s *inMemorySecretStore) Delete(ctx context.Context, id string) error {
+	if s.rejectCanceledCalls && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.store[id]; !ok {
+		return fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
+	}
+	delete(s.store, id)
+	return nil
+}
 
 // List returns no items for the in-memory store.
 func (s *inMemorySecretStore) List(_ context.Context) ([]*secrets.SecretListItem, error) {
@@ -75,6 +150,8 @@ func (s *inMemorySecretStore) Close() error { return nil }
 
 // ListScoped returns stored secrets filtered by the requested scope and workspace.
 func (s *inMemorySecretStore) ListScoped(_ context.Context, opts secrets.SecretListOptions) ([]*secrets.SecretListItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	items := make([]*secrets.SecretListItem, 0, len(s.store))
 	for _, stored := range s.store {
 		scope := stored.Scope
@@ -129,6 +206,8 @@ func (s *inMemorySecretStore) RevealForWorkspace(ctx context.Context, id, worksp
 
 // DeleteWorkspaceSecrets removes all secrets belonging to the given workspace.
 func (s *inMemorySecretStore) DeleteWorkspaceSecrets(_ context.Context, workspaceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for id, stored := range s.store {
 		if stored.Scope == secrets.ScopeWorkspace && stored.WorkspaceID == workspaceID {
 			delete(s.store, id)
@@ -410,4 +489,407 @@ func TestResolveLaunchAuthToken(t *testing.T) {
 			t.Fatalf("resolveLaunchAuthToken() = %q, want empty", got)
 		}
 	})
+}
+
+func TestRegisterKubernetesExecutionPersistsRequiredSecretReferencesBeforeSuccess(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	writer := &captureExecutorRunningWriter{}
+	mgr := newTestManager(t)
+	mgr.SetSecretStore(store)
+	mgr.SetExecutorRunningWriter(writer)
+	execution := &AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		Status: v1.AgentStatusStarting, agentctl: newReadyAgentctlClient(t, log),
+		metadata: map[string]interface{}{},
+	}
+	instance := &ExecutorInstance{
+		InstanceID: "execution-1", AuthToken: "agentctl-token", BootstrapNonce: "bootstrap-nonce",
+	}
+
+	err := mgr.registerAndPublishExecution(
+		context.Background(), execution,
+		&MockExecutor{name: executor.NameKubernetes}, instance, execution.SessionID,
+	)
+	if err != nil {
+		t.Fatalf("registerAndPublishExecution() error = %v", err)
+	}
+	if writer.running == nil {
+		t.Fatal("executors_running row was not persisted")
+	}
+	for _, key := range []string{MetadataKeyAuthTokenSecret, MetadataKeyBootstrapNonceSecret} {
+		secretID := getMetadataString(writer.running.Metadata, key)
+		if secretID == "" {
+			t.Fatalf("persisted %s = empty", key)
+		}
+		if !secrets.IsInternalID(secretID) {
+			t.Fatalf("persisted %s = %q, want internal runtime secret ID", key, secretID)
+		}
+	}
+}
+
+func TestRegisterNonKubernetesExecutionRollsBackWhenRuntimeSecretPersistenceFails(t *testing.T) {
+	store := newInMemorySecretStore()
+	store.err = errors.New("secret store unavailable")
+	mgr := newTestManager(t)
+	mgr.SetSecretStore(store)
+	execution := &AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeDocker,
+		Status: v1.AgentStatusStarting, metadata: map[string]interface{}{},
+	}
+	instance := &ExecutorInstance{InstanceID: execution.ID, AuthToken: "agentctl-token"}
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameDocker}}
+
+	err := mgr.registerAndPublishExecution(
+		context.Background(), execution, backend, instance, execution.SessionID,
+	)
+
+	require.ErrorContains(t, err, "persist runtime secret")
+	require.Equal(t, 1, backend.stopCalls)
+	_, exists := mgr.executionStore.Get(execution.ID)
+	require.False(t, exists)
+}
+
+func TestRegisterKubernetesExecutionRollsBackCreatedSecretsOnPersistenceFailure(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := &failNthCreateSecretStore{inMemorySecretStore: newInMemorySecretStore(), failAt: 2}
+	mgr := newTestManager(t)
+	mgr.SetSecretStore(store)
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
+	execution := &AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		Status: v1.AgentStatusStarting, agentctl: newReadyAgentctlClient(t, log),
+		metadata: map[string]interface{}{},
+	}
+	instance := &ExecutorInstance{
+		InstanceID: "execution-1", AuthToken: "agentctl-token", BootstrapNonce: "bootstrap-nonce",
+	}
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+
+	err := mgr.registerAndPublishExecution(context.Background(), execution, backend, instance, execution.SessionID)
+	if err == nil || !strings.Contains(err.Error(), "bootstrap nonce") {
+		t.Fatalf("registerAndPublishExecution() error = %v, want bootstrap nonce persistence failure", err)
+	}
+	if backend.stopCalls != 1 {
+		t.Fatalf("StopInstance() calls = %d, want 1", backend.stopCalls)
+	}
+	if len(store.store) != 0 {
+		t.Fatalf("runtime secrets after rollback = %#v, want none", store.store)
+	}
+	if _, exists := mgr.executionStore.Get(execution.ID); exists {
+		t.Fatal("failed Kubernetes launch remained registered")
+	}
+}
+
+func TestRegisterKubernetesExecutionRollsBackSecretsWhenDurableRowWriteFails(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	mgr := newTestManager(t)
+	mgr.SetSecretStore(store)
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{upsertErr: errors.New("injected row failure")})
+	execution := &AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		AgentProfileID: "profile-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		Status: v1.AgentStatusStarting, agentctl: newReadyAgentctlClient(t, log),
+		metadata: map[string]interface{}{},
+	}
+	instance := &ExecutorInstance{
+		InstanceID: "execution-1", AuthToken: "agentctl-token", BootstrapNonce: "bootstrap-nonce",
+	}
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+
+	err := mgr.registerAndPublishExecution(context.Background(), execution, backend, instance, execution.SessionID)
+	if err == nil || !strings.Contains(err.Error(), "persist execution registration") {
+		t.Fatalf("registerAndPublishExecution() error = %v, want row persistence failure", err)
+	}
+	if backend.stopCalls != 1 {
+		t.Fatalf("StopInstance() calls = %d, want 1", backend.stopCalls)
+	}
+	if len(store.store) != 0 {
+		t.Fatalf("runtime secrets after row rollback = %#v, want none", store.store)
+	}
+}
+
+func TestCreateWorkspaceKubernetesExecutionPersistsRequiredSecretReferencesBeforeSuccess(t *testing.T) {
+	log := newTestLogger()
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameKubernetes},
+		client:       newReadyAgentctlClient(t, log),
+		authToken:    "agentctl-token",
+		nonce:        "bootstrap-nonce",
+	}
+	executors := NewExecutorRegistry(log)
+	executors.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, executors, &MockCredentialsManager{},
+		&MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetSecretStore(newInMemorySecretStore())
+	writer := &captureExecutorRunningWriter{}
+	mgr.SetExecutorRunningWriter(writer)
+
+	_, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
+		SessionID: "session-1", TaskEnvironmentID: "environment-1",
+		AgentID: "auggie", AgentProfileID: "profile-1",
+		ExecutorType: string(models.ExecutorTypeKubernetes), WorkspacePath: "/workspace",
+	})
+	if err != nil {
+		t.Fatalf("createExecution() error = %v", err)
+	}
+	for _, key := range []string{MetadataKeyAuthTokenSecret, MetadataKeyBootstrapNonceSecret} {
+		if got := getMetadataString(writer.running.Metadata, key); got == "" {
+			t.Fatalf("persisted %s = empty", key)
+		}
+	}
+}
+
+func TestStopKubernetesExecutionDeletesRuntimeSecretsAfterTerminalCleanup(t *testing.T) {
+	store := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"kandev-runtime:execution-1:agentctl-auth":      "agentctl-token",
+		"kandev-runtime:execution-1:agentctl-bootstrap": "bootstrap-nonce",
+	} {
+		if err := store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}); err != nil {
+			t.Fatalf("seed runtime secret: %v", err)
+		}
+	}
+	log := newTestLogger()
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+	executors := NewExecutorRegistry(log)
+	executors.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, executors, nil, nil, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetSecretStore(store)
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeKubernetes, Status: v1.AgentStatusRunning,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "kandev-runtime:execution-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret: "kandev-runtime:execution-1:agentctl-bootstrap",
+		},
+	}); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	err := mgr.StopAgentWithReason(context.Background(), "execution-1", StopReasonTaskDeleted, true)
+
+	if err != nil {
+		t.Fatalf("StopAgentWithReason() error = %v", err)
+	}
+	if len(store.store) != 0 {
+		t.Fatalf("runtime secrets after cleanup = %#v, want none", store.store)
+	}
+}
+
+func TestStopKubernetesExecutionDeletesRuntimeSecretsAfterRequestCancellation(t *testing.T) {
+	store := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"kandev-runtime:execution-1:agentctl-auth":      "agentctl-token",
+		"kandev-runtime:execution-1:agentctl-bootstrap": "bootstrap-nonce",
+	} {
+		require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	store.rejectCanceledCalls = true
+	log := newTestLogger()
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+	executors := NewExecutorRegistry(log)
+	executors.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, executors, nil, nil, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetSecretStore(store)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeKubernetes, Status: v1.AgentStatusRunning,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "kandev-runtime:execution-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret: "kandev-runtime:execution-1:agentctl-bootstrap",
+		},
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := mgr.StopAgentWithReason(ctx, "execution-1", StopReasonTaskDeleted, true)
+
+	require.NoError(t, err)
+	require.Empty(t, store.store)
+}
+
+func TestForceStopKubernetesExecutionDeletesRuntimeSecretsWithoutTerminalReason(t *testing.T) {
+	store := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"kandev-runtime:execution-1:agentctl-auth":      "agentctl-token",
+		"kandev-runtime:execution-1:agentctl-bootstrap": "bootstrap-nonce",
+	} {
+		require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	log := newTestLogger()
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+	executors := NewExecutorRegistry(log)
+	executors.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, executors, nil, nil, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetSecretStore(store)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeKubernetes, Status: v1.AgentStatusRunning,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "kandev-runtime:execution-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret: "kandev-runtime:execution-1:agentctl-bootstrap",
+		},
+	}))
+
+	err := mgr.StopAgent(context.Background(), "execution-1", true)
+
+	require.NoError(t, err)
+	require.Empty(t, store.store, "forced resource cleanup must also remove runtime secrets")
+}
+
+func TestDeleteKubernetesRuntimeSecretsDerivesCanonicalRefsForProvisionalInventory(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		state       string
+		wantDeleted bool
+	}{
+		{name: "crash window", state: KubernetesInventoryStatePodAdmitted, wantDeleted: true},
+		{name: "ready row without refs", state: KubernetesInventoryStateReady, wantDeleted: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newInMemorySecretStore()
+			for _, id := range []string{
+				"kandev-runtime:resource-instance-1:agentctl-auth",
+				"kandev-runtime:resource-instance-1:agentctl-bootstrap",
+			} {
+				require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+					Secret: secrets.Secret{ID: id, Name: id}, Value: "secret",
+				}))
+			}
+			mgr := newTestManager(t)
+			mgr.SetSecretStore(store)
+
+			err := mgr.deleteKubernetesRuntimeSecrets(context.Background(), map[string]interface{}{
+				MetadataKeyKubernetesInventoryState:     tc.state,
+				MetadataKeyKubernetesResourceInstanceID: "resource-instance-1",
+			})
+
+			require.NoError(t, err)
+			store.mu.RLock()
+			defer store.mu.RUnlock()
+			if tc.wantDeleted {
+				require.Empty(t, store.store)
+			} else {
+				require.Len(t, store.store, 2)
+			}
+		})
+	}
+}
+
+func TestRegisteredKubernetesLaunchRollbackDeletesSecretsBeforeReleasingInventory(t *testing.T) {
+	store := newInMemorySecretStore()
+	for id := range map[string]struct{}{
+		"kandev-runtime:execution-1:agentctl-auth": {}, "kandev-runtime:execution-1:agentctl-bootstrap": {},
+	} {
+		if err := store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: "secret",
+		}); err != nil {
+			t.Fatalf("seed runtime secret: %v", err)
+		}
+	}
+	mgr := newTestManager(t)
+	mgr.SetSecretStore(store)
+	execution := &AgentExecution{
+		ID: "execution-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "kandev-runtime:execution-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret: "kandev-runtime:execution-1:agentctl-bootstrap",
+		},
+	}
+	releases := 0
+	instance := &ExecutorInstance{ReleaseRuntimeInventory: func(context.Context) error {
+		releases++
+		if len(store.store) != 0 {
+			return errors.New("inventory released before secrets were deleted")
+		}
+		return nil
+	}}
+
+	err := mgr.stopRegisteredLaunchRuntime(
+		&stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}},
+		instance,
+		execution,
+	)
+
+	if err != nil {
+		t.Fatalf("stopRegisteredLaunchRuntime() error = %v", err)
+	}
+	if releases != 1 {
+		t.Fatalf("runtime inventory releases = %d, want 1", releases)
+	}
+}
+
+func TestRegisteredKubernetesResumeRollbackPreservesRetainedRuntimeAndSecrets(t *testing.T) {
+	store := newInMemorySecretStore()
+	for id := range map[string]struct{}{
+		"kandev-runtime:execution-1:agentctl-auth": {}, "kandev-runtime:execution-1:agentctl-bootstrap": {},
+	} {
+		require.NoError(t, store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: "secret",
+		}))
+	}
+	mgr := newTestManager(t)
+	mgr.SetSecretStore(store)
+	execution := &AgentExecution{
+		ID: "execution-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		isResumedSession: true,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "kandev-runtime:execution-1:agentctl-auth",
+			MetadataKeyBootstrapNonceSecret: "kandev-runtime:execution-1:agentctl-bootstrap",
+		},
+	}
+	backend := &stopTrackingExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+
+	err := mgr.stopRegisteredLaunchRuntime(backend, &ExecutorInstance{}, execution)
+
+	require.NoError(t, err)
+	require.Equal(t, []bool{false}, backend.forces, "resume rollback must only close its local client/forward")
+	require.Len(t, store.store, 2, "retained runtime secrets remain authoritative")
+}
+
+func TestFinishedKubernetesResumeRollbackPreservesDurableInventoryRow(t *testing.T) {
+	mgr := newTestManager(t)
+	writer := &captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		Runtime:          agentruntime.RuntimeKubernetes,
+	}}
+	mgr.SetExecutorRunningWriter(writer)
+	execution := &AgentExecution{
+		ID: "execution-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeKubernetes,
+		isResumedSession: true,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	mgr.finishRegisteredLaunchRollback(execution, true, true)
+
+	require.Zero(t, writer.deleteCalls, "retained Kubernetes inventory must remain available to terminal cleanup")
+	_, exists := mgr.executionStore.Get(execution.ID)
+	require.False(t, exists)
 }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -77,10 +78,14 @@ export function isContainerRun(env: NodeJS.ProcessEnv, argv = process.argv): boo
     return [];
   });
 
-  return selectedProjects.some((projects) => {
-    const names = projects.split(",");
-    return names.includes("containers") || names.includes("docker");
-  });
+  return selectedProjects.some((projects) =>
+    projects
+      .split(",")
+      .some(
+        (project) =>
+          project === "containers" || project === "kubernetes-compat" || project === "docker",
+      ),
+  );
 }
 
 function backendMakeCommand(backendDir: string, target: string): string {
@@ -102,20 +107,25 @@ function assertArtifactExists(artifactPath: string, rebuildTarget?: string): voi
   );
 }
 
-const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", "testdata"]);
+const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", ".git", "testdata"]);
 
 /**
- * Go build and test *outputs* that land in the source tree rather than in
- * bin/ or .build/: `make -C apps/backend test-coverage` writes coverage.out
- * and coverage.html next to go.mod, and `go test -c` leaves `*.test` binaries
- * wherever it is run. The repo .gitignore lists exactly these three patterns;
- * none is `//go:embed`-ed, and no tracked file under apps/backend matches one.
+ * Go test-only sources and outputs that never enter production artifacts.
+ * `*_test.go` is compiled only by `go test`; `make -C apps/backend
+ * test-coverage` writes coverage.out and coverage.html next to go.mod; and
+ * `go test -c` leaves `*.test` binaries wherever it is run. None can affect
+ * the backend or helper binaries exercised by E2E.
  *
  * Without this, the ordinary `make test-coverage` → run E2E sequence aborts
  * demanding a backend rebuild because a coverage profile — which changes
  * nothing the binary contains — is newer than the binary.
  */
-const BACKEND_SOURCE_SKIP_FILE_PATTERNS = [/^coverage\.out$/, /\.test$/, /^coverage\.html$/];
+const BACKEND_SOURCE_SKIP_FILE_PATTERNS = [
+  /_test\.go$/,
+  /^coverage\.out$/,
+  /\.test$/,
+  /^coverage\.html$/,
+];
 
 /**
  * `make sync-embedded-web` copies apps/web/dist here so the binary can serve
@@ -184,6 +194,7 @@ export function assertBackendArtifactsFresh(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
   if (env.KANDEV_E2E_SKIP_FRESHNESS === "1") return;
+  if (validateE2EBuildIdentity(backendDir, artifacts, env)) return;
 
   const newestSource = findNewestBackendSource(backendDir);
   if (!newestSource) return;
@@ -200,6 +211,69 @@ export function assertBackendArtifactsFresh(
       );
     }
   }
+}
+
+type E2EBuildIdentity = {
+  schema_version: number;
+  source_revision: string;
+  artifacts: Record<string, string>;
+};
+
+function sha256File(filePath: string): string {
+  return createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function readE2EBuildIdentity(identityPath: string): E2EBuildIdentity {
+  let identity: E2EBuildIdentity;
+  try {
+    identity = JSON.parse(fs.readFileSync(path.resolve(identityPath), "utf8")) as E2EBuildIdentity;
+  } catch (error) {
+    throw new Error(`Cannot read E2E build identity ${identityPath}`, { cause: error });
+  }
+  if (identity.schema_version !== 1 || !identity.artifacts) {
+    throw new Error(`Unsupported E2E build identity schema in ${identityPath}`);
+  }
+  return identity;
+}
+
+function validateE2EBuildIdentity(
+  backendDir: string,
+  artifacts: BackendArtifact[],
+  env: NodeJS.ProcessEnv,
+): boolean {
+  const identityPath = env.KANDEV_E2E_BUILD_IDENTITY?.trim();
+  const expectedRevision = env.KANDEV_E2E_EXPECTED_SOURCE_REVISION?.trim();
+  if (!identityPath && !expectedRevision) return false;
+  if (!identityPath || !expectedRevision) {
+    throw new Error(
+      "KANDEV_E2E_BUILD_IDENTITY and KANDEV_E2E_EXPECTED_SOURCE_REVISION must be set together",
+    );
+  }
+
+  const identity = readE2EBuildIdentity(identityPath);
+  if (identity.source_revision !== expectedRevision) {
+    throw new Error(
+      `E2E build identity source revision ${identity.source_revision} does not match checkout ${expectedRevision}`,
+    );
+  }
+
+  for (const artifact of artifacts) {
+    const key = path.relative(backendDir, artifact.path).split(path.sep).join("/");
+    if (key.startsWith("../") || path.isAbsolute(key)) {
+      throw new Error(`E2E artifact is outside the backend directory: ${artifact.path}`);
+    }
+    const expectedChecksum = identity.artifacts[key];
+    if (!expectedChecksum) {
+      throw new Error(`E2E build identity does not cover ${key}`);
+    }
+    const actualChecksum = sha256File(artifact.path);
+    if (actualChecksum !== expectedChecksum) {
+      throw new Error(
+        `E2E build identity checksum mismatch for ${key}: got ${actualChecksum}, expected ${expectedChecksum}`,
+      );
+    }
+  }
+  return true;
 }
 
 /**

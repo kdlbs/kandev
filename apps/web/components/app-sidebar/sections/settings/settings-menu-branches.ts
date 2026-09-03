@@ -7,6 +7,10 @@ import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integra
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 import { INTEGRATION_ICONS } from "@/lib/settings/integration-icons";
 import {
+  executorConnectionSettingsPath,
+  executorProfileSettingsPath,
+} from "@/lib/settings/executor-settings-routes";
+import {
   WORKSPACE_SETTINGS_TABS,
   workspaceSettingsHref,
 } from "@/lib/settings/workspace-settings-tabs";
@@ -307,25 +311,28 @@ export function buildAgentsBranch(
 /**
  * One node per executor, holding its profiles.
  *
- * Uses the executor-scoped spellings (`/settings/executor/<id>` and
- * `/settings/executor/<id>/profile/<id>`) rather than the flat
- * `/settings/executors/<profileId>` the Executors page links to. Both are live
- * routes for the same profile, but only the scoped pair has an executor
- * breadcrumb — so it is the one whose crumb chain matches the branch the user
- * clicked through.
+ * Most executors use the scoped legacy spellings so their executor breadcrumb
+ * matches the branch. A configured Kubernetes executor only discloses its
+ * profile children: connection, diagnostics, sessions and workload settings
+ * all live on that profile page. Its standalone connection route remains
+ * reachable only when there is no profile to recover through.
  */
 export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): SettingsMenuNode[] {
   return executors.map((executor) => {
-    const executorHref = `/settings/executor/${encodeURIComponent(executor.id)}`;
+    const profiles = executor.profiles ?? [];
+    const executorHref =
+      executor.type === "k8s" && profiles.length > 0
+        ? null
+        : executorConnectionSettingsPath(executor);
     return {
       key: `executor:${executor.id}`,
       href: executorHref,
       label: { text: executor.name },
       icon: getExecutorIcon(executor.type),
       // Same split as agents: the executor ships with kandev, the profiles do not.
-      children: (executor.profiles ?? []).map((profile) => ({
+      children: profiles.map((profile) => ({
         key: `executor:${executor.id}:profile:${profile.id}`,
-        href: `${executorHref}/profile/${profile.id}`,
+        href: executorProfileSettingsPath(executor, profile.id),
         label: { text: profile.name },
         isUserRecord: true,
       })),
@@ -336,7 +343,8 @@ export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): 
 /** True when `pathname` is this node's page or lives underneath it. */
 function nodeOwns(node: SettingsMenuNode, pathname: string): boolean {
   if (node.href && (pathname === node.href || pathname.startsWith(`${node.href}/`))) return true;
-  return (node.ownsPrefixes ?? []).some((prefix) => pathname.startsWith(prefix));
+  if ((node.ownsPrefixes ?? []).some((prefix) => pathname.startsWith(prefix))) return true;
+  return (node.children ?? []).some((child) => nodeOwns(child, pathname));
 }
 
 /**

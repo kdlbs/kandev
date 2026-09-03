@@ -142,30 +142,128 @@ func TestStartAgentProcessFailureReleasesTrackedExecutionActivity(t *testing.T) 
 	}
 }
 
-func TestInitialPromptWaitFailureRetainsExecutionActivity(t *testing.T) {
+func TestInitialPromptFailureMarksExecutionFailedAndReleasesActivity(t *testing.T) {
 	manager := newTestManager(t)
 	coordinator := activity.NewCoordinator(activity.Options{})
 	manager.SetActivityCoordinator(coordinator)
+	execution := &AgentExecution{
+		ID:        "execution-prompt-failure",
+		TaskID:    "task-prompt-failure",
+		SessionID: "session-prompt-failure",
+		Status:    v1.AgentStatusRunning,
+	}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatalf("Add execution: %v", err)
+	}
 	lease, err := coordinator.AcquireTask(context.Background(), activity.KindExecutionRunning)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.trackActivity(executionActivityKey("execution-prompt-wait"), lease)
+	manager.trackActivity(executionActivityKey(execution.ID), lease)
 
-	manager.sessionManager.SetInitialPromptFailureHandler(func(executionID string) {
-		if executionID != "execution-prompt-wait" {
-			t.Errorf("initial prompt failure execution ID = %q", executionID)
-		}
+	if manager.sessionManager.initialPromptFailure == nil {
+		t.Fatal("NewManager did not wire the initial prompt failure handler")
+	}
+	manager.sessionManager.initialPromptFailure(InitialPromptFailure{
+		ExecutionID: execution.ID,
+		SessionID:   execution.SessionID,
+		Err:         errors.New("attachment materialization failed"),
 	})
-	manager.sessionManager.initialPromptFailure("execution-prompt-wait")
+	if execution.Status != v1.AgentStatusFailed {
+		t.Fatalf("execution status = %q, want %q", execution.Status, v1.AgentStatusFailed)
+	}
+	if execution.ErrorMessage != "initial prompt delivery failed" {
+		t.Fatalf("execution error = %q, want safe prompt failure", execution.ErrorMessage)
+	}
 	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
 	if maintenance != nil {
 		maintenance.Release()
 	}
-	if !errors.Is(err, activity.ErrBusy) {
-		t.Fatalf("maintenance error = %v, want ErrBusy while execution may still run", err)
+	if err != nil {
+		t.Fatalf("maintenance after prompt failure: %v", err)
 	}
-	manager.releaseActivity(executionActivityKey("execution-prompt-wait"))
+}
+
+func TestInitialPromptFailureCannotFailReplacementExecution(t *testing.T) {
+	manager := newTestManager(t)
+	original := &AgentExecution{
+		ID: "execution-original", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}
+	replacement := &AgentExecution{
+		ID: "execution-replacement", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}
+	if err := manager.executionStore.Add(original); err != nil {
+		t.Fatalf("Add original execution: %v", err)
+	}
+	manager.executionStore.Remove(original.ID)
+	if err := manager.executionStore.Add(replacement); err != nil {
+		t.Fatalf("Add replacement execution: %v", err)
+	}
+
+	manager.sessionManager.initialPromptFailure(InitialPromptFailure{
+		ExecutionID: original.ID,
+		SessionID:   original.SessionID,
+		Err:         errors.New("late prompt failure"),
+	})
+
+	if original.Status != v1.AgentStatusRunning {
+		t.Fatalf("removed original status = %q, want %q", original.Status, v1.AgentStatusRunning)
+	}
+	if replacement.Status != v1.AgentStatusRunning {
+		t.Fatalf("replacement status = %q, want %q", replacement.Status, v1.AgentStatusRunning)
+	}
+}
+
+func TestInitialPromptFailureCannotFailSuccessorPrompt(t *testing.T) {
+	manager := newTestManager(t)
+	execution := &AgentExecution{
+		ID: "execution-successor", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatalf("Add execution: %v", err)
+	}
+	if _, err := manager.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin initial prompt: %v", err)
+	}
+	if _, err := manager.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin successor prompt: %v", err)
+	}
+
+	manager.sessionManager.initialPromptFailure(InitialPromptFailure{
+		ExecutionID:      execution.ID,
+		SessionID:        execution.SessionID,
+		PromptGeneration: 1,
+		Err:              errors.New("late initial failure"),
+	})
+
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("successor status = %q, want %q", execution.Status, v1.AgentStatusRunning)
+	}
+}
+
+func TestInitialPromptFailureDuringShutdownStopsExecution(t *testing.T) {
+	manager := newTestManager(t)
+	execution := &AgentExecution{
+		ID: "execution-shutdown", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatalf("Add execution: %v", err)
+	}
+	manager.shuttingDown.Store(true)
+
+	manager.sessionManager.initialPromptFailure(InitialPromptFailure{
+		ExecutionID: execution.ID,
+		SessionID:   execution.SessionID,
+		Err:         errors.New("transport stopped"),
+	})
+
+	if execution.Status != v1.AgentStatusStopped {
+		t.Fatalf("shutdown status = %q, want %q", execution.Status, v1.AgentStatusStopped)
+	}
 }
 
 func TestReleaseCancelsPendingExecutionActivityAcquire(t *testing.T) {

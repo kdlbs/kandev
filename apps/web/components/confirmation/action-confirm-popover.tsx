@@ -216,7 +216,12 @@ function ActionConfirmPopoverContent({
       <PopoverHeader>
         <PopoverTitle id={titleId}>{title}</PopoverTitle>
         {description ? (
-          <PopoverDescription id={descriptionId}>{description}</PopoverDescription>
+          <PopoverDescription
+            id={descriptionId}
+            className={size === "wide" ? "text-pretty" : undefined}
+          >
+            {description}
+          </PopoverDescription>
         ) : null}
       </PopoverHeader>
       <div className="flex justify-end gap-2">

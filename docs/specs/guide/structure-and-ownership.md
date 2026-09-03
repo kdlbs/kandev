@@ -111,7 +111,7 @@ capability.
 
 ## Context limits
 
-The specification linter reads the limits from `docs/specs/spec-lint.json`.
+The specification linter reads the default limits from `docs/specs/spec-lint.json`.
 The default limits are:
 
 - System index: 12 KiB.
@@ -124,7 +124,9 @@ The default limits are:
 Split a file before it reaches its limit. Split by capability, lifecycle, or
 contract boundary. Do not split by arbitrary line ranges.
 
-An oversized legacy file can have a frozen ceiling in the linter configuration.
+An oversized legacy file can have a frozen ceiling registered in
+`docs/specs/spec-lint-exceptions.tsv` (one `path<TAB>size` record per line).
+The path must identify a regular legacy Markdown file under `docs/specs`.
 The ceiling permits migration work but does not permit growth. Lower the ceiling
 in the same change whenever the file shrinks. Remove the exception after the
 file falls below the default limit.
