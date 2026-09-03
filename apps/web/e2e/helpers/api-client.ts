@@ -191,6 +191,8 @@ type CreateTaskOpts = {
   description?: string;
   workflow_id?: string;
   workflow_step_id?: string;
+  /** One of critical/high/medium/low. Omitted leaves the service default (medium). */
+  priority?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
   repository_ids?: string[];
@@ -259,6 +261,7 @@ function buildCreateTaskBody(
   };
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
+  setIf(body, "priority", options.priority);
   setIf(body, "agent_profile_id", options.agent_profile_id);
   setIf(body, "executor_profile_id", options.executor_profile_id);
   setIf(body, "metadata", buildTaskMetadata(options));
@@ -527,6 +530,12 @@ export class ApiClient {
    *  cross-task message badge. */
   async updateTaskTitle(taskId: string, title: string): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { title });
+  }
+
+  /** Change a task's priority via the same PATCH path the priority-picker
+   *  uses, so the update travels over `task.updated` WS to an open board. */
+  async updateTaskPriority(taskId: string, priority: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { priority });
   }
 
   /** Replace a task's metadata via the same PATCH path a real orchestrator
@@ -1207,6 +1216,8 @@ export class ApiClient {
     workflow_ids_with_auto_hide_empty_steps?: string[];
     sidebar_task_color_automation?: SidebarTaskColorAutomation;
     sidebar_task_color_patch?: SidebarTaskColorPatchApi;
+    kanban_sort?: string;
+    kanban_priority_filter_tokens?: string[];
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
