@@ -102,6 +102,20 @@ func (g *RecoveryGuard) MarkStopInFlight(sessionID string) {
 	g.state[sessionID] = guardStopInFlight
 }
 
+// IsStopInFlight reports whether sessionID's guard is currently in the
+// guardStopInFlight state (see MarkStopInFlight): its losing/orphaned
+// instance's stop was still retrying when the recovery deadline elapsed and
+// has not yet resolved. Consulted by standalone liveness classification
+// (design 02 "Persistence": "the snapshot must post-date recovery's own
+// stops") so a row whose stop is still in flight when an adopted-server
+// enumeration is taken classifies unknown rather than alive, since the
+// enumeration is a snapshot that predates the stop's actual completion.
+func (g *RecoveryGuard) IsStopInFlight(sessionID string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.state[sessionID] == guardStopInFlight
+}
+
 // RetainAsUnstoppable marks sessionID's guard to survive
 // ReleaseAllExceptRetained and outlive recovery entirely
 // (AC-EXECUTORS-SURVIVAL-002.16): at least one live instance for it could

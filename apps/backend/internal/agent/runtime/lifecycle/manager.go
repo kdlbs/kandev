@@ -112,6 +112,25 @@ type Manager struct {
 	// construction.
 	retrackedSessions map[string]struct{}
 
+	// standaloneOwnSessionsMu guards standaloneOwnSessions.
+	standaloneOwnSessionsMu sync.RWMutex
+
+	// standaloneOwnSessions is the set of session IDs whose executors_running
+	// row this backend itself created via Launch during this process's
+	// lifetime -- never populated by the recovery path (which adds directly
+	// to executionStore and marks retrackedSessions instead). Consulted by
+	// the standalone liveness classifier's own-record-vs-inherited-record
+	// carve-out (design 02 "Persistence": "A server this backend STARTED is
+	// not a server it adopted" -- a row this backend created is checkable
+	// against whichever control server this backend is currently using,
+	// adopted or freshly started, because that server is the only authority
+	// that can answer for it; an inherited row that server has never heard of
+	// classifies unknown instead of dead). Unlike retrackedSessions, this is
+	// NEVER reset by Start() -- it must accumulate for the whole process
+	// lifetime, not just one recovery pass. Always non-nil after
+	// construction.
+	standaloneOwnSessions map[string]struct{}
+
 	// passthroughLookup reads a session's durable passthrough mode
 	// (TaskSession.IsPassthrough) for AC-EXECUTORS-SURVIVAL-005.3's startup
 	// guard exclusion. Nil = every live standalone session is guarded (the
@@ -372,6 +391,7 @@ func NewManager(
 		remediateNpxCache:        routingerr.RemediateNpxCache,
 		recoveryGuard:            NewRecoveryGuard(),
 		retrackedSessions:        make(map[string]struct{}),
+		standaloneOwnSessions:    make(map[string]struct{}),
 	}
 	// Initialize stream manager with callbacks that delegate to manager methods
 	// mcpHandler will be set later via SetMCPHandler.
@@ -606,6 +626,33 @@ func (m *Manager) resetRetrackedSessions() {
 	m.retrackedSessionsMu.Lock()
 	m.retrackedSessions = make(map[string]struct{})
 	m.retrackedSessionsMu.Unlock()
+}
+
+// wasCreatedThisLifetime reports whether sessionID's executors_running row
+// was created by THIS backend process via Launch, as opposed to inherited
+// from an earlier launch and re-tracked at startup. See
+// standaloneOwnSessions. Safe for concurrent use.
+func (m *Manager) wasCreatedThisLifetime(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	m.standaloneOwnSessionsMu.RLock()
+	defer m.standaloneOwnSessionsMu.RUnlock()
+	_, ok := m.standaloneOwnSessions[sessionID]
+	return ok
+}
+
+// markSessionCreatedThisLifetime records sessionID as created by this
+// backend process. See standaloneOwnSessions. Never cleared: unlike
+// retrackedSessions this must survive for the whole process lifetime, not
+// just one Start() pass.
+func (m *Manager) markSessionCreatedThisLifetime(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	m.standaloneOwnSessionsMu.Lock()
+	m.standaloneOwnSessions[sessionID] = struct{}{}
+	m.standaloneOwnSessionsMu.Unlock()
 }
 
 // SetAttachmentReader wires the backend attachment reader used by prompt

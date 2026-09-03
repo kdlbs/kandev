@@ -1797,6 +1797,12 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	// This execution is durably in the store as of the Add above, and it got
+	// there via Launch -- never via the recovery path, which adds directly to
+	// executionStore and marks retrackedSessions instead -- so sessionID's row
+	// is "created this lifetime" from this point on (see
+	// standaloneOwnSessions).
+	m.markSessionCreatedThisLifetime(sessionID)
 	isKubernetes := execution.RuntimeName == agentruntime.RuntimeKubernetes
 	var createdRuntimeSecrets map[string]bool
 	if isKubernetes {

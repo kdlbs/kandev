@@ -126,6 +126,29 @@ func TestRecoveryGuardMarkStopInFlightOnUnguardedSessionIsSafe(t *testing.T) {
 	}
 }
 
+func TestRecoveryGuardIsStopInFlight(t *testing.T) {
+	g := NewRecoveryGuard()
+
+	if g.IsStopInFlight("session-1") {
+		t.Fatal("expected an unguarded session to not report stop-in-flight")
+	}
+
+	g.AcquireOrObserve("session-1")
+	if g.IsStopInFlight("session-1") {
+		t.Fatal("expected a plainly held guard to not report stop-in-flight")
+	}
+
+	g.MarkStopInFlight("session-1")
+	if !g.IsStopInFlight("session-1") {
+		t.Fatal("expected session-1 to report stop-in-flight after MarkStopInFlight")
+	}
+
+	g.Release("session-1")
+	if g.IsStopInFlight("session-1") {
+		t.Fatal("expected stop-in-flight to clear once the guard is released")
+	}
+}
+
 func TestRecoveryGuardConcurrentAcquireOrObserveIsRace_Free(t *testing.T) {
 	g := NewRecoveryGuard()
 	var wg sync.WaitGroup
