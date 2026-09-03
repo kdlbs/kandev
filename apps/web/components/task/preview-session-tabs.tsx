@@ -6,6 +6,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
@@ -301,7 +302,11 @@ export function PreviewSessionTabs({
   const { sessions, isLoaded } = useTaskSessions(taskId);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const primarySessionId = useAppStore(
-    (state) => state.kanban.tasks.find((task) => task.id === taskId)?.primarySessionId ?? null,
+    (state) =>
+      (
+        state.kanban.tasks.find((task) => task.id === taskId) ??
+        findTaskInSnapshots(taskId, state.kanbanMulti.snapshots)
+      )?.primarySessionId ?? null,
   );
 
   const sortedSessions = useMemo(() => sortSessions(sessions), [sessions]);

@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
   sessions: [] as TaskSession[],
   agentProfiles: [] as AgentProfileOption[],
   primarySessionId: null as string | null,
+  kanbanTasks: [{ id: "task-1", primarySessionId: null as string | null }],
+  kanbanSnapshots: {} as Record<
+    string,
+    { tasks: Array<{ id: string; primarySessionId: string | null }> }
+  >,
   setPrimary: vi.fn(),
   stop: vi.fn(),
   resume: vi.fn(),
@@ -37,8 +42,12 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       agentProfiles: { items: mocks.agentProfiles },
       kanban: {
-        tasks: [{ id: "task-1", primarySessionId: mocks.primarySessionId }],
+        tasks: mocks.kanbanTasks.map((task) => ({
+          ...task,
+          primarySessionId: mocks.primarySessionId ?? task.primarySessionId,
+        })),
       },
+      kanbanMulti: { snapshots: mocks.kanbanSnapshots },
     }),
   useAppStoreApi: () => ({
     getState: () => ({
@@ -160,6 +169,8 @@ afterEach(() => {
   mocks.sessions = [];
   mocks.agentProfiles = [];
   mocks.primarySessionId = null;
+  mocks.kanbanTasks = [{ id: "task-1", primarySessionId: null }];
+  mocks.kanbanSnapshots = {};
   mocks.setPrimary.mockClear();
   mocks.stop.mockClear();
   mocks.resume.mockClear();
@@ -258,6 +269,28 @@ describe("PreviewSessionTabs session context menu", () => {
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" />);
 
     fireEvent.contextMenu(screen.getByTestId(SESSION_A_TAB_TESTID));
+
+    expect(
+      screen.getByRole("menuitem", { name: "Set as Primary" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+  });
+
+  it("uses the latest primary session from a multi-workflow snapshot", () => {
+    mocks.sessions = [
+      makeSession("session-a", { state: "RUNNING" }),
+      makeSession("session-b", { state: "RUNNING" }),
+    ];
+    mocks.kanbanTasks = [];
+    mocks.kanbanSnapshots = {
+      "workflow-2": { tasks: [{ id: TASK_ID, primarySessionId: "session-a" }] },
+    };
+    const { rerender } = render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-b" />);
+
+    mocks.kanbanSnapshots = {
+      "workflow-2": { tasks: [{ id: TASK_ID, primarySessionId: "session-b" }] },
+    };
+    rerender(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-b" />);
+    fireEvent.contextMenu(screen.getByTestId("preview-session-tab-session-b"));
 
     expect(
       screen.getByRole("menuitem", { name: "Set as Primary" }).getAttribute("aria-disabled"),
