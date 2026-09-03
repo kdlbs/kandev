@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@/components/kanban-card";
-import { filterTasks } from "./swimlane-container";
+import { filterTasks, projectWorkflowTasks } from "@/lib/kanban/task-projections";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 
 function makeTask(overrides: Partial<Task> & { id: string }): Task {
@@ -161,5 +161,31 @@ describe("filterTasks — hiddenStepIds (per-workflow step visibility filter)", 
 
     expect(resultA.map((t) => t.id)).toEqual([]);
     expect(resultB.map((t) => t.id)).toEqual(["2"]);
+  });
+});
+
+describe("projectWorkflowTasks — visible cards vs column occupancy", () => {
+  const NO_REPO_FILTER = mapSelectedRepositoryIds([], []);
+
+  it("keeps search and manual hiding out of occupancy while applying plugin filters", () => {
+    const snapshots = {
+      wf: {
+        tasks: [
+          makeTask({ id: "visible", title: "Needle", workflowStepId: "step-a" }),
+          makeTask({ id: "hidden", title: "Other", workflowStepId: "step-b" }),
+          makeTask({ id: "plugin-rejected", title: "Needle", workflowStepId: "step-c" }),
+        ],
+        steps: [{ id: "step-a" }, { id: "step-b" }, { id: "step-c" }],
+      },
+    };
+
+    const projection = projectWorkflowTasks(snapshots, "wf", NO_REPO_FILTER, {
+      searchQuery: "needle",
+      hiddenStepIds: new Set(["step-b"]),
+      matchesPluginTaskFilters: (taskId) => taskId !== "plugin-rejected",
+    });
+
+    expect(projection.visibleTasks.map((task) => task.id)).toEqual(["visible"]);
+    expect(projection.occupancyTasks.map((task) => task.id)).toEqual(["visible", "hidden"]);
   });
 });

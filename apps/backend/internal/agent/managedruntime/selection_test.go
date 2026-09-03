@@ -30,6 +30,14 @@ func (s *memorySettings) Save(_ context.Context, key string, value []byte) error
 	return nil
 }
 
+func (s *memorySettings) Delete(_ context.Context, key string) error {
+	if s.err != nil {
+		return s.err
+	}
+	delete(s.values, key)
+	return nil
+}
+
 func TestStoreRoundTripAndPerAgentIsolation(t *testing.T) {
 	settings := &memorySettings{}
 	store := NewStore(settings)
@@ -78,5 +86,20 @@ func TestStorePropagatesSettingsErrors(t *testing.T) {
 	}
 	if err := store.Save(context.Background(), "opencode-acp", "opencode-ai", "1.18.5"); !errors.Is(err, wantErr) {
 		t.Fatalf("save error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestStoreDeleteRemovesSelection(t *testing.T) {
+	settings := &memorySettings{}
+	store := NewStore(settings)
+	ctx := context.Background()
+	if err := store.Save(ctx, "opencode-acp", "opencode-ai", "1.18.5"); err != nil {
+		t.Fatalf("save selection: %v", err)
+	}
+	if err := store.Delete(ctx, "opencode-acp", "opencode-ai"); err != nil {
+		t.Fatalf("delete selection: %v", err)
+	}
+	if _, found, err := store.Get(ctx, "opencode-acp", "opencode-ai"); err != nil || found {
+		t.Fatalf("selection after delete = found %v, err %v; want absent", found, err)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -55,6 +56,15 @@ type executorStore interface {
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
+	// UpdateTaskSessionStateIfCurrent transitions only the state-related
+	// columns (state, error_message, completed_at, updated_at) guarded by a
+	// CAS on the row's current state. Prefer this over
+	// UpdateTaskSessionIfCurrentState for a pure state transition: the latter
+	// writes the full row from the caller's (possibly stale) in-memory copy,
+	// which can silently revert a concurrent update to unrelated fields
+	// (profile snapshot, routing, execution identifiers) that landed between
+	// the caller's read and its write.
+	UpdateTaskSessionStateIfCurrent(ctx context.Context, id string, expected, status models.TaskSessionState, errorMessage string) (bool, time.Time, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
@@ -100,6 +110,30 @@ type officeTaskSessionCreator interface {
 // stores can omit it; the executor keeps its existing best-effort fallback.
 type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
+}
+
+// taskEnvironmentMaterializationFinalizer publishes a successfully prepared
+// canonical environment only after its complete repository inventory is saved.
+// It is kept narrow so legacy test stores retain the existing fallback path.
+type taskEnvironmentMaterializationFinalizer interface {
+	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
+}
+
+// workspaceBindingTaskSessionCreator elects the single materializing session
+// and inserts its creating environment in the same transaction as the session.
+// It is optional for lightweight test/legacy stores; production repositories
+// must implement it so a concurrent sibling cannot enter lifecycle setup
+// without a durable canonical workspace binding.
+type workspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment) error
+}
+
+// sharedGroupWorkspaceBindingTaskSessionCreator elects the sole first
+// materializer for a shared workspace group while inserting its session and
+// creating environment. Later members observe the same durable claim instead
+// of independently creating task-local workspaces.
+type sharedGroupWorkspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment, string) error
 }
 
 type primarySessionTaskStateStore interface {
@@ -179,6 +213,9 @@ type AgentManagerClient interface {
 
 	// RespondToPermission sends a response to a permission request
 	RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error
+	ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error)
+	ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error)
+	CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error)
 
 	// IsAgentRunningForSession checks if an agent is actually running for a session
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
@@ -312,6 +349,7 @@ type RemoteRuntimeStatus struct {
 
 // RemoteStatusPollRequest contains the fields from ExecutorRunning needed for remote status polling.
 type RemoteStatusPollRequest struct {
+	TaskID           string
 	SessionID        string
 	Runtime          agentruntime.Runtime
 	AgentExecutionID string
@@ -341,9 +379,15 @@ type LaunchAgentRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
-	TaskTitle         string // Human-readable task title for semantic worktree naming
-	AgentProfileID    string
-	TurnID            string // Durable Kandev turn for the initial prompt, when present
+	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
+	// task environment. It must never be inferred from a sibling execution ID.
+	WorkspaceReuseRequired bool
+	// AllowBranchReplacement is granted only by the explicit new-branch recovery
+	// action. It permits lifecycle to replace a confirmed missing worktree branch.
+	AllowBranchReplacement bool
+	TaskTitle              string // Human-readable task title for semantic worktree naming
+	AgentProfileID         string
+	TurnID                 string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -368,7 +412,7 @@ type LaunchAgentRequest struct {
 	ExecutorType                  string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig                map[string]string   // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID           string              // Previous execution ID for runtime reconnect
-	McpMode                       string              // MCP tool mode: "task" (default), "config", or "office"
+	McpMode                       string              // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders                  []string            // Normalized provider capabilities attached to the task
 	McpProfile                    *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
 	IsEphemeral                   bool                // Ephemeral task (quick chat) — enables fallback workspace creation
@@ -409,6 +453,13 @@ type LaunchAgentRequest struct {
 	WorktreeBranchTicket    string // External ticket value for branch templates
 	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
 	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository func(context.Context) error
+	// RefreshRepositoryWithState is the typed refresh path used to distinguish
+	// an authenticated empty remote from an unknown refresh result.
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -452,14 +503,21 @@ type RepoSpec struct {
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string
-	WorktreeBranchPrefix    string
-	WorktreeBranchTemplate  string
-	WorktreeBranchTicket    string
-	PullBeforeWorktree      bool
-	RemoteSyncHandled       bool
-	RepoSetupScript         string
-	RepoCleanupScript       string
-	CopyFiles               string
+	// AllowBranchReplacement permits explicit branch replacement for this repo.
+	AllowBranchReplacement bool
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
+	// RefreshRepository is an optional provider-authenticated refresh deferred
+	// until worktree materialization. A valid reusable worktree bypasses it.
+	RefreshRepository          func(context.Context) error
+	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState             repoclone.RemoteRefState
+	RepoSetupScript            string
+	RepoCleanupScript          string
+	CopyFiles                  string
 	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
 	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
@@ -474,17 +532,21 @@ type RepoSpec struct {
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
 // config, tasks). Used when plan_mode is enabled on a session.
-const McpModeConfig = "config"
+const McpModeConfig = mcpmode.Config
 
 // McpModeTaskTitlePending exposes the task-mode MCP surface plus the one-shot
 // title tool while a prompt-first task still has its provisional title.
-const McpModeTaskTitlePending = "task-title-pending"
+const McpModeTaskTitlePending = mcpmode.TaskTitlePending
 
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
-// docs/specs/office-agent-cli/spec.md.
-const McpModeOffice = "office"
+// docs/specs/office/system-design/agents-03.md.
+const McpModeOffice = mcpmode.Office
+
+// McpModeAutomation selects the fixed coordinator MCP surface for tasks
+// created by a user-configured automation.
+const McpModeAutomation = mcpmode.Automation
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
@@ -496,7 +558,7 @@ type LaunchOptions struct {
 	PriorACPSession      string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID       string
 	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
@@ -575,6 +637,7 @@ type TaskExecution struct {
 	TaskID           string
 	AgentExecutionID string
 	AgentProfileID   string
+	TurnID           string
 	StartedAt        time.Time
 	SessionState     v1.TaskSessionState
 	LastUpdate       time.Time
@@ -807,6 +870,7 @@ type Executor struct {
 	repoCloner                      RepoCloner
 	repoUpdater                     RepoUpdater
 	taskRepositoryBaseBranchUpdater TaskRepositoryBaseBranchUpdater
+	prBaseResolver                  PRBaseResolver
 }
 
 // taskEnvLock returns the per-task mutex for env persistence, creating one on
@@ -835,7 +899,7 @@ type RepoCloner interface {
 	// SetOriginURL updates a Kandev-managed checkout remote without exposing credentials.
 	SetOriginURL(ctx context.Context, repositoryPath, originURL string) error
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
-	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
+	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
 type authenticatedRepoCloner interface {
@@ -845,39 +909,96 @@ type authenticatedRepoCloner interface {
 	) (string, error)
 }
 
+type strictAuthenticatedRepoCloner interface {
+	RefreshWorkspaceRepositoryWithBasicAuth(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, repositoryPath, username, password string,
+	) error
+}
+
+type remoteStateRepoCloner interface {
+	EnsureWorkspaceClonedWithCredentialRequestAndState(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		credentialHost, token string,
+	) (string, repoclone.RemoteRefState, error)
+	RefreshWorkspaceRepositoryWithCredentialRequestAndState(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		repositoryPath, credentialHost, token string,
+	) (repoclone.RemoteRefState, error)
+}
+
+type remoteStateAuthenticatedRepoCloner interface {
+	EnsureWorkspaceClonedWithBasicAuthAndState(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, username, password string,
+	) (string, repoclone.RemoteRefState, error)
+	RefreshWorkspaceRepositoryWithBasicAuthAndState(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, repositoryPath, username, password string,
+	) (repoclone.RemoteRefState, error)
+}
+
+type localRemoteStateRepoCloner interface {
+	InspectLocalRepositoryRemoteRefState(
+		ctx context.Context, repositoryPath string,
+	) (repoclone.RemoteRefState, error)
+}
+
 const providerAzureDevOps = "azure_devops"
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (string, error) {
-	return e.ensureClonedWithWorkspaceAuthForSession(ctx, "", "", repo, cloneURL)
+	path, _, err := e.ensureClonedWithWorkspaceAuthForSessionAndState(ctx, "", "", repo, cloneURL)
+	return path, err
 }
 
 func (e *Executor) ensureClonedWithWorkspaceAuthForSession(
 	ctx context.Context, taskID, sessionID string, repo *models.Repository, cloneURL string,
 ) (string, error) {
+	path, _, err := e.ensureClonedWithWorkspaceAuthForSessionAndState(ctx, taskID, sessionID, repo, cloneURL)
+	return path, err
+}
+
+func (e *Executor) ensureClonedWithWorkspaceAuthForSessionAndState(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, cloneURL string,
+) (string, repoclone.RemoteRefState, error) {
 	credentialHost, token := "", ""
 	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
 		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
 	if repo.Provider != providerAzureDevOps || !strings.HasPrefix(cloneURL, "https://") {
-		return e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
-			ctx, repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL), credentialHost, token,
+		request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+		if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
+			return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
+				ctx, request, credentialHost, token,
+			)
+		}
+		path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+			ctx, request, credentialHost, token,
 		)
+		return path, repoclone.RemoteRefStateHasRefs, err
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
 	if !ok || e.secretStore == nil {
-		return "", fmt.Errorf("azure DevOps repository clone authentication is unavailable")
+		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("azure DevOps repository clone authentication is unavailable")
 	}
 	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
 	if err != nil {
-		return "", fmt.Errorf("read Azure DevOps clone credential: %w", err)
+		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps clone credential: %w", err)
 	}
 	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	return authCloner.EnsureWorkspaceClonedWithBasicAuth(
+	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
+		return stateCloner.EnsureWorkspaceClonedWithBasicAuthAndState(
+			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
+			cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+		)
+	}
+	path, err := authCloner.EnsureWorkspaceClonedWithBasicAuth(
 		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
 		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
 	)
+	return path, repoclone.RemoteRefStateHasRefs, err
 }
 
 func repositoryGitCredentialRequest(
@@ -906,6 +1027,11 @@ type RepoUpdater interface {
 // tests remain independent of the task service.
 type TaskRepositoryBaseBranchUpdater interface {
 	UpdateTaskRepositoryBaseBranch(ctx context.Context, taskID, taskRepositoryID, baseBranch string) error
+}
+
+// PRBaseResolver returns the current base branch for one provider pull request.
+type PRBaseResolver interface {
+	ResolvePRBaseBranch(ctx context.Context, workspaceID, owner, repo string, number int) (string, error)
 }
 
 // ExecutorConfig holds configuration for the Executor
@@ -1000,6 +1126,11 @@ func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 // successful worktree fallback self-healing.
 func (e *Executor) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
 	e.taskRepositoryBaseBranchUpdater = updater
+}
+
+// SetPRBaseResolver wires best-effort pull-request base resolution at launch.
+func (e *Executor) SetPRBaseResolver(resolver PRBaseResolver) {
+	e.prBaseResolver = resolver
 }
 
 // SetOnAgentStartFailed sets a callback for agent process start failures.

@@ -2,10 +2,13 @@ package executor
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -47,6 +50,19 @@ func TestReuseExistingEnvironment_WorktreeReuse(t *testing.T) {
 
 	if req.WorktreeID != "wt-1" {
 		t.Errorf("expected WorktreeID=wt-1, got %s", req.WorktreeID)
+	}
+}
+
+func TestCanonicalInventoryMatches_AcceptsLegacyUnscopedRowWhenNoScopedRowsExist(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main"}
+	rows := []*models.TaskEnvironmentRepo{{
+		RepositoryID: "repo-1",
+		BranchSlug:   "",
+		WorktreeID:   "worktree-1",
+	}}
+
+	if got := canonicalInventoryMatches(spec, rows, true); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want legacy inventory match", got)
 	}
 }
 
@@ -124,11 +140,138 @@ func TestReuseExistingEnvironment_WorktreeSkippedWhenNotRequested(t *testing.T) 
 	}
 }
 
+func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
+	env := &models.TaskEnvironment{
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Repos:        []*models.TaskEnvironmentRepo{{RepositoryID: "repo-1"}},
+	}
+	if workspaceReuseAllowed(env, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("workspace reuse should be disabled when the executor type changes")
+	}
+	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true, true) {
+		t.Fatal("workspace reuse should remain enabled for the owning executor type")
+	}
+	if workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("legacy environments without a physical worktree should not be reused by worktree launches")
+	}
+	if !workspaceReuseAllowed(&models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "legacy-worktree", Status: "active"}},
+	}, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("legacy environments with a physical worktree should remain reusable")
+	}
+}
+
+func TestWorkspaceReuseAllowedRequiresInventoryForRepoBackedExecutors(t *testing.T) {
+	for _, executorType := range []string{
+		string(models.ExecutorTypeLocal),
+		string(models.ExecutorTypeLocalDocker),
+		string(models.ExecutorTypeSSH),
+		string(models.ExecutorTypeWorktree),
+	} {
+		t.Run(executorType, func(t *testing.T) {
+			env := &models.TaskEnvironment{ExecutorType: executorType}
+			if workspaceReuseAllowed(env, executorType, true, true) {
+				t.Fatalf("workspace reuse allowed for %s with empty repository inventory", executorType)
+			}
+		})
+	}
+}
+
+func TestWaitForTaskEnvironmentReadyWaitsForMaterializer(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{ID: "env-wait", Status: models.TaskEnvironmentStatusCreating}
+	lookups := 0
+	repo.getTaskEnvironmentFunc = func(_ context.Context, id string) (*models.TaskEnvironment, error) {
+		if id != env.ID {
+			t.Fatalf("environment lookup id = %q, want %q", id, env.ID)
+		}
+		lookups++
+		if lookups > 1 {
+			env.Status = models.TaskEnvironmentStatusReady
+		}
+		return env, nil
+	}
+
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	got, err := e.waitForTaskEnvironmentReady(context.Background(), env.ID)
+	if err != nil {
+		t.Fatalf("waitForTaskEnvironmentReady: %v", err)
+	}
+	if got.Status != models.TaskEnvironmentStatusReady || lookups < 2 {
+		t.Fatalf("ready environment = %+v after %d lookup(s)", got, lookups)
+	}
+}
+
+func TestEnvironmentReposForLaunch_PersistsRemoteWorkspaceIdentity(t *testing.T) {
+	req := &LaunchAgentRequest{
+		RepositoryID:       "repo-1",
+		BranchIdentitySlug: "feature/task",
+		WorkspacePath:      "/remote/tasks/task-1",
+	}
+	resp := &LaunchAgentResponse{WorkspacePath: "/remote/tasks/task-1"}
+
+	repos := environmentReposForLaunch(req, resp)
+	if len(repos) != 1 {
+		t.Fatalf("environment repos = %#v, want one remote repository row", repos)
+	}
+	got := repos[0]
+	if got.RepositoryID != "repo-1" || got.BranchSlug != "feature-task" || got.WorktreePath != "" || got.WorktreeID != "" {
+		t.Fatalf("remote environment repo = %#v", got)
+	}
+}
+
+func TestEnvironmentReposForLaunch_LocalInventoryDoesNotPointAtSeedCheckout(t *testing.T) {
+	req := &LaunchAgentRequest{
+		ExecutorType:       string(models.ExecutorTypeLocal),
+		RepositoryID:       "repo-1",
+		RepositoryPath:     "/tmp/e2e-repo",
+		BranchIdentitySlug: "feature/task",
+	}
+	resp := &LaunchAgentResponse{WorkspacePath: req.RepositoryPath}
+
+	repos := environmentReposForLaunch(req, resp)
+	if len(repos) != 1 {
+		t.Fatalf("environment repos = %#v, want one inventory row", repos)
+	}
+	got := repos[0]
+	if got.WorktreeID != "" || got.WorktreePath != "" || got.WorktreeBranch != "" {
+		t.Fatalf("local inventory row points at a physical checkout: %#v", got)
+	}
+}
+
+func TestEnvironmentReposForLaunch_PersistsEveryRemoteRepository(t *testing.T) {
+	req := &LaunchAgentRequest{
+		RepositoryID:  "repo-primary",
+		WorkspacePath: "/remote/tasks/task-1",
+		Repositories: []RepoSpec{
+			{RepositoryID: "repo-primary", BranchIdentitySlug: "main"},
+			{RepositoryID: "repo-secondary", BranchIdentitySlug: "release/v2"},
+		},
+	}
+
+	repos := environmentReposForLaunch(req, &LaunchAgentResponse{WorkspacePath: req.WorkspacePath})
+	if len(repos) != 2 {
+		t.Fatalf("environment repos = %#v, want one row per remote repository", repos)
+	}
+	if repos[0].RepositoryID != "repo-primary" || repos[0].BranchSlug != "main" {
+		t.Fatalf("primary remote environment repo = %#v", repos[0])
+	}
+	if repos[1].RepositoryID != "repo-secondary" || repos[1].BranchSlug != "release-v2" {
+		t.Fatalf("secondary remote environment repo = %#v", repos[1])
+	}
+	for _, repo := range repos {
+		if repo.WorktreePath != "" || repo.WorktreeBranch != "" {
+			t.Fatalf("remote repository without a concrete result recorded shared launch fields: %#v", repo)
+		}
+	}
+}
 func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
-	req := &LaunchAgentRequest{TaskID: "task-1"}
+	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}
 	env := &models.TaskEnvironment{
-		ContainerID: "container-abc",
+		ContainerID:                       "container-abc",
+		ContainerBootstrapNonceSecretID:   "bootstrap-secret-abc",
+		ContainerControlAuthTokenSecretID: "container-control-secret-abc",
 	}
 
 	e.reuseExistingEnvironment(context.Background(), req, env)
@@ -138,6 +281,240 @@ func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	}
 	if req.Metadata["container_id"] != "container-abc" {
 		t.Errorf("expected metadata container_id=container-abc, got %v", req.Metadata["container_id"])
+	}
+	if req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "bootstrap-secret-abc" {
+		t.Errorf("expected canonical bootstrap nonce reference, got %v", req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret])
+	}
+	if req.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret] != "container-control-secret-abc" {
+		t.Errorf("expected canonical container control secret reference, got %v", req.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret])
+	}
+}
+
+func TestPersistTaskEnvironment_DockerBootstrapNonceBecomesEnvironmentHandle(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocalDocker),
+		Status:       models.TaskEnvironmentStatusCreating,
+	}
+	repo.taskEnvironments[env.ID] = env
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocalDocker)},
+		&LaunchAgentResponse{ContainerID: "container-1", Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyBootstrapNonceSecret:       "bootstrap-secret-1",
+			lifecycle.MetadataKeyContainerControlAuthSecret: "container-control-secret-1",
+		}},
+		executorConfig{ExecutorID: "docker"})
+
+	persisted := repo.taskEnvironments[env.ID]
+	if persisted.ContainerID != "container-1" {
+		t.Fatalf("ContainerID = %q, want container-1", persisted.ContainerID)
+	}
+	if persisted.ContainerBootstrapNonceSecretID != "bootstrap-secret-1" {
+		t.Fatalf("ContainerBootstrapNonceSecretID = %q, want bootstrap-secret-1", persisted.ContainerBootstrapNonceSecretID)
+	}
+	if persisted.ContainerControlAuthTokenSecretID != "container-control-secret-1" {
+		t.Fatalf("ContainerControlAuthTokenSecretID = %q, want container-control-secret-1", persisted.ContainerControlAuthTokenSecretID)
+	}
+	attach := &LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspaceReuseRequired: true}
+	e.reuseExistingEnvironment(context.Background(), attach, persisted)
+	if attach.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty for sibling attach", attach.PreviousExecutionID)
+	}
+	if got := attach.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret]; got != "bootstrap-secret-1" {
+		t.Fatalf("bootstrap nonce reference = %v, want canonical environment handle", got)
+	}
+	if got := attach.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret]; got != "container-control-secret-1" {
+		t.Fatalf("container control secret reference = %v, want canonical environment handle", got)
+	}
+}
+
+func TestPersistTaskEnvironment_FinalizesCreatingEnvironmentWithInventory(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:                       "env-1",
+		TaskID:                   "task-1",
+		ExecutorType:             string(models.ExecutorTypeWorktree),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "session-1",
+	}
+	repo.taskEnvironments[env.ID] = env
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
+		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
+		}}},
+		executorConfig{ExecutorID: models.ExecutorIDWorktree})
+
+	if len(repo.finalizeTaskEnvironmentCalls) != 1 {
+		t.Fatalf("FinalizeTaskEnvironmentMaterialization calls = %d, want 1", len(repo.finalizeTaskEnvironmentCalls))
+	}
+	if len(repo.updateTaskEnvironmentCalls) != 0 {
+		t.Fatalf("UpdateTaskEnvironment calls = %d, want 0 before atomic finalization", len(repo.updateTaskEnvironmentCalls))
+	}
+	persisted := repo.taskEnvironments[env.ID]
+	if persisted.Status != models.TaskEnvironmentStatusReady || persisted.MaterializationSessionID != "" {
+		t.Fatalf("environment publication = status %q owner %q, want ready with cleared owner", persisted.Status, persisted.MaterializationSessionID)
+	}
+	if got := repo.taskEnvironmentRepos[env.ID]; len(got) != 1 || got[0].WorktreeID != "wt-1" {
+		t.Fatalf("canonical inventory = %#v, want one finalized worktree", got)
+	}
+}
+
+func TestPersistTaskEnvironment_RestoresMaterializationClaimOnFinalizeFailure(t *testing.T) {
+	repo := newMockRepository()
+	persistErr := errors.New("finalize failed")
+	repo.finalizeTaskEnvironmentErr = persistErr
+	env := &models.TaskEnvironment{
+		ID:                       "env-1",
+		TaskID:                   "task-1",
+		ExecutorType:             string(models.ExecutorTypeWorktree),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "session-1",
+	}
+	repo.taskEnvironments[env.ID] = env
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
+		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
+		}}},
+		executorConfig{ExecutorID: models.ExecutorIDWorktree})
+
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("persistTaskEnvironment error = %v, want %v", err, persistErr)
+	}
+	if env.Status != models.TaskEnvironmentStatusCreating || env.MaterializationSessionID != session.ID {
+		t.Fatalf("materialization claim = status %q owner %q, want creating with original owner", env.Status, env.MaterializationSessionID)
+	}
+}
+
+// TestPersistTaskEnvironment_NonMaterializerSiblingPersistsReposBeforeReady
+// pins the fix for the "ready status precedes inventory commit" hazard: a
+// non-initial-materializer sibling must write its per-repo rows before
+// flipping the environment to ready, so a crash or concurrent read between
+// the two writes can never observe a ready environment whose canonical
+// inventory is still empty or stale.
+func TestPersistTaskEnvironment_NonMaterializerSiblingPersistsReposBeforeReady(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-2", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	if err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
+		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-1", WorktreeID: "wt-2", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
+		}}},
+		executorConfig{ExecutorID: models.ExecutorIDWorktree}); err != nil {
+		t.Fatalf("persistTaskEnvironment: %v", err)
+	}
+
+	if len(repo.writeCallLog) < 2 {
+		t.Fatalf("write call log = %v, want at least a repo write followed by an env update", repo.writeCallLog)
+	}
+	repoIdx, envIdx := -1, -1
+	for i, call := range repo.writeCallLog {
+		switch call {
+		case "create_repo":
+			if repoIdx == -1 {
+				repoIdx = i
+			}
+		case "update_env":
+			if envIdx == -1 {
+				envIdx = i
+			}
+		}
+	}
+	if repoIdx == -1 || envIdx == -1 || repoIdx > envIdx {
+		t.Fatalf("write order = %v, want create_repo before update_env", repo.writeCallLog)
+	}
+	if got := repo.taskEnvironments[env.ID].Status; got != models.TaskEnvironmentStatusReady {
+		t.Fatalf("status = %q, want ready once inventory is persisted", got)
+	}
+}
+
+func TestPersistTaskEnvironment_LeavesEnvironmentUnchangedOnRepoWriteFailure(t *testing.T) {
+	repo := newMockRepository()
+	persistErr := errors.New("inventory write failed")
+	repo.createTaskEnvironmentRepoErr = persistErr
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-2", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
+		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-1", WorktreeID: "wt-2", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
+		}}},
+		executorConfig{ExecutorID: models.ExecutorIDWorktree})
+
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("persistTaskEnvironment error = %v, want %v", err, persistErr)
+	}
+	if session.TaskEnvironmentID != env.ID {
+		t.Fatalf("session TaskEnvironmentID = %q, want unchanged %q", session.TaskEnvironmentID, env.ID)
+	}
+	if len(repo.updateTaskEnvironmentCalls) != 0 {
+		t.Fatalf("UpdateTaskEnvironment calls = %d, want none after inventory failure", len(repo.updateTaskEnvironmentCalls))
+	}
+}
+
+// TestPersistTaskEnvironment_NonMaterializerSiblingWithEmptyReposDoesNotSetReady
+// covers the companion invariant: when this sibling's own launch produced no
+// repos and the environment had none recorded either, a repo-backed task's
+// environment must not be forced to ready — that would publish an empty
+// canonical inventory that permanently bricks reuse.
+func TestPersistTaskEnvironment_NonMaterializerSiblingWithEmptyReposDoesNotSetReady(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeSSH),
+		Status:       models.TaskEnvironmentStatusCreating,
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-2", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	if err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeSSH)},
+		&LaunchAgentResponse{},
+		executorConfig{ExecutorID: "ssh"}); err != nil {
+		t.Fatalf("persistTaskEnvironment: %v", err)
+	}
+
+	for _, call := range repo.writeCallLog {
+		if call == "create_repo" {
+			t.Fatalf("write call log = %v, want no repo rows created for an empty prepare result", repo.writeCallLog)
+		}
+	}
+	if got := repo.taskEnvironments[env.ID].Status; got != models.TaskEnvironmentStatusCreating {
+		t.Fatalf("status = %q, want status left untouched instead of forced to ready with empty inventory", got)
 	}
 }
 
@@ -251,7 +628,7 @@ func TestReuseExistingEnvironment_RuntimeMetadata_FallsBackToMatchingContainer(t
 	}
 }
 
-func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
+func TestBuildResumeRequest_ReusesDockerEnvironmentHandleWithoutSiblingRuntime(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}
 	exec := newTestExecutor(t, agentManager, repo)
@@ -278,11 +655,12 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 		Resumable: true,
 	}
 	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
-		ID:           "env-1",
-		TaskID:       "task-1",
-		ExecutorType: string(models.ExecutorTypeLocalDocker),
-		ContainerID:  "container-old",
-		Status:       models.TaskEnvironmentStatusReady,
+		ID:                              "env-1",
+		TaskID:                          "task-1",
+		ExecutorType:                    string(models.ExecutorTypeLocalDocker),
+		ContainerID:                     "container-old",
+		ContainerBootstrapNonceSecretID: "bootstrap-secret",
+		Status:                          models.TaskEnvironmentStatusReady,
 	}
 	repo.sessions["session-old"] = &models.TaskSession{
 		ID:                "session-old",
@@ -314,14 +692,17 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 	if req.TaskEnvironmentID != "env-1" {
 		t.Fatalf("TaskEnvironmentID = %q, want env-1", req.TaskEnvironmentID)
 	}
-	if req.PreviousExecutionID != "exec-old" {
-		t.Fatalf("PreviousExecutionID = %q, want latest environment execution exec-old", req.PreviousExecutionID)
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty for sibling session", req.PreviousExecutionID)
 	}
 	if req.Metadata[lifecycle.MetadataKeyContainerID] != "container-old" {
 		t.Fatalf("container metadata = %v, want container-old", req.Metadata[lifecycle.MetadataKeyContainerID])
 	}
-	if req.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "secret-token" {
-		t.Fatalf("auth token secret missing: %v", req.Metadata)
+	if _, found := req.Metadata[lifecycle.MetadataKeyAuthTokenSecret]; found {
+		t.Fatalf("sibling auth token leaked into attach request: %v", req.Metadata)
+	}
+	if req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "bootstrap-secret" {
+		t.Fatalf("bootstrap nonce reference = %v, want canonical environment handle", req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret])
 	}
 	if _, ok := req.Metadata["task_description"]; ok {
 		t.Fatalf("launch-only metadata should be filtered out: %v", req.Metadata)
@@ -408,6 +789,20 @@ func TestReuseExistingEnvironment_WorktreeAndContainer(t *testing.T) {
 	}
 }
 
+func TestReuseExistingEnvironment_AttachOnlyDoesNotAdoptSiblingExecution(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-1"] = &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: "environment-1"}
+	repo.executorsRunning["session-1"] = &models.ExecutorRunning{AgentExecutionID: "execution-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}
+
+	e.reuseExistingEnvironment(context.Background(), req, &models.TaskEnvironment{ID: "environment-1"})
+
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("attach-only reuse adopted sibling execution %q", req.PreviousExecutionID)
+	}
+}
+
 func TestReuseExistingEnvironment_EmptyEnvFieldsDoNothing(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1"}
@@ -420,6 +815,110 @@ func TestReuseExistingEnvironment_EmptyEnvFieldsDoNothing(t *testing.T) {
 	}
 	if req.PreviousExecutionID != "" {
 		t.Error("expected empty PreviousExecutionID when no container/sandbox IDs")
+	}
+}
+
+func TestReuseExistingEnvironment_ReuseRequiredSSHUsesCanonicalRemoteTaskDir(t *testing.T) {
+	e := newEnvTestExecutor(t)
+	req := &LaunchAgentRequest{
+		TaskID:                 "task-1",
+		ExecutorType:           string(models.ExecutorTypeSSH),
+		WorkspaceReuseRequired: true,
+	}
+	env := &models.TaskEnvironment{
+		ID:            "environment-1",
+		ExecutorType:  string(models.ExecutorTypeSSH),
+		WorkspacePath: "/home/kandev/.kandev/tasks/task-1",
+	}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if got := req.Metadata[lifecycle.MetadataKeySSHRemoteTaskDir]; got != env.WorkspacePath {
+		t.Fatalf("remote task directory = %v, want %q", got, env.WorkspacePath)
+	}
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty for attach-only reuse", req.PreviousExecutionID)
+	}
+}
+
+// TestReuseExistingEnvironment_ReuseNotRequiredSSHSkipsStaleRemoteTaskDir
+// pins the fix for the empty-inventory SSH reuse hazard: when
+// workspaceReuseAllowed has already forced a fresh materialization (reuse
+// not required), reuseExistingEnvironment must not forward the old
+// env.WorkspacePath, or the SSH executor's attach-only path would trust a
+// possibly incomplete or stale checkout instead of preparing a fresh one.
+func TestReuseExistingEnvironment_ReuseNotRequiredSSHSkipsStaleRemoteTaskDir(t *testing.T) {
+	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{
+		TaskID:                 "task-1",
+		ExecutorType:           string(models.ExecutorTypeSSH),
+		WorkspaceReuseRequired: false,
+	}
+	env := &models.TaskEnvironment{
+		ID:            "environment-1",
+		ExecutorType:  string(models.ExecutorTypeSSH),
+		WorkspacePath: "/home/kandev/.kandev/tasks/task-1",
+	}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if got, ok := req.Metadata[lifecycle.MetadataKeySSHRemoteTaskDir]; ok {
+		t.Fatalf("remote task directory = %v, want unset for a non-reuse launch", got)
+	}
+}
+
+func TestReuseExistingEnvironment_FreshRepoRecoveryDoesNotAdoptSiblingExecution(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+	}
+	repo.sessions["session-old"] = &models.TaskSession{
+		ID: "session-old", TaskID: "task-1", TaskEnvironmentID: "env-1",
+	}
+	repo.executorsRunning["session-old"] = &models.ExecutorRunning{
+		SessionID:        "session-old",
+		AgentExecutionID: "exec-old",
+	}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:                 "task-1",
+		ExecutorType:           string(models.ExecutorTypeSSH),
+		WorkspaceReuseRequired: false,
+	}
+	env := &models.TaskEnvironment{ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeSSH)}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty during fresh repo recovery", req.PreviousExecutionID)
+	}
+}
+
+func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+	}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:                 "task-1",
+		ExecutorType:           string(models.ExecutorTypeLocalDocker),
+		WorkspaceReuseRequired: false,
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocalDocker),
+		ContainerID:  "container-stale",
+	}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty during fresh repo recovery", req.PreviousExecutionID)
+	}
+	if req.Metadata != nil {
+		t.Fatalf("metadata = %#v, want no stale container handle during fresh recovery", req.Metadata)
 	}
 }
 
@@ -506,6 +1005,86 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 	}
 }
 
+func TestApplyExecutorRunningMetadata_DoesNotResumeSiblingKubernetesSession(t *testing.T) {
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", SessionID: "session-new", ExecutorType: string(models.ExecutorTypeKubernetes),
+	}
+	running := &models.ExecutorRunning{
+		SessionID: "session-old", TaskID: "task-1", AgentExecutionID: "execution-old",
+		Runtime:  agentruntime.RuntimeKubernetes,
+		Metadata: recordedKubernetesResumeMetadataFor("task-1", "session-old", "execution-old"),
+	}
+
+	applyExecutorRunningMetadata(req, running)
+
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty for fresh sibling Kubernetes launch", req.PreviousExecutionID)
+	}
+}
+
+func TestApplyExecutorRunningMetadata_KubernetesResumeRequiresExactSessionAuthority(t *testing.T) {
+	tests := []struct {
+		name           string
+		requestType    string
+		requestSession string
+		runtime        agentruntime.Runtime
+		runningSession string
+		wantPrevious   string
+	}{
+		{
+			name: "exact non-empty Kubernetes session resumes", requestType: string(models.ExecutorTypeKubernetes),
+			requestSession: "session-1", runtime: agentruntime.RuntimeKubernetes,
+			runningSession: "session-1", wantPrevious: "execution-old",
+		},
+		{
+			name: "sibling Kubernetes session starts fresh", requestType: string(models.ExecutorTypeKubernetes),
+			requestSession: "session-new", runtime: agentruntime.RuntimeKubernetes,
+			runningSession: "session-old",
+		},
+		{
+			name: "missing recorded Kubernetes session starts fresh", requestType: string(models.ExecutorTypeKubernetes),
+			requestSession: "session-new", runtime: agentruntime.RuntimeKubernetes,
+		},
+		{
+			name: "missing request Kubernetes session starts fresh", requestType: string(models.ExecutorTypeKubernetes),
+			runtime: agentruntime.RuntimeKubernetes, runningSession: "session-old",
+		},
+		{
+			name: "Kubernetes request rejects a mismatched recorded runtime", requestType: string(models.ExecutorTypeKubernetes),
+			requestSession: "session-1", runtime: agentruntime.RuntimeSSH,
+			runningSession: "session-1",
+		},
+		{
+			name: "non-Kubernetes request rejects a recorded Kubernetes runtime", requestType: string(models.ExecutorTypeLocal),
+			requestSession: "session-1", runtime: agentruntime.RuntimeKubernetes,
+			runningSession: "session-1",
+		},
+		{
+			name: "legacy runtime keeps cross-session environment reuse", requestType: string(models.ExecutorTypeLocal),
+			requestSession: "session-new", runtime: agentruntime.RuntimeStandalone,
+			runningSession: "session-old", wantPrevious: "execution-old",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := &LaunchAgentRequest{
+				TaskID: "task-1", SessionID: test.requestSession, ExecutorType: test.requestType,
+			}
+			running := &models.ExecutorRunning{
+				SessionID: test.runningSession, TaskID: "task-1",
+				AgentExecutionID: "execution-old", Runtime: test.runtime,
+			}
+
+			applyExecutorRunningMetadata(req, running)
+
+			if req.PreviousExecutionID != test.wantPrevious {
+				t.Fatalf("PreviousExecutionID = %q, want %q", req.PreviousExecutionID, test.wantPrevious)
+			}
+		})
+	}
+}
+
 // TestApplyExecutorRunningMetadata_RequestKeysWin documents that an explicit
 // value already on the request (e.g. set by the caller from launch options)
 // is not overwritten by the previous ExecutorRunning record. This applies to
@@ -581,6 +1160,72 @@ func TestApplyRepositoryConfig_PropagatesRepositoryID(t *testing.T) {
 
 	if req.RepositoryID != "repo-abc" {
 		t.Errorf("req.RepositoryID = %q, want %q", req.RepositoryID, "repo-abc")
+	}
+}
+
+func TestApplyRepositoryConfig_ReuseRequiredDoesNotRequireCloneURL(t *testing.T) {
+	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	info := &repoInfo{
+		RepositoryID:   "repo-abc",
+		RepositoryPath: "/repos/myrepo",
+		Repository:     &models.Repository{ID: "repo-abc", Name: "myrepo"},
+	}
+	execCfg := executorConfig{ExecutorID: "docker", ExecutorType: string(models.ExecutorTypeLocalDocker)}
+
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); err != nil {
+		t.Fatalf("reuse attach rejected an unavailable clone URL: %v", err)
+	}
+}
+
+func TestApplyRepositoryConfig_DockerUsesRepositoryPathWhenCloneURLIsUnavailable(t *testing.T) {
+	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	source := t.TempDir()
+	info := &repoInfo{RepositoryID: "repo-abc", RepositoryPath: source, Repository: &models.Repository{ID: "repo-abc", Name: "myrepo"}}
+	execCfg := executorConfig{ExecutorID: "docker", ExecutorType: string(models.ExecutorTypeLocalDocker)}
+
+	metadata, err := e.applyRepositoryConfig(req, task, info, execCfg, nil)
+	if err != nil {
+		t.Fatalf("applyRepositoryConfig: %v", err)
+	}
+	if req.RepositoryURL != source || metadata["repository_clone_url"] != source {
+		t.Fatalf("Docker clone source = %q / %#v, want repository path", req.RepositoryURL, metadata)
+	}
+}
+
+func TestApplyRepositoryConfig_DockerRejectsMissingRepositoryPathFallback(t *testing.T) {
+	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	source := filepath.Join(t.TempDir(), "docker-host-only-source")
+	info := &repoInfo{
+		RepositoryID:   "repo-abc",
+		RepositoryPath: source,
+		Repository:     &models.Repository{ID: "repo-abc", Name: "myrepo"},
+	}
+	execCfg := executorConfig{ExecutorID: "docker", ExecutorType: string(models.ExecutorTypeLocalDocker)}
+
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); !errors.Is(err, ErrNoCloneURL) {
+		t.Fatalf("applyRepositoryConfig error = %v, want ErrNoCloneURL", err)
+	}
+}
+
+func TestApplyRepositoryConfig_DockerRejectsRemoteRepositoryPathFallback(t *testing.T) {
+	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	info := &repoInfo{
+		RepositoryID:   "repo-abc",
+		RepositoryPath: "https://example.invalid/owner/repository.git",
+		Repository:     &models.Repository{ID: "repo-abc", Name: "myrepo"},
+	}
+	execCfg := executorConfig{ExecutorID: "docker", ExecutorType: string(models.ExecutorTypeLocalDocker)}
+
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); !errors.Is(err, ErrNoCloneURL) {
+		t.Fatalf("applyRepositoryConfig error = %v, want ErrNoCloneURL", err)
 	}
 }
 

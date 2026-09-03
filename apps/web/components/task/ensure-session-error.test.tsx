@@ -82,6 +82,22 @@ describe("EnsureSessionErrorBanner", () => {
     fireEvent.click(screen.getByTestId("ensure-session-error-retry"));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it("disables retry while another recovery action is pending", () => {
+    const onRetry = vi.fn();
+    render(
+      <EnsureSessionErrorBanner
+        error={new Error("recovery pending")}
+        onRetry={onRetry}
+        retryDisabled
+      />,
+    );
+    const retry = screen.getByTestId("ensure-session-error-retry") as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+
+    fireEvent.click(retry);
+    expect(onRetry).not.toHaveBeenCalled();
+  });
 });
 
 describe("EnsureSessionErrorEmptyState", () => {

@@ -107,19 +107,24 @@ func (h *Handler) logError(message string, err error) {
 	}
 }
 
-func RegisterRoutes(group *gin.RouterGroup, handler *Handler) {
-	group.GET("/storage", handler.getStorage)
-	group.GET("/storage/disk", handler.getStorageDisk)
-	group.GET("/storage/settings", handler.getStorageSettings)
-	group.PATCH("/storage/settings", handler.patchSettings)
-	group.POST("/storage/go-cache/adopt", handler.adoptGoCache)
-	group.POST("/storage/analyze", handler.analyze)
-	group.POST("/storage/run", handler.runNow)
-	group.GET("/storage/runs", handler.listRuns)
-	group.GET("/storage/quarantine", handler.listQuarantine)
-	group.POST("/storage/quarantine/:id/restore", handler.restoreQuarantine)
-	group.DELETE("/storage/quarantine", handler.deleteQuarantineBulk)
-	group.DELETE("/storage/quarantine/:id", handler.deleteQuarantine)
+// RegisterRoutes wires storage maintenance onto the /api/v1/system groups.
+// Reading the current usage, policy, run history, and quarantine contents is
+// open to any authenticated caller; every route that changes install-wide
+// state (settings, adoption, cleanup passes, quarantine restore/purge)
+// requires the admin role.
+func RegisterRoutes(read, admin *gin.RouterGroup, handler *Handler) {
+	read.GET("/storage", handler.getStorage)
+	read.GET("/storage/disk", handler.getStorageDisk)
+	read.GET("/storage/settings", handler.getStorageSettings)
+	read.GET("/storage/runs", handler.listRuns)
+	read.GET("/storage/quarantine", handler.listQuarantine)
+	admin.PATCH("/storage/settings", handler.patchSettings)
+	admin.POST("/storage/go-cache/adopt", handler.adoptGoCache)
+	admin.POST("/storage/analyze", handler.analyze)
+	admin.POST("/storage/run", handler.runNow)
+	admin.POST("/storage/quarantine/:id/restore", handler.restoreQuarantine)
+	admin.DELETE("/storage/quarantine", handler.deleteQuarantineBulk)
+	admin.DELETE("/storage/quarantine/:id", handler.deleteQuarantine)
 }
 
 func (h *Handler) getStorageDisk(c *gin.Context) {

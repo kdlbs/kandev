@@ -52,6 +52,8 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/commits", c.addPRCommits)
 	api.PUT("/pr-commits-failures", c.setPRCommitsFailures)
 	api.PUT("/merge-outcomes", c.setMergeOutcome)
+	api.PUT("/merge-queue", c.transitionMergeQueue)
+	api.GET("/merge-attempts", c.listMergeAttempts)
 	api.POST("/commit-details", c.addPRCommitDetail)
 	api.POST("/branches", c.addBranches)
 	api.POST("/repo-files", c.addRepoFiles)
@@ -521,19 +523,115 @@ func (c *MockController) setPRCommitsFailures(ctx *gin.Context) {
 
 func (c *MockController) setMergeOutcome(ctx *gin.Context) {
 	var req struct {
-		Owner   string       `json:"owner"`
-		Repo    string       `json:"repo"`
-		Number  int          `json:"number"`
-		Outcome MergeOutcome `json:"outcome"`
+		Owner   string `json:"owner"`
+		Repo    string `json:"repo"`
+		Number  int    `json:"number"`
+		Outcome string `json:"outcome"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Owner) == "" ||
-		strings.TrimSpace(req.Repo) == "" || req.Number <= 0 ||
-		(req.Outcome != MergeOutcomeMerged && req.Outcome != MergeOutcomeQueued) {
+		strings.TrimSpace(req.Repo) == "" || req.Number <= 0 || !validMockMergeOutcome(req.Outcome) {
 		respondInvalidPayload(ctx)
 		return
 	}
-	c.mock.SetMergeOutcome(req.Owner, req.Repo, req.Number, req.Outcome)
+	switch req.Outcome {
+	case "failed":
+		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge provider unavailable")
+	case "pending":
+		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge request remained pending")
+	case "head_mismatch":
+		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge head mismatch")
+	default:
+		c.mock.SetMergeOutcome(req.Owner, req.Repo, req.Number, MergeOutcome(req.Outcome))
+	}
 	ctx.JSON(http.StatusOK, gin.H{"outcome": req.Outcome})
+}
+
+func validMockMergeOutcome(outcome string) bool {
+	switch outcome {
+	case string(MergeOutcomeMerged), string(MergeOutcomeQueued), "failed", "pending", "head_mismatch":
+		return true
+	default:
+		return false
+	}
+}
+
+type mockMergeQueueTransitionRequest struct {
+	TaskID                         string      `json:"task_id"`
+	Owner                          string      `json:"owner"`
+	Repo                           string      `json:"repo"`
+	PRNumber                       int         `json:"pr_number"`
+	HeadSHA                        string      `json:"head_sha,omitempty"`
+	MergeQueueState                string      `json:"merge_queue_state"`
+	MergeQueuePosition             *int        `json:"merge_queue_position,omitempty"`
+	MergeQueueEntryID              string      `json:"merge_queue_entry_id"`
+	MergeQueueEntryHeadSHA         string      `json:"merge_queue_entry_head_sha"`
+	MergeQueueEstimatedTimeToMerge *int        `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
+	MergeQueueLastRemovalID        string      `json:"merge_queue_last_removal_id"`
+	MergeQueueLastRemovedAt        *time.Time  `json:"merge_queue_last_removed_at,omitempty"`
+	MergeQueueLastRemovalReason    string      `json:"merge_queue_last_removal_reason"`
+	MergeQueueLastRemovalBeforeSHA string      `json:"merge_queue_last_removal_before_sha"`
+	Checks                         *[]CheckRun `json:"checks,omitempty"`
+}
+
+// transitionMergeQueue updates the mock provider and immediately runs the
+// ordinary TaskPR sync path. This keeps E2E transitions causal: the response
+// is not returned until the durable row and its update event exist.
+func (c *MockController) transitionMergeQueue(ctx *gin.Context) {
+	var req mockMergeQueueTransitionRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.TaskID == "" ||
+		strings.TrimSpace(req.Owner) == "" || strings.TrimSpace(req.Repo) == "" || req.PRNumber <= 0 {
+		respondInvalidPayload(ctx)
+		return
+	}
+	if req.MergeQueueLastRemovalID != "" && req.MergeQueueLastRemovedAt == nil {
+		now := time.Now().UTC()
+		req.MergeQueueLastRemovedAt = &now
+	}
+	if err := c.mock.SetPRMergeQueue(req.Owner, req.Repo, req.PRNumber, mockPRMergeQueueState{
+		HeadSHA:                     req.HeadSHA,
+		State:                       req.MergeQueueState,
+		Position:                    req.MergeQueuePosition,
+		EntryID:                     req.MergeQueueEntryID,
+		EntryHeadSHA:                req.MergeQueueEntryHeadSHA,
+		EstimatedTimeToMergeSeconds: req.MergeQueueEstimatedTimeToMerge,
+		LastRemovalID:               req.MergeQueueLastRemovalID,
+		LastRemovedAt:               req.MergeQueueLastRemovedAt,
+		LastRemovalReason:           req.MergeQueueLastRemovalReason,
+		LastRemovalBeforeSHA:        req.MergeQueueLastRemovalBeforeSHA,
+		QueueObserved:               true,
+		RecoveryObserved:            true,
+	}); err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{errKey: err.Error()})
+		return
+	}
+	pr, err := c.mock.GetPR(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{errKey: err.Error()})
+		return
+	}
+	if req.Checks != nil {
+		c.mock.ReplaceCheckRuns(req.Owner, req.Repo, pr.HeadSHA, *req.Checks)
+	}
+	if c.service != nil {
+		status, statusErr := c.mock.GetPRStatus(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber)
+		if statusErr != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{errKey: statusErr.Error()})
+			return
+		}
+		if syncErr := c.service.SyncTaskPR(ctx.Request.Context(), req.TaskID, status); syncErr != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{errKey: syncErr.Error()})
+			return
+		}
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"head_sha":                    pr.HeadSHA,
+		"merge_queue_state":           req.MergeQueueState,
+		"merge_queue_last_removal_id": req.MergeQueueLastRemovalID,
+	})
+}
+
+func (c *MockController) listMergeAttempts(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"attempts": c.mock.MergedPRs()})
 }
 
 func (c *MockController) addPRCommitDetail(ctx *gin.Context) {
@@ -604,29 +702,37 @@ func (c *MockController) addRepoFiles(ctx *gin.Context) {
 // associateTaskPR endpoint. Pointer fields are optional — leave them nil
 // to skip the corresponding TaskPR column update.
 type associateTaskPRRequest struct {
-	TaskID                  string `json:"task_id"`
-	WorkspaceID             string `json:"workspace_id,omitempty"`
-	RepositoryID            string `json:"repository_id,omitempty"`
-	Owner                   string `json:"owner"`
-	Repo                    string `json:"repo"`
-	PRNumber                int    `json:"pr_number"`
-	PRURL                   string `json:"pr_url"`
-	PRTitle                 string `json:"pr_title"`
-	HeadBranch              string `json:"head_branch"`
-	BaseBranch              string `json:"base_branch"`
-	AuthorLogin             string `json:"author_login"`
-	State                   string `json:"state"`
-	ReviewState             string `json:"review_state"`
-	ChecksState             string `json:"checks_state"`
-	MergeableState          string `json:"mergeable_state"`
-	Additions               int    `json:"additions"`
-	Deletions               int    `json:"deletions"`
-	ReviewCount             *int   `json:"review_count,omitempty"`
-	PendingReviewCount      *int   `json:"pending_review_count,omitempty"`
-	RequiredReviews         *int   `json:"required_reviews,omitempty"`
-	ChecksTotal             *int   `json:"checks_total,omitempty"`
-	ChecksPassing           *int   `json:"checks_passing,omitempty"`
-	UnresolvedReviewThreads *int   `json:"unresolved_review_threads,omitempty"`
+	TaskID                                string     `json:"task_id"`
+	WorkspaceID                           string     `json:"workspace_id,omitempty"`
+	RepositoryID                          string     `json:"repository_id,omitempty"`
+	Owner                                 string     `json:"owner"`
+	Repo                                  string     `json:"repo"`
+	PRNumber                              int        `json:"pr_number"`
+	PRURL                                 string     `json:"pr_url"`
+	PRTitle                               string     `json:"pr_title"`
+	HeadBranch                            string     `json:"head_branch"`
+	BaseBranch                            string     `json:"base_branch"`
+	AuthorLogin                           string     `json:"author_login"`
+	State                                 string     `json:"state"`
+	HeadSHA                               string     `json:"head_sha,omitempty"`
+	ReviewState                           string     `json:"review_state"`
+	ChecksState                           string     `json:"checks_state"`
+	MergeableState                        string     `json:"mergeable_state"`
+	MergeQueueState                       string     `json:"merge_queue_state"`
+	MergeQueuePosition                    *int       `json:"merge_queue_position,omitempty"`
+	MergeQueueEstimatedTimeToMergeSeconds *int       `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
+	MergeQueueLastRemovalID               string     `json:"merge_queue_last_removal_id,omitempty"`
+	MergeQueueLastRemovedAt               *time.Time `json:"merge_queue_last_removed_at,omitempty"`
+	MergeQueueLastRemovalReason           string     `json:"merge_queue_last_removal_reason,omitempty"`
+	MergeQueueLastRemovalBeforeSHA        string     `json:"merge_queue_last_removal_before_sha,omitempty"`
+	Additions                             int        `json:"additions"`
+	Deletions                             int        `json:"deletions"`
+	ReviewCount                           *int       `json:"review_count,omitempty"`
+	PendingReviewCount                    *int       `json:"pending_review_count,omitempty"`
+	RequiredReviews                       *int       `json:"required_reviews,omitempty"`
+	ChecksTotal                           *int       `json:"checks_total,omitempty"`
+	ChecksPassing                         *int       `json:"checks_passing,omitempty"`
+	UnresolvedReviewThreads               *int       `json:"unresolved_review_threads,omitempty"`
 }
 
 // associateTaskPR directly creates (or replaces) a github_task_prs record for
@@ -669,24 +775,32 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 // a TaskPR and applies the optional pointer fields when present.
 func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR {
 	tp := &TaskPR{
-		TaskID:         req.TaskID,
-		WorkspaceID:    req.WorkspaceID,
-		RepositoryID:   req.RepositoryID,
-		Owner:          req.Owner,
-		Repo:           req.Repo,
-		PRNumber:       req.PRNumber,
-		PRURL:          req.PRURL,
-		PRTitle:        req.PRTitle,
-		HeadBranch:     req.HeadBranch,
-		BaseBranch:     req.BaseBranch,
-		AuthorLogin:    req.AuthorLogin,
-		State:          req.State,
-		ReviewState:    req.ReviewState,
-		ChecksState:    req.ChecksState,
-		MergeableState: req.MergeableState,
-		Additions:      req.Additions,
-		Deletions:      req.Deletions,
-		CreatedAt:      now,
+		TaskID:                                req.TaskID,
+		WorkspaceID:                           req.WorkspaceID,
+		RepositoryID:                          req.RepositoryID,
+		Owner:                                 req.Owner,
+		Repo:                                  req.Repo,
+		PRNumber:                              req.PRNumber,
+		PRURL:                                 req.PRURL,
+		PRTitle:                               req.PRTitle,
+		HeadBranch:                            req.HeadBranch,
+		BaseBranch:                            req.BaseBranch,
+		AuthorLogin:                           req.AuthorLogin,
+		State:                                 req.State,
+		HeadSHA:                               req.HeadSHA,
+		ReviewState:                           req.ReviewState,
+		ChecksState:                           req.ChecksState,
+		MergeableState:                        req.MergeableState,
+		MergeQueueState:                       req.MergeQueueState,
+		MergeQueuePosition:                    req.MergeQueuePosition,
+		MergeQueueEstimatedTimeToMergeSeconds: req.MergeQueueEstimatedTimeToMergeSeconds,
+		MergeQueueLastRemovalID:               req.MergeQueueLastRemovalID,
+		MergeQueueLastRemovedAt:               req.MergeQueueLastRemovedAt,
+		MergeQueueLastRemovalReason:           req.MergeQueueLastRemovalReason,
+		MergeQueueLastRemovalBeforeSHA:        req.MergeQueueLastRemovalBeforeSHA,
+		Additions:                             req.Additions,
+		Deletions:                             req.Deletions,
+		CreatedAt:                             now,
 	}
 	if req.ReviewCount != nil {
 		tp.ReviewCount = *req.ReviewCount
@@ -718,23 +832,34 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 	if existing, _ := c.mock.GetPR(ctx, req.Owner, req.Repo, req.PRNumber); existing != nil {
 		return
 	}
+	headSHA := req.HeadSHA
+	if headSHA == "" {
+		headSHA = mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
+	}
 	c.mock.AddPR(&PR{
-		Number:         req.PRNumber,
-		Title:          req.PRTitle,
-		URL:            req.PRURL,
-		HTMLURL:        req.PRURL,
-		State:          req.State,
-		HeadBranch:     req.HeadBranch,
-		HeadSHA:        mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
-		BaseBranch:     req.BaseBranch,
-		AuthorLogin:    req.AuthorLogin,
-		MergeableState: req.MergeableState,
-		RepoOwner:      req.Owner,
-		RepoName:       req.Repo,
-		Additions:      req.Additions,
-		Deletions:      req.Deletions,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		Number:                                req.PRNumber,
+		Title:                                 req.PRTitle,
+		URL:                                   req.PRURL,
+		HTMLURL:                               req.PRURL,
+		State:                                 req.State,
+		HeadBranch:                            req.HeadBranch,
+		HeadSHA:                               headSHA,
+		BaseBranch:                            req.BaseBranch,
+		AuthorLogin:                           req.AuthorLogin,
+		MergeableState:                        req.MergeableState,
+		RepoOwner:                             req.Owner,
+		RepoName:                              req.Repo,
+		Additions:                             req.Additions,
+		Deletions:                             req.Deletions,
+		MergeQueueState:                       req.MergeQueueState,
+		MergeQueuePosition:                    req.MergeQueuePosition,
+		MergeQueueEstimatedTimeToMergeSeconds: req.MergeQueueEstimatedTimeToMergeSeconds,
+		MergeQueueLastRemovalID:               req.MergeQueueLastRemovalID,
+		MergeQueueLastRemovedAt:               req.MergeQueueLastRemovedAt,
+		MergeQueueLastRemovalReason:           req.MergeQueueLastRemovalReason,
+		MergeQueueLastRemovalBeforeSHA:        req.MergeQueueLastRemovalBeforeSHA,
+		CreatedAt:                             now,
+		UpdatedAt:                             now,
 	})
 }
 
@@ -772,6 +897,8 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 			CreatedAt: time.Now().UTC(),
 			UpdatedAt: time.Now().UTC(),
 		})
+	} else if pr.HeadSHA != "" {
+		headSHA = pr.HeadSHA
 	}
 	// Replace prior seeded checks/reviews/comments so a follow-up call gives
 	// deterministic state; helpful for tests that drive a "then a check

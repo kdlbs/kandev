@@ -70,6 +70,49 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 	return true, nil
 }
 
+// remoteBranchExists performs an authoritative, bounded probe for a branch on
+// origin. A successful `ls-remote --exit-code` with exit status 2 means the
+// remote answered and did not advertise the requested ref. Any other failure
+// remains an error because transport, authentication, and timeout failures do
+// not prove that the branch was deleted.
+func (m *Manager) remoteBranchExists(ctx context.Context, repoPath, branch string) (bool, error) {
+	branch = normalizeOriginBranchName(branch)
+	if branch == "" {
+		return false, fmt.Errorf("remote branch name is empty: %w", ErrGitCommandFailed)
+	}
+	output, err := m.runBoundedGitInspect(
+		ctx,
+		repoPath,
+		"ls-remote",
+		"--exit-code",
+		"--heads",
+		"origin",
+		"refs/heads/"+branch,
+	)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+		return false, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false, err
+	}
+	if containsAuthFailure(strings.ToLower(output)) {
+		return false, ErrAuthFailed
+	}
+	return false, ErrGitCommandFailed
+}
+
+func normalizeOriginBranchName(branch string) string {
+	branch = strings.TrimSpace(branch)
+	for _, prefix := range []string{"refs/remotes/origin/", "refs/heads/", "origin/"} {
+		branch = strings.TrimPrefix(branch, prefix)
+	}
+	return branch
+}
+
 // runBoundedGitInspect runs a non-interactive local git inspection after
 // acquiring the lifecycle throttle. The timeout starts after admission so
 // queue wait does not consume the command's inspection budget.
@@ -111,46 +154,106 @@ func (m *Manager) checkoutBranchExistsAnywhere(ctx context.Context, repoPath, br
 	return remote
 }
 
-func (m *Manager) preferRefreshedRemoteRef(ctx context.Context, repoPath, branch string) string {
+func (m *Manager) preferRefreshedRemoteRef(ctx context.Context, repoPath, branch string) (string, error) {
 	localBranch := strings.TrimPrefix(branch, "origin/")
 	if localBranch == "" {
-		return branch
+		return branch, nil
 	}
 	remoteRef := "origin/" + localBranch
-	if exists, err := m.branchExists(ctx, repoPath, remoteRef); err == nil && exists {
-		return remoteRef
-	}
-	return branch
+	return m.selectContainingRef(ctx, repoPath, branch, remoteRef)
 }
 
-// prepareCheckoutFromRefreshedOrigin makes a refreshed remote branch available
-// as a local branch without contacting origin. It returns false when neither a
-// local nor remote-tracking ref exists, preserving the existing "create a new
-// branch from base" behavior.
-func (m *Manager) prepareCheckoutFromRefreshedOrigin(ctx context.Context, repoPath, branch string) (bool, error) {
-	if exists, err := m.branchExists(ctx, repoPath, branch); err != nil {
-		return false, err
-	} else if exists {
-		return true, nil
+func (m *Manager) resolveRefreshedBaseRefWithFallback(
+	ctx context.Context, repoPath, baseBranch, fallbackBaseBranch string,
+) (string, string, string, string, error) {
+	resolved, err := m.preferRefreshedRemoteRef(ctx, repoPath, baseBranch)
+	if err == nil {
+		return resolved, "", "", "", nil
 	}
-	remoteRef := "origin/" + branch
-	if exists, err := m.branchExists(ctx, repoPath, remoteRef); err != nil {
-		return false, err
-	} else if !exists {
-		return false, nil
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", "", "", "", ctxErr
+	}
+	reason := classifyBaseRefSelectionFailure(err)
+	fallback := strings.TrimSpace(fallbackBaseBranch)
+	if reason == gitFallbackReasonMissingRemoteRef && fallback != "" && fallback != baseBranch {
+		resolvedFallback, _, _, _, fallbackErr := m.resolveRefreshedBaseRefWithFallback(ctx, repoPath, fallback, "")
+		if fallbackErr == nil {
+			return resolvedFallback, "", "", fallback, nil
+		}
+		return "", "", "", "", fallbackErr
+	}
+	if isRemoteOnlyBaseRef(baseBranch) {
+		return "", "", "", "", err
+	}
+	localExists, localErr := m.branchExists(ctx, repoPath, baseBranch)
+	if localErr != nil {
+		return "", "", "", "", fmt.Errorf("could not verify local base ref %q: %w", baseBranch, localErr)
+	}
+	if !localExists {
+		return "", "", "", "", err
+	}
+	warning, detail := localBaseRefreshWarning(reason, baseBranch)
+	m.logger.Warn("refreshed remote base was incomplete; using local base",
+		zap.String("branch", baseBranch),
+		zap.String("reason", reason),
+		zap.String("fallback_ref", baseBranch),
+		zap.Error(err),
+	)
+	return baseBranch, warning, detail, "", nil
+}
+
+// prepareCheckoutFromRefreshedOrigin verifies a refreshed remote branch and
+// returns whether a usable local or remote ref exists without contacting
+// origin. It returns false when neither ref exists, preserving the existing
+// "create a new branch from base" behavior.
+func (m *Manager) prepareCheckoutFromRefreshedOrigin(ctx context.Context, repoPath, branch string) (bool, error) {
+	selected, err := m.prepareBranchFromRefreshedOrigin(ctx, repoPath, branch, branch, 0)
+	return selected != "", err
+}
+
+// prepareBranchFromRefreshedOrigin selects a provider-refreshed source branch
+// without contacting origin. A PR number selects the dedicated origin/pr/<N>
+// ref, which is also how fork PR heads are kept available after the
+// authenticated refresh. When both refs exist, the selected ref is the one
+// that contains the other. A local-only ref is preserved, a refreshed remote
+// ref is returned to the caller as the worktree start point, and divergence or
+// an unverified relationship fails closed.
+func (m *Manager) prepareBranchFromRefreshedOrigin(
+	ctx context.Context, repoPath, localBranch, sourceBranch string, prNumber int,
+) (string, error) {
+	remoteRef := "origin/" + sourceBranch
+	if prNumber > 0 {
+		remoteRef = fmt.Sprintf("origin/pr/%d", prNumber)
+	}
+	localExists, err := m.branchExists(ctx, repoPath, localBranch)
+	if err != nil {
+		return "", err
+	}
+	remoteExists, err := m.branchExists(ctx, repoPath, remoteRef)
+	if err != nil {
+		return "", err
+	}
+	if !localExists && !remoteExists {
+		return "", nil
+	}
+	if !remoteExists {
+		return "", fmt.Errorf("required fetched remote ref %q is missing", remoteRef)
+	}
+	if !localExists {
+		release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
+		if err != nil {
+			return "", err
+		}
+		defer release()
+		cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", localBranch, remoteRef)
+		if output, runErr := cmd.CombinedOutput(); runErr != nil {
+			return "", fmt.Errorf("create local branch %q from refreshed origin: %s: %w",
+				localBranch, strings.TrimSpace(string(output)), runErr)
+		}
+		return localBranch, nil
 	}
 
-	release, err := subproc.Git().Acquire(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer release()
-	cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", branch, remoteRef)
-	if output, runErr := cmd.CombinedOutput(); runErr != nil {
-		return false, fmt.Errorf("create local branch %q from refreshed origin: %s: %w",
-			branch, strings.TrimSpace(string(output)), runErr)
-	}
-	return true, nil
+	return m.selectContainingRef(ctx, repoPath, localBranch, remoteRef)
 }
 
 // Branch recovery statuses reported by BranchRecoveryStatus.
@@ -182,13 +285,9 @@ func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch str
 
 // refContains reports whether container already includes every commit in
 // contained, i.e. `git merge-base --is-ancestor contained container`.
-//
-// Used to decide whether resolving a worktree start point to one ref can lose
-// commits that only exist on the other. A probe that cannot answer (throttle
-// wait, timeout, missing ref) returns false, and callers must treat that as
-// "cannot rule out loss": being slightly stale is recoverable, silently
-// dropping the user's unpushed commits is not.
-func (m *Manager) refContains(ctx context.Context, repoPath, container, contained string) bool {
+// A non-zero ancestry result is distinct from a failed probe: the former is a
+// proven negative, while the latter must stop required refresh preparation.
+func (m *Manager) refContains(ctx context.Context, repoPath, container, contained string) (bool, error) {
 	// Same Acquire-then-build-execCtx ordering as branchExists.
 	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
 	if err != nil {
@@ -197,13 +296,24 @@ func (m *Manager) refContains(ctx context.Context, repoPath, container, containe
 			zap.String("container", container),
 			zap.String("contained", contained),
 			zap.Error(err))
-		return false
+		return false, fmt.Errorf("acquire Git ancestry check: %w", err)
 	}
 	defer release()
 	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
 	defer cancel()
 	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "merge-base", "--is-ancestor", contained, container)
-	return cmd.Run() == nil
+	runErr := cmd.Run()
+	if ctxErr := inspectCtx.Err(); ctxErr != nil {
+		return false, fmt.Errorf("git ancestry check timed out: %w", ctxErr)
+	}
+	if runErr == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git ancestry check failed for %q and %q: %w", contained, container, runErr)
 }
 
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
@@ -245,6 +355,8 @@ func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, 
 	return cmd
 }
 
+const gitFallbackReasonMissingRemoteRef = "missing_remote_ref"
+
 func classifyGitFallbackReason(cmdErr error, cmdOutput string, ctxErr error) string {
 	if errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(cmdErr, context.DeadlineExceeded) {
 		return "timeout"
@@ -253,28 +365,56 @@ func classifyGitFallbackReason(cmdErr error, cmdOutput string, ctxErr error) str
 	if containsAuthFailure(strings.ToLower(cmdOutput)) {
 		return "non_interactive_auth_failed"
 	}
-
+	if isRemoteBranchMissingError(cmdOutput) {
+		return gitFallbackReasonMissingRemoteRef
+	}
 	return "git_command_failed"
 }
 
-// pullBaseBranch fetches the latest changes from origin and returns the best ref to use
+// pullBaseBranch attempts to refresh origin and returns the safest ref to use
 // for creating a new worktree. The function handles three scenarios:
 //
 //  1. baseBranch is already a remote ref (e.g., "origin/main"): fetch and use it directly
 //  2. baseBranch is a local branch and we're currently on it: pull --ff-only to update
 //  3. baseBranch is a local branch but we're on a different branch: use origin/<branch> instead
 //
-// On fetch/pull failure, errors are logged but the function continues with the best available ref.
-func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch string, onProgress SyncProgressCallback) string {
+// A local base makes refresh best effort. Remote-only refs still require a
+// successful fetch and an independently verified remote ref.
+func (m *Manager) pullBaseBranch(
+	ctx context.Context, repoPath, baseBranch string, onProgress SyncProgressCallback,
+) (string, error) {
+	ref, _, err := m.pullBaseBranchWithPolicy(ctx, repoPath, baseBranch, "", false, onProgress)
+	return ref, err
+}
+
+func (m *Manager) pullBaseBranchWithFallback(
+	ctx context.Context, repoPath, baseBranch, fallbackBaseBranch string, onProgress SyncProgressCallback,
+) (string, string, error) {
+	return m.pullBaseBranchWithPolicy(ctx, repoPath, baseBranch, fallbackBaseBranch, true, onProgress)
+}
+
+func (m *Manager) pullBaseBranchWithPolicy(
+	ctx context.Context, repoPath, baseBranch, fallbackBaseBranch string, required bool,
+	onProgress SyncProgressCallback,
+) (string, string, error) {
 	localBranch := strings.TrimPrefix(baseBranch, "origin/")
 	isRemoteRef := localBranch != baseBranch
 	stepName := "Sync base branch"
+	localBaseExists := false
 
 	m.reportSyncProgress(onProgress, SyncProgressEvent{
 		StepName: stepName,
 		Status:   SyncProgressRunning,
 		Output:   fmt.Sprintf("Fetching latest changes for %s", baseBranch),
 	})
+
+	if !isRemoteRef {
+		var err error
+		localBaseExists, err = m.branchExists(ctx, repoPath, baseBranch)
+		if err != nil {
+			return "", "", m.failBaseBranchProbe(ctx, stepName, baseBranch, onProgress, err)
+		}
+	}
 
 	// Acquire the git throttle slot first, then start the fetch timer.
 	// Order matters: the previous "build fetchCtx, then runGitCmd" shape
@@ -287,16 +427,97 @@ func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch strin
 	}
 	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, fetchArgs...)
 	if err != nil {
-		return m.handleFetchFallback(baseBranch, stepName, onProgress, execCtxErr, output, err)
+		return m.handleBaseFetchFailure(
+			ctx, repoPath, stepName, baseBranch, fallbackBaseBranch, required,
+			localBaseExists, output, err, execCtxErr, onProgress,
+		)
 	}
 
 	if isRemoteRef {
-		resolved := "origin/" + localBranch
-		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", resolved), "")
-		return resolved
+		return m.resolveFetchedRemoteBase(ctx, repoPath, stepName, baseBranch, localBranch, required, onProgress)
 	}
 
-	return m.resolveLocalBaseRef(ctx, repoPath, baseBranch, localBranch, stepName, onProgress)
+	resolved, resolveErr := m.resolveLocalBaseRef(ctx, repoPath, baseBranch, localBranch, stepName, onProgress, localBaseExists && !required)
+	return resolved, "", resolveErr
+}
+
+func (m *Manager) failBaseBranchProbe(
+	ctx context.Context, stepName, baseBranch string, onProgress SyncProgressCallback, err error,
+) error {
+	reason := "base_ref_unverified"
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		reason = syncContextFailureReason(ctxErr)
+		err = ctxErr
+	}
+	return m.failRequiredSync(stepName, baseBranch, onProgress, reason, err)
+}
+
+func (m *Manager) handleBaseFetchFailure(
+	ctx context.Context,
+	repoPath, stepName, baseBranch, fallbackBaseBranch string,
+	required, localBaseExists bool,
+	output []byte,
+	err, execCtxErr error,
+	onProgress SyncProgressCallback,
+) (string, string, error) {
+	reason := classifyGitFallbackReason(err, string(output), execCtxErr)
+	if required {
+		fallback := strings.TrimSpace(fallbackBaseBranch)
+		if reason == gitFallbackReasonMissingRemoteRef && fallback != "" && fallback != baseBranch {
+			resolved, _, fallbackErr := m.pullBaseBranchWithPolicy(ctx, repoPath, fallback, "", true, onProgress)
+			if fallbackErr == nil {
+				return resolved, fallback, nil
+			}
+			return "", "", fallbackErr
+		}
+		failureCause := syncFailureCause(reason, err, execCtxErr)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			reason = syncContextFailureReason(ctxErr)
+			failureCause = ctxErr
+		}
+		return "", "", m.failRequiredSync(
+			stepName, baseBranch, onProgress, reason,
+			fmt.Errorf("required refresh of %q failed (%s): %w", baseBranch, reason, failureCause),
+		)
+	}
+	if localBaseExists {
+		resolved, warningErr := m.completeSyncWithWarning(
+			ctx, stepName, baseBranch, "Fetch", reason, baseBranch, onProgress,
+			syncFailureCause(reason, err, execCtxErr),
+		)
+		return resolved, "", warningErr
+	}
+	failureCause := syncFailureCause(reason, err, execCtxErr)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		reason = syncContextFailureReason(ctxErr)
+		failureCause = ctxErr
+	}
+	return "", "", m.failRequiredSync(
+		stepName, baseBranch, onProgress, reason,
+		fmt.Errorf("required refresh of %q failed (%s): %w", baseBranch, reason, failureCause),
+	)
+}
+
+func (m *Manager) resolveFetchedRemoteBase(
+	ctx context.Context,
+	repoPath, stepName, baseBranch, localBranch string,
+	required bool,
+	onProgress SyncProgressCallback,
+) (string, string, error) {
+	resolved := "origin/" + localBranch
+	if exists, branchErr := m.branchExists(ctx, repoPath, resolved); branchErr != nil {
+		if required {
+			return "", "", m.failRequiredSync(stepName, baseBranch, onProgress, "base_ref_unverified", branchErr)
+		}
+		return "", "", branchErr
+	} else if !exists {
+		return "", "", m.failRequiredSync(
+			stepName, baseBranch, onProgress, gitFallbackReasonMissingRemoteRef,
+			fmt.Errorf("required fetched remote ref %q is missing", resolved),
+		)
+	}
+	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", resolved), "")
+	return resolved, "", nil
 }
 
 func (m *Manager) reportSyncProgress(cb SyncProgressCallback, event SyncProgressEvent) {
@@ -314,68 +535,186 @@ func (m *Manager) reportSyncCompleted(stepName string, onProgress SyncProgressCa
 	})
 }
 
-func (m *Manager) handleFetchFallback(baseBranch, stepName string, onProgress SyncProgressCallback, ctxErr error, output []byte, cmdErr error) string {
-	reason := classifyGitFallbackReason(cmdErr, string(output), ctxErr)
-	m.logger.Warn("git fetch failed before worktree creation; continuing with fallback ref",
+func (m *Manager) completeSyncWithWarning(
+	ctx context.Context,
+	stepName, baseBranch, operation, reason, selectedRef string,
+	onProgress SyncProgressCallback, cause error,
+) (string, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", m.failRequiredSync(stepName, baseBranch, onProgress, syncContextFailureReason(ctxErr), ctxErr)
+	}
+
+	m.logger.Warn("git refresh was incomplete; using selected base",
 		zap.String("branch", baseBranch),
 		zap.String("reason", reason),
-		zap.String("fallback_ref", baseBranch),
-		zap.String("output", string(output)),
-		zap.Error(cmdErr))
-	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Fetch %s; using fallback ref %s", reason, baseBranch), string(output))
-	return baseBranch
+		zap.String("fallback_ref", selectedRef),
+		zap.Error(cause))
+	warning, detail := localBaseRefreshWarning(reason, selectedRef)
+	m.reportSyncProgress(onProgress, SyncProgressEvent{
+		StepName:      stepName,
+		Status:        SyncProgressCompleted,
+		Output:        fmt.Sprintf("%s %s; using %s", operation, reason, selectedRef),
+		Warning:       warning,
+		WarningDetail: detail,
+	})
+	return selectedRef, nil
+}
+
+func localBaseRefreshWarning(reason, selectedRef string) (string, string) {
+	baseKind := "local base"
+	if isRemoteOnlyBaseRef(selectedRef) {
+		baseKind = "remote-tracking base"
+	}
+	return fmt.Sprintf(
+		"Remote refresh was incomplete (%s); using %s %q. Remote changes may be missing.",
+		reason, baseKind, selectedRef,
+	), fmt.Sprintf("The selected %s was verified before refresh. Kandev did not change Git refs.", baseKind)
+}
+
+func localCheckoutBranchRefreshDetail(branch string) string {
+	return fmt.Sprintf("The local checkout branch %q was verified after refresh failed. Kandev did not change Git refs.", branch)
+}
+
+func syncContextFailureReason(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	return "git_command_failed"
+}
+
+func (m *Manager) failRequiredSync(
+	stepName, branch string, onProgress SyncProgressCallback, reason string, err error,
+) error {
+	m.logger.Warn("required git refresh failed before worktree creation",
+		zap.String("branch", branch),
+		zap.String("reason", reason),
+		zap.Error(err))
+	m.reportSyncProgress(onProgress, SyncProgressEvent{
+		StepName: stepName,
+		Status:   SyncProgressFailed,
+		Output:   fmt.Sprintf("Required refresh failed for %s (%s)", branch, reason),
+		Error:    reason,
+	})
+	return err
 }
 
 func (m *Manager) resolveLocalBaseRef(
 	ctx context.Context, repoPath, baseBranch, localBranch, stepName string,
-	onProgress SyncProgressCallback,
-) string {
+	onProgress SyncProgressCallback, localBaseExists bool,
+) (string, error) {
 	remoteRef := "origin/" + localBranch
 	if m.currentBranch(ctx, repoPath) == baseBranch {
-		return m.pullCurrentBranchOrFallback(ctx, repoPath, baseBranch, remoteRef, stepName, onProgress)
+		return m.pullCurrentBranchOrFallback(ctx, repoPath, baseBranch, remoteRef, stepName, onProgress, localBaseExists)
 	}
-	// Best-effort sync: a timeout / error here is treated the same as a
-	// missing remote ref — caller falls back to the local baseBranch.
-	if exists, _ := m.branchExists(ctx, repoPath, remoteRef); exists {
-		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", remoteRef), "")
-		return remoteRef
+	resolved, err := m.selectContainingRef(ctx, repoPath, baseBranch, remoteRef)
+	if err != nil {
+		if localBaseExists {
+			return m.completeSyncWithWarning(
+				ctx, stepName, baseBranch, "Base ref selection", classifyBaseRefSelectionFailure(err),
+				baseBranch, onProgress, err,
+			)
+		}
+		return "", m.failRequiredSync(stepName, baseBranch, onProgress, "base_ref_unverified", err)
 	}
-	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Remote ref not found; using %s", baseBranch), "")
-	return baseBranch
+	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", resolved), "")
+	return resolved, nil
 }
 
 func (m *Manager) pullCurrentBranchOrFallback(
 	ctx context.Context, repoPath, baseBranch, remoteRef, stepName string,
-	onProgress SyncProgressCallback,
-) string {
+	onProgress SyncProgressCallback, localBaseExists bool,
+) (string, error) {
 	// Same Acquire-then-build-execCtx ordering as the fetch path.
 	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.pullTimeout, repoPath, "pull", "--ff-only", "origin", baseBranch)
 	if err != nil {
 		reason := classifyGitFallbackReason(err, string(output), execCtxErr)
-		// The preceding fetch succeeded, so origin/<branch> holds the latest
-		// remote state and is normally the better start point. It is only
-		// better when it is *ahead* of the local branch, though: if the local
-		// branch carries commits origin does not have, starting from the
-		// remote ref silently drops them from the new worktree, and creation
-		// still succeeds so nothing surfaces the loss. Keep the local branch
-		// in that case, matching handleFetchFallback and the non-current-branch
-		// path in resolveLocalBaseRef, which both resolve to it on failure.
-		fallbackRef := remoteRef
-		if !m.refContains(ctx, repoPath, remoteRef, baseBranch) {
-			fallbackRef = baseBranch
+		resolved, selectErr := m.selectContainingRef(ctx, repoPath, baseBranch, remoteRef)
+		if selectErr != nil {
+			if !localBaseExists {
+				return "", m.failRequiredSync(stepName, baseBranch, onProgress, reason, selectErr)
+			}
+			return m.completeSyncWithWarning(
+				ctx, stepName, baseBranch, "Pull", classifyBaseRefSelectionFailure(selectErr),
+				baseBranch, onProgress, selectErr,
+			)
 		}
-		m.logger.Warn("git pull failed before worktree creation; continuing with fallback ref",
-			zap.String("branch", baseBranch),
-			zap.String("reason", reason),
-			zap.String("remote_ref", remoteRef),
-			zap.String("fallback_ref", fallbackRef),
-			zap.String("output", string(output)),
-			zap.Error(err))
-		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Pull %s; using %s", reason, fallbackRef), string(output))
-		return fallbackRef
+		if localBaseExists {
+			return m.completeSyncWithWarning(ctx, stepName, baseBranch, "Pull", reason, resolved, onProgress, err)
+		}
+		return "", m.failRequiredSync(stepName, baseBranch, onProgress, reason, err)
 	}
 	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", baseBranch), "")
-	return baseBranch
+	return baseBranch, nil
+}
+
+func classifyBaseRefSelectionFailure(err error) string {
+	lowerErr := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(lowerErr, "diverged"):
+		return "diverged_refs"
+	case strings.Contains(lowerErr, "missing"):
+		return "missing_remote_ref"
+	default:
+		return "base_ref_unverified"
+	}
+}
+
+func (m *Manager) selectContainingRef(
+	ctx context.Context, repoPath, localRef, remoteRef string,
+) (string, error) {
+	remoteExists, err := m.branchExists(ctx, repoPath, remoteRef)
+	if err != nil {
+		return "", fmt.Errorf("could not verify fetched remote ref %q: %w", remoteRef, err)
+	}
+	if !remoteExists {
+		return "", fmt.Errorf("required fetched remote ref %q is missing", remoteRef)
+	}
+	if localRef == remoteRef {
+		return remoteRef, nil
+	}
+	localExists, err := m.branchExists(ctx, repoPath, localRef)
+	if err != nil {
+		return "", fmt.Errorf("could not verify local base ref %q: %w", localRef, err)
+	}
+	if !localExists {
+		return remoteRef, nil
+	}
+	remoteContainsLocal, err := m.refContains(ctx, repoPath, remoteRef, localRef)
+	if err != nil {
+		return "", err
+	}
+	if remoteContainsLocal {
+		return remoteRef, nil
+	}
+	localContainsRemote, err := m.refContains(ctx, repoPath, localRef, remoteRef)
+	if err != nil {
+		return "", err
+	}
+	if localContainsRemote {
+		return localRef, nil
+	}
+	return "", fmt.Errorf("base refs %q and %q diverged", localRef, remoteRef)
+}
+
+// syncFailureCause intentionally suppresses cmdErr because Git output can
+// contain credentials. Callers expose only a bounded failure class and keep
+// raw command output in internal logs where the existing redaction policy
+// applies.
+func syncFailureCause(reason string, _ error, contextErr error) error {
+	if contextErr != nil {
+		return contextErr
+	}
+	switch reason {
+	case "timeout":
+		return context.DeadlineExceeded
+	case "non_interactive_auth_failed":
+		return ErrAuthFailed
+	default:
+		return ErrGitCommandFailed
+	}
 }
 
 // runGitCombinedAfterAcquire acquires the backend git throttle slot,

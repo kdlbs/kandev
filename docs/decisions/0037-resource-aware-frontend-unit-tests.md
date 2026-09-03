@@ -1,8 +1,30 @@
 # 0037: Resource-Aware Frontend Unit Tests
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-28)
 **Date:** 2026-07-14
 **Area:** frontend, infra
+
+## Amendment (2026-08-28)
+
+Vitest aliases only the bare `monaco-editor` specifier to a small unit-test
+stub. The stub supplies the runtime values that unit tests use. These values
+include `Uri`, editor registration methods, and TypeScript language defaults.
+Deep Monaco imports stay unaliased.
+
+Production builds and Playwright tests continue to load the real Monaco
+package. Unit tests do not load Monaco's side-effectful editor contribution
+graph. This boundary keeps per-file isolation enabled. It also prevents
+duplicate command registration inside one Vitest worker.
+
+The stub must expose an explicit test marker. A focused regression test must
+check the marker, URI behavior, and the language-default shape. When a unit
+test needs another Monaco runtime value, the stub and regression test must
+change together.
+
+Simple dependency deduplication and an alias to `editor.api.js` do not meet the
+contract. Deduplication does not merge distinct module evaluations. The
+API-only entry also omits language contributions that application code uses.
+Native Node externalization is not valid because Monaco imports CSS files.
 
 ## Context
 
@@ -18,6 +40,9 @@ The unit-test environment disables Happy DOM child-frame navigation and intercep
 
 Targeted test-file runs remain the normal development loop. Full frontend suites run during final verification and CI rather than after every edit. Per-file isolation remains enabled because the suite relies on module and DOM isolation.
 
+The unit-test environment uses a narrow Monaco stub. The browser build and
+browser tests use the real editor package.
+
 ## Consequences
 
 - Concurrent Kandev tasks leave CPU capacity for the backend, agents, editor, and other test suites.
@@ -25,6 +50,9 @@ Targeted test-file runs remain the normal development loop. Full frontend suites
 - CI performance is unchanged unless the CI environment explicitly sets `VITEST_MAX_WORKERS`.
 - Vitest and Vite share a supported dependency generation instead of loading a second legacy Vite toolchain.
 - Unit tests do not load iframe content, access the network through Happy DOM, or inherit the host's generic debug verbosity.
+- Unit tests do not evaluate Monaco editor contributions or workers.
+- The stub can drift when application code adds a Monaco runtime dependency. One focused test owns its required shape.
+- Production builds and browser tests remain the evidence for real Monaco integration.
 - The percentage limit scales across developer machines without hard-coding a workstation-specific core count.
 - Vite updates require a production-build smoke check until the Rolldown re-export regression is fixed upstream.
 
@@ -37,6 +65,21 @@ Rejected because the fastest isolated run becomes slower and less predictable wh
 ### Disable test-file isolation
 
 Rejected because a trial produced widespread cross-file mock and DOM failures. The suite depends on isolation for correctness.
+
+### Load the real Monaco package in every unit-test context
+
+Rejected because Monaco registers global editor actions during module
+evaluation. Separate Vitest module evaluations can register the same action
+twice inside one worker.
+
+### Externalize Monaco to native Node
+
+Rejected because native Node does not transform Monaco's CSS imports.
+
+### Alias Monaco to `editor.api.js`
+
+Rejected because the API-only entry omits language contributions that Kandev
+uses, including TypeScript defaults.
 
 ### Migrate to Rstest
 

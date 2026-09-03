@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agent/planinjection"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -61,6 +63,7 @@ func (d *dynamicTaskDownstream) Launch(
 		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
+	d.service.bindPromptAttemptToExecution(ctx, d.sessionID, execution.AgentExecutionID)
 	d.execution = execution
 	acpSessionID := ""
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
@@ -203,7 +206,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	continuationInput *dynamicruntime.ContinuationInput,
 ) (*executor.TaskExecution, error) {
 	if s.profileExecutionResolver == nil {
-		return s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
+		return s.launchConcretePreparedSession(ctx, task, sessionID, options)
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -214,7 +217,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 		return nil, err
 	}
 	if !dynamic {
-		return s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
+		return s.launchConcretePreparedSession(ctx, task, sessionID, options)
 	}
 	downstream := &dynamicTaskDownstream{
 		service: s, task: task, sessionID: sessionID, options: options,
@@ -247,6 +250,22 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 		result.Execution.ExecutionProfileID = session.ExecutionProfileID
 	}
 	return downstream.execution, nil
+}
+
+func (s *Service) launchConcretePreparedSession(
+	ctx context.Context,
+	task *v1.Task,
+	sessionID string,
+	options executor.LaunchOptions,
+) (*executor.TaskExecution, error) {
+	if options.StartAgent && (options.Prompt != "" || len(options.Attachments) > 0) {
+		s.beginInitialPromptAttempt(sessionID, false)
+	}
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
+	if execution != nil {
+		s.bindPromptAttemptToExecution(ctx, sessionID, execution.AgentExecutionID)
+	}
+	return execution, err
 }
 
 func (s *Service) dynamicContinuationForLaunch(
@@ -354,8 +373,24 @@ func (s *Service) addDynamicPlan(ctx context.Context, taskID string, input *dyna
 		}
 		return fmt.Errorf("load plan for dynamic continuation: %w", err)
 	}
-	if plan != nil {
-		input.PlanSummary = strings.TrimSpace(plan.Title + "\n" + plan.Content)
+	if plan == nil {
+		return nil
+	}
+
+	composed := strings.TrimSpace(plan.Title + "\n" + plan.Content)
+	// ContainTags is not called here: PlanSummary lands in the plain-text
+	// continuation package (ContinuationPrompt), not in a <kandev-system>
+	// block. If that ever changes, add ContainTags(composed) before Reduce.
+	reducedPlan, reduced, omitted := planinjection.Reduce(composed, planinjection.DynamicBudget)
+	input.PlanSummary = reducedPlan
+	if reduced {
+		s.logger.Info("reducing dynamic continuation plan",
+			zap.String("site", "dynamic_continuation"),
+			zap.String("task_id", taskID),
+			zap.Int("plan_input_bytes", len(composed)),
+			zap.Int("plan_output_bytes", len(reducedPlan)),
+			zap.Int("plan_sections_omitted", omitted),
+		)
 	}
 	return nil
 }
@@ -632,7 +667,12 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 		return false
 	}
 	if err := s.executor.StopExecution(ctx, data.AgentExecutionID, "dynamic route fallback", true); err != nil {
-		s.logger.Debug("failed to stop dynamic fallback predecessor", zap.Error(err))
+		if errors.Is(err, agentruntime.ErrNotFound) {
+			s.logger.Debug("dynamic fallback predecessor is already absent", zap.Error(err))
+		} else {
+			s.logger.Debug("failed to stop dynamic fallback predecessor", zap.Error(err))
+			return false
+		}
 	}
 	if err := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateCreated, ""); err != nil {
 		return false

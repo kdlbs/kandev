@@ -37,6 +37,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -62,6 +63,12 @@ type ServiceConfig struct {
 	// turn for an agent that advertised prompt queueing. Independent of
 	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
 	ClaudeMidTurnSteering bool
+
+	// OfficeSessionIdentity keys an Office task's session identity on the
+	// run's own agent instead of the task's runner seat. Off by default;
+	// enabling it exposes pre-existing duplicate (task_id, agent_profile_id)
+	// rows until the companion unique-index fix has shipped.
+	OfficeSessionIdentity bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -70,6 +77,12 @@ type ServiceConfig struct {
 // concrete package while preserving the same structural contract.
 type AttachmentReader interface {
 	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
+}
+
+// LaunchAttachmentClaimer is the narrow task-service seam used to bind staged
+// attachment descriptors to an authorized task/session before launch dispatch.
+type LaunchAttachmentClaimer interface {
+	ClaimMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
 }
 
 // DefaultServiceConfig returns default configuration
@@ -95,8 +108,11 @@ type MessageCreator interface {
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
-	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
+	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
+	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
 	// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID for streaming updates
 	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendAgentMessage appends additional content to an existing streaming message
@@ -110,11 +126,19 @@ type MessageCreator interface {
 	InvalidateModelCache(sessionID string)
 }
 
+// TransientRetryMessageService is the narrow task-service seam used to retire
+// persisted retry status messages. The task service owns authorization and
+// event-bus publication for both operations.
+type TransientRetryMessageService interface {
+	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	DeleteMessage(ctx context.Context, id string) error
+}
+
 // SubagentContextRecorder persists a durable relational record of a subagent
 // (Task tool) invocation observed on a tool-call frame. It returns nothing —
 // a repository failure never fails the enclosing message write, turn, or
 // agent stream (AC-27 in
-// docs/specs/subagent-context-persistence/spec.md). Implemented by
+// docs/specs/agents/requirements/subagent-context-persistence.md). Implemented by
 // taskservice.Service via an adapter; optional, so an installation that
 // never wires it behaves exactly as before.
 type SubagentContextRecorder interface {
@@ -221,6 +245,27 @@ type PromptReferenceExpander interface {
 	) (expandedPrompt, trustedContext string)
 }
 
+// DirectPromptPreparer canonicalizes a user-submitted structured prompt before
+// the task service persists it. The returned trusted context is the exact
+// server-generated content that may be preserved by system-context
+// canonicalization.
+type DirectPromptPreparer interface {
+	PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string)
+}
+
+// DirectPromptStarter starts a prepared direct-message session while retaining
+// the trusted saved-prompt context prepared before message persistence.
+type DirectPromptStarter interface {
+	StartCreatedSessionWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, agentProfileID, prompt string,
+		skipMessageRecord, planMode, autoStart bool,
+		attachments []v1.MessageAttachment,
+		references []v1.EntityReference,
+		promptReferenceContext string,
+	) (*executor.TaskExecution, error)
+}
+
 // repoStore is the repository interface accepted by NewService.
 // It covers both the orchestrator's own needs (sessionExecutorStore) and
 // the executor package's needs (executor.executorStore).
@@ -254,6 +299,9 @@ type repoStore interface {
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	// Session history + plan (for context handover)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
+	// GetWorkspaceGroupOwnerTaskID resolves push-detected PR/MR associations
+	// to the workspace-group owner task; see resolveEffectivePushTaskID.
+	GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID string) (string, error)
 }
 
 // sessionExecutorStore is the minimal repository interface needed by the orchestrator service.
@@ -263,9 +311,11 @@ type sessionExecutorStore interface {
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
+	SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error)
 	RenameTaskSession(ctx context.Context, id, name string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
+	UpdateTaskSessionStateIfCurrent(ctx context.Context, id string, expected, status models.TaskSessionState, errorMessage string) (bool, time.Time, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	ClaimPromptableTaskSessionIfActive(ctx context.Context, id string) (models.PromptableTaskSessionClaim, error)
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
@@ -336,6 +386,22 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	// Step-entry CAS markers (see internal/workflow/stepentry) — claim/complete
+	// an engine-owned on_enter action at most once per step-entry.
+	ClaimStepEntryMarker(ctx context.Context, entryID int64, position int, kind, operationID string, claimedAt time.Time) (bool, error)
+	CompleteStepEntryMarker(ctx context.Context, entryID int64, position int, state stepentry.MarkerState, cause string, completedAt time.Time) error
+	// GetStepEntryMarkerState reads back a marker's terminal (or in-progress)
+	// state after a lost CAS claim, so the caller can tell "already failed"
+	// apart from "already done" or "still in progress elsewhere."
+	GetStepEntryMarkerState(ctx context.Context, entryID int64, position int) (state stepentry.MarkerState, cause string, found bool, err error)
+	// ClearStepDecisionsAndCompleteMarker satisfies AC-B6: clears every
+	// decision for (taskID, stepID) and completes the clear_decisions
+	// marker in one database transaction, so a crash between the two can
+	// never leave the marker showing in_progress after the delete already
+	// committed. Only usable when the DecisionStore backing clear_decisions
+	// shares this repository's writer DB — see the capability check at
+	// dispatchClearDecisionsAtomic's call site.
+	ClearStepDecisionsAndCompleteMarker(ctx context.Context, taskID, stepID string, entryID int64, position int, now time.Time) (int64, error)
 }
 
 // ClaimTaskTitleSession claims the first-turn generated-title handoff for a
@@ -470,12 +536,13 @@ func (o *reservedPromptCallbackOwner) stop() {
 
 // Service is the main orchestrator service
 type Service struct {
-	config       ServiceConfig
-	logger       *logger.Logger
-	eventBus     bus.EventBus
-	taskRepo     scheduler.TaskRepository
-	repo         sessionExecutorStore
-	agentManager executor.AgentManagerClient
+	config        ServiceConfig
+	logger        *logger.Logger
+	eventBus      bus.EventBus
+	taskRepo      scheduler.TaskRepository
+	repo          sessionExecutorStore
+	promptTargets taskPullRequestTargetStore
+	agentManager  executor.AgentManagerClient
 
 	// Components
 	queue     *queue.TaskQueue
@@ -489,10 +556,18 @@ type Service struct {
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 
+	// transientRetryMessages owns durable cleanup of persisted retry notices.
+	// It is optional for focused tests and pre-composition callers.
+	transientRetryMessages TransientRetryMessageService
+
 	// subagentContexts optionally persists a relational record of subagent
 	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
 	// safe: both call sites guard on it. See SetSubagentContextRecorder.
 	subagentContexts SubagentContextRecorder
+
+	// agentProfileRecentUseRecorder optionally persists the task_create profile
+	// selected by a deferred launch after its agent starts successfully.
+	agentProfileRecentUseRecorder AgentProfileRecentUseRecorder
 
 	// Turn service for managing session turns
 	turnService TurnService
@@ -501,6 +576,10 @@ type Service struct {
 	// Task service owns the rich payload; orchestrator delegates.
 	taskEvents  TaskEventPublisher
 	feederPulls FeederPullReconciler
+
+	// launchAttachmentClaimer binds staged descriptors before any launch intent
+	// can dispatch them to the runtime. Inline attachments need no claim.
+	launchAttachmentClaimer LaunchAttachmentClaimer
 
 	// sessionAccessCheck enforces per-user workspace scoping on the
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
@@ -583,6 +662,30 @@ type Service struct {
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
+	// officeStalledSignals dedupes the Office stranded-signal surfacing so a
+	// still-stranded signal is reported once, not on every 30-second reaper
+	// tick. Keyed by session ID, step ID and the signal's SignaledAt, so a
+	// genuinely new signal on the same session reports again. Deliberately
+	// in-memory: the surfaced state is derived and cheap to recompute, and a
+	// backend restart re-reporting each stranded signal once is preferable to
+	// a schema migration. Pruned against the live session set at the end of
+	// every complete scan, so it cannot outgrow the active-session list.
+	officeStalledSignals sync.Map
+	// officeDecisionWaiting dedupes the Office decision-waiting surfacing on
+	// the same terms as officeStalledSignals above. Keyed by task ID and step
+	// ID, so a task that moves on and later returns to a decision step (a
+	// rejection round) is reported again while a task sitting still is
+	// reported once. Pruned against the live candidate set at the end of
+	// every complete scan.
+	officeDecisionWaiting sync.Map
+	// officeStallDependenciesMu protects detector dependencies that are wired
+	// after Service.Start while the idle reaper can already read them.
+	officeStallDependenciesMu sync.RWMutex
+	// officeRunInFlight answers whether a task still has a queued or claimed
+	// run, the decision-waiting detector's false-positive guard. Nil until
+	// wired (SetOfficeRunInFlightReader); the detector reports nothing and
+	// counts a skip while it is.
+	officeRunInFlight officeRunInFlightReader
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -604,6 +707,22 @@ type Service struct {
 	engineTaskCreator      engine.TaskCreator
 	engineWorkflowSwitcher engine.WorkflowSwitcher
 
+	// Review participant seats (REQ-OFFICE-REVIEW-SEATS-001) dependencies —
+	// also nil-safe. buildWorkflowCallbacks registers ensure_participant_seat
+	// once engineParticipantSeatWriter is set; engineParticipantSeatCaster
+	// may still be nil at that point (wired separately once the Office seat
+	// caster exists), in which case EnsureParticipantSeatCallback itself
+	// reports ErrActionNotYetWired only for entries that actually need to
+	// cast a new seat.
+	engineParticipantSeatWriter engine.ParticipantSeatWriter
+	engineParticipantSeatCaster engine.ParticipantSeatCaster
+
+	// engineAgentProfiles wires the quorum guard's AgentProfileResolver
+	// (REQ-OFFICE-REVIEW-SEATS-004.3): dropping a required seat whose agent
+	// profile was deleted after the seat was cast. Also nil-safe — an
+	// unwired resolver leaves every seat counted, matching prior behavior.
+	engineAgentProfiles engine.AgentProfileResolver
+
 	// Native code review. When set, buildWorkflowCallbacks registers the
 	// run_code_review on_enter action. Nil-safe: without it the action kind
 	// simply has no callback and the engine treats it as a no-op.
@@ -611,9 +730,9 @@ type Service struct {
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
-	// ciAutomationInFlight prevents PR feedback and task-PR update events from
-	// racing duplicate auto-fix prompts or merge calls for the same PR.
-	ciAutomationInFlight sync.Map
+	// ciAutomationInFlight serializes each PR's evaluation and coalesces one
+	// follow-up request instead of dropping an event that arrives mid-run.
+	ciAutomationInFlight ciAutomationCoordinator
 
 	// GitLab MR lifecycle notification automation. Nil-safe: without it,
 	// gitlab.task_mr.updated events are observed but no lifecycle prompt is
@@ -852,6 +971,11 @@ type Service struct {
 	// execution. Claims expire with the same bounded grace period used for
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
+	// parkedProfileSwitchStops remembers exact executions whose deliberate
+	// parked-switch lifecycle event was already consumed. It is a short-lived
+	// duplicate-delivery optimization; the durable consumed tombstone lives in
+	// session metadata.
+	parkedProfileSwitchStops sync.Map
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
 	// The spec allows at most one in-flight steer per session; a second attempt
@@ -874,6 +998,33 @@ type Service struct {
 	// Entries are not deleted: deleting a lock can let a new caller create a
 	// second mutex while an existing waiter still owns the old one.
 	sessionLifecycleLocks sync.Map // map[sessionID]*sync.Mutex
+	// turnCompletionLocks serializes processOnTurnCompleteViaEngineWithCause
+	// per session. Several independent event sources (normal agent turn
+	// completion, agent-exit, step_complete_kandev's out-of-band signal,
+	// user cancellation) can each call it for the same session; without
+	// serialization, two concurrent calls can both read the same
+	// pre-transition engine state and each call applyEngineTransition,
+	// allocating two independent workflow_step_entries rows for what should
+	// be a single logical transition and double-dispatching that entry's
+	// on_enter actions (clear_decisions, queue_run_for_each_participant).
+	// Entries are not deleted — see sessionLifecycleLocks above for why.
+	turnCompletionLocks sync.Map // map[sessionID]*sync.Mutex
+	// turnCompletionConsumedGeneration records, per session, the
+	// TaskSession.UpdatedAt of the most recent session snapshot that was
+	// already let past acquireTurnCompletionCriticalSection. It closes the
+	// gap turnCompletionLocks' contention signal cannot: two calls whose
+	// entire lifetimes are fully sequential (the second's own pre-lock
+	// GetTask already reflects the first's commit, so the WorkflowStepID
+	// comparison passes trivially) never contend on the mutex at all. A
+	// caller's session argument only carries a newer UpdatedAt than the
+	// stored generation when something legitimately touched the session
+	// (a new turn starting, cancellation reconciliation, ...) after the
+	// last transition was consumed; a stale or identical snapshot — the
+	// hallmark of a duplicate delivery for the same physical turn — is
+	// rejected instead of being re-evaluated against the step the winner
+	// already moved to. See acquireTurnCompletionCriticalSection.
+	// Entries are not deleted — see sessionLifecycleLocks above for why.
+	turnCompletionConsumedGeneration sync.Map // map[sessionID]time.Time
 	// contextWindowGuards serializes live context usage writes and gives each
 	// session a generation boundary that reset_agent_context can invalidate.
 	contextWindowGuards sync.Map
@@ -951,10 +1102,11 @@ type Service struct {
 	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
 	lastTurnPrompt sync.Map
 
-	// dynamicAttemptEvidence is keyed by logical session. A dynamic attempt is
-	// replaced at every concrete launch, and its execution ID fences late
-	// stream/lifecycle events from a predecessor. Fallback requires an explicit
-	// no-output/no-effect result from this map.
+	// dynamicAttemptEvidence is keyed by logical session and stores the current
+	// concrete or dynamic prompt attempt. It is replaced for every attempt, and
+	// its execution ID and prompt generation fence late stream/lifecycle events
+	// from a predecessor. Automatic recovery requires an explicit no-output,
+	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
 
 	// Service state
@@ -970,6 +1122,25 @@ type Service struct {
 	sendNowCancel  context.CancelFunc
 	sendNowStopped bool
 	sendNowWorkers sync.WaitGroup
+
+	// ciAutomationWorkers owns the asynchronous per-PR automation loops. The
+	// service-owned context lets Stop cancel in-flight evaluations and prevents
+	// workers from outliving the orchestrator across a restart.
+	ciAutomationMu      sync.Mutex
+	ciAutomationCtx     context.Context
+	ciAutomationCancel  context.CancelFunc
+	ciAutomationStopped bool
+	ciAutomationWorkers sync.WaitGroup
+}
+
+func (s *Service) officeStallDependencies() (
+	engine.ParticipantStore,
+	engine.DecisionStore,
+	officeRunInFlightReader,
+) {
+	s.officeStallDependenciesMu.RLock()
+	defer s.officeStallDependenciesMu.RUnlock()
+	return s.engineParticipants, s.engineDecisions, s.officeRunInFlight
 }
 
 type RouteAction string
@@ -1138,12 +1309,14 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
+	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
 		eventBus:                     eventBus,
 		taskRepo:                     taskRepo,
 		repo:                         repo,
+		promptTargets:                repo,
 		agentManager:                 agentManager,
 		queue:                        taskQueue,
 		executor:                     exec,
@@ -1156,6 +1329,8 @@ func NewService(
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
+		ciAutomationCtx:              ciAutomationCtx,
+		ciAutomationCancel:           ciAutomationCancel,
 		idleReaper:                   newIdleSessionReaper(),
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
@@ -1241,6 +1416,7 @@ func NewService(
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
 		OnTaskMoved:            s.handleTaskMoved,
 		OnTaskQueuePromoted:    s.handleTaskQueuePromoted,
+		OnTaskCreated:          s.handleTaskCreated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, cfg.QueueGroup, log)
 
@@ -1266,6 +1442,12 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetTransientRetryMessageService wires the task service used to retire
+// persisted transient-retry status messages.
+func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
+	s.transientRetryMessages = service
+}
+
 // SetSubagentContextRecorder wires the optional subagent-context writer.
 // If not set, subagent tool-call frames are recognized and rendered exactly
 // as before; only the durable relational record is skipped.
@@ -1277,6 +1459,12 @@ func (s *Service) SetSubagentContextRecorder(r SubagentContextRecorder) {
 // prompt delivery so claimed descriptors can be streamed into the workspace.
 func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 	s.executor.SetAttachmentReader(reader)
+}
+
+// SetLaunchAttachmentClaimer wires staged-descriptor admission into the
+// unified session launch boundary.
+func (s *Service) SetLaunchAttachmentClaimer(claimer LaunchAttachmentClaimer) {
+	s.launchAttachmentClaimer = claimer
 }
 
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session
@@ -1297,6 +1485,11 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 // self-healing into the executor.
 func (s *Service) SetTaskRepositoryBaseBranchUpdater(updater executor.TaskRepositoryBaseBranchUpdater) {
 	s.executor.SetTaskRepositoryBaseBranchUpdater(updater)
+}
+
+// SetPRBaseResolver wires best-effort pull-request base resolution at launch.
+func (s *Service) SetPRBaseResolver(resolver executor.PRBaseResolver) {
+	s.executor.SetPRBaseResolver(resolver)
 }
 
 // RepositoryHostCloner is the narrow host-materialization contract. It returns
@@ -1662,14 +1855,18 @@ func (s *Service) SetEngineRunQueue(adapter engine.RunQueueAdapter) {
 
 // SetEngineParticipantStore wires the engine's ParticipantStore.
 func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
+	s.officeStallDependenciesMu.Lock()
 	s.engineParticipants = store
+	s.officeStallDependenciesMu.Unlock()
 	s.engineOptions = append(s.engineOptions, engine.WithParticipantStore(store))
 	s.reinitWorkflowEngine()
 }
 
 // SetEngineDecisionStore wires the engine's DecisionStore.
 func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
+	s.officeStallDependenciesMu.Lock()
 	s.engineDecisions = store
+	s.officeStallDependenciesMu.Unlock()
 	s.engineOptions = append(s.engineOptions, engine.WithDecisionStore(store))
 	s.reinitWorkflowEngine()
 }
@@ -1711,6 +1908,31 @@ func (s *Service) SetEngineTaskCreator(creator engine.TaskCreator) {
 func (s *Service) SetEngineWorkflowSwitcher(switcher engine.WorkflowSwitcher) {
 	s.engineWorkflowSwitcher = switcher
 	s.engineOptions = append(s.engineOptions, engine.WithWorkflowSwitcher(switcher))
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineParticipantSeatWriter wires the engine's ParticipantSeatWriter
+// for the ensure_participant_seat action. Unlike ParticipantStore/
+// DecisionStore, this is a pure callback-construction dependency — nothing
+// else in the engine reads it — so it is not also appended as an
+// engine.Option.
+func (s *Service) SetEngineParticipantSeatWriter(writer engine.ParticipantSeatWriter) {
+	s.engineParticipantSeatWriter = writer
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineParticipantSeatCaster wires the engine's ParticipantSeatCaster
+// for the ensure_participant_seat action (REQ-002's casting resolution).
+func (s *Service) SetEngineParticipantSeatCaster(caster engine.ParticipantSeatCaster) {
+	s.engineParticipantSeatCaster = caster
+	s.reinitWorkflowEngine()
+}
+
+// SetEngineAgentProfileResolver wires the engine's AgentProfileResolver for
+// the quorum guard's REQ-OFFICE-REVIEW-SEATS-004.3 skip.
+func (s *Service) SetEngineAgentProfileResolver(resolver engine.AgentProfileResolver) {
+	s.engineAgentProfiles = resolver
+	s.engineOptions = append(s.engineOptions, engine.WithAgentProfileResolver(resolver))
 	s.reinitWorkflowEngine()
 }
 
@@ -2203,6 +2425,32 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	return lock.Unlock
 }
 
+// acquireTurnCompletionLock serializes on_turn_complete processing for a
+// single session — see turnCompletionLocks' field comment for the race it
+// closes. A caller with no session ID (defensive callers pass "" rather than
+// skip the lock call) gets a no-op unlock and contended=false.
+//
+// contended reports whether another caller already held this session's lock
+// at the moment this call tried to acquire it — i.e. another
+// processOnTurnCompleteViaEngineWithCause call for the same session is (or
+// very recently was) actively executing right now. That is a direct,
+// timing-independent duplicate signal: unlike comparing two DB reads taken
+// at different times (which a sufficiently late duplicate can pass
+// trivially — see acquireTurnCompletionCriticalSection), lock contention can
+// only be true when two calls for the same session genuinely overlapped.
+func (s *Service) acquireTurnCompletionLock(sessionID string) (unlock func(), contended bool) {
+	if sessionID == "" {
+		return func() {}, false
+	}
+	value, _ := s.turnCompletionLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if lock.TryLock() {
+		return lock.Unlock, false
+	}
+	lock.Lock()
+	return lock.Unlock, true
+}
+
 func (s *Service) isSessionResetInProgress(sessionID string) bool {
 	if sessionID == "" {
 		return false
@@ -2229,6 +2477,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("starting orchestrator service")
 	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
+	s.resetCIAutomationWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -2312,6 +2561,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Reconcile queued tasks when WIP limits or feeder settings change.
 	s.subscribeWorkflowQueueEvents()
 
+	// Invalidate the compiled-step cache when workflow steps change.
+	s.subscribeWorkflowStepCacheEvents()
+
 	// Restore durable dynamic policy waits after the route and lifecycle
 	// services are ready. Only un-dispatched pending states are scheduled.
 	s.startDynamicPolicyRecovery(ctx)
@@ -2359,6 +2611,7 @@ func (s *Service) Stop() error {
 	s.cancelAllClarificationWatchdogs()
 	s.cancelAllTransientRetries()
 	s.stopSendNowWorkers()
+	s.stopCIAutomationWorkers()
 
 	if len(errs) > 0 {
 		return errs[0]
@@ -2421,6 +2674,7 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	for _, running := range runningExecutors {
 		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
 			remoteRecords = append(remoteRecords, executor.RemoteStatusPollRequest{
+				TaskID:           running.TaskID,
 				SessionID:        running.SessionID,
 				Runtime:          running.Runtime,
 				AgentExecutionID: running.AgentExecutionID,

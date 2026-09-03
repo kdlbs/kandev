@@ -59,7 +59,12 @@ func TestClassify_ProviderRules(t *testing.T) {
 		{"claude auth", "claude-acp", "you are not authenticated", CodeAuthRequired},
 		{"claude model", "claude-acp", "model claude-foo not found here", CodeModelUnavailable},
 		{"codex quota", "codex-acp", "insufficient_quota for project", CodeQuotaLimited},
-		{"codex usage limit", "codex-acp", `{"codexErrorInfo":"usageLimitExceeded"}`, CodeQuotaLimited},
+		{
+			"codex usage limit",
+			"codex-acp",
+			`{"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"usageLimitExceeded","message":"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 1st, 2026 3:14 PM."}}`,
+			CodeQuotaLimited,
+		},
 		{"codex rate", "codex-acp", "rate_limit_exceeded", CodeRateLimited},
 		{"codex apikey", "codex-acp", "invalid api key provided", CodeMissingCredentials},
 		{"opencode auth", "opencode-acp", "Unauthorized request", CodeAuthRequired},

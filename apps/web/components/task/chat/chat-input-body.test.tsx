@@ -6,6 +6,7 @@ import { ChatInputBody, type ChatInputBodyProps } from "./chat-input-body";
 import { shouldShowCancelAgent } from "./chat-input-container";
 
 const tipTapPropsMock = vi.hoisted(() => vi.fn());
+const CHAT_INPUT_GLOW_TEST_ID = "chat-input-glow";
 
 vi.mock("./tiptap-input", () => ({
   TipTapInput: (props: unknown) => {
@@ -81,6 +82,51 @@ function props(overrides: Partial<ChatInputBodyProps> = {}): ChatInputBodyProps 
 }
 
 describe("ChatInputBody", () => {
+  it("renders the running glow as a pointer-inert HTML pulse target", () => {
+    render(
+      <TooltipProvider>
+        <ChatInputBody {...props({ isAgentBusy: true })} />
+      </TooltipProvider>,
+    );
+
+    const glow = screen.getByTestId(CHAT_INPUT_GLOW_TEST_ID);
+    expect(glow.tagName).toBe("SPAN");
+    expect(glow.className).toContain("chat-input-glow-running");
+    expect(glow.getAttribute("aria-hidden")).toBe("true");
+    expect(glow.hasAttribute("data-compositor-pulse")).toBe(true);
+  });
+
+  it("uses the starting glow until the busy state takes precedence", () => {
+    const { rerender } = render(
+      <TooltipProvider>
+        <ChatInputBody {...props({ isStarting: true })} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId(CHAT_INPUT_GLOW_TEST_ID).className).toContain(
+      "chat-input-glow-starting",
+    );
+
+    rerender(
+      <TooltipProvider>
+        <ChatInputBody {...props({ isStarting: true, isAgentBusy: true })} />
+      </TooltipProvider>,
+    );
+    const busyGlow = screen.getByTestId(CHAT_INPUT_GLOW_TEST_ID);
+    expect(busyGlow.className).toContain("chat-input-glow-running");
+    expect(busyGlow.className).not.toContain("chat-input-glow-starting");
+  });
+
+  it("removes the glow target when the composer is settled", () => {
+    render(
+      <TooltipProvider>
+        <ChatInputBody {...props()} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByTestId(CHAT_INPUT_GLOW_TEST_ID)).toBeNull();
+  });
+
   it("keeps the regular editor enabled while a structured clarification is pending", () => {
     render(
       <TooltipProvider>

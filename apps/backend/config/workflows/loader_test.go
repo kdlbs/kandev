@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
 )
@@ -78,6 +79,35 @@ func TestLoadTemplates_AllValid(t *testing.T) {
 		if len(tmpl.Steps) == 0 {
 			t.Errorf("template %q has no steps", tmpl.ID)
 		}
+	}
+}
+
+func TestConvertStep_PreservesAgentProfileAndSessionPolicies(t *testing.T) {
+	var raw templateYAML
+	if err := yaml.Unmarshal([]byte(`
+id: test
+name: Test
+steps:
+  - id: review
+    name: Review
+    agent_profile_id: profile-review
+    profile_session_start_policy: new
+    profile_session_end_policy: park
+`), &raw); err != nil {
+		t.Fatalf("unmarshal template: %v", err)
+	}
+	step, err := convertStep(raw.Steps[0])
+	if err != nil {
+		t.Fatalf("convertStep returned error: %v", err)
+	}
+	if step.AgentProfileID != "profile-review" {
+		t.Fatalf("agent profile ID = %q, want profile-review", step.AgentProfileID)
+	}
+	if step.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyNew {
+		t.Fatalf("profile session start policy = %q, want new", step.ProfileSessionStartPolicy)
+	}
+	if step.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyPark {
+		t.Fatalf("profile session end policy = %q, want park", step.ProfileSessionEndPolicy)
 	}
 }
 
@@ -267,6 +297,45 @@ func TestLoadTemplates_HiddenFlag(t *testing.T) {
 		if hiddenByID[id] {
 			t.Errorf("template %q must not be hidden", id)
 		}
+	}
+}
+
+// TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal verifies that the
+// office-default template's `work` step gates its turn-end auto-advance
+// (Work -> Review) on the ADR 0015 declarative completion signal, now that
+// step_complete_kandev is registered for the Office MCP surface. Without
+// this flag the new signal would be decorative: the step would still
+// advance on bare turn-end regardless of whether the agent called the tool.
+func TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var officeDefault *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "office-default" {
+			officeDefault = tmpl
+			break
+		}
+	}
+	if officeDefault == nil {
+		t.Fatal("office-default template not found")
+	}
+
+	var work *models.StepDefinition
+	for i := range officeDefault.Steps {
+		if officeDefault.Steps[i].ID == "work" {
+			work = &officeDefault.Steps[i]
+			break
+		}
+	}
+	if work == nil {
+		t.Fatal("office-default template step \"work\" not found")
+	}
+
+	if got := boolFieldForTest(t, work, "AutoAdvanceRequiresSignal"); !got {
+		t.Error("office-default template step \"work\" must set auto_advance_requires_signal: true")
 	}
 }
 

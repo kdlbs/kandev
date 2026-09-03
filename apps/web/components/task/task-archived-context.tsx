@@ -8,7 +8,12 @@ type TaskArchivedState = {
   isArchived: boolean;
   archivedTaskId?: string;
   archivedTaskTitle?: string;
-  archivedTaskRepositoryPath?: string;
+  /**
+   * The archived task's repository as a stable `owner/repo` slug (or name).
+   * Sidebar rows render this, so it must be the same identity ordinary rows
+   * carry, never a local clone path.
+   */
+  archivedTaskRepositoryLabel?: string;
   archivedTaskUpdatedAt?: string;
 };
 

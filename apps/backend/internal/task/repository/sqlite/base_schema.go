@@ -17,12 +17,15 @@ func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
 		r.initRepositorySetsSchema,
+		r.initRepositoryBranchPoliciesSchema,
 		r.initPlansSchema,
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
+		r.initStepEntriesSchema,
+		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
@@ -34,10 +37,14 @@ func (r *Repository) initSchema() error {
 		r.ensureDefaultExecutorsAndEnvironments,
 		r.runMigrations,
 		r.hideBuiltinWorkflows,
+		r.healBuiltinWorkflowStepFlags,
+		r.healBuiltinWorkflowStepParticipantSeats,
+		r.healBuiltinWorkflowStepOnAgentError,
 		r.normalizeTaskWorktreeOwnership,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
+		r.migrateGitSnapshotOwnership,
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
@@ -160,15 +167,19 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	return nil
 }
 
-// ensurePromptOrderIndex creates the additive expression index
-// (task_session_id, normalized_microsecond(created_at), id) that makes the
-// prompt-ordering window pass index-only. Read-time derived prompt ordinals
-// need no data-column or table-shape migration; this one additive index is
-// the only schema change.
+// ensurePromptOrderIndex creates additive expression indexes for prompt-order
+// reads. The user-only index also puts author_type before the ordering key, so
+// filtered prompt pages skip interleaved agent and tool rows.
 func (r *Repository) ensurePromptOrderIndex() error {
 	ddl := dialect.PromptOrderIndexDDL(r.db.DriverName(), "idx_messages_prompt_order", "task_session_messages")
 	if _, err := r.db.Exec(ddl); err != nil {
 		return fmt.Errorf("create prompt-order index: %w", err)
+	}
+	userDDL := dialect.PromptUserOrderIndexDDL(
+		r.db.DriverName(), "idx_messages_prompt_user_order", "task_session_messages",
+	)
+	if _, err := r.db.Exec(userDDL); err != nil {
+		return fmt.Errorf("create prompt-user-order index: %w", err)
 	}
 	return nil
 }
@@ -201,6 +212,8 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			show_in_command_panel INTEGER DEFAULT 1,
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
+			profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
+			profile_session_end_policy TEXT NOT NULL DEFAULT 'complete',
 			stage_type TEXT NOT NULL DEFAULT 'custom',
 			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
@@ -422,6 +435,11 @@ func (r *Repository) initTaskSchema() error {
 		repository_id TEXT NOT NULL,
 		base_branch TEXT DEFAULT '',
 		checkout_branch TEXT DEFAULT '',
+		branch_policy_id TEXT DEFAULT '',
+		branch_policy_name TEXT DEFAULT '',
+		branch_policy_base_branch TEXT DEFAULT '',
+		branch_policy_branch_template TEXT DEFAULT '',
+		branch_policy_pull_request_target TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
@@ -508,11 +526,36 @@ func (r *Repository) initRepositorySetsSchema() error {
 	return err
 }
 
+const repositoryBranchPoliciesSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS repository_branch_policies (
+		id TEXT PRIMARY KEY,
+		repository_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL,
+		branch_template TEXT NOT NULL,
+		pull_request_target TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_repository_branch_policies_repository_id
+		ON repository_branch_policies(repository_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS uniq_repository_branch_policies_repository_lower_name
+		ON repository_branch_policies(repository_id, LOWER(name));
+`
+
+func (r *Repository) initRepositoryBranchPoliciesSchema() error {
+	_, err := r.db.Exec(repositoryBranchPoliciesSchemaDDL)
+	return err
+}
+
 func (r *Repository) initCoreIndexes() error {
 	_, err := r.db.Exec(`
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at);
+	CREATE INDEX IF NOT EXISTS idx_tasks_updated_at_id ON tasks(updated_at, id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);
 	CREATE INDEX IF NOT EXISTS idx_task_workspace_folders_task_position ON task_workspace_folders(task_id, position);
@@ -551,6 +594,9 @@ func (r *Repository) initPlansSchema() error {
 		author_kind TEXT NOT NULL DEFAULT 'agent',
 		author_name TEXT NOT NULL DEFAULT '',
 		revert_of_revision_id TEXT,
+		workflow_step_id TEXT NOT NULL DEFAULT '',
+		workflow_step_name TEXT NOT NULL DEFAULT '',
+		workflow_step_color TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
@@ -734,7 +780,7 @@ func (r *Repository) initSessionSchema() error {
 
 // initSubagentContextSchema creates task_session_subagents, the durable
 // relational record of a subagent (Task tool) invocation. See
-// docs/specs/subagent-context-persistence/spec.md. The three measurement
+// docs/specs/agents/requirements/subagent-context-persistence.md. The three measurement
 // columns (total_tokens, tool_use_count, duration_ms) deliberately carry no
 // DEFAULT: an unreported value must store NULL, never 0 (75% of observed
 // invocations report none of them). turn_id carries no FOREIGN KEY so a turn
@@ -792,10 +838,7 @@ func (r *Repository) initSubagentContextSchema() error {
 // workflows get deleted, and the historical fact that a card was in a
 // now-deleted step must survive that deletion.
 func (r *Repository) initStepTransitionsSchema() error {
-	idCol := "id INTEGER PRIMARY KEY AUTOINCREMENT"
-	if dialect.IsPostgres(r.db.DriverName()) {
-		idCol = "id BIGSERIAL PRIMARY KEY"
-	}
+	idCol := dialect.AutoIncrementIDColumn(r.db.DriverName())
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_step_transitions (
 		` + idCol + `,
@@ -934,8 +977,11 @@ const sessionWorktreeSchemaDDL = `
 		executor_profile_id TEXT DEFAULT '',
 		control_port INTEGER DEFAULT 0,
 		status TEXT NOT NULL DEFAULT 'creating',
+		materialization_session_id TEXT DEFAULT '',
 		workspace_path TEXT DEFAULT '',
 		container_id TEXT DEFAULT '',
+		container_bootstrap_nonce_secret_id TEXT DEFAULT '',
+		container_control_auth_token_secret_id TEXT DEFAULT '',
 		sandbox_id TEXT DEFAULT '',
 		task_dir_name TEXT DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
@@ -978,7 +1024,8 @@ func (r *Repository) initGitSchema() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
+		task_environment_id TEXT NOT NULL,
+		session_id TEXT,
 		snapshot_type TEXT NOT NULL,
 		branch TEXT NOT NULL,
 		remote_branch TEXT DEFAULT '',
@@ -990,7 +1037,8 @@ func (r *Repository) initGitSchema() error {
 		triggered_by TEXT DEFAULT '',
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE SET NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_git_snapshots_session ON task_session_git_snapshots(session_id, created_at DESC);
@@ -1062,6 +1110,7 @@ const taskReviewSchemaDDL = `
 		prompt_tokens INTEGER NOT NULL DEFAULT 0,
 		response_tokens INTEGER NOT NULL DEFAULT 0,
 		duration_ms INTEGER NOT NULL DEFAULT 0,
+		entry_id TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		completed_at TIMESTAMP,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE

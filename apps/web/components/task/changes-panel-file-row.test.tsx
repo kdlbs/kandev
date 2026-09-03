@@ -1,7 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { FileRow } from "./changes-panel-file-row";
+
+const responsive = vi.hoisted(() => ({ isFinePointer: true }));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsive,
+}));
+
+afterEach(() => {
+  responsive.isFinePointer = true;
+});
 
 const noop = () => {};
 const noopSelect = () => false;
@@ -86,7 +96,12 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
       <TooltipProvider>
         <ul>
           <FileRow
-            file={{ ...baseFile, path: "README.md", repositoryName: "frontend" }}
+            file={{
+              ...baseFile,
+              path: "README.md",
+              repositoryName: "frontend",
+              changeLayer: "staged",
+            }}
             isPending={false}
             onSelect={noopSelect}
             onOpenDiff={onOpenDiff}
@@ -105,6 +120,7 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
     expect(onOpenDiff).toHaveBeenCalledWith("README.md", {
       source: "uncommitted",
       repositoryName: "frontend",
+      changeLayer: "staged",
     });
   });
 
@@ -216,6 +232,18 @@ describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {
     expect(gridWrapper.className).toContain("col-start-1");
     expect(gridWrapper.className).toContain("row-start-1");
   });
+
+  it("hides statistics behind always-visible actions for coarse pointers", () => {
+    responsive.isFinePointer = false;
+    const { container } = renderRow("file.go");
+    const li = container.querySelector("li") as HTMLElement;
+    const gridWrapper = li.children[1] as HTMLElement;
+    const statsLayer = gridWrapper.children[0] as HTMLElement;
+    const actionsLayer = gridWrapper.children[1] as HTMLElement;
+
+    expect(statsLayer.className.split(/\s+/)).toContain("opacity-0");
+    expect(actionsLayer.className.split(/\s+/)).toContain("opacity-100");
+  });
 });
 
 describe("FileRow tree-mode hover stage action", () => {
@@ -283,6 +311,36 @@ describe("FileRow tree-mode hover stage action", () => {
     const rightActions = row!.querySelector("[data-testid='file-row-hover-actions']");
     expect(rightActions).not.toBeNull();
     expect(rightActions!.querySelector("button[title='Unstage file']")).toBeNull();
+  });
+
+  it("keeps the tree-mode stage action visible and touch-sized for coarse pointers", () => {
+    responsive.isFinePointer = false;
+
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "src/mobile.go", staged: true }}
+            isPending={false}
+            treeMode
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const iconSlot = container.querySelector("[data-testid='file-row-icon-action-slot']");
+    const action = iconSlot?.querySelector("button[title='Unstage file']");
+
+    expect(iconSlot?.className).toContain("size-11");
+    expect(action?.className).toContain("min-h-11");
+    expect(action?.className).toContain("min-w-11");
+    expect(action?.parentElement?.className).not.toContain("opacity-0");
   });
 });
 

@@ -72,7 +72,7 @@ const createTablesSQL = `
 		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
 		-- Cap on concurrent open watcher-created tasks for this watch.
 		-- NULL = uncapped. Positive integer = cap. Values <= 0 are rejected at
-		-- the API layer. See docs/specs/throttle-watcher-fanout/.
+		-- the API layer. See docs/specs/tasks/system-design/wip-limit-pull-system.md.
 		max_inflight_tasks INTEGER DEFAULT 5,
 		-- Dispatch order for matched issues under the in-flight cap.
 		-- '' = Linear default order (updatedAt asc). See linear/issue_sort.go.

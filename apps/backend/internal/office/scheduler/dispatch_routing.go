@@ -202,6 +202,7 @@ func (ss *SchedulerService) parkRunBlocked(
 			Seq:        seq,
 			ProviderID: string(sk.ProviderID),
 			Tier:       string(res.RequestedTier),
+			TierSource: res.TierSource,
 			Outcome:    skipOutcome(sk.Reason),
 			ErrorCode:  sk.ErrorCode,
 			RawExcerpt: sk.RawExcerpt,
@@ -252,7 +253,7 @@ func (ss *SchedulerService) tryCandidates(
 		candidateLaunch := continuationLaunchContext(
 			launch, prior, run.RouteCycleBaselineSeq, candidate,
 		)
-		seq, err := ss.recordAttemptStart(ctx, run, candidate, res.RequestedTier)
+		seq, err := ss.recordAttemptStart(ctx, run, candidate, res.RequestedTier, res.TierSource)
 		if err != nil {
 			return false, nil, err
 		}
@@ -352,10 +353,14 @@ func latestFailedExecutionProfile(
 }
 
 // recordAttemptStart increments the attempt sequence and appends the
-// in-flight attempt row with outcome=launched.
+// in-flight attempt row with outcome=launched. tierSource is the
+// resolution's precedence level (routing.Resolution.TierSource) —
+// threaded in from the caller, which has the *routing.Resolution in
+// scope, rather than re-derived here (AC-20d names effectiveTier as
+// the sole producer).
 func (ss *SchedulerService) recordAttemptStart(
 	ctx context.Context, run *models.Run,
-	candidate routing.Candidate, tier routing.Tier,
+	candidate routing.Candidate, tier routing.Tier, tierSource string,
 ) (int, error) {
 	seq, err := ss.repo.IncrementRouteAttemptSeq(ctx, run.ID)
 	if err != nil {
@@ -369,6 +374,7 @@ func (ss *SchedulerService) recordAttemptStart(
 		ProviderID:         string(candidate.ProviderID),
 		Model:              candidate.Model,
 		Tier:               string(tier),
+		TierSource:         tierSource,
 		Outcome:            RouteAttemptOutcomeLaunched,
 		StartedAt:          time.Now().UTC(),
 	}

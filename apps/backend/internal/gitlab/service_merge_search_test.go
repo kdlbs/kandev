@@ -67,8 +67,8 @@ func TestServiceClientActionsReturnErrNoClient(t *testing.T) {
 		{name: "branches", call: func() error { _, err := service.ListProjectBranches(t.Context(), "acme/widget"); return err }},
 		{name: "search MRs", call: func() error { _, err := service.SearchUserMRs(t.Context(), "", ""); return err }},
 		{name: "search MRs paged", call: func() error { _, err := service.SearchUserMRsPaged(t.Context(), "", "", 1, 10); return err }},
-		{name: "search issues", call: func() error { _, err := service.SearchUserIssues(t.Context(), "", ""); return err }},
-		{name: "search issues paged", call: func() error { _, err := service.SearchUserIssuesPaged(t.Context(), "", "", 1, 10); return err }},
+		{name: "search issues", call: func() error { _, err := service.SearchUserIssues(t.Context(), "", "", ""); return err }},
+		{name: "search issues paged", call: func() error { _, err := service.SearchUserIssuesPaged(t.Context(), "", "", "", 1, 10); return err }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

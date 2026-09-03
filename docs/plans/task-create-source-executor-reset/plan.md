@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/task-create-executor-default.md
+spec: docs/specs/tasks/requirements/task-create-executor-default.md
 created: 2026-08-18
 status: complete
 ---

@@ -6,7 +6,7 @@ wave: 2
 depends_on:
   - "02-portable-rich-row-setting"
 plan: "plan.md"
-spec: "../../specs/ui/task-listing-display-preferences.md"
+spec: "../../specs/ui/requirements/task-listing-display-preferences.md"
 role: implementer
 model_tier: balanced
 ---

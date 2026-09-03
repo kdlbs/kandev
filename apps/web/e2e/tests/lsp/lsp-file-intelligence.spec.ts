@@ -847,7 +847,7 @@ test.describe("LSP file intelligence", () => {
       seedData.workspaceId,
       repositoryDirectory,
       "main",
-      { name: repositoryName },
+      { name: repositoryName, pull_before_worktree: false },
     );
 
     const task = await createKotlinTask(testPage, apiClient, seedData, backend, {

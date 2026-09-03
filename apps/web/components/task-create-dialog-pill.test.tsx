@@ -80,13 +80,8 @@ vi.mock("@kandev/ui/tooltip", async () => {
   };
 });
 
-import {
-  sortBranches,
-  branchToOption,
-  computeBranchPlaceholder,
-  Pill,
-  type PillOption,
-} from "./task-create-dialog-pill";
+import { Pill, type PillOption } from "./task-create-dialog-pill";
+import { branchToOption, computeBranchPlaceholder, sortBranches } from "./branch-picker-options";
 
 const CREATE_REPOSITORY = "Create new repository";
 
@@ -163,7 +158,45 @@ describe("sortBranches", () => {
   });
 });
 
+describe("grouped pill options", () => {
+  it("keeps branch policies before branches even when a branch is selected", async () => {
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value="main"
+        placeholder="branch"
+        options={[
+          { value: "main", label: "main", group: "branches", groupLabel: "Branches" },
+          {
+            value: "policy:feature",
+            label: "Feature policy",
+            group: "policies",
+            groupLabel: "Branch policies",
+          },
+        ]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search branches..."
+        emptyMessage="No branches"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /main/i }));
+    const policies = await screen.findByText("Branch policies");
+    const branches = await screen.findByText("Branches");
+    expect(
+      Boolean(policies.compareDocumentPosition(branches) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
+  });
+});
+
 describe("branchToOption keywords", () => {
+  it("tags branch options for the grouped selector", () => {
+    expect(branchToOption(localBranch("main"))).toMatchObject({
+      group: "branches",
+      groupLabel: expect.any(String),
+    });
+  });
+
   function keywords(b: Branch): string[] {
     return branchToOption(b).keywords ?? [];
   }
@@ -319,6 +352,37 @@ describe("Pill tooltip", () => {
 });
 
 describe("Pill popover", () => {
+  it("puts the current option first with a persistent selected surface", () => {
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value="Current label"
+        selectedValue="current"
+        placeholder="repository"
+        options={[
+          { value: "first", label: "First" },
+          { value: "current", label: "Current" },
+          { value: "last", label: "Last" },
+        ]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Current label"));
+
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.textContent?.trim())).toEqual([
+      "Current",
+      "First",
+      "Last",
+    ]);
+    expect(options[0].className).toContain("bg-card");
+    expect(options[0].className).toContain("border-primary/50");
+    expect(options[0].querySelector("svg")).not.toBeNull();
+  });
+
   it("portals selector content outside the trigger container", () => {
     render(
       <div data-testid="clipping-host" className="overflow-hidden">

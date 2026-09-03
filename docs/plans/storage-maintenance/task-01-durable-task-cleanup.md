@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 01: Durable task cleanup
@@ -46,7 +46,7 @@ None.
 ## Inputs
 
 - Spec sections: Task cleanup and orphan workspaces; Unarchive compatibility; Persistence guarantees
-- `docs/specs/tasks/runtime-cleanup.md`
+- `docs/specs/tasks/system-design/runtime-cleanup.md`
 - ADR 0025 runtime inventory rules
 - PR #1687 unarchive CAS and branch recovery behavior
 

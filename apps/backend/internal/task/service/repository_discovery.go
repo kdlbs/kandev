@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/gitref"
@@ -200,7 +201,55 @@ func validateExplicitGitMetadata(repoPath string) error {
 	if !info.Mode().IsRegular() {
 		return errors.New(".git metadata must be a directory or linked-worktree pointer")
 	}
-	return validateLinkedWorktreeMetadata(repoPath, gitPath)
+	return validateGitFileMetadata(repoPath, gitPath)
+}
+
+func validateGitFileMetadata(repoPath, gitPath string) error {
+	linkedWorktreeErr := validateLinkedWorktreeMetadata(repoPath, gitPath)
+	if linkedWorktreeErr == nil {
+		return nil
+	}
+	submoduleErr := validateSubmoduleMetadata(repoPath)
+	if submoduleErr == nil {
+		return nil
+	}
+	return errors.Join(linkedWorktreeErr, submoduleErr)
+}
+
+func validateSubmoduleMetadata(repoPath string) error {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return err
+	}
+	canonicalGitDir, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return err
+	}
+	canonicalRepoPath, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(filepath.Join(canonicalGitDir, "commondir")); err == nil {
+		return errors.New("submodule metadata must not redirect its common directory")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	config, err := os.ReadFile(filepath.Join(canonicalGitDir, "config"))
+	if err != nil {
+		return err
+	}
+	worktree, err := parseGitConfigCoreWorktree(string(config))
+	if err != nil {
+		return err
+	}
+	resolvedWorktree, err := resolveMetadataPathValue(worktree, canonicalGitDir)
+	if err != nil {
+		return err
+	}
+	if !sameCanonicalPath(resolvedWorktree, canonicalRepoPath) {
+		return errors.New("submodule metadata does not point back to the selected repository")
+	}
+	return nil
 }
 
 func validateStandaloneGitMetadata(gitPath string) error {
@@ -257,10 +306,207 @@ func readMetadataPath(path, relativeTo string) (string, error) {
 	if metadataPath == "" {
 		return "", errors.New("metadata path is empty")
 	}
-	if !filepath.IsAbs(metadataPath) {
-		metadataPath = filepath.Join(relativeTo, metadataPath)
+	return resolveMetadataPathValue(metadataPath, relativeTo)
+}
+
+func resolveMetadataPathValue(value, relativeTo string) (string, error) {
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(relativeTo, value)
 	}
-	return filepath.EvalSymlinks(filepath.Clean(metadataPath))
+	return filepath.EvalSymlinks(filepath.Clean(value))
+}
+
+func parseGitConfigCoreWorktree(config string) (string, error) {
+	section := ""
+	var worktree string
+	var foundWorktree bool
+	for _, rawLine := range strings.Split(config, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if parsedSection, ok := parseGitConfigSection(line); ok {
+			if err := rejectGitConfigAlternateSection(parsedSection); err != nil {
+				return "", err
+			}
+			section = parsedSection
+			continue
+		}
+		switch {
+		case strings.EqualFold(section, "extensions"):
+			if err := rejectGitConfigWorktreeConfig(line); err != nil {
+				return "", err
+			}
+		case strings.EqualFold(section, "core"):
+			parsedWorktree, found, err := parseGitConfigWorktreeLine(line)
+			if err != nil {
+				return "", err
+			}
+			if found {
+				worktree = parsedWorktree
+				foundWorktree = true
+			}
+		}
+	}
+	if !foundWorktree {
+		return "", errors.New("core.worktree is missing")
+	}
+	if worktree == "" {
+		return "", errors.New("core.worktree is empty")
+	}
+	return worktree, nil
+}
+
+func rejectGitConfigAlternateSection(section string) error {
+	sectionName := strings.ToLower(section)
+	if separator := strings.IndexAny(sectionName, " \t"); separator >= 0 {
+		sectionName = sectionName[:separator]
+	}
+	if sectionName == "include" || sectionName == "includeif" {
+		return errors.New("git config includes are not allowed")
+	}
+	return nil
+}
+
+func rejectGitConfigWorktreeConfig(line string) error {
+	key, value, found := strings.Cut(line, "=")
+	if !found {
+		if strings.EqualFold(strings.TrimSpace(line), "worktreeConfig") {
+			return errors.New("git worktree configuration is not allowed")
+		}
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(key), "worktreeConfig") {
+		return nil
+	}
+	enabled, err := parseGitConfigBoolean(value)
+	if err != nil {
+		return fmt.Errorf("parse extensions.worktreeConfig: %w", err)
+	}
+	if enabled {
+		return errors.New("git worktree configuration is not allowed")
+	}
+	return nil
+}
+
+func parseGitConfigWorktreeLine(line string) (string, bool, error) {
+	key, value, found := strings.Cut(line, "=")
+	if !found || !strings.EqualFold(strings.TrimSpace(key), "worktree") {
+		return "", false, nil
+	}
+	parsedWorktree, err := parseGitConfigValue(value)
+	if err != nil {
+		return "", false, fmt.Errorf("parse core.worktree: %w", err)
+	}
+	return parsedWorktree, true, nil
+}
+
+func parseGitConfigSection(line string) (string, bool) {
+	if !strings.HasPrefix(line, "[") {
+		return "", false
+	}
+	inQuote := false
+	escaped := false
+	for index := 1; index < len(line); index++ {
+		character := line[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if character == '\\' && inQuote {
+			escaped = true
+			continue
+		}
+		if character == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if character != ']' || inQuote {
+			continue
+		}
+		remainder := strings.TrimSpace(line[index+1:])
+		if remainder != "" && remainder[0] != '#' && remainder[0] != ';' {
+			return "", false
+		}
+		return strings.TrimSpace(line[1:index]), true
+	}
+	return "", false
+}
+
+func parseGitConfigBoolean(value string) (bool, error) {
+	parsed, err := parseGitConfigValue(value)
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(parsed) {
+	case "true", "yes", "on", "1":
+		return true, nil
+	case "false", "no", "off", "0":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean value %q", parsed)
+	}
+}
+
+func parseGitConfigValue(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	var parsed strings.Builder
+	for len(value) > 0 {
+		if value[0] == '"' {
+			end, err := gitConfigQuotedValueEnd(value)
+			if err != nil {
+				return "", err
+			}
+			unquoted, err := strconv.Unquote(value[:end+1])
+			if err != nil {
+				return "", err
+			}
+			parsed.WriteString(unquoted)
+			value = value[end+1:]
+			continue
+		}
+		quoteIndex := strings.IndexByte(value, '"')
+		commentIndex := gitConfigCommentStart(value)
+		if commentIndex >= 0 && (quoteIndex < 0 || commentIndex < quoteIndex) {
+			parsed.WriteString(value[:commentIndex])
+			return strings.TrimSpace(parsed.String()), nil
+		}
+		if quoteIndex >= 0 {
+			parsed.WriteString(value[:quoteIndex])
+			value = value[quoteIndex:]
+			continue
+		}
+		parsed.WriteString(value)
+		break
+	}
+	return strings.TrimSpace(parsed.String()), nil
+}
+
+func gitConfigCommentStart(value string) int {
+	for index, character := range value {
+		if character == '#' || character == ';' {
+			return index
+		}
+	}
+	return -1
+}
+
+func gitConfigQuotedValueEnd(value string) (int, error) {
+	escaped := false
+	for index := 1; index < len(value); index++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if value[index] == '\\' {
+			escaped = true
+			continue
+		}
+		if value[index] == '"' {
+			return index, nil
+		}
+	}
+	return 0, errors.New("unterminated quoted Git config value")
 }
 
 func sameCanonicalPath(left, right string) bool {
@@ -397,6 +643,19 @@ func (s *Service) resolveRepositoryLocalPath(ctx context.Context, repoID string)
 		return "", fmt.Errorf("%w: saved repository path resolves to a different location", ErrInvalidRepositoryPath)
 	}
 	return resolved, nil
+}
+
+// ResolveRepositoryLocalPath is the exported form of
+// resolveRepositoryLocalPath. It is the narrow, read-only,
+// single-method checkout-resolution port docs/specs/task-delivery-ledger/
+// spec.md, "Which checkout" describes: repository ID in, a validated
+// absolute checkout path or error out, with no sentinel empty path on
+// rejection. internal/delivery's ancestry check depends on this method
+// through a local interface rather than importing this package, so it
+// inherits the existing canonicalization and containment checks instead
+// of duplicating them.
+func (s *Service) ResolveRepositoryLocalPath(ctx context.Context, repoID string) (string, error) {
+	return s.resolveRepositoryLocalPath(ctx, repoID)
 }
 
 // RepositoryCurrentBranch returns the current branch for a saved repository,

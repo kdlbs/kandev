@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-frontend-wiring-and-affordances"]
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-reparenting-drag-drop.md"
+spec: "../../specs/tasks/requirements/subtask-reparenting-drag-drop.md"
 ---
 
 # Task 04: E2E and full verification

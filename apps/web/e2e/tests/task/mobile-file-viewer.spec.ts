@@ -66,6 +66,49 @@ async function setupMobileFileViewerTest({
   return { session, filePath };
 }
 
+test.describe("Mobile file tree keyboard shortcuts", () => {
+  test("select-all stays in the new-file name input", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.1
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.2
+    const { session, filePath } = await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile File Create Select All",
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    await expect(session.fileTreeNode(filePath)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.getByRole("button", { name: "New file" }).tap();
+    const input = testPage.getByPlaceholder("filename...");
+    await expect(input).toBeFocused({ timeout: 5_000 });
+
+    const draftName = "mobile-draft.ts";
+    await input.fill(draftName);
+    await input.press("ControlOrMeta+a");
+
+    await expect
+      .poll(async () => ({
+        selection: await input.evaluate((element) => ({
+          start: element.selectionStart,
+          end: element.selectionEnd,
+        })),
+        selectedRows: await session.fileTreeSelectedNodes().count(),
+      }))
+      .toEqual({
+        selection: { start: 0, end: draftName.length },
+        selectedRows: 0,
+      });
+  });
+});
+
 test.describe("Mobile file viewer panel", () => {
   test.describe.configure({ retries: 1 });
 
@@ -310,6 +353,58 @@ test.describe("Mobile file viewer panel", () => {
     await expect(session.activeChat().getByText(`${fileName} (1)`)).toBeVisible({
       timeout: 5_000,
     });
+  });
+
+  test("wide Markdown preview tables scroll locally without resize controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.12.
+    test.setTimeout(90_000);
+    const marker = "Mobile file preview table marker";
+    const { filePath } = await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile FV Markdown Table",
+      options: {
+        extension: "md",
+        content: [
+          "| Status | Owner | Project | Branch | Review | Build | Deploy | Notes |",
+          "| --- | --- | --- | --- | --- | --- | --- | --- |",
+          `| Ready | Team Alpha | Kandev | main | Pending | Passing | Staged | ${marker} |`,
+        ].join("\n"),
+      },
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
+    await expect(fileNode).toBeVisible({ timeout: 15_000 });
+    await fileNode.tap();
+
+    const viewer = testPage.getByTestId("mobile-file-viewer-panel");
+    await expect(viewer).toBeVisible({ timeout: 5_000 });
+    await viewer.getByTestId("markdown-preview-toggle").tap();
+
+    const preview = viewer.getByTestId("markdown-preview");
+    const table = preview.locator("table", { hasText: marker });
+    const wrapper = table.locator("xpath=..");
+    await expect(table).toBeVisible();
+    await expect(preview.getByTestId(/^markdown-table-resizer-/)).toHaveCount(0);
+    expect(await wrapper.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(
+      true,
+    );
+    expect(
+      await preview.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
   });
 
   test("viewer header shows full path for files inside subdirectories", async ({

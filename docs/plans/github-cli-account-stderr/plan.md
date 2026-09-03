@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/integrations/github-authentication.md
+spec: docs/specs/integrations/requirements/github-authentication.md
 created: 2026-08-07
 status: done
 ---

@@ -29,12 +29,24 @@ async function setupTask(
   taskTitle: string,
 ) {
   const profile = await createStandardProfile(apiClient, profileName);
-  await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
+
+  // The task API returns before local workspace preparation finishes. Wait
+  // for the environment's durable ready state before the first tree request;
+  // otherwise the tree can legitimately snapshot the repository while the
+  // agent session is still being attached to it.
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 30_000,
+      message: `Waiting for ${taskTitle} task environment to be ready`,
+    })
+    .toBe("ready");
+
   const session = await openTaskSession(testPage, taskTitle);
   await session.clickTab("Files");
   return session;

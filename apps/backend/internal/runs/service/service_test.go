@@ -65,7 +65,7 @@ func TestQueueRun_InsertsRow(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()
 
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		Reason:  "task_assigned",
 		Payload: agentInPayload("a1"),
 	}); err != nil {
@@ -78,7 +78,7 @@ func TestQueueRun_DoesNotCoalesceTaskAssignedAcrossTasks(t *testing.T) {
 	ctx := context.Background()
 
 	for _, taskID := range []string{"task-a", "task-b"} {
-		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 			AgentProfileID: "agent-primary",
 			TaskID:         taskID,
 			WorkflowStepID: "step-1",
@@ -119,7 +119,7 @@ func TestQueueRun_UsesRequestAgentProfileIDAndAddsEnvelopePayload(t *testing.T) 
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()
 
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		TaskID:         "task-1",
 		WorkflowStepID: "work",
@@ -174,7 +174,7 @@ func TestQueueRun_DoesNotCoalesceDistinctTaskComments(t *testing.T) {
 	ctx := context.Background()
 
 	for _, commentID := range []string{"comment-1", "comment-2"} {
-		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 			AgentProfileID: "agent-primary",
 			TaskID:         "task-1",
 			WorkflowStepID: "work",
@@ -211,7 +211,7 @@ func TestQueueRun_DoesNotCoalesceTaskCommentPrefixWithCustomReason(t *testing.T)
 	}
 	for i, key := range keys {
 		commentID := commentIDs[i]
-		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 			AgentProfileID: "agent-primary",
 			TaskID:         "task-1",
 			WorkflowStepID: "work",
@@ -240,7 +240,7 @@ func TestQueueRun_LegacyCommentWakeDoesNotOverwriteCanonicalCommentRun(t *testin
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()
 
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		TaskID:         "target-task",
 		WorkflowStepID: "work",
@@ -254,7 +254,7 @@ func TestQueueRun_LegacyCommentWakeDoesNotOverwriteCanonicalCommentRun(t *testin
 		t.Fatalf("queue engine run: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		TaskID:         "source-task",
 		Reason:         "task_comment",
@@ -293,7 +293,7 @@ func TestQueueRun_SaltedKeyUsesPayloadCommentID(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()
 
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		TaskID:         "task-1",
 		WorkflowStepID: "work",
@@ -325,7 +325,7 @@ func TestQueueRun_CommentStatusIgnoresMentionRuns(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()
 
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		TaskID:         "task-1",
 		Reason:         "task_comment",
@@ -382,7 +382,7 @@ func TestQueueRun_PublishesSourceTaskForCrossTaskComment(t *testing.T) {
 		t.Fatalf("subscribe: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		TaskID:         "target-task",
 		WorkflowStepID: "target-step",
@@ -416,7 +416,7 @@ func TestQueueRun_RejectsWithoutAgent(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()
 
-	err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		Reason:  "task_assigned",
 		Payload: map[string]any{"task_id": "t1"},
 	})
@@ -442,7 +442,7 @@ func TestQueueRun_Idempotency(t *testing.T) {
 	}
 
 	for i := 0; i < 2; i++ {
-		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:         "task_comment",
 			IdempotencyKey: "task_comment:c1",
 			Payload:        agentInPayload("a1"),
@@ -464,6 +464,170 @@ func TestQueueRun_Idempotency(t *testing.T) {
 	}
 }
 
+// TestQueueRun_IdempotencyReportsDedupedOutcome pins that a suppressed
+// duplicate reports QueueOutcomeDeduped rather than QueueOutcomeQueued, so a
+// caller that logs or asserts on the outcome (e.g. the office auto-start
+// path in internal/orchestrator) can tell a real insert from a no-op.
+func TestQueueRun_IdempotencyReportsDedupedOutcome(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	first, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:c1",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue 1: %v", err)
+	}
+	if first != runsservice.QueueOutcomeQueued {
+		t.Errorf("first outcome = %q, want %q", first, runsservice.QueueOutcomeQueued)
+	}
+
+	second, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_comment",
+		IdempotencyKey: "task_comment:c1",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue 2: %v", err)
+	}
+	if second != runsservice.QueueOutcomeDeduped {
+		t.Errorf("second outcome = %q, want %q", second, runsservice.QueueOutcomeDeduped)
+	}
+}
+
+// TestQueueRun_DistinctIdempotencyKeyStillQueuesAfterDedup pins the actual
+// office auto-start defect this package's caller relies on: a step re-entry
+// that changes the idempotency key (in production, because task.UpdatedAt
+// changed) must still queue and insert a fresh row once the first run has
+// finished, not be swallowed by the dedup path that suppressed the first
+// identical key. Before the fix, the office auto-start key had no per-entry
+// component, so a rejected review card routed back to the same step would
+// collide with the first entry's key forever.
+func TestQueueRun_DistinctIdempotencyKeyStillQueuesAfterDedup(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	firstEntry, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_assigned",
+		IdempotencyKey: "task_assigned:t1:a1:step2:2026-01-01T00:00:00Z",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue first entry: %v", err)
+	}
+	if firstEntry != runsservice.QueueOutcomeQueued {
+		t.Fatalf("first entry outcome = %q, want %q", firstEntry, runsservice.QueueOutcomeQueued)
+	}
+
+	// Same key again within the entry (e.g. a duplicate delivery) is
+	// suppressed, exactly like TestQueueRun_IdempotencyReportsDedupedOutcome.
+	dup, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_assigned",
+		IdempotencyKey: "task_assigned:t1:a1:step2:2026-01-01T00:00:00Z",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue duplicate: %v", err)
+	}
+	if dup != runsservice.QueueOutcomeDeduped {
+		t.Fatalf("duplicate outcome = %q, want %q", dup, runsservice.QueueOutcomeDeduped)
+	}
+
+	// Simulate the first run having actually run and finished (the office
+	// scheduler claims and finishes it) before the step is re-entered.
+	// CoalesceRun only matches status='queued' rows, so a still-queued first
+	// row would coalesce the second entry instead of exercising the
+	// idempotency path this test targets.
+	var firstRunID string
+	if err := repo.Reader().GetContext(ctx, &firstRunID,
+		`SELECT id FROM runs WHERE idempotency_key = ?`,
+		"task_assigned:t1:a1:step2:2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("look up first run id: %v", err)
+	}
+	if err := repo.SetRunStatusForTest(ctx, firstRunID, "finished", nil, nil); err != nil {
+		t.Fatalf("finish first run: %v", err)
+	}
+
+	// A later re-entry into the same step (task, agent, step unchanged) with
+	// a bumped UpdatedAt component must still queue.
+	secondEntry, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_assigned",
+		IdempotencyKey: "task_assigned:t1:a1:step2:2026-01-01T01:00:00Z",
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue second entry: %v", err)
+	}
+	if secondEntry != runsservice.QueueOutcomeQueued {
+		t.Errorf("second entry outcome = %q, want %q (a key with no per-entry component would dedupe this and silently drop the run)", secondEntry, runsservice.QueueOutcomeQueued)
+	}
+}
+
+// TestQueueRun_DedupesOnIdempotencyIndexRace pins the fix for the duplicate
+// on_children_completed wake race: idx_run_idempotency (unique on
+// idempotency_key with no time bound) can reject an insert even when
+// CheckIdempotencyKey's 24h-windowed lookup found no duplicate — for
+// example when two independent producers derive the same operation id and
+// race the insert, or (as reproduced deterministically here) when the
+// colliding row is older than the window. Before the fix insertRun wrapped
+// that unique-constraint violation in a generic "enqueue run" error, which
+// aborted the losing producer's step actions and logged a spurious ERROR
+// instead of being treated as an idempotent no-op.
+func TestQueueRun_DedupesOnIdempotencyIndexRace(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	const key = "task_children_completed:parent-1:0541818c598576d27d09bff86195037f87910dbf34f0420f6a99dc468aa1dfc7"
+
+	outcome, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		IdempotencyKey: key,
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue first run: %v", err)
+	}
+	if outcome != runsservice.QueueOutcomeQueued {
+		t.Fatalf("first outcome = %q, want %q", outcome, runsservice.QueueOutcomeQueued)
+	}
+
+	var firstRunID string
+	if err := repo.Reader().GetContext(ctx, &firstRunID,
+		`SELECT id FROM runs WHERE idempotency_key = ?`, key); err != nil {
+		t.Fatalf("look up first run id: %v", err)
+	}
+	// Push the first row outside CheckIdempotencyKey's 24h window so the
+	// racing insert reaches idx_run_idempotency instead of being caught
+	// by the earlier check — the exact gap a true concurrent race falls
+	// into (both producers pass the check before either commits).
+	if err := repo.SetRunRequestedAtForTest(ctx, firstRunID, time.Now().UTC().Add(-25*time.Hour)); err != nil {
+		t.Fatalf("age first run past the idempotency window: %v", err)
+	}
+
+	second, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		IdempotencyKey: key,
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue racing run: %v", err)
+	}
+	if second != runsservice.QueueOutcomeDeduped {
+		t.Fatalf("racing outcome = %q, want %q", second, runsservice.QueueOutcomeDeduped)
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM runs WHERE idempotency_key = ?`, key); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("runs with idempotency_key %q = %d, want 1", key, count)
+	}
+}
+
 // TestQueueRun_Coalescing pins that two requests for the same
 // (agent, reason) inside the 5s window collapse onto a single row
 // with coalesced_count = 2 instead of producing two queued rows.
@@ -472,7 +636,7 @@ func TestQueueRun_Coalescing(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 2; i++ {
-		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:  "task_comment",
 			Payload: agentInPayload("a1"),
 		}); err != nil {
@@ -494,7 +658,7 @@ func TestQueueRun_SignalsScheduler(t *testing.T) {
 
 	signal := svc.SubscribeSignal()
 
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		Reason:  "task_assigned",
 		Payload: agentInPayload("a1"),
 	}); err != nil {
@@ -519,7 +683,7 @@ func TestQueueRun_LatencySignalUnder100ms(t *testing.T) {
 	signal := svc.SubscribeSignal()
 
 	start := time.Now()
-	if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		Reason:  "task_assigned",
 		Payload: agentInPayload("a1"),
 	}); err != nil {
@@ -563,7 +727,7 @@ func TestQueueRun_ResolverPathPickedOverPayload(t *testing.T) {
 	)
 	svc := runsservice.New(officeRepo.RunsRepository(), eb, log, resolver)
 
-	if err := svc.QueueRun(context.Background(), runsservice.QueueRunRequest{
+	if _, err := svc.QueueRun(context.Background(), runsservice.QueueRunRequest{
 		Reason:  "task_assigned",
 		Payload: agentInPayload("payload-agent"),
 	}); err != nil {

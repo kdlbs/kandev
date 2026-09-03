@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/settings-typography/spec.md
+spec: docs/specs/ui/requirements/settings-typography.md
 created: 2026-08-16
 status: building
 ---

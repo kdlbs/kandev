@@ -88,9 +88,11 @@ export type MobileTaskListProps = {
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
-  onArchiveTask: (taskId: string) => void;
+  onArchiveTask: (taskId: string, opts?: { cascade?: boolean }) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
   onDetachTask: (taskId: string) => Promise<void> | void;
+  archivingTaskId?: string | null;
+  isArchiving?: boolean;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
@@ -144,6 +146,7 @@ export function MobileTaskList(props: MobileTaskListProps) {
     onReorderSubtasks: handleReorderSubtasks,
     pinnedTaskIds,
     showActivityTime: view.sort.key === "lastActivityAt",
+    taskRowPresentation: view.taskRow,
   });
   return <TaskSwitcher {...switcherProps} />;
 }
@@ -341,6 +344,8 @@ function TaskSwitcherSurfaceContent({
               linking.taskListHandlers.onLinkSentryIssue,
             )}
             deletingTaskId={actions.deletingTaskId}
+            archivingTaskId={actions.archivingTaskId}
+            isArchiving={actions.isArchiving}
             isLoading={data.tasksLoading}
             loadError={data.archivedError ? t("sidebar:archivedLoadFailed") : null}
             onRetryLoad={data.retryArchivedTasks}

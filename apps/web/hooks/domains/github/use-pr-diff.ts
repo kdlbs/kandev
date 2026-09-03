@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import {
+  useEffect,
+  useCallback,
+  useState,
+  useRef,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
@@ -16,7 +23,8 @@ type PRDiffView = {
 };
 
 export type KeyedPRDiffState = PRDiffView & {
-  sourceKey: string;
+  identityKey: string;
+  hasResolved: boolean;
 };
 
 type PRDiffRequest = {
@@ -24,31 +32,41 @@ type PRDiffRequest = {
   owner: string;
   repo: string;
   prNumber: number;
-  sourceKey: string;
+  identityKey: string;
 };
 
 const INITIAL_STATE: KeyedPRDiffState = {
-  sourceKey: "",
+  identityKey: "",
+  hasResolved: false,
   files: [],
   loading: false,
   error: null,
 };
 
-export function resolvePRDiffView(state: KeyedPRDiffState, requestedKey: string): PRDiffView {
-  if (state.sourceKey === requestedKey) {
+export function resolvePRDiffView(state: KeyedPRDiffState, requestedIdentity: string): PRDiffView {
+  if (state.identityKey === requestedIdentity) {
     return { files: state.files, loading: state.loading, error: state.error };
   }
-  return { files: [], loading: requestedKey !== "", error: null };
+  return { files: [], loading: requestedIdentity !== "", error: null };
 }
 
 async function fetchPRFiles(
-  { workspaceId, owner, repo, prNumber, sourceKey }: PRDiffRequest,
-  setState: (s: KeyedPRDiffState) => void,
+  { workspaceId, owner, repo, prNumber, identityKey }: PRDiffRequest,
+  setState: Dispatch<SetStateAction<KeyedPRDiffState>>,
 ) {
   const client = getWebSocketClient();
-  setState({ sourceKey, files: [], loading: true, error: null });
+  setState((previous) => {
+    const retainResolved = previous.identityKey === identityKey && previous.hasResolved;
+    return {
+      identityKey,
+      hasResolved: retainResolved,
+      files: retainResolved ? previous.files : [],
+      loading: !retainResolved,
+      error: null,
+    };
+  });
   if (!client) {
-    setState({ sourceKey, files: [], loading: false, error: null });
+    setState((previous) => ({ ...previous, loading: false }));
     return;
   }
   debug("fetch.start", { owner, repo, prNumber });
@@ -60,11 +78,28 @@ async function fetchPRFiles(
       number: prNumber,
     });
     const files = response?.files ?? [];
-    setState({ sourceKey, files, loading: false, error: null });
+    setState({
+      identityKey,
+      hasResolved: true,
+      files,
+      loading: false,
+      error: null,
+    });
     debug("fetch.success", { owner, repo, prNumber, fileCount: files.length });
   } catch (err) {
     const message = err instanceof Error ? err.message : t("github:failedToFetchPrFiles");
-    setState({ sourceKey, files: [], loading: false, error: message });
+    setState((previous) => {
+      if (previous.identityKey === identityKey && previous.hasResolved) {
+        return { ...previous, loading: false, error: null };
+      }
+      return {
+        identityKey,
+        hasResolved: false,
+        files: [],
+        loading: false,
+        error: message,
+      };
+    });
     debug("fetch.error", { owner, repo, prNumber, error: message });
   }
 }
@@ -82,34 +117,33 @@ export function usePRDiff(
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [state, setState] = useState<KeyedPRDiffState>(INITIAL_STATE);
   const hasParams = !!workspaceId && !!owner && !!repo && !!prNumber;
-  const sourceKey = hasParams
-    ? `${workspaceId}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}`
-    : "";
-  const paramsKeyRef = useRef<string>("");
+  const identityKey = hasParams ? `${workspaceId}/${owner}/${repo}/${prNumber}` : "";
+  const requestKey = hasParams ? `${identityKey}/${refreshKey ?? ""}` : "";
+  const requestKeyRef = useRef<string>("");
   const requestIdRef = useRef(0);
 
   const refresh = useCallback(() => {
     if (!workspaceId || !owner || !repo || !prNumber) return;
     const requestId = ++requestIdRef.current;
-    void fetchPRFiles({ workspaceId, owner, repo, prNumber, sourceKey }, (next) => {
+    void fetchPRFiles({ workspaceId, owner, repo, prNumber, identityKey }, (next) => {
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });
-  }, [workspaceId, owner, repo, prNumber, sourceKey]);
+  }, [workspaceId, owner, repo, prNumber, identityKey]);
 
   useEffect(() => {
-    if (sourceKey === paramsKeyRef.current) return;
-    paramsKeyRef.current = sourceKey;
+    if (requestKey === requestKeyRef.current) return;
+    requestKeyRef.current = requestKey;
     if (!workspaceId || !owner || !repo || !prNumber) {
       requestIdRef.current++; // invalidate in-flight responses
       return;
     }
     const requestId = ++requestIdRef.current;
-    void fetchPRFiles({ workspaceId, owner, repo, prNumber, sourceKey }, (next) => {
+    void fetchPRFiles({ workspaceId, owner, repo, prNumber, identityKey }, (next) => {
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });
-  }, [workspaceId, owner, repo, prNumber, sourceKey]);
+  }, [workspaceId, owner, repo, prNumber, identityKey, requestKey]);
 
-  return { ...resolvePRDiffView(state, sourceKey), refresh };
+  return { ...resolvePRDiffView(state, identityKey), refresh };
 }

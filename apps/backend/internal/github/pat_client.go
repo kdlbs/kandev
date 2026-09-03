@@ -728,11 +728,14 @@ func (c *PATClient) RequestReviewers(ctx context.Context, owner, repo string, nu
 	return c.post(ctx, endpoint, jsonBody)
 }
 
-func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, request MergePRRequest) (MergeOutcome, error) {
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
 	payload := map[string]string{"merge_action": "default"}
-	if mergeMethod != "" {
-		payload["merge_method"] = mergeMethod
+	if request.MergeMethod != "" {
+		payload["merge_method"] = request.MergeMethod
+	}
+	if request.ExpectedHeadSHA != "" {
+		payload["sha"] = request.ExpectedHeadSHA
 	}
 	jsonBody, err := json.Marshal(payload)
 	if err != nil {
@@ -742,20 +745,27 @@ func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int,
 	if err := c.putJSON(ctx, endpoint, jsonBody, &response); err != nil {
 		var apiErr *GitHubAPIError
 		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict ||
-			json.Unmarshal([]byte(apiErr.Body), &response) != nil || response.UUID == "" {
+			json.Unmarshal([]byte(apiErr.Body), &response) != nil || response.Details.UUID == "" {
 			return "", err
 		}
 	}
 	for response.Status == "pending" {
-		if response.UUID == "" {
+		if response.Details.UUID == "" {
 			return "", fmt.Errorf("GitHub merge response is pending without a UUID")
 		}
-		if err := c.get(ctx, endpoint+"/"+response.UUID, &response); err != nil {
+		wait := c.mergePollWait
+		if wait == nil {
+			wait = waitForMergePoll
+		}
+		if waitErr := wait(ctx, mergePollInterval); waitErr != nil {
+			return "", fmt.Errorf("wait to poll merge PR #%d: %w", number, waitErr)
+		}
+		if err := c.get(ctx, endpoint+"/"+response.Details.UUID, &response); err != nil {
 			return "", err
 		}
 	}
 	if response.Status == mergeStatusFailed {
-		return "", fmt.Errorf("GitHub rejected merge: %s", response.Message)
+		return "", newMergeFailureError(response.Details)
 	}
 	return normalizeMergeOutcome(response.Status)
 }

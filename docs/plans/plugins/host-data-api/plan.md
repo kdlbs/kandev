@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/plugins/spec.md
+spec: docs/specs/plugins/requirements/plugins.md
 adr: docs/decisions/0043-plugin-host-data-api.md
 created: 2026-07-17
 status: implemented

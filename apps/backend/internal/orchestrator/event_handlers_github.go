@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -61,11 +62,14 @@ type GitHubService interface {
 	RecordTaskCIFixAttempt(ctx context.Context, attempt github.TaskCIFixAttempt) error
 	RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error
 	RecordTaskCIMergeAttempt(ctx context.Context, attempt github.TaskCIMergeAttempt) error
+	RecordTaskCIMergeAttemptResult(ctx context.Context, taskID, repositoryID string, prNumber int, signature, result, message string) error
+	RecordTaskCIMergeQueueObservation(ctx context.Context, observation github.TaskCIMergeQueueObservation) error
 	RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
+	RecordTaskCIAutoMergeError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error
 	GetPRFeedbackForAutomation(ctx context.Context, workspaceID, owner, repo string, number int) (*github.PRFeedback, error)
-	MergePRForAutomation(ctx context.Context, workspaceID, owner, repo string, number int, mergeMethod string) error
+	MergePRForAutomation(ctx context.Context, workspaceID, owner, repo string, number int, mergeMethod, expectedHeadSHA string) error
 	ListActivePRWatches(ctx context.Context) ([]*github.PRWatch, error)
 	ReserveReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error)
 	AssignReviewPRTaskID(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, taskID string) error
@@ -298,22 +302,133 @@ func (s *Service) startTaskPRCIAutomationWithRefresh(ctx context.Context, pr *gi
 	if pr == nil {
 		return
 	}
+	s.ciAutomationMu.Lock()
+	if s.ciAutomationStopped {
+		s.ciAutomationMu.Unlock()
+		return
+	}
+	if s.ciAutomationCtx == nil {
+		s.ciAutomationCtx, s.ciAutomationCancel = context.WithCancel(context.Background())
+	}
+	workerCtx := s.ciAutomationCtx
+	s.ciAutomationWorkers.Add(1)
+	s.ciAutomationMu.Unlock()
 	key := fmt.Sprintf("%s|%s|%d", pr.TaskID, pr.RepositoryID, pr.PRNumber)
-	if _, loaded := s.ciAutomationInFlight.LoadOrStore(key, struct{}{}); loaded {
-		s.logger.Debug("CI automation already in flight",
+	request := ciAutomationRequest{ctx: ctx, pr: pr, refresh: refresh}
+	if !s.ciAutomationInFlight.Enqueue(key, request) {
+		s.ciAutomationWorkers.Done()
+		s.logger.Debug("CI automation follow-up coalesced",
 			zap.String("task_id", pr.TaskID),
 			zap.String("repository_id", pr.RepositoryID),
 			zap.Int("pr_number", pr.PRNumber))
 		return
 	}
 	go func() {
-		defer s.ciAutomationInFlight.Delete(key)
-		automationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
-		defer cancel()
-		if err := s.handleTaskPRCIAutomationWithRefresh(automationCtx, pr, refresh); err != nil {
-			s.logger.Debug("CI automation handling failed", zap.String("task_id", pr.TaskID), zap.Error(err))
+		defer s.ciAutomationWorkers.Done()
+		for {
+			if workerCtx.Err() != nil {
+				return
+			}
+			automationCtx, cancel := context.WithTimeout(workerCtx, ciAutomationDetachedTimeout)
+			err := s.handleTaskPRCIAutomationWithRefresh(automationCtx, request.pr, request.refresh)
+			cancel()
+			if err != nil {
+				s.logger.Debug("CI automation handling failed", zap.String("task_id", request.pr.TaskID), zap.Error(err))
+			}
+			var ok bool
+			request, ok = s.ciAutomationInFlight.Next(key)
+			if !ok {
+				return
+			}
 		}
 	}()
+}
+
+type ciAutomationRequest struct {
+	ctx     context.Context
+	pr      *github.TaskPR
+	refresh bool
+}
+
+type ciAutomationWork struct {
+	pending *ciAutomationRequest
+}
+
+// ciAutomationCoordinator owns the per-PR worker lifecycle. Enqueue returns
+// true only to the caller that must start the worker. Later requests replace
+// the single pending follow-up while preserving the strongest refresh need.
+type ciAutomationCoordinator struct {
+	mu    sync.Mutex
+	works map[string]*ciAutomationWork
+}
+
+func (c *ciAutomationCoordinator) Enqueue(key string, request ciAutomationRequest) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.works == nil {
+		c.works = make(map[string]*ciAutomationWork)
+	}
+	if work, ok := c.works[key]; ok {
+		if work.pending != nil && work.pending.refresh {
+			request.refresh = true
+		}
+		work.pending = &request
+		return false
+	}
+	c.works[key] = &ciAutomationWork{}
+	return true
+}
+
+func (c *ciAutomationCoordinator) Next(key string) (ciAutomationRequest, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	work, ok := c.works[key]
+	if !ok {
+		return ciAutomationRequest{}, false
+	}
+	if work.pending != nil {
+		request := *work.pending
+		work.pending = nil
+		return request, true
+	}
+	delete(c.works, key)
+	return ciAutomationRequest{}, false
+}
+
+// Has reports whether a worker is currently active for key. It is intentionally
+// read-only so tests can observe coalescing without exposing coordinator state.
+func (c *ciAutomationCoordinator) Has(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, exists := c.works[key]
+	return exists
+}
+
+func (s *Service) resetCIAutomationWorkers() {
+	s.ciAutomationMu.Lock()
+	defer s.ciAutomationMu.Unlock()
+	s.ciAutomationStopped = false
+	s.ciAutomationCtx, s.ciAutomationCancel = context.WithCancel(context.Background())
+}
+
+func (s *Service) stopCIAutomationWorkers() {
+	s.ciAutomationMu.Lock()
+	s.ciAutomationStopped = true
+	cancel := s.ciAutomationCancel
+	s.ciAutomationMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.ciAutomationWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(sendNowClaimRecoveryTimeout):
+		s.logger.Warn("timed out waiting for CI automation workers during shutdown")
+	}
 }
 
 // handleNewReviewPR creates a task for a new PR needing review.
@@ -904,6 +1019,12 @@ func (s *Service) backfillRepoProvider(store repoStore, repo *models.Repository)
 // AND the session worktree for that repo has no branch (rare; ensures
 // backwards compatibility with single-repo callers that pass the resolved
 // branch directly).
+//
+// The watch's task_id is redirected via resolveEffectivePushTaskID, same as
+// push detection: this runs on every session start, so without the redirect
+// a subtask sharing its parent's worktree gets its own member-attributed
+// watch here even when push detection itself is fixed — the watch the
+// poller then associates the PR under (see poller.go's detectPRForWatch).
 func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, fallbackBranch string) {
 	if s.githubService == nil {
 		return
@@ -914,8 +1035,9 @@ func (s *Service) ensureSessionPRWatch(ctx context.Context, taskID, sessionID, f
 	}
 	targets := s.resolveSessionWatchTargets(ctx, taskID, sessionID, fallbackBranch)
 	for _, t := range targets {
+		effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, t.RepositoryID)
 		if _, err := s.githubService.EnsurePRWatchForWorkspace(
-			ctx, workspaceID, sessionID, taskID, t.RepositoryID, t.Owner, t.Repo, t.Branch,
+			ctx, workspaceID, sessionID, effectiveTaskID, t.RepositoryID, t.Owner, t.Repo, t.Branch,
 		); err != nil {
 			s.logger.Warn("failed to ensure PR watch for session",
 				zap.String("session_id", sessionID),
@@ -1244,13 +1366,26 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 
-	// Check if a PR is already associated with this task
-	existing, err := s.githubService.GetTaskPR(ctx, taskID)
+	// The watch/association write destination is redirected the same way as
+	// push detection (resolveEffectivePushTaskID): this is the frontend's
+	// on-demand alternative to that same detection, so without the redirect a
+	// user opening a shared-worktree subtask reproduces the multi-binding on
+	// demand. Resolved first, ahead of resolveTaskRepo/branch below, so the
+	// already-associated short-circuit only needs a repositoryID lookup, not
+	// a full owner/repo/branch resolution.
+	repositoryID := s.resolvePrimaryTaskRepositoryID(ctx, taskID)
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+
+	// Check if a PR is already associated with the effective task.
+	existing, err := s.githubService.GetTaskPR(ctx, effectiveTaskID)
 	if err == nil && existing != nil {
 		return true, nil
 	}
 
-	// Resolve the GitHub owner/repo from the task's repository
+	// Resolve the GitHub owner/repo from the task's repository. This, and
+	// branch resolution below, stay keyed off the observing taskID: the
+	// physical checkout and task_repositories rows belong to whichever task's
+	// session the frontend is checking, same as dispatchPushDetection.
 	owner, repoName := s.resolveTaskRepo(ctx, taskID)
 	if owner == "" || repoName == "" {
 		return false, nil
@@ -1262,13 +1397,12 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 	}
 
 	// Ensure a PR watch exists so the background poller will keep checking
-	repositoryID := s.resolvePrimaryTaskRepositoryID(ctx, taskID)
 	workspaceID := s.taskWorkspaceID(ctx, taskID)
 	if workspaceID == "" {
 		return false, github.ErrGitHubWorkspaceRequired
 	}
 	if _, watchErr := s.githubService.EnsurePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, branch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repoName, branch,
 	); watchErr != nil {
 		s.logger.Warn("failed to ensure PR watch during check",
 			zap.String("session_id", sessionID),
@@ -1283,8 +1417,8 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 
-	// Found a PR — associate it with the task
-	s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, owner, repoName, repositoryID, branch, pr)
+	// Found a PR — associate it with the effective task.
+	s.associatePRFromPushScoped(ctx, workspaceID, sessionID, effectiveTaskID, owner, repoName, repositoryID, branch, pr)
 	return true, nil
 }
 
@@ -1364,6 +1498,16 @@ func (s *Service) activeWorktreeBranchForRepository(ctx context.Context, taskID,
 // multiple sessions resolving to the same (task, repository, branch) target
 // collapse to a single emission here — one lookup per canonical target per
 // cycle, regardless of how many sessions are active on it.
+//
+// TaskID is redirected via resolveEffectivePushTaskID (to the workspace-group
+// owner task) before the dedup key is computed and before the caller
+// (poller.reconcileWatches) creates the watch, same as ensureSessionPRWatch:
+// this is the third and last producer that would otherwise write a
+// member-attributed watch for a shared-worktree subtask. Deduping on the
+// pre-redirect sess.TaskID would let a member and its owner both emit a
+// TaskBranchInfo for the same underlying repository/branch, so the redirect
+// must run first — canonical identity is (effective task, repository,
+// branch), never session or pre-redirect task.
 func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]github.TaskBranchInfo, error) {
 	sessions, err := store.ListSessionsWithBranches(ctx)
 	if err != nil {
@@ -1384,14 +1528,15 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 		// come from session.Worktrees inside resolveSessionWatchTargets.
 		targets := s.resolveSessionWatchTargets(ctx, sess.TaskID, sess.SessionID, sess.Branch)
 		for _, t := range targets {
-			key := watchedTaskRepoBranchKey(sess.TaskID, t.RepositoryID, t.Branch)
+			effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sess.SessionID, sess.TaskID, t.RepositoryID)
+			key := watchedTaskRepoBranchKey(effectiveTaskID, t.RepositoryID, t.Branch)
 			if watchedKeys[key] || emitted[key] {
 				continue
 			}
 			emitted[key] = true
 			result = append(result, github.TaskBranchInfo{
 				WorkspaceID:  sess.WorkspaceID,
-				TaskID:       sess.TaskID,
+				TaskID:       effectiveTaskID,
 				SessionID:    sess.SessionID,
 				RepositoryID: t.RepositoryID,
 				Owner:        t.Owner,

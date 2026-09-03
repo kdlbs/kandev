@@ -1,6 +1,6 @@
 ---
 name: pr-fixup
-description: Wait for CI and automated reviews on a PR, fix valid failures and comments in the primary conversation, verify, and push.
+description: Wait for CI and automated reviews on a PR, fix valid failures and comments, disposition every review thread, verify, and push in the primary conversation.
 ---
 
 # PR Fixup
@@ -24,8 +24,8 @@ Create a visible checklist:
 1. Gather PR state
 2. Resolve an authorized PR merge conflict
 3. Fix failing CI checks
-4. Triage review comments
-5. Address valid comments
+4. Triage every review thread
+5. Apply valid fixes and record every disposition
 6. Commit, rerun affected checks, and push
 7. Re-check the new head
 8. Report
@@ -114,9 +114,9 @@ approve` is not a valid command.
 
 Treat the state as clean only when the current head has no failed or pending
 checks, no merge conflict, no blocking review (an active `CHANGES_REQUESTED`
-or a review blocked at the exact current head), no actionable review thread or
-issue comment, and qualifying exact-head semantic evidence where PR delivery
-requires it.
+or a review blocked at the exact current head), no unresolved review thread, no
+actionable issue comment, and qualifying exact-head semantic evidence where PR
+delivery requires it.
 
 ## 2. Fix CI Failures
 
@@ -148,6 +148,17 @@ For unfamiliar, infrastructure, or E2E failures, load
 Also load it for unexpected zero-duration or no-op manual-review runs: event
 and workflow provenance can explain them without a product-code change.
 
+An explicit request to run `pr fixup` owns every failed required check on the
+current head. Never stop by calling a failure "unrelated" only because its
+files are outside the PR diff. Reproduce each leaf failure with retries
+disabled, inspect its artifacts and shared fixtures/cleanup, and fix every
+valid product, test, fixture, cleanup, or CI-contract defect it exposes. A
+dependent aggregate failure does not replace its leaf failures: trace the
+aggregate to all failed jobs, fix the underlying failures, and wait for the
+aggregate checks to rerun. If concrete evidence proves a failure is external
+after this investigation, report the exact job/log/reproduction evidence and
+keep the PR blocked; do not call it ready while a required check is failed.
+
 Fix with `/tdd` or `/e2e` as applicable, run focused checks, and keep each
 remediation scoped to the reported failure. Do not suppress a failure or mark a
 check clean without fresh evidence.
@@ -167,33 +178,49 @@ when the behavior remains internal.
 ## 3. Triage And Address Reviews
 
 Use `scripts/pr-resolve list <PR>` to obtain unresolved threads. Its previews
-can be truncated, so expand each listed review thread with
-`scripts/pr-resolve show <PR> <thread_id>` before deciding whether it is valid,
-already addressed, a preference, or wrong for this codebase. Use
-`scripts/pr-state --comment <comment_id>` only for a flat comment view when a
-thread context is not available. Validate against the current head, the spec,
+can be truncated, so expand every listed review thread with
+`scripts/pr-resolve show <PR> <thread_id>` before deciding how to handle it.
+Use `scripts/pr-state --comment <comment_id>` only for a flat comment view when
+a thread context is not available. Validate against the current head, the spec,
 and existing architecture before editing or replying.
 
-Make only valid changes. GitHub replies and thread resolution are external
-writes. A direction to "address" valid review comments explicitly authorizes a
-concise reply and resolution after the fix is pushed and targeted verification
-passes; a review-only request does not. For an invalid comment, reply with
-concrete reasoning only when that authorization includes a response. When
-writes are not authorized, report valid comments as addressed in code but still
-unresolved; do not declare the PR clean solely from the code change. Resolve an
-authorized thread only when the change or response genuinely addresses it.
-An explicit request to "address them" authorizes replies and resolution only
-for the selected current actionable threads. If new comments appear during
-remediation, report them or obtain separate confirmation before replying or
-resolving them.
+Every unresolved thread requires an explicit disposition, regardless of its
+author, bot identity, visibility, or apparent severity. Record exactly one of
+these dispositions:
 
-After an authorized fix is pushed, use the atomic helper path
+- `actionable`: make the valid code or test change, verify it, cite the
+  resulting commit in the reply, and resolve the thread when writes are
+  authorized.
+- `already addressed`: verify the current implementation or an existing commit,
+  explain where it is addressed, and resolve the thread when writes are
+  authorized.
+- `informational` or `optional`: make no code change, acknowledge the information
+  or suggestion in a reply, and resolve it when complete cleanup is requested.
+- `invalid`: do not make an invalid code change or silently ignore the finding;
+  reply with concrete reasoning grounded in the code, spec, or architecture,
+  then resolve it only after that pushback is posted and writes are authorized.
+
+A classification is not a disposition. A thread is not complete merely because
+it was called optional, informational, already addressed, or invalid. GitHub
+replies and thread resolution are external writes. A request such as "complete
+cleanup", "clean up all review threads", or "leave no threads unresolved"
+explicitly authorizes a concise reply and resolution for every unresolved
+thread, including informational, optional, and invalid findings. A request to
+address selected comments authorizes replies and resolution only for those
+selected threads. A review-only request authorizes no writes. When writes are
+not authorized, record every disposition, report the still-unresolved thread,
+and do not declare the PR clean.
+
+For code changes, push the fix and pass targeted verification before replying
+and resolving. For non-code dispositions, verify the current head first, then
+use the atomic helper path
 `scripts/pr-resolve reply <PR> <comment_id> <thread_id> --body-file <path>` to
 reply, resolve, and react in one operation when the body contains Markdown or
 shell metacharacters. For short plain-text bodies, a safely quoted argument is
 acceptable. Never interpolate review text into an unquoted shell command or
 use backticks in the command itself. After the helper returns, re-fetch the
-thread and verify the posted reply body before treating the write as complete.
+thread and verify the posted reply body and resolved state before treating the
+disposition as complete.
 Then rerun
 `scripts/pr-resolve list <PR>` and the exact-head `scripts/pr-state --summary
 <PR>` check before reporting.
@@ -259,22 +286,25 @@ non-empty body in `review_evidence.exact_current_head_reviews[]`, even when
 Classify current-head review bodies and top-level bot/issue comments before
 declaring the PR clean; empty thread and issue-comment counts are insufficient.
 Treat a non-empty `hidden_unresolved_threads` value in that fresh snapshot as a
-mandatory hidden-thread gate: run `scripts/pr-resolve list <PR>` again after
-the refresh and immediately before reporting.
+mandatory hidden-thread gate: expand and disposition each hidden thread, then
+run `scripts/pr-resolve list <PR>` again after the refresh and immediately
+before reporting.
 Require `checks_head_sha` to match that head, report pending checks separately
 from failures, and rerun `scripts/pr-resolve list <PR>` before declaring the
 PR clean. The final predicate must also require
 `hidden_unresolved_threads=[]`; do not require filtered and unresolved counts to
 be equal because the filtered count includes resolved threads. Treat prior review
-evidence as stale. When the user authorized thread
-writes, a duplicate or stale bot thread still needs an explicit reply and
-resolution once current source proves the finding is already fixed, including a
-thread surfaced only in `hidden_unresolved_threads`; only current-head
-actionable threads drive code changes. Declare the PR clean only when the
+evidence as stale. When the user authorized thread writes, every unresolved
+thread still needs an explicit reply and resolution matching its disposition.
+A duplicate or stale bot thread needs the same treatment once current source
+proves the finding is already fixed, including a thread surfaced only in
+`hidden_unresolved_threads`; only current-head actionable threads drive code
+changes. Declare the PR clean only when the
 exact-current-head review classification reports no unaddressed findings,
 `checks_snapshot_complete=true`, `failed_checks=[]`, `pending_checks=[]`,
 `approval_required_runs=[]`, `actionable_issue_comment_count=0`,
-`hidden_unresolved_threads=[]`, there is no merge conflict, and
+`unresolved_review_thread_count=0`, `hidden_unresolved_threads=[]`, there is no
+merge conflict, and
 `scripts/pr-resolve list <PR>` is empty. Within
 the user's monitoring limit, continue checking after resolutions until automated
 review jobs are terminal; otherwise report the exact pending check names.
@@ -300,6 +330,13 @@ local `HEAD`, and the fresh mergeability state is not conflicting. Do not call
 the PR clean from CI/review counts alone when the worktree or remote tip still
 differs.
 
+The phrase "ready to merge" is reserved for a fresh current-head snapshot
+with every required check successful or explicitly skipped, no pending or
+failed leaf or aggregate check, no unresolved review thread, no merge conflict,
+and the local, upstream, and PR head OIDs aligned. A clean local reproduction
+does not waive a failed remote check; push the remediation and re-check the
+new head first.
+
 ## 6. User-Requested Merge
 
 Merge only after the user explicitly asks and the current-head state is clean.
@@ -316,4 +353,7 @@ requested and through a worktree-safe cleanup flow.
 - Do not use native delegation or a full-history context fork to poll CI.
 - Do not push, post comments, or resolve threads when the user asked for review
   only.
+- Do not silently dismiss an invalid finding; every invalid thread needs a
+  concrete pushback disposition, and an authorized complete cleanup must post
+  that explanation before resolving it.
 - Do not proceed with an unverified PR when mandatory verification is blocked.

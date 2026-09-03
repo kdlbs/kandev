@@ -20,6 +20,7 @@ export type SidebarViewApi = {
   sort: { key: string; direction: string };
   group: string;
   collapsed_groups: string[];
+  task_row?: SidebarTaskRowPresentationApi | null;
 };
 
 export type SidebarViewDraftApi = {
@@ -27,6 +28,14 @@ export type SidebarViewDraftApi = {
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
   sort: { key: string; direction: string };
   group: string;
+  task_row?: SidebarTaskRowPresentationApi | null;
+};
+
+export type SidebarTaskRowPresentationApi = {
+  details_enabled?: boolean;
+  detail_order?: unknown[];
+  visible_details?: unknown[];
+  trailing?: string;
 };
 
 export type SidebarTaskPrefsApi = {
@@ -105,7 +114,9 @@ export type UserSettings = {
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
+  quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  workflow_ids_with_auto_hide_empty_steps?: string[];
   revision?: number;
   updated_at: string;
 };
@@ -170,5 +181,7 @@ export type UserSettingsUpdatePayload = {
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
+  quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  workflow_ids_with_auto_hide_empty_steps?: string[];
 };

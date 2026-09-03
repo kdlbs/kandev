@@ -32,7 +32,7 @@ function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps)
     <Button
       type="button"
       variant="default"
-      className="w-full h-10 cursor-pointer sm:w-auto sm:h-7 gap-1.5"
+      className="w-full h-11 cursor-pointer sm:w-auto sm:h-7 gap-1.5"
       disabled={isCreatingTask || !hasTitle}
       onClick={onUpdate}
     >
@@ -70,7 +70,7 @@ function StartTaskSplitButton({
 
   return (
     <div className="flex flex-col w-full sm:w-auto gap-2 sm:gap-0">
-      <div className="flex w-full sm:inline-flex sm:w-auto sm:h-7 h-10">
+      <div className="flex w-full sm:inline-flex sm:w-auto sm:h-7 h-11">
         <Button
           type="submit"
           variant="default"
@@ -124,7 +124,7 @@ function StartTaskSplitButton({
         <Button
           type="button"
           variant="outline"
-          className="w-full h-10 cursor-pointer gap-1.5 sm:hidden"
+          className="w-full h-11 cursor-pointer gap-1.5 sm:hidden"
           disabled={altDisabled}
           onClick={onPlanModeAction}
           data-testid="mobile-plan-mode"
@@ -136,7 +136,7 @@ function StartTaskSplitButton({
       <Button
         type="button"
         variant="outline"
-        className="w-full h-10 cursor-pointer gap-1.5 sm:hidden"
+        className="w-full h-11 cursor-pointer gap-1.5 sm:hidden"
         disabled={altDisabled}
         onClick={onAltAction}
       >
@@ -176,7 +176,7 @@ function DefaultSubmitButton({
     <Button
       type="submit"
       variant="default"
-      className={`w-full h-10 cursor-pointer sm:w-auto sm:h-7 gap-1.5 ${planModeStyle}`}
+      className={`w-full h-11 cursor-pointer sm:w-auto sm:h-7 gap-1.5 ${planModeStyle}`}
       disabled={
         disabled || isCreatingSession || isCreatingTask || (isSessionMode ? !hasDescription : false)
       }
@@ -398,7 +398,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
           variant="outline"
           onClick={onCancel}
           disabled={isCreatingSession || isCreatingTask}
-          className="w-full h-10 border-0 cursor-pointer sm:w-auto sm:h-7 sm:border"
+          className="w-full h-11 border-0 cursor-pointer sm:w-auto sm:h-7 sm:border"
         >
           {t("common:cancel")}
         </Button>

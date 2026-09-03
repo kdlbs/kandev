@@ -245,7 +245,15 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 type wsRecoverSessionRequest struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume", "fresh_start", "runtime_retry", or "cancel_retry"
+	Action    string `json:"action"` // "resume", "resume_new_branch", "fresh_start", "runtime_retry", or "cancel_retry"
+}
+
+func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var branchRecoveryErr *orchestrator.BranchRecoveryError
+	if !errors.As(err, &branchRecoveryErr) {
+		return nil, nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), branchRecoveryErr.Details())
 }
 
 // wsRecoverSession recovers a session by id (resume or fresh start).
@@ -268,12 +276,15 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
-	if req.Action != "resume" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'fresh_start', 'runtime_retry', or 'cancel_retry'", nil)
+	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'resume_new_branch', 'fresh_start', 'runtime_retry', or 'cancel_retry'", nil)
 	}
 
 	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)
 	if err != nil {
+		if recoveryResponse, responseErr := branchRecoveryConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		h.logger.Error("failed to recover session",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
@@ -348,7 +359,9 @@ func (h *Handlers) wsStopTask(ctx context.Context, msg *ws.Message) (*ws.Message
 }
 
 type wsPermissionRespondRequest struct {
+	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
+	RequestID string `json:"request_id"`
 	PendingID string `json:"pending_id"`
 	OptionID  string `json:"option_id,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
@@ -367,6 +380,12 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.RequestID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "request_id is required", nil)
+	}
 	if req.PendingID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "pending_id is required", nil)
 	}
@@ -381,7 +400,7 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 		zap.Bool("cancelled", req.Cancelled),
 		zap.Bool("rejected", req.Rejected))
 
-	if err := h.service.RespondToPermission(ctx, req.SessionID, req.PendingID, req.OptionID, req.Cancelled, req.Rejected); err != nil {
+	if err := h.service.RespondToPermission(ctx, req.TaskID, req.SessionID, req.RequestID, req.PendingID, req.OptionID, req.Cancelled, req.Rejected); err != nil {
 		h.logger.Error("failed to respond to permission", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to respond to permission: "+err.Error(), nil)
 	}

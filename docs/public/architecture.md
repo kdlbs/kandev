@@ -20,7 +20,7 @@ flowchart LR
     BE --> DB[("SQLite or PostgreSQL")]
     BE --> Providers["Git and provider APIs"]
     BE -->|control channel| A1["agentctl: local/worktree"]
-    BE -->|control channel| A2["agentctl: Docker/SSH/Sprites"]
+    BE -->|control channel| A2["agentctl: Docker/Kubernetes/SSH/Sprites"]
     A1 --> Agent1["Agent CLI + task MCP"]
     A2 --> Agent2["Agent CLI + task MCP"]
 ```
@@ -44,7 +44,7 @@ Backend code is under `apps/backend/internal/`. Common owners include:
 - `task/`, `workflow/`, `orchestrator/`, and `runs/` for work state and dispatch;
 - `agent/` for agent definitions, profiles, executor mapping, and lifecycle;
 - `agentctl/` for the sidecar server, process/protocol adapters, Git, files, shell, terminal, and workspace operations;
-- `worktree/` plus runtime implementations for local, Docker, remote Docker, SSH, and Sprites environments;
+- `worktree/` plus runtime implementations for local, Docker, Kubernetes, remote Docker, SSH, and Sprites environments;
 - provider domains such as `github/`, `gitlab/`, `jira/`, `linear/`, and `sentry/`;
 - `mcp/` for Kandev tool schemas and backend handlers;
 - `gateway/websocket/` for client broadcasts;
@@ -64,7 +64,7 @@ See [Web development](web-development.md) for settings and workbench ownership.
 
 ## Task runtime and agentctl
 
-A task selects repositories, an agent profile, and an executor profile. Product executor types are `local`, `worktree`, `local_docker`, `remote_docker`, `sprites`, `ssh`, and test-only `mock_remote`. They map to lifecycle backends `standalone`, `docker`, `remote_docker`, `sprites`, or `ssh`; local and worktree share a process backend but prepare different Git environments.
+A task selects repositories, an agent profile, and an executor profile. Product executor types are `local`, `worktree`, `local_docker`, `remote_docker`, `sprites`, `ssh`, `k8s`, and test-only `mock_remote`. They map to lifecycle backends `standalone`, `docker`, `remote_docker`, `sprites`, `ssh`, or `k8s`; local and worktree share a process backend but prepare different Git environments.
 
 `internal/agent/runtime/` is the intended high-level backend lifecycle facade, but it remains transitional and current callers also use `internal/agent/runtime/lifecycle/` directly. Backend-side clients in `internal/agent/runtime/agentctl/` reach the agentctl server implemented in `internal/agentctl/server/`.
 
@@ -98,7 +98,7 @@ Review each crossing explicitly:
 - backend to provider APIs and Git remotes;
 - backend to agentctl and a task environment;
 - agentctl to the selected agent and MCP servers;
-- host to Docker, SSH, Sprites, or other remote infrastructure.
+- host to Docker, Kubernetes, SSH, Sprites, or other remote infrastructure.
 
 Validate scope and identity server-side. Treat provider text, repository content, agent output, URLs, archives, paths, and command arguments as untrusted. Never rely on a frontend-only permission check.
 

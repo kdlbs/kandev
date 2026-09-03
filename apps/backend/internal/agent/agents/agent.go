@@ -215,7 +215,7 @@ type CommandOptions struct {
 	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
 	PreferNativeBinary bool
 	// ManagedRuntimeVersion is an internal exact version override for trusted
-	// managed npm ACP runtimes. Empty preserves the legacy unversioned command.
+	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
 }
 
@@ -275,6 +275,11 @@ type RuntimeConfig struct {
 	// final child env after adapter merge; the inference executor strips
 	// them from the one-shot probe/inference subprocess env.
 	StripEnv []string
+	// NamespacesMCPToolsByServer is true for clients that add the MCP server
+	// name to every tool before presenting it to the model. The per-instance
+	// Kandev MCP server removes that presentation suffix before the client adds
+	// it back, so the model sees the canonical tool name.
+	NamespacesMCPToolsByServer bool
 }
 
 // MountTemplate defines a mount with template variables.

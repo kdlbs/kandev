@@ -1,4 +1,5 @@
 import {
+  pointSeedRepositoryAtFailingOrigin,
   pointSeedRepositoryAtUnresolvedOrigin,
   restoreSeedRepositoryOrigin,
   test,
@@ -184,6 +185,10 @@ test.describe("task launch failure recovery", () => {
       events: { on_enter: [{ type: "auto_start_agent" }] },
     });
 
+    await apiClient.updateRepository(seedData.repositoryId, {
+      default_branch: "default-branch-that-no-longer-exists",
+      pull_before_worktree: false,
+    });
     const task = await apiClient.createTask(
       seedData.workspaceId,
       "Missing base branch recovery fixture",
@@ -205,9 +210,6 @@ test.describe("task launch failure recovery", () => {
     const taskRepository = storedTask.repositories?.[0];
     if (!taskRepository) throw new Error("launch fixture did not create a task repository row");
 
-    await apiClient.updateRepository(seedData.repositoryId, {
-      default_branch: "default-branch-that-no-longer-exists",
-    });
     pointSeedRepositoryAtUnresolvedOrigin(seedData, backend.tmpDir);
 
     try {
@@ -273,7 +275,73 @@ test.describe("task launch failure recovery", () => {
       });
     } finally {
       restoreSeedRepositoryOrigin(seedData);
-      await apiClient.updateRepository(seedData.repositoryId, { default_branch: "main" });
+      await apiClient.updateRepository(seedData.repositoryId, {
+        default_branch: "main",
+        pull_before_worktree: true,
+      });
+    }
+  });
+
+  test("starts from the local base when origin refresh fails", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }, testInfo) => {
+    test.setTimeout(150_000);
+
+    const { workflow, waiting, review } = await recoveryWorkflow(
+      apiClient,
+      seedData.workspaceId,
+      "Local base refresh",
+    );
+    const task = await apiClient.createTask(
+      seedData.workspaceId,
+      "Local base refresh fallback fixture",
+      {
+        description: "/e2e:simple-message",
+        workflow_id: workflow.id,
+        workflow_step_id: waiting.id,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+        repositories: [{ repository_id: seedData.repositoryId, base_branch: "main" }],
+      },
+    );
+
+    pointSeedRepositoryAtFailingOrigin(seedData, backend.tmpDir);
+    try {
+      await apiClient.moveTask(task.id, workflow.id, review.id);
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(task.id);
+            return sessions.some((item) =>
+              ["RUNNING", "WAITING_FOR_INPUT", "IDLE", "COMPLETED"].includes(item.state),
+            );
+          },
+          { timeout: 60_000, message: "waiting for the local-base session to launch" },
+        )
+        .toBe(true);
+
+      await expect
+        .poll(() => taskLaunchError(apiClient, seedData.workspaceId, task.id), {
+          timeout: 30_000,
+          message: "waiting for the local-base launch error to remain clear",
+        })
+        .toBeNull();
+      await expect(testPage.getByTestId("task-launch-error-entry")).toHaveCount(0);
+
+      await assertNoDocumentHorizontalOverflow(testPage, "desktop local-base recovery");
+      await testPage.screenshot({
+        path: testInfo.outputPath("local-base-refresh-desktop.png"),
+        fullPage: true,
+      });
+    } finally {
+      restoreSeedRepositoryOrigin(seedData);
     }
   });
 });

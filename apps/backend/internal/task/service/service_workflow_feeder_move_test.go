@@ -226,9 +226,10 @@ func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmission
 	limit int,
 	admittedState *v1.TaskState,
 	queueExitPending bool,
+	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, err := r.Repository.UpdateTaskWithWorkflowStepAdmissionAndState(
-		ctx, task, targetStepID, limit, admittedState, queueExitPending,
+		ctx, task, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
 	)
 	if err == nil {
 		r.failRefresh.Store(true)

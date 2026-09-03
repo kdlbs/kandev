@@ -36,7 +36,9 @@ func (r *Repository) initPhase2Schema() error {
 		role TEXT NOT NULL CHECK (role IN ('reviewer','approver','watcher','collaborator','runner')),
 		agent_profile_id TEXT NOT NULL,
 		decision_required INTEGER NOT NULL DEFAULT 0,
-		position INTEGER NOT NULL DEFAULT 0
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+		provenance TEXT NOT NULL DEFAULT 'manual'
 	);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_step ON workflow_step_participants(step_id);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_participants_role ON workflow_step_participants(step_id, role);
@@ -46,6 +48,22 @@ func (r *Repository) initPhase2Schema() error {
 	if _, err := r.db.Exec(participantsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_participants table: %w", err)
 	}
+	// created_at predates this column on any database that already had this
+	// table; the ADD COLUMN default backfills existing rows to one constant
+	// timestamp so ResolveCurrentRunner's tiebreak still resolves them
+	// deterministically (see participantsNaturalKeyIndexName below).
+	r.migrate.Apply("workflow_step_participants.created_at", `
+		ALTER TABLE workflow_step_participants
+		ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+	`)
+	// provenance predates this column on any database that already had this
+	// table; the ADD COLUMN default backfills existing rows to "manual" so a
+	// pre-existing seat is never treated as claimable (AddTaskParticipant
+	// only claims a seat whose provenance is "auto").
+	r.migrate.Apply("workflow_step_participants.provenance", `
+		ALTER TABLE workflow_step_participants
+		ADD COLUMN provenance TEXT NOT NULL DEFAULT 'manual'
+	`)
 
 	decisionsSchema := `
 	CREATE TABLE IF NOT EXISTS workflow_step_decisions (
@@ -67,8 +85,26 @@ func (r *Repository) initPhase2Schema() error {
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_decisions_active
 		ON workflow_step_decisions(task_id, role) WHERE superseded_at IS NULL;
 	`
+	// Created before the participant dedupe below: dedupeParticipantsBeforeUniqueIndex
+	// remaps workflow_step_decisions.participant_id off a losing duplicate, which
+	// needs this table to already exist (including on a fresh database's first
+	// initPhase2Schema run).
 	if _, err := r.db.Exec(decisionsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_decisions table: %w", err)
+	}
+
+	// Must run before participantsNaturalKeyIndexName is created below: a
+	// database that predates the unique index can already hold rows sharing
+	// the same (step_id, task_id, role, agent_profile_id) identity, and
+	// CREATE UNIQUE INDEX over them fails outright, aborting backend startup.
+	if err := r.dedupeParticipantsBeforeUniqueIndex(); err != nil {
+		return fmt.Errorf("failed to dedupe workflow_step_participants before unique index: %w", err)
+	}
+	if _, err := r.db.Exec(`
+	CREATE UNIQUE INDEX IF NOT EXISTS ` + participantsNaturalKeyIndexName + `
+		ON workflow_step_participants(step_id, task_id, role, agent_profile_id);
+	`); err != nil {
+		return fmt.Errorf("failed to create %s: %w", participantsNaturalKeyIndexName, err)
 	}
 
 	// Must run before decisionActiveDeciderIndexName is created below: an
@@ -120,6 +156,58 @@ func (r *Repository) dedupeActiveStepDecisionsBeforeUniqueIndex() error {
 // WorkflowStepParticipant CRUD
 // ----------------------------------------------------------------------------
 
+// participantsNaturalKeyIndexName is the unique index enforcing at most one
+// participant row per (step_id, task_id, role, agent_profile_id) identity.
+// EnsureRoleSeat relies on this to turn a lost check-then-insert race into a
+// retryable constraint violation instead of a silent duplicate seat — see
+// isParticipantsNaturalKeyViolation.
+const participantsNaturalKeyIndexName = "idx_workflow_step_participants_natural_key"
+
+// dedupeParticipantsBeforeUniqueIndex keeps one row per (step_id, task_id,
+// role, agent_profile_id) group — the earliest by position, tiebroken by id
+// for determinism — and deletes the rest. Before deleting, it remaps any
+// workflow_step_decisions.participant_id pointing at a losing duplicate onto
+// the surviving row: a decision already recorded against a duplicate would
+// otherwise be left with a dangling participant_id after the delete, making
+// mapDecisionsToSeats drop it and a completed review look undecided. A
+// database with no duplicate rows leaves this a no-op. Mirrors
+// dedupeActiveStepDecisionsBeforeUniqueIndex.
+func (r *Repository) dedupeParticipantsBeforeUniqueIndex() error {
+	if _, err := r.db.Exec(`
+		WITH ranked AS (
+			SELECT
+				id,
+				FIRST_VALUE(id) OVER (
+					PARTITION BY step_id, task_id, role, agent_profile_id
+					ORDER BY position ASC, id ASC
+				) AS survivor_id
+			FROM workflow_step_participants
+		)
+		UPDATE workflow_step_decisions
+		SET participant_id = (
+			SELECT survivor_id FROM ranked WHERE ranked.id = workflow_step_decisions.participant_id
+		)
+		WHERE participant_id IN (SELECT id FROM ranked WHERE ranked.id != ranked.survivor_id)
+	`); err != nil {
+		return fmt.Errorf("remap decisions off duplicate participants: %w", err)
+	}
+
+	_, err := r.db.Exec(`
+		WITH ranked AS (
+			SELECT
+				id,
+				ROW_NUMBER() OVER (
+					PARTITION BY step_id, task_id, role, agent_profile_id
+					ORDER BY position ASC, id ASC
+				) AS participant_rank
+			FROM workflow_step_participants
+		)
+		DELETE FROM workflow_step_participants
+		WHERE id IN (SELECT id FROM ranked WHERE participant_rank > 1)
+	`)
+	return err
+}
+
 // UpsertStepParticipant inserts a new participant or updates an existing one
 // by id. If id is empty a UUID is generated.
 func (r *Repository) UpsertStepParticipant(ctx context.Context, p *models.WorkflowStepParticipant) error {
@@ -138,10 +226,13 @@ func (r *Repository) UpsertStepParticipant(ctx context.Context, p *models.Workfl
 	if p.ID == "" {
 		p.ID = uuid.New().String()
 	}
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now().UTC()
+	}
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, decision_required, position)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			step_id = excluded.step_id,
 			task_id = excluded.task_id,
@@ -150,7 +241,7 @@ func (r *Repository) UpsertStepParticipant(ctx context.Context, p *models.Workfl
 			decision_required = excluded.decision_required,
 			position = excluded.position
 	`), p.ID, p.StepID, p.TaskID, string(p.Role), p.AgentProfileID,
-		dialect.BoolToInt(p.DecisionRequired), p.Position)
+		dialect.BoolToInt(p.DecisionRequired), p.Position, p.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("upsert step participant: %w", err)
 	}
@@ -184,9 +275,9 @@ func (r *Repository) UpsertTaskParticipant(
 	}
 	id := uuid.New().String()
 	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, decision_required, position)
-		VALUES (?, ?, ?, ?, ?, 1, 0)
-	`), id, stepID, taskID, role, agentProfileID); err != nil {
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+		VALUES (?, ?, ?, ?, ?, 1, 0, ?)
+	`), id, stepID, taskID, role, agentProfileID, time.Now().UTC()); err != nil {
 		return "", fmt.Errorf("insert task participant: %w", err)
 	}
 	return id, nil
@@ -223,10 +314,10 @@ func (r *Repository) ListStepParticipantsForTask(
 		return nil, errors.New("step_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
 		FROM workflow_step_participants
 		WHERE step_id = ? AND (task_id = '' OR task_id = ?)
-		ORDER BY role ASC, position ASC, id ASC
+		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
 	`), stepID, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list step participants for task: %w", err)
@@ -238,7 +329,7 @@ func (r *Repository) ListStepParticipantsForTask(
 		p := &models.WorkflowStepParticipant{}
 		var role string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
@@ -263,10 +354,10 @@ func (r *Repository) ListParticipantsForTaskAnyStep(
 		return nil, errors.New("task_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
 		FROM workflow_step_participants
 		WHERE task_id = ?
-		ORDER BY role ASC, position ASC, id ASC
+		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
 	`), taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list participants for task: %w", err)
@@ -278,7 +369,7 @@ func (r *Repository) ListParticipantsForTaskAnyStep(
 		p := &models.WorkflowStepParticipant{}
 		var role string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
@@ -305,11 +396,11 @@ func (r *Repository) ListParticipantsForTaskWorkflow(
 		return nil, errors.New("workflow_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position
+		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position, p.created_at
 		FROM workflow_step_participants p
 		JOIN workflow_steps ws ON ws.id = p.step_id
 		WHERE p.task_id = ? AND ws.workflow_id = ?
-		ORDER BY p.role ASC, p.position ASC, p.id ASC
+		ORDER BY p.role ASC, p.position ASC, p.agent_profile_id ASC, p.id ASC
 	`), taskID, workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("list participants for task workflow: %w", err)
@@ -321,7 +412,7 @@ func (r *Repository) ListParticipantsForTaskWorkflow(
 		p := &models.WorkflowStepParticipant{}
 		var role string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
@@ -387,10 +478,10 @@ func (r *Repository) ListStepParticipants(ctx context.Context, stepID string) ([
 		return nil, errors.New("step_id is required")
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at
 		FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ''
-		ORDER BY role ASC, position ASC, id ASC
+		ORDER BY role ASC, position ASC, agent_profile_id ASC, id ASC
 	`), stepID)
 	if err != nil {
 		return nil, fmt.Errorf("list step participants: %w", err)
@@ -402,7 +493,7 @@ func (r *Repository) ListStepParticipants(ctx context.Context, stepID string) ([
 		p := &models.WorkflowStepParticipant{}
 		var role string
 		var decisionRequired int
-		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position); err != nil {
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan step participant: %w", err)
 		}
 		p.Role = models.ParticipantRole(role)
@@ -434,13 +525,14 @@ func (r *Repository) ListTaskParticipantsByRole(
 // GetStepParticipant returns a single participant by id.
 func (r *Repository) GetStepParticipant(ctx context.Context, id string) (*models.WorkflowStepParticipant, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance
 		FROM workflow_step_participants WHERE id = ?
 	`), id)
 	p := &models.WorkflowStepParticipant{}
 	var role string
 	var decisionRequired int
-	err := row.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position)
+	var provenance string
+	err := row.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position, &p.CreatedAt, &provenance)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("workflow step participant not found: %s", id)
 	}
@@ -449,6 +541,7 @@ func (r *Repository) GetStepParticipant(ctx context.Context, id string) (*models
 	}
 	p.Role = models.ParticipantRole(role)
 	p.DecisionRequired = decisionRequired == 1
+	p.Provenance = models.ParticipantProvenance(provenance)
 	return p, nil
 }
 
@@ -510,7 +603,7 @@ func (r *Repository) ResolveCurrentRunner(
 	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT agent_profile_id FROM workflow_step_participants
 		WHERE task_id = ? AND role = 'runner'
-		ORDER BY rowid DESC
+		ORDER BY created_at DESC, agent_profile_id ASC
 		LIMIT 1
 	`), taskID).Scan(&agentID)
 	if err == nil {
@@ -580,9 +673,9 @@ func (r *Repository) SetTaskRunner(
 	id := uuid.New().String()
 	_, ierr := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_step_participants
-		(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-		VALUES (?, ?, ?, 'runner', ?, 0, 0)
-	`), id, stepID, taskID, agentProfileID)
+		(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+		VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
+	`), id, stepID, taskID, agentProfileID, time.Now().UTC())
 	if ierr != nil {
 		return fmt.Errorf("insert runner participant: %w", ierr)
 	}
@@ -631,6 +724,195 @@ func (r *Repository) FindParticipantID(
 		return "", err
 	}
 	return id, nil
+}
+
+// sqliteParticipantsNaturalKeyViolationMessage is the substring go-sqlite3
+// puts in a UNIQUE-constraint error for participantsNaturalKeyIndexName's
+// column list, in the index's own column order.
+const sqliteParticipantsNaturalKeyViolationMessage = "UNIQUE constraint failed: workflow_step_participants.step_id, " +
+	"workflow_step_participants.task_id, workflow_step_participants.role, workflow_step_participants.agent_profile_id"
+
+// isParticipantsNaturalKeyViolation reports whether err is a violation of
+// participantsNaturalKeyIndexName specifically, not any unique violation. On
+// PostgreSQL it inspects the typed pgconn.PgError's constraint name; on
+// SQLite (no typed access to the constraint name) it matches the
+// column-list message documented above. Mirrors isDecisionActiveDeciderViolation.
+func isParticipantsNaturalKeyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == participantsNaturalKeyIndexName
+	}
+	return strings.Contains(err.Error(), sqliteParticipantsNaturalKeyViolationMessage)
+}
+
+const participantsLockNamespace = "workflow-participant-role-seat:"
+
+// ensureRoleSeatMaxAttempts bounds EnsureRoleSeat's retry loop. Mirrors
+// recordStepDecisionMaxAttempts: one retry resolves the race the unique
+// index exists for (a second concurrent entry's check now observes the
+// first entry's committed row and writes nothing); further attempts only
+// matter if a third writer interleaves in the same narrow window.
+const ensureRoleSeatMaxAttempts = 3
+
+// HasRoleSeatForTaskWorkflow reports whether any participant row in the
+// given role already exists for the task anywhere in the given workflow —
+// the same workflow-scoped (not step-scoped) existence question
+// EnsureRoleSeat answers inside its transaction. Callers use this cheap,
+// non-transactional peek to decide whether resolving a candidate agent (an
+// Office caster call) is worth doing at all; it is not itself a
+// concurrency guard — EnsureRoleSeat's own transactional check is what
+// closes the race (see EnsureRoleSeat's doc comment).
+func (r *Repository) HasRoleSeatForTaskWorkflow(ctx context.Context, workflowID, taskID, role string) (bool, error) {
+	if workflowID == "" || taskID == "" || role == "" {
+		return false, errors.New("workflow_id, task_id, and role are required")
+	}
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM workflow_step_participants p
+		JOIN workflow_steps ws ON ws.id = p.step_id
+		WHERE p.task_id = ? AND ws.workflow_id = ? AND p.role = ?
+		LIMIT 1
+	`), taskID, workflowID, role).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check existing role seat: %w", err)
+	}
+	return true, nil
+}
+
+// EnsureRoleSeat is the participant writer review-participant-seats
+// introduces (system-design "Components": "A new writer, not a reuse").
+// Unlike UpsertTaskParticipant (natural key scoped to step+role+agent) or
+// UpsertStepParticipant (same, template-level), this writer's existence
+// check is scoped to workflow+role: it asks whether the task already holds
+// a seat in this role anywhere in the given workflow, not just at this
+// step, so an operator's manually-placed seat at an earlier step is never
+// duplicated at a later gated step (AC-OFFICE-REVIEW-SEATS-001.5,
+// -003.5).
+//
+// The check and the insert run in one transaction on the write handle —
+// deliberately, not the read-then-write split UpsertTaskParticipant uses.
+// That is what lets two concurrent entries for the same task+step be
+// bounded to one seat at the role level: the second transaction's check
+// observes the first transaction's committed insert and writes nothing
+// (system-design "Failure and recovery"). The unique natural-key index
+// remains the backstop for the case two entries resolve the same
+// (step, agent) pair concurrently despite the check — EnsureRoleSeat
+// retries the whole transaction on that specific violation so the loser
+// re-observes the winner's row instead of surfacing an error.
+//
+// agentProfileID must already be resolved by the caller (the Office
+// caster) before calling this — EnsureRoleSeat only ever writes the seat
+// it is given; it does not resolve a candidate itself.
+//
+// Returns the seat (existing or newly written) and whether this call
+// inserted it. On PostgreSQL, an advisory transaction lock keyed on
+// (workflow, task, role) serializes concurrent callers before the SELECT,
+// matching recordStepDecisionTx's pattern — SQLite's single-writer lock
+// already provides that serialization.
+func (r *Repository) EnsureRoleSeat(
+	ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string,
+) (*models.WorkflowStepParticipant, bool, error) {
+	if workflowID == "" || stepID == "" || taskID == "" || agentProfileID == "" {
+		return nil, false, errors.New("workflow_id, step_id, task_id, and agent_profile_id are required")
+	}
+	if !validParticipantRole(models.ParticipantRole(role)) {
+		return nil, false, fmt.Errorf("invalid participant role %q", role)
+	}
+
+	var (
+		seat *models.WorkflowStepParticipant
+		ins  bool
+		err  error
+	)
+	for attempt := 0; attempt < ensureRoleSeatMaxAttempts; attempt++ {
+		seat, ins, err = r.ensureRoleSeatTx(ctx, workflowID, stepID, taskID, role, agentProfileID)
+		if err == nil || !isParticipantsNaturalKeyViolation(err) {
+			return seat, ins, err
+		}
+	}
+	return nil, false, fmt.Errorf("ensure role seat: exhausted retries on natural-key race: %w", err)
+}
+
+// ensureRoleSeatTx runs one check-then-insert attempt in its own
+// transaction. A caller that loses the race gets its INSERT rejected by
+// participantsNaturalKeyIndexName; EnsureRoleSeat's retry loop then re-runs
+// this from scratch so the SELECT sees the winner's now-committed row.
+func (r *Repository) ensureRoleSeatTx(
+	ctx context.Context, workflowID, stepID, taskID, role, agentProfileID string,
+) (*models.WorkflowStepParticipant, bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockKey := strings.Join([]string{participantsLockNamespace, workflowID, taskID, role}, "|")
+		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
+			return nil, false, fmt.Errorf("lock role seat identity: %w", err)
+		}
+	}
+
+	existing := &models.WorkflowStepParticipant{}
+	var existingRole string
+	var existingDecisionRequired int
+	var existingProvenance string
+	err = tx.QueryRowContext(ctx, tx.Rebind(`
+		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position, p.created_at, p.provenance
+		FROM workflow_step_participants p
+		JOIN workflow_steps ws ON ws.id = p.step_id
+		WHERE p.task_id = ? AND ws.workflow_id = ? AND p.role = ?
+		ORDER BY p.position ASC, p.agent_profile_id ASC, p.id ASC
+		LIMIT 1
+	`), taskID, workflowID, role).Scan(
+		&existing.ID, &existing.StepID, &existing.TaskID, &existingRole,
+		&existing.AgentProfileID, &existingDecisionRequired, &existing.Position, &existing.CreatedAt, &existingProvenance,
+	)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, fmt.Errorf("check existing role seat: %w", err)
+	}
+	if err == nil {
+		existing.Role = models.ParticipantRole(existingRole)
+		existing.DecisionRequired = existingDecisionRequired == 1
+		existing.Provenance = models.ParticipantProvenance(existingProvenance)
+		if cerr := tx.Commit(); cerr != nil {
+			return nil, false, fmt.Errorf("commit: %w", cerr)
+		}
+		return existing, false, nil
+	}
+
+	seat := &models.WorkflowStepParticipant{
+		ID:               uuid.New().String(),
+		StepID:           stepID,
+		TaskID:           taskID,
+		Role:             models.ParticipantRole(role),
+		AgentProfileID:   agentProfileID,
+		DecisionRequired: true,
+		Position:         0,
+		CreatedAt:        time.Now().UTC(),
+		Provenance:       models.ParticipantProvenanceAuto,
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), seat.ID, seat.StepID, seat.TaskID, string(seat.Role), seat.AgentProfileID,
+		dialect.BoolToInt(seat.DecisionRequired), seat.Position, seat.CreatedAt, string(seat.Provenance)); err != nil {
+		if isParticipantsNaturalKeyViolation(err) {
+			return nil, false, err
+		}
+		return nil, false, fmt.Errorf("insert role seat: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("commit: %w", err)
+	}
+	return seat, true, nil
 }
 
 // ----------------------------------------------------------------------------

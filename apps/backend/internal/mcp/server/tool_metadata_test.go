@@ -19,6 +19,7 @@ func TestCoreToolDescriptionsStayFocused(t *testing.T) {
 		"stop_task_kandev":                     700,
 		"spawn_session_kandev":                 600,
 		"add_branch_to_task_kandev":            650,
+		"add_workspace_sources_kandev":         500,
 		"step_complete_kandev":                 650,
 		"ask_user_question_kandev":             600,
 		"show_rich_output_kandev":              650,
@@ -68,6 +69,7 @@ func TestCoreToolRiskAnnotations(t *testing.T) {
 		{name: "archive_task_kandev", readOnly: false, destructive: false, idempotent: true, openWorld: false},
 		{name: "delete_task_kandev", readOnly: false, destructive: true, idempotent: false, openWorld: false},
 		{name: "stop_task_kandev", readOnly: false, destructive: true, idempotent: true, openWorld: false},
+		{name: "add_workspace_sources_kandev", readOnly: false, destructive: false, idempotent: true, openWorld: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

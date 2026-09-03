@@ -79,11 +79,13 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	// stuck waiting for the first tick. Skipped only in fully-paused initial
 	// state? No: even paused workspaces benefit from a one-time scan so
 	// transitioning to slow/fast later finds a populated cache.
+	initialScanStarted := time.Now()
 	wt.updateGitStatusClass(ctx, subproc.GitBackground)
 	wt.updateFiles(ctx)
 
 	// Cache the last known state (ignore error on initial fetch)
 	lastState, _ := wt.getWorkspaceState(ctx)
+	wt.recordMonitorTick(time.Since(initialScanStarted))
 
 	// Signal that the initial scan is done — tests wait on this instead of
 	// sleeping to avoid races with the goroutine's first getWorkspaceState.
@@ -160,7 +162,9 @@ func (wt *WorkspaceTracker) handleMonitorTimerTick(ctx context.Context, lastStat
 // updates if changes are detected. Returns true if the loop should stop.
 // The deferred flag reset ensures monitorRunning is cleared even on panic.
 func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspaceState, consecutiveFailures *int) bool {
+	tickStarted := time.Now()
 	defer func() {
+		wt.recordMonitorTick(time.Since(tickStarted))
 		atomic.StoreInt32(&wt.monitorRunning, 0)
 		// Signal that the tick completed — tests wait on this instead of
 		// spinning on the monitorRunning atomic flag.
@@ -241,8 +245,8 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	}
 	state.diffFilesID = wt.buildDirtyFilesID(string(out))
 
-	// Check untracked files - git diff-files doesn't include them
-	// Use git ls-files to get untracked files, then check their mtimes
+	// Check eligible untracked files - git diff-files doesn't include them.
+	// The shared query excludes dependency trees before Git enumerates paths.
 	untrackedID, err := wt.getUntrackedFilesID(ctx)
 	if err != nil {
 		return state, err
@@ -283,20 +287,23 @@ func (wt *WorkspaceTracker) buildDirtyFilesID(diffFilesOutput string) string {
 // Uses file list + mtimes to detect when untracked files are added, removed, or modified.
 // Returns an error if the git command fails (e.g., timeout, index lock).
 func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) (string, error) {
-	// Get list of untracked files (excluding ignored)
-	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "ls-files", "--others", "--exclude-standard")
+	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, gitUntrackedFilesArgs...)
 	if err != nil {
 		return "", fmt.Errorf("git ls-files in %s: %w (stderr: %s)",
 			wt.workDir, err, stderr)
 	}
-	if len(out) == 0 {
+
+	files, err := parseGitUntrackedOutput(ctx, out)
+	if err != nil {
+		return "", err
+	}
+	if len(files) == 0 {
 		return "", nil // No untracked files is not an error
 	}
 
 	// Build a string from file paths + mtimes to detect any changes
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	var hashInput strings.Builder
-	for _, file := range lines {
+	for _, file := range files {
 		if file == "" {
 			continue
 		}

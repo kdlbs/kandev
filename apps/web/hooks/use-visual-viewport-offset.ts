@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 export type VisualViewportOffset = {
   /** Pixels between the bottom of `visualViewport` and the bottom of the layout viewport. */
@@ -10,6 +10,27 @@ export type VisualViewportOffset = {
 };
 
 const KEYBOARD_THRESHOLD_PX = 80;
+
+export function resolveVisualViewportPosition({
+  keyboardOpen,
+  viewportBottom,
+  barHeight,
+  baseBottomOffset,
+}: {
+  keyboardOpen: boolean;
+  viewportBottom: number;
+  barHeight: number;
+  baseBottomOffset?: string;
+}): Pick<CSSProperties, "top" | "bottom"> {
+  if (keyboardOpen) {
+    return { top: `${viewportBottom - barHeight}px`, bottom: "auto" };
+  }
+
+  const base = baseBottomOffset
+    ? `calc(${baseBottomOffset} + env(safe-area-inset-bottom, 0px))`
+    : "env(safe-area-inset-bottom, 0px)";
+  return { bottom: base };
+}
 
 function readOffset(): VisualViewportOffset {
   if (typeof window === "undefined" || !window.visualViewport) {

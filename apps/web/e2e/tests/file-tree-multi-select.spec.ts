@@ -287,11 +287,12 @@ test.describe("File Tree Multi-Select", () => {
 
   // --- Right-Click Context Menu ---
 
-  test("right-click single file shows context menu with delete", async ({
+  test("right-click single file uses local delete confirmation", async ({
     testPage,
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const git = new GitHelper(
       path.join(backend.tmpDir, "repos", "e2e-repo"),
@@ -312,9 +313,19 @@ test.describe("File Tree Multi-Select", () => {
     await expect(file).toBeVisible({ timeout: 15_000 });
 
     await file.click({ button: "right" });
-    await expect(testPage.getByRole("menuitem", { name: "Delete" })).toBeVisible({
+    const deleteItem = testPage.getByRole("menuitem", { name: "Delete" });
+    await expect(deleteItem).toBeVisible({
       timeout: 5_000,
     });
+
+    await deleteItem.click();
+    await expect(testPage.getByTestId("file-delete-confirm-popover")).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await prCapture.screenshot("desktop-file-delete-confirmation", {
+      caption: "Desktop file context menu with one-file delete confirmation",
+    });
+    await testPage.getByTestId("file-delete-confirm").click();
+    await expect(file).not.toBeVisible({ timeout: 10_000 });
   });
 
   test("right-click on multi-selection shows bulk delete", async ({
@@ -396,6 +407,41 @@ test.describe("File Tree Multi-Select", () => {
   });
 
   // --- Keyboard ---
+
+  test("select-all selects every visible row from non-editable tree focus", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.3
+    const git = new GitHelper(
+      path.join(backend.tmpDir, "repos", "e2e-repo"),
+      makeGitEnv(backend.tmpDir),
+    );
+    git.createFile("tree-select-all-a.ts", "a");
+    git.createFile("tree-select-all-b.ts", "b");
+    git.stageAll();
+    git.commit("add select-all files");
+
+    const session = await setupFileTreeTest(
+      testPage,
+      apiClient,
+      seedData,
+      "ft-tree-select-all",
+      "FT Tree Select All",
+    );
+    const firstFile = session.fileTreeNode("tree-select-all-a.ts");
+    await expect(firstFile).toBeVisible({ timeout: 15_000 });
+    const visibleRows = session.files.locator("[data-testid='file-tree-node']:visible");
+    const visibleRowCount = await visibleRows.count();
+
+    const fileBrowser = firstFile.locator("xpath=ancestor::div[@tabindex='-1'][1]");
+    await fileBrowser.focus();
+    await fileBrowser.press("ControlOrMeta+a");
+
+    await expect(session.fileTreeSelectedNodes()).toHaveCount(visibleRowCount);
+  });
 
   test("escape clears selection", async ({ testPage, apiClient, seedData, backend }) => {
     const git = new GitHelper(

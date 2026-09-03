@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,10 +14,13 @@ import (
 
 	"github.com/google/uuid"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -61,13 +63,13 @@ var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 // aborting the whole operation.
 var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
-// ErrAutoTitlePromptRequired is returned when prompt-first creation has no
-// prompt from which to derive a provisional title.
-var ErrAutoTitlePromptRequired = errors.New("description is required when auto_title is enabled")
+// ErrAutoTitlePromptRequired is returned when auto-title creation has neither
+// a prompt nor a usable provisional title.
+var ErrAutoTitlePromptRequired = errors.New("description or title is required when auto_title is enabled")
 
-// ErrAutoTitleUnsupportedForOffice is returned when prompt-first title
-// generation is requested for an Office task. Office agents use a restricted
-// MCP surface that does not expose the one-shot title tool.
+// ErrAutoTitleUnsupportedForOffice is returned when auto-title generation is
+// requested for an Office task. Office agents use a restricted MCP surface
+// that does not expose the one-shot title tool.
 var ErrAutoTitleUnsupportedForOffice = errors.New("auto_title is not supported for Office tasks")
 
 type pendingTaskTitleSetter interface {
@@ -77,15 +79,17 @@ type pendingTaskTitleSetter interface {
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
-	// terminal indicates the session is already in a terminal state (CANCELLED,
-	// COMPLETED, FAILED, IDLE). Stop failures for terminal sessions are expected
-	// and must not block environment cleanup — the agent is already gone.
+	runtime     agentruntime.Runtime
+	// terminal records the session state observed when the cleanup snapshot was
+	// taken. It is retained for snapshot compatibility, but it must never
+	// suppress a non-not-found runtime stop failure.
 	terminal bool
 }
 
 type taskEnvironmentCleanup struct {
-	env       *models.TaskEnvironment
-	deleteRow bool
+	env              *models.TaskEnvironment
+	deleteRow        bool
+	preserveBranches bool
 }
 
 type taskEnvironmentSessionUsageChecker interface {
@@ -120,7 +124,7 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 
 // CreateTaskOutcome distinguishes why Service.CreateTask returned the task it
 // did, per the create-idempotency contract
-// (docs/specs/tasks/external-id-idempotency/spec.md). Only meaningful when
+// (docs/specs/tasks/requirements/external-id-idempotency.md). Only meaningful when
 // the request carried an external_id; a request without one always reports
 // CreateTaskOutcomeCreated. The fourth contract outcome, CreatedIdentityLost,
 // is not produced here — it is decided by the handler during settlement,
@@ -162,7 +166,7 @@ func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
 // CreateTask creates a new task and publishes a task.created event, or —
 // when the request carries an external_id already held by a task — returns
 // that task instead, per the create-idempotency contract
-// (docs/specs/tasks/external-id-idempotency/spec.md). WorkflowID is required
+// (docs/specs/tasks/requirements/external-id-idempotency.md). WorkflowID is required
 // for non-ephemeral kanban tasks. Office tasks (project_id set, or origin is
 // agent_created/routine) auto-resolve to the workspace's office workflow.
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
@@ -200,7 +204,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		return result, err
 	}
 
-	task, err := s.prepareTaskForCreation(ctx, req, externalID)
+	prepared, err := s.prepareTaskForCreation(ctx, req, externalID)
 	if err != nil {
 		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
 			return found, nil
@@ -208,7 +212,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		return CreateTaskResult{}, err
 	}
 
-	if err := s.createTaskWithCapacity(ctx, task); err != nil {
+	if err := s.createTaskWithCapacity(ctx, prepared.task); err != nil {
 		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
 			return found, nil
 		}
@@ -216,13 +220,25 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		return CreateTaskResult{}, err
 	}
 
-	return s.finalizeCreatedTask(ctx, task, req)
+	return s.finalizeCreatedTask(ctx, prepared, req)
+}
+
+// preparedTask carries everything CreateTask resolved BEFORE inserting the
+// task row: the row itself, and the fully-resolved task-repository rows that
+// only need a TaskID stamped once the insert succeeds.
+//
+// Resolving the repositories here rather than in finalizeCreatedTask is the
+// whole point: a reference that does not resolve must fail while there is
+// still no task row to strand.
+type preparedTask struct {
+	task         *models.Task
+	repositories []*models.TaskRepository
 }
 
 // prepareTaskForCreation runs create-sequence steps 4-5's non-write half:
 // required validation, workflow/step resolution, and office identifier
 // assignment, producing the in-memory task CreateTask is about to insert.
-func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskRequest, externalID string) (*models.Task, error) {
+func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskRequest, externalID string) (*preparedTask, error) {
 	// Subtasks created without an explicit project inherit the parent's, so
 	// office cost events (which copy tasks.project_id verbatim) attribute to
 	// the same project as the rest of the tree instead of leaking. Runs first
@@ -251,6 +267,12 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.preflightRepositorySelections(ctx, req); err != nil {
+		return nil, err
+	}
+	if err := s.validateTaskRepositoryPolicies(ctx, req.WorkspaceID, req.Repositories); err != nil {
+		return nil, err
+	}
 
 	// For office tasks, resolve workflow from workspace
 	if isOfficeRequest(req) && req.WorkflowID == "" {
@@ -266,7 +288,7 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	}
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
-	task := s.buildTask(req, workflowStepID)
+	task := s.buildTask(ctx, req, workflowStepID)
 	task.ExternalID = externalID
 
 	// Auto-assign identifier for office tasks
@@ -275,7 +297,38 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 			return nil, err
 		}
 	}
-	return task, nil
+
+	return s.resolveTaskCreationReferences(ctx, req, task)
+}
+
+// resolveTaskCreationReferences resolves every remaining caller-supplied
+// reference, and runs LAST in prepareTaskForCreation: the earlier steps
+// rewrite req.Repositories in place (preflightRepositorySelections and
+// prepareContributionDestination both do), so resolution has to see the final
+// list. It still runs before the insert, which is the point — anything that
+// can reject the request on bad input has now run with nothing yet written.
+//
+// One consequence is deliberate. A github_url or local_path input resolves
+// through find-or-create, so a repository row may now be created before the
+// task insert rather than after it, and a create that then fails admission
+// (WIP limit, capacity) leaves that row behind. It is NOT rolled back, and the
+// asymmetry is the reason: a stranded task row duplicates a card and carries
+// deferred_launch, while a repository row is an idempotent workspace-level
+// entity that the caller's retry resolves straight back onto. Deleting it
+// would be the more dangerous choice — find-or-create means a concurrent task
+// can bind to the same row in between, and rolling back would then delete a
+// repository somebody else is using.
+func (s *Service) resolveTaskCreationReferences(
+	ctx context.Context, req *CreateTaskRequest, task *models.Task,
+) (*preparedTask, error) {
+	if err := s.validateBlockerReferences(ctx, req); err != nil {
+		return nil, err
+	}
+	repositories, err := s.resolveTaskRepositoryRows(ctx, req.WorkspaceID, req.Repositories)
+	if err != nil {
+		return nil, err
+	}
+	return &preparedTask{task: task, repositories: repositories}, nil
 }
 
 func (s *Service) prepareContributionDestination(ctx context.Context, req *CreateTaskRequest) error {
@@ -310,10 +363,10 @@ func (s *Service) loadContributionDestinationRepositories(
 		}
 		repository, err := s.repoEntities.GetRepository(ctx, input.RepositoryID)
 		if err != nil {
-			return nil, fmt.Errorf("load repository %s for contribution destination: %w", input.RepositoryID, err)
+			return nil, classifyRepositoryResolutionError(index, input.RepositoryID, err)
 		}
 		if repository == nil || repository.WorkspaceID != req.WorkspaceID {
-			return nil, repoerrors.ErrRepositoryNotFound
+			return nil, unknownRepositoryReferenceError(index, input.RepositoryID)
 		}
 		repositories[index] = repository
 	}
@@ -323,16 +376,19 @@ func (s *Service) loadContributionDestinationRepositories(
 // finalizeCreatedTask runs create-sequence step 6, the required synchronous
 // post-create work, after task has been inserted: blocker relationships,
 // task repositories, the created-event publish, and the feeder-pull refresh.
-func (s *Service) finalizeCreatedTask(ctx context.Context, task *models.Task, req *CreateTaskRequest) (CreateTaskResult, error) {
-	// Create blocker relationships if specified.
+func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTask, req *CreateTaskRequest) (CreateTaskResult, error) {
+	task := prepared.task
+	// Create blocker relationships if specified. Every id here was validated
+	// pre-insert, so a failure now means the blocker was deleted underneath
+	// us — rare, but it must not leave the half-built task behind.
 	for _, blockerID := range req.BlockedBy {
 		if err := s.AddBlocker(ctx, task.ID, blockerID); err != nil {
-			return CreateTaskResult{}, fmt.Errorf("add blocker %s: %w", blockerID, err)
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("add blocker %s: %w", blockerID, err))
 		}
 	}
 
-	if err := s.createTaskRepositories(ctx, task.ID, req.WorkspaceID, req.Repositories); err != nil {
-		return CreateTaskResult{}, err
+	if err := s.persistTaskRepositoryRows(ctx, task.ID, prepared.repositories); err != nil {
+		return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, err)
 	}
 
 	// Load repositories into task for response
@@ -422,6 +478,19 @@ func prepareAutoTitle(req *CreateTaskRequest) error {
 	}
 	if isOfficeRequest(req) {
 		return ErrAutoTitleUnsupportedForOffice
+	}
+	if isConfigTaskMetadata(req.Metadata) {
+		return nil
+	}
+	if req.IsEphemeral && strings.TrimSpace(req.Description) == "" {
+		if strings.TrimSpace(req.Title) == "" {
+			return ErrAutoTitlePromptRequired
+		}
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata[models.MetaKeyAgentTitlePending] = true
+		return nil
 	}
 	title, err := deriveProvisionalTaskTitle(req.Description)
 	if err != nil {
@@ -662,14 +731,32 @@ func (s *Service) resolveOfficeWorkflow(ctx context.Context, req *CreateTaskRequ
 }
 
 // resolveWorkflowStep resolves the starting workflow step for a new task.
+//
+// Three destinations, picked by what the caller is asking for:
+//
+//   - plan mode → the first step by position. Planning happens before the work,
+//     so the task belongs at the head of the board even when a later step is
+//     marked as the start step.
+//   - starting an agent now → the first step that runs agents
+//     (on_enter: auto_start_agent). A task that is about to run does not belong
+//     in a parking column that was never configured to run anything.
+//   - everything else → the workflow's start step (is_start_step).
+//
+// The middle case is the one that is easy to get wrong: `is_start_step` and
+// `auto_start_agent` are separate settings, and routing an agent start through
+// the start step silently made the two synonymous. It went unnoticed because
+// every built-in template puts both on the same step.
 func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskRequest) string {
 	workflowStepID := req.WorkflowStepID
 	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
 		var resolvedID string
 		var err error
-		if req.PlanMode {
+		switch {
+		case req.PlanMode:
 			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
-		} else {
+		case req.StartAgent:
+			resolvedID, err = s.startStepResolver.ResolveAutoStartStep(ctx, req.WorkflowID)
+		default:
 			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
 		}
 		if err != nil {
@@ -684,7 +771,7 @@ func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskReques
 }
 
 // buildTask constructs a Task model from the CreateTaskRequest.
-func (s *Service) buildTask(req *CreateTaskRequest, workflowStepID string) *models.Task {
+func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflowStepID string) *models.Task {
 	state := v1.TaskStateCreated
 	if req.State != nil {
 		state = *req.State
@@ -704,19 +791,26 @@ func (s *Service) buildTask(req *CreateTaskRequest, workflowStepID string) *mode
 		// so callers (e.g. onboarding) can omit it.
 		priority = defaultPriority
 	}
-	metadata := req.Metadata
+	metadata := cloneTaskMetadata(req.Metadata)
+	delete(metadata, models.MetaKeyDeferredLaunch)
 	if req.DeferredLaunch != nil {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
 		}
-		launch := req.DeferredLaunch
+		launch := cloneTaskMetadata(req.DeferredLaunch)
+		delete(launch, models.DeferredLaunchUserIDKey)
+		delete(launch, models.DeferredLaunchRecordRecentUseKey)
+		if req.RecordAgentProfileRecentUse {
+			if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
+				launch[models.DeferredLaunchUserIDKey] = identity.UserID
+				launch[models.DeferredLaunchRecordRecentUseKey] = true
+			}
+		}
 		if ResolveStartWhenUnblocked(req) {
 			// Mark the intent as a dependency-chain step. The record is the same
 			// one WIP overflow persists — reused so "launch exactly once" and
 			// restart survival are inherited — and the flag is what lets
 			// dependency resolution recognise its own intents.
-			launch = make(map[string]interface{}, len(req.DeferredLaunch)+1)
-			maps.Copy(launch, req.DeferredLaunch)
 			launch[models.DeferredLaunchStartWhenUnblockedKey] = true
 		}
 		metadata[models.MetaKeyDeferredLaunch] = launch
@@ -764,103 +858,228 @@ func (s *Service) assignIdentifier(ctx context.Context, task *models.Task) error
 
 // createTaskRepositories creates task-repository associations, resolving local paths to repository IDs.
 func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
-	var repoByPath map[string]*models.Repository
-	for _, repoInput := range repositories {
-		if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
-			repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
-			if err != nil {
-				s.logger.Error("failed to list repositories", zap.Error(err))
-				return err
-			}
-			repoByPath = make(map[string]*models.Repository, len(repos))
-			for _, repo := range repos {
-				if repo.LocalPath == "" {
-					continue
-				}
-				repoByPath[repo.LocalPath] = repo
-			}
-			break
-		}
+	rows, err := s.resolveTaskRepositoryRows(ctx, workspaceID, repositories)
+	if err != nil {
+		return err
 	}
+	return s.persistTaskRepositoryRows(ctx, taskID, rows)
+}
 
-	seen := make(map[string]bool, len(repositories))
-	for i, repoInput := range repositories {
-		if repoInput.RemoteContribution != nil {
-			if err := repoInput.RemoteContribution.Validate(); err != nil {
-				return fmt.Errorf("invalid remote contribution: %w", err)
-			}
-			if repoInput.CheckoutBranch == "" {
-				repoInput.CheckoutBranch = repoInput.RemoteContribution.HeadBranch
-			}
-			if repoInput.BaseBranch == "" {
-				repoInput.BaseBranch = repoInput.RemoteContribution.BaseBranch
-			}
-			if repoInput.CheckoutBranch != repoInput.RemoteContribution.HeadBranch ||
-				repoInput.BaseBranch != repoInput.RemoteContribution.BaseBranch {
-				return fmt.Errorf("remote contribution branches do not match the resolved binding")
-			}
-		}
-		if repoInput.ContributionDestination != nil {
-			if err := repoInput.ContributionDestination.Validate(); err != nil {
-				return fmt.Errorf("invalid contribution destination: %w", err)
-			}
-		}
-		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
-		if err != nil {
-			return err
-		}
-		if repositoryID == "" {
-			return fmt.Errorf("repository_id is required")
-		}
-		// Multi-branch validation: the same repository may appear multiple
-		// times in a task on different branches. Identity is
-		// (repository_id, base_branch, checkout_branch) — base_branch matters
-		// because the worktree executor anchors the branch there while
-		// checkout_branch stays empty, and the local-executor flow puts the
-		// branch in checkout_branch with base_branch anchored to default_branch.
-		// Both shapes must dedup; matching DB key is UNIQUE(task_id,
-		// repository_id, base_branch, checkout_branch).
-		dedupKey := repositoryID + "\x00" + baseBranch + "\x00" + repoInput.CheckoutBranch
-		if seen[dedupKey] {
-			label := s.repoDisplayLabel(ctx, repoInput, repositoryID)
-			branchLabel := repoInput.CheckoutBranch
-			if branchLabel == "" {
-				branchLabel = baseBranch
-			}
-			if branchLabel == "" {
-				return fmt.Errorf("repository %q is listed more than once for this task", label)
-			}
-			return fmt.Errorf("repository %q on branch %q is listed more than once for this task", label, branchLabel)
-		}
-		seen[dedupKey] = true
-		metadata := make(map[string]interface{})
-		if prNum := resolvePRNumber(repoInput); prNum > 0 {
-			metadata["pr_number"] = prNum
-		}
-		if repoInput.RemoteContribution != nil {
-			if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {
-				return fmt.Errorf("persist remote contribution: %w", err)
-			}
-		}
-		if repoInput.ContributionDestination != nil {
-			if err := models.PutContributionDestination(metadata, repoInput.ContributionDestination); err != nil {
-				return fmt.Errorf("persist contribution destination: %w", err)
-			}
-		}
-		taskRepo := &models.TaskRepository{
-			TaskID:         taskID,
-			RepositoryID:   repositoryID,
-			BaseBranch:     baseBranch,
-			CheckoutBranch: repoInput.CheckoutBranch,
-			Position:       i,
-			Metadata:       metadata,
-		}
+// persistTaskRepositoryRows writes already-resolved task-repository rows,
+// stamping them with the owning task. Split from resolution so CreateTask can
+// resolve BEFORE inserting the task row: every reference failure that used to
+// surface here — after the insert, leaving an orphan task — is now raised by
+// resolveTaskRepositoryRows while there is still nothing to orphan.
+func (s *Service) persistTaskRepositoryRows(ctx context.Context, taskID string, rows []*models.TaskRepository) error {
+	for _, taskRepo := range rows {
+		taskRepo.TaskID = taskID
 		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))
 			return err
 		}
 	}
 	return nil
+}
+
+// resolveTaskRepositoryRows resolves every repository input to a complete
+// TaskRepository row WITHOUT persisting anything and without needing a task to
+// exist yet: TaskID is left empty for persistTaskRepositoryRows to stamp.
+//
+// This half performs all reference resolution, policy lookup, and duplicate
+// detection, so it is the half that can fail on caller-supplied data. Keeping
+// it free of writes is what lets CreateTask run it pre-insert.
+func (s *Service) resolveTaskRepositoryRows(
+	ctx context.Context, workspaceID string, repositories []TaskRepositoryInput,
+) ([]*models.TaskRepository, error) {
+	repoByPath, err := s.repositoriesByLocalPath(ctx, workspaceID, repositories)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(repositories))
+	rows := make([]*models.TaskRepository, 0, len(repositories))
+	for i, repoInput := range repositories {
+		row, err := s.resolveTaskRepositoryRow(ctx, workspaceID, i, repoInput, repoByPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.claimRepositoryBranchSlot(ctx, seen, row, repoInput); err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// repositoriesByLocalPath indexes the workspace's repositories by local path,
+// and only when some input actually needs the lookup.
+func (s *Service) repositoriesByLocalPath(
+	ctx context.Context, workspaceID string, repositories []TaskRepositoryInput,
+) (map[string]*models.Repository, error) {
+	needed := false
+	for _, repoInput := range repositories {
+		if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
+			needed = true
+			break
+		}
+	}
+	if !needed {
+		return nil, nil
+	}
+	repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		s.logger.Error("failed to list repositories", zap.Error(err))
+		return nil, err
+	}
+	repoByPath := make(map[string]*models.Repository, len(repos))
+	for _, repo := range repos {
+		if repo.LocalPath == "" {
+			continue
+		}
+		repoByPath[repo.LocalPath] = repo
+	}
+	return repoByPath, nil
+}
+
+// resolveTaskRepositoryRow resolves a single input into a complete, unsaved
+// TaskRepository row.
+func (s *Service) resolveTaskRepositoryRow(
+	ctx context.Context, workspaceID string, index int,
+	repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository,
+) (*models.TaskRepository, error) {
+	repoInput, err := normalizeContributionBindings(repoInput)
+	if err != nil {
+		return nil, err
+	}
+	repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
+	if err != nil {
+		if repoInput.RepositoryID != "" {
+			return nil, classifyRepositoryResolutionError(index, repoInput.RepositoryID, err)
+		}
+		return nil, err
+	}
+	if repositoryID == "" {
+		return nil, fmt.Errorf("repository_id is required")
+	}
+	policy, err := s.resolveTaskRepositoryPolicy(ctx, repositoryID, repoInput)
+	if err != nil {
+		return nil, err
+	}
+	baseBranch, err = applyBranchPolicyBaseBranch(baseBranch, repoInput, policy)
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := buildTaskRepositoryMetadata(repoInput)
+	if err != nil {
+		return nil, err
+	}
+	row := &models.TaskRepository{
+		RepositoryID:   repositoryID,
+		BaseBranch:     baseBranch,
+		CheckoutBranch: repoInput.CheckoutBranch,
+		Position:       index,
+		Metadata:       metadata,
+	}
+	if policy != nil {
+		row.BranchPolicyID = policy.ID
+		row.BranchPolicyName = policy.Name
+		row.BranchPolicyBaseBranch = policy.BaseBranch
+		row.BranchPolicyBranchTemplate = policy.BranchTemplate
+		row.BranchPolicyPullRequestTarget = policy.PullRequestTarget
+	}
+	return row, nil
+}
+
+// normalizeContributionBindings validates the remote-contribution and
+// contribution-destination bindings and fills in the branches they imply.
+func normalizeContributionBindings(repoInput TaskRepositoryInput) (TaskRepositoryInput, error) {
+	if repoInput.RemoteContribution != nil {
+		if err := repoInput.RemoteContribution.Validate(); err != nil {
+			return repoInput, fmt.Errorf("invalid remote contribution: %w", err)
+		}
+		if repoInput.CheckoutBranch == "" {
+			repoInput.CheckoutBranch = repoInput.RemoteContribution.HeadBranch
+		}
+		if repoInput.BaseBranch == "" {
+			repoInput.BaseBranch = repoInput.RemoteContribution.BaseBranch
+		}
+		if repoInput.CheckoutBranch != repoInput.RemoteContribution.HeadBranch ||
+			repoInput.BaseBranch != repoInput.RemoteContribution.BaseBranch {
+			return repoInput, fmt.Errorf("remote contribution branches do not match the resolved binding")
+		}
+	}
+	if repoInput.ContributionDestination != nil {
+		if err := repoInput.ContributionDestination.Validate(); err != nil {
+			return repoInput, fmt.Errorf("invalid contribution destination: %w", err)
+		}
+	}
+	return repoInput, nil
+}
+
+// applyBranchPolicyBaseBranch reconciles the resolved base branch with the
+// repository's branch policy.
+func applyBranchPolicyBaseBranch(
+	baseBranch string, repoInput TaskRepositoryInput, policy *models.RepositoryBranchPolicy,
+) (string, error) {
+	if policy == nil {
+		return baseBranch, nil
+	}
+	if repoInput.RemoteContribution != nil {
+		if policy.BaseBranch != repoInput.RemoteContribution.BaseBranch {
+			return "", fmt.Errorf("remote contribution base branch %q does not match branch policy base branch %q",
+				repoInput.RemoteContribution.BaseBranch, policy.BaseBranch)
+		}
+		return baseBranch, nil
+	}
+	if repoInput.PreserveBaseBranch {
+		return baseBranch, nil
+	}
+	return policy.BaseBranch, nil
+}
+
+// buildTaskRepositoryMetadata assembles the row's metadata blob.
+func buildTaskRepositoryMetadata(repoInput TaskRepositoryInput) (map[string]interface{}, error) {
+	metadata := make(map[string]interface{})
+	if prNum := resolvePRNumber(repoInput); prNum > 0 {
+		metadata["pr_number"] = prNum
+	}
+	if repoInput.RemoteContribution != nil {
+		if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {
+			return nil, fmt.Errorf("persist remote contribution: %w", err)
+		}
+	}
+	if repoInput.ContributionDestination != nil {
+		if err := models.PutContributionDestination(metadata, repoInput.ContributionDestination); err != nil {
+			return nil, fmt.Errorf("persist contribution destination: %w", err)
+		}
+	}
+	return metadata, nil
+}
+
+// claimRepositoryBranchSlot enforces multi-branch uniqueness. The same
+// repository may appear multiple times in a task on different branches.
+// Identity is (repository_id, base_branch, checkout_branch) — base_branch
+// matters because the worktree executor anchors the branch there while
+// checkout_branch stays empty, and the local-executor flow puts the branch in
+// checkout_branch with base_branch anchored to default_branch. Both shapes
+// must dedup; matching DB key is UNIQUE(task_id, repository_id, base_branch,
+// checkout_branch).
+func (s *Service) claimRepositoryBranchSlot(
+	ctx context.Context, seen map[string]bool, row *models.TaskRepository, repoInput TaskRepositoryInput,
+) error {
+	dedupKey := row.RepositoryID + "\x00" + row.BaseBranch + "\x00" + row.CheckoutBranch
+	if !seen[dedupKey] {
+		seen[dedupKey] = true
+		return nil
+	}
+	label := s.repoDisplayLabel(ctx, repoInput, row.RepositoryID)
+	branchLabel := row.CheckoutBranch
+	if branchLabel == "" {
+		branchLabel = row.BaseBranch
+	}
+	if branchLabel == "" {
+		return fmt.Errorf("repository %q is listed more than once for this task", label)
+	}
+	return fmt.Errorf("repository %q on branch %q is listed more than once for this task", label, branchLabel)
 }
 
 // repoDisplayLabel returns a human-readable label for a repository to surface
@@ -925,6 +1144,9 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
+	// Only the plugin Host Tasks.Create path can set this internal marker.
+	// REST, WebSocket, and MCP callers must go through the built-in resolver;
+	// they cannot assert ownership of a plugin descriptor in request data.
 	if repoInput.TrustedProviderDescriptor {
 		return s.resolveTrustedRemoteRepository(ctx, workspaceID, repoInput, baseBranch)
 	}
@@ -950,7 +1172,10 @@ func (s *Service) resolveRepoInputID(ctx context.Context, workspaceID, repositor
 		return "", "", false, fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
 	}
 	if repo == nil || repo.WorkspaceID != workspaceID {
-		return "", "", false, fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
+		// Wrapped so transports classify this as a caller-supplied reference
+		// problem (VALIDATION) rather than an internal failure; the message
+		// itself is unchanged.
+		return "", "", false, fmt.Errorf("%w: repository %q does not belong to workspace %q", ErrTaskReferenceNotFound, repositoryID, workspaceID)
 	}
 	replacementID, replacementCreated, replacementErr := s.safeRepositoryIDForTaskWorktree(ctx, workspaceID, repo)
 	if replacementErr != nil {
@@ -1268,6 +1493,9 @@ func validateTrustedRemoteRepository(input TaskRepositoryInput) error {
 	if _, err := validateProviderScope(input.ProviderScope); err != nil {
 		return errors.New("trusted remote repository provider_scope is invalid")
 	}
+	if err := repoclone.ValidateHTTPSCloneOrigin(input.RemoteURL, input.ProviderHost); err != nil {
+		return fmt.Errorf("trusted remote repository clone origin: %w", err)
+	}
 	parsed, _, err := normalizeRemoteRepositoryURL(input.RemoteURL)
 	if err != nil {
 		return err
@@ -1497,6 +1725,15 @@ func (s *Service) ReplaceTaskRepositories(ctx context.Context, taskID, workspace
 
 // replaceTaskRepositories deletes all existing task-repository associations and recreates them.
 func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
+	existing, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to load existing task repositories", zap.Error(err))
+		return err
+	}
+	preserveTaskRepositoryPolicySnapshots(repositories, existing)
+	if err := s.validateTaskRepositoryPolicies(ctx, workspaceID, repositories); err != nil {
+		return err
+	}
 	if err := s.taskRepos.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {
 		s.logger.Error("failed to delete task repositories", zap.Error(err))
 		return err
@@ -1548,6 +1785,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	if req.Repositories != nil {
+		if err := s.preflightRepositoryInputs(ctx, task.WorkspaceID, req.Repositories); err != nil {
+			return nil, err
+		}
+	}
 	oldWorkflowStepID := task.WorkflowStepID
 	var oldState *v1.TaskState
 	stateChanged := false
@@ -1571,7 +1813,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.Position = *req.Position
 	}
 	if req.Metadata != nil {
-		task.Metadata = req.Metadata
+		task.Metadata = protectedTaskMetadataUpdate(task.Metadata, req.Metadata)
 	}
 	if req.Title != nil {
 		task.Title = *req.Title
@@ -1666,7 +1908,7 @@ func (s *Service) reloadTaskAfterMutation(ctx context.Context, id string, fallba
 	return fallback
 }
 
-// SetPendingAgentTitle replaces a prompt-first provisional title exactly once.
+// SetPendingAgentTitle replaces a pending provisional title exactly once.
 // Only the atomically claimed owner session may resolve it. A missing pending
 // marker is an idempotent no-op so a human rename or an earlier agent call
 // always wins a late request.
@@ -1963,7 +2205,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("lookup task environment for archive: %w", err)
 	}
-	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true}
+	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false, preserveBranches: true}
 	cleanupJob, err := s.persistTaskResourceCleanup(
 		ctx, id, models.TaskResourceCleanupTriggerArchive, "",
 		sessions, worktrees, stopTargets, envCleanup, true,
@@ -2004,6 +2246,17 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 5. Publish task.updated event so frontend removes from board
 	s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
+	// 5b. Archive cleanup tears down this task's runtime resources (worktree,
+	// container/sandbox) but preserves its task_environments row
+	// (deleteRow: false above) — the row is deleted only by a DELETE cascade
+	// or an explicit ResetTaskEnvironment, never by archive. An inherit_parent
+	// child that has not yet launched and still depends on this task's
+	// environment is therefore left pointing at a row that either dangles
+	// later (if something does delete it) or, more immediately, survives but
+	// now names a workspace whose worktree is gone. Mark those children now,
+	// while we still know which task was archived, instead of letting them
+	// silently strand.
+	s.markOrphanedInheritParentChildren(finalizeCtx, task)
 	s.pullNextTaskOnVacate(finalizeCtx, task.WorkflowStepID, task.ID)
 	s.logger.Info("task archived",
 		zap.String("task_id", id),
@@ -2016,11 +2269,89 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
 		}
 	} else if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, false,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
 	return nil
+}
+
+// markOrphanedInheritParentChildren stamps an orphan marker on archived's
+// direct, non-archived inherit_parent children that have not materialized
+// their own workspace. Archive tears down archived's runtime resources
+// (worktree, container/sandbox) but deliberately preserves its own
+// task_environments row (deleteRow: false; the row is deleted only by a
+// DELETE cascade or an explicit ResetTaskEnvironment) — so a child's
+// session.TaskEnvironmentID (task_sessions.task_environment_id has no
+// foreign key) is left pointing at a row that either dangles later, if
+// something else deletes it, or survives but now names a workspace whose
+// worktree is gone. Before this, the child kept rendering as an ordinary
+// launchable CREATED card and only discovered the problem days later, at
+// launch time. The fail-closed check in internal/orchestrator's
+// resolveInheritedEnvironment covers the dangling-row case at launch time;
+// this covers detection at archive time so the card itself can be told
+// apart later, and the worktree-layer ownership-marker message (see
+// internal/worktree/manager_lifecycle.go) covers the live-but-useless case
+// this marker cannot detect on its own.
+// Markers land under the already-open metadata.workspace map (new keys
+// alongside the existing "mode") rather than a new mode value or DTO field,
+// so they stay inert for existing frontend consumers.
+func (s *Service) markOrphanedInheritParentChildren(ctx context.Context, archived *models.Task) {
+	if archived == nil {
+		return
+	}
+	children, err := s.tasks.ListChildren(ctx, archived.ID)
+	if err != nil {
+		s.logger.Warn("list children for orphan marking failed",
+			zap.String("task_id", archived.ID), zap.Error(err))
+		return
+	}
+	for _, child := range children {
+		s.markOrphanedInheritParentChild(ctx, archived, child)
+	}
+}
+
+// markOrphanedInheritParentChild marks a single child, skipping any child
+// that is not an unmaterialized inherit_parent workspace. A child that
+// already has its own task_environments row is not orphaned: the executor's
+// by-task-id environment lookup finds that row first and never falls
+// through to the (now-gone) inherited one.
+func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, child *models.Task) {
+	if child == nil || taskWorkspaceMode(child.Metadata) != workspaceModeInheritParent {
+		return
+	}
+	ownEnv, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, child.ID)
+	if err != nil {
+		s.logger.Warn("check child task environment for orphan marking failed",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	if ownEnv != nil {
+		return
+	}
+
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
+
+	if err := s.updateTaskWorkspaceMetadata(ctx, child); err != nil {
+		s.logger.Warn("mark orphaned inherit_parent child failed",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, child, nil)
+	s.logger.Info("marked inherit_parent child orphaned by parent archive",
+		zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
+}
+
+func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.Task) error {
+	if task == nil {
+		return nil
+	}
+	workspace, _ := task.Metadata["workspace"].(map[string]interface{})
+	if setter, ok := s.tasks.(taskMetadataKeySetter); ok {
+		return setter.SetTaskMetadataKey(ctx, task.ID, "workspace", workspace)
+	}
+	return s.tasks.UpdateTask(ctx, task)
 }
 
 // finalizeCancelledSessions finalizes an archived task's active sessions in
@@ -2249,7 +2580,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
 		}
 	} else if hasCleanup {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, true,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
@@ -2289,6 +2620,10 @@ func (s *Service) deleteTaskStopTargets(ctx context.Context, id string) ([]taskS
 // for delete cascade, false for archive — archive preserves the row). Runtime
 // inventory failures abort cleanup so durable stop handles remain retryable.
 func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool) {
+	// Capture the lifecycle disposition before borrower ownership transfer can
+	// change whether the environment row itself is deleted.
+	preserveBranches := !deleteEnvRow
+	taskDeleted := deleteEnvRow
 	if deleteEnvRow && s.attachmentSvc != nil {
 		if err := s.attachmentSvc.DeleteByTask(context.WithoutCancel(ctx), taskID); err != nil {
 			s.logger.Warn("failed to remove task attachment bytes during resource cleanup",
@@ -2340,7 +2675,9 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 				zap.String("new_owner_task_id", taskEnv.TaskID))
 		}
 	}
-	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvRow}
+	envCleanup := taskEnvironmentCleanup{
+		env: taskEnv, deleteRow: deleteEnvRow, preserveBranches: preserveBranches,
+	}
 	if len(sessions) == 0 && len(worktrees) == 0 && len(stopTargets) == 0 && taskEnv == nil {
 		return
 	}
@@ -2348,7 +2685,7 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 	if deleteEnvRow {
 		reason = "cascade delete"
 	}
-	s.runAsyncTaskCleanup(taskID, sessions, worktrees, stopTargets, envCleanup,
+	s.runAsyncTaskCleanup(taskID, sessions, worktrees, stopTargets, envCleanup, taskDeleted,
 		reason, "failed to stop session on cascade cleanup", "cascade cleanup completed")
 }
 
@@ -2395,9 +2732,10 @@ func (s *Service) runAsyncTaskCleanup(
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
+	taskDeleted bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
-	go s.runTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, stopReason, stopFailMsg, cleanupMsg)
+	go s.runTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, taskDeleted, stopReason, stopFailMsg, cleanupMsg)
 }
 
 func (s *Service) runTaskCleanup(
@@ -2406,6 +2744,7 @@ func (s *Service) runTaskCleanup(
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
+	taskDeleted bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
 	cleanupStart := time.Now()
@@ -2422,7 +2761,7 @@ func (s *Service) runTaskCleanup(
 	stopTargets = refreshedTargets
 	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
-	stopOutcome := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
+	stopOutcome := s.stopTaskRuntimeTargetsWithTaskDeleted(cleanupCtx, id, stopTargets, stopReason, stopFailMsg, taskDeleted, true)
 
 	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup,
 		taskCleanupPreserveRows(stopOutcome))
@@ -2479,6 +2818,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 			target := taskStopTarget{
 				sessionID:   running.SessionID,
 				executionID: strings.TrimSpace(running.AgentExecutionID),
+				runtime:     running.Runtime,
 				terminal:    isCleanableSessionState(sessionStates[running.SessionID]),
 			}
 			targets = append(targets, target)
@@ -2546,6 +2886,7 @@ func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []tas
 		targets = append(targets, taskStopTarget{
 			sessionID:   strings.TrimSpace(running.SessionID),
 			executionID: strings.TrimSpace(running.AgentExecutionID),
+			runtime:     running.Runtime,
 		})
 	}
 	return targets
@@ -2569,6 +2910,9 @@ func mergeTaskStopTargets(live, snapshot []taskStopTarget) []taskStopTarget {
 		key := target.sessionID + "\x00" + target.executionID
 		if index, exists := seen[key]; exists {
 			targets[index].terminal = targets[index].terminal || target.terminal
+			if targets[index].runtime == "" {
+				targets[index].runtime = target.runtime
+			}
 			return
 		}
 		seen[key] = len(targets)
@@ -2626,6 +2970,17 @@ func taskCleanupPreserveRows(outcome taskRuntimeStopOutcome) map[string]struct{}
 }
 
 func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) taskRuntimeStopOutcome {
+	return s.stopTaskRuntimeTargetsWithTaskDeleted(ctx, taskID, stopTargets, stopReason, stopFailMsg, false)
+}
+
+func (s *Service) stopTaskRuntimeTargetsWithTaskDeleted(
+	ctx context.Context,
+	taskID string,
+	stopTargets []taskStopTarget,
+	stopReason, stopFailMsg string,
+	taskDeleted bool,
+	waitForStop ...bool,
+) taskRuntimeStopOutcome {
 	outcome := taskRuntimeStopOutcome{
 		failed:   make(map[string]struct{}),
 		preserve: make(map[string]struct{}),
@@ -2633,58 +2988,147 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 	if s.executionStopper == nil || len(stopTargets) == 0 {
 		return outcome
 	}
+	wait := len(waitForStop) > 0 && waitForStop[0]
 	for _, target := range stopTargets {
 		if context.Cause(ctx) != nil {
 			return outcome
 		}
-		if target.executionID != "" {
-			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
-				if runtimeStopAlreadyComplete(err) {
-					continue
-				}
-				if target.terminal {
-					s.logger.Debug("stop failed for terminal session execution (expected), proceeding with cleanup",
-						zap.String("task_id", taskID),
-						zap.String("session_id", target.sessionID),
-						zap.Error(err))
-					continue
-				}
-				outcome.failed[target.sessionID] = struct{}{}
-				s.logger.Warn(stopFailMsg,
-					zap.String("task_id", taskID),
-					zap.String("session_id", target.sessionID),
-					zap.String("execution_id", target.executionID),
-					zap.Error(err))
-			}
-			continue
-		}
-		if err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true); err != nil {
-			if target.terminal {
-				s.logger.Debug("stop failed for terminal session (expected), proceeding with cleanup",
-					zap.String("task_id", taskID),
-					zap.String("session_id", target.sessionID),
-					zap.Error(err))
-				continue
-			}
-			// A session-level not-found is retryable by default (the execution may
-			// simply not be registered yet). But when the owned row is a
-			// confirmed-dead LOCAL runtime, the runtime really is gone — treat the
-			// stop as already complete so the durable cleanup job stops retrying a
-			// runtime that will never come back.
-			if runtimeStopAlreadyComplete(err) {
-				if running := s.confirmedDeadLocalRow(ctx, target.sessionID); running != nil {
-					s.reconcileConfirmedDeadRow(ctx, taskID, target.sessionID, running, &outcome)
-					continue
-				}
-			}
-			outcome.failed[target.sessionID] = struct{}{}
-			s.logger.Warn(stopFailMsg,
-				zap.String("task_id", taskID),
-				zap.String("session_id", target.sessionID),
-				zap.Error(err))
-		}
+		s.stopTaskRuntimeTarget(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, wait, &outcome)
 	}
 	return outcome
+}
+
+func (s *Service) stopTaskRuntimeTarget(
+	ctx context.Context,
+	taskID string,
+	target taskStopTarget,
+	stopReason, stopFailMsg string,
+	taskDeleted, waitForStop bool,
+	outcome *taskRuntimeStopOutcome,
+) {
+	if target.executionID != "" {
+		s.stopTaskRuntimeExecution(ctx, taskID, target, stopReason, stopFailMsg, outcome)
+		return
+	}
+	s.stopTaskRuntimeSession(ctx, taskID, target, stopReason, stopFailMsg, taskDeleted, waitForStop, outcome)
+}
+
+func (s *Service) stopTaskRuntimeExecution(
+	ctx context.Context,
+	taskID string,
+	target taskStopTarget,
+	stopReason, stopFailMsg string,
+	outcome *taskRuntimeStopOutcome,
+) {
+	err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true)
+	if err == nil || runtimeStopAlreadyComplete(err) {
+		return
+	}
+	outcome.failed[target.sessionID] = struct{}{}
+	s.logger.Warn(stopFailMsg,
+		zap.String("task_id", taskID),
+		zap.String("session_id", target.sessionID),
+		zap.String("execution_id", target.executionID),
+		zap.Error(err))
+}
+
+func (s *Service) stopTaskRuntimeSession(
+	ctx context.Context,
+	taskID string,
+	target taskStopTarget,
+	stopReason, stopFailMsg string,
+	taskDeleted bool,
+	waitForStop bool,
+	outcome *taskRuntimeStopOutcome,
+) {
+	var err error
+	if waitForStop {
+		if synchronous, ok := s.executionStopper.(synchronousTaskExecutionStopper); ok {
+			err = synchronous.StopSessionSynchronously(ctx, target.sessionID, stopReason, true)
+		} else {
+			err = s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+		}
+	} else {
+		err = s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true)
+	}
+	if err == nil {
+		return
+	}
+	// A session-level not-found is retryable by default (the execution may
+	// simply not be registered yet). But when the owned row is a
+	// confirmed-dead LOCAL runtime, the runtime really is gone — treat the
+	// stop as already complete so the durable cleanup job stops retrying a
+	// runtime that will never come back.
+	if runtimeStopAlreadyComplete(err) {
+		if taskDeleted && s.stopDeletedSessionRuntime(ctx, taskID, target, stopReason) {
+			return
+		}
+		if running := s.confirmedDeadLocalRow(ctx, target.sessionID); running != nil {
+			s.reconcileConfirmedDeadRow(ctx, taskID, target.sessionID, running, outcome)
+			return
+		}
+	}
+	outcome.failed[target.sessionID] = struct{}{}
+	s.logger.Warn(stopFailMsg,
+		zap.String("task_id", taskID),
+		zap.String("session_id", target.sessionID),
+		zap.Error(err))
+}
+
+// stopDeletedSessionRuntime handles a session stop that raced with task deletion.
+// A missing session is complete only when no executor row remains. If a late row
+// has an exact execution ID, stop that execution before cleanup removes the row.
+// When the row has no execution ID, return false so the caller can apply the
+// confirmed-dead local probe before marking the session for retry.
+func (s *Service) stopDeletedSessionRuntime(
+	ctx context.Context,
+	taskID string,
+	target taskStopTarget,
+	stopReason string,
+) bool {
+	if s.executors == nil || s.executionStopper == nil {
+		return false
+	}
+	running, err := s.executors.GetExecutorRunningBySessionID(ctx, target.sessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrExecutorRunningNotFound) {
+			s.logger.Debug("deleted task session has no registered runtime",
+				zap.String("task_id", taskID),
+				zap.String("session_id", target.sessionID))
+			return true
+		}
+		s.logger.Warn("failed to inspect deleted task session runtime",
+			zap.String("task_id", taskID),
+			zap.String("session_id", target.sessionID),
+			zap.Error(err))
+		return false
+	}
+	if running == nil {
+		return true
+	}
+	executionID := strings.TrimSpace(running.AgentExecutionID)
+	if executionID == "" {
+		return false
+	}
+
+	s.executionStopper.RegisterExecutionStopOwner(target.sessionID, executionID, true)
+	if err := s.executionStopper.StopExecution(ctx, executionID, stopReason, true); err != nil {
+		if runtimeStopAlreadyComplete(err) {
+			s.logger.Debug("late deleted task execution was already stopped",
+				zap.String("task_id", taskID),
+				zap.String("session_id", target.sessionID),
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+			return true
+		}
+		s.logger.Warn("failed to stop late deleted task execution",
+			zap.String("task_id", taskID),
+			zap.String("session_id", target.sessionID),
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+		return false
+	}
+	return true
 }
 
 // reconcileConfirmedDeadRow applies the resume-safety deletion invariant to a
@@ -2940,18 +3384,24 @@ func (s *Service) cleanupDestructiveTaskResources(
 		}
 		return errs
 	}
-	cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner)
-	if !ok {
-		return errs
-	}
 	if cause := context.Cause(ctx); cause != nil {
 		return append(errs, cause)
 	}
-	if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
-		s.logger.Warn("failed to cleanup worktrees after delete",
+	var cleanupErr error
+	if envCleanup.preserveBranches {
+		cleaner, ok := s.worktreeCleanup.(WorktreeArchiveBatchCleaner)
+		if !ok {
+			return append(errs, errors.New("worktree cleaner cannot preserve branches during archive cleanup"))
+		}
+		cleanupErr = cleaner.CleanupWorktreesPreservingBranches(ctx, worktrees)
+	} else if cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner); ok {
+		cleanupErr = cleaner.CleanupWorktrees(ctx, worktrees)
+	}
+	if cleanupErr != nil {
+		s.logger.Warn("failed to cleanup task worktrees",
 			zap.String("task_id", taskID),
-			zap.Error(err))
-		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
+			zap.Error(cleanupErr))
+		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
 	}
 	return errs
 }
@@ -3305,7 +3755,11 @@ func parsePRQuery(query string) (int, bool) {
 // `json_extract(metadata, '$.config_mode') IS NOT 1` filter). JSON-decoded
 // numbers arrive as float64, so accept both numeric 1 and bool true.
 func isConfigTask(task *models.Task) bool {
-	switch v := task.Metadata["config_mode"].(type) {
+	return isConfigTaskMetadata(task.Metadata)
+}
+
+func isConfigTaskMetadata(metadata map[string]interface{}) bool {
+	switch v := metadata["config_mode"].(type) {
 	case float64:
 		return v == 1
 	case int:

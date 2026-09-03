@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -169,21 +171,34 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 	if strings.EqualFold(opts.Sort, "desc") {
 		sortDir = "DESC"
 	}
-	cursor, err := r.resolveMessageCursor(ctx, sessionID, opts)
+	var (
+		cursor *models.Message
+		err    error
+	)
+	if opts.Around != "" {
+		cursor, err = r.resolveAroundTarget(ctx, sessionID, opts.Around)
+	} else {
+		cursor, err = r.resolveMessageCursor(ctx, sessionID, opts)
+	}
 	if err != nil {
 		return nil, false, err
 	}
-	// The outer cursor bound is the cursor row's normalized-microsecond key,
-	// derived through the same SQL expression the per-row key uses — never a
-	// driver-parsed Go time.Time (mattn/go-sqlite3 serializes time.Time as
-	// RFC3339Nano, which mis-compares lexicographically against the
-	// space-separated per-row expression and silently shifts page boundaries).
+	if cursor != nil && opts.AuthorType == string(models.MessageAuthorUser) &&
+		cursor.AuthorType != models.MessageAuthorUser {
+		return nil, false, fmt.Errorf("message cursor not found: %s", cursor.ID)
+	}
 	var cursorKey string
 	if cursor != nil {
 		cursorKey, err = r.messageCursorKey(ctx, cursor.ID)
 		if err != nil {
+			if opts.Around != "" && errors.Is(err, sql.ErrNoRows) {
+				return nil, false, fmt.Errorf("%w: %s", ErrMessageNotFound, cursor.ID)
+			}
 			return nil, false, err
 		}
+	}
+	if opts.Around != "" {
+		return r.listMessagesAround(ctx, sessionID, cursor, cursorKey, limit)
 	}
 	query, args := buildListMessagesQuery(r.ro.DriverName(), sessionID, opts, cursor, cursorKey, sortDir, limit)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
@@ -313,6 +328,61 @@ func (r *Repository) resolveMessageCursor(ctx context.Context, sessionID string,
 	return nil, nil
 }
 
+// resolveAroundTarget validates and loads the target message for an around-window read.
+func (r *Repository) resolveAroundTarget(ctx context.Context, sessionID, id string) (*models.Message, error) {
+	target, err := r.GetMessage(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrMessageNotFound, id)
+		}
+		return nil, err
+	}
+	if target.TaskSessionID != sessionID {
+		return nil, fmt.Errorf("%w: %s", ErrMessageNotFound, id)
+	}
+	return target, nil
+}
+
+// listMessagesAround returns the target and newer messages in newest-first order,
+// along with whether the bounded window was truncated.
+func (r *Repository) listMessagesAround(
+	ctx context.Context,
+	sessionID string,
+	target *models.Message,
+	targetKey string,
+	limit int,
+) ([]*models.Message, bool, error) {
+	nm := dialect.NormalizedMicrosecond(r.ro.DriverName(), "created_at")
+	bound := "?"
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		bound = "CAST(? AS timestamp)"
+	}
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at,
+		       CASE WHEN author_type = 'user' THEN prompt_seq ELSE 0 END AS prompt_index
+		FROM task_session_messages
+		WHERE task_session_id = ? AND (%s > %s OR (%s = %s AND id >= ?))
+		ORDER BY %s ASC, id ASC`, nm, bound, nm, bound, nm)
+	args := []interface{}{sessionID, targetKey, targetKey, target.ID}
+	if limit > 0 {
+		query += sqlLimitClause
+		args = append(args, limit+1)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	messages, hasMore, err := scanPromptIndexedMessageRows(rows, limit)
+	if err != nil {
+		return nil, false, err
+	}
+	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
+		messages[left], messages[right] = messages[right], messages[left]
+	}
+	return messages, hasMore, nil
+}
+
 // buildListMessagesQuery assembles the paginated message list query and bound arguments, ordering rows by the normalized-microsecond key with cursor and limit bounds.
 func buildListMessagesQuery(driverName, sessionID string, opts models.ListMessagesOptions, cursor *models.Message, cursorKey string, sortDir string, limit int) (string, []interface{}) {
 	nm := dialect.NormalizedMicrosecond(driverName, "created_at")
@@ -337,6 +407,10 @@ func buildListMessagesQuery(driverName, sessionID string, opts models.ListMessag
 		FROM task_session_messages
 		WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
+	if opts.AuthorType != "" {
+		query += " AND author_type = ?"
+		args = append(args, opts.AuthorType)
+	}
 	if cursor != nil {
 		if opts.Before != "" {
 			query += fmt.Sprintf(" AND (%s < %s OR (%s = %s AND id < ?))", nm, bound, nm, bound)
@@ -511,6 +585,15 @@ func (r *Repository) GetMessageByPendingID(ctx context.Context, sessionID, pendi
 	return r.getMessageByMetadataField(ctx, sessionID, "pending_id", pendingID, "")
 }
 
+// GetPermissionMessageByIdentity retrieves a permission_request message by its
+// full (task, session, request, pending) identity. A provider may reuse
+// pending_id for a later, unrelated request once the original is resolved, so
+// matching request_id too prevents a delayed event about the old request from
+// being applied to the new one.
+func (r *Repository) GetPermissionMessageByIdentity(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.Message, error) {
+	return r.getPermissionMessageByIdentity(ctx, taskID, sessionID, requestID, pendingID)
+}
+
 // FindMessageByPendingID finds the most-recent message by pending_id alone.
 // This is useful when we only have the pending ID (e.g., from expired clarification responses).
 // For multi-question clarification requests, prefer FindMessagesByPendingID to retrieve
@@ -567,13 +650,14 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 // cleanup; they never become current input authority.
 func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	drv := r.ro.DriverName()
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	query := fmt.Sprintf(`
 		WITH current_turn AS (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = ?
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
 		)
 		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
@@ -584,7 +668,7 @@ func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Cont
 		  AND m.type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
 		ORDER BY m.created_at ASC, m.id ASC
-	`, turnAuthorityPredicate(drv, "turn_row"), dialect.JSONExtract(drv, "m.metadata", "status"))
+	`, predicate, orderBy, dialect.JSONExtract(drv, "m.metadata", "status"))
 	// First sessionID selects current-turn authority; second scopes messages so
 	// a malformed cross-session turn reference cannot leak another session's row.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID, sessionID)
@@ -646,6 +730,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 	// Terminal sessions quarantine pending history even when best-effort expiry
 	// persistence failed. Both message CTEs inherit the requested-session
 	// boundary through their task_session_id and turn_id joins to current_turn.
+	predicate, orderBy := currentTurnAuthority(driverName, "turn_row")
 	return fmt.Sprintf(`
 		WITH current_turn AS (
 			SELECT task_session_id, id AS turn_id
@@ -654,7 +739,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 				       id,
 				       ROW_NUMBER() OVER (
 				         PARTITION BY task_session_id
-				         ORDER BY started_at DESC, created_at DESC, id DESC
+				         ORDER BY %s
 				       ) AS rn
 				FROM task_session_turns turn_row
 				WHERE turn_row.task_session_id IN (%s)
@@ -691,7 +776,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions
 		WHERE rn = 1 AND status IN ('', 'pending')
-	`, placeholderList, turnAuthorityPredicate(driverName, "turn_row"),
+	`, orderBy, placeholderList, predicate,
 		nonTerminalSessionPredicate("turn_row"), statusExpr, statusExpr, permissionOrderExpr)
 }
 
@@ -795,6 +880,187 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 		return fmt.Errorf("message not found: %s", message.ID)
 	}
 	return nil
+}
+
+// ClaimPermissionResolution installs the first durable dispatch claim for one
+// exact pending permission. The conditional UPDATE is the serialization point
+// on both SQLite and PostgreSQL.
+func (r *Repository) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	request.Audit.Result = models.PermissionResolutionDispatching
+	auditJSON, err := json.Marshal(request.Audit)
+	if err != nil {
+		return nil, fmt.Errorf("marshal permission resolution claim: %w", err)
+	}
+	driver := r.db.DriverName()
+	now := time.Now().UTC()
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = ?
+		WHERE task_id = ? AND task_session_id = ? AND type = 'permission_request'
+		  AND %s = ? AND %s = ?
+		  AND COALESCE(%s, '') = ''
+		  AND %s IS NULL
+	`, permissionClaimJSONExpression(driver),
+		permissionJSONExtract(driver, "metadata", "request_id"),
+		permissionJSONExtract(driver, "metadata", "pending_id"),
+		permissionJSONExtract(driver, "metadata", "status"),
+		permissionJSONExtract(driver, "metadata", "permission_resolution"))
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), string(auditJSON), now,
+		request.TaskID, request.SessionID, request.Audit.RequestID, request.Audit.PendingID)
+	if err != nil {
+		return nil, fmt.Errorf("claim permission resolution: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("claim permission resolution rows: %w", err)
+	}
+	message, getErr := r.getPermissionMessageByIdentity(ctx, request.TaskID, request.SessionID, request.Audit.RequestID, request.Audit.PendingID)
+	if rows == 1 {
+		if getErr != nil {
+			return nil, fmt.Errorf("read claimed permission resolution: %w", getErr)
+		}
+		return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimed, Message: message}, nil
+	}
+	if errors.Is(getErr, sql.ErrNoRows) {
+		return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimNotFound}, nil
+	}
+	if getErr != nil {
+		return nil, fmt.Errorf("read unclaimed permission resolution: %w", getErr)
+	}
+	audit, ok := permissionAuditFromMetadata(message.Metadata)
+	if ok && audit.Result == models.PermissionResolutionDispatching {
+		return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimInProgress, Message: message}, nil
+	}
+	return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimAlreadyFinal, Message: message}, nil
+}
+
+// FinalizePermissionResolution closes only the caller's dispatch claim. A
+// failed finalization never reopens the request for another provider response.
+func (r *Repository) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	driver := r.db.DriverName()
+	finalizedAt := request.FinalizedAt.UTC()
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = ?
+		WHERE task_id = ? AND task_session_id = ? AND type = 'permission_request'
+		  AND %s = ? AND %s = ?
+		  AND %s = ? AND %s = ?
+	`, permissionFinalizeJSONExpression(driver),
+		permissionJSONExtract(driver, "metadata", "request_id"),
+		permissionJSONExtract(driver, "metadata", "pending_id"),
+		permissionJSONExtract(driver, "metadata", "permission_resolution", "claim_id"),
+		permissionJSONExtract(driver, "metadata", "permission_resolution", "result"))
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), string(request.Result), finalizedAt.Format(time.RFC3339Nano), string(request.Status), finalizedAt,
+		request.TaskID, request.SessionID, request.RequestID, request.PendingID, request.ClaimID, string(models.PermissionResolutionDispatching))
+	if err != nil {
+		return nil, fmt.Errorf("finalize permission resolution: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("finalize permission resolution rows: %w", err)
+	}
+	message, getErr := r.getPermissionMessageByIdentity(ctx, request.TaskID, request.SessionID, request.RequestID, request.PendingID)
+	if rows == 1 {
+		if getErr != nil {
+			return nil, fmt.Errorf("read finalized permission resolution: %w", getErr)
+		}
+		return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalized, Message: message}, nil
+	}
+	if errors.Is(getErr, sql.ErrNoRows) {
+		return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalizeNotFound}, nil
+	}
+	if getErr != nil {
+		return nil, fmt.Errorf("read unfinalized permission resolution: %w", getErr)
+	}
+	audit, ok := permissionAuditFromMetadata(message.Metadata)
+	if !ok || audit.ClaimID != request.ClaimID {
+		return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalizeClaimMismatch, Message: message}, nil
+	}
+	return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalizeAlreadyFinal, Message: message}, nil
+}
+
+func permissionClaimJSONExpression(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `jsonb_set(COALESCE(NULLIF(metadata, ''), '{}')::jsonb, '{permission_resolution}', ?::jsonb, true)::text`
+	}
+	return `json_set(COALESCE(NULLIF(metadata, ''), '{}'), '$.permission_resolution', json(?))`
+}
+
+func permissionFinalizeJSONExpression(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `jsonb_set(jsonb_set(jsonb_set(COALESCE(NULLIF(metadata, ''), '{}')::jsonb, '{permission_resolution,result}', to_jsonb(?::text), true), '{permission_resolution,finalized_at}', to_jsonb(?::text), true), '{status}', to_jsonb(?::text), true)::text`
+	}
+	return `json_set(COALESCE(NULLIF(metadata, ''), '{}'), '$.permission_resolution.result', ?, '$.permission_resolution.finalized_at', ?, '$.status', ?)`
+}
+
+func permissionJSONExtract(driver, column string, path ...string) string {
+	if dialect.IsPostgres(driver) {
+		return fmt.Sprintf("COALESCE(NULLIF(%s, ''), '{}')::jsonb#>>'{%s}'", column, strings.Join(path, ","))
+	}
+	return fmt.Sprintf("json_extract(CASE WHEN json_valid(%s) THEN %s ELSE '{}' END, '$.%s')", column, column, strings.Join(path, "."))
+}
+
+func (r *Repository) getPermissionMessageByIdentity(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.Message, error) {
+	driver := r.db.DriverName()
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content,
+		       requests_input, type, metadata, created_at, updated_at
+		FROM task_session_messages
+		WHERE task_id = ? AND task_session_id = ? AND type = 'permission_request'
+		  AND %s = ? AND %s = ?
+		LIMIT 1
+	`, permissionJSONExtract(driver, "metadata", "request_id"), permissionJSONExtract(driver, "metadata", "pending_id"))
+	message := &models.Message{}
+	var requestsInput int
+	var messageType string
+	var metadataJSON string
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), taskID, sessionID, requestID, pendingID).Scan(
+		&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID,
+		&message.AuthorType, &message.AuthorID, &message.Content, &requestsInput,
+		&messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	message.RequestsInput = requestsInput == 1
+	message.Type = models.MessageType(messageType)
+	if metadataJSON != "" {
+		if err := json.Unmarshal([]byte(metadataJSON), &message.Metadata); err != nil {
+			return nil, fmt.Errorf("deserialize permission message metadata: %w", err)
+		}
+	}
+	return message, nil
+}
+
+func permissionAuditFromMetadata(metadata map[string]any) (models.PermissionResolutionAudit, bool) {
+	raw, ok := metadata["permission_resolution"]
+	if !ok {
+		return models.PermissionResolutionAudit{}, false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return models.PermissionResolutionAudit{}, false
+	}
+	var audit models.PermissionResolutionAudit
+	if err := json.Unmarshal(encoded, &audit); err != nil {
+		return models.PermissionResolutionAudit{}, false
+	}
+	return audit, audit.ClaimID != ""
+}
+
+func (r *Repository) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	message, err := r.getPermissionMessageByIdentity(ctx, taskID, sessionID, requestID, pendingID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	audit, ok := permissionAuditFromMetadata(message.Metadata)
+	if !ok {
+		return nil, nil
+	}
+	return &audit, nil
 }
 
 // CountToolCallMessagesBySession returns the number of tool_call messages

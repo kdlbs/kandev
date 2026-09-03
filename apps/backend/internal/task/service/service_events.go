@@ -109,6 +109,17 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 }
 
+// PublishTaskSessionsCancelled publishes session.state_changed events for
+// sessions finalized by a cascade path that bypasses Service.ArchiveTask.
+func (s *Service) PublishTaskSessionsCancelled(
+	ctx context.Context,
+	taskID string,
+	cancelledSessions []*models.TaskSession,
+	reason string,
+) {
+	s.publishSessionsCancelled(context.WithoutCancel(ctx), taskID, nil, cancelledSessions, reason)
+}
+
 // taskPublicationTimeout bounds publication-owned repository reads and
 // synchronous EventBus delivery. It intentionally starts when a queued closure
 // drains, rather than inheriting a caller deadline that may already have expired.
@@ -283,11 +294,11 @@ func (s *Service) enqueueTaskPublication(ctx context.Context, taskID, eventType 
 
 // drainTaskPublications runs the FIFO drain loop for one task's publication
 // queue. queue.draining is ALWAYS released before this call ends — including
-// when a synchronous EventBus subscriber inside next.publish panics — via the
-// deferred recover below. Without this, a panic recovered higher up the stack
-// (MemoryEventBus.Publish itself has no recover) would leave queue.draining
-// stuck true forever, and enqueueTaskPublication would silently append every
-// later publication for that task without ever draining them again.
+// when next.publish itself panics (event-data construction, not the
+// EventBus subscribers it calls into, which recover their own panics) — via
+// the deferred recover below. Without this, queue.draining would stay true
+// forever, and enqueueTaskPublication would silently append every later
+// publication for that task without ever draining them again.
 func (s *Service) drainTaskPublications(taskID string, queue *taskPublicationQueue) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -368,20 +379,21 @@ func snapshotTaskForPublication(task *models.Task) *models.Task {
 func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs []string, activity *taskActivitySnapshot) {
 
 	data := map[string]interface{}{
-		"task_id":          task.ID,
-		"workspace_id":     task.WorkspaceID,
-		"workflow_id":      task.WorkflowID,
-		"workflow_step_id": task.WorkflowStepID,
-		"title":            task.Title,
-		"description":      task.Description,
-		"state":            string(task.State),
-		"priority":         task.Priority,
-		"position":         task.Position,
-		"wip_admitted":     task.WIPAdmitted,
-		"created_at":       task.CreatedAt.Format(time.RFC3339Nano),
-		"updated_at":       task.UpdatedAt.Format(time.RFC3339Nano),
-		"is_ephemeral":     task.IsEphemeral,
-		"autopilot":        task.Autopilot,
+		"task_id":            task.ID,
+		"step_transition_id": task.WorkflowStepTransitionID,
+		"workspace_id":       task.WorkspaceID,
+		"workflow_id":        task.WorkflowID,
+		"workflow_step_id":   task.WorkflowStepID,
+		"title":              task.Title,
+		"description":        task.Description,
+		"state":              string(task.State),
+		"priority":           task.Priority,
+		"position":           task.Position,
+		"wip_admitted":       task.WIPAdmitted,
+		"created_at":         task.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":         task.UpdatedAt.Format(time.RFC3339Nano),
+		"is_ephemeral":       task.IsEphemeral,
+		"autopilot":          task.Autopilot,
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,
@@ -404,7 +416,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
 	}
-	// external_id (docs/specs/tasks/external-id-idempotency): omitted rather
+	// external_id (docs/specs/tasks/requirements/external-id-idempotency.md): omitted rather
 	// than sent as null/"" when the task holds none, matching the REST DTO's
 	// omitempty and parent_id's convention above. This map is hand-built, not
 	// derived from TaskDTO, so it needs its own explicit field.
@@ -428,7 +440,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 	s.addTaskWorkspaceFoldersToEvent(ctx, task, data)
 	if task.Metadata != nil {
-		data["metadata"] = task.Metadata
+		data["metadata"] = models.PublicTaskMetadata(task.Metadata)
 	}
 	if oldState != nil {
 		data["old_state"] = string(*oldState)
@@ -674,14 +686,37 @@ func taskRepositoriesForEvent(ctx context.Context, s *Service, task *models.Task
 func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(repos))
 	for _, r := range repos {
-		out = append(out, map[string]interface{}{
-			"id":              r.ID,
-			"task_id":         r.TaskID,
-			"repository_id":   r.RepositoryID,
-			"base_branch":     r.BaseBranch,
-			"checkout_branch": r.CheckoutBranch,
-			"position":        r.Position,
-		})
+		serialized := map[string]interface{}{
+			"id":            r.ID,
+			"task_id":       r.TaskID,
+			"repository_id": r.RepositoryID,
+			"base_branch":   r.BaseBranch,
+			"position":      r.Position,
+			"created_at":    r.CreatedAt.Format(time.RFC3339Nano),
+			"updated_at":    r.UpdatedAt.Format(time.RFC3339Nano),
+		}
+		if r.CheckoutBranch != "" {
+			serialized["checkout_branch"] = r.CheckoutBranch
+		}
+		if r.BranchPolicyID != "" {
+			serialized["branch_policy_id"] = r.BranchPolicyID
+		}
+		if r.BranchPolicyName != "" {
+			serialized["branch_policy_name"] = r.BranchPolicyName
+		}
+		if r.BranchPolicyBaseBranch != "" {
+			serialized["branch_policy_base_branch"] = r.BranchPolicyBaseBranch
+		}
+		if r.BranchPolicyBranchTemplate != "" {
+			serialized["branch_policy_branch_template"] = r.BranchPolicyBranchTemplate
+		}
+		if r.BranchPolicyPullRequestTarget != "" {
+			serialized["branch_policy_pull_request_target"] = r.BranchPolicyPullRequestTarget
+		}
+		if len(r.Metadata) > 0 {
+			serialized["metadata"] = r.Metadata
+		}
+		out = append(out, serialized)
 	}
 	return out
 }
@@ -728,6 +763,7 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
+		"step_transition_id":        task.WorkflowStepTransitionID,
 		"from_workflow_id":          fromWorkflowID,
 		"to_workflow_id":            task.WorkflowID,
 		"from_step_id":              fromStepID,

@@ -28,6 +28,7 @@ steps:
     is_start_step: true
     show_in_command_panel: true
     allow_manual_move: true
+    auto_advance_requires_signal: true
     events:
       on_enter:
         - type: auto_start_agent
@@ -42,13 +43,13 @@ steps:
           config:
             target: primary
             task_id: this
-            reason: blockers_resolved
+            reason: task_blockers_resolved
       on_children_completed:
         - type: queue_run
           config:
             target: primary
             task_id: this
-            reason: children_completed
+            reason: task_children_completed
       on_agent_error:
         - type: queue_run
           config:
@@ -70,10 +71,21 @@ steps:
     events:
       on_enter:
         - type: clear_decisions
+        - type: ensure_participant_seat
+          config:
+            role: reviewer
         - type: queue_run_for_each_participant
           config:
             role: reviewer
-            reason: review_started
+            reason: task_assigned
+            payload:
+              stage_type: review
+      on_agent_error:
+        - type: queue_run
+          config:
+            target: workspace.ceo_agent
+            task_id: this
+            reason: agent_error
       on_turn_complete:
         - type: move_to_step
           config:
@@ -98,10 +110,21 @@ steps:
     events:
       on_enter:
         - type: clear_decisions
+        - type: ensure_participant_seat
+          config:
+            role: approver
         - type: queue_run_for_each_participant
           config:
             role: approver
-            reason: approval_started
+            reason: task_assigned
+            payload:
+              stage_type: approval
+      on_agent_error:
+        - type: queue_run
+          config:
+            target: workspace.ceo_agent
+            task_id: this
+            reason: agent_error
       on_turn_complete:
         - type: move_to_step
           config:
@@ -130,3 +153,9 @@ steps:
             target: primary
             task_id: this
             reason: task_comment
+      on_agent_error:
+        - type: queue_run
+          config:
+            target: workspace.ceo_agent
+            task_id: this
+            reason: agent_error

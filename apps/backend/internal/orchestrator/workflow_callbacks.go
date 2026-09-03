@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/review"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // ReviewRunner launches native code-review passes. Satisfied by
@@ -44,6 +45,7 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 			CEOResolver:  svc.engineCEOResolver,
 			Primary:      svc.enginePrimary,
 			TaskSteps:    workflowTargetStepResolver(svc.enginePrimary, svc.engineParticipants),
+			Logger:       svc.logger,
 		}
 		if svc.engineParticipants != nil {
 			r[engine.ActionQueueRunForEachParticipant] = engine.QueueRunForEachParticipantCallback{
@@ -65,6 +67,13 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 		r[engine.ActionSwitchWorkflow] = engine.SwitchWorkflowCallback{
 			Switcher: svc.engineWorkflowSwitcher,
 			Dispatch: switchWorkflowDispatcher(svc),
+		}
+	}
+	if svc.engineParticipantSeatWriter != nil {
+		r[engine.ActionEnsureParticipantSeat] = engine.EnsureParticipantSeatCallback{
+			Writer: svc.engineParticipantSeatWriter,
+			Caster: svc.engineParticipantSeatCaster,
+			Logger: svc.logger,
 		}
 	}
 	return r
@@ -92,7 +101,7 @@ func workflowTargetStepResolver(
 // guaranteed by the time the closure runs (callbacks only execute after
 // HandleTrigger).
 func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
-	return func(ctx context.Context, taskID, sessionID string, trigger engine.Trigger, operationID string) error {
+	return func(ctx context.Context, taskID, sessionID string, trigger engine.Trigger, operationID, sourceStepID string) error {
 		eng := svc.workflowEngine
 		if eng == nil {
 			return nil // engine not initialised; treat as no-op
@@ -114,24 +123,47 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 		var preloadedState *engine.MachineState
 		if trigger == engine.TriggerOnEnter {
 			var err error
-			sessionID, preloadedState, err = svc.prepareDirectWorkflowStepEntry(ctx, taskID, sessionID)
+			var sourceStep *wfmodels.WorkflowStep
+			if sourceStepID != "" {
+				sourceStep, err = svc.loadWorkflowStepForLifecycle(ctx, sourceStepID, "workflow switch source")
+				if err != nil {
+					return err
+				}
+			}
+			sessionID, preloadedState, err = svc.prepareDirectWorkflowStepEntry(ctx, taskID, sessionID, sourceStep)
 			if err != nil {
 				return err
 			}
 		}
-		_, err := eng.HandleTrigger(ctx, engine.HandleInput{
+		input := engine.HandleInput{
 			TaskID:         taskID,
 			SessionID:      sessionID,
 			Trigger:        trigger,
 			OperationID:    operationID,
 			PreloadedState: preloadedState,
-		})
+		}
+		// on_enter: the ledger-driven DispatchStepEntry path (fired by the
+		// step-transition writer this switch's AddTaskToWorkflow call
+		// commits through) now owns the session-independent half of the
+		// entry sequence. Running the full HandleTrigger here would execute
+		// those actions a second time. Session-shaped actions have no other
+		// production path on this route, so they still run through the
+		// engine's callback registry.
+		// on_exit is unaffected — it is a different trigger, entirely out of
+		// this requirement's scope.
+		var err error
+		if trigger == engine.TriggerOnEnter {
+			_, err = eng.HandleTriggerSessionShapedOnly(ctx, input)
+		} else {
+			_, err = eng.HandleTrigger(ctx, input)
+		}
 		return err
 	}
 }
 
 func (s *Service) prepareDirectWorkflowStepEntry(
 	ctx context.Context, taskID, sessionID string,
+	sourceStep *wfmodels.WorkflowStep,
 ) (string, *engine.MachineState, error) {
 	ctx = withWorkflowMetaCache(ctx)
 	task, err := s.repo.GetTask(ctx, taskID)
@@ -155,7 +187,7 @@ func (s *Service) prepareDirectWorkflowStepEntry(
 	if err != nil {
 		return "", nil, fmt.Errorf("load session for workflow step entry: %w", err)
 	}
-	effectiveSession, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step)
+	effectiveSession, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step, sourceStep)
 	if err != nil {
 		return "", nil, fmt.Errorf("prepare session for workflow step entry: %w", err)
 	}
@@ -282,6 +314,7 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 		AgentProfileID: profileID,
 		Trigger:        taskmodels.ReviewTriggerWorkflowStep,
 		WorkflowStepID: in.Step.ID,
+		EntryID:        in.EntryID,
 	})
 	if err != nil {
 		c.svc.logger.Warn("workflow step code review did not start",

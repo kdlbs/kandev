@@ -229,3 +229,45 @@ type PendingMove struct {
 	// context used to apply the deferred move.
 	SenderSessionID string `json:"sender_session_id,omitempty"`
 }
+
+// PendingMoveTTL bounds how long a deferred move may stay armed before it is
+// treated as stale and dropped instead of applied.
+//
+// A pending move only exists to bridge two moments: the agent called
+// move_task_kandev while its turn was still running, and that same turn ended.
+// In a healthy system those are seconds to minutes apart. A row that outlives
+// this window did not survive a slow turn — its turn never ended cleanly (crash,
+// restart, parked session), and the board state it was authored against is gone.
+// Replaying it then relocates a card against a board that has moved on.
+//
+// 24h is deliberately orders of magnitude above the legitimate window, so no
+// healthy move is ever caught by it, while being far below the multi-day replay
+// that motivated the TTL.
+//
+// It is a code constant rather than an env var or runtime flag, matching the
+// precedent set by the idle-session reaper's thresholds: the orchestrator has no
+// other runtime configuration of this shape, and the value is bounded by a
+// fail-closed invariant rather than by deployment shape.
+const PendingMoveTTL = 24 * time.Hour
+
+// IsStaleAt reports whether the move has been armed longer than ttl.
+//
+// A zero or future QueuedAt is never stale. An unset timestamp column or a
+// clock skew must not be able to mass-expire the table; the same rejection the
+// idle-session reaper applies to zero/future UpdatedAt.
+func (m *PendingMove) IsStaleAt(now time.Time, ttl time.Duration) bool {
+	if m == nil || ttl <= 0 {
+		return false
+	}
+	if m.QueuedAt.IsZero() || m.QueuedAt.After(now) {
+		return false
+	}
+	return now.Sub(m.QueuedAt) > ttl
+}
+
+// PendingMoveRecord pairs a deferred move with the session it is keyed to.
+// Used by the sweep, which works across sessions rather than looking one up.
+type PendingMoveRecord struct {
+	SessionID string
+	Move      PendingMove
+}

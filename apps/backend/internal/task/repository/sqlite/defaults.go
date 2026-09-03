@@ -64,6 +64,33 @@ func (r *Repository) hideBuiltinWorkflows() error {
 	return nil
 }
 
+// healBuiltinWorkflowStepFlags reconciles workflow_steps.auto_advance_requires_signal
+// on system-workflow rows whose steps were materialized before their embedded
+// template started requiring the ADR-0015 completion signal (WO-32:
+// office-default's "work" step). Steps are matched by name within their
+// workflow's template id, scoped to is_system = 1 so user-created and
+// user-customised workflows are never touched.
+func (r *Repository) healBuiltinWorkflowStepFlags() error {
+	templates, err := workflowcfg.LoadTemplates()
+	if err != nil {
+		return fmt.Errorf("load embedded templates for step-flag healing: %w", err)
+	}
+	now := time.Now().UTC()
+	for _, tmpl := range templates {
+		for _, step := range tmpl.Steps {
+			want := dialect.BoolToInt(step.AutoAdvanceRequiresSignal)
+			if _, err := r.db.Exec(r.db.Rebind(`
+				UPDATE workflow_steps SET auto_advance_requires_signal = ?, updated_at = ?
+				WHERE name = ? AND auto_advance_requires_signal != ?
+				  AND workflow_id IN (SELECT id FROM workflows WHERE is_system = 1 AND workflow_template_id = ?)
+			`), want, now, step.Name, want, tmpl.ID); err != nil {
+				return fmt.Errorf("heal step flags for template %s step %s: %w", tmpl.ID, step.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
 // ensureDefaultWorkspace creates a default workspace if none exists
 func (r *Repository) ensureDefaultWorkspace() error {
 	ctx := context.Background()
@@ -444,15 +471,15 @@ func (r *Repository) insertTemplateStep(
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color, prompt, events,
 			allow_manual_move, is_start_step, show_in_command_panel,
-			auto_archive_after_hours, agent_profile_id, stage_type,
+				auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type,
 			auto_advance_requires_signal, cancel_triggers_turn_complete,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		idMap[def.ID], workflowID, def.Name, def.Position, def.Color, def.Prompt,
 		string(eventsJSON), dialect.BoolToInt(def.AllowManualMove),
 		dialect.BoolToInt(def.IsStartStep), dialect.BoolToInt(def.ShowInCommandPanel),
-		def.AutoArchiveAfterHours, def.AgentProfileID, string(stage),
+		def.AutoArchiveAfterHours, def.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(def.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(def.ProfileSessionEndPolicy)), string(stage),
 		dialect.BoolToInt(def.AutoAdvanceRequiresSignal), dialect.BoolToInt(def.CancelTriggersTurnComplete),
 		now, now,
 	)

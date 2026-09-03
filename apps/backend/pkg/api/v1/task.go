@@ -166,8 +166,9 @@ type Task struct {
 
 // TaskRepositoryInput for creating/updating task repositories
 type TaskRepositoryInput struct {
-	RepositoryID string `json:"repository_id" binding:"required"`
-	BaseBranch   string `json:"base_branch" binding:"required"`
+	RepositoryID   string `json:"repository_id" binding:"required"`
+	BaseBranch     string `json:"base_branch" binding:"required"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 }
 
 // CreateTaskRequest for creating a new task

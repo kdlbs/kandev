@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -37,22 +40,27 @@ type BackendClient interface {
 // MCP mode constants control which tools are registered.
 const (
 	// ModeTask registers kanban, plan, and interaction tools (default for task-solving agents).
-	ModeTask = "task"
+	ModeTask = mcpmode.Task
 	// ModeTaskTitlePending registers the task-mode tools plus the one-shot
 	// title tool used while a prompt-first task still has its provisional title.
-	ModeTaskTitlePending = "task-title-pending"
+	ModeTaskTitlePending = mcpmode.TaskTitlePending
 	// ModeConfig registers configuration tools for workflows, agents, and MCP servers.
-	ModeConfig = "config"
+	ModeConfig = mcpmode.Config
 	// ModeExternal registers config tools plus create_task_kandev for external coding agents
 	// (Claude Code, Cursor, etc.) that connect to the backend's MCP endpoint.
 	// No session-scoped tools (plan, ask_user_question) since there is no live session.
-	ModeExternal = "external"
+	ModeExternal = mcpmode.External
 	// ModeOffice registers plan and interaction tools for office agents.
 	// Kanban tools are excluded because office agents use CLI commands instead.
-	ModeOffice = "office"
+	ModeOffice = mcpmode.Office
+	// ModeAutomation registers the fixed workspace coordinator catalog for
+	// scheduled automation agents.
+	ModeAutomation = mcpmode.Automation
 )
 
 const pluginToolArgumentsKey = "arguments"
+
+const mcpToolNameSuffix = "_kandev"
 
 // MCP payload keys reused across tool registrations. Extracted so a future
 // wire-protocol rename touches every tool in one place AND so goconst
@@ -85,7 +93,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeTaskTitlePending:
+	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending:
 		return mode
 	default:
 		return ModeTask
@@ -94,31 +102,46 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
-	backend             BackendClient
-	sessionID           string
-	taskID              string
-	disableAskQuestion  bool
-	mode                string // "task" (default), "task-title-pending", "config", or "office"
-	mcpProviders        []string
-	profile             mcpprofile.Context
-	mcpServer           *server.MCPServer
-	sseServer           *server.SSEServer
-	httpServer          *server.StreamableHTTPServer
-	logger              *logger.Logger
-	mcpLogger           *zap.Logger // optional file logger for MCP debug traces
-	mu                  sync.RWMutex
-	running             bool
-	attachmentMu        sync.RWMutex
-	attachmentAttempt   streams.MCPAttachmentAttempt
-	attachmentAttempts  map[string]streams.MCPAttachmentAttempt
-	attachmentReporter  func(streams.MCPAttachmentEvidence)
-	validatorMu         sync.RWMutex
-	toolValidators      map[string]toolArgumentValidator
-	pluginToolsUpdateMu sync.Mutex
-	pluginToolsMu       sync.Mutex
-	pluginTools         plugintools.Snapshot
-	pluginToolsReady    bool
+	backend                    BackendClient
+	sessionID                  string
+	taskID                     string
+	disableAskQuestion         bool
+	mode                       string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
+	mcpProviders               []string
+	profile                    mcpprofile.Context
+	legacyModeCapabilities     []mcpprofile.Capability
+	namespacesMCPToolsByServer bool
+	mcpServer                  *server.MCPServer
+	sseServer                  *server.SSEServer
+	httpServer                 *server.StreamableHTTPServer
+	logger                     *logger.Logger
+	mcpLogger                  *zap.Logger // optional file logger for MCP debug traces
+	mu                         sync.RWMutex
+	running                    bool
+	attachmentMu               sync.RWMutex
+	attachmentAttempt          streams.MCPAttachmentAttempt
+	attachmentAttempts         map[string]streams.MCPAttachmentAttempt
+	attachmentReporter         func(streams.MCPAttachmentEvidence)
+	validatorMu                sync.RWMutex
+	toolValidators             map[string]toolArgumentValidator
+	pluginToolsUpdateMu        sync.Mutex
+	pluginToolsMu              sync.Mutex
+	pluginTools                plugintools.Snapshot
+	pluginToolsReady           bool
 }
+
+// ServerOption configures the per-instance MCP transport.
+type ServerOption func(*Server)
+
+// WithMCPToolNamespacingByServer enables presentation compatibility for an
+// agent that appends the injected MCP server name to every tool.
+func WithMCPToolNamespacingByServer(enabled bool) ServerOption {
+	return func(s *Server) {
+		s.namespacesMCPToolsByServer = enabled
+	}
+}
+
+type mcpAttachmentAttemptContextKey struct{}
 
 // New creates a new MCP server for agentctl.
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
@@ -140,6 +163,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 	// Create Streamable HTTP server for Codex
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 
 	return s
@@ -149,16 +173,17 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 // The profile keeps base surfaces and additive capability groups separate so
 // callers can add or remove one context-specific group without copying a full
 // mode branch.
-func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, profileContext mcpprofile.Context) *Server {
+func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, profileContext mcpprofile.Context, options ...ServerOption) *Server {
 	if disableAskQuestion {
 		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
 	}
-	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext)
+	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
 	s.sseServer = server.NewSSEServer(s.mcpServer,
 		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
 	)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 	return s
 }
@@ -182,6 +207,7 @@ func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *
 	// Streamable HTTP transport handler — mounted at /mcp on the backend.
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 
 	return s
@@ -194,18 +220,24 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 	return newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, mcpprofile.Legacy(mcpMode, disableAskQuestion, mcpProviders))
 }
 
-func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context) *Server {
+func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context, options ...ServerOption) *Server {
 	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
 	s := &Server{
-		backend:            backend,
-		sessionID:          sessionID,
-		taskID:             taskID,
-		disableAskQuestion: !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
-		mode:               modeForProfile(profileContext),
-		mcpProviders:       mcpproviders.Normalize(profileContext.Providers),
-		profile:            profileContext,
-		logger:             log.WithFields(zap.String("component", "mcp-server")),
-		attachmentAttempts: make(map[string]streams.MCPAttachmentAttempt),
+		backend:                backend,
+		sessionID:              sessionID,
+		taskID:                 taskID,
+		disableAskQuestion:     !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
+		mode:                   modeForProfile(profileContext),
+		mcpProviders:           mcpproviders.Normalize(profileContext.Providers),
+		profile:                profileContext,
+		legacyModeCapabilities: slices.Clone(profileContext.Capabilities),
+		logger:                 log.WithFields(zap.String("component", "mcp-server")),
+		attachmentAttempts:     make(map[string]streams.MCPAttachmentAttempt),
+	}
+	for _, option := range options {
+		if option != nil {
+			option(s)
+		}
 	}
 
 	// Set up optional file logger for MCP debug traces
@@ -227,25 +259,35 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		"kandev-mcp",
 		"1.0.0",
 		server.WithToolCapabilities(true),
+		server.WithCacheHints(0, mcp.CacheScopePrivate),
 		server.WithHooks(hooks),
 	)
+	hooks.AddBeforeAny(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any) {
+		if server.IsModernRequest(ctx) {
+			s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceProtocolAccepted, 0, "")
+		}
+	})
 	hooks.AddOnRegisterSession(func(_ context.Context, session server.ClientSession) {
 		s.registerMCPConnection(session.SessionID())
 	})
 	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
+	})
+	hooks.AddBeforeCallTool(func(_ context.Context, _ any, request *mcp.CallToolRequest) {
+		s.restoreCanonicalToolName(request)
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
-		s.observeMCPToolsList(mcpConnectionID(ctx), result.Tools)
+		s.presentTransportToolNames(result)
+		s.observeMCPToolsListForRequest(ctx, result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
 		s.syncPluginTools(ctx)
 	})
-	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ *mcp.CallToolResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
+	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ any) {
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
 	})
 	hooks.AddOnError(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any, err error) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceExplicitError, 0, err.Error())
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceExplicitError, 0, err.Error())
 	})
 	hooks.AddOnUnregisterSession(func(_ context.Context, session server.ClientSession) {
 		s.unregisterMCPConnection(session.SessionID())
@@ -253,6 +295,39 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	s.registerTools()
 	s.running = true
 	return s
+}
+
+func (s *Server) presentTransportToolNames(result *mcp.ListToolsResult) {
+	if !s.namespacesMCPToolsByServer || result == nil {
+		return
+	}
+	registeredTools := s.mcpServer.ListTools()
+	for index := range result.Tools {
+		name := result.Tools[index].Name
+		if !strings.HasSuffix(name, mcpToolNameSuffix) {
+			continue
+		}
+		transportName := strings.TrimSuffix(name, mcpToolNameSuffix)
+		// Keep plugin tools named "name" distinct from canonical tools named
+		// "name_kandev" when both are present in the live registry.
+		if _, collision := registeredTools[transportName]; collision {
+			continue
+		}
+		result.Tools[index].Name = transportName
+	}
+}
+
+func (s *Server) restoreCanonicalToolName(request *mcp.CallToolRequest) {
+	if !s.namespacesMCPToolsByServer || request == nil {
+		return
+	}
+	if s.mcpServer.GetTool(request.Params.Name) != nil {
+		return
+	}
+	canonicalName := request.Params.Name + mcpToolNameSuffix
+	if s.mcpServer.GetTool(canonicalName) != nil {
+		request.Params.Name = canonicalName
+	}
 }
 
 func modeForProfile(profileContext mcpprofile.Context) string {
@@ -263,6 +338,8 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		return ModeExternal
 	case mcpprofile.SurfaceOfficeTask:
 		return ModeOffice
+	case mcpprofile.SurfaceAutomation:
+		return ModeAutomation
 	case mcpprofile.SurfaceKanbanTask:
 		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
 			return ModeTaskTitlePending
@@ -291,8 +368,28 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 	s.attachmentAttempt = attempt
 }
 
+// mcpHTTPContext snapshots the backend-owned attachment attempt before the MCP
+// transport dispatches a request. Modern requests are stateless, so their
+// hooks must retain the attempt that accepted the request even if a later
+// lifecycle operation rolls the server over to a new attempt.
+func (s *Server) mcpHTTPContext(ctx context.Context, _ *http.Request) context.Context {
+	s.attachmentMu.RLock()
+	attempt := s.attachmentAttempt
+	s.attachmentMu.RUnlock()
+	return context.WithValue(ctx, mcpAttachmentAttemptContextKey{}, attempt)
+}
+
+func mcpAttachmentAttemptFromContext(ctx context.Context) (streams.MCPAttachmentAttempt, bool) {
+	attempt, ok := ctx.Value(mcpAttachmentAttemptContextKey{}).(streams.MCPAttachmentAttempt)
+	return attempt, ok
+}
+
 func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
 	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
+}
+
+func (s *Server) observeMCPRequest(ctx context.Context, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
+	s.observeMCPRequestWithTools(ctx, kind, toolCount, summary, nil)
 }
 
 func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
@@ -301,6 +398,14 @@ func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
 		summaries = append(summaries, summarizeMCPTool(tool))
 	}
 	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
+}
+
+func (s *Server) observeMCPToolsListForRequest(ctx context.Context, tools []mcp.Tool) {
+	summaries := make([]streams.MCPToolSummary, 0, len(tools))
+	for _, tool := range tools {
+		summaries = append(summaries, summarizeMCPTool(tool))
+	}
+	s.observeMCPRequestWithTools(ctx, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
 }
 
 func summarizeMCPTool(tool mcp.Tool) streams.MCPToolSummary {
@@ -346,6 +451,46 @@ func (s *Server) observeMCPConnectionWithTools(
 		return
 	}
 	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
+}
+
+func (s *Server) observeMCPRequestWithTools(
+	ctx context.Context,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
+	if !server.IsModernRequest(ctx) {
+		connectionID := mcpConnectionID(ctx)
+		s.attachmentMu.RLock()
+		attempt, ok := s.attachmentAttempts[connectionID]
+		reporter := s.attachmentReporter
+		if !ok && connectionID != "" && kind == streams.MCPAttachmentEvidenceInitializeObserved {
+			// Streamable HTTP registers a legacy POST initialize session after
+			// handling the request. Attribute its initialize evidence to the
+			// current attempt until the registration hook records the connection.
+			attempt = s.attachmentAttempt
+			ok = attempt.AttemptID != ""
+		}
+		s.attachmentMu.RUnlock()
+		if !ok || reporter == nil || attempt.AttemptID == "" {
+			return
+		}
+		s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
+		return
+	}
+
+	attempt, hasSnapshot := mcpAttachmentAttemptFromContext(ctx)
+	s.attachmentMu.RLock()
+	if !hasSnapshot {
+		attempt = s.attachmentAttempt
+	}
+	reporter := s.attachmentReporter
+	s.attachmentMu.RUnlock()
+	if reporter == nil || attempt.AttemptID == "" {
+		return
+	}
+	s.reportMCPConnectionWithTools(reporter, attempt, "", kind, toolCount, summary, tools)
 }
 
 func (s *Server) registerMCPConnection(connectionID string) {
@@ -578,12 +723,26 @@ func (s *Server) SetMode(mode string) {
 	if s.mode == normalizedMode {
 		return
 	}
+	previousMode := s.mode
+	capabilities := s.profile.Capabilities
+	if normalizedMode == ModeAutomation {
+		s.legacyModeCapabilities = slices.Clone(capabilities)
+		// The automation surface is a fixed coordinator catalog and never
+		// carries task-local capabilities. The snapshot lets a later legacy
+		// mode change restore the profile that was active before automation.
+		capabilities = nil
+	} else if previousMode == ModeAutomation {
+		capabilities = slices.Clone(s.legacyModeCapabilities)
+	}
 	s.mode = normalizedMode
-	s.profile = mcpprofile.New(surfaceForMode(normalizedMode), s.profile.Capabilities, s.mcpProviders)
+	s.profile = mcpprofile.New(surfaceForMode(normalizedMode), capabilities, s.mcpProviders)
 	if normalizedMode == ModeTaskTitlePending {
 		s.profile = s.profile.WithCapability(mcpprofile.CapabilityTaskTitle)
 	} else {
 		s.profile = s.profile.WithoutCapability(mcpprofile.CapabilityTaskTitle)
+	}
+	if normalizedMode != ModeAutomation {
+		s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 	}
 	s.rebuildTools()
 }
@@ -596,6 +755,8 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceExternal
 	case ModeOffice:
 		return mcpprofile.SurfaceOfficeTask
+	case ModeAutomation:
+		return mcpprofile.SurfaceAutomation
 	default:
 		return mcpprofile.SurfaceKanbanTask
 	}
@@ -633,6 +794,13 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
 	if sameProfile(s.profile, profileContext) {
 		return
+	}
+	if profileContext.Surface == mcpprofile.SurfaceAutomation {
+		if s.profile.Surface != mcpprofile.SurfaceAutomation {
+			s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
+		}
+	} else {
+		s.legacyModeCapabilities = slices.Clone(profileContext.Capabilities)
 	}
 	s.profile = profileContext
 	s.mode = modeForProfile(profileContext)
@@ -894,13 +1062,18 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	external := surfaceEnabled(mcpprofile.SurfaceExternal)
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
+	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
 	return []profileToolGroup{
+		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
+		{name: "configuration-prompts", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigPromptTools() }},
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
+		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
+		{name: "external-agent-permissions", enabled: external, register: func(s *Server) { s.registerAgentPermissionTools() }},
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
@@ -920,10 +1093,32 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 			s.registerAddWorkspaceSourcesTool()
 			s.registerUpdateRepositoryBaseBranchTool()
 		}},
-		{name: "step-completion", enabled: kanban, register: func(s *Server) { s.registerStepCompleteTool() }},
+		{name: "step-completion", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerStepCompleteTool() }},
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 	}
+}
+
+func (s *Server) registerAgentPermissionTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_pending_agent_permissions_kandev",
+			mcp.WithDescription("List live pending agent command and tool permission requests for an authorized task, optionally limited to one session. Returns safe action details and the exact immutable provider-offered option IDs and kinds needed for resolution."),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID whose live permission requests to list")),
+			mcp.WithString("session_id", mcp.Description("Optional session ID, which must belong to task_id")),
+		),
+		s.wrapHandler("list_pending_agent_permissions_kandev", s.listPendingAgentPermissionsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("resolve_agent_permission_kandev",
+			mcp.WithDescription("Resolve one exact live agent permission request by selecting one option the provider originally offered. First call list_pending_agent_permissions_kandev and submit the returned task, session, request, pending, and option IDs unchanged. Reject choices are selected by their offered option ID; cancellation and caller-authored commands or options are not accepted."),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID returned by permission discovery")),
+			mcp.WithString("session_id", mcp.Required(), mcp.Description("The session ID returned by permission discovery")),
+			mcp.WithString("request_id", mcp.Required(), mcp.Description("The immutable Kandev request generation ID")),
+			mcp.WithString("pending_id", mcp.Required(), mcp.Description("The provider pending request ID")),
+			mcp.WithString("option_id", mcp.Required(), mcp.Description("One exact option ID returned for this request")),
+		),
+		s.wrapHandler("resolve_agent_permission_kandev", s.resolveAgentPermissionHandler()),
+	)
 }
 
 // registerTools registers MCP tools from the declarative profile registry.
@@ -935,12 +1130,52 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	s.registerPluginTools()
+	if s.profile.Surface != mcpprofile.SurfaceAutomation {
+		s.registerPluginTools()
+	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),
 		zap.Bool("disable_ask_question", s.disableAskQuestion))
 	s.rebuildToolArgumentValidators()
+}
+
+// registerAutomationTools composes the fixed coordinator catalog from the
+// existing read/task lifecycle registrations, then removes every mutation or
+// task-local capability that is not part of the automation authority. Keeping
+// this allowlist next to the profile registry makes accidental additions
+// visible in the catalog test instead of silently expanding automation power.
+func (s *Server) registerAutomationTools() {
+	s.registerKanbanTools()
+	s.registerTaskDependencyTools()
+	s.registerRelatedTasksTool()
+	s.registerQuestionAnsweringTools()
+	s.registerAgentPermissionTools()
+	s.registerConfigWorkflowTools()
+	s.registerConfigExecutorTools()
+	s.mcpServer.DeleteTools(
+		"delete_task_kandev",
+		"update_task_state_kandev",
+		"create_workflow_kandev",
+		"update_workflow_kandev",
+		"delete_workflow_kandev",
+		"import_workflow_kandev",
+		"export_workflow_kandev",
+		"create_workflow_step_kandev",
+		"update_workflow_step_kandev",
+		"delete_workflow_step_kandev",
+		"reorder_workflow_steps_kandev",
+		"update_agent_kandev",
+		"create_agent_profile_kandev",
+		"delete_agent_profile_kandev",
+		"list_agent_profiles_kandev",
+		"update_agent_profile_kandev",
+		"get_mcp_config_kandev",
+		"update_mcp_config_kandev",
+		"create_executor_profile_kandev",
+		"update_executor_profile_kandev",
+		"delete_executor_profile_kandev",
+	)
 }
 
 func (s *Server) registerDiagnosticBundleTool() {
@@ -1136,7 +1371,17 @@ func (s *Server) registerMRAutomationTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_mr_automation_kandev",
-			mcp.WithDescription("Update this task's GitLab merge request lifecycle notification switches."),
+			mcp.WithDescription("Update this task's GitLab merge request automation options (auto-fix, auto-merge, "+
+				"and lifecycle notifications). The five switches are per merge request: pass repository_id, "+
+				"project_path and mr_iid together to target one linked MR, or omit all three to apply them to "+
+				"every MR linked to this task. auto_fix_prompt_override applies to every linked MR regardless "+
+				"of MR identity."),
+			mcp.WithString("repository_id", mcp.Description("Repository ID of the linked MR to target (omit to target every linked MR)")),
+			mcp.WithString("project_path", mcp.Description("Project path of the linked MR to target, e.g. group/project")),
+			mcp.WithNumber("mr_iid", mcp.Description("IID of the linked MR to target")),
+			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when the linked MR's pipeline fails")),
+			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when the linked MR is ready")),
+			mcp.WithString("auto_fix_prompt_override", mcp.Description("Task-level custom prompt for auto-fix; valid without linked MRs and not scoped by MR identity (empty string clears the override)")),
 			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
 			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked MR becomes merged")),
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked MR becomes closed without merge")),
@@ -1291,8 +1536,12 @@ func (s *Server) registerAddBranchToTaskTool() {
 func (s *Server) registerAddWorkspaceSourcesTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("add_workspace_sources_kandev",
-			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. task_id defaults to the current task."),
+			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. A task may update itself or its same-workspace direct child. Exact retries are idempotent."),
 			mcp.WithString(mcpKeyTaskID, mcp.Description("Task to update. Defaults to the current task.")),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(true),
 			mcp.WithArray("sources", mcp.Required(), mcp.MinItems(1),
 				mcp.Description("Ordered source objects. Each has kind repository or folder and the documented fields for that kind."),
 				mcp.Items(map[string]any{"type": "object"}),
@@ -1311,11 +1560,8 @@ func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
 		}
-		// A task-mode MCP server is bound to one live task. Never let an agent
-		// use this mutation tool as a cross-task capability: the backend tunnel
-		// has no authenticated user principal to authorize arbitrary task IDs.
-		if s.taskID == "" || taskID != s.taskID {
-			return mcp.NewToolResultError("task_id is not available in this session"), nil
+		if s.taskID == "" || s.sessionID == "" {
+			return mcp.NewToolResultError("task source provenance is unavailable in this session"), nil
 		}
 		arguments, ok := req.Params.Arguments.(map[string]interface{})
 		if !ok {
@@ -1325,7 +1571,8 @@ func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
 		if !ok {
 			return mcp.NewToolResultError("sources is required"), nil
 		}
-		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources}
+		// Provenance is server-authored and intentionally absent from the callable schema.
+		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources, "caller_task_id": s.taskID, "caller_session_id": s.sessionID}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddWorkspaceSources, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -1573,9 +1820,9 @@ This tool is available only to autopilot child tasks. It sends a durable questio
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan_kandev",
-			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). If a plan already exists for this task, this REPLACES ITS ENTIRE CONTENT — same as update_task_plan_kandev through a different door. Read it first with get_task_plan_kandev if you need to preserve any of it."),
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole — there is no partial update or append mode. To preserve prior content, call get_task_plan_kandev first and include its content plus your additions in this call. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
 		s.wrapHandler("create_task_plan_kandev", s.createTaskPlanHandler()),
@@ -1589,9 +1836,9 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_plan_kandev",
-			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This REPLACES THE ENTIRE PLAN — there is no partial update, append, or section-patch mode. The correct sequence is: call get_task_plan_kandev, then send this call with the full document (prior content plus your changes), never just the new section."),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
 		s.wrapHandler("update_task_plan_kandev", s.updateTaskPlanHandler()),
@@ -1729,12 +1976,6 @@ func buildWalkthroughStepSchemaItem() map[string]any {
 // to keep the registration body short and to deduplicate the JSON-schema
 // keyword strings (linter goconst rules).
 func buildQuestionSchemaItem() map[string]any {
-	const typeKey = "type"
-	const propsKey = "properties"
-	const reqKey = "required"
-	const objType = "object"
-	const stringType = "string"
-
 	str := func(desc string) map[string]any {
 		return map[string]any{typeKey: stringType, descriptionArg: desc}
 	}

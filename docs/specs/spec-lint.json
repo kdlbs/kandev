@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "limits": {
+    "guide": 16384,
+    "legacy": 32768,
+    "product": 16384,
+    "requirement": 20480,
+    "system-design": 32768,
+    "system-index": 12288,
+    "template": 8192
+  }
+}

@@ -310,6 +310,8 @@ func (r *sqliteRepository) CreateProvider(ctx context.Context, provider *models.
 	return err
 }
 
+// UpdateProvider writes the provider back, scoped to provider.UserID. A row
+// owned by someone else is reported as ErrProviderNotFound and left untouched.
 func (r *sqliteRepository) UpdateProvider(ctx context.Context, provider *models.Provider) error {
 	provider.UpdatedAt = time.Now().UTC()
 	if provider.Config == nil {
@@ -319,21 +321,31 @@ func (r *sqliteRepository) UpdateProvider(ctx context.Context, provider *models.
 	if err != nil {
 		return fmt.Errorf("failed to serialize provider config: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE notification_providers
 		SET name = ?, type = ?, config = ?, enabled = ?, updated_at = ?
-		WHERE id = ?
-	`), provider.Name, provider.Type, string(configJSON), dialect.BoolToInt(provider.Enabled), provider.UpdatedAt, provider.ID)
-	return err
+		WHERE id = ? AND user_id = ?
+	`), provider.Name, provider.Type, string(configJSON), dialect.BoolToInt(provider.Enabled), provider.UpdatedAt, provider.ID, provider.UserID)
+	if err != nil {
+		return err
+	}
+	return errIfNoRows(result)
 }
 
-func (r *sqliteRepository) GetProvider(ctx context.Context, id string) (*models.Provider, error) {
+// GetProvider reads one provider owned by userID. A provider ID belonging to
+// another user is reported exactly like an ID that does not exist, so probing
+// IDs reveals nothing about other users' configuration.
+func (r *sqliteRepository) GetProvider(ctx context.Context, userID, id string) (*models.Provider, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, user_id, name, type, config, enabled, created_at, updated_at
 		FROM notification_providers
-		WHERE id = ?
-	`), id)
-	return scanProvider(row)
+		WHERE id = ? AND user_id = ?
+	`), id, userID)
+	provider, err := scanProvider(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrProviderNotFound
+	}
+	return provider, err
 }
 
 func (r *sqliteRepository) ListProvidersByUser(ctx context.Context, userID string) ([]*models.Provider, error) {
@@ -364,9 +376,58 @@ func (r *sqliteRepository) ListProvidersByUser(ctx context.Context, userID strin
 	return providers, nil
 }
 
-func (r *sqliteRepository) DeleteProvider(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM notification_providers WHERE id = ?`), id)
-	return err
+// DeleteProvider removes one provider owned by userID, reporting a foreign or
+// nonexistent ID identically as ErrProviderNotFound.
+// ListProviderUserIDs returns every distinct user that owns at least one
+// provider. Instance-wide events (a new release) have no owning workspace to
+// resolve a recipient from, so they fan out across these owners instead of
+// landing on one hardcoded user.
+func (r *sqliteRepository) ListProviderUserIDs(ctx context.Context) ([]string, error) {
+	rows, err := r.ro.QueryContext(ctx, `
+		SELECT DISTINCT user_id FROM notification_providers ORDER BY user_id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var userIDs []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return nil, err
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return userIDs, nil
+}
+
+func (r *sqliteRepository) DeleteProvider(ctx context.Context, userID, id string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM notification_providers WHERE id = ? AND user_id = ?
+	`), id, userID)
+	if err != nil {
+		return err
+	}
+	return errIfNoRows(result)
+}
+
+// errIfNoRows turns a write that matched nothing into ErrProviderNotFound, so
+// an unauthorized target and a missing one are indistinguishable to the caller.
+func errIfNoRows(result sql.Result) error {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrProviderNotFound
+	}
+	return nil
 }
 
 func (r *sqliteRepository) ListSubscriptionsByProvider(ctx context.Context, providerID string) ([]*models.Subscription, error) {

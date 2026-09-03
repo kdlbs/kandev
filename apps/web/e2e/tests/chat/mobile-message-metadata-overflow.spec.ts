@@ -37,7 +37,7 @@ async function openMetadataDialog(
   await session.waitForLoad();
 
   const chat = session.activeChat();
-  await expect(chat.getByText(SEEDED_MESSAGE)).toBeVisible({ timeout: 15_000 });
+  await expect(chat.getByText(SEEDED_MESSAGE, { exact: true })).toBeVisible({ timeout: 15_000 });
 
   const messageBody = chat
     .locator("[data-agent-message-body][data-message-id]")

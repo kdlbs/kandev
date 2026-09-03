@@ -239,7 +239,10 @@ export function FileBrowserToolbar({
           {displayPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                <span
+                  className="min-w-0 truncate text-xs font-medium text-muted-foreground"
+                  data-testid="file-browser-workspace-path"
+                >
                   {displayPath}
                 </span>
               </TooltipTrigger>

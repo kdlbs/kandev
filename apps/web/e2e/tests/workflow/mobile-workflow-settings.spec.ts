@@ -2,6 +2,69 @@ import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings on mobile", () => {
+  test("remove sync confirmation keeps 44px inline actions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.configureGitLab(seedData.workspaceId);
+    const configResponse = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      {
+        provider: "gitlab",
+        project_path: "platform/kandev",
+        branch: "main",
+        path: ".kandev/workflows",
+        interval_seconds: 300,
+        poll_enabled: true,
+      },
+    );
+    expect(configResponse.ok).toBe(true);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const dialog = testPage.getByTestId("workflow-sync-dialog");
+    await testPage.getByTestId("workflow-sync-open").tap();
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("workflow-sync-remove").tap();
+    const confirmation = dialog.getByTestId("workflow-sync-remove-confirmation");
+    await expect(confirmation).toBeVisible();
+
+    for (const control of [
+      confirmation.getByRole("button", { name: "Cancel" }),
+      confirmation.getByTestId("workflow-sync-remove-confirm"),
+    ]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(
+        await testPage.evaluate(() => window.innerWidth),
+      );
+    }
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+
+    await testPage.keyboard.press("Escape");
+    await expect(confirmation).not.toBeVisible();
+    await expect(dialog.getByTestId("workflow-sync-remove")).toBeVisible();
+
+    await dialog.getByTestId("workflow-sync-remove").tap();
+    await dialog.getByTestId("workflow-sync-remove-confirm").tap();
+    await expect(dialog).not.toBeVisible();
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+        )
+      ).status,
+    ).toBe(204);
+  });
+
   test("configures original-session rules with touch-sized controls", async ({
     testPage,
     apiClient,
@@ -162,6 +225,60 @@ test.describe("Workflow settings on mobile", () => {
       () => document.documentElement.scrollWidth > window.innerWidth,
     );
     expect(hasDocumentOverflow).toBe(false);
+  });
+
+  test("changes both profile session lifecycle settings with touch-sized controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    const policySelect = await page
+      .selectStep(card, seedData.steps[0]!.name, true)
+      .then(() => page.stepAgentProfileSelect(card));
+    await expect(policySelect).toBeVisible();
+    await policySelect.tap();
+
+    const lifecycleNavigation = page.stepProfileSessionLifecycleSelect();
+    await expect(lifecycleNavigation).toBeVisible();
+    await lifecycleNavigation.tap();
+    const stepId = seedData.steps[0]!.id;
+    const startOption = testPage.getByTestId(`${stepId}-profile-session-start-new`);
+    const endOption = testPage.getByTestId(`${stepId}-profile-session-end-park`);
+    await expect(startOption).toBeVisible();
+    await expect(endOption).toBeVisible();
+
+    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+    for (const control of [policySelect, startOption, endOption]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
+    }
+
+    await startOption.tap();
+    await endOption.tap();
+    await testPage.keyboard.press("Escape");
+    await page.saveChanges(true);
+
+    const savedStep = (await apiClient.listWorkflowSteps(seedData.workflowId)).steps.find(
+      (step) => step.id === stepId,
+    );
+    expect(savedStep?.profile_session_start_policy).toBe("new");
+    expect(savedStep?.profile_session_end_policy).toBe("park");
+
+    await page.goto(seedData.workspaceId);
+    const reloadedCard = await page.findWorkflowCard("E2E Workflow");
+    await page.selectStep(reloadedCard, seedData.steps[0]!.name, true);
+    await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText("New on start");
+    await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText("Park on end");
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
   });
 
   test("shows optional feeder guidance from the WIP info tooltip", async ({

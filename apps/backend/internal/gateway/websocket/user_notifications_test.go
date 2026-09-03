@@ -167,3 +167,54 @@ func TestRegisterUserNotifications_PluginUserStateRoutesUnderNATSTransport(t *te
 		t.Fatal("expected the writing user's client to receive the notification even when event.Data arrives as a map (NATS transport)")
 	}
 }
+
+func TestRegisterUserNotifications_AgentProfileRecentUseReachesOnlyOwner(t *testing.T) {
+	h := newTestHub(t)
+	owner := newTestClient("owner-conn")
+	other := newTestClient("other-conn")
+	registerTestClient(h, owner)
+	registerTestClient(h, other)
+	h.SubscribeToUser(owner, "user_1")
+	h.SubscribeToUser(other, "user_2")
+
+	eventBus := bus.NewMemoryEventBus(testLoggerForUserNotifications(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	RegisterUserNotifications(ctx, eventBus, h, testLoggerForUserNotifications(t))
+	if err := eventBus.Publish(ctx, events.UserAgentProfileRecentUseUpdated, bus.NewEvent(
+		events.UserAgentProfileRecentUseUpdated,
+		"test",
+		map[string]any{
+			"user_id":     "user_1",
+			"context":     "quick_chat",
+			"profile_ids": []string{"profile-a"},
+			"revision":    int64(1),
+			"updated_at":  "2026-08-27T00:00:00Z",
+		},
+	)); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case raw := <-owner.send:
+		var message ws.Message
+		if err := json.Unmarshal(raw, &message); err != nil {
+			t.Fatalf("unmarshal envelope: %v", err)
+		}
+		if message.Action != ws.ActionUserAgentProfileRecentUseUpdated {
+			t.Fatalf("action = %q, want %q", message.Action, ws.ActionUserAgentProfileRecentUseUpdated)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(message.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if _, leaked := payload["user_id"]; leaked {
+			t.Fatalf("payload leaked user_id: %+v", payload)
+		}
+	default:
+		t.Fatal("expected owner notification")
+	}
+	if clientReceived(other) {
+		t.Fatal("expected other user's client to receive nothing")
+	}
+}

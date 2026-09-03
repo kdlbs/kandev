@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -38,6 +39,26 @@ func TestWsRecoverSessionCancelRetryReportsServiceResult(t *testing.T) {
 	require.False(t, payload.Cancelled)
 }
 
+func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	err := &orchestrator.BranchRecoveryError{
+		Cause:          errors.New("branch is gone"),
+		SessionID:      "session-1",
+		RepositoryID:   "repo-1",
+		OriginalBranch: "feature/lost",
+		BaseBranch:     "main",
+	}
+
+	response, responseErr := branchRecoveryConflictResponse(msg, err)
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "feature/lost", payload.Details["original_branch"])
+	require.Equal(t, "main", payload.Details["base_branch"])
+	require.Equal(t, "resume_new_branch", payload.Details["recovery_action"])
+}
+
 func TestWsEnsureSessionRequestParsesAutoStartOverride(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -61,6 +82,39 @@ func TestWsEnsureSessionRequestParsesAutoStartOverride(t *testing.T) {
 			} else {
 				require.Nil(t, req.AutoStart, "auto_start should be absent")
 			}
+		})
+	}
+}
+
+func TestWsRespondToPermissionRequiresTaskAndRequestIdentity(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	for _, test := range []struct {
+		name    string
+		payload map[string]any
+		want    string
+	}{
+		{
+			name: "missing task",
+			payload: map[string]any{
+				"session_id": "session-1", "request_id": "request-1", "pending_id": "pending-1", "option_id": "allow-once",
+			},
+			want: "task_id is required",
+		},
+		{
+			name: "missing request generation",
+			payload: map[string]any{
+				"task_id": "task-1", "session_id": "session-1", "pending_id": "pending-1", "option_id": "allow-once",
+			},
+			want: "request_id is required",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := handlers.wsRespondToPermission(context.Background(), createTestMessage(t, ws.ActionPermissionRespond, test.payload))
+			require.NoError(t, err)
+			var payload ws.ErrorPayload
+			require.NoError(t, json.Unmarshal(response.Payload, &payload))
+			require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+			require.Equal(t, test.want, payload.Message)
 		})
 	}
 }
