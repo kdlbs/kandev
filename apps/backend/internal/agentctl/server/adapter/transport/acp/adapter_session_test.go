@@ -2,7 +2,10 @@ package acp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +19,22 @@ type sessionRequestCaptureAgent struct {
 	loadRequest acpsdk.LoadSessionRequest
 	newStarted  chan struct{}
 	releaseNew  chan struct{}
+
+	mu                      sync.Mutex
+	sessionCounter          int
+	failNewSessionOnAttempt int
+	closeRequests           []acpsdk.CloseSessionRequest
+	closeErr                error
+}
+
+// recordedCloseRequests returns a snapshot of every session/close request the
+// fake received, in call order.
+func (a *sessionRequestCaptureAgent) recordedCloseRequests() []acpsdk.CloseSessionRequest {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]acpsdk.CloseSessionRequest, len(a.closeRequests))
+	copy(out, a.closeRequests)
+	return out
 }
 
 var (
@@ -39,8 +58,11 @@ func (*sessionRequestCaptureAgent) Cancel(context.Context, acpsdk.CancelNotifica
 	return nil
 }
 
-func (*sessionRequestCaptureAgent) CloseSession(context.Context, acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
-	return acpsdk.CloseSessionResponse{}, nil
+func (a *sessionRequestCaptureAgent) CloseSession(_ context.Context, req acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.closeRequests = append(a.closeRequests, req)
+	return acpsdk.CloseSessionResponse{}, a.closeErr
 }
 
 func (*sessionRequestCaptureAgent) DeleteSession(context.Context, acpsdk.DeleteSessionRequest) (acpsdk.DeleteSessionResponse, error) {
@@ -57,7 +79,16 @@ func (a *sessionRequestCaptureAgent) NewSession(_ context.Context, request acpsd
 		close(a.newStarted)
 		<-a.releaseNew
 	}
-	return acpsdk.NewSessionResponse{SessionId: "session-1"}, nil
+	a.mu.Lock()
+	attempt := a.sessionCounter + 1
+	if a.failNewSessionOnAttempt == attempt {
+		a.mu.Unlock()
+		return acpsdk.NewSessionResponse{}, errors.New("session/new failed")
+	}
+	a.sessionCounter = attempt
+	sessionID := fmt.Sprintf("session-%d", attempt)
+	a.mu.Unlock()
+	return acpsdk.NewSessionResponse{SessionId: acpsdk.SessionId(sessionID)}, nil
 }
 
 func (*sessionRequestCaptureAgent) Prompt(context.Context, acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
@@ -204,6 +235,84 @@ func TestResetSessionCannotInvalidateInheritedPromptOwnership(t *testing.T) {
 	}
 	adapter.finishPromptTurn(owner)
 	adapter.finishPromptTurn(successor)
+}
+
+func TestResetSessionClosesSupersededSessionWhenAdvertised(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.Close = &acpsdk.SessionCloseCapabilities{}
+
+	firstID, err := adapter.NewSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	secondID, err := adapter.ResetSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ResetSession: %v", err)
+	}
+	if secondID == firstID {
+		t.Fatalf("ResetSession returned the same session id %q twice", secondID)
+	}
+
+	closes := capture.recordedCloseRequests()
+	if len(closes) != 1 {
+		t.Fatalf("CloseSession called %d times, want 1", len(closes))
+	}
+	if string(closes[0].SessionId) != firstID {
+		t.Fatalf("closed session id = %q, want the superseded id %q", closes[0].SessionId, firstID)
+	}
+}
+
+func TestResetSessionSkipsCloseWithoutCapability(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	// newSessionRequestCaptureAdapter does not set SessionCapabilities.Close.
+
+	if _, err := adapter.NewSession(context.Background(), nil); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if _, err := adapter.ResetSession(context.Background(), nil); err != nil {
+		t.Fatalf("ResetSession: %v", err)
+	}
+
+	if closes := capture.recordedCloseRequests(); len(closes) != 0 {
+		t.Fatalf("CloseSession called %d times, want 0 when the agent omits the close capability", len(closes))
+	}
+}
+
+func TestResetSessionSkipsCloseWhenNewSessionFails(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.Close = &acpsdk.SessionCloseCapabilities{}
+
+	if _, err := adapter.NewSession(context.Background(), nil); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	capture.failNewSessionOnAttempt = 2
+	if _, err := adapter.ResetSession(context.Background(), nil); err == nil {
+		t.Fatal("ResetSession succeeded despite a failing session/new")
+	}
+
+	if closes := capture.recordedCloseRequests(); len(closes) != 0 {
+		t.Fatalf("CloseSession called %d times, want 0 after a failed reset (live session must stay intact)", len(closes))
+	}
+}
+
+func TestResetSessionSucceedsWhenCloseSessionErrors(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.Close = &acpsdk.SessionCloseCapabilities{}
+	capture.closeErr = errors.New("close failed")
+
+	if _, err := adapter.NewSession(context.Background(), nil); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	newID, err := adapter.ResetSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ResetSession returned an error despite CloseSession failing: %v", err)
+	}
+	if newID == "" {
+		t.Fatal("ResetSession returned an empty session id")
+	}
 }
 
 func newSessionRequestCaptureAdapter(t *testing.T, capabilities acpsdk.McpCapabilities) (*Adapter, *sessionRequestCaptureAgent) {

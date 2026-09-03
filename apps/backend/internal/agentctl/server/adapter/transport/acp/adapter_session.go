@@ -528,8 +528,51 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // ResetSession creates a new session on the existing connection, effectively resetting
 // the agent's conversation context without restarting the subprocess. This is much faster
 // than a full process restart since the ACP protocol supports multiple sessions per connection.
+//
+// The session/new call spawns a fresh agent-side child process without releasing the
+// superseded one, so a successful reset closes the outgoing session to release its
+// resources. The old session is captured before NewSession overwrites a.sessionID.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
-	return a.NewSession(ctx, mcpServers)
+	a.mu.RLock()
+	previous, conn := a.sessionID, a.acpConn
+	a.mu.RUnlock()
+
+	newID, err := a.NewSession(ctx, mcpServers)
+	if err != nil {
+		return "", err
+	}
+	a.closeSupersededSession(ctx, conn, previous, newID)
+	return newID, nil
+}
+
+// closeSupersededSessionTimeout bounds session/close after a reset so cleanup
+// can't hang the caller when the agent doesn't respond.
+const closeSupersededSessionTimeout = 10 * time.Second
+
+// closeSupersededSession releases the session a successful reset just replaced.
+// It fails closed: absent capability, an empty or unchanged previous id, or a
+// nil connection all skip the close silently rather than risk closing the live
+// session. A close error is logged and never surfaces to the caller, since the
+// reset itself already succeeded.
+func (a *Adapter) closeSupersededSession(ctx context.Context, conn *acp.ClientSideConnection, previous, newID string) {
+	if previous == "" || previous == newID || conn == nil {
+		return
+	}
+	a.mu.RLock()
+	supportsClose := a.capabilities.SessionCapabilities.Close != nil
+	a.mu.RUnlock()
+	if !supportsClose {
+		return
+	}
+
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeSupersededSessionTimeout)
+	defer cancel()
+	if _, err := conn.CloseSession(closeCtx, acp.CloseSessionRequest{
+		SessionId: acp.SessionId(previous),
+	}); err != nil {
+		a.logger.Warn("failed to close superseded session after reset",
+			zap.String("session_id", previous), zap.Error(err))
+	}
 }
 
 // emitReplayPlan re-emits the plan captured during session/load replay so the todo
