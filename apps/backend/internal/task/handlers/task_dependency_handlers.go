@@ -37,8 +37,9 @@ func dependencyRefs(refs []service.DependencyRef) []dto.TaskDependencyRefDTO {
 
 // Response keys repeated across the dependency handlers.
 const (
-	dependencyKeyError  = "error"
-	dependencyKeyTaskID = "task_id"
+	dependencyKeyError        = "error"
+	dependencyKeyTaskID       = "task_id"
+	maxDependencyRequestBytes = 128 << 10
 )
 
 // addTaskDependencyBody is the POST /tasks/:id/dependencies payload.
@@ -60,6 +61,7 @@ type replaceTaskDependenciesBody struct {
 // "A → B → C → A"; that body shape is what BlockersPicker already parses.
 func (h *TaskHandlers) httpAddTaskDependency(c *gin.Context) {
 	taskID := c.Param("id")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxDependencyRequestBytes)
 	var body addTaskDependencyBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{dependencyKeyError: "depends_on_task_id is required"})
@@ -86,6 +88,7 @@ func (h *TaskHandlers) httpAddTaskDependency(c *gin.Context) {
 // The request is a complete predecessor set, including an empty list to clear
 // all direct dependencies.
 func (h *TaskHandlers) httpReplaceTaskDependencies(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxDependencyRequestBytes)
 	var body replaceTaskDependenciesBody
 	if err := c.ShouldBindJSON(&body); err != nil || body.DependsOnTaskIDs == nil {
 		c.JSON(http.StatusBadRequest, gin.H{dependencyKeyError: "depends_on_task_ids is required"})

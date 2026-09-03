@@ -39,9 +39,9 @@ export function replaceTaskDependencies(
   return fetchJson<TaskDependencyProjectionResponse>(`${BASE}/tasks/${taskId}/dependencies`, {
     ...options,
     init: {
+      ...options?.init,
       method: "PUT",
       body: JSON.stringify({ depends_on_task_ids: dependsOnTaskIDs }),
-      ...options?.init,
     },
   });
 }

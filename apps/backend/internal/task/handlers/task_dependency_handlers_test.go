@@ -181,7 +181,11 @@ func TestHTTPReplaceTaskDependenciesRejectsCycleAndPreservesSet(t *testing.T) {
 	recorder := dependencyRequest(t, h, "task-c", `{"depends_on_task_ids":["task-a"]}`)
 
 	require.Equal(t, http.StatusConflict, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "cycle")
+	var response struct {
+		Cycle []string `json:"cycle"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, []string{"task-c", "task-a", "task-b", "task-c"}, response.Cycle)
 	require.Len(t, repo.blockers, 2)
 }
 
@@ -195,4 +199,35 @@ func TestHTTPReplaceTaskDependenciesRequiresCompleteList(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "depends_on_task_ids")
+}
+
+func TestHTTPReplaceTaskDependenciesRejectsTooManyIDs(t *testing.T) {
+	repo := &dependencyHandlerRepo{tasks: map[string]*models.Task{
+		"task-1": dependencyTask("task-1", "Dependent"),
+	}}
+	h := newDependencyHandlers(t, repo)
+	ids := make([]string, 513)
+	for index := range ids {
+		ids[index] = "task-2"
+	}
+	body, err := json.Marshal(map[string][]string{"depends_on_task_ids": ids})
+	require.NoError(t, err)
+
+	recorder := dependencyRequest(t, h, "task-1", string(body))
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Empty(t, repo.blockers)
+}
+
+func TestHTTPReplaceTaskDependenciesRejectsOversizedBody(t *testing.T) {
+	repo := &dependencyHandlerRepo{tasks: map[string]*models.Task{
+		"task-1": dependencyTask("task-1", "Dependent"),
+	}}
+	h := newDependencyHandlers(t, repo)
+	body := `{"depends_on_task_ids":["` + strings.Repeat("x", maxDependencyRequestBytes) + `"]}`
+
+	recorder := dependencyRequest(t, h, "task-1", body)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Empty(t, repo.blockers)
 }

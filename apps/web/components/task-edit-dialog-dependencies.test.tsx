@@ -60,6 +60,7 @@ function state(
     isDirty: false,
     save: vi.fn(),
     retry: vi.fn(),
+    retryCandidates: vi.fn(),
     ...overrides,
   };
 }
@@ -111,5 +112,19 @@ describe("TaskEditDialogDependencies", () => {
     expect(screen.getByTestId("task-edit-dependencies-error").textContent).toContain(
       "Dependency cycle: task-1 -> task-2 -> task-1",
     );
+  });
+
+  it("uses the candidate retry without disabling the editor", () => {
+    const retryCandidates = vi.fn();
+    renderDependencies(
+      state({
+        candidateError: new Error("candidate search failed"),
+        retryCandidates,
+      }),
+    );
+
+    expect(screen.getByTestId("task-create-dependencies-trigger")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("task-edit-dependencies-candidates-retry"));
+    expect(retryCandidates).toHaveBeenCalledOnce();
   });
 });

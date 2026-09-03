@@ -233,7 +233,17 @@ export function TaskCreateDependencies({
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
   const boardTasks = useBoardTasks();
-  const tasks = providedCandidates ?? boardTasks;
+  const tasks = useMemo(() => {
+    const byID = new Map<string, TaskDependencyCandidate>();
+    for (const task of providedCandidates ?? boardTasks) byID.set(task.id, task);
+    for (const id of value) {
+      const title = selectedTitles?.[id];
+      if (title !== undefined && !byID.has(id)) {
+        byID.set(id, { id, title, isArchived: true });
+      }
+    }
+    return [...byID.values()];
+  }, [boardTasks, providedCandidates, selectedTitles, value]);
 
   const selectedTitle = useMemo(() => {
     if (value.length !== 1) return undefined;

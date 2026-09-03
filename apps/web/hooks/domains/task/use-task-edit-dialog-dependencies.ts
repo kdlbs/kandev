@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listTasksByWorkspace } from "@/lib/api/domains/kanban-api";
 import {
   getTaskDependencies,
@@ -45,6 +45,7 @@ export type TaskEditDialogDependenciesState = {
   isDirty: boolean;
   save: () => Promise<void>;
   retry: () => void;
+  retryCandidates: () => void;
 };
 
 type TaskEditDialogDependenciesArgs = {
@@ -69,6 +70,11 @@ type DependencyCandidateState = {
   candidates: TaskDependencyCandidate[];
   candidatesLoading: boolean;
   candidateError: unknown | null;
+};
+
+type DependencySaveRequest = {
+  identity: string;
+  generation: number;
 };
 
 function uniqueIDs(ids: string[]): string[] {
@@ -99,6 +105,26 @@ function titlesFromRefs(refs: DependencyRef[]): Record<string, string> {
       .filter((ref): ref is DependencyRef & { title: string } => typeof ref.title === "string")
       .map((ref) => [ref.id, ref.title]),
   );
+}
+
+function useDependencySaveGuard(identity: string) {
+  const identityRef = useRef(identity);
+  const generationRef = useRef(0);
+  if (identityRef.current !== identity) {
+    identityRef.current = identity;
+    generationRef.current += 1;
+  }
+
+  const begin = useCallback((): DependencySaveRequest => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    return { identity: identityRef.current, generation };
+  }, []);
+  const isCurrent = useCallback((request: DependencySaveRequest) => {
+    return identityRef.current === request.identity && generationRef.current === request.generation;
+  }, []);
+
+  return { begin, isCurrent };
 }
 
 function useTaskDependencyProjection(
@@ -179,9 +205,9 @@ function useTaskDependencyCandidates(
 
     setCandidatesLoading(true);
     setCandidateError(null);
-    void listTasksByWorkspace(workspaceId, { page: 1, pageSize: 50, query })
-      .then((response) => {
-        if (!cancelled) setCandidates(mapCandidates(response.tasks, taskId));
+    void listAllDependencyCandidates(workspaceId, query)
+      .then((tasks) => {
+        if (!cancelled) setCandidates(mapCandidates(tasks, taskId));
       })
       .catch((error: unknown) => {
         if (!cancelled) setCandidateError(error);
@@ -198,6 +224,29 @@ function useTaskDependencyCandidates(
   return { candidates, candidatesLoading, candidateError };
 }
 
+const dependencyCandidatePageSize = 100;
+
+async function listAllDependencyCandidates(
+  workspaceId: string,
+  query: string,
+): Promise<Array<{ id: string; title: string; archived_at?: string | null }>> {
+  const tasks: Array<{ id: string; title: string; archived_at?: string | null }> = [];
+  let page = 1;
+  let total = 0;
+  do {
+    const response = await listTasksByWorkspace(workspaceId, {
+      page,
+      pageSize: dependencyCandidatePageSize,
+      query,
+    });
+    tasks.push(...response.tasks);
+    total = response.total;
+    if (response.tasks.length === 0) break;
+    page += 1;
+  } while (tasks.length < total);
+  return tasks;
+}
+
 export function useTaskEditDialogDependencies({
   open,
   workspaceId,
@@ -205,19 +254,31 @@ export function useTaskEditDialogDependencies({
 }: TaskEditDialogDependenciesArgs): TaskEditDialogDependenciesState {
   const [saveError, setSaveError] = useState<unknown | null>(null);
   const [submitError, setSubmitError] = useState<TaskDependencyUpdateFailure | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
+  const [projectionReloadToken, setProjectionReloadToken] = useState(0);
+  const [candidateReloadToken, setCandidateReloadToken] = useState(0);
   const [query, setQueryState] = useState("");
-  const projection = useTaskDependencyProjection({ open, workspaceId, taskId }, reloadToken);
+  const projection = useTaskDependencyProjection(
+    { open, workspaceId, taskId },
+    projectionReloadToken,
+  );
   const candidateState = useTaskDependencyCandidates(
     { open, workspaceId, taskId, query },
-    reloadToken,
+    candidateReloadToken,
   );
+
+  const saveIdentity = JSON.stringify([
+    open,
+    workspaceId ?? null,
+    taskId ?? null,
+    projectionReloadToken,
+  ]);
+  const saveGuard = useDependencySaveGuard(saveIdentity);
 
   useEffect(() => {
     setSaveError(null);
     setSubmitError(null);
     if (open && workspaceId && taskId) setQueryState("");
-  }, [open, reloadToken, taskId, workspaceId]);
+  }, [open, taskId, workspaceId]);
 
   const setDraftIds = useCallback(
     (ids: string[]) => {
@@ -237,19 +298,23 @@ export function useTaskEditDialogDependencies({
   const isDirty = !sameIDs(confirmedIds, draftIds);
 
   const save = useCallback(async () => {
-    if (!taskId || loading || !isDirty) return;
+    if (!open || !workspaceId || !taskId || loading || !isDirty) return;
+    const request = saveGuard.begin();
+    const ids = [...draftIds];
     setSaveError(null);
     setSubmitError(null);
     try {
-      await replaceTaskDependencies(taskId, draftIds);
-      setConfirmedIds(draftIds);
+      await replaceTaskDependencies(taskId, ids);
+      if (!saveGuard.isCurrent(request)) return;
+      setConfirmedIds(ids);
     } catch (cause: unknown) {
+      if (!saveGuard.isCurrent(request)) return;
       const failure: TaskDependencyUpdateFailure = { dependencyUpdate: true, cause };
       setSaveError(cause);
       setSubmitError(failure);
       throw failure;
     }
-  }, [draftIds, isDirty, loading, taskId]);
+  }, [draftIds, isDirty, loading, open, saveGuard, taskId, workspaceId]);
 
   const selectedTitles = useMemo(
     () => ({
@@ -258,8 +323,9 @@ export function useTaskEditDialogDependencies({
     }),
     [candidates, knownTitles],
   );
-  const retry = useCallback(() => setReloadToken((value) => value + 1), []);
-  const ready = !loading && !loadError && !candidateError;
+  const retry = useCallback(() => setProjectionReloadToken((value) => value + 1), []);
+  const retryCandidates = useCallback(() => setCandidateReloadToken((value) => value + 1), []);
+  const ready = !loading && !loadError;
 
   return {
     taskId: taskId ?? null,
@@ -281,5 +347,6 @@ export function useTaskEditDialogDependencies({
     isDirty,
     save,
     retry,
+    retryCandidates,
   };
 }

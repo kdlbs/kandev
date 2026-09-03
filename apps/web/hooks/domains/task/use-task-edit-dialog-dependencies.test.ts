@@ -22,6 +22,16 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
 
 const dependency = (id: string, title: string) => ({ id, title, state: "TODO" as const });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 beforeEach(() => {
   vi.mocked(getTaskDependencies).mockReset();
   vi.mocked(replaceTaskDependencies).mockReset();
@@ -55,7 +65,35 @@ describe("useTaskEditDialogDependencies", () => {
     expect(result.current.candidates.map((task) => task.id)).toEqual(["task-2"]);
     expect(listTasksByWorkspace).toHaveBeenCalledWith("ws-1", {
       page: 1,
-      pageSize: 50,
+      pageSize: 100,
+      query: "",
+    });
+  });
+
+  it("loads every candidate page", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `task-${index + 1}`,
+      title: `Task ${index + 1}`,
+      archived_at: null,
+    }));
+    vi.mocked(listTasksByWorkspace).mockImplementation(async (_workspaceId, params) => {
+      if (params?.page === 1) return { total: 101, tasks: firstPage } as never;
+      return {
+        total: 101,
+        tasks: [{ id: "task-101", title: "Task 101", archived_at: null }],
+      } as never;
+    });
+
+    const { result } = renderHook(() =>
+      useTaskEditDialogDependencies({ open: true, workspaceId: "ws-1", taskId: "task-1" }),
+    );
+
+    await waitFor(() => expect(result.current.candidates).toHaveLength(100));
+
+    expect(result.current.candidates.map((task) => task.id)).toContain("task-101");
+    expect(listTasksByWorkspace).toHaveBeenNthCalledWith(2, "ws-1", {
+      page: 2,
+      pageSize: 100,
       query: "",
     });
   });
@@ -103,5 +141,82 @@ describe("useTaskEditDialogDependencies", () => {
     expect(result.current.draftIds).toEqual(["task-2", "task-3"]);
     expect(result.current.error).toBe(apiError);
     expect(isTaskDependencyUpdateFailure(result.current.submitError)).toBe(true);
+  });
+});
+
+describe("useTaskEditDialogDependencies failure handling", () => {
+  it("keeps the editor ready when candidate search fails", async () => {
+    vi.mocked(listTasksByWorkspace).mockRejectedValueOnce(new Error("candidate search failed"));
+    const { result } = renderHook(() =>
+      useTaskEditDialogDependencies({ open: true, workspaceId: "ws-1", taskId: "task-1" }),
+    );
+
+    await waitFor(() => expect(result.current.candidateError).not.toBeNull());
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.ready).toBe(true);
+  });
+
+  it("retries candidates without reloading the projection or losing the draft", async () => {
+    vi.mocked(listTasksByWorkspace).mockRejectedValueOnce(new Error("candidate search failed"));
+    const { result } = renderHook(() =>
+      useTaskEditDialogDependencies({ open: true, workspaceId: "ws-1", taskId: "task-1" }),
+    );
+
+    await waitFor(() => expect(result.current.candidateError).not.toBeNull());
+    act(() => result.current.setDraftIds(["task-3"]));
+    vi.mocked(listTasksByWorkspace).mockResolvedValueOnce({
+      total: 1,
+      tasks: [{ id: "task-3", title: "Recovered candidate", archived_at: null }],
+    } as never);
+
+    act(() => result.current.retryCandidates());
+    await waitFor(() =>
+      expect(result.current.candidates).toEqual([
+        { id: "task-3", title: "Recovered candidate", isArchived: false },
+      ]),
+    );
+
+    expect(result.current.draftIds).toEqual(["task-3"]);
+    expect(getTaskDependencies).toHaveBeenCalledOnce();
+  });
+
+  it("ignores a save result from the previous task after the dialog changes identity", async () => {
+    const saveRequest = deferred<{ task_id: string }>();
+    vi.mocked(replaceTaskDependencies).mockReturnValue(saveRequest.promise as never);
+    const { result, rerender } = renderHook(
+      ({ open, workspaceId, taskId }: { open: boolean; workspaceId: string; taskId: string }) =>
+        useTaskEditDialogDependencies({ open, workspaceId, taskId }),
+      {
+        initialProps: { open: true, workspaceId: "ws-1", taskId: "task-1" },
+      },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.setDraftIds(["task-3"]));
+    let savePromise!: Promise<void>;
+    act(() => {
+      savePromise = result.current.save();
+    });
+
+    vi.mocked(getTaskDependencies).mockResolvedValueOnce({
+      id: "task-2",
+      depends_on: [dependency("task-4", "New predecessor")],
+    });
+    vi.mocked(listTasksByWorkspace).mockResolvedValueOnce({
+      total: 1,
+      tasks: [{ id: "task-4", title: "New predecessor", archived_at: null }],
+    } as never);
+    rerender({ open: true, workspaceId: "ws-2", taskId: "task-2" });
+    await waitFor(() => expect(result.current.draftIds).toEqual(["task-4"]));
+
+    await act(async () => {
+      saveRequest.resolve({ task_id: "task-1" });
+      await savePromise;
+    });
+
+    expect(result.current.confirmedIds).toEqual(["task-4"]);
+    expect(result.current.draftIds).toEqual(["task-4"]);
+    expect(result.current.saveError).toBeNull();
   });
 });

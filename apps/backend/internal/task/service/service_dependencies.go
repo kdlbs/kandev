@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -54,6 +55,11 @@ const (
 // dependencyCycleWalkLimit bounds the BFS in checkDependencyCycle. A walk that
 // exceeds it rejects the edge rather than accepting an unverified one.
 const dependencyCycleWalkLimit = 1000
+
+const (
+	maxTaskDependencyCount    = 512
+	maxTaskDependencyIDLength = 128
+)
 
 // DependencyRef is one end of a dependency edge, carrying enough detail for the
 // dependency chip to render without fetching each related task.
@@ -156,10 +162,10 @@ func (s *Service) authorizeDependencyPair(ctx context.Context, taskID, dependsOn
 
 // AddDependency records "taskID depends on dependsOnTaskID".
 //
-// This is the single validator for dependency edges. Self-edges,
-// cross-workspace edges, and cycles of any length are rejected here, and both
-// the task-scoped routes and the Office blocker routes go through it — a second
-// validator would let a cycle in through whichever path was weakest.
+// This is the task-service validator for dependency edges. Self-edges,
+// cross-workspace edges, and cycles of any length are rejected here. The task
+// and Office mutation surfaces share the same process-wide mutation lock while
+// they validate and write their respective repository adapters.
 func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID string) error {
 	if s.blockers == nil {
 		return ErrDependencyRepositoryUnavailable
@@ -169,6 +175,9 @@ func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID str
 	}
 	if taskID == dependsOnTaskID {
 		return fmt.Errorf("a task cannot depend on itself")
+	}
+	if len(dependsOnTaskID) > maxTaskDependencyIDLength {
+		return fmt.Errorf("dependency task IDs cannot exceed %d characters", maxTaskDependencyIDLength)
 	}
 	if err := s.authorizeDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
 		return err
@@ -228,6 +237,9 @@ func (s *Service) ReplaceDependencies(ctx context.Context, taskID string, depend
 }
 
 func validateDependencyIDs(taskID string, dependsOnTaskIDs []string) error {
+	if len(dependsOnTaskIDs) > maxTaskDependencyCount {
+		return fmt.Errorf("%w: at most %d dependency task IDs are allowed", ErrInvalidDependencySet, maxTaskDependencyCount)
+	}
 	seen := make(map[string]struct{}, len(dependsOnTaskIDs))
 	for _, dependsOnTaskID := range dependsOnTaskIDs {
 		switch dependsOnTaskID {
@@ -235,6 +247,9 @@ func validateDependencyIDs(taskID string, dependsOnTaskIDs []string) error {
 			return fmt.Errorf("%w: dependency task IDs cannot be empty", ErrInvalidDependencySet)
 		case taskID:
 			return fmt.Errorf("%w: a task cannot depend on itself", ErrInvalidDependencySet)
+		}
+		if len(dependsOnTaskID) > maxTaskDependencyIDLength {
+			return fmt.Errorf("%w: dependency task IDs cannot exceed %d characters", ErrInvalidDependencySet, maxTaskDependencyIDLength)
 		}
 		if _, duplicate := seen[dependsOnTaskID]; duplicate {
 			return fmt.Errorf("%w: dependency %s is listed more than once", ErrInvalidDependencySet, dependsOnTaskID)
@@ -252,8 +267,8 @@ func (s *Service) replaceDependencyEdges(
 	dependsOnTaskIDs []string,
 	replacer taskDependencyReplacer,
 ) ([]string, error) {
-	s.dependencyEdgeMu.Lock()
-	defer s.dependencyEdgeMu.Unlock()
+	unlock := taskdependencies.AcquireMutationLock()
+	defer unlock()
 
 	if err := s.validateReplacementSet(ctx, taskID, dependsOnTaskIDs); err != nil {
 		return nil, err
@@ -290,11 +305,11 @@ func (s *Service) validateReplacementSet(ctx context.Context, taskID string, dep
 	return nil
 }
 
-// insertDependencyEdge holds dependencyEdgeMu across exactly the validate,
-// cycle-walk and insert, and nothing else.
+// insertDependencyEdge holds the shared mutation lock across exactly the
+// validate, cycle-walk and insert, and nothing else.
 func (s *Service) insertDependencyEdge(ctx context.Context, taskID, dependsOnTaskID string) error {
-	s.dependencyEdgeMu.Lock()
-	defer s.dependencyEdgeMu.Unlock()
+	unlock := taskdependencies.AcquireMutationLock()
+	defer unlock()
 	if err := s.validateDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
 		return err
 	}
@@ -328,10 +343,10 @@ func (s *Service) RemoveDependency(ctx context.Context, taskID, dependsOnTaskID 
 	return nil
 }
 
-// deleteDependencyEdge holds the edge lock across the delete only.
+// deleteDependencyEdge holds the shared mutation lock across the delete only.
 func (s *Service) deleteDependencyEdge(ctx context.Context, taskID, dependsOnTaskID string) error {
-	s.dependencyEdgeMu.Lock()
-	defer s.dependencyEdgeMu.Unlock()
+	unlock := taskdependencies.AcquireMutationLock()
+	defer unlock()
 	return s.blockers.DeleteTaskBlocker(ctx, taskID, dependsOnTaskID)
 }
 
@@ -706,6 +721,8 @@ func (s *Service) pruneDanglingEdge(ctx context.Context, taskID, missingTaskID s
 	if s.blockers == nil {
 		return
 	}
+	unlock := taskdependencies.AcquireMutationLock()
+	defer unlock()
 	if err := s.blockers.DeleteTaskBlocker(ctx, taskID, missingTaskID); err != nil {
 		s.logger.Warn("failed to prune dangling dependency edge",
 			zap.String("task_id", taskID),
@@ -732,14 +749,22 @@ func (s *Service) deleteDependencyEdgesForTask(ctx context.Context, taskID strin
 	if !ok {
 		return
 	}
-	dependents, err := s.blockers.ListTasksBlockedBy(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to list dependents before edge cleanup",
-			zap.String("task_id", taskID), zap.Error(err))
-	}
-	if err := cleaner.DeleteTaskBlockersForTask(ctx, taskID); err != nil {
+	var dependents []string
+	var cleanupErr error
+	func() {
+		unlock := taskdependencies.AcquireMutationLock()
+		defer unlock()
+		var err error
+		dependents, err = s.blockers.ListTasksBlockedBy(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to list dependents before edge cleanup",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+		cleanupErr = cleaner.DeleteTaskBlockersForTask(ctx, taskID)
+	}()
+	if cleanupErr != nil {
 		s.logger.Warn("failed to clean up dependency edges for deleted task",
-			zap.String("task_id", taskID), zap.Error(err))
+			zap.String("task_id", taskID), zap.Error(cleanupErr))
 		return
 	}
 	// Dependents may now be unblocked, so refresh them. Deliberately no

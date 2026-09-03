@@ -164,3 +164,27 @@ describe("TaskCreateDependencies", () => {
     expect(screen.getByTestId(TRIGGER_TEST_ID).textContent).toContain(NO_DEPENDENCY_LABEL);
   });
 });
+
+describe("selected dependency preservation", () => {
+  it("keeps a selected predecessor visible when the server candidate page omits it", () => {
+    const selectedID = "task-archived";
+    render(
+      <TooltipProvider>
+        <TaskCreateDependencies
+          value={[selectedID]}
+          onChange={vi.fn()}
+          candidates={[{ id: "task-other", title: "Other task" }]}
+          selectedTitles={{ [selectedID]: "Archived predecessor" }}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+
+    expect(
+      within(screen.getByTestId("task-create-dependencies-popover")).getByTestId(
+        `task-create-dependency-option-${selectedID}`,
+      ),
+    ).toBeTruthy();
+  });
+});

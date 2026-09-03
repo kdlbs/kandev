@@ -104,7 +104,7 @@ export function TaskEditDialogDependencies({
             type="button"
             variant="ghost"
             className="h-11 min-h-11 shrink-0 cursor-pointer px-3 text-xs"
-            onClick={state.retry}
+            onClick={state.retryCandidates}
             data-testid="task-edit-dependencies-candidates-retry"
           >
             {t("task:retry")}

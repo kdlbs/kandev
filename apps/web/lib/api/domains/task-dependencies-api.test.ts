@@ -41,6 +41,24 @@ describe("replaceTaskDependencies", () => {
     expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
   });
 
+  it("does not let caller request options override the replacement method or body", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ task_id: "task-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await replaceTaskDependencies("task-1", ["task-2"], {
+      baseUrl: API_BASE_URL,
+      init: { method: "POST", body: "caller-controlled body" },
+    });
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(init?.method).toBe("PUT");
+    expect(init?.body).toBe(JSON.stringify({ depends_on_task_ids: ["task-2"] }));
+  });
+
   it("keeps the structured cycle path available to the edit dialog", async () => {
     fetchSpy.mockResolvedValueOnce(
       new Response(
