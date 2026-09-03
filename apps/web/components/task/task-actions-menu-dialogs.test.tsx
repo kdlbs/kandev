@@ -6,6 +6,13 @@ import { useTaskActionsMenu, type TaskActionsMenuBoardRow } from "@/hooks/use-ta
 import { TaskActionsMenuDialogs } from "./task-actions-menu-dialogs";
 
 const capturedEditDialogProps: Array<{ open: boolean; focusReturnRef?: { current: unknown } }> = [];
+type CapturedLinkDialogProps = { open: boolean; focusReturnRef?: { current: unknown } };
+const capturedLinkDialogProps: Record<string, CapturedLinkDialogProps[]> = {
+  pr: [],
+  issue: [],
+  mr: [],
+  external: [],
+};
 
 vi.mock("@/components/task-create-dialog", () => ({
   TaskCreateDialog: (props: { open: boolean; focusReturnRef?: { current: unknown } }) => {
@@ -14,9 +21,38 @@ vi.mock("@/components/task-create-dialog", () => ({
   },
 }));
 
+vi.mock("@/components/task/task-github-pr-dialog", () => ({
+  TaskGitHubPRDialog: (props: CapturedLinkDialogProps) => {
+    capturedLinkDialogProps.pr.push(props);
+    return props.open ? <div data-testid="pr-dialog-open" /> : null;
+  },
+}));
+
+vi.mock("@/components/task/task-github-issue-dialog", () => ({
+  TaskGitHubIssueDialog: (props: CapturedLinkDialogProps) => {
+    capturedLinkDialogProps.issue.push(props);
+    return props.open ? <div data-testid="issue-dialog-open" /> : null;
+  },
+}));
+
+vi.mock("@/components/gitlab/task-mr-link-dialog", () => ({
+  TaskMRLinkDialog: (props: CapturedLinkDialogProps) => {
+    capturedLinkDialogProps.mr.push(props);
+    return props.open ? <div data-testid="mr-dialog-open" /> : null;
+  },
+}));
+
+vi.mock("@/components/task/task-external-link-dialog", () => ({
+  TaskExternalLinkDialog: (props: CapturedLinkDialogProps) => {
+    capturedLinkDialogProps.external.push(props);
+    return props.open ? <div data-testid="external-dialog-open" /> : null;
+  },
+}));
+
 afterEach(() => {
   cleanup();
   capturedEditDialogProps.length = 0;
+  for (const key of Object.keys(capturedLinkDialogProps)) capturedLinkDialogProps[key].length = 0;
 });
 
 const TASK_ID = "task-1";
@@ -41,6 +77,18 @@ function Harness({ boardRow }: { boardRow: TaskActionsMenuBoardRow | null }) {
     <>
       <button data-testid="open-edit" onClick={() => menu.setShowEditDialog(true)}>
         Edit
+      </button>
+      <button data-testid="open-pr" onClick={() => menu.setShowPRDialog(true)}>
+        Link PR
+      </button>
+      <button data-testid="open-issue" onClick={() => menu.setShowIssueDialog(true)}>
+        Link issue
+      </button>
+      <button data-testid="open-mr" onClick={() => menu.setShowMRDialog(true)}>
+        Link MR
+      </button>
+      <button data-testid="open-external" onClick={() => menu.setExternalLinkProvider("jira")}>
+        Link Jira
       </button>
       <TaskActionsMenuDialogs
         taskId={TASK_ID}
@@ -112,5 +160,39 @@ describe("TaskActionsMenuDialogs — Edit dialog stays mounted through a board-r
     fireEvent.click(screen.getByTestId("open-edit"));
 
     expect(capturedEditDialogProps.at(-1)?.focusReturnRef).toBeTruthy();
+  });
+});
+
+describe("TaskActionsMenuDialogs — Link dialogs get a focusReturnRef (AC-TASKS-TASK-ACTIONS-MENU-001.12)", () => {
+  it("passes a focusReturnRef pointing at the trigger to the GitHub PR dialog", () => {
+    renderHarness(BOARD_ROW);
+    fireEvent.click(screen.getByTestId("open-pr"));
+
+    expect(screen.getByTestId("pr-dialog-open")).toBeTruthy();
+    expect(capturedLinkDialogProps.pr.at(-1)?.focusReturnRef).toBeTruthy();
+  });
+
+  it("passes a focusReturnRef pointing at the trigger to the GitHub Issue dialog", () => {
+    renderHarness(BOARD_ROW);
+    fireEvent.click(screen.getByTestId("open-issue"));
+
+    expect(screen.getByTestId("issue-dialog-open")).toBeTruthy();
+    expect(capturedLinkDialogProps.issue.at(-1)?.focusReturnRef).toBeTruthy();
+  });
+
+  it("passes a focusReturnRef pointing at the trigger to the GitLab MR dialog", () => {
+    renderHarness(BOARD_ROW);
+    fireEvent.click(screen.getByTestId("open-mr"));
+
+    expect(screen.getByTestId("mr-dialog-open")).toBeTruthy();
+    expect(capturedLinkDialogProps.mr.at(-1)?.focusReturnRef).toBeTruthy();
+  });
+
+  it("passes a focusReturnRef pointing at the trigger to the external link dialog", () => {
+    renderHarness(BOARD_ROW);
+    fireEvent.click(screen.getByTestId("open-external"));
+
+    expect(screen.getByTestId("external-dialog-open")).toBeTruthy();
+    expect(capturedLinkDialogProps.external.at(-1)?.focusReturnRef).toBeTruthy();
   });
 });

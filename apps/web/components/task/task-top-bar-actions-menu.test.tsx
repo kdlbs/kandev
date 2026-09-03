@@ -7,7 +7,26 @@ import type { AppState } from "@/lib/state/store";
 import { TaskTopBarActionsMenu } from "./task-top-bar-actions-menu";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 
-const mockClient = { subscribe: vi.fn(() => vi.fn()) };
+type WsHandler = (message: { payload: Record<string, unknown> }) => void;
+const wsHandlers = new Map<string, Set<WsHandler>>();
+
+function emitWs(type: string, payload: Record<string, unknown>) {
+  const handlers = wsHandlers.get(type);
+  if (!handlers) return;
+  for (const handler of handlers) handler({ payload });
+}
+
+const mockClient = {
+  subscribe: vi.fn(() => vi.fn()),
+  on: vi.fn((type: string, handler: WsHandler) => {
+    const handlers = wsHandlers.get(type) ?? new Set();
+    handlers.add(handler);
+    wsHandlers.set(type, handlers);
+    return () => {
+      handlers.delete(handler);
+    };
+  }),
+};
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => mockClient,
 }));
@@ -15,6 +34,8 @@ vi.mock("@/lib/ws/connection", () => ({
 afterEach(() => {
   cleanup();
   mockClient.subscribe.mockClear();
+  mockClient.on.mockClear();
+  wsHandlers.clear();
 });
 
 const TASK_ID = "task-1";
@@ -259,20 +280,101 @@ describe("TaskTopBarActionsMenu — live demotion on board-row loss (AC-TASKS-TA
 });
 
 describe("TaskTopBarActionsMenu — closes on genuine removal (AC-TASKS-TASK-ACTIONS-MENU-004.5)", () => {
-  it("closes the trigger's open menu once the subject leaves every board collection for good", () => {
-    const getStore = renderMenu(initialStateWithTaskInActiveKanban());
+  it("closes the trigger's open menu when task.deleted arrives for this task", () => {
+    renderMenu(initialStateWithTaskInActiveKanban());
     const trigger = screen.getByTestId(TRIGGER_TEST_ID);
 
     openMenu(trigger);
     expectMenuOpen(trigger, true);
 
     act(() => {
-      getStore().setState((state) => ({
-        kanban: { ...state.kanban, tasks: [] },
-      }));
+      emitWs("task.deleted", { task_id: TASK_ID });
     });
 
     expectMenuOpen(trigger, false);
+  });
+
+  it("closes the trigger's open menu when task.updated arrives with archived_at set for this task", () => {
+    renderMenu(initialStateWithTaskInActiveKanban());
+    const trigger = screen.getByTestId(TRIGGER_TEST_ID);
+
+    openMenu(trigger);
+    expectMenuOpen(trigger, true);
+
+    act(() => {
+      emitWs("task.updated", { task_id: TASK_ID, archived_at: "2026-09-03T00:00:00Z" });
+    });
+
+    expectMenuOpen(trigger, false);
+  });
+
+  it("ignores task.deleted for a different task id", () => {
+    renderMenu(initialStateWithTaskInActiveKanban());
+    const trigger = screen.getByTestId(TRIGGER_TEST_ID);
+
+    openMenu(trigger);
+    expectMenuOpen(trigger, true);
+
+    act(() => {
+      emitWs("task.deleted", { task_id: "some-other-task" });
+    });
+
+    expectMenuOpen(trigger, true);
+  });
+
+  it("ignores task.updated for this task when archived_at is absent (an ordinary field update)", () => {
+    renderMenu(initialStateWithTaskInActiveKanban());
+    const trigger = screen.getByTestId(TRIGGER_TEST_ID);
+
+    openMenu(trigger);
+    expectMenuOpen(trigger, true);
+
+    act(() => {
+      emitWs("task.updated", { task_id: TASK_ID, title: "Renamed" });
+    });
+
+    expectMenuOpen(trigger, true);
+  });
+});
+
+describe("TaskTopBarActionsMenu — board-row loss alone does not close the menu (AC-TASKS-TASK-ACTIONS-MENU-002.6/004.1c)", () => {
+  it("stays open and only demotes entries when the board row disappears from the store without a task.deleted/archived lifecycle event", () => {
+    const { getStore, setBoardRow } = renderMenuWithBoardRow(
+      initialStateWithMoveTargets(),
+      RESOLVED_BOARD_ROW,
+    );
+    const trigger = screen.getByTestId(TRIGGER_TEST_ID);
+
+    openMenu(trigger);
+    expectMenuOpen(trigger, true);
+    expect(screen.getByTestId(MOVE_TO_TEST_ID)).toBeTruthy();
+
+    // Mirrors what a real board-row loss looks like: the task's row vanishes
+    // from the store's collections (e.g. `useTaskActionsMenuBoardRow` can no
+    // longer resolve it) and the parent recomputes `boardRow` as null -- but
+    // no task.deleted/archived_at lifecycle event ever arrives, because the
+    // task itself is still alive. This is the exact state combination the
+    // old `existsInBoard`-based implementation could not tell apart from a
+    // genuine removal.
+    act(() => {
+      getStore().setState((state) => ({
+        kanban: { ...state.kanban, tasks: [] },
+        kanbanMulti: {
+          ...state.kanbanMulti,
+          snapshots: {
+            ...state.kanbanMulti.snapshots,
+            [OLD_WORKFLOW_ID]: {
+              ...state.kanbanMulti.snapshots[OLD_WORKFLOW_ID],
+              tasks: [],
+            },
+          },
+        },
+      }));
+      setBoardRow(null);
+    });
+
+    expectMenuOpen(trigger, true);
+    expect(screen.queryByTestId(MOVE_TO_TEST_ID)).toBeNull();
   });
 });
 

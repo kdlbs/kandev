@@ -1,8 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { useCallback, useEffect, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { TaskActionsMenuTrigger } from "@/components/task/task-actions-menu-trigger";
 import { TaskActionsMenuDialogs } from "@/components/task/task-actions-menu-dialogs";
@@ -32,39 +30,45 @@ function useSubscribeToTask(taskId: string | null) {
 }
 
 /**
- * Closes the menu when the subject leaves the board's task collections
- * (AC-TASKS-TASK-ACTIONS-MENU-004.5): the detail route's own task record can
- * outlive a peer's delete (it is seeded once from the initial page load and
- * has no WS-driven unmount for this case), so the board's live collections,
- * not the page's own task prop, are the observation this criterion names.
- * Guarded by "seen present, now absent" rather than "currently absent" so a
- * task that simply has not loaded into the board yet never falsely closes
- * the menu. Also resets any pending confirm/link dialog: a subject the board
- * just pruned must not leave a stale, still-actionable confirmation open
+ * Closes the menu only when the subject is genuinely gone -- deleted, or
+ * archived by another actor (AC-TASKS-TASK-ACTIONS-MENU-004.5). This
+ * deliberately listens for the task's own lifecycle events rather than
+ * inferring removal from board-collection presence: a task's board row can
+ * also disappear while the task is still alive (e.g. a move to a workflow
+ * this client has not tracked as a snapshot yet), which is the unresolved-row
+ * case AC-TASKS-TASK-ACTIONS-MENU-002.6/004.1c governs and must demote
+ * entries in place rather than close the menu. Board presence and "genuinely
+ * gone" happen to coincide for an ordinary delete/archive, but they are not
+ * the same predicate, so this hook never reads board state at all. Also
+ * resets any pending confirm/link dialog: a subject that is gone must not
+ * leave a stale, still-actionable confirmation open
  * (AC-TASKS-TASK-ACTIONS-MENU-004.5a's no-retarget rule applies here too).
  */
-function useCloseMenuOnTaskRemoved(
+function useCloseMenuOnTaskGone(
   taskId: string | null,
   setOpen: (open: boolean) => void,
   closeDialogs: () => void,
 ) {
   useSubscribeToTask(taskId);
-  const existsInBoard = useAppStore((state) => {
-    if (!taskId) return false;
-    if (state.kanban.tasks.some((task) => task.id === taskId)) return true;
-    return findTaskInSnapshots(taskId, state.kanbanMulti.snapshots) != null;
-  });
-  const seenRef = useRef(false);
   useEffect(() => {
-    if (existsInBoard) {
-      seenRef.current = true;
-      return;
-    }
-    if (seenRef.current) {
+    if (!taskId) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    const close = () => {
       setOpen(false);
       closeDialogs();
-    }
-  }, [existsInBoard, setOpen, closeDialogs]);
+    };
+    const unsubscribeDeleted = client.on("task.deleted", (message) => {
+      if (message.payload.task_id === taskId) close();
+    });
+    const unsubscribeUpdated = client.on("task.updated", (message) => {
+      if (message.payload.task_id === taskId && message.payload.archived_at) close();
+    });
+    return () => {
+      unsubscribeDeleted();
+      unsubscribeUpdated();
+    };
+  }, [taskId, setOpen, closeDialogs]);
 }
 
 type TaskTopBarActionsMenuProps = {
@@ -131,7 +135,7 @@ export function TaskTopBarActionsMenu({
     onArchive: (opts) => (taskId ? archiving.invoke(taskId, opts) : undefined),
     onDelete: (opts) => (taskId ? deleting.invoke(taskId, opts) : undefined),
   });
-  useCloseMenuOnTaskRemoved(taskId, setOpen, menu.closeDialogs);
+  useCloseMenuOnTaskGone(taskId, setOpen, menu.closeDialogs);
 
   if (!taskId) return null;
 

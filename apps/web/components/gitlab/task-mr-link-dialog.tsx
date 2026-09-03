@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { createTaskMR } from "@/lib/api/domains/gitlab-api";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 import type { Repository } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
@@ -111,6 +112,7 @@ export function TaskMRLinkDialog({
   workspaceId,
   taskRepositories,
   repositories,
+  focusReturnRef,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -118,6 +120,9 @@ export function TaskMRLinkDialog({
   workspaceId: string;
   taskRepositories: TaskRepositoryLink[];
   repositories: Repository[];
+  /** Element to return keyboard focus to on close (AC-TASKS-TASK-ACTIONS-MENU-001.12).
+   * Omitted callers keep Radix's default restore-to-previously-focused-element behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
   const options = useRepositoryOptions(repositories, taskRepositories);
@@ -168,7 +173,10 @@ export function TaskMRLinkDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={createFocusReturnHandler(focusReturnRef)}
+      >
         <DialogHeader>
           <DialogTitle>{t("gitlab:linkGitlabMergeRequest")}</DialogTitle>
           <DialogDescription>{t("gitlab:pasteAMergeRequestUrlFrom")}</DialogDescription>

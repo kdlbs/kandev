@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { KanbanPresentation } from "@/components/kanban-card";
-import { useKanbanCardMoveTargets } from "@/components/kanban-card-menu-items";
+import type { KanbanCardMoveTargets } from "@/components/kanban-card-menu-items";
 import type { WorkflowStep } from "@/components/kanban-card";
+import { useTaskActionsMenuMoveTargets } from "@/hooks/use-task-actions-menu-move-targets";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import {
   useTaskMenuDialogState,
@@ -71,7 +72,7 @@ type ComputeEntriesArgs = {
   taskId: string | null;
   tier: ReturnType<typeof resolveTaskActionsMenuTier>;
   boardRow: TaskActionsMenuBoardRow | null;
-  moveTargets: ReturnType<typeof useKanbanCardMoveTargets>;
+  moveTargets: KanbanCardMoveTargets;
   disabled: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
@@ -200,7 +201,7 @@ export function useTaskActionsMenu({
   // Re-render on any registry mutation so a menu action a plugin registers or
   // disables at runtime appears/disappears in an already-open menu (AC-002.8).
   usePluginRegistry();
-  const moveTargets = useKanbanCardMoveTargets(taskId ?? "", steps);
+  const moveTargets = useTaskActionsMenuMoveTargets(taskId ?? "", steps);
   const moveTasks = useTaskWorkflowMove();
 
   const triggerRef = useRef<HTMLButtonElement>(null);

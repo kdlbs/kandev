@@ -489,25 +489,29 @@ function buildDetachEntry({
   };
 }
 
+/**
+ * The card's hot render path: a caller with column context already passes a
+ * `steps` list pre-filtered for this workflow, and its `currentWorkflowId`
+ * always resolves from `kanbanMulti.snapshots`. Kept to exactly these two
+ * subscriptions (system design: no `kanban.tasks`/`hiddenWorkflowStepIds`
+ * reads here) so unrelated writes to either slice never re-render every
+ * visible card. Callers without column context (preview panel, detail top
+ * bar) use `useTaskActionsMenuMoveTargets` instead, which layers the
+ * flat-list and hidden-step fallbacks this hook intentionally omits.
+ */
 export function useKanbanCardMoveTargets(
   taskId: string,
   steps?: WorkflowStep[],
 ): KanbanCardMoveTargets {
   const workflows = useAppStore((state) => state.workflows.items);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
 
-  // A snapshot's own `tasks` list can lag a WS-arrived task update, the same
-  // race `findTaskInSnapshots` falls back for (`lib/kanban/find-task.ts`), so
-  // consult the flat `kanban.tasks` list before concluding the task has no
-  // current workflow.
   const currentWorkflowId = useMemo(() => {
     for (const [workflowId, snapshot] of Object.entries(snapshots)) {
       if (snapshot.tasks.some((task) => task.id === taskId)) return workflowId;
     }
-    return kanbanTasks.find((task) => task.id === taskId)?.workflowId ?? null;
-  }, [snapshots, kanbanTasks, taskId]);
+    return null;
+  }, [snapshots, taskId]);
 
   const workflowItems = useMemo<TaskMoveWorkflow[]>(() => {
     const current = workflows.find((workflow) => workflow.id === currentWorkflowId);
@@ -515,21 +519,6 @@ export function useKanbanCardMoveTargets(
       .filter((workflow) => workflow.workspaceId === current?.workspaceId && !workflow.hidden)
       .map((workflow) => ({ id: workflow.id, name: workflow.name, hidden: workflow.hidden }));
   }, [workflows, currentWorkflowId]);
-
-  // A caller with column context (the card) already passes a `steps` list
-  // pre-filtered to exclude steps the user hid for this workflow. A caller
-  // with no column context (the preview panel, the detail top bar) passes
-  // none, so fall back to the same hidden-step filter here
-  // (AC-TASKS-TASK-ACTIONS-MENU-002.3b: Move to must match the card).
-  const fallbackCurrentWorkflowSteps = useMemo<WorkflowStep[] | undefined>(() => {
-    if (!currentWorkflowId || steps) return undefined;
-    const snapshotSteps = snapshots[currentWorkflowId]?.steps;
-    if (!snapshotSteps) return undefined;
-    const hiddenIds = hiddenWorkflowStepIds[currentWorkflowId];
-    const hiddenSet = hiddenIds && hiddenIds.length > 0 ? new Set(hiddenIds) : null;
-    const sorted = sortWorkflowStepsByPosition(snapshotSteps);
-    return hiddenSet ? sorted.filter((step) => !hiddenSet.has(step.id)) : sorted;
-  }, [currentWorkflowId, steps, snapshots, hiddenWorkflowStepIds]);
 
   const stepsByWorkflowId = useMemo<Record<string, TaskMoveStep[]>>(() => {
     const result: Record<string, TaskMoveStep[]> = {};
@@ -541,9 +530,8 @@ export function useKanbanCardMoveTargets(
         events: step.events,
       }));
     }
-    const effectiveCurrentWorkflowSteps = steps ?? fallbackCurrentWorkflowSteps;
-    if (currentWorkflowId && effectiveCurrentWorkflowSteps) {
-      result[currentWorkflowId] = effectiveCurrentWorkflowSteps.map((step) => ({
+    if (currentWorkflowId && steps) {
+      result[currentWorkflowId] = steps.map((step) => ({
         id: step.id,
         title: step.title,
         color: step.color,
@@ -551,7 +539,7 @@ export function useKanbanCardMoveTargets(
       }));
     }
     return result;
-  }, [snapshots, currentWorkflowId, steps, fallbackCurrentWorkflowSteps]);
+  }, [snapshots, currentWorkflowId, steps]);
 
   return { currentWorkflowId, workflowItems, stepsByWorkflowId };
 }

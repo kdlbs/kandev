@@ -185,12 +185,14 @@ export function TaskActionsMenuDialogs({
         onOpenChange={menu.setShowPRDialog}
         task={linkDialogTask}
         repositories={repositories}
+        focusReturnRef={menu.triggerRef}
       />
       <TaskGitHubIssueDialog
         open={menu.showIssueDialog}
         onOpenChange={menu.setShowIssueDialog}
         task={linkDialogTask}
         repositories={repositories}
+        focusReturnRef={menu.triggerRef}
       />
       {workspaceId && (
         <TaskMRLinkDialog
@@ -200,6 +202,7 @@ export function TaskActionsMenuDialogs({
           workspaceId={workspaceId}
           taskRepositories={boardRow?.repositories ?? []}
           repositories={repositories}
+          focusReturnRef={menu.triggerRef}
         />
       )}
       {menu.externalLinkProvider && workspaceId && (
@@ -211,6 +214,7 @@ export function TaskActionsMenuDialogs({
           provider={menu.externalLinkProvider}
           task={linkDialogTask}
           workspaceId={workspaceId}
+          focusReturnRef={menu.triggerRef}
         />
       )}
     </>

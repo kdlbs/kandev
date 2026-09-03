@@ -303,7 +303,13 @@ function StoreProbe({ onReady }: { onReady: (store: ReturnType<typeof useAppStor
 }
 
 describe("TaskTopBar actions menu — subject removed from the board (AC-TASKS-TASK-ACTIONS-MENU-004.5)", () => {
-  it("closes an open menu once the subject leaves the board's task collections", () => {
+  // The subject leaving `kanban.tasks` alone is board-row loss, not genuine
+  // removal (AC-TASKS-TASK-ACTIONS-MENU-002.6/004.1c): it must demote the
+  // menu in place, never close it. `actionsMenuBoardRow` is a prop this
+  // harness holds static, so only a real "gone" signal (task.deleted, or
+  // task.updated with archived_at) may close the menu here, and this test has
+  // no WS client wired up to send one.
+  it("keeps an open menu open when the subject merely leaves the board's task collections", () => {
     let store: ReturnType<typeof useAppStoreApi> | null = null;
     renderTopBar(
       <StateProvider
@@ -338,7 +344,7 @@ describe("TaskTopBar actions menu — subject removed from the board (AC-TASKS-T
       store!.setState((state) => ({ kanban: { ...state.kanban, tasks: [] } }));
     });
 
-    expectMenuOpen(false);
+    expectMenuOpen(true);
   });
 
   it("does not close the menu for a task that has simply not loaded into the board yet", () => {
