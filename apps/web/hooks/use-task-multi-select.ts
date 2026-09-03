@@ -4,11 +4,39 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefOb
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
-import { sortIdsByCreatedDesc } from "@/lib/kanban/task-order";
+import { sortIdsByDisplayOrder, type DisplayOrderTask } from "@/lib/kanban/task-order";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { getEffectiveView } from "@/lib/kanban/view-registry";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/auto-hide-empty-columns";
+
+/**
+ * Builds a step-id → displayed-index lookup spanning every known workflow's
+ * currently displayed step order (position order, minus hidden steps),
+ * matching what the pipeline view renders. Used only when the active view is
+ * pipeline; a step id absent from every workflow (unknown to the caller)
+ * sorts last.
+ *
+ * @internal Exported for testing.
+ */
+export function buildPipelineStepIndexOf(
+  snapshots: Record<string, { steps: Array<{ id: string; position: number }> }>,
+  hiddenWorkflowStepIds: Record<string, string[]>,
+): (stepId: string | undefined) => number {
+  const indexByStepId = new Map<string, number>();
+  for (const [workflowId, snapshot] of Object.entries(snapshots)) {
+    const hidden = new Set(hiddenWorkflowStepIds[workflowId] ?? []);
+    const displaySteps = sortWorkflowStepsByPosition(snapshot.steps).filter(
+      (step) => !hidden.has(step.id),
+    );
+    displaySteps.forEach((step, index) => indexByStepId.set(step.id, index));
+  }
+  return (stepId) => (stepId !== undefined ? (indexByStepId.get(stepId) ?? Infinity) : Infinity);
+}
 
 /** @internal Exported for reuse by the sidebar multi-select hook. */
 export function useTaskMultiSelectStore() {
   const store = useAppStoreApi();
+  const { isMobile } = useResponsiveBreakpoint();
 
   const removeTasksFromStore = useCallback(
     (ids: Set<string>) => {
@@ -79,20 +107,33 @@ export function useTaskMultiSelectStore() {
     [store],
   );
 
-  // Sort ids into the board's visible (created-desc) order. A backward range
-  // selection leaves `selectedIds` in anchor-first Set order, which would land
-  // scrambled when the move assigns sequential positions.
+  // Sort ids into the board's currently-displayed order (derived from the
+  // active board sort token and the active view), not a fixed created-desc
+  // order. A backward range selection leaves `selectedIds` in anchor-first
+  // Set order, which would land scrambled when the move assigns sequential
+  // positions.
   const sortByDisplayOrder = useCallback(
     (ids: string[]): string[] => {
       const state = store.getState();
-      const taskById = new Map<string, { createdAt?: string }>();
+      const taskById = new Map<string, DisplayOrderTask>();
       for (const snap of Object.values(state.kanbanMulti.snapshots)) {
         for (const t of snap.tasks) taskById.set(t.id, t);
       }
       for (const t of state.kanban.tasks) if (!taskById.has(t.id)) taskById.set(t.id, t);
-      return sortIdsByCreatedDesc(ids, taskById);
+
+      const sortToken = state.userSettings.kanbanSort ?? "created_desc";
+      const isPipelineView =
+        getEffectiveView(state.userSettings.kanbanViewMode ?? "", isMobile).id === "graph2";
+      const stepIndexOf = isPipelineView
+        ? buildPipelineStepIndexOf(
+            state.kanbanMulti.snapshots,
+            state.userSettings.hiddenWorkflowStepIds ?? {},
+          )
+        : undefined;
+
+      return sortIdsByDisplayOrder(ids, taskById, { sortToken, isPipelineView, stepIndexOf });
     },
-    [store],
+    [store, isMobile],
   );
 
   return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder };

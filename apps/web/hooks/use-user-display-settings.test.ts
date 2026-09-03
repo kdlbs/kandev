@@ -6,10 +6,12 @@ import {
   normalizeHiddenStepIds,
 } from "./use-user-display-settings";
 
+const WORKSPACE_ID = "workspace-1";
+
 function settings(tasksListShowDetails: boolean): UserSettingsState {
   return {
     loaded: true,
-    workspaceId: "workspace-1",
+    workspaceId: WORKSPACE_ID,
     workflowId: null,
     repositoryIds: [],
     tasksListShowDetails,
@@ -19,7 +21,7 @@ function settings(tasksListShowDetails: boolean): UserSettingsState {
 function settingsWithHidden(hiddenWorkflowStepIds: Record<string, string[]>): UserSettingsState {
   return {
     loaded: true,
-    workspaceId: "workspace-1",
+    workspaceId: WORKSPACE_ID,
     workflowId: null,
     repositoryIds: [],
     tasksListShowDetails: false,
@@ -30,12 +32,29 @@ function settingsWithHidden(hiddenWorkflowStepIds: Record<string, string[]>): Us
 function settingsWithAutoHide(workflowIdsWithAutoHideEmptySteps: string[]): UserSettingsState {
   return {
     loaded: true,
-    workspaceId: "workspace-1",
+    workspaceId: WORKSPACE_ID,
     workflowId: null,
     repositoryIds: [],
     tasksListShowDetails: false,
     hiddenWorkflowStepIds: {},
     workflowIdsWithAutoHideEmptySteps,
+  } as unknown as UserSettingsState;
+}
+
+function settingsWithKanbanBoard(
+  kanbanSort: "created_desc" | "priority_desc",
+  kanbanPriorityFilterTokens: string[],
+): UserSettingsState {
+  return {
+    loaded: true,
+    workspaceId: WORKSPACE_ID,
+    workflowId: null,
+    repositoryIds: [],
+    tasksListShowDetails: false,
+    hiddenWorkflowStepIds: {},
+    workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort,
+    kanbanPriorityFilterTokens,
   } as unknown as UserSettingsState;
 }
 
@@ -80,6 +99,33 @@ describe("isSettingsUnchanged", () => {
       isSettingsUnchanged(settingsWithAutoHide(["wf-a"]), settingsWithAutoHide(["wf-b"])),
     ).toBe(false);
   });
+
+  it("detects a board sort token change", () => {
+    expect(
+      isSettingsUnchanged(
+        settingsWithKanbanBoard("priority_desc", []),
+        settingsWithKanbanBoard("created_desc", []),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats a reordered priority filter selection as unchanged", () => {
+    expect(
+      isSettingsUnchanged(
+        settingsWithKanbanBoard("created_desc", ["high", "critical"]),
+        settingsWithKanbanBoard("created_desc", ["critical", "high"]),
+      ),
+    ).toBe(true);
+  });
+
+  it("detects an actual priority filter selection change", () => {
+    expect(
+      isSettingsUnchanged(
+        settingsWithKanbanBoard("created_desc", ["critical"]),
+        settingsWithKanbanBoard("created_desc", ["high"]),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("normalizeHiddenStepIds", () => {
@@ -122,6 +168,14 @@ describe("buildSettingsUpdatePayload", () => {
     const normalized = settingsWithAutoHide(["wf-b", "wf-a"]);
     expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
       workflow_ids_with_auto_hide_empty_steps: ["wf-b", "wf-a"],
+    });
+  });
+
+  it("sends the board sort token and priority filter selection under their wire keys", () => {
+    const normalized = settingsWithKanbanBoard("priority_desc", ["critical", "high"]);
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_sort: "priority_desc",
+      kanban_priority_filter_tokens: ["critical", "high"],
     });
   });
 });

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KanbanDisplayDropdown } from "./kanban-display-dropdown";
+import { KANBAN_PRIORITY_TOKENS } from "@/lib/kanban/task-priority";
 
 const { useKanbanDisplaySettingsMock } = vi.hoisted(() => ({
   useKanbanDisplaySettingsMock: vi.fn(),
@@ -23,11 +24,15 @@ function defaultMockSettings() {
     eligibleWorkflows: [],
     snapshots: {},
     hiddenWorkflowStepIds: {},
+    boardSort: "created_desc" as "created_desc" | "priority_desc",
+    priorityFilterTokens: [] as string[],
     onWorkflowChange: vi.fn(),
     onRepositoryChange: vi.fn(),
     onTogglePreviewOnClick: vi.fn(),
     onToggleTasksListShowDetails: vi.fn(),
     onToggleStepVisibility: vi.fn(),
+    onBoardSortChange: vi.fn(),
+    onPriorityFilterChange: vi.fn(),
   };
 }
 
@@ -192,5 +197,57 @@ describe("KanbanDisplayDropdown — no Steps section (relocated to the lane)", (
 
     expect(screen.queryByTestId("steps-filter-step-step-1")).toBeNull();
     expect(screen.queryByTestId("columns-menu-step-step-1")).toBeNull();
+  });
+});
+
+describe("KanbanDisplayDropdown — board sort and priority filter", () => {
+  it("renders the board sort and priority filter sections on the kanban page", () => {
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+
+    expect(screen.getByTestId("display-board-sort")).not.toBeNull();
+    KANBAN_PRIORITY_TOKENS.forEach((token) => {
+      expect(screen.getByTestId(`display-priority-filter-option-${token}`)).not.toBeNull();
+    });
+  });
+
+  it("omits the board sort and priority filter sections on the tasks list page", () => {
+    render(<KanbanDisplayDropdown currentPage="tasks" />);
+    openDropdown();
+
+    expect(screen.queryByTestId("display-board-sort")).toBeNull();
+    expect(screen.queryByTestId(/display-priority-filter-option-/)).toBeNull();
+  });
+
+  it("reflects the current priority filter selection", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      priorityFilterTokens: ["critical"],
+    });
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+
+    expect(
+      screen
+        .getByTestId("display-priority-filter-option-critical")
+        .getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("checked");
+    expect(
+      screen.getByTestId("display-priority-filter-option-high").getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("unchecked");
+  });
+
+  it("invokes onPriorityFilterChange when toggling a priority option", () => {
+    const onPriorityFilterChange = vi.fn();
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      onPriorityFilterChange,
+    });
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
+    openDropdown();
+
+    fireEvent.click(screen.getByTestId("display-priority-filter-option-high"));
+
+    expect(onPriorityFilterChange).toHaveBeenCalledWith("high");
   });
 });

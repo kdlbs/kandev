@@ -19,8 +19,14 @@ import {
   type TasksListDisplayOptions,
 } from "./mobile-menu-task-list-options";
 import { cn } from "@/lib/utils";
-import type { Repository } from "@/lib/types/http";
+import type { Repository, TaskPriority } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
+import {
+  KANBAN_SORT_OPTIONS,
+  KANBAN_SORT_LABEL_KEYS,
+  type KanbanSort,
+} from "@/lib/kanban/kanban-sort";
+import { KANBAN_PRIORITY_TOKENS, KANBAN_PRIORITY_LABEL_KEYS } from "@/lib/kanban/task-priority";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 import { useMobileMenuSheetState } from "@/hooks/use-mobile-menu-sheet-state";
@@ -67,6 +73,12 @@ export type MobileDisplayOptionsProps = {
    * the phone kanban, where the lane header owns the control instead.
    */
   columnsSection: MobileColumnsSection | null;
+  /** Board sort and priority filter are board-only, like `columnsSection`. */
+  showBoardControls: boolean;
+  boardSort: KanbanSort;
+  onBoardSortChange: (sort: KanbanSort) => void;
+  priorityFilterTokens: TaskPriority[];
+  onPriorityFilterChange: (token: TaskPriority) => void;
 };
 
 export type MobileColumnsSection = {
@@ -99,6 +111,11 @@ function MobileDisplaySelects({
   | "showPreviewPanel"
   | "tasksListOptions"
   | "columnsSection"
+  | "showBoardControls"
+  | "boardSort"
+  | "onBoardSortChange"
+  | "priorityFilterTokens"
+  | "onPriorityFilterChange"
 >) {
   const { t } = useTranslation();
   return (
@@ -155,6 +172,63 @@ function MobileDisplaySelects({
   );
 }
 
+function MobileBoardSortSelect({
+  boardSort,
+  onBoardSortChange,
+}: {
+  boardSort: KanbanSort;
+  onBoardSortChange: (sort: KanbanSort) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className={mobileFieldClass}>
+      <label className={mobileFieldLabelClass}>{t("kanban:boardSort")}</label>
+      <Select value={boardSort} onValueChange={(value) => onBoardSortChange(value as KanbanSort)}>
+        <SelectTrigger data-testid="mobile-board-sort" className={mobileControlClass}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {KANBAN_SORT_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {t(KANBAN_SORT_LABEL_KEYS[option.value])}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function MobilePriorityFilterGroup({
+  priorityFilterTokens,
+  onPriorityFilterChange,
+}: {
+  priorityFilterTokens: TaskPriority[];
+  onPriorityFilterChange: (token: TaskPriority) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className={mobileFieldClass}>
+      <label className={mobileFieldLabelClass}>{t("kanban:priorityFilter")}</label>
+      <div className="space-y-1">
+        {KANBAN_PRIORITY_TOKENS.map((token) => (
+          <label
+            key={token}
+            className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium"
+          >
+            <Checkbox
+              data-testid={`mobile-priority-filter-option-${token}`}
+              checked={priorityFilterTokens.includes(token)}
+              onCheckedChange={() => onPriorityFilterChange(token)}
+            />
+            <span>{t(KANBAN_PRIORITY_LABEL_KEYS[token])}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
   const { t } = useTranslation();
   const {
@@ -166,6 +240,11 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
     showPreviewPanel,
     tasksListOptions,
     columnsSection,
+    showBoardControls,
+    boardSort,
+    onBoardSortChange,
+    priorityFilterTokens,
+    onPriorityFilterChange,
     ...selectProps
   } = props;
   return (
@@ -177,6 +256,15 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
           <label className={mobileFieldLabelClass}>{t("kanban:columns")}</label>
           <ColumnsMenu {...columnsSection} touchTargets />
         </div>
+      )}
+      {showBoardControls && (
+        <>
+          <MobileBoardSortSelect boardSort={boardSort} onBoardSortChange={onBoardSortChange} />
+          <MobilePriorityFilterGroup
+            priorityFilterTokens={priorityFilterTokens}
+            onPriorityFilterChange={onPriorityFilterChange}
+          />
+        </>
       )}
       {showPreviewPanel && (
         <div className={mobileFieldClass}>

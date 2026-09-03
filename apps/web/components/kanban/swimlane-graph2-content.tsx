@@ -9,6 +9,8 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTranslation } from "react-i18next";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
+import { sortTasksForPipelineView } from "@/lib/kanban/task-order";
+import { useAppStore } from "@/components/state-provider";
 
 export function getGraph2DisplayState(
   tasks: Task[],
@@ -53,15 +55,10 @@ export function SwimlaneGraph2Content({
     return orphan ? [...moveTargetSteps, orphan] : moveTargetSteps;
   }, [displaySteps, moveTargetSteps]);
 
+  const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
   const sortedTasks = useMemo(
-    () =>
-      [...displayTasks].sort((a, b) => {
-        const aStepIdx = displaySteps.findIndex((c) => c.id === a.workflowStepId);
-        const bStepIdx = displaySteps.findIndex((c) => c.id === b.workflowStepId);
-        if (aStepIdx !== bStepIdx) return aStepIdx - bStepIdx;
-        return (a.position ?? 0) - (b.position ?? 0);
-      }),
-    [displayTasks, displaySteps],
+    () => sortTasksForPipelineView(displayTasks, displaySteps, kanbanSort),
+    [displayTasks, displaySteps, kanbanSort],
   );
 
   const handleMoveTask = async (task: (typeof tasks)[number], targetStepId: string) => {
