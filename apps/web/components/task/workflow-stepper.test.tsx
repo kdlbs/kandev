@@ -128,6 +128,20 @@ describe("WorkflowStepper", () => {
     expect(screen.getByTestId("workflow-step-Review")).toBeTruthy();
   });
 
+  it("orders steps sharing a position by ascending id, not insertion order", () => {
+    collapsedMock.mockReturnValue(false);
+    const TIEBREAK_STEPS: WorkflowStepperStep[] = [
+      { id: "z", name: "ZStep", color: "#111", position: 0 },
+      { id: "a", name: "AStep", color: "#222", position: 0 },
+    ];
+    const { container } = render(<WorkflowStepper steps={TIEBREAK_STEPS} currentStepId={null} />);
+
+    const aIndex = container.innerHTML.indexOf("AStep");
+    const zIndex = container.innerHTML.indexOf("ZStep");
+    expect(aIndex).toBeGreaterThan(-1);
+    expect(aIndex).toBeLessThan(zIndex);
+  });
+
   it("collapses to only the current step when space runs out", () => {
     collapsedMock.mockReturnValue(true);
     render(<WorkflowStepper steps={STEPS} currentStepId="b" />);

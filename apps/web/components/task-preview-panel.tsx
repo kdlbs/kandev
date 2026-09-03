@@ -60,6 +60,11 @@ function PreviewPanelHeader({
         </h2>
         {handleMoveStep && (
           <div
+            // Keyed by task id so a task switch remounts this subtree instead of
+            // reusing it: the disclosure's open state is local to it, and nothing
+            // else ties that state (or a still-settling move promise's closure)
+            // to which task is being previewed.
+            key={task?.id ?? "none"}
             // `w-full` on the trigger button counteracts a browser quirk:
             // a <button> normally sizes to its content regardless of `display`,
             // so without an explicit width it overflows this shrink-capped
