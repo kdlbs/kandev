@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,20 @@ func TestProbeRemoteAgentctlLiveness(t *testing.T) {
 		alive, err := probeRemoteAgentctlLiveness(context.Background(), server.dial(t), 4242)
 		if err != nil || alive {
 			t.Fatalf("probe = (%v, %v), want (false, nil)", alive, err)
+		}
+	})
+
+	t.Run("permission failure leaves liveness unknown", func(t *testing.T) {
+		server := newFakeSSHServer(t, func(string, string) sshExecResult {
+			return sshFail("kill: 4242: Operation not permitted")
+		})
+
+		alive, err := probeRemoteAgentctlLiveness(context.Background(), server.dial(t), 4242)
+		if err == nil || alive {
+			t.Fatalf("probe = (%v, %v), want (false, error)", alive, err)
+		}
+		if !strings.Contains(err.Error(), "Operation not permitted") {
+			t.Fatalf("error = %v, want permission detail", err)
 		}
 	})
 

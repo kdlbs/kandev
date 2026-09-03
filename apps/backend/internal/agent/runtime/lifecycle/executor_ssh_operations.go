@@ -911,15 +911,33 @@ func probeRemoteAgentctlLiveness(ctx context.Context, client *ssh.Client, pid in
 	if pid <= 0 {
 		return false, nil
 	}
-	_, _, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
+	_, stderr, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
 	if err == nil {
 		return true, nil
 	}
 	var exitErr *ssh.ExitError
 	if errors.As(err, &exitErr) {
-		return false, nil
+		if remoteProcessProbeConfirmsAbsence(stderr) {
+			return false, nil
+		}
+		return false, remoteProcessProbeError(pid, err, stderr)
 	}
 	return false, err
+}
+
+func remoteProcessProbeConfirmsAbsence(stderr string) bool {
+	message := strings.ToLower(strings.TrimSpace(stderr))
+	return strings.Contains(message, "no such process") ||
+		strings.Contains(message, "no such pid") ||
+		strings.Contains(message, "esrch")
+}
+
+func remoteProcessProbeError(pid int, err error, stderr string) error {
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		return fmt.Errorf("remote kill -0 %d failed: %w", pid, err)
+	}
+	return fmt.Errorf("remote kill -0 %d failed: %w (stderr: %s)", pid, err, detail)
 }
 
 // isRemoteAgentctlAlive is the best-effort boolean form used by status and
