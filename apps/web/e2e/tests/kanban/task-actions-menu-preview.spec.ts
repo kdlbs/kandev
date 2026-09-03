@@ -52,4 +52,45 @@ test.describe("Task preview panel actions menu", () => {
     expect(testPage.url()).not.toBe(startUrl);
     expect(testPage.url()).not.toMatch(/\/t\//);
   });
+
+  test("Escape closes only the open menu, keeping the preview open, and returns focus to the trigger; a second Escape closes the preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    await apiClient.createTask(seedData.workspaceId, "Preview Menu Escape Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardByTitle("Preview Menu Escape Task");
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+    await expect(testPage).toHaveURL(/taskId=/, { timeout: 10_000 });
+
+    const previewPanel = testPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible();
+
+    const trigger = previewPanel.getByTestId("task-preview-actions-menu");
+    await trigger.click();
+    await expect(testPage.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    // First Escape (AC-TASKS-TASK-ACTIONS-MENU-001.9/001.11): closes only the
+    // menu, leaves the preview open on the same subject, and returns focus to
+    // the trigger that opened it.
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByRole("menuitem", { name: "Edit" })).not.toBeVisible();
+    await expect(previewPanel).toBeVisible();
+    await expect(trigger).toBeFocused();
+
+    // Second Escape, with no menu open, closes the preview panel as it does
+    // today.
+    await testPage.keyboard.press("Escape");
+    await expect(previewPanel).not.toBeVisible();
+  });
 });
