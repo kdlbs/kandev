@@ -396,7 +396,7 @@ func (r *Repository) runMigrations() error {
 	// existed) backfill to '' — deliberately not reconstructed from the
 	// current step definition, which may have changed since that entry was
 	// allocated.
-	r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
 
 	return nil
 }
