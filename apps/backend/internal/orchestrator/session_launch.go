@@ -423,6 +423,9 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	if err != nil {
 		return nil, err
 	}
+	if session == nil {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
 	}
@@ -464,6 +467,9 @@ func (s *Service) recoverSessionWithWorkspaceRehome(ctx context.Context, taskID,
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	if session == nil {
+		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)

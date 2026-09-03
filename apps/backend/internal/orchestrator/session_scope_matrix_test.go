@@ -15,10 +15,34 @@ import (
 type pairStubRepo struct {
 	sessionExecutorStore
 	sessionTaskID string
+	missing       bool
 }
 
 func (r *pairStubRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	if r.missing {
+		return nil, nil
+	}
 	return &models.TaskSession{ID: "sess-1", TaskID: r.sessionTaskID}, nil
+}
+
+func TestRecoverSessionRejectsNilRepositoryResult(t *testing.T) {
+	s := &Service{
+		repo:               &pairStubRepo{missing: true},
+		sessionAccessCheck: func(context.Context, string) error { return nil },
+		taskAccessCheck:    func(context.Context, string) error { return nil },
+	}
+
+	if _, err := s.RecoverSession(context.Background(), "task-1", "session-1", "resume"); err == nil {
+		t.Fatal("RecoverSession accepted a nil session repository result")
+	}
+}
+
+func TestRecoverSessionWithWorkspaceRehomeRejectsNilRepositoryResult(t *testing.T) {
+	s := &Service{repo: &pairStubRepo{missing: true}}
+
+	if _, err := s.recoverSessionWithWorkspaceRehome(context.Background(), "task-1", "session-1"); err == nil {
+		t.Fatal("recoverSessionWithWorkspaceRehome accepted a nil session repository result")
+	}
 }
 
 // Structural pin for the orchestrator's session-keyed entry points.
