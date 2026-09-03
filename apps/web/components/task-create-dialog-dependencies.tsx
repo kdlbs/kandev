@@ -21,6 +21,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
+import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { TaskMR } from "@/lib/types/gitlab";
@@ -40,6 +42,7 @@ const NO_SNAPSHOTS: Record<string, { tasks?: KanbanState["tasks"] }> = {};
 const NO_MRS: TaskMR[] = [];
 const NO_MRS_BY_TASK_ID: Record<string, TaskMR[]> = {};
 const NO_PRS: TaskPR[] = [];
+const NO_PRS_BY_TASK_ID: Record<string, TaskPR[]> = {};
 
 export type TaskCreateDependenciesProps = {
   /** Selected predecessor task IDs. */
@@ -73,7 +76,17 @@ function useMRsByTaskId(): Record<string, TaskMR[]> {
 }
 
 function usePRsByTaskId(): Record<string, TaskPR[]> {
-  return useAppStore((state) => state.taskPRs.byTaskId);
+  return useAppStore((state) => {
+    const activeWorkspaceId = state.workspaces.activeId;
+    if (
+      !activeWorkspaceId ||
+      state.taskPRs.workspaceId !== activeWorkspaceId ||
+      state.taskPRs.workspaceContextGeneration !== state.workspaceContextGeneration
+    ) {
+      return NO_PRS_BY_TASK_ID;
+    }
+    return state.taskPRs.byTaskId;
+  });
 }
 
 function DependencyTriggerLabel({
@@ -240,6 +253,11 @@ export function TaskCreateDependencies({ value, onChange, disabled }: TaskCreate
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  // The global new-task dialog is available outside the Kanban and Tasks
+  // routes, which normally hydrate these association stores.
+  useWorkspacePRs(activeWorkspaceId);
+  useWorkspaceMRs(activeWorkspaceId);
   const tasks = useBoardTasks();
   const mrsByTaskId = useMRsByTaskId();
   const prsByTaskId = usePRsByTaskId();

@@ -7,14 +7,27 @@ import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskPR } from "@/lib/types/github";
 import { TaskCreateDependencies } from "./task-create-dialog-dependencies";
 
+const workspaceHydrationMocks = vi.hoisted(() => ({
+  useWorkspacePRs: vi.fn(),
+  useWorkspaceMRs: vi.fn(),
+}));
+
+vi.mock("@/hooks/domains/github/use-task-pr", () => workspaceHydrationMocks);
+vi.mock("@/hooks/domains/gitlab/use-task-mr", () => workspaceHydrationMocks);
+
 const WORKSPACE_ID = "workspace-1";
 
 type MockStore = {
   kanban: { tasks: KanbanState["tasks"] };
   kanbanMulti: { snapshots: Record<string, { tasks?: KanbanState["tasks"] }> };
   workspaces: { activeId: string | null };
+  workspaceContextGeneration: number;
   taskMRs: { byWorkspaceId: Record<string, Record<string, TaskMR[]>> };
-  taskPRs: { byTaskId: Record<string, TaskPR[]> };
+  taskPRs: {
+    byTaskId: Record<string, TaskPR[]>;
+    workspaceId?: string | null;
+    workspaceContextGeneration?: number;
+  };
 };
 
 const ALPHA_ID = "task-alpha";
@@ -33,8 +46,13 @@ function emptyStore(): MockStore {
     kanban: { tasks: [] },
     kanbanMulti: { snapshots: {} },
     workspaces: { activeId: WORKSPACE_ID },
+    workspaceContextGeneration: 0,
     taskMRs: { byWorkspaceId: {} },
-    taskPRs: { byTaskId: {} },
+    taskPRs: {
+      byTaskId: {},
+      workspaceId: WORKSPACE_ID,
+      workspaceContextGeneration: 0,
+    },
   };
 }
 
@@ -105,10 +123,18 @@ function optionTestId(taskId: string): string {
 
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   mockStore = emptyStore();
 });
 
 describe("TaskCreateDependencies", () => {
+  it("hydrates change-request associations for the active workspace", () => {
+    renderDependencies();
+
+    expect(workspaceHydrationMocks.useWorkspacePRs).toHaveBeenCalledWith(WORKSPACE_ID);
+    expect(workspaceHydrationMocks.useWorkspaceMRs).toHaveBeenCalledWith(WORKSPACE_ID);
+  });
+
   it("starts with a no-dependency selector and its dependency icon", () => {
     renderDependencies();
 
@@ -310,6 +336,8 @@ describe("TaskCreateDependencies multi-PR change requests", () => {
             taskPR({ id: "pr-assoc-2", pr_number: 1002, repo: "kandev-docs" }),
           ],
         },
+        workspaceId: WORKSPACE_ID,
+        workspaceContextGeneration: 0,
       },
     };
 

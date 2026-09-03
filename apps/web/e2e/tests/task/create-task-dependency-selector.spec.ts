@@ -269,7 +269,7 @@ test.describe("Task-create dependency selector", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
     await dialog.getByTestId("task-create-advanced-settings-trigger").click();
-    const { picker } = await openDependencyPicker(dialog);
+    const { dependency, picker } = await openDependencyPicker(dialog);
 
     const option = picker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${withMR.id}`);
     const search = picker.getByPlaceholder(SEARCH_PLACEHOLDER);
@@ -278,5 +278,7 @@ test.describe("Task-create dependency selector", () => {
     await expect(option.locator(`[aria-label="Linked pull or merge request #${iid}"]`)).toHaveText(
       `#${iid}`,
     );
+    await option.click();
+    await expect(dependency).toContainText(`#${iid} · Task with a linked MR`);
   });
 });

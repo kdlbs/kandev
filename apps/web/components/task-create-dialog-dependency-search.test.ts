@@ -98,6 +98,12 @@ describe("compareDependencyCandidates", () => {
     expect(compareDependencyCandidates(b, a)).toBeLessThan(0);
   });
 
+  it("uses createdAt to break equal updatedAt timestamps", () => {
+    const a = task({ id: "a", updatedAt: EARLY, createdAt: LATE });
+    const b = task({ id: "b", updatedAt: EARLY, createdAt: EARLY });
+    expect(compareDependencyCandidates(a, b)).toBeLessThan(0);
+  });
+
   it("falls back to createdAt descending when updatedAt is missing", () => {
     const a = task({ id: "a", createdAt: EARLY });
     const b = task({ id: "b", createdAt: LATE });
