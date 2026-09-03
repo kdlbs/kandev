@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-05
+updated: 2026-09-03
 owners:
   - Kandev
 ---
@@ -33,6 +34,59 @@ This document is the migrated task-system source for the capability. The source 
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.4:** When turn quiescence or context replacement fails, the system shall not dispatch the automatic step prompt.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.5:** When a prompt waits for an unresolved dispatch-only completion, the wait shall end within a bounded period and release session admission.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.6:** A delayed completion from the replaced turn shall not complete or release a later prompt generation.
+
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003: Single-use task-description fallback
+
+**Intent:** Start an unprompted workflow session from its task description without
+repeating that description during later workflow entries.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.1:** When an unprompted
+session enters an automatic-start step with no step prompt, the system shall send
+the task description once. Admission of this fallback shall be atomic with the
+session's first-prompt boundary.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.2:** When a prompted session
+enters an automatic-start step with no step prompt, the system shall not send the
+task description again. A concurrent direct user prompt and automatic fallback
+shall not both qualify as the first prompt.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.3:** When an
+automatic-start step has a step prompt, the system shall send the evaluated step
+prompt regardless of earlier session prompts.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.4:** When fallback
+suppression removes all textual prompt content and no queued attachment remains,
+the system shall not create a user message or dispatch an empty agent turn. A
+queued attachment-only handoff shall remain durable user input and shall be
+dispatched with its attachment metadata.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.5:** The automatic
+`on_enter` path and the explicit workflow-step launch path shall use the same
+task-description fallback rule.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.6:** ACP and passthrough
+sessions shall use the same task-description fallback rule.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.7:** If prompt-history
+inspection fails, the system shall stop the automatic prompt and expose the
+existing workflow-start error behavior.
+
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004: Immediate-launch placement
+
+**Intent:** Place a new task in the workflow step that owns its requested agent
+start, regardless of the selected agent mode.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.1:** When task creation
+starts an agent immediately, the system shall place the task in the first
+positional step with an `auto_start_agent` entry action. Plan mode shall not
+change this destination.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.2:** When no workflow step
+has an `auto_start_agent` entry action, an immediate agent start shall use the
+configured start step. If no start step exists, it shall use the first
+positional step.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.3:** When a creator supplies
+an explicit workflow step, the system shall use that step instead of an
+intent-derived destination.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.4:** Desktop and mobile task
+creation shall apply the same immediate-launch placement rule.
 
 ## Migrated source detail
 
@@ -152,3 +206,6 @@ read, which is a design change beyond this repair.
   force-kill rather than an independent defect.
 - Changing task `FAILED` semantics, the reconciliation path, or the
   lazy-recovery boot that follows a backend restart.
+- Changing placement for a plan-only prepared session that does not request an
+  immediate agent start. This path continues to use the first workflow step by
+  position.

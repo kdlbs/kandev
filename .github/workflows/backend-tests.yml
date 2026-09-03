@@ -464,7 +464,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-    timeout-minutes: 10
+    # The env-gated package suite runs with the race detector and can exceed
+    # ten minutes on a hosted runner as the repository test set grows.
+    timeout-minutes: 20
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:

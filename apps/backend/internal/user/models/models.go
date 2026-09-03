@@ -121,6 +121,9 @@ type UserSettings struct {
 	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
 	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
+	ThreadViews                       []ThreadView                      `json:"thread_views"`
+	ThreadActiveViewID                string                            `json:"thread_active_view_id"`
+	ThreadViewDraft                   *ThreadViewDraft                  `json:"thread_view_draft"`
 	SidebarTaskPrefs                  SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`

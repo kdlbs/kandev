@@ -1,10 +1,8 @@
 "use client";
 
-import { IconArrowUp, IconArrowDown } from "@tabler/icons-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Button } from "@kandev/ui/button";
 import type { SortKey, SortSpec } from "@/lib/state/slices/ui/sidebar-view-types";
 import { useTranslation } from "react-i18next";
+import { TypedSortPicker } from "./sort-picker-primitive";
 
 // `labelKey` holds a catalog key, not copy: this table is module scope, so a
 // resolved `t()` here would freeze at the boot locale. `key` is a persisted
@@ -49,52 +47,17 @@ type Props = {
 
 export function SortPicker({ value, onChange }: Props) {
   const { t } = useTranslation();
-  // Direction has no meaning for the custom sort — its order is the user's
-  // drag, not an asc/desc field. Hide the toggle to avoid surprising flips.
-  const isCustom = value.key === "custom";
   return (
-    <div className="flex items-center gap-1.5">
-      <Select value={value.key} onValueChange={(v) => onChange({ ...value, key: v as SortKey })}>
-        <SelectTrigger size="sm" className="h-7 flex-1 text-xs" data-testid="sort-key-select">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {SORT_OPTIONS.map((opt) => {
-            const label = t(opt.labelKey);
-            return (
-              <SelectItem
-                key={opt.key}
-                value={opt.key}
-                className="text-xs"
-                aria-label={label}
-                description={t(opt.descriptionKey)}
-              >
-                {label}
-              </SelectItem>
-            );
-          })}
-        </SelectContent>
-      </Select>
-      {!isCustom && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 cursor-pointer"
-          onClick={() =>
-            onChange({ ...value, direction: value.direction === "asc" ? "desc" : "asc" })
-          }
-          data-testid="sort-direction-toggle"
-          data-direction={value.direction}
-          aria-label={t("task:sortDirection", { direction: value.direction })}
-        >
-          {value.direction === "asc" ? (
-            <IconArrowUp className="h-3.5 w-3.5" />
-          ) : (
-            <IconArrowDown className="h-3.5 w-3.5" />
-          )}
-        </Button>
-      )}
-    </div>
+    <TypedSortPicker
+      value={value}
+      options={SORT_OPTIONS.map((option) => ({
+        key: option.key,
+        label: t(option.labelKey),
+        description: t(option.descriptionKey),
+      }))}
+      onChange={onChange}
+      directionless={(key) => key === "custom"}
+      directionLabel={t("task:sortDirection", { direction: value.direction })}
+    />
   );
 }

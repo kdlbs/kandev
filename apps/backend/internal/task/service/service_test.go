@@ -3220,13 +3220,11 @@ func TestService_CreateMessage(t *testing.T) {
 	}
 
 	// Check event was published
-	events := eventBus.GetPublishedEvents()
-	if len(events) != 1 {
-		t.Errorf("expected 1 event, got %d", len(events))
+	published := eventBus.GetPublishedEvents()
+	if countEvents(published, events.MessageAdded) != 1 {
+		t.Errorf("expected one %s event, got %v", events.MessageAdded, eventTypes(published))
 	}
-	if events[0].Type != "message.added" {
-		t.Errorf("expected event type 'message.added', got %s", events[0].Type)
-	}
+	findPublishedEvent(t, published, events.MessageAdded)
 }
 
 func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testing.T) {
@@ -3257,7 +3255,7 @@ func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testi
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	addedData := singlePublishedEventData(t, eventBus)
+	addedData := singlePublishedEventDataOfType(t, eventBus, events.MessageAdded)
 	if got := addedData["pending_action"]; got != "clarification" {
 		t.Fatalf("message.added pending_action = %#v, want clarification", got)
 	}
@@ -3271,7 +3269,7 @@ func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testi
 	if err := svc.UpdateMessage(ctx, message); err != nil {
 		t.Fatalf("UpdateMessage: %v", err)
 	}
-	data := singlePublishedEventData(t, eventBus)
+	data := singlePublishedEventDataOfType(t, eventBus, events.MessageUpdated)
 	if got, ok := data["pending_action"]; !ok || got != nil {
 		t.Fatalf("message.updated pending_action = %#v, want explicit nil", got)
 	}
@@ -3324,7 +3322,7 @@ func TestService_OrdinaryMessageAuthorityEventsRefreshPendingAction(t *testing.T
 	if err != nil {
 		t.Fatalf("create successor message: %v", err)
 	}
-	added := singlePublishedEventData(t, eventBus)
+	added := singlePublishedEventDataOfType(t, eventBus, events.MessageAdded)
 	if got, exists := added["pending_action"]; !exists || got != nil {
 		t.Fatalf("ordinary message.added pending_action = %#v, want explicit nil", got)
 	}
@@ -3333,7 +3331,7 @@ func TestService_OrdinaryMessageAuthorityEventsRefreshPendingAction(t *testing.T
 	if err := svc.DeleteMessage(ctx, ordinary.ID); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
-	deleted := singlePublishedEventData(t, eventBus)
+	deleted := singlePublishedEventDataOfType(t, eventBus, events.MessageDeleted)
 	if got := deleted["pending_action"]; got != "clarification" {
 		t.Fatalf("ordinary message.deleted pending_action = %#v, want clarification", got)
 	}
@@ -3368,8 +3366,8 @@ func TestService_CreateMessageIdempotentReturnsCommittedMessage(t *testing.T) {
 	if second.ID != first.ID || second.Content != first.Content {
 		t.Fatalf("retry returned %+v, want original %+v", second, first)
 	}
-	if events := eventBus.GetPublishedEvents(); len(events) != 1 {
-		t.Fatalf("published events = %d, want 1", len(events))
+	if published := eventBus.GetPublishedEvents(); countEvents(published, events.MessageAdded) != 1 {
+		t.Fatalf("published events = %v, want one %s", eventTypes(published), events.MessageAdded)
 	}
 
 	messages, err := repo.ListMessages(ctx, sessionID)

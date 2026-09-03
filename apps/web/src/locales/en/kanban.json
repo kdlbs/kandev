@@ -93,6 +93,7 @@
   "taskList": "Task list",
   "tasksOverWipLimit": "{{label}} tasks, over WIP limit",
   "theseOptionsAffectThisTaskList": "These options affect this task list only.",
+  "threads": "Threads",
   "utilities": "Utilities",
   "view": "View",
   "whenEnabledClickingATaskOpens": "When enabled, clicking a task opens the preview panel. When disabled, clicking navigates directly to the session.",

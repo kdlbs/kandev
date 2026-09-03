@@ -5,6 +5,14 @@ import type { TaskEditDialogDependenciesState } from "@/hooks/domains/task/use-t
 import { ApiError } from "@/lib/api/client";
 import { TaskEditDialogDependencies } from "./task-edit-dialog-dependencies";
 
+const workspaceHydrationMocks = vi.hoisted(() => ({
+  useWorkspacePRs: vi.fn(),
+  useWorkspaceMRs: vi.fn(),
+}));
+
+vi.mock("@/hooks/domains/github/use-task-pr", () => workspaceHydrationMocks);
+vi.mock("@/hooks/domains/gitlab/use-task-mr", () => workspaceHydrationMocks);
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { count?: number; cycle?: string }) =>
@@ -29,7 +37,14 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ kanban: { tasks: [] }, kanbanMulti: { snapshots: {} } }),
+    selector({
+      kanban: { tasks: [] },
+      kanbanMulti: { snapshots: {} },
+      workspaces: { activeId: null },
+      workspaceContextGeneration: 0,
+      taskMRs: { byWorkspaceId: {} },
+      taskPRs: { byTaskId: {}, workspaceId: null, workspaceContextGeneration: 0 },
+    }),
 }));
 
 function state(

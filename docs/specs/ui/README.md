@@ -7,16 +7,13 @@ owners:
   - kandev
 ---
 
-# UI system
+# UI
 
-## Ownership
+## Scope
 
-UI owns reusable presentation and responsive interaction.
-[Tasks](../tasks/README.md), [Agents](../agents/README.md),
-[Plugins](../plugins/README.md), and [Integrations](../integrations/README.md) own
-feature behavior and state.
+UI owns responsive behavior; other systems own behavior/state.
 
-## Specification map
+## Map
 
 ### Requirements
 
@@ -122,6 +119,7 @@ feature behavior and state.
 - [Confirmations](requirements/confirmation-warning-hierarchy.md)
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](requirements/task-agent-tab-reconciliation.md)
+- [Threads Deck](requirements/threads-conversation-deck.md)
 - [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
@@ -129,6 +127,7 @@ feature behavior and state.
 - [Task Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
 - [Terminal Rendering](requirements/terminal-rendering.md)
+- [Terminal Touch Scrolling](requirements/terminal-touch-scrolling.md)
 - [Thinking Message Preview](requirements/thinking-message-preview.md)
 - [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
 - [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
@@ -139,7 +138,7 @@ feature behavior and state.
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 
-### System design
+### Design
 
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Growing Dialog Content Containment](system-design/dialog-content-containment.md)
@@ -176,15 +175,15 @@ feature behavior and state.
 - [Session](system-design/session-start-composer-readiness.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
+- [Threads Deck](system-design/threads-conversation-deck.md)
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
 - [Command Panel Task Activity Icons](system-design/command-panel-task-activity-icons.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
+- [Terminal Touch Scrolling](system-design/terminal-touch-scrolling.md)
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
 - [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 
-## Related systems
+## Related
 
-- [Tasks](../tasks/README.md)
-- [Plugins](../plugins/README.md)
 - [Platform](../platform/README.md)

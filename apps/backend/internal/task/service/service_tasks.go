@@ -734,15 +734,14 @@ func (s *Service) resolveOfficeWorkflow(ctx context.Context, req *CreateTaskRequ
 //
 // Three destinations, picked by what the caller is asking for:
 //
-//   - plan mode → the first step by position. Planning happens before the work,
-//     so the task belongs at the head of the board even when a later step is
-//     marked as the start step.
 //   - starting an agent now → the first step that runs agents
 //     (on_enter: auto_start_agent). A task that is about to run does not belong
-//     in a parking column that was never configured to run anything.
+//     in a parking column that was never configured to run anything. Agent mode
+//     does not change this destination.
+//   - plan mode without an immediate agent start → the first step by position.
 //   - everything else → the workflow's start step (is_start_step).
 //
-// The middle case is the one that is easy to get wrong: `is_start_step` and
+// The first case is the one that is easy to get wrong: `is_start_step` and
 // `auto_start_agent` are separate settings, and routing an agent start through
 // the start step silently made the two synonymous. It went unnoticed because
 // every built-in template puts both on the same step.
@@ -752,10 +751,10 @@ func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskReques
 		var resolvedID string
 		var err error
 		switch {
-		case req.PlanMode:
-			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
 		case req.StartAgent:
 			resolvedID, err = s.startStepResolver.ResolveAutoStartStep(ctx, req.WorkflowID)
+		case req.PlanMode:
+			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
 		default:
 			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
 		}
