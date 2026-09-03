@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // TestClaimActiveClarificationBundleUsesPendingIDIndex is the regression
@@ -32,39 +30,7 @@ func TestClaimActiveClarificationBundleUsesPendingIDIndex(t *testing.T) {
 	}
 
 	drv := repo.db.DriverName()
-	pendingIDExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id")
-	statusExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "status")
-	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
-	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
-	claimQuery := fmt.Sprintf(`
-		EXPLAIN QUERY PLAN
-		UPDATE task_session_messages
-		SET metadata = %s, updated_at = ?
-		WHERE %s = ?
-		  AND type = 'clarification_request'
-		  AND COALESCE(%s, '') IN ('', 'pending')
-		  AND %s
-		  AND turn_id = (
-			SELECT turn_row.id
-			FROM task_session_turns turn_row
-			WHERE turn_row.task_session_id = task_session_messages.task_session_id
-			  AND %s
-			ORDER BY %s
-			LIMIT 1
-		  )
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM task_session_messages bundle
-			WHERE %s = ?
-			  AND (
-				bundle.type != 'clarification_request'
-				OR bundle.task_session_id != task_session_messages.task_session_id
-				OR bundle.turn_id != task_session_messages.turn_id
-			  )
-		  )
-	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
-		nonTerminalSessionPredicate("task_session_messages"),
-		predicate, orderBy, bundlePendingIDExpr)
+	claimQuery := "EXPLAIN QUERY PLAN\n" + clarificationClaimQuery(drv)
 
 	rows, err := repo.db.Query(repo.db.Rebind(claimQuery), now, "pending-claim-plan", "pending-claim-plan")
 	if err != nil {
