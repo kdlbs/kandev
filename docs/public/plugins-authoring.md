@@ -31,7 +31,7 @@ support, not a starter repository.
 
 ## Lifecycle
 
-![Plugin authoring lifecycle: package validation and safe extraction feed the supervised Go runtime path and the browser native-UI path, which ends in plugin initialization.](../screenshots/plugin-authoring-lifecycle.svg)
+[![Plugin authoring lifecycle: package validation and safe extraction feed the supervised Go runtime path and the browser native-UI path, which ends in plugin initialization.](../screenshots/plugin-authoring-lifecycle.svg)](../screenshots/plugin-authoring-lifecycle.svg "Open full-size SVG diagram")
 
 The two lower paths are intentionally separate: the Go subprocess uses the
 host gRPC connection, while the browser receives static bundle assets and then

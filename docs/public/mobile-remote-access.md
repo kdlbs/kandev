@@ -13,7 +13,7 @@ Anyone who can reach an unauthenticated Kandev origin has administrator access. 
 
 Each protected path reaches the same Kandev origin. Kandev then sends task work to the selected executor.
 
-![Mobile remote access architecture: a phone reaches one Kandev origin through Tailscale Serve, Cloudflare Access with cloudflared, or a private VPN, then Kandev routes the task session to the selected executor and repository.](../screenshots/mobile-remote-access.svg)
+[![Mobile remote access architecture: a phone reaches one Kandev origin through Tailscale Serve, Cloudflare Access with cloudflared, or a private VPN, then Kandev routes the task session to the selected executor and repository.](../screenshots/mobile-remote-access.svg)](../screenshots/mobile-remote-access.svg "Open full-size SVG diagram")
 
 The diagram shows the important boundary: Tailscale Serve, Cloudflare Access with
 `cloudflared`, and a private VPN are alternative protected paths to the same

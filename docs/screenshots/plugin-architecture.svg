@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="plugin-runtime-lifecycle-title plugin-runtime-lifecycle-desc">
+<svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="plugin-runtime-lifecycle-title plugin-runtime-lifecycle-desc">
       <title id="plugin-runtime-lifecycle-title">How a plugin reaches the host</title>
       <desc id="plugin-runtime-lifecycle-desc">Kandev installs, verifies, and extracts a plugin before spawning a supervised go-plugin subprocess. The runtime receives bus events and external webhooks, calls the Host API, and can optionally load a native UI bundle in the SPA.</desc>
       <defs><style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Figtree:wght@400;500;600&amp;display=swap');</style>
@@ -35,14 +35,14 @@
       <path d="M640 496 V592" fill="none" stroke="#a1a1a1" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
 
       <!-- Route labels are masked with the dark paper token. -->
-      <rect x="536" y="204" width="128" height="12" rx="2" fill="#0d0d10"/>
-      <text x="600" y="213" text-anchor="middle" fill="#53eafd" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">DELIVER EVENT</text>
-      <rect x="824" y="204" width="112" height="12" rx="2" fill="#0d0d10"/>
-      <text x="880" y="213" text-anchor="middle" fill="#53eafd" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">WEBHOOK</text>
-      <rect x="664" y="392" width="128" height="12" rx="2" fill="#0d0d10"/>
-      <text x="728" y="401" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">PLUGIN CALLBACK</text>
-      <rect x="656" y="532" width="96" height="12" rx="2" fill="#0d0d10"/>
-      <text x="704" y="541" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">OPTIONAL UI</text>
+      <rect x="520" y="200" width="160" height="20" rx="4" fill="#0d0d10"/>
+      <text x="600" y="214" text-anchor="middle" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">DELIVER EVENT</text>
+      <rect x="808" y="200" width="144" height="20" rx="4" fill="#0d0d10"/>
+      <text x="880" y="214" text-anchor="middle" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">WEBHOOK</text>
+      <rect x="648" y="388" width="160" height="20" rx="4" fill="#0d0d10"/>
+      <text x="728" y="402" text-anchor="middle" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">PLUGIN CALLBACK</text>
+      <rect x="640" y="528" width="128" height="20" rx="4" fill="#0d0d10"/>
+      <text x="704" y="542" text-anchor="middle" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">OPTIONAL UI</text>
 
       <!-- Package nodes. -->
       <g role="group" aria-label="Install plugin package">
@@ -89,9 +89,9 @@
       </g>
 
       <line x1="56" y1="688" x2="88" y2="688" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
-      <text x="104" y="692" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">PACKAGE / RUNTIME</text>
+      <text x="104" y="692" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">PACKAGE / RUNTIME</text>
       <line x1="296" y1="688" x2="328" y2="688" stroke="#53eafd" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow-link)"/>
-      <text x="344" y="692" fill="#53eafd" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">EVENT / WEBHOOK</text>
+      <text x="344" y="692" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">EVENT / WEBHOOK</text>
       <rect x="544" y="680" width="12" height="12" rx="2" fill="#6468f0"/>
-      <text x="572" y="692" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.06em">HOST API FOCAL</text>
+      <text x="572" y="692" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">HOST API FOCAL</text>
     </svg>

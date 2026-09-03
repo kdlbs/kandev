@@ -31,6 +31,10 @@ If the user explicitly asks for "a screenshot of the whole page including the ca
 3. Make it standalone:
    - Ensure the opening tag has `xmlns="http://www.w3.org/2000/svg"`. Add it if missing.
    - Ensure a `viewBox` is present. The skill's templates always include one; warn the user if absent rather than guessing.
+   - For assets that readers can open directly from documentation, add `width`
+     and `height` matching the numeric `viewBox` dimensions. The docs CSS can
+     still scale the image down responsively, while direct-open preserves a
+     useful intrinsic size for zooming.
    - Preserve `role="img"`, `aria-labelledby`, and the first-child `<title>` / `<desc>` exactly as authored.
    - Inject Google Fonts `@import` so the SVG renders with correct typography in a browser. **XML-escape the `&` separators as `&amp;`** — a standalone `.svg` is parsed as strict XML, where a bare `&` starts an entity reference and makes the whole file fail to parse. (Don't copy the raw URL from the HTML `<link href>`; that ampersand form is only valid in HTML.)
      ```svg

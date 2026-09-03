@@ -146,7 +146,7 @@ Task A (backend) was created by a coordinator. The coordinator also created Task
 
 ### The exchange
 
-![Agent communication sequence: a backend agent proposes a GET items contract, the frontend agent requests created_at, the backend queues an agreement, and both agents implement after a conversation read-back.](../screenshots/agent-communication.svg)
+[![Agent communication sequence: a backend agent proposes a GET items contract, the frontend agent requests created_at, the backend queues an agreement, and both agents implement after a conversation read-back.](../screenshots/agent-communication.svg)](../screenshots/agent-communication.svg "Open full-size SVG diagram")
 
 The sequence keeps the state changes beside the messages: an idle recipient is
 sent a new turn, a running sender queues its next turn, and a final read-back

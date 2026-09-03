@@ -44,6 +44,9 @@ For a normal docs-column figure, use the `doc-inline` size preset,
 `balanced` detail, and `mixed` audience unless the page or source requires
 another choice. Keep the result readable at docs-column width. Split an
 overview from detail when the complexity budget is exceeded.
+When technical labels remain small at that width, use a tighter `fit`-style
+viewBox and a larger readable type ramp, then link the published SVG to itself
+for full-size inspection.
 
 ## Content and accessibility
 
