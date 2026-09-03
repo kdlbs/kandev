@@ -80,6 +80,28 @@ func TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault(t *testing.T) {
 	}
 }
 
+func TestUpdateUserSettingsMapsSidebarTaskColorPatch(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{}}
+	controller := NewController(service.NewService(repo, nil, log))
+	red := "red"
+
+	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
+		SidebarTaskColorPatch: &models.SidebarTaskColorPatch{
+			Colors: map[string]*string{"task-red": &red},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if value := response.Settings.SidebarTaskColors["task-red"]; value == nil || *value != "red" {
+		t.Fatalf("SidebarTaskColors[task-red] = %#v, want red", value)
+	}
+}
+
 // TestUpdateUserSettingsMapsLspStatusLocation verifies the controller persists an LSP status location patch.
 func TestUpdateUserSettingsMapsLspStatusLocation(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())

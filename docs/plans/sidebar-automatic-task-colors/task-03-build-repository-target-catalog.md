@@ -1,7 +1,7 @@
 ---
 id: "03-build-repository-target-catalog"
 title: "Build repository target catalog"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "01-persist-automatic-color-settings"

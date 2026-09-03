@@ -29,6 +29,10 @@ let mockState: MockState;
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: MockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => ({
+    getState: () => mockState,
+    setState: vi.fn(),
+  }),
 }));
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
@@ -84,6 +88,7 @@ function makeUnloadedSettings(): UserSettingsState {
     threadViewDraft: null,
     sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
     sidebarTaskColorAutomation: { enabled: false, rules: [] },
+    sidebarTaskColors: {},
     taskCreateLastUsed: {
       repositoryId: null,
       branch: null,

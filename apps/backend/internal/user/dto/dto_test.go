@@ -40,6 +40,26 @@ func TestSidebarTaskColorAutomationDTOContract(t *testing.T) {
 	}
 }
 
+func TestSidebarTaskColorsDTOContract(t *testing.T) {
+	red := "red"
+	value := map[string]*string{"task-red": &red, "task-cleared": nil}
+	got := FromUserSettings(&models.UserSettings{SidebarTaskColors: value})
+	if !reflect.DeepEqual(got.SidebarTaskColors, value) {
+		t.Fatalf("SidebarTaskColors = %#v, want %#v", got.SidebarTaskColors, value)
+	}
+	if got.SidebarTaskColors["task-red"] == value["task-red"] {
+		t.Fatal("DTO color map aliases the model pointer")
+	}
+
+	var request UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"sidebar_task_color_patch":{"if_missing":true,"colors":{"task-red":"red","task-cleared":null}}}`), &request); err != nil {
+		t.Fatalf("decode manual color patch: %v", err)
+	}
+	if request.SidebarTaskColorPatch == nil || !request.SidebarTaskColorPatch.IfMissing {
+		t.Fatalf("SidebarTaskColorPatch = %#v, want missing-only patch", request.SidebarTaskColorPatch)
+	}
+}
+
 // TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences verifies the patch request exposes the Azure DevOps browse preferences field.
 func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")

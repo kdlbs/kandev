@@ -84,6 +84,7 @@ type UpdateUserSettingsRequest struct {
 	ThreadViewDraft                   **models.ThreadViewDraft
 	SidebarTaskPrefs                  *models.SidebarTaskPrefs
 	SidebarTaskColorAutomation        *models.SidebarTaskColorAutomation
+	SidebarTaskColorPatch             *models.SidebarTaskColorPatch
 	TaskCreateLastUsed                *models.TaskCreateLastUsed
 	JiraSavedViews                    **json.RawMessage
 	JiraTaskPresets                   **json.RawMessage
@@ -227,6 +228,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
 		if err := applySidebarTaskColorAutomation(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarTaskColors(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
 		if err := applyUserPreferenceBlobs(settings, req); err != nil {
@@ -1003,6 +1007,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       settings.SidebarTaskPrefs,
 		"sidebar_task_color_automation":            settings.SidebarTaskColorAutomation,
+		"sidebar_task_colors":                      models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
 		"jira_task_presets":                        settings.JiraTaskPresets,

@@ -597,6 +597,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	if sidebarTaskColorAutomation.Rules == nil {
 		sidebarTaskColorAutomation.Rules = []models.SidebarTaskColorRule{}
 	}
+	sidebarTaskColors := models.CloneSidebarTaskColors(settings.SidebarTaskColors)
 	keyboardShortcuts := settings.KeyboardShortcuts
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
@@ -643,6 +644,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       sidebarTaskPrefs,
 		"sidebar_task_color_automation":            sidebarTaskColorAutomation,
+		"sidebar_task_colors":                      sidebarTaskColors,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
 		"jira_task_presets":                        settings.JiraTaskPresets,
@@ -745,6 +747,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ThreadActiveViewID:                DefaultThreadViewID,
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		SidebarTaskColorAutomation:        models.DefaultSidebarTaskColorAutomation(),
+		SidebarTaskColors:                 map[string]*string{},
 		AppStatusBarEnabled:               false,
 		ResolveSessionHostnames:           false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
@@ -819,6 +822,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ThreadViewDraft                   *models.ThreadViewDraft             `json:"thread_view_draft"`
 		SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
 		SidebarTaskColorAutomation        json.RawMessage                     `json:"sidebar_task_color_automation"`
+		SidebarTaskColors                 json.RawMessage                     `json:"sidebar_task_colors"`
 		TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
 		JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views"`
 		JiraTaskPresets                   json.RawMessage                     `json:"jira_task_presets"`
@@ -968,6 +972,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.ThreadViewDraft = payload.ThreadViewDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
 	settings.SidebarTaskColorAutomation = decodeSidebarTaskColorAutomation(payload.SidebarTaskColorAutomation)
+	settings.SidebarTaskColors = decodeSidebarTaskColors(payload.SidebarTaskColors)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
 	settings.JiraSavedViews = payload.JiraSavedViews
 	settings.JiraTaskPresets = payload.JiraTaskPresets

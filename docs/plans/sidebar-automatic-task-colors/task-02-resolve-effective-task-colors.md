@@ -111,6 +111,6 @@ Task 01 supplies normalized portable rules and repository target wire types.
 
 ## Results
 
-Implemented first-match resolution, ten-color presentation, workflow-step color parsing, repository identity matching, desktop/mobile task facts, and automatic-source disclosure in the manual color menu. Manual colors remain device-local and are used when no automatic rule matches.
+Implemented first-match resolution, ten-color presentation, workflow-step color parsing, repository identity matching, task facts, and automatic-source disclosure. Task 06 replaces the original device-local manual-color source.
 
 Verification: focused resolver, presentation, identity, projection, option, mapper, and sidebar suites passed 80 tests. Desktop and mobile Playwright flows passed with live state changes and reload persistence.

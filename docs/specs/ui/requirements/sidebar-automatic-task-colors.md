@@ -6,11 +6,11 @@ owners:
   - kandev
 ---
 
-# Sidebar Automatic Task Colors Requirements
+# Sidebar Task Colors Requirements
 
 ## Overview
 
-The sidebar can derive a personal task color from ordered rules. The rules use task data but do not change shared task records.
+The sidebar can use a personal manual task color or derive a personal color from ordered rules. Neither source changes shared task records.
 
 The UI system owns this presentation contract. The task, workflow, executor, and repository systems continue to own the source data.
 
@@ -19,7 +19,7 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **Automatic color rule:** A personal condition that supplies a task color.
 - **Effective color:** The first matching automatic color. If no rule matches, it is the manual color.
 - **Fixed rule color:** A color token stored as part of an automatic color rule.
-- **Manual color:** A device-local color that a user assigns directly to one task.
+- **Manual color:** A portable personal color that a user assigns directly to one task.
 - **Repository target:** A stable reference to a workspace, local, built-in remote, or plugin repository.
 
 ## Requirements
@@ -55,7 +55,7 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.9:** The task color menu shall identify an active automatic source and explain that manual colors do not override matching rules.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.10:** Automatic colors shall not mutate a task, workflow, executor, repository, or workspace setting.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.11:** Fixed rule colors shall support gray, red, orange, yellow, green, cyan, blue, indigo, purple, and pink.
-- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.12:** The manual color menu shall keep its current seven colors. Manual color choices shall remain device-local.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.12:** The manual color menu shall keep its current seven colors.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.13:** An incomplete rule shall be disabled, shall match no task, and shall remain editable.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.14:** An origin rule shall offer Kanban as the value for a task that has no stored origin.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.15:** A task-state rule shall offer every raw task state. It shall not use the broader state groups from sidebar filters.
@@ -93,9 +93,29 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.10:** The editor shall not cause document-level horizontal overflow at supported widths.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.11:** The editor shall disable Add rule at 50 rules and shall show a localized limit message.
 
+### REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005: Portable personal manual colors
+
+**Intent:** Keep a user's manual task colors consistent across browsers without changing colors for other users.
+
+**User story:** As a user, I want my manual task colors in each browser, so that I can recognize tasks consistently.
+
+#### Acceptance criteria
+
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.1:** A manual color shall persist as a personal setting. It shall not change the shared task or another user's color.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.2:** After another browser loads or reloads, it shall show the latest stored manual colors for that user.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.3:** A successful manual color edit shall remain after reload on desktop, phone, and tablet.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.4:** During upgrade, valid legacy browser colors shall import only for tasks without a stored color decision.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.5:** A stored color or stored clear decision shall take precedence over every legacy browser value for that task.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.6:** A successful legacy import shall remove the legacy browser value. A failed import shall keep it only for a later import attempt.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.7:** The application shall not use a legacy browser value as the displayed color before the backend accepts it.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.8:** A failed manual color edit shall restore the latest confirmed backend value and show a localized error.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.9:** A matching automatic rule shall hide the stored manual color without changing or clearing it.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.10:** An already-open browser shall receive the latest stored color no later than its next reload. Immediate cross-browser updates are not required.
+
 ## Out of scope
 
-- Shared workspace color rules or a durable task color field.
+- Shared workspace colors or a task-owned color field.
 - Rules for labels, projects, assigned agents, age, staleness, subtasks, pull requests, or CI status.
 - Changes to workflow-step colors or executor configuration.
 - Import or export of rule sets.
+- Real-time delivery of manual color changes to other open browsers.

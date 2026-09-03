@@ -163,6 +163,7 @@
   "automaticColorsRuleCount_other": "{{count}} regras",
   "automaticColorsRuleLimit": "Pode adicionar até 50 regras.",
   "automaticColorsSaveError": "Não foi possível guardar as cores automáticas.",
+  "manualColorSaveError": "Não foi possível guardar a cor da tarefa.",
   "automaticColorsSearchRepositories": "Pesquisar repositórios",
   "automaticColorsSelectRepository": "Selecionar repositório",
   "automaticColorsSelectTarget": "Selecionar um destino",

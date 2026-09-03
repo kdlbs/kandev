@@ -6,9 +6,10 @@ requirements:
   - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002
   - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003
   - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004
+  - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005
 ---
 
-# Sidebar Automatic Task Colors System Design
+# Sidebar Task Colors System Design
 
 ## Purpose and boundaries
 
@@ -24,6 +25,7 @@ The backend owns the portable settings value. Existing task, workflow, executor,
 | `REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002` | [Rule model](#rule-model), [Color resolution](#color-resolution) |
 | `REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003` | [Repository identity and discovery](#repository-identity-and-discovery) |
 | `REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004` | [Settings persistence](#settings-persistence), [Responsive behavior](#responsive-behavior), [Failure behavior](#failure-behavior) |
+| `REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005` | [Manual color model and mutation](#manual-color-model-and-mutation), [Legacy browser migration](#legacy-browser-migration), [Failure behavior](#failure-behavior) |
 
 ## Existing contracts
 
@@ -34,7 +36,7 @@ The backend owns the portable settings value. Existing task, workflow, executor,
 - Workspace repository discovery supplies local Git repositories that are not yet saved.
 - `filter-dimension-registry.ts`, `use-filter-value-options.ts`, and `apply-view.ts` own the current sidebar filter contract.
 - `task-session-sidebar-item.ts`, `session-task-switcher-sheet-item.ts`, and `task-session-sidebar-archived-item.ts` build task-row projections.
-- `lib/task-colors.ts` remains the device-local store for manual task colors.
+- `lib/task-colors.ts` defines the legacy browser format and the seven-color manual palette.
 - `PATCH /api/v1/user/settings` remains the only durable write path for personal portable settings.
 
 ## Rule model
@@ -161,7 +163,7 @@ If any attached repository matches the target, the repository condition matches.
 
 Desktop and mobile derive automatic colors from the same `TaskSwitcherItem` facts. Task, workflow, repository, and settings updates rebuild the affected presentation.
 
-`TaskItem` still subscribes to the device-local manual color. It renders `automaticColor ?? manualColor`.
+`TaskItem` reads the manual color from normalized user settings. It renders `automaticColor ?? manualColor`.
 
 This composition preserves the manual value. If automation stops matching, the previous manual marker becomes visible again.
 
@@ -218,11 +220,59 @@ Automatic-color edits are global across saved views and workspaces. They are ind
 
 HTTP hydration, the boot payload, settings events, and mutation responses use the same backend value. The rules and fixed colors therefore follow the user to another browser.
 
-Manual task colors remain in browser storage. They do not synchronize to another browser.
+Manual task colors are stored in backend-owned personal settings. They follow the same user to each browser.
 
 A serialized optimistic mutation helper owns writes. Each operation applies to the latest local rule list and sends one complete replacement.
 
 The helper maps the authoritative response through the common settings mapper. User-settings revisions reject older HTTP or WebSocket snapshots.
+
+## Manual color model and mutation
+
+The stored settings add `sidebar_task_colors`. This map uses a task ID as its key.
+
+Each value is one of the seven `TaskColor` values or `null`. A color value is an active manual color. A `null` value is a clear tombstone.
+
+The tombstone is not a visible color. It prevents a later legacy import from restoring a color that the user cleared.
+
+The settings response includes only normalized values. The frontend derives its visible manual-color map from the non-null values.
+
+The settings update request adds a narrow `sidebar_task_color_patch` operation. The operation contains a bounded map and an `if_missing` flag.
+
+For a normal edit, `if_missing` is false. The backend overwrites only the supplied task IDs.
+
+For a clear operation, the supplied value is `null`. The backend stores a tombstone for that task ID.
+
+For a legacy import, `if_missing` is true. The backend adds an entry only when the stored map has no key for that task ID.
+
+The service applies each patch to the latest settings value during every CAS attempt. Concurrent writes to different task IDs cannot replace each other.
+
+If two normal edits change the same task, the last committed edit wins. A legacy import never wins against a color or tombstone.
+
+The backend accepts at most 500 entries in one patch. A task ID contains at most 128 UTF-8 bytes.
+
+The stored map contains at most 10,000 entries and 1 MiB of encoded JSON. These limits keep settings responses below the existing size budget.
+
+The backend stores the map in the existing `users.settings` JSON value. This change does not add a task column or a database schema migration.
+
+`useTaskColor` selects the confirmed color from `UserSettingsState`. `useSetTaskColor` applies an optimistic per-task change and sends one narrow patch.
+
+The mutation response goes through the common settings mapper. Revision guards prevent an older response from replacing a newer settings event.
+
+The existing `user.settings.updated` event can refresh another open browser. The product contract only guarantees the new value after reload.
+
+## Legacy browser migration
+
+The frontend starts legacy migration only after backend user settings are loaded. It reads `kandev.taskColors` as migration input.
+
+The migration parser accepts only known color values and bounded task IDs. Malformed entries do not enter the request.
+
+The frontend sends valid entries in bounded batches with `if_missing` set to true. Each response replaces the local settings snapshot through the common mapper.
+
+After all batches succeed, the frontend removes `kandev.taskColors`. If no valid entries exist, it removes the legacy value without a request.
+
+If a batch fails, the frontend keeps the legacy value for a later load. It does not use that value to color a task.
+
+Tombstones remain while legacy import support exists. A later cleanup can remove tombstones only after the application retires all legacy imports.
 
 ## Editor composition
 
@@ -263,6 +313,8 @@ The repository picker uses a focused pane inside the open drawer. It follows the
 
 Desktop and mobile share rule state, normalization, matching, catalog data, and actions. Only the picker composition changes.
 
+Desktop and mobile also share the server-backed manual-color hook. The existing menus, markers, drawer, touch targets, and scroll ownership do not change.
+
 Touch summary rows, reorder controls, and standalone actions have a 44 CSS pixel active dimension. No action depends on hover.
 
 ## Failure behavior
@@ -274,6 +326,12 @@ The sidebar sync toast shows a localized error. A failed global write does not c
 If one repository source fails, the picker keeps successful groups. It shows the error beside the failed source and permits refresh.
 
 If stored automation data is malformed, the frontend disables automation and drops invalid rules. It preserves valid disabled incomplete rules and does not change manual colors.
+
+If a manual color write fails, the frontend restores the latest confirmed color and shows a localized error.
+
+If a legacy import fails, the backend map remains authoritative. The frontend retains the legacy value only as input for the next import attempt.
+
+If stored manual-color data is malformed, the backend omits invalid entries and keeps valid colors and tombstones. It does not reject all user settings.
 
 ## Accessibility and security
 
@@ -293,15 +351,19 @@ Backend tests cover defaults, exact bounds, incomplete-rule validation, JSON rou
 
 Frontend unit tests cover shared option sources, dimension differences, all rule dimensions, precedence, manual fallback, and step-color fallbacks.
 
+Backend tests cover normal color edits, clear tombstones, import-only-missing behavior, CAS retries, limits, and malformed stored entries.
+
+Frontend tests cover settings mapping, optimistic rollback, legacy parsing, successful removal, failed retry retention, and stale-response rejection.
+
 Projection tests cover desktop, mobile, and archived task facts. They also cover repository metadata joins and missing facts.
 
 Catalog tests cover search, refresh generations, source errors, duplicate identities, plugin reload, and unavailable stored targets.
 
 Component tests cover disclosure summaries, global copy, rule editing, reorder, automatic-source copy, and desktop or mobile picker composition.
 
-Desktop Playwright coverage proves database persistence across browser contexts, rule precedence, manual fallback, repository search, and live recoloring after a task change.
+Desktop Playwright coverage proves manual-color migration and persistence across browser contexts. It also proves rule precedence, repository search, and live recoloring.
 
-Mobile Playwright coverage proves the same user value through the drawer. It also proves touch targets, internal scrolling, and no horizontal overflow.
+Mobile Playwright coverage proves server-backed manual colors through the drawer. It also proves touch targets, internal scrolling, and no horizontal overflow.
 
 ## Related decisions and designs
 

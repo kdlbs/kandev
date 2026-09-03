@@ -163,6 +163,7 @@
   "automaticColorsRuleCount_other": "{{count}} 条规则",
   "automaticColorsRuleLimit": "最多可以添加 50 条规则。",
   "automaticColorsSaveError": "无法保存自动颜色。",
+  "manualColorSaveError": "无法保存任务颜色。",
   "automaticColorsSearchRepositories": "搜索代码仓库",
   "automaticColorsSelectRepository": "选择代码仓库",
   "automaticColorsSelectTarget": "选择目标",

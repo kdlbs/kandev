@@ -1,23 +1,26 @@
 ---
 created: 2026-08-30
-status: implemented
+status: done
 requirements:
   - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001
   - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002
   - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003
   - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004
+  - REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005
 system_design:
   - ../../specs/ui/system-design/sidebar-automatic-task-colors.md
 legacy_specs: []
 ---
 
-# Implementation Plan: Sidebar Automatic Task Colors
+# Implementation Plan: Sidebar Task Colors
 
 ## Overview
 
 Add the portable rule contract first. Then add rule resolution and repository identity before repository discovery and the responsive editor.
 
 This order keeps persistence, derivation, and user interaction independently testable. The final work order proves the complete desktop and mobile flow.
+
+Tasks 05 and 06 change the original manual-color boundary. They add atomic backend storage first, then migrate browser values and switch each client.
 
 ## Scope
 
@@ -31,12 +34,15 @@ This order keeps persistence, derivation, and user interaction independently tes
 - Search and refresh for workspace, local, remote, and plugin repositories.
 - Desktop and mobile rule editing.
 - Portable settings, failure recovery, localization, and E2E coverage.
+- Personal manual colors that synchronize through backend settings.
+- A safe import of legacy browser colors.
 
 ### Out of scope
 
-- Shared workspace rules or a persisted per-task color.
+- Shared workspace colors or a task-owned color field.
 - Additional rule dimensions.
 - Rule import or export.
+- Real-time cross-browser delivery of manual color changes.
 - Public documentation. Existing public docs do not describe sidebar view settings.
 
 ## Technical approach
@@ -51,7 +57,15 @@ Add the matching wire and store types in the web application. Normalize missing 
 
 Add one serialized optimistic mutation helper. It sends a complete replacement and respects settings revisions.
 
-Keep the existing manual task-color store device-local. Do not copy manual colors into backend settings.
+Store manual colors as per-user task decisions in `users.settings`. Keep colors and clear tombstones separate from automatic rules.
+
+Add a narrow per-task patch to `PATCH /api/v1/user/settings`. Apply each patch to the latest settings value during every CAS attempt.
+
+Use `if_missing` patches for legacy import. Normal edits overwrite supplied task IDs. Clear operations store tombstones.
+
+Read `kandev.taskColors` only after backend settings load. Import valid values in bounded batches, then remove the legacy browser value.
+
+Replace the localStorage subscription with a selector for backend settings. Keep automatic colors as presentation precedence over the stored manual value.
 
 ### Dimension options and color presentation
 
@@ -98,11 +112,15 @@ Add localized copy in all shipped catalogs. Generate the Traditional Chinese cat
 | `AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003.*` | Repository catalog tests and repository picker Playwright flows |
 | `AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.1` through `.4` | Backend user-settings tests and frontend mapper or mutation tests |
 | `AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.5` through `.11` | Desktop and mobile Playwright flows |
+| `AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.1` through `.5` | Backend patch, import, tombstone, and CAS tests |
+| `AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-005.6` through `.10` | Frontend migration, rollback, desktop, and mobile tests |
 
 ## E2E tests
 
 - `apps/web/e2e/tests/task/sidebar-automatic-colors.spec.ts` covers ordered state rules, live recoloring, reload persistence, and the stored API value.
 - `apps/web/e2e/tests/task/mobile-sidebar-automatic-colors.spec.ts` covers the drawer flow, touch repository selection, the focused picker pane, and reload persistence.
+- `apps/web/e2e/tests/task/sidebar-task-color-sync.spec.ts` covers desktop manual-menu selection, backend persistence, reload, and legacy-key absence.
+- `apps/web/e2e/tests/task/mobile-sidebar-task-color-sync.spec.ts` covers a server-backed manual color in the existing phone drawer.
 
 ## Work orders
 
@@ -110,6 +128,8 @@ Add localized copy in all shipped catalogs. Generate the Traditional Chinese cat
 - [x] [Task 02: Resolve effective task colors](task-02-resolve-effective-task-colors.md)
 - [x] [Task 03: Build repository target catalog](task-03-build-repository-target-catalog.md)
 - [x] [Task 04: Deliver responsive automatic-color editor](task-04-deliver-responsive-automatic-color-editor.md)
+- [x] [Task 05: Persist personal manual colors](task-05-persist-personal-manual-colors.md)
+- [x] [Task 06: Adopt server-backed manual colors](task-06-adopt-server-backed-manual-colors.md)
 
 ## Verification results
 
@@ -119,6 +139,9 @@ Add localized copy in all shipped catalogs. Generate the Traditional Chinese cat
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:zh-hant`, `pnpm run i18n:check`, and `pnpm run e2e:sleep-ratchet`: passed.
 - `python3 scripts/lint-spec-files.py --all` and `git diff --check`: passed.
 - Desktop and mobile automatic-color Playwright specs: one test passed in each project.
+- Task 05 backend and frontend settings verification: 1,158 Go tests across 7 packages and 88 focused Vitest tests passed.
+- Task 06 focused frontend verification: 76 Vitest tests passed; typecheck, lint, Traditional Chinese generation, and i18n checks passed.
+- Task 06 desktop and mobile sync Playwright specs: one test passed in each project.
 
 ## Risks
 
@@ -128,6 +151,9 @@ Add localized copy in all shipped catalogs. Generate the Traditional Chinese cat
 - Global rules can contain targets from another workspace. Stored workspace identity and unavailable labels must prevent collisions.
 - Desktop, mobile, and archived task projections expose different facts today. Each projection needs focused coverage.
 - A global setting inside a saved-view editor can appear view-specific. Visible scope copy must remove that ambiguity.
+- Whole-map replacement can erase a concurrent browser's edit. Manual colors need per-task patches that reapply after CAS conflicts.
+- A later browser can contain an old local color. Clear tombstones must win against every import-missing request.
+- Legacy browser data can exceed one request. The frontend must use bounded batches and remove the key only after all batches succeed.
 
 ## Prerequisite
 

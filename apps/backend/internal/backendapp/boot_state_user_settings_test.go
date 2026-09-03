@@ -72,6 +72,22 @@ func TestMapUserSettingsStateIncludesSidebarTaskColorAutomation(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesSidebarTaskColors(t *testing.T) {
+	red := "red"
+	colors := map[string]*string{"task-red": &red, "task-cleared": nil}
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{SidebarTaskColors: colors},
+	}, "workspace-1")
+
+	got, ok := state["sidebarTaskColors"].(map[string]*string)
+	if !ok || got["task-red"] == nil || *got["task-red"] != "red" {
+		t.Fatalf("sidebarTaskColors = %#v, want red color", state["sidebarTaskColors"])
+	}
+	if value, present := got["task-cleared"]; !present || value != nil {
+		t.Fatalf("sidebarTaskColors tombstone = (%#v, %t), want (nil, true)", value, present)
+	}
+}
+
 // TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault verifies boot state normalizes the MCP task agent profile default.
 func TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{

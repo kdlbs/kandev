@@ -163,6 +163,7 @@
   "automaticColorsRuleCount_other": "{{count}} 條規則",
   "automaticColorsRuleLimit": "最多可以新增 50 條規則。",
   "automaticColorsSaveError": "無法儲存自動顏色。",
+  "manualColorSaveError": "無法儲存任務顏色。",
   "automaticColorsSearchRepositories": "搜尋程式碼儲存庫",
   "automaticColorsSelectRepository": "選擇程式碼儲存庫",
   "automaticColorsSelectTarget": "選擇目標",

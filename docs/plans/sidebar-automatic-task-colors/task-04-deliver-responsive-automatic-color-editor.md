@@ -73,7 +73,7 @@ Deliver the compact disclosure layout and the complete automatic-color editor. P
 - Rule operations remain usable with keyboard, pointer, and touch input.
 - Desktop and mobile flows persist rules and recolor tasks after fact changes.
 - A second browser context receives the stored rule order, targets, and output colors.
-- The manual color menu remains unchanged and device-local.
+- The manual color menu remains unchanged. Task 06 replaces its device-local persistence.
 
 ## Verification
 

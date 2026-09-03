@@ -164,6 +164,7 @@
   "automaticColorsRuleCount_other": "{{count}} rules",
   "automaticColorsRuleLimit": "You can add up to 50 rules.",
   "automaticColorsSaveError": "Could not save automatic colors.",
+  "manualColorSaveError": "Could not save the task color.",
   "automaticColorsSearchRepositories": "Search repositories",
   "automaticColorsSelectRepository": "Select repository",
   "automaticColorsSelectTarget": "Select a target",
