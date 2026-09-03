@@ -351,6 +351,13 @@ func TestResetAgentContext_SerializesPromptAdmission(t *testing.T) {
 		}
 	}
 	releaseCancel()
+	if promptTimedOut {
+		select {
+		case promptErr = <-promptDone:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for reset-blocked prompt admission")
+		}
+	}
 	select {
 	case resetOK := <-resetDone:
 		if !resetOK {
