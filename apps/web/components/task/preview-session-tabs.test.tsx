@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createStore } from "zustand/vanilla";
+import { useStore } from "zustand";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 import type { TaskPlan } from "@/lib/types/http-agents";
 import type { ChatSubmitPayload } from "./chat/chat-input-container";
@@ -40,27 +42,75 @@ vi.mock("@/components/editors/tiptap/tiptap-plan-readonly", () => ({
   ),
 }));
 
-const mockTaskPlansState = {
-  byTaskId: {} as Record<string, TaskPlan | null>,
-  loadedByTaskId: {} as Record<string, boolean>,
-  loadingByTaskId: {} as Record<string, boolean>,
-  lastSeenUpdatedAtByTaskId: {} as Record<string, string | undefined>,
+type TaskPlansState = {
+  byTaskId: Record<string, TaskPlan | null>;
+  loadedByTaskId: Record<string, boolean>;
+  loadingByTaskId: Record<string, boolean>;
+  lastSeenUpdatedAtByTaskId: Record<string, string | undefined>;
 };
 
+type FakeAppState = {
+  agentProfiles: { items: never[] };
+  taskPlans: TaskPlansState;
+  markTaskPlanSeen: (taskId: string) => void;
+  setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
+  setTaskPlanLoading: (taskId: string, loading: boolean) => void;
+};
+
+function emptyTaskPlans(): TaskPlansState {
+  return { byTaskId: {}, loadedByTaskId: {}, loadingByTaskId: {}, lastSeenUpdatedAtByTaskId: {} };
+}
+
+// A real (non-static) store double: production code drives loading/loaded
+// state through these actions, and components re-render on real state
+// changes, exactly like the app's actual Zustand store. This is required to
+// exercise effect-retrigger regressions (F1/F2) that a frozen mock object
+// cannot reproduce.
+const fakeStore = createStore<FakeAppState>()((set, get) => ({
+  agentProfiles: { items: [] },
+  taskPlans: emptyTaskPlans(),
+  markTaskPlanSeen: (taskId: string) => {
+    mocks.markTaskPlanSeen(taskId);
+    const plan = get().taskPlans.byTaskId[taskId];
+    set((state) => ({
+      taskPlans: {
+        ...state.taskPlans,
+        lastSeenUpdatedAtByTaskId: {
+          ...state.taskPlans.lastSeenUpdatedAtByTaskId,
+          [taskId]: plan?.updated_at ?? "",
+        },
+      },
+    }));
+  },
+  setTaskPlan: (taskId: string, plan: TaskPlan | null) => {
+    mocks.setTaskPlan(taskId, plan);
+    set((state) => ({
+      taskPlans: {
+        ...state.taskPlans,
+        byTaskId: { ...state.taskPlans.byTaskId, [taskId]: plan },
+        loadingByTaskId: { ...state.taskPlans.loadingByTaskId, [taskId]: false },
+        loadedByTaskId: { ...state.taskPlans.loadedByTaskId, [taskId]: true },
+      },
+    }));
+  },
+  setTaskPlanLoading: (taskId: string, loading: boolean) => {
+    mocks.setTaskPlanLoading(taskId, loading);
+    set((state) => ({
+      taskPlans: {
+        ...state.taskPlans,
+        loadingByTaskId: { ...state.taskPlans.loadingByTaskId, [taskId]: loading },
+      },
+    }));
+  },
+}));
+
+function setTaskPlansState(patch: Partial<TaskPlansState>) {
+  fakeStore.setState((state) => ({ taskPlans: { ...state.taskPlans, ...patch } }));
+}
+
 vi.mock("@/components/state-provider", () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  useAppStore: (selector: (state: any) => unknown) =>
-    selector({
-      agentProfiles: { items: [] },
-      taskPlans: mockTaskPlansState,
-      markTaskPlanSeen: mocks.markTaskPlanSeen,
-    }),
-  useAppStoreApi: () => ({
-    getState: () => ({
-      setTaskPlan: mocks.setTaskPlan,
-      setTaskPlanLoading: mocks.setTaskPlanLoading,
-    }),
-  }),
+  useAppStore: (selector: (state: FakeAppState) => unknown) => useStore(fakeStore, selector),
+  useAppStoreApi: () => fakeStore,
 }));
 
 import { PreviewSessionBody, PreviewSessionTabs } from "./preview-session-tabs";
@@ -68,6 +118,7 @@ import { PreviewSessionBody, PreviewSessionTabs } from "./preview-session-tabs";
 const TASK_ID = "task-1";
 const TIMESTAMP = "2026-07-21T00:00:00Z";
 const PLAN_INDICATOR_TESTID = "preview-plan-tab-indicator";
+const PLAN_TAB_TESTID = "preview-plan-tab";
 
 const session: TaskSession = {
   id: toSessionId("session-1"),
@@ -162,10 +213,7 @@ describe("PreviewSessionTabs Plan tab", () => {
       resumeSession: vi.fn(),
     });
     mocks.getTaskPlan.mockResolvedValue(null);
-    mockTaskPlansState.byTaskId = {};
-    mockTaskPlansState.loadedByTaskId = {};
-    mockTaskPlansState.loadingByTaskId = {};
-    mockTaskPlansState.lastSeenUpdatedAtByTaskId = {};
+    fakeStore.setState({ taskPlans: emptyTaskPlans() });
   });
 
   afterEach(() => {
@@ -179,13 +227,15 @@ describe("PreviewSessionTabs Plan tab", () => {
   it("shows a Plan tab alongside session tabs", () => {
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
 
-    expect(screen.getByTestId("preview-plan-tab")).toBeTruthy();
+    expect(screen.getByTestId(PLAN_TAB_TESTID)).toBeTruthy();
     expect(screen.getByTestId(`preview-session-tab-${session.id}`)).toBeTruthy();
   });
 
   it("clicking the Plan tab swaps the chat body for the read-only plan and does not change the session", () => {
-    mockTaskPlansState.byTaskId = { [TASK_ID]: agentPlan() };
-    mockTaskPlansState.loadedByTaskId = { [TASK_ID]: true };
+    setTaskPlansState({
+      byTaskId: { [TASK_ID]: agentPlan() },
+      loadedByTaskId: { [TASK_ID]: true },
+    });
     const onSessionChange = vi.fn();
 
     render(
@@ -193,7 +243,7 @@ describe("PreviewSessionTabs Plan tab", () => {
     );
     expect(screen.getByTestId("preview-chat")).toBeTruthy();
 
-    fireEvent.mouseDown(screen.getByTestId("preview-plan-tab"), { button: 0 });
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
 
     expect(screen.queryByTestId("preview-chat")).toBeNull();
     expect(screen.getByTestId("preview-plan-panel")).toBeTruthy();
@@ -202,7 +252,10 @@ describe("PreviewSessionTabs Plan tab", () => {
   });
 
   it("shows the unseen indicator for an agent-authored plan the user hasn't seen", () => {
-    mockTaskPlansState.byTaskId = { [TASK_ID]: agentPlan() };
+    setTaskPlansState({
+      byTaskId: { [TASK_ID]: agentPlan() },
+      loadedByTaskId: { [TASK_ID]: true },
+    });
 
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
 
@@ -210,7 +263,10 @@ describe("PreviewSessionTabs Plan tab", () => {
   });
 
   it("does not show the indicator for a user-authored plan", () => {
-    mockTaskPlansState.byTaskId = { [TASK_ID]: agentPlan({ created_by: "user" }) };
+    setTaskPlansState({
+      byTaskId: { [TASK_ID]: agentPlan({ created_by: "user" }) },
+      loadedByTaskId: { [TASK_ID]: true },
+    });
 
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
 
@@ -218,8 +274,11 @@ describe("PreviewSessionTabs Plan tab", () => {
   });
 
   it("does not show the indicator once the plan's updated_at has been seen", () => {
-    mockTaskPlansState.byTaskId = { [TASK_ID]: agentPlan() };
-    mockTaskPlansState.lastSeenUpdatedAtByTaskId = { [TASK_ID]: TIMESTAMP };
+    setTaskPlansState({
+      byTaskId: { [TASK_ID]: agentPlan() },
+      loadedByTaskId: { [TASK_ID]: true },
+      lastSeenUpdatedAtByTaskId: { [TASK_ID]: TIMESTAMP },
+    });
 
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
 
@@ -227,14 +286,92 @@ describe("PreviewSessionTabs Plan tab", () => {
   });
 
   it("clears the indicator (marks seen) when the Plan tab is clicked", () => {
-    mockTaskPlansState.byTaskId = { [TASK_ID]: agentPlan() };
-    mockTaskPlansState.loadedByTaskId = { [TASK_ID]: true };
+    setTaskPlansState({
+      byTaskId: { [TASK_ID]: agentPlan() },
+      loadedByTaskId: { [TASK_ID]: true },
+    });
 
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
     expect(screen.getByTestId(PLAN_INDICATOR_TESTID)).toBeTruthy();
 
-    fireEvent.mouseDown(screen.getByTestId("preview-plan-tab"), { button: 0 });
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
 
     expect(mocks.markTaskPlanSeen).toHaveBeenCalledWith(TASK_ID);
+  });
+});
+
+describe("PreviewSessionTabs Plan tab reliability", () => {
+  beforeEach(() => {
+    mocks.useTaskSessions.mockReturnValue({ sessions: [session], isLoaded: true });
+    mocks.useSessionResumption.mockReturnValue({
+      error: null,
+      notice: null,
+      resumeSession: vi.fn(),
+    });
+    mocks.getTaskPlan.mockResolvedValue(null);
+    fakeStore.setState({ taskPlans: emptyTaskPlans() });
+  });
+
+  afterEach(() => {
+    cleanup();
+    mocks.useTaskSessions.mockReset();
+    mocks.useSessionResumption.mockReset();
+    mocks.markTaskPlanSeen.mockReset();
+    mocks.getTaskPlan.mockReset();
+  });
+
+  it("stops retrying the plan fetch after it rejects and shows an error state", async () => {
+    mocks.getTaskPlan.mockRejectedValue(new Error("boom"));
+
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-plan-error-state")).toBeTruthy();
+    });
+    expect(mocks.getTaskPlan).toHaveBeenCalledTimes(1);
+
+    // A retry-loop regression would call getTaskPlan again on every one of
+    // these render/microtask cycles.
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+
+    expect(mocks.getTaskPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-light the indicator when the plan finishes loading while the Plan tab is already open", async () => {
+    mocks.getTaskPlan.mockResolvedValue(agentPlan());
+
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-plan-panel")).toBeTruthy();
+    });
+
+    expect(screen.queryByTestId(PLAN_INDICATOR_TESTID)).toBeNull();
+  });
+
+  it("does not re-light the indicator when the plan updates over WS while the Plan tab is open", () => {
+    const initialPlan = agentPlan();
+    setTaskPlansState({
+      byTaskId: { [TASK_ID]: initialPlan },
+      loadedByTaskId: { [TASK_ID]: true },
+      lastSeenUpdatedAtByTaskId: { [TASK_ID]: initialPlan.updated_at },
+    });
+
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId={null} />);
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+    expect(screen.queryByTestId(PLAN_INDICATOR_TESTID)).toBeNull();
+
+    // Simulate a task.plan.updated WS event landing for this task while the
+    // Plan tab is already the active view.
+    const updatedPlan = agentPlan({ updated_at: "2026-07-22T00:00:00Z" });
+    act(() => {
+      setTaskPlansState({ byTaskId: { [TASK_ID]: updatedPlan } });
+    });
+
+    expect(screen.queryByTestId(PLAN_INDICATOR_TESTID)).toBeNull();
   });
 });

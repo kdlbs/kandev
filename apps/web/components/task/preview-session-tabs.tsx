@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { PanelLoadingState } from "@/components/panel-loading-state";
@@ -75,7 +75,8 @@ export function PreviewSessionTabs({
   // restart where the session row is persisted but agentctl isn't alive).
   const resumption = useSessionResumption(taskId, activeSessionId);
 
-  const { viewMode, handleTabChange, planTab } = usePreviewPlanTab(taskId, onSessionChange);
+  const planTabState = usePreviewPlanTab(taskId, onSessionChange);
+  const { viewMode, planTab } = planTabState;
 
   const tabs = useMemo<SessionTab[]>(
     () => [
@@ -138,21 +139,37 @@ export function PreviewSessionTabs({
         <SessionTabs
           tabs={tabs}
           activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
-          onTabChange={handleTabChange}
+          onTabChange={planTabState.handleTabChange}
           listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         />
       </div>
       <div className="flex-1 min-h-0">
-        {viewMode === "plan" ? (
-          <PreviewPlanPanel taskId={taskId} />
-        ) : (
-          activeSession && (
-            <PreviewSessionBody key={activeSession.id} session={activeSession} taskId={taskId} />
-          )
-        )}
+        <PreviewTabBody
+          viewMode={viewMode}
+          planState={planTabState.planState}
+          activeSession={activeSession}
+          taskId={taskId}
+        />
       </div>
     </div>
   );
+}
+
+/** Renders the Plan tab's content or the active session's chat, per `viewMode`. */
+function PreviewTabBody({
+  viewMode,
+  planState,
+  activeSession,
+  taskId,
+}: {
+  viewMode: "session" | "plan";
+  planState: ReturnType<typeof usePreviewPlanSummary>;
+  activeSession: TaskSession | null;
+  taskId: string;
+}) {
+  if (viewMode === "plan") return <PreviewPlanPanel {...planState} />;
+  if (!activeSession) return null;
+  return <PreviewSessionBody key={activeSession.id} session={activeSession} taskId={taskId} />;
 }
 
 /**
@@ -162,7 +179,8 @@ export function PreviewSessionTabs({
  */
 function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string | null) => void) {
   const { t } = useTranslation();
-  const { plan } = usePreviewPlanSummary(taskId);
+  const planState = usePreviewPlanSummary(taskId);
+  const { plan, loaded } = planState;
   const lastSeenPlanAt = useAppStore((state) => state.taskPlans.lastSeenUpdatedAtByTaskId[taskId]);
   const markTaskPlanSeen = useAppStore((state) => state.markTaskPlanSeen);
   const hasUnseenPlan = plan?.created_by === "agent" && lastSeenPlanAt !== plan.updated_at;
@@ -173,17 +191,29 @@ function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string 
     setViewMode("session");
   }, [taskId]);
 
+  // While the Plan tab is the active view, re-mark seen whenever the plan's
+  // updated_at changes. Covers both clicking Plan before the fetch resolves
+  // (nothing is marked seen until the plan actually arrives) and a WS plan
+  // update landing while the tab is already open. useLayoutEffect so the
+  // seen-mark commits before paint, matching plan-tab.tsx's dot logic.
+  const planUpdatedAt = plan?.updated_at;
+  useLayoutEffect(() => {
+    if (viewMode === "plan" && planUpdatedAt !== undefined) {
+      markTaskPlanSeen(taskId);
+    }
+  }, [viewMode, taskId, markTaskPlanSeen, planUpdatedAt]);
+
   const handleTabChange = useCallback(
     (id: string) => {
       if (id === PLAN_TAB_ID) {
         setViewMode("plan");
-        markTaskPlanSeen(taskId);
+        if (loaded) markTaskPlanSeen(taskId);
       } else {
         setViewMode("session");
         onSessionChange?.(id);
       }
     },
-    [taskId, markTaskPlanSeen, onSessionChange],
+    [taskId, loaded, markTaskPlanSeen, onSessionChange],
   );
 
   const planTab = useMemo<SessionTab>(
@@ -197,7 +227,7 @@ function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string 
     [t, hasUnseenPlan],
   );
 
-  return { viewMode, handleTabChange, planTab };
+  return { viewMode, handleTabChange, planTab, planState };
 }
 
 function resolveProfileSubLabel(

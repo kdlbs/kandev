@@ -961,6 +961,7 @@
   "planContentTooLarge": "O seu plano tem {{submitted}}, acima do limite de {{limit}}. Reduza o documento e guarde novamente.",
   "planHistory": "Histórico do plano",
   "planIsEmpty": "O plano está vazio",
+  "planLoadError": "Não foi possível carregar o plano.",
   "planMode": "Modo de plano",
   "planRestoredToV": "Plano restaurado para a v{{revisionnumber}}",
   "planRevisionCharCount_one": "{{formatted}} carácter",
