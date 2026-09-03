@@ -19,9 +19,15 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
+import type { WorkflowStepperStep } from "./task/workflow-step-disclosure";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToTask } from "@/lib/links";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
+import {
+  usePresentationToken,
+  useWorkflowStepMove,
+} from "@/hooks/domains/kanban/use-workflow-step-move";
 import {
   useEnsureTaskSession,
   type UseEnsureTaskSessionResult,
@@ -87,17 +93,21 @@ function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string
   }, [selectedTaskId, selectedTaskSessionId]);
 }
 
-function useEscapeKey(isOpen: boolean, close: () => void) {
+// The step disclosure closes itself on Escape via its own document-level
+// Radix handling; without this guard the preview's window-level listener
+// would also fire on the same keypress and close the whole panel instead of
+// leaving the first Escape to the disclosure alone.
+function useEscapeKey(isOpen: boolean, close: () => void, isDisclosureOpen: () => boolean) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
+      if (e.key === "Escape" && isOpen && !isDisclosureOpen()) {
         close();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, close]);
+  }, [isOpen, close, isDisclosureOpen]);
 }
 
 function useResizeHandler(
@@ -198,6 +208,70 @@ function useSelectedTask(
   }, [selectedTaskId, kanbanTasks, snapshots]);
 }
 
+/**
+ * Owns the preview header's step indicator: step resolution for the
+ * previewed task's own workflow, the move request, and the move-failure
+ * banner. Lives here rather than in `TaskPreviewPanel` because the panel
+ * unmounts on preview close in both layouts, while a stale response must
+ * still be discarded and never rendered against the presentation that
+ * replaced it (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.11).
+ */
+function usePreviewWorkflowStepMove(
+  selectedTaskId: string | null | undefined,
+  selectedTask: { id: string; workflowId?: string | null; workflowStepId: string | null } | null,
+) {
+  const workflowSteps = useWorkflowStepsById(selectedTask?.workflowId ?? null);
+  const [moveError, setMoveError] = useState<unknown>(null);
+  const presentationToken = usePresentationToken(selectedTaskId ?? null);
+  const disclosureOpenRef = useRef(false);
+
+  useEffect(() => {
+    setMoveError(null);
+  }, [selectedTaskId]);
+
+  const handleMoveStart = useCallback(() => setMoveError(null), []);
+  const handleMoveError = useCallback((error: unknown) => setMoveError(error), []);
+
+  const { movingToStepId, handleMove } = useWorkflowStepMove({
+    taskId: selectedTask?.id ?? null,
+    workflowId: selectedTask?.workflowId ?? null,
+    presentationToken,
+    onMoveStart: handleMoveStart,
+    onMoveError: handleMoveError,
+  });
+
+  const handleDisclosureOpenChange = useCallback((open: boolean) => {
+    disclosureOpenRef.current = open;
+  }, []);
+  const isDisclosureOpen = useCallback(() => disclosureOpenRef.current, []);
+
+  return {
+    workflowSteps,
+    currentStepId: selectedTask?.workflowStepId ?? null,
+    taskWorkflowId: selectedTask?.workflowId ?? null,
+    movingToStepId,
+    handleMove,
+    moveError,
+    handleDisclosureOpenChange,
+    isDisclosureOpen,
+  };
+}
+
+// Mirror the previewed task id into the store so kanban cards can highlight
+// the currently-previewed card without prop-drilling through swimlanes.
+function useMirrorPreviewedTaskId(
+  isOpen: boolean,
+  selectedTaskId: string | null | undefined,
+  setKanbanPreviewedTaskId: (taskId: string | null) => void,
+) {
+  useEffect(() => {
+    setKanbanPreviewedTaskId(isOpen ? (selectedTaskId ?? null) : null);
+  }, [isOpen, selectedTaskId, setKanbanPreviewedTaskId]);
+  useEffect(() => {
+    return () => setKanbanPreviewedTaskId(null);
+  }, [setKanbanPreviewedTaskId]);
+}
+
 function useCloseMissingSelectedTask(params: {
   isOpen: boolean;
   selectedTaskId: string | null | undefined;
@@ -285,14 +359,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       },
     });
 
-  // Mirror the previewed task id into the store so kanban cards can highlight
-  // the currently-previewed card without prop-drilling through swimlanes.
-  useEffect(() => {
-    setKanbanPreviewedTaskId(isOpen ? (selectedTaskId ?? null) : null);
-  }, [isOpen, selectedTaskId, setKanbanPreviewedTaskId]);
-  useEffect(() => {
-    return () => setKanbanPreviewedTaskId(null);
-  }, [setKanbanPreviewedTaskId]);
+  useMirrorPreviewedTaskId(isOpen, selectedTaskId, setKanbanPreviewedTaskId);
 
   // Use custom hooks for layout and session management
   const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(isOpen, previewWidthPx);
@@ -309,6 +376,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   const isResizingRef = useRef(false);
 
   const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks, kanbanMultiSnapshots);
+  const previewStepMove = usePreviewWorkflowStepMove(selectedTaskId, selectedTask);
 
   useCloseMissingSelectedTask({
     isOpen,
@@ -361,7 +429,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
     [isOpen, selectedTaskId, open, close],
   );
 
-  useEscapeKey(isOpen, close);
+  useEscapeKey(isOpen, close, previewStepMove.isDisclosureOpen);
 
   const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
 
@@ -384,6 +452,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       selectedTask={selectedTask}
       activeSessionId={activeSessionId}
       ensureSession={ensureSession}
+      stepMove={previewStepMove}
       onPreviewTask={handlePreviewTaskWithData}
       onNavigateToTask={handleNavigateToTask}
       onClose={close}
@@ -421,12 +490,23 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => v
   );
 }
 
+type PreviewStepMove = {
+  workflowSteps: WorkflowStepperStep[];
+  currentStepId: string | null;
+  taskWorkflowId: string | null;
+  movingToStepId: string | null;
+  handleMove: (stepId: string) => Promise<boolean>;
+  moveError: unknown;
+  handleDisclosureOpenChange: (open: boolean) => void;
+};
+
 type PreviewLayoutProps = {
   kanbanWidth: number;
   previewWidthPx: number;
   selectedTask: Task | null;
   activeSessionId: string | null;
   ensureSession: UseEnsureTaskSessionResult;
+  stepMove: PreviewStepMove;
   onPreviewTask: (task: Task) => void;
   onNavigateToTask: (task: Task) => void;
   onClose: () => void;
@@ -434,12 +514,25 @@ type PreviewLayoutProps = {
   onResizeMouseDown: (e: React.MouseEvent) => void;
 };
 
+function previewPanelStepProps(stepMove: PreviewStepMove) {
+  return {
+    workflowSteps: stepMove.workflowSteps,
+    currentStepId: stepMove.currentStepId,
+    taskWorkflowId: stepMove.taskWorkflowId,
+    movingToStepId: stepMove.movingToStepId,
+    onMoveStep: stepMove.handleMove,
+    onDisclosureOpenChange: stepMove.handleDisclosureOpenChange,
+    moveError: stepMove.moveError,
+  };
+}
+
 function FloatingPreviewLayout({
   kanbanWidth,
   previewWidthPx,
   selectedTask,
   activeSessionId,
   ensureSession,
+  stepMove,
   onPreviewTask,
   onNavigateToTask,
   onClose,
@@ -477,6 +570,7 @@ function FloatingPreviewLayout({
             onClose={onClose}
             onMaximize={(task) => onNavigateToTask(task)}
             onSessionChange={onSessionChange}
+            {...previewPanelStepProps(stepMove)}
           />
         </div>
       </div>
@@ -491,6 +585,7 @@ function InlinePreviewLayout({
   selectedTask,
   activeSessionId,
   ensureSession,
+  stepMove,
   onPreviewTask,
   onNavigateToTask,
   onClose,
@@ -520,6 +615,7 @@ function InlinePreviewLayout({
               onClose={onClose}
               onMaximize={(task) => onNavigateToTask(task)}
               onSessionChange={onSessionChange}
+              {...previewPanelStepProps(stepMove)}
             />
           </div>
         </div>
