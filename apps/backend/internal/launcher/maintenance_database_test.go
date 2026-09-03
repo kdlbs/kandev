@@ -203,7 +203,17 @@ func seedMaintenanceFixtureDB(t *testing.T, dbPath string) {
 	if err := repo.CreateTask(ctx, &models.Task{ID: "task-cli-fixture", WorkspaceID: "workspace-cli-fixture", Title: "t"}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-cli-fixture", TaskID: "task-cli-fixture"}); err != nil {
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "environment-cli-fixture", TaskID: "task-cli-fixture",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-cli-fixture", TaskID: "task-cli-fixture",
+		TaskEnvironmentID: "environment-cli-fixture",
+	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 	snap := func(id string) *models.GitSnapshot {

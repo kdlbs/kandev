@@ -67,7 +67,17 @@ func (f *testFixture) seedTask(taskID string) {
 
 func (f *testFixture) seedSession(taskID, sessionID string) {
 	f.t.Helper()
-	if err := f.repo.CreateTaskSession(context.Background(), &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
+	environmentID := "environment-" + taskID
+	if err := f.repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		f.t.Fatalf("CreateTaskEnvironment(%s): %v", environmentID, err)
+	}
+	if err := f.repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID,
+	}); err != nil {
 		f.t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
 	}
 }
