@@ -6,6 +6,7 @@ type Listener = (state: { isRestoringLayout: boolean }) => void;
 const fakeStore = {
   isRestoringLayout: false,
   pendingChatScrollTop: null as number | null,
+  pendingChatInitialPlacement: null as { sessionId: string; token: number } | null,
   setPendingChatScrollTop: vi.fn((v: number | null) => {
     fakeStore.pendingChatScrollTop = v;
   }),
@@ -51,6 +52,7 @@ describe("preserveChatScrollDuringLayout", () => {
     document.body.innerHTML = "";
     fakeStore.isRestoringLayout = false;
     fakeStore.pendingChatScrollTop = null;
+    fakeStore.pendingChatInitialPlacement = null;
     fakeStore.listeners.clear();
     fakeStore.setPendingChatScrollTop.mockClear();
   });
@@ -67,6 +69,18 @@ describe("preserveChatScrollDuringLayout", () => {
   it("uses 0 when no chat list element is present", () => {
     preserveChatScrollDuringLayout();
     expect(fakeStore.setPendingChatScrollTop).toHaveBeenCalledWith(0);
+  });
+
+  it("does not replace a pending session-specific initial placement", () => {
+    fakeStore.pendingChatInitialPlacement = { sessionId: "incoming-session", token: 11 };
+    makeChatList(250);
+
+    preserveChatScrollDuringLayout();
+
+    expect(fakeStore.pendingChatInitialPlacement).toEqual({
+      sessionId: "incoming-session",
+      token: 11,
+    });
   });
 
   it("restores scrollTop and clears pending after isRestoringLayout flips to false", async () => {

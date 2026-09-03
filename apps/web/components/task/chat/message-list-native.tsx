@@ -87,6 +87,7 @@ type NativeMessageListScrollParams = {
   anchoredBarHeight?: number;
   /** Initial/refetch loading: the sentinel's hard block. */
   messagesLoading: boolean;
+  historyRefreshPending: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
@@ -120,6 +121,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     dividerBeforeItemKey,
     anchoredBarHeight,
     messagesLoading,
+    historyRefreshPending,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -146,6 +148,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     enabled,
     hasUnreadDivider: Boolean(dividerBeforeItemKey),
     messagesLoading,
+    historyRefreshPending,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -538,6 +541,7 @@ export const NativeMessageList = memo(
       taskId,
       sessionId,
       messagesLoading,
+      historyRefreshPending = false,
       isWorking,
       sessionState,
       worktreePath,
@@ -581,6 +585,7 @@ export const NativeMessageList = memo(
         dividerBeforeItemKey,
         anchoredBarHeight,
         messagesLoading,
+        historyRefreshPending,
         hasMore,
         isLoadingMore,
         loadMore,

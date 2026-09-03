@@ -312,6 +312,8 @@ type DockviewStore = {
   activePanelComponent: string | null;
   pendingChatScrollTop: number | null;
   setPendingChatScrollTop: (value: number | null) => void;
+  pendingChatInitialPlacement: { sessionId: string; token: number } | null;
+  completePendingChatInitialPlacement: (token: number) => void;
   /** Saved layout from before a manual maximize. Null when not maximized. */
   preMaximizeLayout: LayoutState | null;
   /** The group ID that was maximized (used for session restore). */
@@ -324,6 +326,17 @@ type StoreGet = () => DockviewStore;
 type StoreSet = (
   partial: Partial<DockviewStore> | ((s: DockviewStore) => Partial<DockviewStore>),
 ) => void;
+
+let chatInitialPlacementToken = 0;
+
+function nextChatInitialPlacementToken(): number {
+  chatInitialPlacementToken += 1;
+  return chatInitialPlacementToken;
+}
+
+function createChatInitialPlacement(sessionId: string | null) {
+  return sessionId ? { sessionId, token: nextChatInitialPlacementToken() } : null;
+}
 
 /**
  * Apply queued deferred panel actions to the dockview API after a layout
@@ -1037,6 +1050,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       debugSwitch("envSwitch: skip (same env)", { newEnvId });
       return;
     }
+    set({ pendingChatInitialPlacement: createChatInitialPlacement(activeSessionId) });
     // First adoption (oldEnvId and currentLayoutEnvId both null) falls through
     // to the general path below. We deliberately do NOT "just adopt" whatever
     // onReady rendered: this branch only fires when onReady ran with a null
@@ -1460,6 +1474,13 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   resetLayout: () => resetToEffectiveDefault(set, get),
   pendingChatScrollTop: null,
   setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
+  pendingChatInitialPlacement: null,
+  completePendingChatInitialPlacement: (token) =>
+    set((state) =>
+      state.pendingChatInitialPlacement?.token === token
+        ? { pendingChatInitialPlacement: null }
+        : {},
+    ),
   preMaximizeLayout: null,
   maximizedGroupId: null,
   ...buildMaximizeActions(set, get),
