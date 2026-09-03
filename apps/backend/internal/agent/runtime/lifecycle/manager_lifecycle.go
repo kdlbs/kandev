@@ -44,6 +44,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 
+	// AC-EXECUTORS-SURVIVAL-003.1: start this pass's re-tracked-session set
+	// empty so a stale entry from an earlier Start() call (tests, or a
+	// hypothetical re-Start) never leaks into this pass's outcome.
+	m.resetRetrackedSessions()
+
 	// Read the live standalone recovery-inventory records (startup step 3,
 	// AC-EXECUTORS-SURVIVAL-002.8) before recovery contacts any control
 	// server, and hand them to every runtime's RecoverInstances unchanged.
@@ -199,6 +204,11 @@ func (m *Manager) Start(ctx context.Context) error {
 				continue
 			}
 			m.setRuntimeInterest(execution.SessionID, true)
+			// AC-EXECUTORS-SURVIVAL-003.1: this execution is durably in the
+			// store as of the Add above, so its session is re-tracked from
+			// this point on regardless of which branch below applies the
+			// retained turn outcome or publishes running.
+			m.markSessionRetracked(execution.SessionID)
 
 			// Reconcile the persistence row to match the recovered in-memory ID.
 			// If executors_running.agent_execution_id had drifted (e.g. from a

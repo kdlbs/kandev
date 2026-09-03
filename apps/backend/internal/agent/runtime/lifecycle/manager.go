@@ -96,6 +96,22 @@ type Manager struct {
 	// for a session that might still be re-tracking. Always non-nil.
 	recoveryGuard *RecoveryGuard
 
+	// retrackedSessionsMu guards retrackedSessions.
+	retrackedSessionsMu sync.RWMutex
+
+	// retrackedSessions is the set of session IDs this backend successfully
+	// re-tracked during its most recent Start() recovery pass
+	// (AC-EXECUTORS-SURVIVAL-003.1). Reset at the start of each Start() call,
+	// then populated once per recovered execution, right after it lands in
+	// executionStore -- never for an instance this pass explicitly refused
+	// to re-track (unreconstructable agent identity, unretrievable turn
+	// status). Queried by the orchestrator's startup reconciliation via
+	// WasSessionRetracked so a session whose agent actually survived the
+	// restart skips "backend died mid-turn" cleanup
+	// (AC-EXECUTORS-SURVIVAL-003.2/.3/.4/.5). Always non-nil after
+	// construction.
+	retrackedSessions map[string]struct{}
+
 	// passthroughLookup reads a session's durable passthrough mode
 	// (TaskSession.IsPassthrough) for AC-EXECUTORS-SURVIVAL-005.3's startup
 	// guard exclusion. Nil = every live standalone session is guarded (the
@@ -355,6 +371,7 @@ func NewManager(
 		skillDeployer:            NoopSkillDeployer(),
 		remediateNpxCache:        routingerr.RemediateNpxCache,
 		recoveryGuard:            NewRecoveryGuard(),
+		retrackedSessions:        make(map[string]struct{}),
 	}
 	// Initialize stream manager with callbacks that delegate to manager methods
 	// mcpHandler will be set later via SetMCPHandler.
@@ -557,6 +574,38 @@ func (m *Manager) SetAgentSurvivalEnabled(enabled bool) {
 // StandaloneExecutor, via SetUnstoppableSessionRecorder). Always non-nil.
 func (m *Manager) RecoveryGuard() *RecoveryGuard {
 	return m.recoveryGuard
+}
+
+// WasSessionRetracked reports whether sessionID was successfully re-tracked
+// during this backend's most recent Start() recovery pass
+// (AC-EXECUTORS-SURVIVAL-003.1). Safe for concurrent use.
+func (m *Manager) WasSessionRetracked(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	m.retrackedSessionsMu.RLock()
+	defer m.retrackedSessionsMu.RUnlock()
+	_, ok := m.retrackedSessions[sessionID]
+	return ok
+}
+
+// markSessionRetracked records sessionID as re-tracked for the current
+// Start() pass. See retrackedSessions.
+func (m *Manager) markSessionRetracked(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	m.retrackedSessionsMu.Lock()
+	m.retrackedSessions[sessionID] = struct{}{}
+	m.retrackedSessionsMu.Unlock()
+}
+
+// resetRetrackedSessions clears the re-tracked set at the start of a new
+// Start() pass.
+func (m *Manager) resetRetrackedSessions() {
+	m.retrackedSessionsMu.Lock()
+	m.retrackedSessions = make(map[string]struct{})
+	m.retrackedSessionsMu.Unlock()
 }
 
 // SetAttachmentReader wires the backend attachment reader used by prompt

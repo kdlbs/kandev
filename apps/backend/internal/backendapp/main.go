@@ -683,6 +683,12 @@ func startAgentInfrastructure(
 		return false
 	}
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
+	// AC-EXECUTORS-SURVIVAL-003.1: lifecycleMgr.Start already ran
+	// synchronously inside provideLifecycleManager above, so every session's
+	// re-tracking outcome is already decided by the time orchestratorSvc.Start
+	// (called later, from startGatewayAndServe) runs its own startup
+	// reconciliation and consults this checker.
+	orchestratorSvc.SetRetrackedSessionChecker(lifecycleMgr.WasSessionRetracked)
 	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
 		repos.Task,
 		repos.AgentSettings,

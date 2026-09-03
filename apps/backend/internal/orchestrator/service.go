@@ -601,6 +601,16 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// retrackedSessionCheck reports whether the lifecycle manager
+	// successfully re-tracked a session during this backend's own startup
+	// recovery pass (AC-EXECUTORS-SURVIVAL-003.1). Consulted by startup
+	// reconciliation so a session whose agent survived the restart skips
+	// "backend died mid-turn" cleanup. Nil (unwired, or agent survival
+	// disabled) preserves today's behavior -- every active session is
+	// reconciled as if its agent died with the backend. See
+	// SetRetrackedSessionChecker.
+	retrackedSessionCheck func(sessionID string) bool
+
 	// routeActionHandler is owned by the dynamic conductor composition. The
 	// orchestrator only validates/authorizes the request and returns the
 	// authoritative route snapshot; concrete and dynamic callers share this
@@ -1693,6 +1703,27 @@ func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessio
 // than a session. Same contract: nil for identity-less internal callers.
 func (s *Service) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskAccessCheck = check
+}
+
+// SetRetrackedSessionChecker installs the lifecycle manager's query for
+// AC-EXECUTORS-SURVIVAL-003.1: whether a session was successfully
+// re-tracked during this backend's own startup recovery pass. Wired from
+// backendapp after the lifecycle manager's synchronous Start() has already
+// completed, so every session's outcome is decided before this service's
+// own Start() runs startup reconciliation. Nil (unwired) preserves today's
+// behavior.
+func (s *Service) SetRetrackedSessionChecker(check func(sessionID string) bool) {
+	s.retrackedSessionCheck = check
+}
+
+// wasSessionRetracked applies the configured retrackedSessionCheck. Nil
+// checker or empty sessionID is treated as "not retracked" -- today's
+// unconditional reconciliation, the correct default.
+func (s *Service) wasSessionRetracked(sessionID string) bool {
+	if s.retrackedSessionCheck == nil || sessionID == "" {
+		return false
+	}
+	return s.retrackedSessionCheck(sessionID)
 }
 
 // authorizeSession applies the configured per-user session check. No-op when
@@ -3003,9 +3034,21 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	previousState models.TaskSessionState,
 	session *models.TaskSession,
 ) {
+	// AC-EXECUTORS-SURVIVAL-003.1: the lifecycle manager's re-tracking
+	// outcome for sessionID is already decided by the time this runs (its
+	// Start() is synchronous and completes before this service's own Start()
+	// is ever called). A re-tracked session's agent survived the restart and
+	// is already running under this backend, so none of the "backend died
+	// mid-turn" reconciliation below applies to it
+	// (AC-EXECUTORS-SURVIVAL-003.2/.3/.4/.5).
+	retracked := s.wasSessionRetracked(sessionID)
+
 	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
-	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user opens it)
-	if previousState != models.TaskSessionStateWaitingForInput {
+	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user
+	// opens it) -- unless the session was re-tracked, in which case it is
+	// still genuinely running and AC-EXECUTORS-SURVIVAL-003.3 requires
+	// leaving it in that state.
+	if !retracked && previousState != models.TaskSessionStateWaitingForInput {
 		s.updateTaskSessionStateWithHook(
 			ctx,
 			running.TaskID,
@@ -3017,7 +3060,11 @@ func (s *Service) reconcileActiveSessionOnStartup(
 			session,
 		)
 	}
-	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
+	// AC-EXECUTORS-SURVIVAL-003.4: a re-tracked session's open turn is still
+	// live, not abandoned.
+	if !retracked {
+		s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
+	}
 
 	// PRESERVE executors_running.agent_execution_id post-restart. The in-memory
 	// process is gone, but the stored ID still serves as a "this session was
@@ -3030,8 +3077,9 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// in-memory Add on the next launch, closing the divergence window we set out
 	// to fix in this refactor.
 
-	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
-	if running.TaskID != "" {
+	// Ensure task is in REVIEW state (not stuck IN_PROGRESS) -- skipped for a
+	// re-tracked session's task, per AC-EXECUTORS-SURVIVAL-003.5.
+	if !retracked && running.TaskID != "" {
 		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
@@ -3050,11 +3098,14 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// Mark the task interrupted when its session was mid-turn when the backend
 	// died (STARTING/RUNNING) so task-list surfaces can show the red
 	// interruption icon. WAITING_FOR_INPUT sessions were idle, not interrupted.
+	// A re-tracked session's task was never actually interrupted -- its agent
+	// kept running across the restart -- so this is skipped for it per
+	// AC-EXECUTORS-SURVIVAL-003.2.
 	// The write is archive-atomic (SetTaskMetadataKeyIfNotArchived), so an
 	// archive that commits after this check cannot leave a stale marker on an
 	// archived task. The marker is cleared when a session of the task next
 	// enters STARTING/RUNNING (see updateTaskSessionStateWithHook).
-	if running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
+	if !retracked && running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
 		if _, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); setErr != nil {
 			s.logger.Warn("failed to mark task interrupted on startup",
 				zap.String("task_id", running.TaskID),
@@ -3077,6 +3128,7 @@ func (s *Service) reconcileActiveSessionOnStartup(
 		zap.String("session_id", sessionID),
 		zap.String("task_id", running.TaskID),
 		zap.String("previous_state", string(previousState)),
+		zap.Bool("retracked", retracked),
 		zap.Bool("has_resume_token", running.ResumeToken != ""),
 		zap.Bool("has_worktree", running.WorktreePath != ""))
 }
