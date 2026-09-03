@@ -9,6 +9,8 @@ import type {
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
   AgentProfileRecentUseApiRecord,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowProfileSessionEndPolicy,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
@@ -41,6 +43,11 @@ import type {
   SSHTestRequest,
   SSHTestResult,
 } from "../../lib/types/http-ssh";
+import type {
+  KubernetesSession,
+  KubernetesTestRequest,
+  KubernetesTestResult,
+} from "../../lib/types/http-kubernetes";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 import { dwell } from "./causal-waits";
 
@@ -786,6 +793,9 @@ export class ApiClient {
     position: number,
     opts?: {
       is_start_step?: boolean;
+      agent_profile_id?: string;
+      profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+      profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -798,6 +808,13 @@ export class ApiClient {
       name,
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
+      ...(opts?.agent_profile_id ? { agent_profile_id: opts.agent_profile_id } : {}),
+      ...(opts?.profile_session_start_policy
+        ? { profile_session_start_policy: opts.profile_session_start_policy }
+        : {}),
+      ...(opts?.profile_session_end_policy
+        ? { profile_session_end_policy: opts.profile_session_end_policy }
+        : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
   }
@@ -1002,8 +1019,17 @@ export class ApiClient {
   async createExecutor(
     name: string,
     type: string,
+    config?: Record<string, string>,
   ): Promise<{ id: string; name: string; type: string }> {
-    return this.request("POST", "/api/v1/executors", { name, type });
+    return this.request("POST", "/api/v1/executors", { name, type, config });
+  }
+
+  async testKubernetesConnection(request: KubernetesTestRequest): Promise<KubernetesTestResult> {
+    return this.request("POST", "/api/v1/kubernetes/test", request);
+  }
+
+  async listKubernetesSessions(executorId: string): Promise<KubernetesSession[]> {
+    return this.request("GET", `/api/v1/kubernetes/executors/${executorId}/sessions`);
   }
 
   async updateWorkspace(
@@ -1173,7 +1199,12 @@ export class ApiClient {
 
   async updateWorkflow(
     workflowId: string,
-    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+    updates: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+    },
   ): Promise<Workflow> {
     return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
   }
@@ -1202,6 +1233,8 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
+      profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+      profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
@@ -1363,11 +1396,16 @@ export class ApiClient {
     await this.request("POST", "/api/v1/_test/messages", body);
   }
 
-  async seedToolCallMessages(sessionId: string, count: number): Promise<void> {
+  async seedToolCallMessages(
+    sessionId: string,
+    count: number,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
     for (let i = 0; i < count; i++) {
       await this.seedSessionMessage(sessionId, {
         type: "tool_call",
         content: `synthetic tool call ${i + 1}`,
+        metadata,
       });
     }
   }
@@ -1907,6 +1945,8 @@ export class ApiClient {
       line?: number;
       side?: string;
       comment_type?: string;
+      html_url?: string;
+      in_reply_to?: number | null;
       created_at?: string;
       updated_at?: string;
     }>;
@@ -2264,7 +2304,9 @@ export class ApiClient {
       executor_id?: string;
       executor_profile_id?: string;
       state: string;
+      is_primary: boolean;
       started_at: string;
+      completed_at?: string | null;
       task_environment_id?: string;
       workspace_path?: string;
       worktree_path?: string;
@@ -2434,10 +2476,10 @@ export class ApiClient {
   async launchSession(
     payload: {
       task_id: string;
-      agent_profile_id: string;
+      agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
-      prompt: string;
+      prompt?: string;
       intent?: string;
       session_id?: string;
       workflow_step_id?: string;

@@ -47,6 +47,8 @@ type WorkspaceTracker struct {
 	workDir      string
 	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
 	logger       *logger.Logger
+	gitEnv       []string
+	gitEnvMu     sync.RWMutex
 	// allowedSourceRoots are canonical roots of durable sources explicitly
 	// attached to this workspace. They are deliberately separate from workDir:
 	// a link may point outside the workspace, but only to one of these roots.
@@ -158,6 +160,9 @@ type WorkspaceTracker struct {
 	gitStatusObserveMu      sync.Mutex
 	gitStatusObserveWG      sync.WaitGroup
 	gitStatusWaiterJoined   func() // Optional test synchronization hook; nil in production.
+	// gitStatusBetweenQueries is an optional test hook invoked between the
+	// tracked and untracked queries. It is nil in production.
+	gitStatusBetweenQueries func()
 
 	// Control
 	stopCh          chan struct{}
@@ -226,6 +231,22 @@ func (wt *WorkspaceTracker) MonitorTickStats() (count int64, totalNanos int64) {
 // rescan path to decide whether a discovered subdir already has a tracker.
 func (wt *WorkspaceTracker) RepositoryName() string {
 	return wt.repositoryName
+}
+
+// SetGitEnvironment stores a detached copy of the instance environment used
+// for every Git command started by this tracker. Tracker-owned copies prevent
+// a later manager or sibling-tracker update from changing an in-flight command.
+func (wt *WorkspaceTracker) SetGitEnvironment(env []string) {
+	detached := append([]string(nil), env...)
+	wt.gitEnvMu.Lock()
+	wt.gitEnv = detached
+	wt.gitEnvMu.Unlock()
+}
+
+func (wt *WorkspaceTracker) gitEnvironmentSnapshot() []string {
+	wt.gitEnvMu.RLock()
+	defer wt.gitEnvMu.RUnlock()
+	return append([]string(nil), wt.gitEnv...)
 }
 
 // SetBaseBranch records the task's stored base branch for this repository.

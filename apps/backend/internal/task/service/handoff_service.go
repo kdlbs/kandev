@@ -436,20 +436,32 @@ func (s *HandoffService) attachWorkspaceGroup(ctx context.Context, taskID, paren
 // workspace group or creates a fresh one with the parent as owner. The
 // MaterializedKind is provisional (single_repo by default) — the
 // materializer flips it via MarkWorkspaceMaterialized at launch time.
+//
+// The archived check runs first and unconditionally, before the
+// existing-group lookup: a parent that already has other children almost
+// always already has a group, so gating only the create-new-group branch
+// would let a new inherit_parent child attach to an archived parent's group
+// silently — a task that is dead workspace-wise the moment it is created
+// ("born stranded"), indistinguishable on the board from a normal
+// launchable CREATED card until someone tries to launch it.
 func (s *HandoffService) lookupOrCreateParentGroup(ctx context.Context, parentID string) (*orchmodels.WorkspaceGroup, error) {
-	g, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, parentID)
-	if err != nil {
-		return nil, err
-	}
-	if g != nil {
-		return g, nil
-	}
 	parent, err := s.tasks.GetTask(ctx, parentID)
 	if err != nil {
 		return nil, err
 	}
 	if parent == nil {
 		return nil, fmt.Errorf("parent task %s not found", parentID)
+	}
+	if parent.ArchivedAt != nil {
+		return nil, fmt.Errorf("workspace_mode=%s requires a non-archived parent task; parent task %s is archived", workspaceModeInheritParent, parentID)
+	}
+
+	g, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if g != nil {
+		return g, nil
 	}
 	g = &orchmodels.WorkspaceGroup{
 		WorkspaceID:      parent.WorkspaceID,

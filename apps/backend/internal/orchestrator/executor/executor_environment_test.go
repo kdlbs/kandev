@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -1001,6 +1002,86 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 	// pre-existing ShouldPersistMetadataKey gate already drops it.
 	if _, ok := req.Metadata["task_description"]; ok {
 		t.Error("task_description (non-persistent) leaked into sibling-session request")
+	}
+}
+
+func TestApplyExecutorRunningMetadata_DoesNotResumeSiblingKubernetesSession(t *testing.T) {
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", SessionID: "session-new", ExecutorType: string(models.ExecutorTypeKubernetes),
+	}
+	running := &models.ExecutorRunning{
+		SessionID: "session-old", TaskID: "task-1", AgentExecutionID: "execution-old",
+		Runtime:  agentruntime.RuntimeKubernetes,
+		Metadata: recordedKubernetesResumeMetadataFor("task-1", "session-old", "execution-old"),
+	}
+
+	applyExecutorRunningMetadata(req, running)
+
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty for fresh sibling Kubernetes launch", req.PreviousExecutionID)
+	}
+}
+
+func TestApplyExecutorRunningMetadata_KubernetesResumeRequiresExactSessionAuthority(t *testing.T) {
+	tests := []struct {
+		name           string
+		requestType    string
+		requestSession string
+		runtime        agentruntime.Runtime
+		runningSession string
+		wantPrevious   string
+	}{
+		{
+			name: "exact non-empty Kubernetes session resumes", requestType: string(models.ExecutorTypeKubernetes),
+			requestSession: "session-1", runtime: agentruntime.RuntimeKubernetes,
+			runningSession: "session-1", wantPrevious: "execution-old",
+		},
+		{
+			name: "sibling Kubernetes session starts fresh", requestType: string(models.ExecutorTypeKubernetes),
+			requestSession: "session-new", runtime: agentruntime.RuntimeKubernetes,
+			runningSession: "session-old",
+		},
+		{
+			name: "missing recorded Kubernetes session starts fresh", requestType: string(models.ExecutorTypeKubernetes),
+			requestSession: "session-new", runtime: agentruntime.RuntimeKubernetes,
+		},
+		{
+			name: "missing request Kubernetes session starts fresh", requestType: string(models.ExecutorTypeKubernetes),
+			runtime: agentruntime.RuntimeKubernetes, runningSession: "session-old",
+		},
+		{
+			name: "Kubernetes request rejects a mismatched recorded runtime", requestType: string(models.ExecutorTypeKubernetes),
+			requestSession: "session-1", runtime: agentruntime.RuntimeSSH,
+			runningSession: "session-1",
+		},
+		{
+			name: "non-Kubernetes request rejects a recorded Kubernetes runtime", requestType: string(models.ExecutorTypeLocal),
+			requestSession: "session-1", runtime: agentruntime.RuntimeKubernetes,
+			runningSession: "session-1",
+		},
+		{
+			name: "legacy runtime keeps cross-session environment reuse", requestType: string(models.ExecutorTypeLocal),
+			requestSession: "session-new", runtime: agentruntime.RuntimeStandalone,
+			runningSession: "session-old", wantPrevious: "execution-old",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := &LaunchAgentRequest{
+				TaskID: "task-1", SessionID: test.requestSession, ExecutorType: test.requestType,
+			}
+			running := &models.ExecutorRunning{
+				SessionID: test.runningSession, TaskID: "task-1",
+				AgentExecutionID: "execution-old", Runtime: test.runtime,
+			}
+
+			applyExecutorRunningMetadata(req, running)
+
+			if req.PreviousExecutionID != test.wantPrevious {
+				t.Fatalf("PreviousExecutionID = %q, want %q", req.PreviousExecutionID, test.wantPrevious)
+			}
+		})
 	}
 }
 

@@ -148,6 +148,64 @@ func TestStop_MissingSessionReportsRuntimeNotFound(t *testing.T) {
 	})
 }
 
+func TestStopSessionSynchronouslyWaitsForAgentTeardown(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-sync"] = &models.TaskSession{
+		ID: "session-sync", TaskID: "task-sync", State: models.TaskSessionStateRunning,
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-sync", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if err := exec.StopSessionSynchronously(context.Background(), "session-sync", "cleanup", true); err != nil {
+		t.Fatalf("StopSessionSynchronously: %v", err)
+	}
+	select {
+	case executionID := <-stopCalls:
+		if executionID != "execution-sync" {
+			t.Fatalf("stopped execution = %q, want execution-sync", executionID)
+		}
+	default:
+		t.Fatal("synchronous stop returned before agent teardown ran")
+	}
+	if got := repo.sessions["session-sync"].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED", got)
+	}
+}
+
+func TestStopSessionSynchronouslyStopsLateExecutionAfterSessionDeletion(t *testing.T) {
+	repo := newMockRepository()
+	repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+		return nil, fmt.Errorf("session deleted: %w", models.ErrTaskSessionNotFound)
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-late", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if err := exec.StopSessionSynchronously(context.Background(), "session-deleted", "cleanup", true); err != nil {
+		t.Fatalf("StopSessionSynchronously: %v", err)
+	}
+	if got := <-stopCalls; got != "execution-late" {
+		t.Fatalf("stopped execution = %q, want execution-late", got)
+	}
+}
+
 func TestStopSessionDetailed_RejectsInvalidSession(t *testing.T) {
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 
@@ -427,32 +485,24 @@ func TestStopExecution_PreservesRuntimeFailureClassification(t *testing.T) {
 	}
 }
 
-func TestPrepareModelSwitch_StopsBeforeReplacementWhenTeardownFails(t *testing.T) {
+func TestStopPreparedModelSwitchAgent_ReturnsTeardownFailure(t *testing.T) {
 	stopErr := errors.New("runtime teardown failed")
-	repo := newMockRepository()
-	repo.sessions["session-model-switch"] = &models.TaskSession{
-		ID: "session-model-switch", TaskID: "task-model-switch",
-	}
-	repo.tasks["task-model-switch"] = &models.Task{ID: "task-model-switch"}
 	manager := &mockAgentManager{
-		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
-			return "execution-model-switch", nil
-		},
-		stopAgentFunc: func(context.Context, string, bool) error {
+		stopAgentFunc: func(_ context.Context, executionID string, force bool) error {
+			if executionID != "execution-model-switch" || force {
+				t.Fatalf("StopAgent = (%q, %v), want (execution-model-switch, false)", executionID, force)
+			}
 			return stopErr
 		},
 	}
-	exec := newTestExecutor(t, manager, repo)
+	exec := newTestExecutor(t, manager, newMockRepository())
 
-	session, task, acpSessionID, existingRunning, err := exec.prepareModelSwitch(
-		context.Background(), "task-model-switch", "session-model-switch",
+	err := exec.stopPreparedModelSwitchAgent(
+		context.Background(), "execution-model-switch",
 	)
 
 	if !errors.Is(err, stopErr) {
-		t.Fatalf("prepareModelSwitch error = %v, want %v", err, stopErr)
-	}
-	if session != nil || task != nil || acpSessionID != "" || existingRunning != nil {
-		t.Fatalf("prepareModelSwitch returned replacement inputs after stop failure: session=%#v task=%#v acp=%q running=%#v", session, task, acpSessionID, existingRunning)
+		t.Fatalf("stopPreparedModelSwitchAgent error = %v, want %v", err, stopErr)
 	}
 }
 

@@ -200,7 +200,7 @@ Native session continuation and provider-managed compaction remain authoritative
 
 Automation sessions receive one fixed, workspace-scoped coordinator MCP surface. The server resolves the trusted automation principal before dispatch and uses that principal for workspace, caller task, caller session, surface, and audit identity; a prompt or tool argument cannot forge those values. The catalog includes coordination and pending-question or permission actions needed by an automation, but excludes task deletion, configuration mutation, task-local authoring, provider PR/MR actions, diagnostics, plugins, and arbitrary capability settings.
 
-The automation's own hidden task and every session on it are invalid targets for mutation, messaging, stopping, spawning, and blocker discovery or resolution. Foreign-workspace targets return the same not-found result as unknown targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
+The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for every mutation except archiving. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
 
 ## Export automations
 
@@ -668,7 +668,8 @@ A profile server can show **Delivered, connection unverified**. That server
 connects directly to the agent, so Kandev cannot inspect its `tools/list`
 result, descriptions, schemas, or token estimates. The explorer still shows
 safe status metadata. The built-in Kandev server becomes **Connected** after
-MCP initialize. It becomes **Active** after it serves `tools/list`. Missing
+protocol acceptance, either legacy MCP initialize or an accepted modern
+request. It becomes **Active** after it serves `tools/list`. Missing
 observation is not a failure. Red appears only for an explicit sanitized error.
 
 The report is per Kandev session and execution. It stores only bounded,
@@ -691,6 +692,27 @@ http://127.0.0.1:<backend-port>/mcp
 ```
 
 SSE compatibility uses `/mcp/sse` with messages sent to `/mcp/message`. A reverse proxy must support long-lived streaming connections.
+
+### MCP protocol versions
+
+The `/mcp` endpoint supports protocol negotiation for modern and legacy clients.
+
+- Modern clients can select `2026-07-28` with `server/discover`, or send a direct request with the modern request metadata.
+- Legacy clients use `initialize` and can negotiate `2025-11-25`, `2025-06-18`, `2025-03-26`, or `2024-11-05`.
+- Modern requests are stateless. They do not use `Mcp-Session-Id`.
+- SSE remains a legacy transport. Use `/mcp` when the client supports `2026-07-28`.
+
+Automatic client negotiation depends on the client SDK. Some clients need an explicit option to enable discovery. Kandev does not enable modern protocol use for every client by default.
+
+Agent-attached MCP servers keep `/mcp`, `/sse`, and `/message` on the agentctl port. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
+
+### Configured third-party MCP servers
+
+Kandev delivers configured third-party MCP server definitions directly to the agent. The agent and each third-party server negotiate their own protocol and authentication.
+
+Kandev does not upgrade or proxy configured third-party MCP servers. Their supported versions depend on the agent, client, and server.
+
+This compatibility work does not add MCP Tasks, new OAuth behavior, or third-party MCP proxying.
 
 External MCP exposes 42 tools in these groups:
 

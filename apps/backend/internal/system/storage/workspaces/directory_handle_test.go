@@ -1,6 +1,7 @@
 package workspaces
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,6 +43,15 @@ func TestDirectoryHandlePinsWorktreeAcrossPathReplacement(t *testing.T) {
 	}
 	if err := handle.VerifyPath(original); err == nil {
 		t.Fatal("VerifyPath succeeded after the lexical path changed")
+	}
+	if err := handle.RemoveDirectory(context.Background()); err == nil {
+		t.Fatal("remove pinned original directory succeeded after path replacement")
+	}
+	if _, err := os.Stat(filepath.Join(archived, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("archived original directory contents remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(original, ".git")); err != nil {
+		t.Fatalf("replacement directory changed: %v", err)
 	}
 }
 

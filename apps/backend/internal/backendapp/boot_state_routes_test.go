@@ -31,6 +31,17 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	}
 }
 
+func TestMapKanbanStepStateIncludesProfileSessionPolicies(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:                        "step-policy",
+		ProfileSessionStartPolicy: "new",
+		ProfileSessionEndPolicy:   "park",
+	})
+	if step["profile_session_start_policy"] != "new" || step["profile_session_end_policy"] != "park" {
+		t.Fatalf("profile session policies = %#v/%#v, want new/park", step["profile_session_start_policy"], step["profile_session_end_policy"])
+	}
+}
+
 // TestMapKanbanTaskStateIncludesAutoStartFailed regression-tests Review round
 // 2's MAJOR finding: mapKanbanTaskState is a camelCase whitelist that omitted
 // auto_start_failed, so a task whose auto-start already failed rendered with

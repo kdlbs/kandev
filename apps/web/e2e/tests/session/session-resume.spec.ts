@@ -5,6 +5,10 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
+import {
+  seedActiveSessionForegroundActivity,
+  waitForActiveSessionForegroundActivity,
+} from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
@@ -147,6 +151,139 @@ test.describe("Session resume (ACP mode)", () => {
 
     // 10. The agent should respond to the new prompt
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+  });
+
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9
+  test("clears stale background activity after backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Settled Activity Resume Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskSession(testPage, "Settled Activity Resume Task");
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Initial session did not settle before restart",
+      timeout: 30_000,
+    });
+
+    await backend.restart();
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 60_000 });
+    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Resumed session did not settle before activity reconciliation",
+      timeout: 30_000,
+    });
+
+    // Reproduce the stale client projection left behind when the reconnect
+    // state_changed event is missed. The real session-list refresh must clear it.
+    await seedActiveSessionForegroundActivity(testPage, "background");
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+    await expect(session.agentStatus()).toHaveAccessibleName("Background work is running");
+
+    const refreshedSessions = testPage.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return response.request().method() === "GET" && path === `/api/v1/tasks/${task.id}/sessions`;
+    });
+    await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+    expect((await refreshedSessions).ok()).toBe(true);
+
+    await waitForActiveSessionForegroundActivity(testPage, null);
+    await expect(testPage.getByRole("status", { name: "Background work is running" })).toHaveCount(
+      0,
+    );
+    await expect(session.anyIdleInput()).toBeVisible();
+  });
+
+  // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.2
+  test("preserves the worktree Files path after backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Worktree Path Resume Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskSession(testPage, "Worktree Path Resume Task");
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Initial worktree session did not settle before restart",
+      timeout: 30_000,
+    });
+
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const initialSession = sessions.find((candidate) => candidate.id === sessionId);
+    const expectedWorkspacePath = initialSession?.workspace_path ?? initialSession?.worktree_path;
+    if (!expectedWorkspacePath) throw new Error("Worktree session did not expose a workspace path");
+    const expectedDisplayPath = expectedWorkspacePath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
+
+    await session.clickTab("Files");
+    const visibleWorkspacePath = session.files.getByTestId("file-browser-workspace-path");
+    await expect(visibleWorkspacePath).toHaveText(expectedDisplayPath, { timeout: 30_000 });
+
+    // Keeping Files active makes reload reconstruct the workspace-only execution
+    // before automatic session resume promotes and persists that execution.
+    await backend.restart();
+    await testPage.reload();
+    await expect(session.files).toBeVisible({ timeout: 30_000 });
+
+    await session.clickSessionChatTab();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 60_000 });
+    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Reload once promotion has persisted the task environment. The boot payload
+    // must project the promoted execution's canonical workspace, not stale UI state.
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Files");
+    await expect(visibleWorkspacePath).toHaveText(expectedDisplayPath, { timeout: 30_000 });
   });
 });
 

@@ -319,6 +319,7 @@ test.describe("Automation concurrency note", () => {
     testPage: Page,
     seed: Seed & { steps: { name: string }[] },
     name: string,
+    maxConcurrentRuns = 1,
   ): Promise<string> {
     const automations = new AutomationsPage(testPage, seed.workspaceId);
     await automations.gotoNew();
@@ -329,6 +330,9 @@ test.describe("Automation concurrency note", () => {
     await automations.selectFrequency("every day");
     await automations.timeInput.fill("03:17");
     await automations.selectWorkflow("E2E Workflow");
+    if (maxConcurrentRuns !== 1) {
+      await testPage.getByRole("spinbutton").fill(String(maxConcurrentRuns));
+    }
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.click();
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
@@ -384,7 +388,9 @@ test.describe("Automation concurrency note", () => {
     await expect(testPage.getByTestId("runs-rail-empty")).toBeVisible({ timeout: 15_000 });
 
     await testPage.getByTestId("automation-run-now").click();
-    await expect(testPage.getByText(/Triggered|Skipped/)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      testPage.getByRole("region", { name: /^Notifications/ }).getByText(/Triggered|Skipped/),
+    ).toBeVisible({ timeout: 15_000 });
 
     // The run row is written after the fire returns, so a page that only polls
     // while it can already see something open never learns the run happened.
@@ -392,5 +398,30 @@ test.describe("Automation concurrency note", () => {
     await expect(testPage.getByTestId("runs-rail-empty")).toHaveCount(0, { timeout: 30_000 });
     // …and nothing it renders from the pre-trigger snapshot is left standing.
     await expect(testPage.getByTestId("automation-next-run")).not.toContainText("Paused");
+  });
+
+  test("targets the trigger notification when the run rail has the same status", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const automationId = await createScheduledAutomation(
+      testPage,
+      seedData,
+      "Duplicate Triggered",
+      2,
+    );
+    await apiClient.seedAutomationRun(automationId, "triggered");
+
+    await testPage.goto(`/automations/${automationId}`);
+    const runsRail = testPage.getByTestId("runs-rail");
+    await expect(runsRail.getByText("Triggered", { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    await testPage.getByTestId("automation-run-now").click();
+    await expect(
+      testPage
+        .getByRole("region", { name: /^Notifications/ })
+        .getByText("Triggered", { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
   });
 });

@@ -17,10 +17,12 @@ Start from intent and evidence: read the spec/task first when available, then ch
 
 ### Architecture discussion gate
 
-For a large architectural change, require a linked issue with maintainer
-discussion before the PR opens. If the issue or discussion is missing, report a
-blocker. Prefer one logical change and a small diff because this limits risk and
-maintainer burden.
+For a large architectural change, verify the authenticated actor's repository
+permission before the PR opens. Maintainers and collaborators with `push`,
+`maintain`, or `admin` permission may proceed without a linked issue. For an
+actor without write access, require a linked issue with maintainer discussion;
+if the issue or discussion is missing, report a blocker. Prefer one logical
+change and a small diff because this limits risk and maintainer burden.
 
 ## Available skills
 

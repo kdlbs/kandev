@@ -44,17 +44,20 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 		return
 	}
 
-	instance := &ExecutorInstance{
-		InstanceID:           execution.ID,
-		TaskID:               execution.TaskID,
-		SessionID:            execution.SessionID,
-		RuntimeName:          execution.RuntimeName,
-		ContainerID:          execution.ContainerID,
-		ContainerIP:          execution.ContainerIP,
-		WorkspacePath:        execution.WorkspacePath,
-		StandaloneInstanceID: execution.standaloneInstanceID,
-		StandalonePort:       execution.standalonePort,
-		Metadata:             execution.MetadataSnapshot(),
+	instance := m.remoteStatusInstance(ctx, execution)
+	if refresher, refreshable := rt.(RemoteInstanceRefresher); refreshable {
+		if refreshErr := m.refreshTrackedRemoteInstance(ctx, execution, refresher); refreshErr != nil {
+			m.storeRemoteStatus(execution.SessionID, &RemoteStatus{
+				RuntimeName: execution.RuntimeName, LastCheckedAt: time.Now().UTC(),
+				ErrorMessage: refreshErr.Error(),
+			})
+			m.logger.Debug("remote control refresh failed",
+				zap.String("session_id", execution.SessionID),
+				zap.String("execution_id", execution.ID),
+				zap.Error(refreshErr))
+			return
+		}
+		instance = m.remoteStatusInstance(ctx, execution)
 	}
 	status, statusErr := provider.GetRemoteStatus(ctx, instance)
 	if statusErr != nil {
@@ -74,6 +77,11 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 	if status == nil {
 		return
 	}
+	// Providers may reuse a cached status object across concurrent polls. Copy it
+	// before filling lifecycle-owned defaults so polling never mutates provider
+	// state (or races with another caller holding the same result pointer).
+	statusCopy := *status
+	status = &statusCopy
 	if status.RuntimeName == "" {
 		status.RuntimeName = execution.RuntimeName
 	}
@@ -81,6 +89,24 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 		status.LastCheckedAt = time.Now().UTC()
 	}
 	m.storeRemoteStatus(execution.SessionID, status)
+}
+
+func (m *Manager) remoteStatusInstance(ctx context.Context, execution *AgentExecution) *ExecutorInstance {
+	metadata := execution.MetadataSnapshot()
+	return &ExecutorInstance{
+		InstanceID:           execution.ID,
+		TaskID:               execution.TaskID,
+		SessionID:            execution.SessionID,
+		RuntimeName:          execution.RuntimeName,
+		ContainerID:          execution.ContainerID,
+		ContainerIP:          execution.ContainerIP,
+		WorkspacePath:        execution.WorkspacePath,
+		StandaloneInstanceID: execution.standaloneInstanceID,
+		StandalonePort:       execution.standalonePort,
+		Metadata:             metadata,
+		AuthToken:            m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:       m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+	}
 }
 
 func (m *Manager) storeRemoteStatus(sessionID string, status *RemoteStatus) {
@@ -126,6 +152,7 @@ func (m *Manager) GetRemoteStatusBySessionID(ctx context.Context, sessionID stri
 // RemoteStatusPollRecord contains the minimal information needed to poll remote status
 // for a session that is not currently tracked in the in-memory execution store.
 type RemoteStatusPollRecord struct {
+	TaskID           string
 	SessionID        string
 	Runtime          agentruntime.Runtime
 	AgentExecutionID string
@@ -155,6 +182,7 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 
 		instance := &ExecutorInstance{
 			InstanceID:  rec.AgentExecutionID,
+			TaskID:      rec.TaskID,
 			SessionID:   rec.SessionID,
 			RuntimeName: rec.Runtime,
 			ContainerID: rec.ContainerID,

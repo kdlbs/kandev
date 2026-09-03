@@ -21,6 +21,19 @@ This document is the migrated task-system source for the capability. The source 
 
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
 
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002: Context reset turn quiescence
+
+**Intent:** A workflow step can replace agent context without losing turn completion or blocking later session operations.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.1:** When a workflow context reset finds an active turn, the system shall stop and reconcile that turn before it replaces the provider context.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.2:** The system-owned stop shall not create a user-cancellation message or evaluate configured user-cancellation completion actions.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.3:** When the reset succeeds, the next automatic step prompt shall reach the new provider context without waiting for the replaced turn.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.4:** When turn quiescence or context replacement fails, the system shall not dispatch the automatic step prompt.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.5:** When a prompt waits for an unresolved dispatch-only completion, the wait shall end within a bounded period and release session admission.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002.6:** A delayed completion from the replaced turn shall not complete or release a later prompt generation.
+
 ## Migrated source detail
 
 ## Why

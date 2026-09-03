@@ -158,6 +158,7 @@ export function KanbanCardBody({
           <RemoteCloudTooltip
             taskId={task.id}
             sessionId={task.primarySessionId ?? null}
+            executorId={task.primaryExecutorId}
             executorType={task.primaryExecutorType}
             fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
           />

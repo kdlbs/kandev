@@ -1,5 +1,10 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 
+type StepProfileSessionLifecycle = {
+  startPolicy: "reuse" | "new";
+  endPolicy: "complete" | "park";
+};
+
 export class WorkflowSettingsPage {
   readonly page: Page;
   readonly addWorkflowButton: Locator;
@@ -170,15 +175,11 @@ export class WorkflowSettingsPage {
   /** Save every dirty workflow contributor through the route-level action. */
   async saveChanges(touch = false): Promise<void> {
     await this.submitSaveChanges(touch);
-    await expect
-      .poll(
-        async () =>
-          (await this.floatingSave.isVisible())
-            ? await this.floatingSave.getAttribute("data-dirty-contributors")
-            : null,
-        { timeout: 15_000 },
-      )
-      .toBeNull();
+    // The coordinator reports `saved` only after every contributor's save
+    // promise has settled. Waiting for that state avoids treating the
+    // contributor-id diagnostic attribute as a completion signal while a
+    // slow save is still in flight.
+    await expect(this.floatingSave).toHaveAttribute("data-status", "saved", { timeout: 30_000 });
   }
 
   /** The delete workflow button within a card. */
@@ -248,9 +249,38 @@ export class WorkflowSettingsPage {
     return card.getByTestId("workflow-agent-profile-select");
   }
 
-  /** The step agent profile override select trigger in the step config panel within a workflow card. */
+  /** The step agent profile and session policy selector in a workflow card. */
   stepAgentProfileSelect(card: Locator): Locator {
     return card.getByTestId("step-agent-profile-select");
+  }
+
+  /** The nested session lifecycle entry in the selected step's profile selector. */
+  stepProfileSessionLifecycleSelect(): Locator {
+    // DrawerContent is portalled outside the workflow card on mobile. The
+    // settings page has one open step selector at a time, so the suffix is
+    // enough to address its nested navigation surface in either layout.
+    return this.page.locator('[data-testid$="-profile-session-lifecycle-select"]');
+  }
+
+  /** Set a step's independent session start and end behavior through its selector. */
+  async setStepProfileSessionLifecycle(
+    card: Locator,
+    stepName: string,
+    stepId: string,
+    lifecycle: StepProfileSessionLifecycle,
+    touch = false,
+  ) {
+    await this.selectStep(card, stepName, touch);
+    await this.activate(this.stepAgentProfileSelect(card), touch);
+    await this.activate(this.stepProfileSessionLifecycleSelect(), touch);
+    await this.activate(
+      this.page.getByTestId(`${stepId}-profile-session-start-${lifecycle.startPolicy}`),
+      touch,
+    );
+    await this.activate(
+      this.page.getByTestId(`${stepId}-profile-session-end-${lifecycle.endPolicy}`),
+      touch,
+    );
   }
 
   /** Hover over a step node to reveal the trash button, then click it. */

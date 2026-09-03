@@ -291,10 +291,21 @@
       "docs": ["executors", "remote-cloud-environment", "docker", "k8s"],
       "sources": [
         "apps/backend/internal/agent/executor/executor.go",
-        "apps/web/app/settings/executors/page.tsx"
+        "apps/backend/internal/agent/kubernetes/config.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes.go",
+        "apps/backend/internal/kubernetes/handlers.go",
+        "apps/web/app/settings/executors/page.tsx",
+        "apps/web/app/settings/executors/k8s/[executorId]/page.tsx",
+        "k8s/executor-rbac.yaml"
       ],
       "tests": [
+        "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_test.go",
+        "apps/backend/internal/kubernetes/handlers_test.go",
+        "apps/backend/internal/task/service/service_resources_kubernetes_test.go",
+        "apps/web/components/settings/kubernetes-config.test.ts",
         "apps/web/e2e/tests/docker/docker-launch.spec.ts",
+        "apps/web/e2e/tests/settings/kubernetes-executor.spec.ts",
+        "apps/web/e2e/tests/settings/mobile-kubernetes-executor.spec.ts",
         "apps/web/e2e/tests/ssh/executor-crud.spec.ts"
       ],
       "settingsRoutes": ["/settings/executor/new", "/settings/executors"],
