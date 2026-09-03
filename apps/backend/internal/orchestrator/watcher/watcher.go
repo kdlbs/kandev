@@ -83,6 +83,7 @@ type GitEventData = lifecycle.GitEventPayload
 type TaskMovedEventData struct {
 	TaskID           string     `json:"task_id"`
 	StepTransitionID int64      `json:"step_transition_id,omitempty"`
+	MoveID           string     `json:"move_id,omitempty"`
 	FromStepID       string     `json:"from_step_id"`
 	ToStepID         string     `json:"to_step_id"`
 	SessionID        string     `json:"session_id"`

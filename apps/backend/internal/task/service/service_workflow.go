@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -17,6 +19,13 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+)
+
+const (
+	workflowMoveFromStepIDKey = "from_step_id"
+	workflowMoveIDKey         = "move_id"
+	workflowMoveOptionsKey    = "options"
 )
 
 // ApproveSessionResult contains the result of approving a session
@@ -399,6 +408,12 @@ type MoveTaskResult struct {
 	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
 	FromStepID   string
 	Transitioned bool
+	// MoveID correlates the one-shot entry options carried on the transient
+	// move marker with the target-step entry. Empty for an option-less move.
+	MoveID string
+	// EntryOptions is the normalized one-shot override accepted for this move,
+	// or nil for an ordinary move.
+	EntryOptions *workflowmove.EntryOptions
 }
 
 // MoveTaskOptions controls non-default move behavior for trusted callers.
@@ -434,6 +449,10 @@ type MoveTaskOptions struct {
 	// performs and fails with ErrWorkflowResolutionConflict on a mismatch,
 	// instead of silently reverting whatever the concurrent move just did.
 	ExpectedWorkflowID *string
+	// EntryOptions are one-shot values applied when the orchestrator enters the
+	// target workflow step. They are persisted privately on a transient task
+	// marker and are never included in task.moved event payloads.
+	EntryOptions *workflowmove.EntryOptions
 }
 
 // ErrWorkflowResolutionConflict indicates a caller's pre-resolved "current
@@ -548,6 +567,40 @@ func (s *Service) MoveTaskWithOptions(
 	oldStepID := task.WorkflowStepID
 	oldState := task.State
 	stepChanged := oldStepID != workflowStepID
+
+	entryOptions, err := workflowmove.NormalizeEntryOptions(opts.EntryOptions, "")
+	if err != nil {
+		return nil, err
+	}
+	change := workflowmove.MoveChangePositionOnly
+	if stepChanged {
+		change = workflowmove.MoveChangeStep
+	}
+	if err := workflowmove.ValidateEntryOptions(entryOptions, change); err != nil {
+		return nil, err
+	}
+	// Only a new optioned move conflicts with a marker already in flight. A
+	// plain move falls through and clears a stranded marker below (moveID == "")
+	// so a stale marker can never permanently block ordinary moves.
+	if entryOptions != nil && stepChanged && task.Metadata != nil {
+		if _, pending := task.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+			return nil, workflowmove.ErrMoveConflict
+		}
+	}
+	// Entry options need a recipient. A step without auto-start can still
+	// receive a one-shot hand-off through an active task session, but a
+	// session-less move would otherwise accept and permanently drop the
+	// instructions/profile after the task update is committed.
+	if entryOptions != nil && targetStep != nil &&
+		!targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) &&
+		s.resolvePrimaryOrActiveSession(ctx, id) == nil {
+		return nil, workflowmove.ErrEntryTargetUnavailable
+	}
+	moveID, optionsJSON, err := prepareWorkflowMoveMarker(entryOptions)
+	if err != nil {
+		return nil, err
+	}
+
 	stateAfterAdmission := *task
 	if stepChanged {
 		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID, opts); err != nil {
@@ -567,6 +620,18 @@ func (s *Service) MoveTaskWithOptions(
 		task.QueuedAt = nil
 		task.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
 			"from_step_id": oldStepID,
+		}
+		// The one-shot options ride on the pending marker itself: it is the
+		// sole live transport for a direct optioned move. task.moved publishes
+		// only the move ID; the orchestrator reads this marker at target entry.
+		if moveID != "" {
+			task.Metadata[models.MetaKeyWorkflowMovePending] = map[string]interface{}{
+				workflowMoveFromStepIDKey: oldStepID,
+				workflowMoveIDKey:         moveID,
+				workflowMoveOptionsKey:    string(optionsJSON),
+			}
+		} else {
+			delete(task.Metadata, models.MetaKeyWorkflowMovePending)
 		}
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
@@ -659,7 +724,7 @@ func (s *Service) MoveTaskWithOptions(
 	// are always the source step and workflow the task actually left on this
 	// commit.
 	if resultTransitioned {
-		s.publishTaskMovedEvent(ctx, task, resultFromWorkflowID, resultFromStepID, workflowStepID, sessionID)
+		s.publishTaskMovedEvent(ctx, task, resultFromWorkflowID, resultFromStepID, workflowStepID, sessionID, moveID)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
@@ -684,7 +749,7 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{Task: task, FromStepID: resultFromStepID, Transitioned: resultTransitioned}
+	result := &MoveTaskResult{Task: task, FromStepID: resultFromStepID, Transitioned: resultTransitioned, MoveID: moveID, EntryOptions: entryOptions}
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
@@ -700,6 +765,20 @@ func (s *Service) MoveTaskWithOptions(
 	}
 
 	return result, nil
+}
+
+// prepareWorkflowMoveMarker mints a correlation ID and encodes the one-shot
+// options for the workflow_move_pending marker. The marker is the sole live
+// transport for a direct optioned move; nil options mean an ordinary move.
+func prepareWorkflowMoveMarker(entryOptions *workflowmove.EntryOptions) (string, json.RawMessage, error) {
+	if entryOptions == nil {
+		return "", nil, nil
+	}
+	optionsJSON, err := workflowmove.EncodeEntryOptionsJSON(entryOptions)
+	if err != nil {
+		return "", nil, fmt.Errorf("encode workflow move options: %w", err)
+	}
+	return uuid.NewString(), optionsJSON, nil
 }
 
 func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID string) (bool, error) {
@@ -966,7 +1045,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID)
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "")
 		return true
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
 		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
@@ -984,7 +1063,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID)
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "")
 		return true
 	}
 	// ctx here still carries the identity of whoever triggered the move that
