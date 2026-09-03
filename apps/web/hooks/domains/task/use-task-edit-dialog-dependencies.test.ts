@@ -63,11 +63,17 @@ describe("useTaskEditDialogDependencies", () => {
     expect(result.current.draftIds).toEqual(["task-2"]);
     expect(result.current.selectedTitles).toEqual({ "task-2": "Predecessor" });
     expect(result.current.candidates.map((task) => task.id)).toEqual(["task-2"]);
-    expect(listTasksByWorkspace).toHaveBeenCalledWith("ws-1", {
-      page: 1,
-      pageSize: 100,
-      query: "",
-    });
+    expect(listTasksByWorkspace).toHaveBeenCalledWith(
+      "ws-1",
+      {
+        page: 1,
+        pageSize: 100,
+        query: "",
+      },
+      {
+        init: { signal: expect.any(AbortSignal) },
+      },
+    );
   });
 
   it("loads every candidate page", async () => {
@@ -91,13 +97,98 @@ describe("useTaskEditDialogDependencies", () => {
     await waitFor(() => expect(result.current.candidates).toHaveLength(100));
 
     expect(result.current.candidates.map((task) => task.id)).toContain("task-101");
-    expect(listTasksByWorkspace).toHaveBeenNthCalledWith(2, "ws-1", {
-      page: 2,
-      pageSize: 100,
-      query: "",
-    });
+    expect(listTasksByWorkspace).toHaveBeenNthCalledWith(
+      2,
+      "ws-1",
+      {
+        page: 2,
+        pageSize: 100,
+        query: "",
+      },
+      {
+        init: { signal: expect.any(AbortSignal) },
+      },
+    );
   });
+});
 
+describe("candidate loading cancellation", () => {
+  it("does not request later pages when a candidate query is superseded", async () => {
+    const oldFirstPage = deferred<{
+      total: number;
+      tasks: Array<{ id: string; title: string; archived_at: null }>;
+    }>();
+    vi.mocked(listTasksByWorkspace).mockImplementation(async (_workspaceId, params) => {
+      if (params?.query === "old" && params.page === 1) return oldFirstPage.promise as never;
+      if (params?.query === "old") {
+        return {
+          total: 200,
+          tasks: Array.from({ length: 100 }, (_, index) => ({
+            id: `old-page-${index}`,
+            title: `Old page ${index}`,
+            archived_at: null,
+          })),
+        } as never;
+      }
+      if (params?.query === "new") {
+        return {
+          total: 1,
+          tasks: [{ id: "task-new", title: "New result", archived_at: null }],
+        } as never;
+      }
+      return { total: 0, tasks: [] } as never;
+    });
+
+    const { result } = renderHook(() =>
+      useTaskEditDialogDependencies({ open: true, workspaceId: "ws-1", taskId: "task-1" }),
+    );
+    await waitFor(() =>
+      expect(
+        vi.mocked(listTasksByWorkspace).mock.calls.some(([, params]) => params?.query === ""),
+      ).toBe(true),
+    );
+
+    act(() => result.current.setQuery("old"));
+    await waitFor(() =>
+      expect(
+        vi.mocked(listTasksByWorkspace).mock.calls.some(([, params]) => params?.query === "old"),
+      ).toBe(true),
+    );
+    const oldFirstPageCall = vi
+      .mocked(listTasksByWorkspace)
+      .mock.calls.find(([, params]) => params?.query === "old" && params.page === 1);
+    expect(oldFirstPageCall?.[2]?.init?.signal).toBeInstanceOf(AbortSignal);
+
+    act(() => result.current.setQuery("new"));
+    expect(oldFirstPageCall?.[2]?.init?.signal?.aborted).toBe(true);
+    await waitFor(() =>
+      expect(result.current.candidates).toEqual([
+        { id: "task-new", title: "New result", isArchived: false },
+      ]),
+    );
+
+    oldFirstPage.resolve({
+      total: 200,
+      tasks: Array.from({ length: 100 }, (_, index) => ({
+        id: `old-${index}`,
+        title: `Old ${index}`,
+        archived_at: null,
+      })),
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      vi
+        .mocked(listTasksByWorkspace)
+        .mock.calls.filter(([, params]) => params?.query === "old" && (params.page ?? 0) > 1),
+    ).toHaveLength(0);
+  });
+});
+
+describe("useTaskEditDialogDependencies updates", () => {
   it("saves only draft changes and updates the confirmed set after success", async () => {
     const { result } = renderHook(() =>
       useTaskEditDialogDependencies({ open: true, workspaceId: "ws-1", taskId: "task-1" }),
@@ -141,6 +232,43 @@ describe("useTaskEditDialogDependencies", () => {
     expect(result.current.draftIds).toEqual(["task-2", "task-3"]);
     expect(result.current.error).toBe(apiError);
     expect(isTaskDependencyUpdateFailure(result.current.submitError)).toBe(true);
+  });
+
+  it("retains a newly selected title when a later candidate result omits it", async () => {
+    vi.mocked(listTasksByWorkspace).mockImplementation(async (_workspaceId, params) => {
+      if (params?.query === "later") {
+        return {
+          total: 1,
+          tasks: [{ id: "task-b", title: "Task B", archived_at: null }],
+        } as never;
+      }
+      return {
+        total: 1,
+        tasks: [{ id: "task-a", title: "Task A", archived_at: null }],
+      } as never;
+    });
+
+    const { result } = renderHook(() =>
+      useTaskEditDialogDependencies({ open: true, workspaceId: "ws-1", taskId: "task-1" }),
+    );
+    await waitFor(() =>
+      expect(result.current.candidates).toEqual([
+        { id: "task-a", title: "Task A", isArchived: false },
+      ]),
+    );
+
+    act(() => {
+      result.current.setDraftIds(["task-a"]);
+      result.current.setQuery("later");
+    });
+    await waitFor(() =>
+      expect(result.current.candidates).toEqual([
+        { id: "task-b", title: "Task B", isArchived: false },
+      ]),
+    );
+
+    expect(result.current.draftIds).toEqual(["task-a"]);
+    expect(result.current.selectedTitles).toMatchObject({ "task-a": "Task A" });
   });
 });
 

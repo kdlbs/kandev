@@ -72,6 +72,11 @@ type DependencyCandidateState = {
   candidateError: unknown | null;
 };
 
+type DependencyTitleCacheState = {
+  identity: string;
+  titles: Record<string, string>;
+};
+
 type DependencySaveRequest = {
   identity: string;
   generation: number;
@@ -203,21 +208,32 @@ function useTaskDependencyCandidates(
       };
     }
 
+    const controller = new AbortController();
     setCandidatesLoading(true);
     setCandidateError(null);
-    void listAllDependencyCandidates(workspaceId, query)
-      .then((tasks) => {
-        if (!cancelled) setCandidates(mapCandidates(tasks, taskId));
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setCandidateError(error);
-      })
-      .finally(() => {
-        if (!cancelled) setCandidatesLoading(false);
-      });
+
+    const loadCandidates = () => {
+      void listAllDependencyCandidates(workspaceId, query, controller.signal)
+        .then((tasks) => {
+          if (!cancelled && !controller.signal.aborted) {
+            setCandidates(mapCandidates(tasks, taskId));
+          }
+        })
+        .catch((error: unknown) => {
+          if (!cancelled && !controller.signal.aborted) setCandidateError(error);
+        })
+        .finally(() => {
+          if (!cancelled && !controller.signal.aborted) setCandidatesLoading(false);
+        });
+    };
+    const debounceTimer =
+      query.length > 0 ? window.setTimeout(loadCandidates, dependencySearchDebounceMs) : undefined;
+    if (debounceTimer === undefined) loadCandidates();
 
     return () => {
       cancelled = true;
+      controller.abort();
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
     };
   }, [open, query, reloadToken, taskId, workspaceId]);
 
@@ -225,26 +241,79 @@ function useTaskDependencyCandidates(
 }
 
 const dependencyCandidatePageSize = 100;
+const dependencySearchDebounceMs = 200;
 
 async function listAllDependencyCandidates(
   workspaceId: string,
   query: string,
+  signal: AbortSignal,
 ): Promise<Array<{ id: string; title: string; archived_at?: string | null }>> {
   const tasks: Array<{ id: string; title: string; archived_at?: string | null }> = [];
   let page = 1;
   let total = 0;
   do {
-    const response = await listTasksByWorkspace(workspaceId, {
-      page,
-      pageSize: dependencyCandidatePageSize,
-      query,
-    });
+    if (signal.aborted) return tasks;
+    const response = await listTasksByWorkspace(
+      workspaceId,
+      {
+        page,
+        pageSize: dependencyCandidatePageSize,
+        query,
+      },
+      {
+        init: { signal },
+      },
+    );
+    if (signal.aborted) return tasks;
     tasks.push(...response.tasks);
     total = response.total;
     if (response.tasks.length === 0) break;
     page += 1;
   } while (tasks.length < total);
   return tasks;
+}
+
+function useDependencyTitleCache(
+  identity: string,
+  candidates: TaskDependencyCandidate[],
+  draftIds: string[],
+): Record<string, string> {
+  const [titleCache, setTitleCache] = useState<DependencyTitleCacheState>({
+    identity: "",
+    titles: {},
+  });
+
+  useEffect(() => {
+    setTitleCache((current) => {
+      if (current.identity !== identity) {
+        return { identity, titles: {} };
+      }
+      const nextTitles = { ...current.titles };
+      let changed = false;
+      for (const candidate of candidates) {
+        if (!draftIds.includes(candidate.id) || nextTitles[candidate.id] === candidate.title) {
+          continue;
+        }
+        nextTitles[candidate.id] = candidate.title;
+        changed = true;
+      }
+      return changed ? { identity, titles: nextTitles } : current;
+    });
+  }, [candidates, draftIds, identity]);
+
+  return titleCache.identity === identity ? titleCache.titles : {};
+}
+
+function mergeSelectedTitles(
+  knownTitles: Record<string, string>,
+  cachedSelectedTitles: Record<string, string>,
+  candidates: TaskDependencyCandidate[],
+): Record<string, string> {
+  return {
+    ...knownTitles,
+    ...cachedSelectedTitles,
+    ...Object.fromEntries(candidates.map((candidate) => [candidate.id, candidate.title])),
+  };
 }
 
 export function useTaskEditDialogDependencies({
@@ -257,6 +326,7 @@ export function useTaskEditDialogDependencies({
   const [projectionReloadToken, setProjectionReloadToken] = useState(0);
   const [candidateReloadToken, setCandidateReloadToken] = useState(0);
   const [query, setQueryState] = useState("");
+  const dependencyDialogIdentity = JSON.stringify([open, workspaceId ?? null, taskId ?? null]);
   const projection = useTaskDependencyProjection(
     { open, workspaceId, taskId },
     projectionReloadToken,
@@ -296,6 +366,11 @@ export function useTaskEditDialogDependencies({
   const { confirmedIds, setConfirmedIds, draftIds, knownTitles, loading, loadError } = projection;
   const { candidates, candidatesLoading, candidateError } = candidateState;
   const isDirty = !sameIDs(confirmedIds, draftIds);
+  const cachedSelectedTitles = useDependencyTitleCache(
+    dependencyDialogIdentity,
+    candidates,
+    draftIds,
+  );
 
   const save = useCallback(async () => {
     if (!open || !workspaceId || !taskId || loading || !isDirty) return;
@@ -317,11 +392,8 @@ export function useTaskEditDialogDependencies({
   }, [draftIds, isDirty, loading, open, saveGuard, taskId, workspaceId]);
 
   const selectedTitles = useMemo(
-    () => ({
-      ...knownTitles,
-      ...Object.fromEntries(candidates.map((candidate) => [candidate.id, candidate.title])),
-    }),
-    [candidates, knownTitles],
+    () => mergeSelectedTitles(knownTitles, cachedSelectedTitles, candidates),
+    [cachedSelectedTitles, candidates, knownTitles],
   );
   const retry = useCallback(() => setProjectionReloadToken((value) => value + 1), []);
   const retryCandidates = useCallback(() => setCandidateReloadToken((value) => value + 1), []);

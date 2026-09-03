@@ -166,13 +166,14 @@ describe("TaskCreateDependencies", () => {
 });
 
 describe("selected dependency preservation", () => {
-  it("keeps a selected predecessor visible when the server candidate page omits it", () => {
+  it("keeps an omitted selected predecessor titled and individually removable", () => {
     const selectedID = "task-archived";
+    const onChange = vi.fn();
     render(
       <TooltipProvider>
         <TaskCreateDependencies
           value={[selectedID]}
-          onChange={vi.fn()}
+          onChange={onChange}
           candidates={[{ id: "task-other", title: "Other task" }]}
           selectedTitles={{ [selectedID]: "Archived predecessor" }}
         />
@@ -181,10 +182,13 @@ describe("selected dependency preservation", () => {
 
     fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
 
-    expect(
-      within(screen.getByTestId("task-create-dependencies-popover")).getByTestId(
-        `task-create-dependency-option-${selectedID}`,
-      ),
-    ).toBeTruthy();
+    const selectedOption = within(
+      screen.getByTestId("task-create-dependencies-popover"),
+    ).getByTestId(`task-create-dependency-option-${selectedID}`);
+    expect(selectedOption).toBeTruthy();
+    expect(selectedOption.textContent).toContain("Archived predecessor");
+
+    fireEvent.click(selectedOption);
+    expect(onChange).toHaveBeenCalledWith([]);
   });
 });
