@@ -333,10 +333,11 @@ export function PreviewSessionTabs({
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
   const handleSessionRemoved = useCallback(
     (removedSessionId: string) => {
+      if (removedSessionId !== activeSessionId) return;
       const remaining = sortedSessions.filter((s) => s.id !== removedSessionId);
       onSessionChange?.(remaining[0]?.id ?? null);
     },
-    [sortedSessions, onSessionChange],
+    [sortedSessions, activeSessionId, onSessionChange],
   );
 
   const tabs = useBuildPreviewTabs({

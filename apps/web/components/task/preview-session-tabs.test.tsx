@@ -308,3 +308,76 @@ describe("PreviewSessionTabs session context menu", () => {
     );
   });
 });
+
+describe("PreviewSessionTabs delete session selection", () => {
+  async function deleteViaContextMenu(tabTestId: string) {
+    fireEvent.contextMenu(screen.getByTestId(tabTestId));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const confirm = await screen.findByTestId("session-delete-confirm");
+    fireEvent.click(confirm);
+  }
+
+  it("does not change the viewed session when a non-active tab is deleted", async () => {
+    mocks.sessions = [
+      makeSession("session-a", { state: "COMPLETED" }),
+      makeSession("session-b", { state: "COMPLETED" }),
+      makeSession("session-c", { state: "COMPLETED" }),
+    ];
+    const onSessionChange = vi.fn();
+    render(
+      <PreviewSessionTabs
+        taskId={TASK_ID}
+        sessionId="session-b"
+        onSessionChange={onSessionChange}
+      />,
+    );
+
+    await deleteViaContextMenu("preview-session-tab-session-a");
+
+    await vi.waitFor(() =>
+      expect(mocks.remove).toHaveBeenCalledWith("session-a", { feedback: "toast" }),
+    );
+    expect(onSessionChange).not.toHaveBeenCalled();
+  });
+
+  it("re-points to a remaining session when the active tab is deleted", async () => {
+    mocks.sessions = [
+      makeSession("session-a", { state: "COMPLETED" }),
+      makeSession("session-b", { state: "COMPLETED" }),
+    ];
+    const onSessionChange = vi.fn();
+    render(
+      <PreviewSessionTabs
+        taskId={TASK_ID}
+        sessionId="session-a"
+        onSessionChange={onSessionChange}
+      />,
+    );
+
+    await deleteViaContextMenu("preview-session-tab-session-a");
+
+    await vi.waitFor(() =>
+      expect(mocks.remove).toHaveBeenCalledWith("session-a", { feedback: "toast" }),
+    );
+    expect(onSessionChange).toHaveBeenCalledWith("session-b");
+  });
+
+  it("calls onSessionChange with null when the last remaining session is deleted", async () => {
+    mocks.sessions = [makeSession("session-a", { state: "COMPLETED" })];
+    const onSessionChange = vi.fn();
+    render(
+      <PreviewSessionTabs
+        taskId={TASK_ID}
+        sessionId="session-a"
+        onSessionChange={onSessionChange}
+      />,
+    );
+
+    await deleteViaContextMenu(SESSION_A_TAB_TESTID);
+
+    await vi.waitFor(() =>
+      expect(mocks.remove).toHaveBeenCalledWith("session-a", { feedback: "toast" }),
+    );
+    expect(onSessionChange).toHaveBeenCalledWith(null);
+  });
+});
