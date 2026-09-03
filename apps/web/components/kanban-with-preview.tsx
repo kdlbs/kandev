@@ -19,15 +19,13 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
-import type { WorkflowStepperStep } from "./task/workflow-step-disclosure";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToTask } from "@/lib/links";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
-import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
 import {
-  usePresentationToken,
-  useWorkflowStepMove,
-} from "@/hooks/domains/kanban/use-workflow-step-move";
+  usePreviewWorkflowStepMove,
+  type PreviewStepMove,
+} from "@/hooks/domains/kanban/use-preview-workflow-step-move";
 import {
   useEnsureTaskSession,
   type UseEnsureTaskSessionResult,
@@ -200,61 +198,13 @@ function useSelectedTask(
       workflowStepId: task.workflowStepId,
       workflowId,
       state: task.state,
+      isArchived: task.isArchived,
       description: task.description,
       position: task.position,
       repositoryId: task.repositoryId,
       primarySessionId: task.primarySessionId,
     };
   }, [selectedTaskId, kanbanTasks, snapshots]);
-}
-
-/**
- * Owns the preview header's step indicator: step resolution for the
- * previewed task's own workflow, the move request, and the move-failure
- * banner. Lives here rather than in `TaskPreviewPanel` because the panel
- * unmounts on preview close in both layouts, while a stale response must
- * still be discarded and never rendered against the presentation that
- * replaced it (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.11).
- */
-function usePreviewWorkflowStepMove(
-  selectedTaskId: string | null | undefined,
-  selectedTask: { id: string; workflowId?: string | null; workflowStepId: string | null } | null,
-) {
-  const workflowSteps = useWorkflowStepsById(selectedTask?.workflowId ?? null);
-  const [moveError, setMoveError] = useState<unknown>(null);
-  const presentationToken = usePresentationToken(selectedTaskId ?? null);
-  const disclosureOpenRef = useRef(false);
-
-  useEffect(() => {
-    setMoveError(null);
-  }, [selectedTaskId]);
-
-  const handleMoveStart = useCallback(() => setMoveError(null), []);
-  const handleMoveError = useCallback((error: unknown) => setMoveError(error), []);
-
-  const { movingToStepId, handleMove } = useWorkflowStepMove({
-    taskId: selectedTask?.id ?? null,
-    workflowId: selectedTask?.workflowId ?? null,
-    presentationToken,
-    onMoveStart: handleMoveStart,
-    onMoveError: handleMoveError,
-  });
-
-  const handleDisclosureOpenChange = useCallback((open: boolean) => {
-    disclosureOpenRef.current = open;
-  }, []);
-  const isDisclosureOpen = useCallback(() => disclosureOpenRef.current, []);
-
-  return {
-    workflowSteps,
-    currentStepId: selectedTask?.workflowStepId ?? null,
-    taskWorkflowId: selectedTask?.workflowId ?? null,
-    movingToStepId,
-    handleMove,
-    moveError,
-    handleDisclosureOpenChange,
-    isDisclosureOpen,
-  };
 }
 
 // Mirror the previewed task id into the store so kanban cards can highlight
@@ -490,16 +440,6 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => v
   );
 }
 
-type PreviewStepMove = {
-  workflowSteps: WorkflowStepperStep[];
-  currentStepId: string | null;
-  taskWorkflowId: string | null;
-  movingToStepId: string | null;
-  handleMove: (stepId: string) => Promise<boolean>;
-  moveError: unknown;
-  handleDisclosureOpenChange: (open: boolean) => void;
-};
-
 type PreviewLayoutProps = {
   kanbanWidth: number;
   previewWidthPx: number;
@@ -519,6 +459,7 @@ function previewPanelStepProps(stepMove: PreviewStepMove) {
     workflowSteps: stepMove.workflowSteps,
     currentStepId: stepMove.currentStepId,
     taskWorkflowId: stepMove.taskWorkflowId,
+    isArchived: stepMove.isArchived,
     movingToStepId: stepMove.movingToStepId,
     onMoveStep: stepMove.handleMove,
     onDisclosureOpenChange: stepMove.handleDisclosureOpenChange,

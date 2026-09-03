@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { moveTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
@@ -95,14 +95,17 @@ export function useWorkflowStepMove({
   const moveRequestRef = useRef(0);
   const tokenRef = useRef(presentationToken);
 
-  useEffect(() => {
-    if (tokenRef.current === presentationToken) return;
+  // Invalidate synchronously in the render that changes `presentationToken`,
+  // not in a passive effect: a `moveTask` rejection can reach its `catch`
+  // before a `useEffect` scheduled by the same commit has flushed, which
+  // would let a stale request still pass the `requestId` check below.
+  if (tokenRef.current !== presentationToken) {
     tokenRef.current = presentationToken;
     // A new presentation invalidates any request still in flight from the one
     // it replaced, and starts with no disabled control of its own.
     moveRequestRef.current += 1;
     setMovingToStepId(null);
-  }, [presentationToken]);
+  }
 
   const handleMove = useCallback(
     async (stepId: string): Promise<boolean> => {

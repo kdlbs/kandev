@@ -74,14 +74,18 @@ describe("TaskPreviewPanel step indicator", () => {
     expect(screen.getByText("1/2")).toBeTruthy();
   });
 
-  it("issues a move for an eligible target selected from the disclosure", async () => {
+  it("issues a move for an eligible target and closes the disclosure on success", async () => {
     const onMoveStep = vi.fn().mockResolvedValue(true);
     renderPanel({ onMoveStep });
 
     fireEvent.mouseEnter(screen.getByTestId(STEPPER_TEST_ID));
-    fireEvent.click(screen.getByTestId("workflow-step-disclosure-move-b"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("workflow-step-disclosure-move-b"));
+      await Promise.resolve();
+    });
 
     expect(onMoveStep).toHaveBeenCalledWith("b");
+    expect(screen.queryByTestId(DISCLOSURE_TEST_ID)).toBeNull();
   });
 
   it("notifies the caller when the disclosure opens and closes", () => {
@@ -157,5 +161,15 @@ describe("TaskPreviewPanel step indicator", () => {
     });
 
     expect(screen.getByTestId(DISCLOSURE_TEST_ID)).toBeTruthy();
+  });
+
+  it("shows the archived badge and offers no move control for an archived task", () => {
+    const onMoveStep = vi.fn();
+    renderPanel({ isArchived: true, onMoveStep });
+
+    expect(screen.queryByTestId("workflow-step-disclosure-move-b")).toBeNull();
+    fireEvent.mouseEnter(screen.getByTestId(STEPPER_TEST_ID));
+    expect(screen.queryByTestId(DISCLOSURE_TEST_ID)).toBeNull();
+    expect(onMoveStep).not.toHaveBeenCalled();
   });
 });

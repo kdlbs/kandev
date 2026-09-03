@@ -20,6 +20,7 @@ interface TaskPreviewPanelProps {
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
   taskWorkflowId?: string | null;
+  isArchived?: boolean;
   movingToStepId?: string | null;
   onMoveStep?: (stepId: string) => Promise<boolean>;
   onDisclosureOpenChange?: (open: boolean) => void;
@@ -33,6 +34,7 @@ interface PreviewPanelHeaderProps {
   workflowSteps: WorkflowStepperStep[];
   currentStepId: string | null;
   taskWorkflowId: string | null;
+  isArchived: boolean;
   movingToStepId: string | null;
   onMoveStep?: (stepId: string) => Promise<boolean>;
   onDisclosureOpenChange?: (open: boolean) => void;
@@ -45,6 +47,7 @@ function PreviewPanelHeader({
   workflowSteps,
   currentStepId,
   taskWorkflowId,
+  isArchived,
   movingToStepId,
   onMoveStep,
   onDisclosureOpenChange,
@@ -76,6 +79,7 @@ function PreviewPanelHeader({
               currentIndex={currentIndex}
               taskId={task?.id ?? null}
               workflowId={taskWorkflowId}
+              isArchived={isArchived}
               movingToStepId={movingToStepId}
               onMove={handleMoveStep}
               onDisclosureOpenChange={onDisclosureOpenChange}
@@ -115,6 +119,7 @@ export function TaskPreviewPanel({
   workflowSteps = [],
   currentStepId = null,
   taskWorkflowId = null,
+  isArchived = false,
   movingToStepId = null,
   onMoveStep,
   onDisclosureOpenChange,
@@ -134,6 +139,7 @@ export function TaskPreviewPanel({
         workflowSteps={workflowSteps}
         currentStepId={currentStepId}
         taskWorkflowId={taskWorkflowId}
+        isArchived={isArchived}
         movingToStepId={movingToStepId}
         onMoveStep={onMoveStep}
         onDisclosureOpenChange={onDisclosureOpenChange}
