@@ -1,7 +1,7 @@
 ---
 id: "01-split-system-pages"
 title: "Split the System pages"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -67,7 +67,6 @@ Run these commands from `apps/web`.
 ## Files likely touched
 
 - `apps/web/components/settings/system/data-logs-settings.tsx`
-- `apps/web/components/settings/system/data-logs-settings.tsx`
 - `apps/web/components/settings/system/system-route-copy.test.ts`
 - `apps/web/components/settings/system/system-invisible-copy.test.tsx`
 - `apps/web/components/settings/settings-breadcrumb-labels.ts`
@@ -110,4 +109,20 @@ None.
 
 ## Results
 
-Pending.
+Implemented in commit `407e3df65`. The route composition, System navigation,
+breadcrumbs, discovery ownership, localized copy, unit tests, and desktop,
+authenticated, phone, and container-backed Playwright references were updated.
+
+Verification passed:
+
+- Focused Vitest command: 107 tests passed.
+- `pnpm run typecheck` passed.
+- Full `pnpm run lint` passed.
+- `pnpm run i18n:check` passed.
+- Desktop Playwright command: 18 tests passed.
+- Authenticated role command: 2 tests passed.
+- Phone Playwright command: 10 tests passed.
+- `python3 scripts/lint-spec-files.py --all` and `git diff --check` passed.
+
+The exact container Playwright command was attempted, but Docker is unavailable
+in this environment, so that suite could not run.

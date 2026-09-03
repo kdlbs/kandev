@@ -1,6 +1,6 @@
 ---
 created: 2026-09-03
-status: draft
+status: implemented
 requirements:
   - REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-001
 system_design:
@@ -92,12 +92,22 @@ screenshots must show the Storage route and must not expose developer data.
 
 ## Work orders
 
-- [ ] [Task 01: Split the System pages](task-01-split-system-pages.md)
-- [ ] [Task 02: Update storage operations documentation](task-02-update-storage-operations-docs.md)
+- [x] [Task 01: Split the System pages](task-01-split-system-pages.md)
+- [x] [Task 02: Update storage operations documentation](task-02-update-storage-operations-docs.md)
 
 ## Verification results
 
-Pending.
+Task 01 is done. Focused unit tests passed with 107 tests, typecheck passed,
+full web lint passed, the i18n check passed, and the desktop, authenticated, and
+phone Playwright suites passed with 18, 2, and 10 tests respectively. The
+container-backed storage suite could not start because Docker is unavailable in
+the environment.
+
+Task 02 is done. Public documentation tests and validation passed, and the four
+Storage screenshots were recaptured from an isolated Playwright fixture with
+fictional paths and no developer data. A landing-repository capture target was
+not configured, so the documented screenshot fallback used the isolated native
+Playwright capture.
 
 ## Risks
 

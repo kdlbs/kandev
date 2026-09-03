@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-001

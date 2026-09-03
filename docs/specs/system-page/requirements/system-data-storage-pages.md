@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: system-page
 created: 2026-09-03
 owners:

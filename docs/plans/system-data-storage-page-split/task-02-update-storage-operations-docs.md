@@ -1,7 +1,7 @@
 ---
 id: "02-update-storage-operations-docs"
 title: "Update storage operations documentation"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-split-system-pages"
@@ -81,4 +81,16 @@ Run these commands from the repository root.
 
 ## Results
 
-Pending.
+Implemented in commit `407e3df65`. Storage instructions and captions now point
+to `Settings > System > Storage`. The four affected screenshots were recaptured
+with an isolated Playwright fixture using fictional `/var/lib/kandev/...`
+paths, then visually inspected and copied into `docs/screenshots/`.
+
+Verification passed:
+
+- `node --test scripts/validate-public-docs.test.mjs` passed all 61 tests.
+- `node scripts/validate-public-docs.mjs` validated 42 published pages.
+- `git diff --check -- docs/public docs/screenshots` passed.
+
+No landing-repository capture target was configured. The capture used the
+isolated native Playwright fallback and did not include developer data.
