@@ -103,7 +103,7 @@ type transferTaskPlacement struct {
 }
 
 type transferRelationInventory struct {
-	labels, groups, pendingMoves, participants, decisions, treeHolds, agentProfiles bool
+	labels, groups, pendingMoves, participants, decisions, treeHolds, agentProfiles, automationCleanupJobs bool
 }
 
 type transferStepSemantics struct {
@@ -540,7 +540,7 @@ func (r *Repository) validateTransferInvariants(
 			repoerrors.ErrTaskTransferConflict,
 		)
 	}
-	if err := r.validateTransferCleanup(ctx, tx, taskID); err != nil {
+	if err := r.validateTransferCleanup(ctx, tx, taskID, inventory.automationCleanupJobs); err != nil {
 		return err
 	}
 	return r.validateTransferWorkspaceRelations(ctx, tx, taskID, destinationWorkspaceID, inventory)
@@ -596,25 +596,13 @@ func (r *Repository) validateTransferLane(
 		if err := tx.GetContext(ctx, &occupants, r.db.Rebind(`
 			SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ?
 				AND archived_at IS NULL AND is_ephemeral = 0 AND wip_admitted = 1
+				AND COALESCE(origin, '') <> 'automation_run'
 				AND (queued_for_step_id = '' OR queued_for_step_id IS NULL)`), destinationStepID); err != nil {
 			return err
 		}
 		if occupants >= destination.WIPLimit {
 			return fmt.Errorf("%w: destination lane is at capacity", repoerrors.ErrTaskTransferConflict)
 		}
-	}
-	return nil
-}
-
-func (r *Repository) validateTransferCleanup(ctx context.Context, tx *sqlx.Tx, taskID string) error {
-	var cleanupCount int
-	if err := tx.GetContext(ctx, &cleanupCount, r.db.Rebind(`
-		SELECT COUNT(*) FROM task_resource_cleanup_jobs
-		WHERE task_id = ? AND state NOT IN ('completed', 'failed')`), taskID); err != nil {
-		return err
-	}
-	if cleanupCount != 0 {
-		return fmt.Errorf("%w: incompatible lifecycle mutation is active", repoerrors.ErrTaskTransferConflict)
 	}
 	return nil
 }

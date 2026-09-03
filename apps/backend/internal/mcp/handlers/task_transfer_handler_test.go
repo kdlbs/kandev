@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
@@ -110,7 +111,7 @@ func TestHandleTransferTaskAttributesRejectedHumanAttempt(t *testing.T) {
 	transfer := &recordingTaskTransferService{}
 	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
 	response, err := h.handleTransferTask(
-		authn.WithIdentity(context.Background(), authn.Identity{UserID: "human-1"}),
+		mcporigin.WithTrustedInternalCall(authn.WithIdentity(context.Background(), authn.Identity{UserID: "human-1"})),
 		&ws.Message{ID: "bad-json", Action: ws.ActionMCPTransferTask, Payload: []byte(`{"task_id":`)},
 	)
 	require.NoError(t, err)
@@ -150,7 +151,7 @@ func TestAuditTaskTransferAttemptActionRecordsAuditWithoutTransfer(t *testing.T)
 	payload["unknown_field"] = true
 	message = makeWSMessage(t, ws.ActionMCPAuditTaskTransferAttempt, payload)
 	response, err := dispatcher.Dispatch(
-		authn.WithIdentity(context.Background(), authn.Identity{UserID: "human-1"}),
+		mcporigin.WithTrustedInternalCall(authn.WithIdentity(context.Background(), authn.Identity{UserID: "human-1"})),
 		message,
 	)
 	require.NoError(t, err)
@@ -167,7 +168,7 @@ func TestAuditTaskTransferAttemptActionRecordsSchemaRejectedFieldTypes(t *testin
 		"expected_source_workspace_id": "ws-source",
 	})
 
-	response, err := h.handleAuditTaskTransferAttempt(context.Background(), message)
+	response, err := h.handleAuditTaskTransferAttempt(mcporigin.WithTrustedInternalCall(context.Background()), message)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, response.Type)
 	require.Empty(t, transfer.commands)
@@ -181,7 +182,7 @@ func TestAuditTaskTransferAttemptActionReturnsErrorWhenAuditFails(t *testing.T) 
 	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
 
 	response, err := h.handleAuditTaskTransferAttempt(
-		context.Background(),
+		mcporigin.WithTrustedInternalCall(context.Background()),
 		&ws.Message{
 			ID:      "audit",
 			Action:  ws.ActionMCPAuditTaskTransferAttempt,

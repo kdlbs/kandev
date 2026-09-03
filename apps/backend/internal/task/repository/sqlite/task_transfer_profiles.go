@@ -76,7 +76,7 @@ func (r *Repository) rejectUnverifiableTransferProfiles(
 ) (map[string]string, error) {
 	var profileCount int
 	if err := tx.GetContext(ctx, &profileCount, r.db.Rebind(`
-		SELECT (SELECT COUNT(*) FROM workflow_step_participants WHERE task_id = ?) +
+		SELECT (SELECT COUNT(*) FROM workflow_step_participants WHERE task_id = ? AND COALESCE(agent_profile_id, '') <> '') +
 			(SELECT COUNT(*) FROM workflow_steps s JOIN workflows w ON w.id = s.workflow_id
 			 WHERE s.id = ? AND COALESCE(NULLIF(s.agent_profile_id, ''), w.agent_profile_id, '') <> '')`),
 		command.TaskID, command.ExpectedSourceStepID); err != nil {

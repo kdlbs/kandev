@@ -78,9 +78,6 @@ func (r *Repository) RecordTaskTransferAttempt(
 		result = taskTransferResultFailed
 	}
 	stepID := command.DestinationStepID
-	if stepID == "" {
-		stepID = command.DestinationStepName
-	}
 	_, err := r.db.ExecContext(auditCtx, r.db.Rebind(`
 		INSERT INTO task_transfer_audit
 			(id, operation_id, actor_kind, actor_id, actor_session_id, task_id,

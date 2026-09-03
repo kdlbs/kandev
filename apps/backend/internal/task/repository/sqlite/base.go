@@ -24,13 +24,6 @@ type Repository struct {
 	queuePurgeMu     sync.RWMutex
 	queuePurger      func(context.Context, string)
 	queuePurgeNotify func(context.Context, string)
-	// transferRelationCache memoizes inspectTaskTransferRelations' schema
-	// discovery (information_schema/PRAGMA lookups) for the lifetime of this
-	// Repository. Table/column shape never changes after startup migrations
-	// run, so recomputing it on every transfer attempt is pure overhead; the
-	// cache is invalidated only if migrations are re-applied against this
-	// same instance (see invalidateTaskTransferRelationCache).
-	transferRelationCache transferRelationInventoryCache
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time

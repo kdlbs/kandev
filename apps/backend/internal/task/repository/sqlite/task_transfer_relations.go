@@ -5,27 +5,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 )
-
-// transferRelationInventoryCache memoizes inspectTaskTransferRelations. The
-// schema it inspects (information_schema.columns on Postgres, PRAGMA
-// table_info on SQLite, plus sqlite_master/information_schema.tables table
-// sweeps) is fixed once Repository.initSchema completes during construction,
-// so recomputing it on every transfer attempt is pure per-call overhead. The
-// cache is filled lazily on first use and held for the lifetime of the
-// Repository instance.
-type transferRelationInventoryCache struct {
-	mu          sync.RWMutex
-	ready       bool
-	projections []transferWorkspaceProjection
-	counts      []transferWorkspaceProjection
-	inventory   transferRelationInventory
-}
 
 func (r *Repository) lockTaskTransferRelations(
 	ctx context.Context,
@@ -81,15 +65,6 @@ func validTransferRelationName(name string) bool {
 func (r *Repository) inspectTaskTransferRelations(
 	ctx context.Context,
 ) ([]transferWorkspaceProjection, []transferWorkspaceProjection, transferRelationInventory, error) {
-	cache := &r.transferRelationCache
-	cache.mu.RLock()
-	if cache.ready {
-		projections, counts, inventory := cache.projections, cache.counts, cache.inventory
-		cache.mu.RUnlock()
-		return projections, counts, inventory, nil
-	}
-	cache.mu.RUnlock()
-
 	projections, err := r.presentTransferTables(ctx, transferWorkspaceProjections, true)
 	if err != nil {
 		return nil, nil, transferRelationInventory{}, err
@@ -107,11 +82,6 @@ func (r *Repository) inspectTaskTransferRelations(
 		return nil, nil, transferRelationInventory{}, err
 	}
 
-	cache.mu.Lock()
-	if !cache.ready {
-		cache.projections, cache.counts, cache.inventory, cache.ready = projections, counts, inventory, true
-	}
-	cache.mu.Unlock()
 	return projections, counts, inventory, nil
 }
 
@@ -156,10 +126,14 @@ func (r *Repository) inspectTransferRelationInventory(ctx context.Context) (tran
 		return transferRelationInventory{}, err
 	}
 	agentProfiles, err := has("agent_profiles", "id", "workspace_id", "role", "deleted_at", "enabled", "status")
+	automationCleanupJobs, cleanupErr := has("automation_task_cleanup_jobs", "task_id", "state")
+	if err == nil {
+		err = cleanupErr
+	}
 	return transferRelationInventory{
 		labels: taskLabels && labels, groups: groups && members, pendingMoves: pendingMoves,
 		participants: participants, decisions: decisions, treeHolds: holds && holdMembers,
-		agentProfiles: agentProfiles,
+		agentProfiles: agentProfiles, automationCleanupJobs: automationCleanupJobs,
 	}, err
 }
 
@@ -191,6 +165,16 @@ func (r *Repository) addDiscoveredTaskTransferRelations(
 			return nil, nil, relationErr
 		}
 		if hasWorkspaceID {
+			approved := false
+			for _, relation := range projections {
+				if relation.table == table {
+					approved = true
+					break
+				}
+			}
+			if !approved {
+				return nil, nil, fmt.Errorf("task transfer relation %q has unapproved workspace ownership", table)
+			}
 			projections = appendTransferRelationIfMissing(projections, transferWorkspaceProjection{
 				table: table, taskColumn: "task_id",
 			})

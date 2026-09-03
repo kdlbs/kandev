@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -37,6 +38,7 @@ type BackendClient interface {
 }
 
 const rejectedTransferToolAuditTimeout = 2 * time.Second
+const rejectedTransferToolAuditAttempts = 3
 
 // MCP mode constants control which tools are registered.
 const (
@@ -645,10 +647,20 @@ func (s *Server) auditRejectedTransferTool(ctx context.Context, arguments any) {
 		}
 	}
 	var ignored map[string]interface{}
-	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rejectedTransferToolAuditTimeout)
+	auditCtx, cancel := context.WithTimeout(mcporigin.WithTrustedInternalCall(context.WithoutCancel(ctx)), rejectedTransferToolAuditTimeout)
 	defer cancel()
-	if err := s.backend.RequestPayload(auditCtx, ws.ActionMCPAuditTaskTransferAttempt, payload, &ignored); err != nil {
-		s.logger.Warn("failed to audit rejected transfer tool call", zap.Error(err))
+	var err error
+	for attempt := 0; attempt < rejectedTransferToolAuditAttempts; attempt++ {
+		err = s.backend.RequestPayload(auditCtx, ws.ActionMCPAuditTaskTransferAttempt, payload, &ignored)
+		if err == nil {
+			return
+		}
+		if auditCtx.Err() != nil {
+			break
+		}
+	}
+	if err != nil {
+		s.logger.Warn("failed to durably audit rejected transfer tool call", zap.Error(err))
 	}
 }
 

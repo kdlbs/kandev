@@ -19,6 +19,7 @@ import (
 
 func TestPostgresTransferTaskRoundTrip(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	db.SetMaxOpenConns(2)
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
@@ -98,6 +99,7 @@ func TestPostgresTransferTaskRoundTrip(t *testing.T) {
 
 func TestPostgresTaskTransferRelationLockBlocksWriter(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	db.SetMaxOpenConns(2)
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
@@ -391,6 +393,7 @@ func assertPostgresTransferConflict(t *testing.T, done <-chan error, reason stri
 func seedPostgresConcurrentTransferTasks(t *testing.T, wipLimit int) (*Repository, []*models.Task) {
 	t.Helper()
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	db.SetMaxOpenConns(2)
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)

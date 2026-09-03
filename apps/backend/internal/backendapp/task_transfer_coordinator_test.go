@@ -100,7 +100,7 @@ func TestTaskTransferCoordinatorAttestorRequiresAssignedSourceCEO(t *testing.T) 
 func TestTaskTransferCoordinatorAttestorRejectsDestinationBoundTask(t *testing.T) {
 	principal := mcpscope.Principal{WorkspaceID: "ws-destination", CallerTaskID: "caller-task", CallerSessionID: "caller-session"}
 	attestor := taskTransferCoordinatorAttestor{
-		tasks: fixedTaskTransferTaskReader{task: &models.Task{ID: "caller-task", WorkspaceID: "ws-destination"}},
+		tasks: fixedTaskTransferTaskReader{task: &models.Task{ID: "caller-task", WorkspaceID: "ws-destination", IsFromOffice: true, AssigneeAgentProfileID: "ceo-1"}},
 		sessions: fixedTaskTransferSessionReader{session: &models.TaskSession{
 			ID: "caller-session", TaskID: "caller-task", AgentProfileID: "ceo-1",
 		}},

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
@@ -106,6 +107,9 @@ func decodeTaskTransferRequest(payload []byte, request *taskTransferRequest) err
 }
 
 func (h *Handlers) handleAuditTaskTransferAttempt(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if !mcporigin.IsTrustedInternalCall(ctx) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "Unknown action", nil)
+	}
 	request, err := decodeTaskTransferAuditRequest(msg.Payload)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid task transfer audit payload", nil)
@@ -210,6 +214,13 @@ func (h *Handlers) taskTransferActor(ctx context.Context, command models.TaskTra
 			actorID = "local-human"
 		}
 		return models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: actorID}, nil
+	}
+	if principal.Surface == mcpprofile.SurfaceConfiguration {
+		identity, ok := authn.IdentityFromContext(ctx)
+		if !ok || identity.UserID == "" {
+			return models.TaskTransferActor{}, repoerrors.ErrTaskNotFound
+		}
+		return models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: identity.UserID, SessionID: principal.CallerSessionID}, nil
 	}
 	if principal.Surface != mcpprofile.SurfaceOfficeTask {
 		return models.TaskTransferActor{}, repoerrors.ErrTaskNotFound
