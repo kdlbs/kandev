@@ -5,6 +5,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
+import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
 import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
@@ -57,23 +58,7 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   }
   await dialog.getByTestId("quick-chat-start").click();
 
-  // Wait for chat input to appear AND become editable. Eager init means the
-  // agent starts during the picker → tab transition; the input is briefly
-  // disabled while the FE store catches up to the RUNNING session state.
-  //
-  // Race fix: `contenteditable="true"` was observed as a momentary flicker
-  // before the session settled into STARTING/RUNNING and flipped the input
-  // back to false. Callers then hit `editor.fill()` against a non-editable
-  // node and the test failed. Wait for the agent-status indicator to clear
-  // (STARTING/RUNNING both render a "Agent is …" status; IDLE renders none),
-  // then assert editability — by that point the input has reached its
-  // stable, ready state.
-  const editor = dialog.locator(".tiptap.ProseMirror");
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("status", { name: /Agent is (starting|running)/ })).not.toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  await waitForQuickChatComposerReady(dialog);
   return dialog;
 }
 

@@ -3,11 +3,13 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { attachAvailableCommandsCapture, attachShellInputCapture } from "../../helpers/ws-capture";
+import { waitForSessionState } from "../../helpers/session";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
   openQuickChatSetup,
   openQuickChatWithAgent,
   quickChatTabReferences,
+  readQuickChatViewportLayout,
   selectAgentIfNeeded,
   sendQuickChatMessage,
   startQuickChatFromSetup,
@@ -54,6 +56,47 @@ async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  // @covers AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.1 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.2 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.3 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.4 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.6
+  test("keeps the viewport layout contained for new and long chats", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 1440, height: 800 });
+    const dialog = await openQuickChatWithAgent(testPage);
+
+    const newChatLayout = await readQuickChatViewportLayout(dialog);
+    expect(newChatLayout.composerTop).toBeGreaterThan(newChatLayout.dialogTop);
+    expect(newChatLayout.composerBottom).toBeLessThanOrEqual(newChatLayout.dialogBottom + 1);
+    expect(newChatLayout.dialogBottom - newChatLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(newChatLayout.contentBottom).toBeLessThanOrEqual(newChatLayout.dialogBottom + 1);
+    expect(newChatLayout.dialogBottom - newChatLayout.contentBottom).toBeLessThanOrEqual(2);
+    expect(newChatLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      newChatLayout.dialogClientHeight + 1,
+    );
+
+    await sendQuickChatMessage(dialog, testPage, "/e2e:bulk:20");
+    await expect(dialog.getByText(/Done\. Emitted 20 messages/)).toBeVisible({ timeout: 30_000 });
+
+    const longChatLayout = await readQuickChatViewportLayout(dialog);
+    expect(longChatLayout.messageScrollerScrollHeight).toBeGreaterThan(
+      longChatLayout.messageScrollerClientHeight,
+    );
+    expect(longChatLayout.composerBottom).toBeLessThanOrEqual(longChatLayout.dialogBottom + 1);
+    expect(longChatLayout.dialogBottom - longChatLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(longChatLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      longChatLayout.dialogClientHeight + 1,
+    );
+
+    await testPage.setViewportSize({ width: 1440, height: 600 });
+
+    const resizedLayout = await readQuickChatViewportLayout(dialog);
+    expect(resizedLayout.messageScrollerScrollHeight).toBeGreaterThan(
+      resizedLayout.messageScrollerClientHeight,
+    );
+    expect(resizedLayout.composerBottom).toBeLessThanOrEqual(resizedLayout.dialogBottom + 1);
+    expect(resizedLayout.dialogBottom - resizedLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(resizedLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      resizedLayout.dialogClientHeight + 1,
+    );
+  });
+
   // @covers AC-UI-QUICK-CHAT-ELEVATION-001.1 AC-UI-QUICK-CHAT-ELEVATION-001.2 AC-UI-QUICK-CHAT-ELEVATION-001.5 AC-UI-QUICK-CHAT-ELEVATION-001.6
   test("adds a stronger elevation backdrop when opened over the page", async ({ testPage }) => {
     const dialog = await openQuickChatSetup(testPage);
@@ -754,6 +797,71 @@ test.describe("Quick Chat", () => {
     });
     await effortTrigger.click();
     await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  // @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2
+  test("resumes a restored session after backend restart", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const dialog = await openQuickChatSetup(testPage);
+    const startResponse = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/quick-chat") && response.request().method() === "POST",
+    );
+    await startQuickChatFromSetup(dialog, testPage);
+    const started = (await (await startResponse).json()) as {
+      task_id: string;
+      session_id: string;
+    };
+
+    await sendQuickChatMessage(dialog, testPage, "/e2e:simple-message");
+    await expect(dialog.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: started.task_id,
+      sessionId: started.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Quick Chat session did not settle before backend restart",
+      timeout: 30_000,
+    });
+
+    await backend.restart();
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+Shift+q`);
+    const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(restoredDialog).toBeVisible({ timeout: 10_000 });
+    const restoredTab = restoredDialog.locator(
+      `[data-tab-reference="conversation:${started.session_id}"]`,
+    );
+    await expect(restoredTab).toBeVisible({ timeout: 15_000 });
+
+    await waitForSessionState(apiClient, {
+      taskId: started.task_id,
+      sessionId: started.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Restored Quick Chat session did not settle after backend restart",
+      timeout: 60_000,
+    });
+    await expect(restoredDialog.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const modelSettings = restoredDialog.getByRole("button", {
+      name: "Session model settings",
+    });
+    await expect(modelSettings).toContainText("Mock Fast", { timeout: 15_000 });
+    await modelSettings.click();
+    await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible({
       timeout: 10_000,
     });
   });

@@ -969,6 +969,9 @@ case "${1:-}" in
     exit 0
     ;;
   rev-parse)
+    if [ "${2:-}" = "--verify" ]; then
+      exit 1
+    fi
     if [ "${2:-}" = "--abbrev-ref" ]; then
       echo "master"
     fi
@@ -1208,6 +1211,9 @@ esac
 	}
 	if !errors.Is(err, ErrInvalidBaseBranch) {
 		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
+	}
+	if !errors.Is(err, ErrRemoteRefMissing) {
+		t.Fatalf("error = %v, want confirmed remote-ref-missing sentinel", err)
 	}
 }
 

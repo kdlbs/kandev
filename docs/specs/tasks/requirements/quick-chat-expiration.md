@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-07-02
+updated: 2026-08-29
 owners:
   - kandev
 ---
@@ -20,6 +21,10 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-QUICK-CHAT-EXPIRATION-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-QUICK-CHAT-EXPIRATION-001.2:** When a user opens a persisted Quick Chat tab with a
+  stopped, resumable agent, the system shall apply the regular task resumption preference. When
+  automatic start is allowed, the system shall resume the agent and restore session capabilities.
+  When automatic start on open is disabled, the system shall leave the agent stopped.
 
 ## Migrated source detail
 
@@ -290,3 +295,7 @@ deletion.
 - Multiple configuration sessions per workspace.
 - Repository context for configuration sessions.
 - A user-configurable ordinary-chat retention window or automatic expiration for config sessions.
+
+## System design
+
+- [Quick Chat Session Resumption](../system-design/quick-chat-session-resumption.md)

@@ -4,10 +4,11 @@ import { useEffect, useMemo, useRef, memo, forwardRef, useImperativeHandle } fro
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
-import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { OLDER_PAGE_LIMIT, useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
 import { useNativeScrollManagement } from "./message-list-native-scroll";
+import { scheduleAfterPanelRestore, useActivationPending } from "./transcript-auto-scroll";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
@@ -27,6 +28,8 @@ import {
   resolveLastPromptEdge,
   isElementFullyVisible,
 } from "./message-list-shared";
+
+const DIVIDER_SETTLING_WINDOW_MS = 4000;
 
 /** Notifies `onLastPromptEdgeChange`/`onFirstMessageHiddenChange` whenever the
  * last-prompt or first message crosses the container's viewport edges, so
@@ -93,11 +96,16 @@ type NativeMessageListScrollParams = {
   onFirstMessageHiddenChange: ((isHidden: boolean) => void) | undefined;
   /** Changes when transcript status rows can add/remove space above messages. */
   scrollLayoutKey: string;
+  isVisible: boolean;
 };
 
 type ScrollToDividerOptions = {
   onDividerScroll?: () => void;
   scrollLayoutKey?: string;
+  enabled?: boolean;
+  sessionId?: string | null;
+  isProgrammaticScrollLocked?: () => boolean;
+  isVisible?: boolean;
 };
 
 function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
@@ -120,8 +128,16 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     firstMessageId,
     onFirstMessageHiddenChange,
     scrollLayoutKey,
+    isVisible,
   } = params;
-  const { handleScrollToMessage, sentinelRef, markNotNearBottom } = useNativeScrollManagement({
+  const {
+    handleScrollToMessage,
+    sentinelRef,
+    markNotNearBottom,
+    isProgrammaticScrollLocked,
+    retryLoadMore,
+    showRecovery,
+  } = useNativeScrollManagement({
     scrollRef,
     items,
     messages,
@@ -133,6 +149,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     hasMore,
     isLoadingMore,
     loadMore,
+    isVisible,
   });
   const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
   useEffect(() => {
@@ -141,6 +158,10 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
   useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey, anchoredBarOffsetPx, {
     onDividerScroll: markNotNearBottom,
     scrollLayoutKey,
+    enabled,
+    sessionId,
+    isProgrammaticScrollLocked,
+    isVisible,
   });
   useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
     handleScrollToMessage,
@@ -152,7 +173,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     firstMessageId,
     onFirstMessageHiddenChange,
   );
-  return { handleScrollToMessage, sentinelRef };
+  return { handleScrollToMessage, sentinelRef, retryLoadMore, showRecovery };
 }
 
 type MessageRowProps = {
@@ -236,7 +257,8 @@ type NativeMessageListBodyProps = {
   isLoadingMore: boolean;
   isInitialLoading: boolean;
   showLoadingState: boolean;
-  loadMore: () => Promise<number>;
+  retryLoadMore: () => void;
+  showRecovery: boolean;
   sentinelRef: (node: HTMLDivElement | null) => void;
   lastTurnGroupId: string | null;
   activeTurnId: string | null;
@@ -267,7 +289,7 @@ type NativeMessageListBodyProps = {
  *   by BOTH of: the reader hasn't started scrolling yet (isUserScrolling
  *   — wheel/touchstart/keydown, since a plain 'scroll' event can't tell
  *   user intent apart from our own programmatic writes), AND still being
- *   within a short settling window since mount (isWithinSettlingWindow).
+ *   within a short settling window since activation (isWithinSettlingWindow).
  *   The window exists so a live message arriving long after the visit has
  *   genuinely settled — with no wheel/touch/key event to catch, e.g. a
  *   scrollbar drag — can never re-trigger a correction; once either gate
@@ -277,10 +299,10 @@ type NativeMessageListBodyProps = {
  *   bottom-fallback firing first (before dividerBeforeItemKey resolves)
  *   doesn't block the divider correction from still applying once it
  *   does. The caller also supplies a layout key so a loading-state transition
- *   with an unchanged item count can re-assert the target. Embedded, always-
- *   invisible previews (isVisible hardcoded false,
- *   see TaskChatPanel) never resolve a divider, so they keep the
- *   original, unconditional scroll-to-bottom-on-mount behavior untouched.
+ *   with an unchanged item count can re-assert the target. Disabled initial
+ *   placement is owned by the native initial-position hook, while previews
+ *   keep their existing visible-host behavior without participating in read
+ *   tracking.
  */
 export function useScrollToDividerOrBottom(
   scrollRef: React.RefObject<HTMLDivElement | null>,
@@ -289,7 +311,115 @@ export function useScrollToDividerOrBottom(
   anchoredBarOffsetPx: number,
   options: ScrollToDividerOptions = {},
 ) {
-  const { onDividerScroll, scrollLayoutKey = "" } = options;
+  const {
+    onDividerScroll,
+    scrollLayoutKey = "",
+    enabled = true,
+    sessionId = null,
+    isProgrammaticScrollLocked = () => false,
+    isVisible = true,
+  } = options;
+  const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
+  const isUserScrollingRef = useDividerUserScrolling(scrollRef);
+
+  // Bounds how long the divider correction below can keep re-asserting
+  // itself after activation, independent of user interaction: a scrollbar drag
+  // (no wheel/touch/key event) or a live message arriving long after the
+  // visit has settled must never be able to re-trigger it. 4s comfortably
+  // covers the slowest observed multi-wave initial load (WS backfill
+  // continuing after the REST fetch) without lingering into the range
+  // where the user has plausibly started reading and scrolling normally.
+  const previousVisibleForSettlingRef = useRef(isVisible);
+  const settlingDeadlineRef = useRef<number | null>(null);
+  const isWithinSettlingWindow = () =>
+    settlingDeadlineRef.current !== null && Date.now() < settlingDeadlineRef.current;
+
+  const didInitialScroll = useRef(false);
+  const didScrollToDivider = useRef(false);
+  useEffect(() => {
+    const becameVisible = isVisible && !previousVisibleForSettlingRef.current;
+    previousVisibleForSettlingRef.current = isVisible;
+    if (!isVisible) {
+      settlingDeadlineRef.current = null;
+      return;
+    }
+    if (settlingDeadlineRef.current === null || becameVisible) {
+      settlingDeadlineRef.current = Date.now() + DIVIDER_SETTLING_WINDOW_MS;
+    }
+    const el = scrollRef.current;
+    if (!el || itemCount === 0) return;
+
+    const placeInitialPosition = () => {
+      if (!isVisibleRef.current) return;
+      const dockviewState = useDockviewStore.getState();
+      const hasPendingLayoutRestore = dockviewState.pendingChatScrollTop !== null;
+      const hasExplicitScrollTarget =
+        sessionId !== null && dockviewState.scrollTarget?.sessionId === sessionId;
+      const hasProgrammaticOwner = isProgrammaticScrollLocked();
+      if (hasPendingLayoutRestore || hasExplicitScrollTarget || hasProgrammaticOwner) {
+        didInitialScroll.current = true;
+        activationPendingRef.current = false;
+        if (hasExplicitScrollTarget || hasProgrammaticOwner) {
+          isUserScrollingRef.current = true;
+        }
+        return;
+      }
+      const canReassertDivider = canReassertDividerScroll({
+        hasDividerTarget: Boolean(dividerBeforeItemKey),
+        didScrollToDivider: didScrollToDivider.current,
+        isUserScrolling: isUserScrollingRef.current,
+        isWithinSettlingWindow: isWithinSettlingWindow(),
+      });
+      if (canReassertDivider) {
+        const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
+        if (dividerEl) {
+          // scrollIntoView aligns against the viewport, which puts the target
+          // behind the fixed mobile session header instead of inside this
+          // nested scroll container. Move by the relative geometry instead;
+          // the desktop anchored prompt bar still reserves its measured height.
+          const containerRect = el.getBoundingClientRect();
+          const dividerRect = dividerEl.getBoundingClientRect();
+          el.scrollTop += dividerRect.top - containerRect.top - anchoredBarOffsetPx;
+          onDividerScroll?.();
+          didScrollToDivider.current = true;
+          didInitialScroll.current = true;
+          activationPendingRef.current = false;
+          return;
+        }
+      }
+      if (didInitialScroll.current) return;
+      // Disabled initial placement is owned by useInitialScrollPosition,
+      // which restores the persisted reader offset (or its bottom fallback).
+      // This divider hook only owns the enabled bottom fallback.
+      if (!enabled) {
+        didInitialScroll.current = true;
+        activationPendingRef.current = false;
+        return;
+      }
+      el.scrollTop = el.scrollHeight;
+      didInitialScroll.current = true;
+      activationPendingRef.current = false;
+    };
+
+    if (activationPendingRef.current) {
+      return scheduleAfterPanelRestore(placeInitialPosition);
+    }
+    placeInitialPosition();
+  }, [
+    itemCount,
+    dividerBeforeItemKey,
+    anchoredBarOffsetPx,
+    onDividerScroll,
+    scrollLayoutKey,
+    enabled,
+    sessionId,
+    isProgrammaticScrollLocked,
+    isVisible,
+    scrollRef,
+  ]);
+}
+
+function useDividerUserScrolling(scrollRef: React.RefObject<HTMLDivElement | null>) {
   const isUserScrollingRef = useRef(false);
   useEffect(() => {
     const el = scrollRef.current;
@@ -306,57 +436,7 @@ export function useScrollToDividerOrBottom(
       el.removeEventListener("keydown", markUserScrolling);
     };
   }, [scrollRef]);
-
-  // Bounds how long the divider correction below can keep re-asserting
-  // itself after mount, independent of user interaction: a scrollbar drag
-  // (no wheel/touch/key event) or a live message arriving long after the
-  // visit has settled must never be able to re-trigger it. 4s comfortably
-  // covers the slowest observed multi-wave initial load (WS backfill
-  // continuing after the REST fetch) without lingering into the range
-  // where the user has plausibly started reading and scrolling normally.
-  const mountedAtRef = useRef<number | null>(null);
-  if (mountedAtRef.current === null) mountedAtRef.current = Date.now();
-  const isWithinSettlingWindow = () => Date.now() - (mountedAtRef.current ?? 0) < 4000;
-
-  const didInitialScroll = useRef(false);
-  const didScrollToDivider = useRef(false);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || itemCount === 0) return;
-    const canReassertDivider = canReassertDividerScroll({
-      hasDividerTarget: Boolean(dividerBeforeItemKey),
-      didScrollToDivider: didScrollToDivider.current,
-      isUserScrolling: isUserScrollingRef.current,
-      isWithinSettlingWindow: isWithinSettlingWindow(),
-    });
-    if (canReassertDivider) {
-      if (useDockviewStore.getState().pendingChatScrollTop === null) {
-        const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
-        if (dividerEl) {
-          // scrollIntoView aligns against the viewport, which puts the target
-          // behind the fixed mobile session header instead of inside this
-          // nested scroll container. Move by the relative geometry instead;
-          // the desktop anchored prompt bar still reserves its measured height.
-          const containerRect = el.getBoundingClientRect();
-          const dividerRect = dividerEl.getBoundingClientRect();
-          el.scrollTop += dividerRect.top - containerRect.top - anchoredBarOffsetPx;
-          onDividerScroll?.();
-          didScrollToDivider.current = true;
-          didInitialScroll.current = true;
-          return;
-        }
-      }
-    }
-    if (didInitialScroll.current) return;
-    // If a layout rebuild scroll restore is pending, skip initial scroll
-    // (the restore handler will set the correct position)
-    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
-      didInitialScroll.current = true;
-      return;
-    }
-    el.scrollTop = el.scrollHeight;
-    didInitialScroll.current = true;
-  }, [itemCount, dividerBeforeItemKey, anchoredBarOffsetPx, onDividerScroll, scrollLayoutKey]);
+  return isUserScrollingRef;
 }
 
 /** Sentinel, status/footer, and transcript rows — everything below the
@@ -378,7 +458,8 @@ function NativeMessageListBody({
   isLoadingMore,
   isInitialLoading,
   showLoadingState,
-  loadMore,
+  retryLoadMore,
+  showRecovery,
   sentinelRef,
   lastTurnGroupId,
   activeTurnId,
@@ -399,7 +480,8 @@ function NativeMessageListBody({
         messagesLoading={messagesLoading}
         isInitialLoading={isInitialLoading}
         messagesCount={messages.length}
-        onLoadMore={loadMore}
+        onLoadMore={retryLoadMore}
+        showRecovery={showRecovery}
       />
 
       {items.map((item) => (
@@ -467,6 +549,7 @@ export const NativeMessageList = memo(
       stickyPromptBar,
       dividerBeforeItemKey,
       anchoredBarHeight,
+      isVisible = true,
     }: MessageListProps,
     ref,
   ) {
@@ -478,39 +561,43 @@ export const NativeMessageList = memo(
       isWorking,
       sessionState,
     });
-    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId);
+    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId, {
+      minTextPartsPerLoad: OLDER_PAGE_LIMIT,
+    });
     const { activeTurnId } = useSessionTurn(sessionId);
     const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
     const streamingMessageId = getStreamingAgentMessageId(messages);
     const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
     const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
-    const { handleScrollToMessage, sentinelRef } = useNativeMessageListScroll({
-      scrollRef,
-      ref,
-      items,
-      messages,
-      isWorking,
-      sessionId,
-      enabled: autoScrollEnabled,
-      dividerBeforeItemKey,
-      anchoredBarHeight,
-      messagesLoading,
-      hasMore,
-      isLoadingMore,
-      loadMore,
-      lastPromptMessageId,
-      onLastPromptEdgeChange,
-      firstMessageId,
-      onFirstMessageHiddenChange,
-      scrollLayoutKey: [
-        messagesLoading,
-        isInitialLoading,
-        showLoadingState,
-        isLoadingMore,
-        hasMore,
+    const { handleScrollToMessage, sentinelRef, retryLoadMore, showRecovery } =
+      useNativeMessageListScroll({
+        scrollRef,
+        ref,
+        items,
+        messages,
         isWorking,
-      ].join(":"),
-    });
+        sessionId,
+        enabled: autoScrollEnabled,
+        dividerBeforeItemKey,
+        anchoredBarHeight,
+        messagesLoading,
+        hasMore,
+        isLoadingMore,
+        loadMore,
+        lastPromptMessageId,
+        onLastPromptEdgeChange,
+        firstMessageId,
+        onFirstMessageHiddenChange,
+        scrollLayoutKey: [
+          messagesLoading,
+          isInitialLoading,
+          showLoadingState,
+          isLoadingMore,
+          hasMore,
+          isWorking,
+        ].join(":"),
+        isVisible,
+      });
 
     return (
       <SessionPanelContent
@@ -537,7 +624,8 @@ export const NativeMessageList = memo(
           isLoadingMore={isLoadingMore}
           isInitialLoading={isInitialLoading}
           showLoadingState={showLoadingState}
-          loadMore={loadMore}
+          retryLoadMore={retryLoadMore}
+          showRecovery={showRecovery}
           sentinelRef={sentinelRef}
           lastTurnGroupId={lastTurnGroupId}
           activeTurnId={effectiveActiveTurnId}

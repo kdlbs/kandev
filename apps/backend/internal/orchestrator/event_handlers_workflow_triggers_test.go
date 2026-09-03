@@ -340,7 +340,7 @@ func TestProcessOnEnterSetSessionMode(t *testing.T) {
 	}
 
 	session, _ := repo.GetTaskSession(ctx, "s1")
-	svc.processOnEnter(ctx, "t1", session, step, "test task", 0)
+	svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 	updated, _ := repo.GetTaskSession(ctx, "s1")
 	if got, _ := updated.Metadata[models.SessionMetaKeySessionMode].(string); got != "acceptEdits" {
@@ -374,7 +374,7 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "test task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata == nil {
@@ -403,7 +403,7 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "test task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 		// Plan mode should persist — only explicit on_exit/on_turn_complete
 		// disable_plan_mode actions should clear it.
@@ -445,7 +445,7 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, reviewStep, "task description", 0)
+		svc.processOnEnter(ctx, "t1", session, reviewStep, "task description", 0, nil)
 
 		select {
 		case <-agentMgr.promptDone:
@@ -492,7 +492,7 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "queued prompt content", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "queued prompt content", 0, nil)
 
 		deadline := time.Now().Add(2 * time.Second)
 		for {
@@ -744,7 +744,7 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 		}
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "test task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata != nil {
@@ -771,7 +771,7 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "test task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 		// plan_mode should still be set since passthrough sessions skip plan mode management
 		updated, _ := repo.GetTaskSession(ctx, "s1")
@@ -849,7 +849,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		published := eventBus.published()
 		if len(published) < 2 {
@@ -960,7 +960,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// Verify RestartAgentProcess was called with the correct execution ID
 		if len(agentMgr.restartProcessCalls) != 1 {
@@ -996,7 +996,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// Verify RestartAgentProcess was NOT called (no execution ID)
 		if len(agentMgr.restartProcessCalls) != 0 {
@@ -1135,7 +1135,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "Run the work", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "Run the work", 0, nil)
 		select {
 		case <-startAgentProcessCalled:
 		case <-time.After(time.Second):
@@ -1177,7 +1177,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// Verify RestartAgentProcess was called even for passthrough sessions
 		if len(agentMgr.restartProcessCalls) != 1 {
@@ -1211,7 +1211,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.State != models.TaskSessionStateWaitingForInput {
@@ -1255,7 +1255,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			t.Fatalf("precondition: seed should start session as RUNNING, got %q", session.State)
 		}
 
-		svc.processOnEnter(ctx, "t1", session, step, "review task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// In-memory session must also be updated — queueAutoStartPromptIfRunning
 		// (further down in processOnEnter when auto_start_agent is present)
@@ -1304,7 +1304,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task", 0)
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// Positive assertion: pin the expected state to RUNNING so any other
 		// unintended mutation (COMPLETED, FAILED, etc.) also fails the test,

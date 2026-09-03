@@ -520,6 +520,9 @@ test.describe("Mobile sidebar — view system", () => {
   }) => {
     const taskTitle = "Mobile task row layout";
     const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [taskTitle]);
+    const listedTasks = await apiClient.listTasks(seedData.workspaceId);
+    const task = listedTasks.tasks.find((candidate) => candidate.title === taskTitle);
+    expect(task?.id).toBeTruthy();
     const gear = sheet.getByTestId("sidebar-filter-gear");
     await gear.tap();
 
@@ -615,8 +618,14 @@ test.describe("Mobile sidebar — view system", () => {
 
     const row = compactRow;
     await expect(row).toBeVisible();
-    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    const trailingTime = row.getByTestId("sidebar-task-trailing-time");
+    await expect(trailingTime).toBeVisible();
     await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(trailingTime).not.toContainText(/ago|yesterday/i);
+    await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
+    const mobileTimeBox = await trailingTime.boundingBox();
+    expect(mobileTimeBox).not.toBeNull();
+    expect(mobileTimeBox!.width).toBeGreaterThanOrEqual(40);
     await prCapture.screenshot("mobile-task-row-settings", {
       caption: "Mobile task-row settings in the inset bottom drawer",
     });
@@ -634,6 +643,24 @@ test.describe("Mobile sidebar — view system", () => {
     ).toBe(true);
     await testPage.keyboard.press("Escape");
     await expect(popover).toBeHidden();
+    const taskAction = row.getByRole("button", { name: "Task actions" });
+    await expect(taskAction).toBeVisible();
+    const taskActionBox = await taskAction.boundingBox();
+    expect(taskActionBox).not.toBeNull();
+    expect(taskActionBox!.width).toBeGreaterThanOrEqual(44);
+    expect(taskActionBox!.height).toBeGreaterThanOrEqual(44);
+    const rowBoxWithAction = await row.boundingBox();
+    expect(rowBoxWithAction).not.toBeNull();
+    expect(taskActionBox!.x).toBeGreaterThanOrEqual(rowBoxWithAction!.x - 1);
+    expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
+      rowBoxWithAction!.x + rowBoxWithAction!.width + 1,
+    );
+    expect(taskActionBox!.x).toBeGreaterThanOrEqual(drawerBox!.x - 1);
+    expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
+      drawerBox!.x + drawerBox!.width + 1,
+    );
+    await row.tap();
+    await expect(testPage).toHaveURL((url) => url.pathname === `/t/${task!.id}`);
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();

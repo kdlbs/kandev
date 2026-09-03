@@ -245,6 +245,17 @@ func TestTaskLastActivityBatch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create agent message: %v", err)
 	}
+	lifecycleCompletedAt := base.Add(14 * time.Hour)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-activity-lifecycle",
+		TaskSessionID: "session-activity-turn",
+		TaskID:        "task-activity-turn",
+		StartedAt:     base.Add(13 * time.Hour),
+		CompletedAt:   &lifecycleCompletedAt,
+		Metadata:      map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	}); err != nil {
+		t.Fatalf("create lifecycle turn: %v", err)
+	}
 	if err := repo.CreateTurn(ctx, &models.Turn{
 		ID:            "turn-activity-active",
 		TaskSessionID: "session-activity-active",

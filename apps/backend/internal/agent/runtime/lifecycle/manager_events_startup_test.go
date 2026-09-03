@@ -22,7 +22,7 @@ func TestHandleCompleteEventMarkState_DefersUninitializedStartupFailure(t *testi
 		Type:  streams.EventTypeComplete,
 		Error: "Agent process exited with code 1",
 		Data:  map[string]any{"is_error": true},
-	}, true)
+	}, true, nil)
 
 	got, _ := mgr.GetExecution(execution.ID)
 	if got.Status != v1.AgentStatusStarting {

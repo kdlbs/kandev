@@ -10,6 +10,7 @@ import {
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
 import { doFetchMessages } from "./use-session-message-fetch";
+import { reconcileLatestMessageWindow } from "./message-window-reconciliation";
 import { t } from "@/lib/i18n";
 
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
@@ -130,6 +131,7 @@ interface UseSessionMessagesReturn {
   isLoading: boolean;
   isInitialMessagesLoading: boolean;
   messages: Message[];
+  historyInitialized: boolean;
   hasMore: boolean;
   oldestCursor: string | null;
 }
@@ -138,10 +140,17 @@ type MessageListResponse = { messages: Message[]; has_more?: boolean; cursor?: s
 type InFlightMessageRequest = {
   readiness: Promise<void>;
   promise: Promise<MessageListResponse>;
+  cachedAtRequest: Message[];
 };
 
 const EMPTY_MESSAGES: Message[] = [];
-const EMPTY_META = { isLoading: false, isLoadingMore: false, hasMore: false, oldestCursor: null };
+const EMPTY_META = {
+  isLoading: false,
+  isLoadingMore: false,
+  historyInitialized: false,
+  hasMore: false,
+  oldestCursor: null,
+};
 const inFlightMessageRequests = new Map<string, InFlightMessageRequest>();
 
 /** Debug-only summary of a fetch response (no-op unless debug logging is on). */
@@ -174,9 +183,10 @@ function requestSessionMessages(
   client: NonNullable<ReturnType<typeof getWebSocketClient>>,
   sessionId: string,
   readiness: Promise<void>,
-): Promise<MessageListResponse> {
+  cachedAtRequest: Message[],
+): InFlightMessageRequest {
   const existing = inFlightMessageRequests.get(sessionId);
-  if (existing?.readiness === readiness) return existing.promise;
+  if (existing?.readiness === readiness) return existing;
 
   const requestParams = {
     session_id: sessionId,
@@ -184,7 +194,7 @@ function requestSessionMessages(
     sort: "desc" as const,
   };
   const promise = client.request<MessageListResponse>("message.list", requestParams, 10000);
-  const entry = { readiness, promise };
+  const entry = { readiness, promise, cachedAtRequest: [...cachedAtRequest] };
   inFlightMessageRequests.set(sessionId, entry);
   void promise.then(
     () => {
@@ -202,7 +212,7 @@ function requestSessionMessages(
       }, 0);
     },
   );
-  return promise;
+  return entry;
 }
 
 /** Fetch latest messages via WS and merge with any that arrived via live notifications. */
@@ -227,24 +237,21 @@ async function fetchAndStoreMessages(
   // after subscription acknowledgement so the REST snapshot cannot race the
   // initial WebSocket subscription registration.
   void ensureSessionTurnsLoaded(sessionId, store, { readiness });
+  const cachedAtRequest = store.getState().messages.bySession[sessionId] ?? [];
   const seq = nextFetchSeq();
-  const response = await requestSessionMessages(client, sessionId, readiness);
+  // Keep the snapshot on the deduplicated request. Concurrent callers may
+  // observe different cache contents, but reconciliation must use the
+  // baseline captured by the caller that actually issued the network request.
+  const request = requestSessionMessages(client, sessionId, readiness, cachedAtRequest);
+  const response = await request.promise;
   if (isActive && !isActive()) return [];
   const fetched = [...(response.messages ?? [])].reverse();
   logFetchSummary(sessionId, fetched, response, INITIAL_FETCH_LIMIT);
-  // Merge: keep WS-delivered messages that aren't in the fetch response.
-  // This prevents a slow fetch (sent before messages existed) from wiping
-  // messages that arrived via real-time notifications while the fetch was
-  // in flight.
-  const existing = store.getState().messages.bySession[sessionId] ?? [];
-  const fetchedIds = new Set(fetched.map((m) => m.id));
-  const extras = existing.filter((m) => !fetchedIds.has(m.id));
-  const merged =
-    extras.length > 0
-      ? [...fetched, ...extras].sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-        )
-      : fetched;
+  const { messages: merged, oldestCursor } = reconcileLatestMessageWindow({
+    cachedAtRequest: request.cachedAtRequest,
+    cachedAtResponse: store.getState().messages.bySession[sessionId] ?? [],
+    fetched,
+  });
 
   // Stale-fetch guard: if a newer fetch for this session already merged while
   // this one was in flight, skip the merge so the older snapshot can't drop
@@ -258,8 +265,9 @@ async function fetchAndStoreMessages(
   // preserving object/array identity for unchanged messages so the periodic
   // refetch doesn't re-render the whole chat (see reconcileMessages).
   store.getState().mergeMessages(sessionId, merged, {
+    historyInitialized: true,
     hasMore: response.has_more ?? false,
-    oldestCursor: merged[0]?.id ?? null,
+    oldestCursor,
   });
   // The store now holds the identity-reconciled array; callers only read length
   // and message content from the return, so `merged` is equivalent.
@@ -649,6 +657,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,
     isInitialMessagesLoading: isWaitingForInitialMessages,
     messages,
+    historyInitialized: messagesMeta.historyInitialized,
     hasMore: messagesMeta.hasMore,
     oldestCursor: messagesMeta.oldestCursor,
   };

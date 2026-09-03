@@ -349,6 +349,7 @@ type Issue struct {
 	ProjectPath      string     `json:"project_path"`
 	Labels           []string   `json:"labels"`
 	Assignees        []string   `json:"assignees"`
+	Milestone        string     `json:"milestone,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ClosedAt         *time.Time `json:"closed_at,omitempty"`

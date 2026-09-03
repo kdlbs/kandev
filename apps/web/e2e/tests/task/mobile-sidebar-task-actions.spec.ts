@@ -812,16 +812,27 @@ test.describe("Mobile sidebar task actions", () => {
     backend,
     seedData,
   }) => {
-    execSync("git branch -f develop", {
-      cwd: seedData.repositoryPath,
-      env: makeGitEnv(backend.tmpDir),
-    });
-    const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
-      name: `Mobile subtask policy ${Date.now()}`,
-      base_branch: "main",
-      branch_template: "feature/{title}-{suffix}",
-      pull_request_target: "develop",
-    });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    const normalizeSeedRepository = () => {
+      execSync("git checkout -f main", {
+        cwd: seedData.repositoryPath,
+        env: gitEnv,
+      });
+      execSync("git reset --hard main", {
+        cwd: seedData.repositoryPath,
+        env: gitEnv,
+      });
+      execSync("git clean -fd", {
+        cwd: seedData.repositoryPath,
+        env: gitEnv,
+      });
+      execSync("git branch -f develop", {
+        cwd: seedData.repositoryPath,
+        env: gitEnv,
+      });
+    };
+    normalizeSeedRepository();
+
     const { executors } = await apiClient.listExecutors();
     const localExecutor = executors.find((executor) =>
       ["local", "local_pc"].includes(executor.type),
@@ -830,14 +841,22 @@ test.describe("Mobile sidebar task actions", () => {
       test.skip(true, "No local executor available");
       return;
     }
-    const localProfile = await apiClient.createExecutorProfile(
-      localExecutor.id,
-      `E2E Mobile Subtask Local ${Date.now()}`,
-    );
+
+    const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
+      name: `Mobile subtask policy ${Date.now()}`,
+      base_branch: "main",
+      branch_template: "feature/{title}-{suffix}",
+      pull_request_target: "develop",
+    });
+    let localProfile: { id: string; name: string } | undefined;
     const parentTitle = `Mobile policy subtask parent ${Date.now()}`;
     const childTitle = `Mobile policy subtask child ${Date.now()}`;
 
     try {
+      localProfile = await apiClient.createExecutorProfile(
+        localExecutor.id,
+        `E2E Mobile Subtask Local ${Date.now()}`,
+      );
       const parent = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         parentTitle,
@@ -933,8 +952,9 @@ test.describe("Mobile sidebar task actions", () => {
         )
         .toBe(repository!.base_branch);
     } finally {
-      await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
+      if (localProfile) await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
       await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
+      normalizeSeedRepository();
     }
   });
 });

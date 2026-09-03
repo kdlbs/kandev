@@ -9,7 +9,7 @@ import type { LocalRepository, Repository, RepositoryBranchPolicy } from "@/lib/
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 import { cn, formatUserHomePath } from "@/lib/utils";
 import { type PillOption } from "@/components/task-create-dialog-pill";
-import { branchToOption, sortBranches } from "@/components/task-create-dialog-branch-options";
+import { branchToOption, sortBranches } from "@/components/branch-picker-options";
 import {
   computeBranchIntent,
   type BranchIntent,

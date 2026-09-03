@@ -74,11 +74,13 @@ localization, feature toggles, health, and shared session recovery services.
 
 - [Agent process exit and stderr drain](system-design/agent-process-exit-drain.md)
 - [Agentctl instance stop idempotency](system-design/agentctl-instance-stop.md)
+- [Background Work Liveness](system-design/background-work-liveness.md)
 - [Browser console retention](system-design/browser-console-retention.md)
 - [Bounded Task Status Delivery](system-design/bounded-task-status-delivery.md)
 - [Diagnostic logging System Design Part 1](system-design/diagnostic-logging-01.md)
 - [Diagnostic logging System Design Part 2](system-design/diagnostic-logging-02.md)
 - [Expected runtime log severity](system-design/expected-runtime-log-severity.md)
+- [Duration-aware E2E sharding and CI reliability](system-design/e2e-duration-aware-sharding.md)
 - [Health Endpoint — Surface the Running Version](system-design/health-endpoint-version.md)
 - [Internationalization (i18n)](system-design/i18n.md)
 - [LSP File Intelligence System Design Part 1](system-design/lsp-file-intelligence-01.md)

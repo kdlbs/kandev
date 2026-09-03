@@ -13,10 +13,45 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import {
+  readQuickChatViewportLayout,
+  sendQuickChatMessage,
+  startQuickChatFromSetup,
+} from "./quick-chat-helpers";
 
 const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 
 test.describe("Quick Chat entry points on mobile", () => {
+  // @covers AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.5 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.6
+  test("preserves composer containment at the bottom of the phone dialog", async ({ testPage }) => {
+    await testPage.goto("/");
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
+
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await startQuickChatFromSetup(dialog, testPage);
+
+    const layout = await readQuickChatViewportLayout(dialog);
+    expect(layout.composerTop).toBeGreaterThan(layout.dialogTop);
+    expect(layout.composerBottom).toBeLessThanOrEqual(layout.dialogBottom + 1);
+    expect(layout.dialogBottom - layout.composerBottom).toBeLessThanOrEqual(8);
+    expect(layout.contentBottom).toBeLessThanOrEqual(layout.dialogBottom + 1);
+    expect(layout.dialogBottom - layout.contentBottom).toBeLessThanOrEqual(2);
+    expect(layout.dialogScrollHeight).toBeLessThanOrEqual(layout.dialogClientHeight + 1);
+
+    await sendQuickChatMessage(dialog, testPage, "/e2e:bulk:20");
+    await expect(dialog.getByText(/Done\. Emitted 20 messages/)).toBeVisible({ timeout: 30_000 });
+
+    const longChatLayout = await readQuickChatViewportLayout(dialog);
+    expect(longChatLayout.messageScrollerScrollHeight).toBeGreaterThan(
+      longChatLayout.messageScrollerClientHeight,
+    );
+    expect(longChatLayout.composerBottom).toBeLessThanOrEqual(longChatLayout.dialogBottom + 1);
+    expect(longChatLayout.dialogBottom - longChatLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(longChatLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      longChatLayout.dialogClientHeight + 1,
+    );
+  });
+
   // @covers AC-UI-QUICK-CHAT-ELEVATION-001.4 AC-UI-QUICK-CHAT-ELEVATION-001.7
   test("opens from the home header and closes with the touch control", async ({ testPage }) => {
     await testPage.goto("/");

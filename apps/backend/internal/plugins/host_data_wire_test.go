@@ -437,6 +437,9 @@ func TestPluginHostData_Wire_WorkflowSteps_OnEnterActionTypes(t *testing.T) {
 					OnEnter: []wfmodels.OnEnterAction{
 						{Type: wfmodels.OnEnterAutoStartAgent, Config: map[string]interface{}{"agent_profile_id": "profile-1"}},
 						{Type: wfmodels.OnEnterRunCodeReview},
+						// Unknown types must remain available to plugin callers so they can
+						// apply their own forward-compatible handling.
+						{Type: wfmodels.OnEnterActionType("future_action")},
 					},
 				},
 			},
@@ -456,7 +459,7 @@ func TestPluginHostData_Wire_WorkflowSteps_OnEnterActionTypes(t *testing.T) {
 	require.Len(t, steps, 2)
 
 	require.Equal(t, "step-work", steps[0].ID)
-	require.Equal(t, []string{"auto_start_agent", "run_code_review"}, steps[0].OnEnterActionTypes)
+	require.Equal(t, []string{"auto_start_agent", "run_code_review", "future_action"}, steps[0].OnEnterActionTypes)
 
 	require.Equal(t, "step-todo", steps[1].ID)
 	require.Nil(t, steps[1].OnEnterActionTypes)

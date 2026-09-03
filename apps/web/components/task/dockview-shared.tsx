@@ -294,6 +294,8 @@ function DiffViewerContent({
   const selectedRepositoryName =
     panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
   const selectedPRKey = panelKind === "file" ? (params?.prKey as string | undefined) : undefined;
+  const selectedChangeLayer =
+    panelKind === "file" ? (params?.changeLayer as OpenDiffOptions["changeLayer"]) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   useResyncGitStatusOnTabActivate(panelId, activeSessionId);
@@ -309,6 +311,7 @@ function DiffViewerContent({
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}
       prKey={selectedPRKey}
+      changeLayer={selectedChangeLayer}
       sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
@@ -352,6 +355,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
         source: options?.source,
         repositoryName: options?.repositoryName,
         prKey: options?.prKey,
+        changeLayer: options?.changeLayer,
       }),
     [addFileDiffPanel],
   );

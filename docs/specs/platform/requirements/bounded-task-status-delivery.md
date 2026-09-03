@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-08-01
-updated: 2026-08-27
+updated: 2026-08-29
 owners:
   - kandev
 ---
@@ -33,6 +33,10 @@ Task rows currently obtain compact status indicators by observing large, session
   flush shall apply all accepted `session.message.updated` replacements in one
   store transaction while preserving semantic barriers and final transcript
   content.
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.10:** When task opening resumes
+  an idle agent after a restart, `status_summary.last_activity_at` shall remain
+  unchanged. A later task mutation, user prompt, or conversational agent turn
+  can advance it.
 
 ## System design
 

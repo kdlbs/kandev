@@ -437,6 +437,7 @@ function shouldShowExecutorEnvironmentControls(executorType?: string | null): bo
     case "remote_docker":
     case "sprites":
     case "ssh":
+    case "k8s":
       return true;
     default:
       return false;

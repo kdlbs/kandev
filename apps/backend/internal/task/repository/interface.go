@@ -390,6 +390,9 @@ type GitSnapshotRepository interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitSnapshotByTaskEnvironmentID(ctx context.Context, taskEnvironmentID string) (*models.GitSnapshot, error)
+	GetLatestGitSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) ([]*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
@@ -595,7 +598,14 @@ type PlanRepository interface {
 	// WritePlanRevision atomically upserts the HEAD plan and writes/merges a revision in a
 	// single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
 	// otherwise a new revision is appended with revision_number computed inside the tx.
-	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
+	//
+	// preserveTitle and preserveCreatedBy gate the HEAD upsert's ON CONFLICT branch only: when
+	// true, an existing row keeps its stored title / created_by rather than taking head's value.
+	// They have no effect on a fresh insert, which always uses head's value. Callers set a flag
+	// only when the value they would otherwise overwrite with could not be read (see
+	// docs/specs/tasks/system-design/plan-write-consistency.md, "Existing behavior that must
+	// change"); every other caller passes false.
+	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string, preserveTitle, preserveCreatedBy bool) error
 }
 
 // SubagentContextRepository persists the durable, queryable record of a

@@ -123,6 +123,57 @@ test.describe("Clarification flow", () => {
     await expect(session.chat).toContainText(/You answered|selected_option/);
   });
 
+  test("shows the header submitting status for a single-question answer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Single Submit Feedback",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    const header = session.clarificationOverlay().getByTestId("clarification-overlay-header");
+    const status = session.clarificationSubmittingStatus();
+    await expect(status).toHaveCount(0);
+
+    let releaseResponse = () => undefined;
+    const heldResponse = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      await heldResponse;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    try {
+      await session.clarificationOption("PostgreSQL").click();
+      await expect(status).toBeVisible();
+      await expect(status).toHaveAttribute("aria-label", "Submitting…");
+      await expect(status).toHaveCount(1);
+      await expect(session.clarificationSkip()).toBeDisabled();
+
+      const statusPrecedesSkip = await header.evaluate((node) => {
+        const submitting = node.querySelector('[data-testid="clarification-submitting-status"]');
+        const skip = node.querySelector('[data-testid="clarification-skip"]');
+        return Boolean(
+          submitting &&
+          skip &&
+          submitting.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      });
+      expect(statusPrecedesSkip).toBe(true);
+    } finally {
+      releaseResponse();
+    }
+
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+  });
+
   // R2/R11 + W3: a duplicate submit is a 200 with claimed: false, not a 409 —
   // the losing client must apply the winner's own answer instead of stranding
   // the overlay on "pending" or rendering its own (overwritten) submission.
@@ -1028,22 +1079,40 @@ test.describe("Multi-question clarification carousel", () => {
       await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await session.chat.focus();
-    await testPage.keyboard.press("ControlOrMeta+Enter");
-    const submit = session.clarificationSubmit();
-    await expect(submit).toContainText("Submitting");
-    await expect(submit).toBeDisabled();
-    await expect(submit.locator('[role="status"]')).toBeVisible();
-    await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
-    await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
+    try {
+      await session.chat.focus();
+      await testPage.keyboard.press("ControlOrMeta+Enter");
+      const submit = session.clarificationSubmit();
+      const header = session.clarificationOverlay().getByTestId("clarification-overlay-header");
+      const status = session.clarificationSubmittingStatus();
+      await expect(submit).toContainText("Submitting");
+      await expect(submit).toBeDisabled();
+      await expect(status).toBeVisible();
+      await expect(status).toHaveAttribute("aria-label", "Submitting…");
+      await expect(status).not.toHaveAttribute("aria-hidden");
+      await expect(submit).toHaveAttribute("aria-label", "Submit");
+      await expect(submit.locator('[role="status"]')).toHaveCount(0);
+      await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
 
-    await testPage.keyboard.press("ArrowLeft");
-    await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
+      const statusPrecedesSkip = await header.evaluate((node) => {
+        const submitting = node.querySelector('[data-testid="clarification-submitting-status"]');
+        const skip = node.querySelector('[data-testid="clarification-skip"]');
+        return Boolean(
+          submitting &&
+          skip &&
+          submitting.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      });
+      expect(statusPrecedesSkip).toBe(true);
 
-    await testPage.getByTestId("clarification-submit-shortcut").hover();
-    await expect(testPage.getByRole("tooltip", { name: /Submit answers/ })).not.toBeVisible();
+      await testPage.keyboard.press("ArrowLeft");
+      await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
 
-    releaseResponse();
+      await testPage.getByTestId("clarification-submit-shortcut").hover();
+      await expect(testPage.getByRole("tooltip", { name: /Submit answers/ })).not.toBeVisible();
+    } finally {
+      releaseResponse();
+    }
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
   });
 

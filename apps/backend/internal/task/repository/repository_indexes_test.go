@@ -32,6 +32,7 @@ func TestSQLiteRepository_CreatesPerformanceIndexes(t *testing.T) {
 		"idx_tasks_workspace_archived",
 		"idx_messages_metadata_tool_call_id",
 		"idx_messages_metadata_pending_id",
+		"idx_messages_prompt_user_order",
 	}
 	for _, idx := range required {
 		if _, ok := indexNames[idx]; !ok {

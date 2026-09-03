@@ -109,6 +109,17 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 }
 
+// PublishTaskSessionsCancelled publishes session.state_changed events for
+// sessions finalized by a cascade path that bypasses Service.ArchiveTask.
+func (s *Service) PublishTaskSessionsCancelled(
+	ctx context.Context,
+	taskID string,
+	cancelledSessions []*models.TaskSession,
+	reason string,
+) {
+	s.publishSessionsCancelled(context.WithoutCancel(ctx), taskID, nil, cancelledSessions, reason)
+}
+
 // taskPublicationTimeout bounds publication-owned repository reads and
 // synchronous EventBus delivery. It intentionally starts when a queued closure
 // drains, rather than inheriting a caller deadline that may already have expired.
@@ -283,11 +294,11 @@ func (s *Service) enqueueTaskPublication(ctx context.Context, taskID, eventType 
 
 // drainTaskPublications runs the FIFO drain loop for one task's publication
 // queue. queue.draining is ALWAYS released before this call ends — including
-// when a synchronous EventBus subscriber inside next.publish panics — via the
-// deferred recover below. Without this, a panic recovered higher up the stack
-// (MemoryEventBus.Publish itself has no recover) would leave queue.draining
-// stuck true forever, and enqueueTaskPublication would silently append every
-// later publication for that task without ever draining them again.
+// when next.publish itself panics (event-data construction, not the
+// EventBus subscribers it calls into, which recover their own panics) — via
+// the deferred recover below. Without this, queue.draining would stay true
+// forever, and enqueueTaskPublication would silently append every later
+// publication for that task without ever draining them again.
 func (s *Service) drainTaskPublications(taskID string, queue *taskPublicationQueue) {
 	defer func() {
 		if r := recover(); r != nil {

@@ -5,6 +5,9 @@
         "preventAutoStartAgentOnOpen": "開啟任務時不自動啟動代理程式",
         "preventAutoStartAgentOnOpenHelp": "重新啟動後，或從工作流程最後一步開啟任務時，不會自動啟動代理程式，改為顯示「啟動代理程式」按鈕。"
       },
+      "agents": {
+        "dynamicProfileSettings": "動態設定檔設定"
+      },
       "github": {
         "resolvedFromOneNamedHostAccount": "需要時從一個指定的主機帳戶解析。受管理任務會取得限定範圍的中介身分；除非在下方選取，否則不會繼承主機 Git。",
         "storedAppCredentialsMintShortLived": "儲存的應用程式認證會簽發短效安裝權杖。受管理任務會針對允許的儲存庫取得限定範圍的應用程式中介身分。",
@@ -17,6 +20,10 @@
       "workspaces": {
         "failedToSaveRepository": "無法儲存此儲存庫"
       },
+      "workflows": {
+        "profileSessionLifecycleIntro": "這些設定適用於工作流程更改代理程式設定檔的情況。",
+        "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。"
+      },
       "system": {
         "diskRefreshHelp": "遍歷 Kandev 資料目錄內的所有子目錄並累計檔案大小。結果會快取幾小時；點選可立即重新計算。大型工作區可能需要幾秒。"
       }
@@ -25,6 +32,9 @@
       "settings": {
         "preventAutoStartAgentOnOpen": "開啟任務時不自動啓動代理程式",
         "preventAutoStartAgentOnOpenHelp": "重新啓動後，或從工作流程最後一步開啟任務時，不會自動啓動代理程式，改為顯示「啓動代理程式」按鈕。"
+      },
+      "agents": {
+        "dynamicProfileSettings": "動態設定檔設定"
       },
       "github": {
         "resolvedFromOneNamedHostAccount": "需要時從一個指定的主機帳戶解析。受管理任務會取得限定範圍的中介身份；除非在下方選取，否則不會繼承主機 Git。",
@@ -37,6 +47,10 @@
       },
       "workspaces": {
         "failedToSaveRepository": "無法儲存此儲存庫"
+      },
+      "workflows": {
+        "profileSessionLifecycleIntro": "這些設定適用於工作流程更改代理程式設定檔的情況。",
+        "profileSessionStartReuseDescription": "繼續使用此代理程式設定檔最近可用的工作階段。如果沒有可用工作階段，則開始新工作階段。"
       },
       "system": {
         "diskRefreshHelp": "遍歷 Kandev 數據目錄內的所有子目錄並累計檔案大小。結果會快取幾小時；點擊可立即重新計算。大型工作區可能需要幾秒。"

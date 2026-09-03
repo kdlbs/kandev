@@ -75,6 +75,14 @@ type RunCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// activeTaskSessionCanceller finalizes active task sessions independently of
+// runtime teardown. The sqlite task repository implements this surface; it is
+// intentionally optional so handoff tests and legacy wiring do not need the
+// full session repository.
+type activeTaskSessionCanceller interface {
+	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
+}
+
 // SetRunCanceller wires the run-canceller used by ArchiveTaskTree /
 // DeleteTaskTree to terminate active descendants before archive.
 func (s *HandoffService) SetRunCanceller(c RunCanceller) {
@@ -221,6 +229,14 @@ type HandoffService struct {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskDeleted(ctx context.Context, task *models.Task)
+}
+
+// taskSessionCancellationPublisher is the optional event side effect paired
+// with activeTaskSessionCanceller. Cascade archive/delete paths do not call
+// Service.ArchiveTask, so they must publish the session transition themselves
+// when a DB-only cancellation is needed.
+type taskSessionCancellationPublisher interface {
+	PublishTaskSessionsCancelled(ctx context.Context, taskID string, cancelledSessions []*models.TaskSession, reason string)
 }
 
 // SetSessionReader wires the session/worktree lookup used by the
@@ -420,20 +436,32 @@ func (s *HandoffService) attachWorkspaceGroup(ctx context.Context, taskID, paren
 // workspace group or creates a fresh one with the parent as owner. The
 // MaterializedKind is provisional (single_repo by default) — the
 // materializer flips it via MarkWorkspaceMaterialized at launch time.
+//
+// The archived check runs first and unconditionally, before the
+// existing-group lookup: a parent that already has other children almost
+// always already has a group, so gating only the create-new-group branch
+// would let a new inherit_parent child attach to an archived parent's group
+// silently — a task that is dead workspace-wise the moment it is created
+// ("born stranded"), indistinguishable on the board from a normal
+// launchable CREATED card until someone tries to launch it.
 func (s *HandoffService) lookupOrCreateParentGroup(ctx context.Context, parentID string) (*orchmodels.WorkspaceGroup, error) {
-	g, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, parentID)
-	if err != nil {
-		return nil, err
-	}
-	if g != nil {
-		return g, nil
-	}
 	parent, err := s.tasks.GetTask(ctx, parentID)
 	if err != nil {
 		return nil, err
 	}
 	if parent == nil {
 		return nil, fmt.Errorf("parent task %s not found", parentID)
+	}
+	if parent.ArchivedAt != nil {
+		return nil, fmt.Errorf("workspace_mode=%s requires a non-archived parent task; parent task %s is archived", workspaceModeInheritParent, parentID)
+	}
+
+	g, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if g != nil {
+		return g, nil
 	}
 	g = &orchmodels.WorkspaceGroup{
 		WorkspaceID:      parent.WorkspaceID,

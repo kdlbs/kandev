@@ -92,3 +92,29 @@ func TestEmitTurnComplete_closes_firstIdle_only_once(t *testing.T) {
 		t.Fatalf("firstIdleCh was not closed after emitTurnComplete")
 	}
 }
+
+func TestEmitTurnComplete_callsCallbackBeforeReleasingFirstIdle(t *testing.T) {
+	runner, proc := newRunnerWithProcess(t, "proc-order")
+	callbackCalled := make(chan struct{})
+	runner.SetTurnCompleteCallback(func(_, _ string) {
+		select {
+		case <-proc.firstIdleCh:
+			t.Fatal("firstIdleCh released before turn-complete callback")
+		default:
+		}
+		close(callbackCalled)
+	})
+
+	runner.emitTurnComplete(proc)
+
+	select {
+	case <-callbackCalled:
+	default:
+		t.Fatal("turn-complete callback was not called")
+	}
+	select {
+	case <-proc.firstIdleCh:
+	default:
+		t.Fatal("firstIdleCh was not released after turn-complete callback")
+	}
+}
