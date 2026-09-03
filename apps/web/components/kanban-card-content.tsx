@@ -25,6 +25,7 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import { KanbanCardPriorityIndicator } from "@/components/kanban-card-priority-indicator";
 import { CardTitle } from "@/components/kanban-card-title";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
@@ -148,6 +149,7 @@ export function KanbanCardBody({
           <RepoChipRow chips={repositoryChips} />
           <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
             <CardTitle task={task} enableTitleHover={enableTitleHover} />
+            <KanbanCardPriorityIndicator priority={task.priority} />
             <PRTaskIcon taskId={task.id} />
             <MRTaskIcon taskId={task.id} />
             <RegisteredChangeRequestTaskIcon taskId={task.id} />
