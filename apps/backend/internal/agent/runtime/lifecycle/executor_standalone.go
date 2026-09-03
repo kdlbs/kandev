@@ -16,15 +16,35 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// defaultRecoveryReadTimeout and defaultRecoveryReadRetries are the
+// AC-EXECUTORS-SURVIVAL-002.13 defaults (two seconds, two retries), used
+// whenever SetRecoveryRetryConfig has not installed a configured value.
+const (
+	defaultRecoveryReadTimeout = 2 * time.Second
+	defaultRecoveryReadRetries = 2
+)
+
+// UnstoppableSessionRecorder retains a session's recovery guard for the rest
+// of this backend's lifetime when AC-EXECUTORS-SURVIVAL-002.16 applies: at
+// least one live instance for that session could not be stopped despite
+// AC-EXECUTORS-SURVIVAL-002.15's bounded retry. Satisfied structurally by
+// *lifecycle.RecoveryGuard (see Manager.RecoveryGuard).
+type UnstoppableSessionRecorder interface {
+	RetainAsUnstoppable(sessionID string)
+}
+
 // StandaloneExecutor implements Runtime for standalone agentctl execution.
 // In this mode, a single agentctl control server manages multiple agent instances.
 type StandaloneExecutor struct {
-	ctl               *agentctl.ControlClient
-	host              string
-	port              int
-	authToken         string // per-launch auth token from launcher
-	logger            *logger.Logger
-	interactiveRunner *process.InteractiveRunner
+	ctl                 *agentctl.ControlClient
+	host                string
+	port                int
+	authToken           string // per-launch auth token from launcher
+	logger              *logger.Logger
+	interactiveRunner   *process.InteractiveRunner
+	recoveryReadTimeout time.Duration
+	recoveryReadRetries int
+	unstoppableRecorder UnstoppableSessionRecorder
 }
 
 // NewStandaloneExecutor creates a new standalone runtime.
@@ -34,12 +54,58 @@ func NewStandaloneExecutor(ctl *agentctl.ControlClient, host string, port int, l
 		host:   host,
 		port:   port,
 		logger: log.WithFields(zap.String("runtime", "standalone")),
+		// -1 is the "unset" sentinel: zero is itself a valid configured
+		// retry count (AC-EXECUTORS-SURVIVAL-002.13 allows zero retries), so
+		// the zero value of an unset int field can't be used to mean unset.
+		recoveryReadRetries: -1,
 	}
 }
 
 // SetAuthToken sets the per-launch auth token for authenticating instance clients.
 func (r *StandaloneExecutor) SetAuthToken(token string) {
 	r.authToken = token
+}
+
+// SetRecoveryRetryConfig installs the bounded per-attempt timeout and retry
+// count AC-EXECUTORS-SURVIVAL-002.13/002.15 require for recovery reads and
+// stops. A zero timeout or negative retry count falls back to the two-second/
+// two-retry default the AC itself specifies.
+func (r *StandaloneExecutor) SetRecoveryRetryConfig(timeout time.Duration, retries int) {
+	r.recoveryReadTimeout = timeout
+	r.recoveryReadRetries = retries
+}
+
+// SetUnstoppableSessionRecorder installs the AC-EXECUTORS-SURVIVAL-002.16 sink.
+// Unset means an unstoppable instance is only logged, never retained --
+// acceptable for callers that haven't wired a recovery guard.
+func (r *StandaloneExecutor) SetUnstoppableSessionRecorder(recorder UnstoppableSessionRecorder) {
+	r.unstoppableRecorder = recorder
+}
+
+// stopWithRetry stops instanceID within the bounded per-attempt timeout and
+// retry count of AC-EXECUTORS-SURVIVAL-002.13/002.15, with no delay between
+// attempts. DeleteInstance itself already treats an already-absent instance
+// (404) as success.
+func (r *StandaloneExecutor) stopWithRetry(ctx context.Context, instanceID string) error {
+	timeout := r.recoveryReadTimeout
+	if timeout <= 0 {
+		timeout = defaultRecoveryReadTimeout
+	}
+	retries := r.recoveryReadRetries
+	if retries < 0 {
+		retries = defaultRecoveryReadRetries
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+		lastErr = r.ctl.DeleteInstance(attemptCtx, instanceID)
+		cancel()
+		if lastErr == nil {
+			return nil
+		}
+	}
+	return lastErr
 }
 
 func (r *StandaloneExecutor) Name() executor.Name {
@@ -223,22 +289,26 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 // startup step 3 (AC-EXECUTORS-SURVIVAL-002.1/002.8), applying the
 // AC-EXECUTORS-SURVIVAL-002.10 duplicate tiebreak via CorrelateRecoveryInstances.
 // Every losing duplicate, ambiguous-session instance, and record-less orphan
-// (AC-EXECUTORS-SURVIVAL-002.6) is stopped; every winner is returned for the
-// caller to re-track.
+// (AC-EXECUTORS-SURVIVAL-002.6) is stopped within the bounded retry budget of
+// AC-EXECUTORS-SURVIVAL-002.13/002.15 (SetRecoveryRetryConfig); every winner
+// is returned for the caller to re-track. When a losing duplicate's stop
+// exhausts its retries, that session's winner is also stopped and dropped
+// from the result rather than re-tracked (AC-EXECUTORS-SURVIVAL-002.15); if
+// the winner's own stop then also fails, the session is reported to the
+// installed UnstoppableSessionRecorder (AC-EXECUTORS-SURVIVAL-002.16).
 //
 // When the adopted server cannot be enumerated at all, this reports nothing
 // recovered, stops nothing, and leaves every record to the existing
 // stale-execution repair path (AC-EXECUTORS-SURVIVAL-002.12) rather than
 // treating an enumeration failure as though every instance were an orphan.
 //
-// Scope note: this does not yet implement AC-EXECUTORS-SURVIVAL-002.13's
-// bounded read retry, AC-EXECUTORS-SURVIVAL-002.15's bounded stop retry and
-// joint winner/loser stop-failure handling, or the full four-source
-// reconstruction table of design part 3 (task-environment identity, agent
-// identity/command re-derivation, workspace source roots and provider
-// session identity read back from the instance). A recovered execution here
-// carries the same field set the pre-existing (never-before-reachable)
-// recovery consumer in Manager.Start already builds.
+// Scope note: this does not yet implement the full four-source reconstruction
+// table of design part 3 (task-environment identity, agent identity/command
+// re-derivation, workspace source roots and provider session identity read
+// back from the instance) -- those require new agentctl wire-contract fields
+// not yet added. A recovered execution here carries the same field set the
+// pre-existing (never-before-reachable) recovery consumer in Manager.Start
+// already builds.
 func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	instances, err := r.ctl.ListInstances(ctx)
 	if err != nil {
@@ -256,13 +326,41 @@ func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*mo
 
 	correlation := CorrelateRecoveryInstances(records, instances)
 
+	// AC-EXECUTORS-SURVIVAL-002.15: a stop that exhausts its bounded retries
+	// is recorded; when the failed instance was a losing duplicate for a
+	// session that DOES have a winner, that winner must not be re-tracked
+	// either -- collected here and resolved below, after every ToStop
+	// instance has had its own retry budget, so one session's outcome never
+	// depends on iteration order (AC-EXECUTORS-SURVIVAL-002.11).
+	sessionsWithFailedLoserStop := make(map[string]bool)
 	for _, inst := range correlation.ToStop {
-		if err := r.ctl.DeleteInstance(ctx, inst.ID); err != nil {
-			r.logger.Warn("failed to stop a not-re-tracked standalone instance during recovery",
+		if err := r.stopWithRetry(ctx, inst.ID); err != nil {
+			r.logger.Warn("failed to stop a not-re-tracked standalone instance during recovery after exhausting retries",
 				zap.String("instance_id", inst.ID),
 				zap.String("session_id", inst.SessionID),
 				zap.Error(err))
+			if _, hasWinner := correlation.Winners[inst.SessionID]; hasWinner {
+				sessionsWithFailedLoserStop[inst.SessionID] = true
+			}
 		}
+	}
+
+	for sessionID := range sessionsWithFailedLoserStop {
+		winner := correlation.Winners[sessionID]
+		delete(correlation.Winners, sessionID)
+		if err := r.stopWithRetry(ctx, winner.ID); err != nil {
+			r.logger.Warn("failed to stop the winning instance after its losing duplicate could not be stopped; retaining session as unstoppable",
+				zap.String("instance_id", winner.ID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			if r.unstoppableRecorder != nil {
+				r.unstoppableRecorder.RetainAsUnstoppable(sessionID)
+			}
+			continue
+		}
+		r.logger.Warn("stopped the winning instance because its losing duplicate could not be stopped; session left not re-tracked",
+			zap.String("instance_id", winner.ID),
+			zap.String("session_id", sessionID))
 	}
 
 	recovered := make([]*ExecutorInstance, 0, len(correlation.Winners))

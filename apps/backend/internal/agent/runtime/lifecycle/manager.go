@@ -509,6 +509,13 @@ func (m *Manager) SetPassthroughLookup(lookup PassthroughLookup) {
 	m.passthroughLookup = lookup
 }
 
+// RecoveryGuard exposes the in-memory recovery guard so it can be wired into
+// an ExecutorBackend that supports AC-EXECUTORS-SURVIVAL-002.16 (currently
+// StandaloneExecutor, via SetUnstoppableSessionRecorder). Always non-nil.
+func (m *Manager) RecoveryGuard() *RecoveryGuard {
+	return m.recoveryGuard
+}
+
 // SetAttachmentReader wires the backend attachment reader used by prompt
 // dispatch. Claimed descriptors are streamed into the active agentctl
 // session immediately before an ACP prompt is sent.

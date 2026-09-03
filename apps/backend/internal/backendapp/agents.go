@@ -116,6 +116,12 @@ func provideLifecycleManager(
 		log,
 	)
 
+	// Wire recovery's bounded stop-retry budget (AC-EXECUTORS-SURVIVAL-002.13/
+	// 002.15) and the AC-EXECUTORS-SURVIVAL-002.16 unstoppable-session sink
+	// into the standalone backend before Start runs its recovery pass.
+	standaloneExec.SetRecoveryRetryConfig(cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries)
+	standaloneExec.SetUnstoppableSessionRecorder(lifecycleMgr.RecoveryGuard())
+
 	// Register environment preparers (keyed by ExecutorType — the
 	// "local"/"worktree"/"local_docker"/"sprites" taxonomy, not Runtime).
 	// The Worktree preparer is registered separately in

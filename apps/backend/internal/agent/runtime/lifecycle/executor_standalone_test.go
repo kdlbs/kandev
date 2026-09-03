@@ -34,11 +34,23 @@ type standaloneControlServer struct {
 	// for exercising AC-EXECUTORS-SURVIVAL-002.12.
 	listInstances    []*agentctlclient.InstanceInfo
 	listInstancesErr bool
+	// deleteFailures, keyed by instance ID, is the number of remaining DELETE
+	// attempts to fail (500) for that instance before it starts succeeding --
+	// lets a test pin the exact bounded-retry attempt count
+	// (AC-EXECUTORS-SURVIVAL-002.15). A count so high it never reaches zero
+	// simulates a stop that never succeeds.
+	deleteFailures map[string]int
+	deleteAttempts map[string]int
 }
 
 func newStandaloneControlServer(t *testing.T, healthy bool) *standaloneControlServer {
 	t.Helper()
-	s := &standaloneControlServer{healthy: healthy, createStatus: http.StatusOK}
+	s := &standaloneControlServer{
+		healthy:        healthy,
+		createStatus:   http.StatusOK,
+		deleteFailures: make(map[string]int),
+		deleteAttempts: make(map[string]int),
+	}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -61,7 +73,14 @@ func newStandaloneControlServer(t *testing.T, healthy bool) *standaloneControlSe
 			}
 			_ = json.NewEncoder(w).Encode(agentctlclient.CreateInstanceResponse{ID: "std-1", Port: 45678})
 		case strings.HasPrefix(r.URL.Path, "/api/v1/instances/") && r.Method == http.MethodDelete:
-			s.deleted = append(s.deleted, strings.TrimPrefix(r.URL.Path, "/api/v1/instances/"))
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/instances/")
+			s.deleteAttempts[id]++
+			if s.deleteFailures[id] > 0 {
+				s.deleteFailures[id]--
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			s.deleted = append(s.deleted, id)
 		case r.URL.Path == "/api/v1/instances" && r.Method == http.MethodGet:
 			if s.listInstancesErr {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -419,6 +438,147 @@ func TestStandaloneExecutorRecoverInstancesEnumerationFailureRecoversNothing(t *
 	defer control.mu.Unlock()
 	if len(control.deleted) != 0 {
 		t.Fatalf("deleted = %v, want none: an unenumerable server must not have instances stopped blind", control.deleted)
+	}
+}
+
+// fakeUnstoppableRecorder captures RetainAsUnstoppable calls without needing
+// a real RecoveryGuard.
+type fakeUnstoppableRecorder struct {
+	mu       sync.Mutex
+	retained []string
+}
+
+func (f *fakeUnstoppableRecorder) RetainAsUnstoppable(sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retained = append(f.retained, sessionID)
+}
+
+// TestStandaloneExecutorRecoverInstancesRetriesTransientStopFailure pins
+// AC-EXECUTORS-SURVIVAL-002.15: a stop that fails once and then succeeds is
+// retried within the bounded count rather than being treated as a permanent
+// failure.
+func TestStandaloneExecutorRecoverInstancesRetriesTransientStopFailure(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "orphan-instance", Port: 5002, SessionID: "session-orphan"},
+	}
+	control.deleteFailures["orphan-instance"] = 1
+	exec := control.executor(t)
+
+	recovered, err := exec.RecoverInstances(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none", recovered)
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.deleted) != 1 || control.deleted[0] != "orphan-instance" {
+		t.Fatalf("deleted = %v, want the orphan eventually stopped after a retry", control.deleted)
+	}
+	if control.deleteAttempts["orphan-instance"] != 2 {
+		t.Fatalf("delete attempts = %d, want exactly 2 (one failure plus one retry)", control.deleteAttempts["orphan-instance"])
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesExhaustingLoserStopDropsAndStopsWinner
+// pins AC-EXECUTORS-SURVIVAL-002.15: when a losing duplicate's stop exhausts
+// its retries, the winning instance for that session is also not re-tracked
+// and is itself stopped on the same terms.
+func TestStandaloneExecutorRecoverInstancesExhaustingLoserStopDropsAndStopsWinner(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "winner", Port: 5001, SessionID: "session-1"},
+		{ID: "loser", Port: 5002, SessionID: "session-1"},
+	}
+	control.deleteFailures["loser"] = 999 // never succeeds within the retry budget
+	exec := control.executor(t)
+	exec.SetRecoveryRetryConfig(50*time.Millisecond, 1)
+
+	records := []*models.ExecutorRunning{{SessionID: "session-1", AgentExecutionID: "winner"}}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none: the session must not be re-tracked once its loser can't be stopped", recovered)
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if control.deleteAttempts["loser"] != 2 {
+		t.Fatalf("loser delete attempts = %d, want exactly 2 (1 retry configured)", control.deleteAttempts["loser"])
+	}
+	if len(control.deleted) != 1 || control.deleted[0] != "winner" {
+		t.Fatalf("deleted = %v, want the winner also stopped since the session won't be re-tracked", control.deleted)
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesJointStopFailureRetainsSessionUnstoppable
+// pins AC-EXECUTORS-SURVIVAL-002.16: when both the losing duplicate's stop
+// and the winner's own stop exhaust their retries, the session is recorded
+// as unstoppable rather than silently left not-re-tracked.
+func TestStandaloneExecutorRecoverInstancesJointStopFailureRetainsSessionUnstoppable(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "winner", Port: 5001, SessionID: "session-1"},
+		{ID: "loser", Port: 5002, SessionID: "session-1"},
+	}
+	control.deleteFailures["loser"] = 999
+	control.deleteFailures["winner"] = 999
+	exec := control.executor(t)
+	exec.SetRecoveryRetryConfig(50*time.Millisecond, 0)
+	recorder := &fakeUnstoppableRecorder{}
+	exec.SetUnstoppableSessionRecorder(recorder)
+
+	records := []*models.ExecutorRunning{{SessionID: "session-1", AgentExecutionID: "winner"}}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none", recovered)
+	}
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if len(recorder.retained) != 1 || recorder.retained[0] != "session-1" {
+		t.Fatalf("retained = %v, want session-1 retained as unstoppable", recorder.retained)
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesOrphanStopFailureIsRecordedNotJoint
+// pins that an orphan's (AC-EXECUTORS-SURVIVAL-002.6) exhausted stop retry
+// has no session to affect: it is only logged, never routed through the
+// unstoppable-session recorder.
+func TestStandaloneExecutorRecoverInstancesOrphanStopFailureIsRecordedNotJoint(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "orphan-instance", Port: 5002, SessionID: "session-orphan"},
+	}
+	control.deleteFailures["orphan-instance"] = 999
+	exec := control.executor(t)
+	exec.SetRecoveryRetryConfig(50*time.Millisecond, 0)
+	recorder := &fakeUnstoppableRecorder{}
+	exec.SetUnstoppableSessionRecorder(recorder)
+
+	recovered, err := exec.RecoverInstances(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none", recovered)
+	}
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if len(recorder.retained) != 0 {
+		t.Fatalf("retained = %v, want none: an orphan has no session to retain", recorder.retained)
 	}
 }
 
