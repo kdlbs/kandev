@@ -162,7 +162,7 @@ func (m *Manager) branchMetadataStoreForCleanup(
 	if !ok {
 		return nil, RetainedMissingMetadata
 	}
-	owners, err := metadataStore.CountWorktreeBranchOwners(ctx, wt.RepositoryID, wt.Branch)
+	owners, err := metadataStore.CountWorktreeBranchOwners(ctx, wt.RepositoryPath, wt.Branch)
 	if err != nil || owners != 1 {
 		return nil, RetainedAmbiguousOwner
 	}
@@ -173,7 +173,7 @@ func (m *Manager) verifiedIntegratedBranchHead(
 	ctx context.Context, wt *Worktree, requireArchived bool,
 ) (string, BranchRetentionReason) {
 	branchRef := "refs/heads/" + wt.Branch
-	live, err := branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
+	live, err := m.branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
 	if err != nil {
 		return "", RetainedAncestryProbeFailed
 	}
@@ -318,7 +318,7 @@ func (m *Manager) deleteExpectedBranchRef(
 	ctx context.Context, metadataStore BranchMetadataStore, wt *Worktree, branchHead string,
 ) BranchRetentionReason {
 	branchRef := "refs/heads/" + wt.Branch
-	live, err := branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
+	live, err := m.branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
 	if err != nil {
 		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
 		return RetainedAncestryProbeFailed
@@ -331,7 +331,7 @@ func (m *Manager) deleteExpectedBranchRef(
 	// be attached after the initial eligibility probe without changing the
 	// branch head, and update-ref does not enforce Git's checked-out-branch
 	// protection.
-	live, err = branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
+	live, err = m.branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
 	if err != nil {
 		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
 		return RetainedAncestryProbeFailed
@@ -365,7 +365,7 @@ func (m *Manager) verifyDeletionDidNotRaceLiveness(
 ) BranchRetentionReason {
 	safetyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.inspectTimeout)
 	defer cancel()
-	live, err := branchCheckedOutInWorktree(safetyCtx, wt.RepositoryPath, branchRef)
+	live, err := m.branchCheckedOutInWorktree(safetyCtx, wt.RepositoryPath, branchRef)
 	if err == nil && !live {
 		return ""
 	}
@@ -458,7 +458,7 @@ func (m *Manager) completeInterruptedArchivedCompaction(
 	wt *Worktree,
 	branchRef string,
 ) (bool, BranchRetentionReason) {
-	live, err := branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
+	live, err := m.branchCheckedOutInWorktree(ctx, wt.RepositoryPath, branchRef)
 	if err != nil {
 		return true, RetainedAncestryProbeFailed
 	}
@@ -542,14 +542,12 @@ func normalizeIntegrationRef(ref string) string {
 	return "refs/heads/" + ref
 }
 
-func branchCheckedOutInWorktree(ctx context.Context, repoPath, branchRef string) (bool, error) {
-	cmd := newGitCommand(ctx, "worktree", "list", "--porcelain", "-z")
-	cmd.Dir = repoPath
-	output, err := runGitCmdCombinedOutput(ctx, cmd)
+func (m *Manager) branchCheckedOutInWorktree(ctx context.Context, repoPath, branchRef string) (bool, error) {
+	output, err := m.runBoundedGitInspect(ctx, repoPath, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return false, err
 	}
-	for _, registration := range parseWorktreeRegistrations(string(output)) {
+	for _, registration := range parseWorktreeRegistrations(output) {
 		if registration.branch == branchRef {
 			return true, nil
 		}

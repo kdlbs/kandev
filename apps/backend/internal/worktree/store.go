@@ -492,17 +492,20 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 }
 
 func (s *SQLiteStore) CountWorktreeBranchOwners(
-	ctx context.Context, repositoryID, branch string,
+	ctx context.Context, repositoryPath, branch string,
 ) (int, error) {
 	// Count every durable claimant, including soft-deleted rows. A deleted row
 	// may still retain the local ref, so ambiguity must fail closed.
 	var count int
 	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
 		SELECT COUNT(*)
-		FROM task_environment_repos
-		WHERE repository_id = ? AND worktree_branch = ?
+		FROM task_environment_repos ter
+		LEFT JOIN repositories r ON r.id = ter.repository_id
+		WHERE (r.local_path = ? OR (r.local_path IS NULL AND NOT EXISTS (
+			SELECT 1 FROM repositories r2 WHERE r2.local_path = ? AND r2.local_path <> ''
+		))) AND ter.worktree_branch = ?
 		  AND COALESCE(worktree_id, '') <> ''
-	`), repositoryID, branch).Scan(&count)
+	`), repositoryPath, repositoryPath, branch).Scan(&count)
 	return count, err
 }
 

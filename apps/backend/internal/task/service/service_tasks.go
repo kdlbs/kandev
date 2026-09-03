@@ -3615,6 +3615,21 @@ func (s *Service) cleanupTaskEnvironment(
 	// fallback so resources are not orphaned.
 	_, archiveBatch := s.worktreeCleanup.(WorktreeArchiveBatchCleaner)
 	_, deleteBatch := s.worktreeCleanup.(WorktreeBatchCleaner)
+	needsArchiveBatch := false
+	if cleanup.env.ExecutorType == string(models.ExecutorTypeWorktree) {
+		for _, repo := range cleanup.env.Repos {
+			if repo != nil && repo.WorktreeID != "" && repo.Status != "deleted" {
+				needsArchiveBatch = true
+				break
+			}
+		}
+	}
+	if cleanup.preserveBranches && !archiveBatch && needsArchiveBatch {
+		if err := s.teardownEnvironmentRuntimeResources(ctx, cleanup.env); err != nil {
+			return []error{fmt.Errorf("teardown task environment %s runtime resources: %w", cleanup.env.ID, err)}
+		}
+		return []error{fmt.Errorf("archive cleanup requires a worktree archive batch cleaner")}
+	}
 	batchHandlesWorktrees := (cleanup.preserveBranches && archiveBatch) || (!cleanup.preserveBranches && deleteBatch)
 	var teardownErr error
 	if batchHandlesWorktrees {

@@ -605,6 +605,8 @@ type LaunchAgentResponse struct {
 	WorktreeID                string
 	WorktreePath              string
 	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
 	RequestedBaseBranch       string
 	BaseBranch                string
 	BaseBranchFallbackWarning string

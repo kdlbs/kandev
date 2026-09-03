@@ -308,13 +308,15 @@ func (m *Manager) restoreManagedBranchFromRecoveryHeadLocked(ctx context.Context
 	if wt == nil || wt.BranchOwner != BranchOwnerManaged || wt.RecoveryHeadSHA == "" {
 		return fmt.Errorf("managed branch recovery metadata is unavailable")
 	}
-	resolved, err := m.resolveCommit(ctx, wt.RepositoryPath, wt.RecoveryHeadSHA)
+	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	resolved, err := m.resolveCommit(inspectCtx, wt.RepositoryPath, wt.RecoveryHeadSHA)
 	if err != nil || resolved != strings.ToLower(wt.RecoveryHeadSHA) {
 		return fmt.Errorf("recovery commit is unavailable")
 	}
 	branchRef := "refs/heads/" + wt.Branch
 	zeroOID := strings.Repeat("0", len(resolved))
-	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "update-ref", branchRef, resolved, zeroOID)
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, wt.RepositoryPath, "update-ref", branchRef, resolved, zeroOID)
 	if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 		return fmt.Errorf("restore managed branch: %s: %w", strings.TrimSpace(string(output)), err)
 	}

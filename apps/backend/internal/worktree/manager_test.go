@@ -117,10 +117,10 @@ func (s *mockStore) CountActiveWorktreeReferences(_ context.Context, _ string, _
 	return 0, nil
 }
 
-func (s *mockStore) CountWorktreeBranchOwners(_ context.Context, repositoryID, branch string) (int, error) {
+func (s *mockStore) CountWorktreeBranchOwners(_ context.Context, repositoryPath, branch string) (int, error) {
 	count := 0
 	for _, wt := range s.worktrees {
-		if wt.RepositoryID == repositoryID && wt.Branch == branch {
+		if wt.RepositoryPath == repositoryPath && wt.Branch == branch {
 			count++
 		}
 	}

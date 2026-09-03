@@ -2579,14 +2579,13 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		branchSlug = topLevelBranchIdentitySlug(req)
 	}
 	worktreeID, worktreePath, worktreeBranch := "", "", ""
+	worktreeBranchOwner, worktreeIntegrationRef := "", ""
 	if resp.WorktreeID != "" {
 		worktreeID = resp.WorktreeID
 		worktreePath = resp.WorktreePath
 		worktreeBranch = resp.WorktreeBranch
-	}
-	integrationRef := req.IntegrationRef
-	if integrationRef == "" {
-		integrationRef = req.BaseBranch
+		worktreeBranchOwner = resp.WorktreeBranchOwner
+		worktreeIntegrationRef = resp.WorktreeIntegrationRef
 	}
 	return []*models.TaskEnvironmentRepo{{
 		RepositoryID: req.RepositoryID,
@@ -2598,20 +2597,10 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		WorktreeID:             worktreeID,
 		WorktreePath:           worktreePath,
 		WorktreeBranch:         worktreeBranch,
-		WorktreeBranchOwner:    launchBranchOwner(worktreeID, worktreeBranch, req.CheckoutBranch),
-		WorktreeIntegrationRef: integrationRef,
+		WorktreeBranchOwner:    worktreeBranchOwner,
+		WorktreeIntegrationRef: worktreeIntegrationRef,
 		Position:               0,
 	}}
-}
-
-func launchBranchOwner(worktreeID, actualBranch, checkoutBranch string) string {
-	if worktreeID == "" {
-		return ""
-	}
-	if checkoutBranch == "" || actualBranch != checkoutBranch {
-		return worktree.BranchOwnerManaged
-	}
-	return worktree.BranchOwnerExternal
 }
 
 // buildTaskEnvironmentRepos converts per-repo worktree results into env-repo rows.
@@ -2713,12 +2702,12 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 		row.WorktreeID = w.WorktreeID
 		row.WorktreePath = w.WorktreePath
 		row.WorktreeBranch = w.WorktreeBranch
-		if w.WorktreeBranchOwner != "" {
-			row.WorktreeBranchOwner = w.WorktreeBranchOwner
-		}
-		if w.WorktreeIntegrationRef != "" {
-			row.WorktreeIntegrationRef = w.WorktreeIntegrationRef
-		}
+	}
+	if w.WorktreeBranchOwner != "" || w.WorktreeID == "" {
+		row.WorktreeBranchOwner = w.WorktreeBranchOwner
+	}
+	if w.WorktreeIntegrationRef != "" || w.WorktreeID == "" {
+		row.WorktreeIntegrationRef = w.WorktreeIntegrationRef
 	}
 	row.Position = position
 	row.ErrorMessage = w.ErrorMessage

@@ -1955,6 +1955,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		if restoreErr := m.restoreManagedBranchFromRecoveryHeadLocked(ctx, &recovery); restoreErr == nil {
 			exists = true
 			recoveredFromHead = true
+		} else if existing.BranchCompactedAt != nil {
+			return nil, fmt.Errorf("restore compacted worktree branch %q: %w", existing.Branch, restoreErr)
 		}
 	}
 	contributionRemote := ""

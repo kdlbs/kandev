@@ -255,6 +255,8 @@ type EnvPrepareResult struct {
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string `json:"-"`
+	WorktreeIntegrationRef    string `json:"-"`
 	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
 	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
 	BaseBranch                string `json:"base_branch,omitempty"`

@@ -138,6 +138,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_environment_repos.worktree_integration_ref", `ALTER TABLE task_environment_repos ADD COLUMN worktree_integration_ref TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_environment_repos.worktree_recovery_head_sha", `ALTER TABLE task_environment_repos ADD COLUMN worktree_recovery_head_sha TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_environment_repos.worktree_branch_compacted_at", `ALTER TABLE task_environment_repos ADD COLUMN worktree_branch_compacted_at TIMESTAMP`)
+	r.migrate.Apply("task_environment_repos.archived_branch_candidates_index", `CREATE INDEX IF NOT EXISTS idx_task_environment_repos_archived_branch_candidates ON task_environment_repos(worktree_branch_owner, worktree_branch_compacted_at, status, deleted_at, updated_at, worktree_id, task_environment_id)`)
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)

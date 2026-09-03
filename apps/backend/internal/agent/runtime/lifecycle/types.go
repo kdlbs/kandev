@@ -873,6 +873,7 @@ type WorkspaceRepositorySpec struct {
 	RepositoryID           string
 	RepositoryPath         string
 	RepoName               string
+	IntegrationRef         string
 	BaseBranch             string
 	DefaultBranch          string
 	CheckoutBranch         string
@@ -1033,6 +1034,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,

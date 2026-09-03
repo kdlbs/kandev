@@ -125,7 +125,7 @@ type MultiRepoStore interface {
 // BranchMetadataStore is the fail-closed persistence capability required for
 // managed-branch compaction. Stores without it retain every branch.
 type BranchMetadataStore interface {
-	CountWorktreeBranchOwners(ctx context.Context, repositoryID, branch string) (int, error)
+	CountWorktreeBranchOwners(ctx context.Context, repositoryPath, branch string) (int, error)
 	PersistBranchRecoveryHead(ctx context.Context, worktreeID, expected, recoveryHead string) (bool, error)
 	PersistBranchCompactionComplete(ctx context.Context, worktreeID, expectedRecoveryHead string) (bool, error)
 }

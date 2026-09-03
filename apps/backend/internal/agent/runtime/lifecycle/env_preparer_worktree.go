@@ -475,6 +475,8 @@ func (p *WorktreePreparer) prepareMultiRepo(
 	if len(worktrees) > 0 {
 		res.WorktreeID = worktrees[0].WorktreeID
 		res.WorktreeBranch = worktrees[0].WorktreeBranch
+		res.WorktreeBranchOwner = worktrees[0].WorktreeBranchOwner
+		res.WorktreeIntegrationRef = worktrees[0].WorktreeIntegrationRef
 		res.MainRepoGitDir = worktrees[0].MainRepoGitDir
 		res.RequestedBaseBranch = worktrees[0].RequestedBaseBranch
 		res.BaseBranch = worktrees[0].BaseBranch
@@ -529,6 +531,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.RepositoryPath = spec.RepositoryPath
 	subReq.RepoName = spec.RepoName
 	subReq.BaseBranch = spec.BaseBranch
+	subReq.IntegrationRef = spec.IntegrationRef
 	subReq.DefaultBranch = spec.DefaultBranch
 	subReq.CheckoutBranch = spec.CheckoutBranch
 	subReq.PRNumber = spec.PRNumber

@@ -604,7 +604,11 @@ func (m *Manager) MaintainArchivedBranches(
 		if wt == nil {
 			continue
 		}
-		receipt.merge(m.maintainArchivedBranchCandidate(ctx, maintenanceStore, wt))
+		candidateReceipt, candidateErr := m.maintainArchivedBranchCandidate(ctx, maintenanceStore, wt)
+		receipt.merge(candidateReceipt)
+		if candidateErr != nil && err == nil {
+			err = candidateErr
+		}
 		if touchErr := maintenanceStore.TouchArchivedBranchCandidate(ctx, wt.ID); touchErr != nil && err == nil {
 			err = touchErr
 		}
@@ -615,7 +619,7 @@ func (m *Manager) MaintainArchivedBranches(
 
 func (m *Manager) maintainArchivedBranchCandidate(
 	ctx context.Context, maintenanceStore ArchivedBranchMaintenanceStore, wt *Worktree,
-) BranchCleanupReceipt {
+) (BranchCleanupReceipt, error) {
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
 	defer func() {
@@ -625,13 +629,13 @@ func (m *Manager) maintainArchivedBranchCandidate(
 
 	eligible, err := maintenanceStore.IsArchivedBranchCandidate(ctx, wt.ID)
 	if err == nil && eligible {
-		return m.compactArchivedManagedBranch(ctx, wt)
+		return m.compactArchivedManagedBranch(ctx, wt), nil
 	}
 	candidateReceipt := newBranchCleanupReceipt()
 	candidateReceipt.Attempted = 1
 	branchCleanupMetrics.Add("attempted", 1)
 	candidateReceipt.retain(RetainedArchiveStateChanged)
-	return candidateReceipt
+	return candidateReceipt, err
 }
 
 func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, removeBranch bool) error {

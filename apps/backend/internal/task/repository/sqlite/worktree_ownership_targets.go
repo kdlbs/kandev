@@ -75,6 +75,10 @@ func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	}
 	target.mergedAt = row.mergedAt
 	target.deletedAt = row.deletedAt
+	target.worktreeBranchOwner = row.worktreeBranchOwner
+	target.worktreeIntegrationRef = row.worktreeIntegrationRef
+	target.worktreeRecoveryHeadSHA = row.worktreeRecoveryHeadSHA
+	target.worktreeBranchCompactedAt = row.worktreeBranchCompactedAt
 	return target.mergeCreation(row.createdAt, row.updatedAt)
 }
 
@@ -277,11 +281,13 @@ func (c *worktreeCutover) insertRepoRow(tx *sqlx.Tx, taskID, envID string, targe
 	if _, err := tx.Exec(tx.Rebind(`
 		INSERT INTO task_environment_repos_shadow (
 			id, task_environment_id, repository_id, branch_slug,
-			worktree_id, worktree_path, worktree_branch, position,
+			worktree_id, worktree_path, worktree_branch, worktree_branch_owner,
+			worktree_integration_ref, worktree_recovery_head_sha, worktree_branch_compacted_at, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		uuid.New().String(), envID, target.repositoryID, target.branchSlug,
-		target.worktreeID, target.worktreePath, target.worktreeBranch, target.position,
+		target.worktreeID, target.worktreePath, target.worktreeBranch, target.worktreeBranchOwner,
+		target.worktreeIntegrationRef, target.worktreeRecoveryHeadSHA, target.worktreeBranchCompactedAt, target.position,
 		target.errorMessage, target.status, target.createdAt, target.updatedAt,
 		mergedAt, deletedAt); err != nil {
 		return fmt.Errorf("cutover: insert shadow repo row for task %s: %w", taskID, err)
@@ -512,6 +518,7 @@ func (r *Repository) cutoverSwap(c *worktreeCutover, tx *sqlx.Tx) error {
 		`CREATE INDEX IF NOT EXISTS idx_task_environments_status ON task_environments(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_archived_branch_candidates ON task_environment_repos(worktree_branch_owner, worktree_branch_compacted_at, status, deleted_at, updated_at, worktree_id, task_environment_id)`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("cutover: recreate index: %w", err)
