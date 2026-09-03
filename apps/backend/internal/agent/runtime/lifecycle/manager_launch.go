@@ -1000,7 +1000,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
-		WorkspaceSourceRoots:           taskWorkspaceSourceRoots(reqWithWorktree.WorkspacePath, reqWithWorktree.WorkspaceFolders, gitMetadata),
+		WorkspaceSourceRoots:           taskWorkspaceSourceRoots(reqWithWorktree.WorkspacePath, reqWithWorktree.WorkspaceFolders, gitMetadata, reqWithWorktree.ExecutorType, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		GitMetadataRequirement:         cloneGitMetadataRequirement(rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 0),
 		GitMetadataProjections:         gitMetadata,
 		Protocol:                       string(agentConfig.Runtime().Protocol),
@@ -1651,7 +1651,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
-	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
+	if isLocalExecutorType(req.ExecutorType) {
 		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger, owner); err != nil {
 			return nil, err
 		}

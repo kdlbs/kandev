@@ -9,8 +9,17 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+// isLocalExecutorType reports whether executorType runs repositories directly
+// below the workspace root via reconcileWorkspaceRepositories, rather than
+// through a worktree checkout. Only then is a repository's RepositoryPath the
+// actual directory an agent session works in.
+func isLocalExecutorType(executorType string) bool {
+	return executorType == string(models.ExecutorTypeLocal) || executorType == legacyExecutorTypeLocalPC
+}
 
 func ownedDirectoryLinkOwner(taskID, taskDirName string) worktree.OwnedDirectoryLinkOwner {
 	return worktree.OwnedDirectoryLinkOwner{TaskID: taskID, TaskDirName: taskDirName}
@@ -170,12 +179,19 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 }
 
 // taskWorkspaceSourceRoots returns only task-owned workspace entries suitable
-// for agentctl and ACP. RepositoryPath is deliberately absent: it identifies
-// the source repository used to materialize a worktree, not a checkout an ACP
-// session may receive as an additional directory. Validated projections are
-// the authority for repository roots.
-func taskWorkspaceSourceRoots(workspacePath string, folders []WorkspaceFolderSpec, projections []*worktree.GitMetadataProjection) []string {
-	roots := make([]string, 0, 1+len(folders)+len(projections))
+// for agentctl and ACP. RepositoryPath is deliberately absent for worktree
+// executors: it identifies the source repository used to materialize a
+// worktree, not a checkout an ACP session may receive as an additional
+// directory. Validated projections are the authority for those repository
+// roots.
+//
+// The local executor has no worktree indirection: reconcileWorkspaceRepositories
+// links each repository's RepositoryPath directly below the workspace root, so
+// for isLocalExecutorType(executorType) that path IS the checkout an agent
+// session works in and must be included, or agentctl rejects it as outside its
+// allowed roots.
+func taskWorkspaceSourceRoots(workspacePath string, folders []WorkspaceFolderSpec, projections []*worktree.GitMetadataProjection, executorType string, repositories []WorkspaceRepositorySpec) []string {
+	roots := make([]string, 0, 1+len(folders)+len(projections)+len(repositories))
 	seen := make(map[string]struct{}, cap(roots))
 	add := func(path string) {
 		resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
@@ -199,6 +215,14 @@ func taskWorkspaceSourceRoots(workspacePath string, folders []WorkspaceFolderSpe
 	for _, projection := range projections {
 		if projection != nil {
 			add(projection.CheckoutPath)
+		}
+	}
+	if isLocalExecutorType(executorType) {
+		for _, repository := range repositories {
+			if repository.RepositoryPath == "" || sameDirectory(workspacePath, repository.RepositoryPath) {
+				continue
+			}
+			add(repository.RepositoryPath)
 		}
 	}
 	return roots

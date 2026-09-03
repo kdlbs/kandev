@@ -676,7 +676,7 @@ func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string
 	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
 		return err
 	}
-	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
+	if isLocalExecutorType(info.ExecutorType) {
 		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return err
 		}
@@ -772,7 +772,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           info.AgentProfileID,
 			WorkspacePath:                  info.WorkspacePath,
-			WorkspaceSourceRoots:           taskWorkspaceSourceRoots(info.WorkspacePath, info.WorkspaceFolders, nil),
+			WorkspaceSourceRoots:           taskWorkspaceSourceRoots(info.WorkspacePath, info.WorkspaceFolders, nil, info.ExecutorType, info.WorkspaceRepositories),
 			Protocol:                       string(agentConfig.Runtime().Protocol),
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,
