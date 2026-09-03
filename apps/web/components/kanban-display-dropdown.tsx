@@ -127,7 +127,11 @@ function BoardSortSection({
         {t("kanban:boardSort")}
       </DropdownMenuLabel>
       <Select value={boardSort} onValueChange={(value) => onBoardSortChange(value as KanbanSort)}>
-        <SelectTrigger data-testid="display-board-sort" className="w-full border-border">
+        <SelectTrigger
+          data-testid="display-board-sort"
+          aria-label={t("kanban:boardSort")}
+          className="w-full border-border"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

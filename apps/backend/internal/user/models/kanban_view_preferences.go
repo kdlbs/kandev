@@ -22,8 +22,8 @@ var (
 		KanbanSortPriorityDesc,
 	}
 
-	// kanbanPriorityFilterTokenRank orders the four priority tokens for
-	// AC-004.9's "store it in priority rank order" requirement.
+	// kanbanPriorityFilterTokenRank orders the four priority tokens so the
+	// persisted selection is always stored in priority rank order.
 	kanbanPriorityFilterTokenRank = map[string]int{
 		KanbanPriorityFilterTokenCritical: 0,
 		KanbanPriorityFilterTokenHigh:     1,

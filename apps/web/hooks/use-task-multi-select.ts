@@ -47,9 +47,9 @@ function buildTaskById(state: AppState): Map<string, DisplayOrderTask> {
 
 /**
  * Excludes an id whose known task is outside the active priority filter,
- * matching what the board is currently displaying (AC-002.11). An id whose
- * task isn't found in any snapshot is kept — its visibility can't be
- * determined here, so this only narrows a set, never widens one.
+ * matching what the board is currently displaying. An id whose task isn't
+ * found in any snapshot is kept — its visibility can't be determined here,
+ * so this only narrows a set, never widens one.
  *
  * @internal Exported for testing.
  */
@@ -172,7 +172,7 @@ export function useTaskMultiSelectStore() {
   );
 
   // Narrows `ids` to the ones the priority filter currently admits, so a
-  // bulk action never acts on a task the person can't see (AC-002.11).
+  // bulk action never acts on a task the person can't see.
   const eligibleSelectedIds = useCallback(
     (ids: string[]): string[] => {
       const state = store.getState();
@@ -209,7 +209,7 @@ type RunBulkActionOptions = {
 /**
  * A task the priority filter hides is excluded before dispatch and stays
  * selected — hiding it doesn't clear the rest of the selection and it
- * doesn't count toward success or failure (AC-002.11).
+ * doesn't count toward success or failure.
  */
 async function runBulkAction({
   ids,
@@ -311,9 +311,9 @@ function useBulkOperations({
   const bulkMove = useCallback(
     async (targetStepId: string) => {
       // A task the priority filter hides is excluded before ordering, so it
-      // is neither moved nor consumes a position index (AC-002.11). Move the
-      // remainder in board order so a backward range selection isn't
-      // reordered when sequential positions are assigned below.
+      // is neither moved nor consumes a position index. Move the remainder
+      // in board order so a backward range selection isn't reordered when
+      // sequential positions are assigned below.
       const idList = sortByDisplayOrder(eligibleSelectedIds([...(selectedIdsRef.current ?? [])]));
       if (idList.length === 0) return;
       const results = await Promise.allSettled(
