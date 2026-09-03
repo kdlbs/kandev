@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ownershipperiod"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -49,7 +50,7 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	gin.SetMode(gin.ReleaseMode)
 
 	csLogger := log.WithFields(zap.String("component", "control-server"))
-	unownedPeriod, adjustments := resolveUnownedPeriod(cfg.UnownedPeriod, cfg.IdleTimeout)
+	unownedPeriod, adjustments := ownershipperiod.Resolve(cfg.UnownedPeriod, cfg.IdleTimeout)
 	for _, reason := range adjustments {
 		csLogger.Warn(reason,
 			zap.Duration("configured_unowned_period", cfg.UnownedPeriod),

@@ -9,81 +9,10 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// --- resolveUnownedPeriod (AC-EXECUTORS-CONTROL-OWNERSHIP-003.4/.6/.7) ---
-
-func TestResolveUnownedPeriod(t *testing.T) {
-	tests := []struct {
-		name            string
-		configured      time.Duration
-		idleTimeout     time.Duration
-		wantPeriod      time.Duration
-		wantAdjustments int
-	}{
-		{
-			name:            "already satisfies ordering, no adjustment",
-			configured:      5 * time.Minute,
-			idleTimeout:     10 * time.Minute,
-			wantPeriod:      5 * time.Minute,
-			wantAdjustments: 0,
-		},
-		{
-			name:            "AC-003.4 clamps to half the idle timeout when not shorter",
-			configured:      10 * time.Minute,
-			idleTimeout:     10 * time.Minute,
-			wantPeriod:      5 * time.Minute,
-			wantAdjustments: 1,
-		},
-		{
-			name:            "AC-003.4 clamps when configured exceeds idle timeout",
-			configured:      20 * time.Minute,
-			idleTimeout:     4 * time.Minute,
-			wantPeriod:      2 * time.Minute,
-			wantAdjustments: 1,
-		},
-		{
-			name:            "AC-003.6 disabled idle reaping (zero) is left unchanged",
-			configured:      10 * time.Minute,
-			idleTimeout:     0,
-			wantPeriod:      10 * time.Minute,
-			wantAdjustments: 0,
-		},
-		{
-			name:            "AC-003.6 negative idle timeout treated as disabled",
-			configured:      10 * time.Minute,
-			idleTimeout:     -1,
-			wantPeriod:      10 * time.Minute,
-			wantAdjustments: 0,
-		},
-		{
-			name:            "AC-003.7 floor applies when configured value is too small",
-			configured:      10 * time.Second,
-			idleTimeout:     0,
-			wantPeriod:      minUnownedPeriod,
-			wantAdjustments: 1,
-		},
-		{
-			name:            "AC-003.7 floor takes precedence over the AC-003.4 clamp",
-			configured:      time.Minute,
-			idleTimeout:     30 * time.Second,
-			wantPeriod:      minUnownedPeriod,
-			wantAdjustments: 2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			period, adjustments := resolveUnownedPeriod(tt.configured, tt.idleTimeout)
-			if period != tt.wantPeriod {
-				t.Fatalf("resolveUnownedPeriod(%v, %v) period = %v, want %v",
-					tt.configured, tt.idleTimeout, period, tt.wantPeriod)
-			}
-			if len(adjustments) != tt.wantAdjustments {
-				t.Fatalf("resolveUnownedPeriod(%v, %v) adjustments = %v (len %d), want len %d",
-					tt.configured, tt.idleTimeout, adjustments, len(adjustments), tt.wantAdjustments)
-			}
-		})
-	}
-}
+// resolveUnownedPeriod's own coverage (AC-EXECUTORS-CONTROL-OWNERSHIP-003.4/
+// .6/.7) moved to internal/common/ownershipperiod, which both this package
+// and the backend's ownership-renewal loop now import, so the computation
+// cannot drift between the two sides that must agree on it.
 
 // --- reaper goroutine lifecycle ---
 
