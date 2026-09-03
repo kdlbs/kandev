@@ -73,7 +73,7 @@ contributor. The route-scoped settings coordinator will continue to show the
 shared save action and navigation guard for dirty storage policy settings.
 
 The `Data & Logs` page will not mount the storage contributor. Database,
-backup, and log commands will keep their existing immediate action behavior.
+backup, and log commands will continue to execute immediately.
 
 ## Mobile design contract
 

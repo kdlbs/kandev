@@ -109,7 +109,7 @@ None.
 
 ## Results
 
-Implemented in commit `407e3df65`. The route composition, System navigation,
+The route composition, System navigation,
 breadcrumbs, discovery ownership, localized copy, unit tests, and desktop,
 authenticated, phone, and container-backed Playwright references were updated.
 
@@ -126,3 +126,7 @@ Verification passed:
 
 The exact container Playwright command was attempted, but Docker is unavailable
 in this environment, so that suite could not run.
+
+PR review follow-up added an explicit pseudo-locale assertion for
+`system:storageTitle` and clarified the system-design wording for immediate
+commands. The focused remediation test passed with 12 tests.

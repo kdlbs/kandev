@@ -109,6 +109,10 @@ fictional paths and no developer data. A landing-repository capture target was
 not configured, so the documented screenshot fallback used the isolated native
 Playwright capture.
 
+The PR review follow-up added an explicit pseudo-locale assertion for the
+Storage title and clarified the immediate command wording in the system design.
+The focused remediation test passed.
+
 ## Risks
 
 - Tests that use `/settings/system/data-storage` for storage can pass against
