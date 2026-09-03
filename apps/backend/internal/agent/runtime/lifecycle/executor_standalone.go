@@ -218,10 +218,85 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 	return nil
 }
 
+// RecoverInstances enumerates the adopted control server's live instances and
+// correlates them to the live standalone recovery-inventory records read at
+// startup step 3 (AC-EXECUTORS-SURVIVAL-002.1/002.8), applying the
+// AC-EXECUTORS-SURVIVAL-002.10 duplicate tiebreak via CorrelateRecoveryInstances.
+// Every losing duplicate, ambiguous-session instance, and record-less orphan
+// (AC-EXECUTORS-SURVIVAL-002.6) is stopped; every winner is returned for the
+// caller to re-track.
+//
+// When the adopted server cannot be enumerated at all, this reports nothing
+// recovered, stops nothing, and leaves every record to the existing
+// stale-execution repair path (AC-EXECUTORS-SURVIVAL-002.12) rather than
+// treating an enumeration failure as though every instance were an orphan.
+//
+// Scope note: this does not yet implement AC-EXECUTORS-SURVIVAL-002.13's
+// bounded read retry, AC-EXECUTORS-SURVIVAL-002.15's bounded stop retry and
+// joint winner/loser stop-failure handling, or the full four-source
+// reconstruction table of design part 3 (task-environment identity, agent
+// identity/command re-derivation, workspace source roots and provider
+// session identity read back from the instance). A recovered execution here
+// carries the same field set the pre-existing (never-before-reachable)
+// recovery consumer in Manager.Start already builds.
 func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
-	// Standalone instances are not persisted - they are transient processes
-	// managed by agentctl. Session resume will restart them as needed.
-	return nil, nil
+	instances, err := r.ctl.ListInstances(ctx)
+	if err != nil {
+		r.logger.Warn("failed to enumerate standalone instances for recovery; leaving every record to the existing repair path",
+			zap.Error(err))
+		return nil, nil
+	}
+
+	recordBySession := make(map[string]*models.ExecutorRunning, len(records))
+	for _, rec := range records {
+		if rec != nil && rec.SessionID != "" {
+			recordBySession[rec.SessionID] = rec
+		}
+	}
+
+	correlation := CorrelateRecoveryInstances(records, instances)
+
+	for _, inst := range correlation.ToStop {
+		if err := r.ctl.DeleteInstance(ctx, inst.ID); err != nil {
+			r.logger.Warn("failed to stop a not-re-tracked standalone instance during recovery",
+				zap.String("instance_id", inst.ID),
+				zap.String("session_id", inst.SessionID),
+				zap.Error(err))
+		}
+	}
+
+	recovered := make([]*ExecutorInstance, 0, len(correlation.Winners))
+	for sessionID, inst := range correlation.Winners {
+		record := recordBySession[sessionID]
+
+		client := agentctl.NewClient(r.host, inst.Port, r.logger,
+			agentctl.WithExecutionID(inst.ID),
+			agentctl.WithSessionID(sessionID),
+			agentctl.WithAuthToken(r.authToken))
+
+		taskID := inst.TaskID
+		var metadata map[string]interface{}
+		if record != nil {
+			if record.TaskID != "" {
+				taskID = record.TaskID
+			}
+			metadata = record.Metadata
+		}
+
+		recovered = append(recovered, &ExecutorInstance{
+			InstanceID:           inst.ID,
+			TaskID:               taskID,
+			SessionID:            sessionID,
+			RuntimeName:          r.Name(),
+			Client:               client,
+			StandaloneInstanceID: inst.ID,
+			StandalonePort:       inst.Port,
+			WorkspacePath:        inst.WorkspacePath,
+			Metadata:             metadata,
+		})
+	}
+
+	return recovered, nil
 }
 
 // SetInteractiveRunner sets the interactive runner for passthrough mode.

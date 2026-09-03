@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // standaloneControlServer is an in-process stand-in for the host agentctl
@@ -28,6 +29,11 @@ type standaloneControlServer struct {
 	deleted        []string
 	createStatus   int
 	server         *httptest.Server
+	// listInstances is what GET /api/v1/instances returns; nil (vs. an empty
+	// non-nil slice) tells the fake to answer with a listing failure instead,
+	// for exercising AC-EXECUTORS-SURVIVAL-002.12.
+	listInstances    []*agentctlclient.InstanceInfo
+	listInstancesErr bool
 }
 
 func newStandaloneControlServer(t *testing.T, healthy bool) *standaloneControlServer {
@@ -56,6 +62,14 @@ func newStandaloneControlServer(t *testing.T, healthy bool) *standaloneControlSe
 			_ = json.NewEncoder(w).Encode(agentctlclient.CreateInstanceResponse{ID: "std-1", Port: 45678})
 		case strings.HasPrefix(r.URL.Path, "/api/v1/instances/") && r.Method == http.MethodDelete:
 			s.deleted = append(s.deleted, strings.TrimPrefix(r.URL.Path, "/api/v1/instances/"))
+		case r.URL.Path == "/api/v1/instances" && r.Method == http.MethodGet:
+			if s.listInstancesErr {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(struct {
+				Instances []*agentctlclient.InstanceInfo `json:"instances"`
+			}{Instances: s.listInstances})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -100,8 +114,8 @@ func TestStandaloneExecutorStaticSurface(t *testing.T) {
 		t.Fatal("standalone instances are transient and not always resumable")
 	}
 	instances, err := exec.RecoverInstances(context.Background(), nil)
-	if err != nil || instances != nil {
-		t.Fatalf("RecoverInstances() = %v, %v; want nil, nil", instances, err)
+	if err != nil || len(instances) != 0 {
+		t.Fatalf("RecoverInstances() = %v, %v; want none recovered, no error", instances, err)
 	}
 
 	runner := &process.InteractiveRunner{}
@@ -283,6 +297,129 @@ func TestStandaloneExecutorStopInstance(t *testing.T) {
 			t.Fatalf("deleted = %v", control.deleted)
 		}
 	})
+}
+
+// TestStandaloneExecutorRecoverInstancesReTracksWinnerAndStopsOrphan pins
+// AC-EXECUTORS-SURVIVAL-002.1/002.2/002.6: a live instance whose session
+// matches a recovery-inventory record is re-tracked and returned; a live
+// instance with no matching record is stopped as an orphan.
+func TestStandaloneExecutorRecoverInstancesReTracksWinnerAndStopsOrphan(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "instance-1", Port: 5001, SessionID: "session-1", TaskID: "task-1", WorkspacePath: "/ws/1"},
+		{ID: "orphan-instance", Port: 5002, SessionID: "session-orphan"},
+	}
+	exec := control.executor(t)
+	exec.SetAuthToken("survival-token")
+
+	records := []*models.ExecutorRunning{
+		{SessionID: "session-1", TaskID: "task-1", AgentExecutionID: "instance-1", Metadata: map[string]interface{}{"k": "v"}},
+	}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 1 {
+		t.Fatalf("recovered = %+v, want exactly one winner", recovered)
+	}
+	got := recovered[0]
+	if got.SessionID != "session-1" || got.TaskID != "task-1" || got.InstanceID != "instance-1" {
+		t.Fatalf("recovered instance identity = %+v", got)
+	}
+	if got.WorkspacePath != "/ws/1" {
+		t.Fatalf("WorkspacePath = %q, want the instance's live workspace path", got.WorkspacePath)
+	}
+	if got.Metadata["k"] != "v" {
+		t.Fatalf("Metadata = %+v, want the record's persisted metadata", got.Metadata)
+	}
+	if got.Client == nil {
+		t.Fatal("recovered instance must carry a usable agentctl client")
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.deleted) != 1 || control.deleted[0] != "orphan-instance" {
+		t.Fatalf("deleted = %v, want the orphan instance stopped", control.deleted)
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesStopsDuplicateLoser pins
+// AC-EXECUTORS-SURVIVAL-002.10: of two live instances for one session, the
+// one matching the record's agent execution identifier is re-tracked and the
+// other is stopped.
+func TestStandaloneExecutorRecoverInstancesStopsDuplicateLoser(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "winner", Port: 5001, SessionID: "session-1"},
+		{ID: "loser", Port: 5002, SessionID: "session-1"},
+	}
+	exec := control.executor(t)
+
+	records := []*models.ExecutorRunning{{SessionID: "session-1", AgentExecutionID: "winner"}}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].InstanceID != "winner" {
+		t.Fatalf("recovered = %+v, want only the winner", recovered)
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.deleted) != 1 || control.deleted[0] != "loser" {
+		t.Fatalf("deleted = %v, want the loser stopped", control.deleted)
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesRecordWithNoInstanceIsUntouched pins
+// AC-EXECUTORS-SURVIVAL-002.7: a record with no live instance is left alone,
+// not stopped and not reported recovered.
+func TestStandaloneExecutorRecoverInstancesRecordWithNoInstanceIsUntouched(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = nil
+	exec := control.executor(t)
+
+	records := []*models.ExecutorRunning{{SessionID: "session-cold", AgentExecutionID: "instance-cold"}}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none", recovered)
+	}
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.deleted) != 0 {
+		t.Fatalf("deleted = %v, want none: a record with no instance is left to the existing repair path", control.deleted)
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesEnumerationFailureRecoversNothing
+// pins AC-EXECUTORS-SURVIVAL-002.12: when the adopted server cannot be
+// enumerated, recovery reports nothing recovered, stops nothing, and does
+// not error out (a hard error here would fail backend startup outright).
+func TestStandaloneExecutorRecoverInstancesEnumerationFailureRecoversNothing(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstancesErr = true
+	exec := control.executor(t)
+
+	records := []*models.ExecutorRunning{{SessionID: "session-1", AgentExecutionID: "instance-1"}}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v, want a logged-and-swallowed enumeration failure", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none", recovered)
+	}
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.deleted) != 0 {
+		t.Fatalf("deleted = %v, want none: an unenumerable server must not have instances stopped blind", control.deleted)
+	}
 }
 
 func TestBuildStandaloneCreateInstanceRequestMapsEveryField(t *testing.T) {
