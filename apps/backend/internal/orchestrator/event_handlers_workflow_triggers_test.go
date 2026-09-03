@@ -271,12 +271,12 @@ func TestProcessOnEnterQueuesOneCurrentTransitionControlPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTaskSession: %v", err)
 	}
-	svc.processOnEnter(ctx, "t1", session, step, "review the change", 0)
+	svc.processOnEnter(ctx, "t1", session, step, "review the change", 0, nil)
 	session, err = repo.GetTaskSession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("GetTaskSession after first entry: %v", err)
 	}
-	svc.processOnEnter(ctx, "t1", session, step, "review the change", 0)
+	svc.processOnEnter(ctx, "t1", session, step, "review the change", 0, nil)
 
 	entries := svc.messageQueue.GetStatus(ctx, "s1").Entries
 	if len(entries) != 1 {
