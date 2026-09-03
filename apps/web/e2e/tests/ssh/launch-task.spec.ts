@@ -34,40 +34,44 @@ test.describe("ssh executor — task launch", () => {
       cleanup_script: "",
       env_vars: [],
     });
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Nested durable Coder root",
-      seedData.agentProfileId,
-      {
-        description: 'e2e:delay(30000)\ne2e:message("running")',
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-        executor_profile_id: profile.id,
-      },
-    );
-    const { sessions } = await apiClient.listTaskSessions(task.id);
-    await waitForSessionState(apiClient, {
-      taskId: task.id,
-      sessionId: sessions[0].id,
-      expectedState: "RUNNING",
-      message: "SSH task should reach RUNNING below the parent checkout",
-    });
-    const row = (await apiClient.listSSHSessions(seedData.sshExecutorId)).find(
-      (session) => session.task_id === task.id,
-    );
-    expect(row?.remote_task_dir).toMatch(/^\/opt\/jumprope-fullstack\/\.kandev\/tasks\//);
-    expect(
-      execInContainer(seedData.sshTarget, [
-        "git",
-        "-c",
-        "safe.directory=*",
-        "-C",
-        row!.remote_task_dir!,
-        "rev-parse",
-        "--show-toplevel",
-      ]).trim(),
-    ).toBe(row!.remote_task_dir);
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Nested durable Coder root",
+        seedData.agentProfileId,
+        {
+          description: 'e2e:delay(30000)\ne2e:message("running")',
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: profile.id,
+        },
+      );
+      const { sessions } = await apiClient.listTaskSessions(task.id);
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: sessions[0].id,
+        expectedState: "RUNNING",
+        message: "SSH task should reach RUNNING below the parent checkout",
+      });
+      const row = (await apiClient.listSSHSessions(seedData.sshExecutorId)).find(
+        (session) => session.task_id === task.id,
+      );
+      expect(row?.remote_task_dir).toMatch(/^\/opt\/jumprope-fullstack\/\.kandev\/tasks\//);
+      expect(
+        execInContainer(seedData.sshTarget, [
+          "git",
+          "-c",
+          "safe.directory=*",
+          "-C",
+          row!.remote_task_dir!,
+          "rev-parse",
+          "--show-toplevel",
+        ]).trim(),
+      ).toBe(row!.remote_task_dir);
+    } finally {
+      await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
+    }
   });
 
   test("launches a session and records ssh runtime on the task environment", async ({

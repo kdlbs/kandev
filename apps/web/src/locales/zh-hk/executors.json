@@ -231,7 +231,7 @@
   "sshReclaimTaskDirLabel": "任務被歸檔或刪除時刪除其目錄",
   "sshReclaimTaskDirTitle": "遠端任務目錄",
   "sshReclaimTaskDirWarning": "刪除是永久性的，且發生在 Kandev 並不擁有的機器 {{host}} 上。如果目錄中有未提交的更改、未推送的提交或儲藏，或者有其他任務共用該目錄，則始終保留。取消歸檔任務會重新複製其儲存庫。",
-  "sshCoderDurableRootWarning": "Coder 設定檔必須使用持久掛載的任務根目錄，例如 /work/.kandev。主目錄和範本簽出可能會被重建並導致任務擱置。",
+  "sshCoderDurableRootWarning": "SSH 設定檔應使用持久掛載的任務根目錄，例如 {{taskRootExample}}。這對 Coder 尤其重要，因為主目錄和範本簽出可能會被重建並導致任務擱置。",
   "sshRemotePort": "遠端端口",
   "sshReprobe": "重新探測",
   "sshShellNotDetected": "（未檢測到）",

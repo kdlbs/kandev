@@ -24,8 +24,8 @@ the task system.
 
 ## Detection and warning contract
 
-The SSH executor profile settings card always presents a prominent Coder
-durability warning. This conservative warning does not guess from hostnames or
+The SSH executor profile settings card always presents a prominent durable-root
+warning, with Coder called out as a common risk. This conservative warning does not guess from hostnames or
 claim arbitrary mounts are durable, and it does not block profile save or
 launch. Future remote mount-health evidence can narrow the warning without
 changing the durability contract.

@@ -26,6 +26,16 @@ type taskLaunchRecoveryServiceFake struct {
 	moveTaskIDs []string
 }
 
+func TestValidateTaskLaunchRecoveryAllowsStampedRehomeWithoutRepository(t *testing.T) {
+	svc := &Service{}
+	err := svc.validateTaskLaunchRecoveryRequest(&TaskLaunchRecoveryRequest{
+		TaskID: "task-repoless", SessionID: "session-repoless", Action: taskLaunchRecoveryRehomeFresh, ErrorStamp: "current-stamp",
+	})
+	if err != nil {
+		t.Fatalf("repo-less stamped rehome validation failed: %v", err)
+	}
+}
+
 func (f *taskLaunchRecoveryServiceFake) UpdateRepositoryBaseBranch(_ context.Context, req taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
 	f.updated = append(f.updated, req)
 	return &models.TaskRepository{ID: req.TaskRepositoryID, TaskID: req.TaskID, BaseBranch: req.BaseBranch}, nil

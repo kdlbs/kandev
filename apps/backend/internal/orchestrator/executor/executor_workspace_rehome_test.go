@@ -21,7 +21,7 @@ func TestRetryLaunchAfterMissingWorkspaceRetriesExactlyOnce(t *testing.T) {
 		return &LaunchAgentResponse{AgentExecutionID: "replacement", Status: api.AgentStatusStarting}, nil
 	}}
 	exec := newTestExecutor(t, manager, repo)
-	req := &LaunchAgentRequest{TaskID: "task", SessionID: "session", WorkspaceReuseRequired: true, PreviousExecutionID: "old", Metadata: map[string]interface{}{workspaceMetadataSSHRemoteTaskDir: "/missing"}}
+	req := &LaunchAgentRequest{TaskID: "task", SessionID: "session", WorkspaceReuseRequired: true, PreviousExecutionID: "old", WorktreeID: "top", Repositories: []RepoSpec{{RepositoryID: "repo-a", WorktreeID: "repo-worktree"}}, Metadata: map[string]interface{}{workspaceMetadataSSHRemoteTaskDir: "/missing"}}
 	env := &models.TaskEnvironment{ID: "env", TaskID: "task", Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/missing"}
 
 	resp, err := exec.retryLaunchAfterMissingWorkspace(context.Background(), "task", "session", env, req, &models.MissingTaskWorkspaceError{}, false)
@@ -33,6 +33,9 @@ func TestRetryLaunchAfterMissingWorkspaceRetriesExactlyOnce(t *testing.T) {
 	}
 	if req.WorkspaceReuseRequired || req.PreviousExecutionID != "" {
 		t.Fatalf("replacement request retained reuse identity: %+v", req)
+	}
+	if req.WorktreeID != "" || req.Repositories[0].WorktreeID != "" {
+		t.Fatalf("replacement request retained worktree identity: %+v", req)
 	}
 	if req.TaskID != "task" || req.SessionID != "session" {
 		t.Fatalf("replacement changed task/session identity: %+v", req)
@@ -48,13 +51,17 @@ func TestRetryLaunchAfterMissingWorkspacePreservesBothErrors(t *testing.T) {
 	exec := newTestExecutor(t, manager, repo)
 	original := &models.MissingTaskWorkspaceError{Detail: "missing remote task directory"}
 
-	_, err := exec.retryLaunchAfterMissingWorkspace(context.Background(), "task", "session", &models.TaskEnvironment{ID: "env"}, &LaunchAgentRequest{}, original, false)
+	env := &models.TaskEnvironment{ID: "env", Status: models.TaskEnvironmentStatusReady}
+	_, err := exec.retryLaunchAfterMissingWorkspace(context.Background(), "task", "session", env, &LaunchAgentRequest{}, original, false)
 	var combined *WorkspaceRehomeError
 	if !errors.As(err, &combined) || !errors.Is(err, models.ErrWorkspaceReuseUnsafe) || !errors.Is(combined.Recovery, recoveryErr) {
 		t.Fatalf("error = %v, want original and recovery causes", err)
 	}
 	if manager.launchAgentCallCount != 1 {
 		t.Fatalf("replacement launches = %d, want exactly one", manager.launchAgentCallCount)
+	}
+	if env.Status != models.TaskEnvironmentStatusFailed || env.MaterializationSessionID != "" {
+		t.Fatalf("replacement failure left environment non-terminal: %+v", env)
 	}
 }
 

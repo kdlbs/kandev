@@ -62,6 +62,9 @@ func (e *Executor) retryLaunchAfterMissingWorkspace(
 	req.WorkspaceReuseRequired = false
 	req.PreviousExecutionID = ""
 	req.WorktreeID = ""
+	for index := range req.Repositories {
+		req.Repositories[index].WorktreeID = ""
+	}
 	if req.Metadata != nil {
 		delete(req.Metadata, workspaceMetadataSSHRemoteTaskDir)
 		delete(req.Metadata, workspaceMetadataContainerID)
@@ -69,9 +72,11 @@ func (e *Executor) retryLaunchAfterMissingWorkspace(
 	}
 	resp, retryErr := e.agentManager.LaunchAgent(ctx, req)
 	if retryErr != nil {
+		e.markTaskEnvironmentMaterializationFailed(ctx, env, sessionID)
 		return nil, &WorkspaceRehomeError{Original: original, Recovery: retryErr}
 	}
 	if resp == nil {
+		e.markTaskEnvironmentMaterializationFailed(ctx, env, sessionID)
 		return nil, &WorkspaceRehomeError{Original: original, Recovery: fmt.Errorf("replacement launch returned no response")}
 	}
 	return resp, nil

@@ -419,6 +419,13 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	if err := s.authorizeTask(ctx, taskID); err != nil {
 		return nil, err
 	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.TaskID != taskID {
+		return nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+	}
 	if action == "runtime_retry" {
 		if s.wasResumeAttempt(ctx, sessionID) {
 			action = "resume"
@@ -430,10 +437,6 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	case "fresh_start":
 		if err := s.clearResumeToken(ctx, sessionID); err != nil {
 			return nil, fmt.Errorf("failed to clear resume token for fresh start: %w", err)
-		}
-	case "rehome_fresh":
-		if err := s.clearResumeToken(ctx, sessionID); err != nil {
-			return nil, fmt.Errorf("failed to clear resume token for fresh workspace: %w", err)
 		}
 	case "resume":
 		// no-op — relaunch with existing resume token
@@ -449,8 +452,26 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		SessionID:              sessionID,
 		Intent:                 IntentResume,
 		AllowBranchReplacement: action == "resume_new_branch",
-		AllowWorkspaceRehome:   action == "rehome_fresh",
+		AllowWorkspaceRehome:   false,
 	})
+	if err != nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	return resp, nil
+}
+
+func (s *Service) recoverSessionWithWorkspaceRehome(ctx context.Context, taskID, sessionID string) (*LaunchSessionResponse, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.TaskID != taskID {
+		return nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+	}
+	if err := s.clearResumeToken(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("failed to clear resume token for fresh workspace: %w", err)
+	}
+	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{TaskID: taskID, SessionID: sessionID, Intent: IntentResume, AllowWorkspaceRehome: true})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)
 	}

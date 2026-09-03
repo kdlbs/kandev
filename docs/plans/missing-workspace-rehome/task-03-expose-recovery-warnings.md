@@ -91,4 +91,7 @@ node --test scripts/validate-public-docs.test.mjs && node scripts/validate-publi
 
 ## Results
 
-Pending.
+Implemented the stamped `rehome_fresh` action on the existing task launch-error
+card for desktop and mobile. Added the always-visible SSH durable-root warning,
+with Coder called out explicitly, localized interpolation for the example path,
+and public operator guidance.

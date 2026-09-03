@@ -131,11 +131,14 @@ func (s *Service) RecoverTaskLaunch(ctx context.Context, req *TaskLaunchRecovery
 		if source.session == nil {
 			return nil, fmt.Errorf("session_id is required for %s", req.Action)
 		}
-		response, recoverErr := s.RecoverSession(ctx, req.TaskID, source.session.ID, "rehome_fresh")
+		response, recoverErr := s.recoverSessionWithWorkspaceRehome(ctx, req.TaskID, source.session.ID)
 		if recoverErr != nil {
 			return nil, recoverErr
 		}
 		responseSessionID = response.SessionID
+		if err := s.clearTaskLaunchRecoverySource(ctx, source); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, ErrTaskLaunchRecoveryInvalid
 	}

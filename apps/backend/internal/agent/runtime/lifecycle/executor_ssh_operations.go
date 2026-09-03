@@ -471,10 +471,25 @@ func ensureReuseRequiredRemoteTaskDirExists(ctx context.Context, client *ssh.Cli
 	if strings.TrimSpace(taskDir) == "" {
 		return &models.MissingTaskWorkspaceError{Detail: "missing remote task directory"}
 	}
-	if _, _, err := runSSHCommand(ctx, client, "test -d "+shellQuote(taskDir)); err != nil {
-		return &models.MissingTaskWorkspaceError{Detail: "remote task directory is unavailable"}
+	quotedTaskDir := shellQuote(taskDir)
+	command := "if test -d " + quotedTaskDir + "; then printf present; " +
+		"elif test -e " + quotedTaskDir + "; then printf not_directory; " +
+		"else parent=$(dirname -- " + quotedTaskDir + "); " +
+		"if test -d \"$parent\" && test -x \"$parent\"; then printf missing; else printf inaccessible; fi; fi"
+	stdout, _, err := runSSHCommand(ctx, client, command)
+	if err != nil {
+		return fmt.Errorf("ssh: probe reusable task directory: %w", err)
 	}
-	return nil
+	switch strings.TrimSpace(stdout) {
+	case "present":
+		return nil
+	case "missing":
+		return &models.MissingTaskWorkspaceError{Detail: "remote task directory is missing"}
+	case "not_directory":
+		return fmt.Errorf("ssh: reusable task path is not a directory: %s", taskDir)
+	default:
+		return fmt.Errorf("ssh: reusable task directory is inaccessible: %s", taskDir)
+	}
 }
 
 // ensureRemoteSessionDir creates <taskDir>/.kandev/sessions/<sessionID>/ and

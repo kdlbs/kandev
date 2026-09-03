@@ -664,7 +664,7 @@ func TestEnsureRemoteSessionDir(t *testing.T) {
 
 	t.Run("does not recreate a task directory deleted after the reuse probe", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-			sshScriptRule{match: "test -d", result: sshOK},
+			sshScriptRule{match: "test -d", result: sshOut("present")},
 			sshScriptRule{match: "cd --", result: sshFail("no such file or directory")},
 		).handle)
 		client := server.dial(t)
@@ -701,19 +701,19 @@ func TestEnsureRemoteSessionDir(t *testing.T) {
 func TestEnsureReuseRequiredRemoteTaskDirExists(t *testing.T) {
 	t.Run("existing canonical directory is accepted without creating it", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-			sshScriptRule{match: "test -d", result: sshOK},
+			sshScriptRule{match: "test -d", result: sshOut("present")},
 		).handle)
 		if err := ensureReuseRequiredRemoteTaskDirExists(context.Background(), server.dial(t), "/remote/task"); err != nil {
 			t.Fatalf("ensureReuseRequiredRemoteTaskDirExists: %v", err)
 		}
-		if got := server.commands(); len(got) != 1 || got[0] != "test -d '/remote/task'" {
+		if got := server.commands(); len(got) != 1 || !strings.Contains(got[0], "test -d '/remote/task'") {
 			t.Fatalf("commands = %v, want only the non-mutating directory probe", got)
 		}
 	})
 
 	t.Run("missing canonical directory fails closed", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-			sshScriptRule{match: "test -d", result: sshFail("missing")},
+			sshScriptRule{match: "test -d", result: sshOut("missing")},
 		).handle)
 		err := ensureReuseRequiredRemoteTaskDirExists(context.Background(), server.dial(t), "/remote/task")
 		if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
@@ -726,6 +726,16 @@ func TestEnsureReuseRequiredRemoteTaskDirExists(t *testing.T) {
 			if strings.Contains(command, "mkdir -p") {
 				t.Fatalf("reuse probe created remote state: %q", command)
 			}
+		}
+	})
+
+	t.Run("transport or permission failure is not classified as missing", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "test -d", result: sshFail("permission denied")},
+		).handle)
+		err := ensureReuseRequiredRemoteTaskDirExists(context.Background(), server.dial(t), "/remote/task")
+		if err == nil || models.IsMissingTaskWorkspace(err) {
+			t.Fatalf("error = %v, want preserved non-missing probe failure", err)
 		}
 	})
 }

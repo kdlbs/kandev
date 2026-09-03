@@ -878,6 +878,10 @@ func (e *Executor) resumeSession(
 		resp, err = e.agentManager.LaunchAgent(ctx, req)
 	}
 	if err != nil {
+		var rehomeErr *WorkspaceRehomeError
+		if errors.As(err, &rehomeErr) {
+			e.persistLastAgentError(ctx, session.ID, e.buildLastAgentError(ctx, task.ID, req.TaskRepositoryID, err))
+		}
 		if startAgent {
 			e.rollbackResumeStateAfterFailure(
 				ctx, task.ID, session.ID, resumeInitialState, err,

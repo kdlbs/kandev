@@ -66,6 +66,11 @@ work.
   missing workspace contained no unique unpushed or uncommitted work, the
   system shall not rehome automatically and shall expose an explicit data-loss
   warning with a human-authorized fresh-rehome action.
+- **AC-TASKS-MISSING-WORKSPACE-REHOME-002.1a:** Proof is complete only when
+  every repository in the current environment inventory has a phase-current,
+  completion snapshot from the launching session showing a clean tree, a
+  configured remote branch, and no commits ahead of that branch. Missing,
+  stale, partial, or live-monitor-only evidence is unknown and fails closed.
 - **AC-TASKS-MISSING-WORKSPACE-REHOME-002.2:** When durable repository evidence
   identifies unique work, automatic rehome shall remain blocked even when the
   workflow phase completed successfully.
@@ -87,4 +92,3 @@ work.
 - Treating every workspace-reuse error as evidence that a physical directory
   disappeared.
 - Creating a successor Kandev task.
-

@@ -44,7 +44,10 @@ the typed cause after the ordinary launch attempt, without parsing error text.
 
 ## Loss assessment and authorization
 
-The latest environment-owned Git snapshot is the recovery evidence. A loss
+The latest completion snapshot for every repository in the environment
+inventory is the recovery evidence. Each snapshot must belong to the session
+entering the next phase. The assessment holds the same environment lock used
+by snapshot replacement, so a concurrent observation cannot race the claim. A loss
 assessment records one of:
 
 - `recoverable`: the tree was clean and every local commit was known reachable
@@ -56,7 +59,11 @@ Workflow completion persists an assessment before the transition is eligible
 to launch its next step. Server-side conversation, task documents, and plan
 artifacts do not depend on the executor directory. A `recoverable` assessment
 therefore permits automatic rehome after planning/specification completion.
-`unique_work` and `unknown` block automatic rehome.
+`unique_work` and `unknown` block automatic rehome. An absent repository
+partition, a snapshot from another session, a newer incomplete live-monitor
+observation, malformed data, or any mismatch between inventory and snapshot
+partitions is `unknown`. A clean repository can therefore never mask unique or
+unknown work in another repository.
 
 The existing task launch-error projection gains category
 `workspace_rehome_required`. Its bounded detail carries the original cause,
@@ -68,7 +75,7 @@ task/session/binding identities or stale stamps.
 ## Rehome operation and persistence
 
 The repository exposes a single transactional claim operation. It takes the
-task cleanup barrier, applies the loss gate, and compare-and-swaps the matching
+task cleanup barrier and snapshot environment lock, applies the loss gate, and compare-and-swaps the matching
 ready or stopped environment to creating. The winner assigns the current
 session as materialization owner, clears stale workspace/provider handles, and
 clears old repository inventory. Task, environment, session, workflow step,

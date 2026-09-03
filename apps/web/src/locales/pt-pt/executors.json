@@ -231,7 +231,7 @@
   "sshReclaimTaskDirLabel": "Eliminar o diretório de uma tarefa quando a tarefa for arquivada ou eliminada",
   "sshReclaimTaskDirTitle": "Diretórios de tarefas remotos",
   "sshReclaimTaskDirWarning": "A eliminação é permanente e ocorre em {{host}}, uma máquina que o Kandev não controla. Um diretório é sempre mantido quando contém alterações não guardadas, commits por enviar ou um stash, ou quando outra tarefa o partilha. Desarquivar uma tarefa volta a clonar os seus repositórios.",
-  "sshCoderDurableRootWarning": "Os perfis Coder devem usar uma raiz de tarefas montada e durável, como /work/.kandev. Os diretórios pessoais e os checkouts de modelos podem ser reconstruídos e deixar tarefas bloqueadas.",
+  "sshCoderDurableRootWarning": "Os perfis SSH devem usar uma raiz de tarefas montada e durável, como {{taskRootExample}}. Isto é especialmente importante para o Coder, onde os diretórios pessoais e os checkouts de modelos podem ser reconstruídos e deixar tarefas bloqueadas.",
   "sshRemotePort": "Porta remota",
   "sshReprobe": "Voltar a sondar",
   "sshShellNotDetected": "(não detetada)",

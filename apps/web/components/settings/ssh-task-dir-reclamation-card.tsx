@@ -66,7 +66,7 @@ export function SSHTaskDirReclamationCard({
           className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
           role="alert"
         >
-          {t("executors:sshCoderDurableRootWarning")}
+          {t("executors:sshCoderDurableRootWarning", { taskRootExample: "/work/.kandev" })}
         </p>
         <div className="flex min-h-11 items-center justify-between gap-4">
           <div className="min-w-0 space-y-0.5">

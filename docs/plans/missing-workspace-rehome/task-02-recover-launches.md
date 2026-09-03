@@ -21,6 +21,7 @@ acceptance_criteria:
   - AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.4
 system_design:
   - ../../specs/tasks/system-design/missing-workspace-rehome.md
+  - ../../specs/executors/system-design/coder-task-root-durability.md
 ---
 
 # Task 02: Recover launches with one idempotent retry
@@ -37,7 +38,7 @@ authorized recovery. Persist complete failure outcomes and fence stale events.
 - Exact-root checks in default SSH and remote-contribution materialization.
 - Task-scoped orchestrator recovery coordinator and restart reconciliation.
 - Step-entry, created-session, resume, and `task.launch.recover` integration.
-- Exactly-one retry, concurrent follower joining, and stale-generation fences.
+- Exactly-one retry, concurrent claim handling, and stale-callback fences.
 - Durable original/recovery errors and replacement terminalization.
 
 ## Out of scope
@@ -74,12 +75,12 @@ cd apps/backend && go test -race ./internal/agent/runtime/lifecycle ./internal/o
 
 ## Dependencies
 
-- Task 01 durable claim and generation model.
+- Task 01 durable claim and loss-evidence model.
 
 ## Risks
 
-- Session lifecycle and cancellation locks currently key by session, while this
-  operation crosses two session identities.
+- Session lifecycle and cancellation locks key by the retained session while
+  the environment binding is rematerialized.
 - Initial-prompt failures must use the replacement execution stamp.
 
 ## Parallelism
@@ -94,4 +95,8 @@ cd apps/backend && go test -race ./internal/agent/runtime/lifecycle ./internal/o
 
 ## Results
 
-Pending.
+Implemented typed missing-directory classification, the atomic same-task
+rehome retry, terminal replacement-failure persistence, stamped explicit
+authorization, and exact-root SSH preparation. Recovery retains the task,
+session, workflow step, repository selection, and launch profiles, clears all
+stale per-repository worktree identities, and retries only once.

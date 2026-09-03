@@ -28,8 +28,7 @@ workspace is rebuilt.
   on an unverified remote root.
 - **AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.2:** The warning shall identify
   `ssh_workdir_root`, recommend a durable mounted root such as `/work/.kandev`,
-  and remain visible on desktop and mobile profile surfaces until the profile
-  settings surface on desktop and mobile.
+  and remain visible on all desktop and mobile SSH profile settings surfaces.
 - **AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.3:** The warning shall not
   reject SSH profiles because Kandev cannot prove arbitrary mount durability.
 - **AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.4:** When an SSH task root is

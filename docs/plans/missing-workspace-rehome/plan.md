@@ -25,7 +25,7 @@ first because every later concurrency and failure guarantee depends on it.
 
 ### In scope
 
-- Same-task environment-generation and replacement-session rehome.
+- Same-task environment-binding refresh and replacement launch.
 - Task-scoped idempotency across concurrent calls and backend restart.
 - Exactly one retry and durable original/recovery failure projection.
 - Evidence-gated automatic recovery and stamped human authorization.
@@ -44,13 +44,14 @@ first because every later concurrency and failure guarantee depends on it.
 
 ### Persistence and loss evidence
 
-Add replayable SQLite/PostgreSQL migrations for environment generations and
-`task_environment_rehomes`. Replace the global `task_environments.task_id`
-uniqueness with one-active-generation uniqueness. Add repository compare-and-
-swap methods that claim or join a rehome and atomically create the replacement
-environment/session while preserving the old rows. Extend environment-owned Git
-snapshot production with the reachability facts needed for a durable loss
-assessment at workflow completion.
+Use the existing task environment row as the stable binding and add a
+transactional compare-and-swap from ready/stopped to creating. The claim clears
+only stale physical handles and repository inventory while preserving task,
+session, workflow, profile, repository-selection, conversation, and plan rows;
+no schema migration is required. Evaluate completion snapshots for the complete
+repository inventory under the snapshot environment lock, scoped to the
+launching session, and fail closed on missing, partial, stale, or malformed
+evidence.
 
 ### Typed classification and recovery coordinator
 
@@ -88,9 +89,9 @@ root such as `/work/.kandev`.
   orchestrator integration tests cover deleted SSH task directories, phase
   transition identity, concurrency, one retry, failed replacement state, and
   unchanged normal reuse.
-- `AC-TASKS-MISSING-WORKSPACE-REHOME-002.1` through `.4`: loss-assessment and
-  recovery-action tests cover clean/reachable, unique-work, unknown, and stale
-  authorization cases.
+- `AC-TASKS-MISSING-WORKSPACE-REHOME-002.1` through `.5`: loss-assessment and
+  recovery-action tests cover multi-repository clean/reachable and unique work,
+  incomplete/stale inventory, current stamped authorization, and responsive UI.
 - `AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.1` through `.3`: SSH health,
   profile service, and serialization tests cover warning presence and absence.
 - `AC-EXECUTORS-CODER-TASK-ROOT-DURABILITY-001.4`: local-shell and remote SSH

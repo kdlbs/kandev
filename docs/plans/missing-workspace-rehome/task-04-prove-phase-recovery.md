@@ -96,4 +96,8 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-execut
 
 ## Results
 
-Pending.
+Added phase-transition container coverage for a deleted remote task directory,
+same-task/same-step preservation, bounded recovery failure, normal reuse, and
+the nested-parent-checkout regression. The durable-root proof requires the SSH
+session to reach `RUNNING` and verifies the task directory itself is Git's
+reported top level.

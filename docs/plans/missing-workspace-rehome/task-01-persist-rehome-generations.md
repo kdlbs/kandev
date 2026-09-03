@@ -17,20 +17,19 @@ system_design:
   - ../../specs/tasks/system-design/missing-workspace-rehome.md
 ---
 
-# Task 01: Persist rehome generations and loss evidence
+# Task 01: Persist atomic rehome claims and loss evidence
 
 ## Summary
 
-Create the durable environment-generation, loss-assessment, and rehome-claim
-model. Prove the transaction elects one replacement while retaining the source
-binding and all task/workflow/profile identity.
+Create the durable loss-assessment and environment-binding rehome claim. Prove
+the transaction elects one materialization owner while retaining all
+task/workflow/profile identity.
 
 ## In scope
 
-- Replayable SQLite and PostgreSQL schema changes.
-- Atomic claim/join repository API and task cleanup-barrier enforcement.
+- Atomic claim repository API and task cleanup/snapshot-lock enforcement.
 - Phase-current loss assessment based on Git status and remote reachability.
-- Fresh and upgrade/replay tests, including concurrent claims.
+- Complete multi-repository inventory and concurrent-claim tests.
 
 ## Out of scope
 
@@ -39,24 +38,23 @@ binding and all task/workflow/profile identity.
 
 ## Acceptance
 
-- One active environment generation exists per task while historical bindings
-  and sessions remain queryable.
-- Concurrent equivalent claims persist one replacement environment and session.
+- The existing environment binding retains its identity while stale physical
+  handles are cleared for fresh materialization.
+- Concurrent equivalent claims elect one materialization owner.
 - Unknown or unique repository evidence cannot win an automatic claim.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test -race ./internal/task/repository/sqlite ./internal/task/service -run 'Test.*(Rehome|LossAssessment|TaskEnvironmentGeneration)'
+cd apps/backend && go test -race ./internal/task/repository/sqlite ./internal/task/service -run 'Test.*(Rehome|LossAssessment)'
 ```
 
 ## Files likely touched
 
 - `apps/backend/internal/task/models/models.go`
 - `apps/backend/internal/task/repository/interface.go`
-- `apps/backend/internal/task/repository/sqlite/base_schema.go`
-- `apps/backend/internal/task/repository/sqlite/base_migrations.go`
-- `apps/backend/internal/task/repository/sqlite/task_environment.go`
+- `apps/backend/internal/task/repository/sqlite/task_environment_rehome.go`
+- `apps/backend/internal/task/repository/sqlite/git_snapshots.go`
 - `apps/backend/internal/task/repository/sqlite/session.go`
 - `apps/backend/internal/task/service/service_turns.go`
 
@@ -66,7 +64,7 @@ None.
 
 ## Risks
 
-- PostgreSQL partial-index and table-rebuild behavior differs from SQLite.
+- SQLite transaction serialization and PostgreSQL advisory locking differ.
 - Shared-group and inherited workspace bindings must remain fail-closed.
 
 ## Parallelism
@@ -80,4 +78,8 @@ None.
 
 ## Results
 
-Pending.
+Implemented a schema-free compare-and-swap on the existing environment binding.
+Automatic recovery now requires clean completion evidence for every current
+repository partition, from the launching session, while holding the snapshot
+environment lock. Missing, stale, malformed, mixed clean/dirty, and incomplete
+inventories fail closed; concurrent claims elect exactly one owner.
