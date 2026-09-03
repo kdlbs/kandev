@@ -1,12 +1,13 @@
-import type { ReactNode, RefObject } from "react";
+import type { RefObject } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@kandev/ui/context-menu", () => ({
-  ContextMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
-  ContextMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-
+// Deliberately NOT mocking @kandev/ui/context-menu: the real Radix
+// ContextMenuTrigger only conditionally renders its portal-based Content
+// while closed, so `renderContextMenu` output (never wrapped in
+// ContextMenuContent by these tests) still renders directly as a Root child —
+// and using the real component is what let the data-state regression below
+// reproduce at all (see #data-state test).
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 
 describe("SessionTabs terminal tab contract", () => {
@@ -85,5 +86,27 @@ describe("SessionTabs terminal tab contract", () => {
     expect(screen.queryByText("#1")).toBeNull();
     expect(screen.queryByText("Terminal", { selector: "span.truncate" })).toBeNull();
     expect(screen.getByRole("tab", { name: "Terminal" })).toBeTruthy();
+  });
+
+  it("keeps the tab's own active/inactive data-state when it has a context menu and no custom content", () => {
+    // Regression: ContextMenuTrigger asChild clones its own open/closed
+    // data-state onto its single child via Slot. When that child is the bare
+    // TabsTrigger (no tab.content wrapper div in between), the clone lands
+    // directly on TabsTrigger's DOM node and overwrites its active/inactive
+    // data-state, silently breaking data-[state=active] styling.
+    const tabs: SessionTab[] = [
+      {
+        id: "session-1",
+        label: "Session 1",
+        testId: "session-tab-1",
+        renderContextMenu: () => null,
+      },
+      { id: "session-2", label: "Session 2", testId: "session-tab-2" },
+    ];
+
+    render(<SessionTabs tabs={tabs} activeTab="session-1" onTabChange={vi.fn()} />);
+
+    expect(screen.getByTestId("session-tab-1").getAttribute("data-state")).toBe("active");
+    expect(screen.getByTestId("session-tab-2").getAttribute("data-state")).toBe("inactive");
   });
 });
