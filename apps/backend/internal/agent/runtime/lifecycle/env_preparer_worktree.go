@@ -89,7 +89,11 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	}
 	projection, err := worktree.ResolveGitMetadataForRepository(wt.Path, req.RepositoryPath)
 	if err != nil {
-		if req.WorktreeID == "" || wt.ID != req.WorktreeID {
+		// wt.Reused means Create returned an already-valid existing worktree
+		// unchanged; rolling it back here would delete a checkout this call
+		// never created (e.g. reused by session+repo lookup even though the
+		// caller passed no explicit req.WorktreeID).
+		if !wt.Reused {
 			p.rollbackWorktrees(ctx, []string{wt.ID})
 		}
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: "git metadata projection invalid", Error: err, Duration: time.Since(start)}, nil
@@ -445,7 +449,12 @@ func (p *WorktreePreparer) prepareMultiRepo(
 				Duration:     time.Since(start),
 			}, nil
 		}
-		if spec.WorktreeID == "" || wt.ID != spec.WorktreeID {
+		// wt.Reused means prepareOneRepo's Create call returned an
+		// already-valid existing worktree unchanged; only track truly
+		// created/recreated worktrees for rollback, so a later repo's
+		// failure never deletes a checkout this call did not create (e.g.
+		// reused by session+repo lookup even with no explicit spec.WorktreeID).
+		if !wt.Reused {
 			createdIDs = append(createdIDs, wt.ID)
 		}
 		projection, projectionErr := worktree.ResolveGitMetadataForRepository(wt.Path, spec.RepositoryPath)

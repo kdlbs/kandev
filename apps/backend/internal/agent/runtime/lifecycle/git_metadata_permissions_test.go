@@ -146,6 +146,31 @@ func TestStandaloneGitMetadataPreflightAllowsMockAgent(t *testing.T) {
 	}
 }
 
+// TestPrepareGitMetadataRebindDoesNotSkipEmptyReplacementPolicy pins the
+// attachment-removal security boundary: replacing the complete projection set
+// with an empty (non-nil) slice means every repository was removed from the
+// task's authorized set, and the running agent's old writable-path grants
+// must actually be revoked. A nil-vs-empty short-circuit that skips
+// preflight/install here would leave the old grant installed on the live
+// child even though the durable projection bookkeeping was updated to empty.
+func TestPrepareGitMetadataRebindDoesNotSkipEmptyReplacementPolicy(t *testing.T) {
+	mgr := &Manager{executorRegistry: NewExecutorRegistry(newTestRegistryLogger())}
+	runtime := &gitMetadataAttestingExecutor{MockExecutor: MockExecutor{name: executor.NameLocal}}
+	mgr.executorRegistry.Register(runtime)
+	execution := &AgentExecution{ID: "execution", RuntimeName: executor.NameLocal}
+
+	policyReq, err := mgr.prepareGitMetadataRebind(context.Background(), execution, "/workspace", []*worktree.GitMetadataProjection{})
+	if err != nil {
+		t.Fatalf("prepareGitMetadataRebind() error = %v", err)
+	}
+	if !runtime.attested {
+		t.Fatal("prepareGitMetadataRebind skipped preflight for an empty replacement projection set")
+	}
+	if policyReq == nil {
+		t.Fatal("prepareGitMetadataRebind returned a nil policy for an empty replacement projection set; the old grant would never be revoked")
+	}
+}
+
 func TestStandaloneGitMetadataPreflightRejectsLegacyCodexSandbox(t *testing.T) {
 	projection := newLinkedGitMetadataProjection(t)
 	codexHome := t.TempDir()

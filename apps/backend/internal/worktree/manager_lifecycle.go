@@ -300,6 +300,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		}
 		return nil, ErrReuseWorktreeUnavailable
 	}
+	wt.Reused = true
 	return wt, nil
 }
 
@@ -373,6 +374,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 					zap.String("repository_id", req.RepositoryID),
 					zap.String("task_id", req.TaskID),
 					zap.String("path", existing.Path))
+				existing.Reused = true
 				return existing, true, nil
 			}
 			m.logger.Warn("worktree directory invalid, recreating",
@@ -405,6 +407,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 					zap.String("session_id", req.SessionID),
 					zap.String("task_id", req.TaskID),
 					zap.String("path", existing.Path))
+				existing.Reused = true
 				return existing, true, nil
 			}
 			m.logger.Warn("worktree directory invalid, recreating",

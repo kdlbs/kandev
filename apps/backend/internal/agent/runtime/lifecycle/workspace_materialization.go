@@ -117,7 +117,10 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 			if refreshErr != nil {
 				failedCleanup, cleanupErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
 				m.failClosedMaterializedWorkspaceRepositoryClients(ctx, failedCleanup)
-				rollbackErr := m.rollbackCloneWorkspacePolicyRefreshes(ctx, refreshed)
+				rollbackErr := errors.Join(
+					rollbackWorkspaceRepositoryRescans(ctx, rescanned),
+					m.rollbackCloneWorkspacePolicyRefreshes(ctx, refreshed),
+				)
 				return nil, fmt.Errorf("refresh clone workspace policy for session %s: %w", execution.sessionID, errors.Join(refreshErr, cleanupErr, rollbackErr))
 			}
 			refreshed = append(refreshed, refresh)
@@ -419,6 +422,14 @@ func (m *Manager) rollbackCloneWorkspacePolicyRefresh(ctx context.Context, refre
 	execution.WorkspaceSourceRoots = append([]string(nil), refresh.oldRoots...)
 	execution.setRuntimeEnvironment(oldEnv)
 	execution.setMetadataValue("runtime_env", cloneStringMap(oldEnv))
+	// restoreCloneWorkspacePolicyChild reloads refresh.oldACP inside the
+	// restarted child via ACP LoadSession, but does not touch this field. If
+	// the forward refresh had started a brand-new ACP session (recorded into
+	// execution.ACPSessionID), leaving that value in place here would address
+	// prompts to a session the rolled-back child no longer has loaded.
+	if refresh.oldACP != "" {
+		execution.ACPSessionID = refresh.oldACP
+	}
 	execution.Status = v1.AgentStatusReady
 	return cause
 }

@@ -1412,7 +1412,7 @@ func gitMetadataProjectionForResumedWorktree(req *LaunchRequest, workspacePath s
 
 func resumedWorktreeCheckoutPath(taskRoot string, spec RepoLaunchSpec) (string, error) {
 	if spec.WorktreePath != "" {
-		return spec.WorktreePath, nil
+		return containedResumedWorktreePath(taskRoot, spec.WorktreePath, spec.RepositoryPath)
 	}
 	if spec.RepositoryPath == "" {
 		return "", errors.New(gitMetadataProjectionInvalid)
@@ -1429,6 +1429,25 @@ func resumedWorktreeCheckoutPath(taskRoot string, spec RepoLaunchSpec) (string, 
 		repoName += "-" + branchSlug
 	}
 	return filepath.Join(taskRoot, repoName), nil
+}
+
+// containedResumedWorktreePath validates a durable resumed WorktreePath
+// before it is trusted to resolve a Git metadata projection. A resumed path
+// that equals repositoryPath, or that is not strictly below taskRoot, would
+// otherwise bypass the linked-worktree containment check and let the source
+// checkout (or an unrelated directory) receive the task's Git metadata grant
+// and ACP root.
+func containedResumedWorktreePath(taskRoot, worktreePath, repositoryPath string) (string, error) {
+	cleanRoot := filepath.Clean(taskRoot)
+	cleanPath := filepath.Clean(worktreePath)
+	if repositoryPath != "" && cleanPath == filepath.Clean(repositoryPath) {
+		return "", errors.New(gitMetadataProjectionInvalid)
+	}
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New(gitMetadataProjectionInvalid)
+	}
+	return cleanPath, nil
 }
 
 // Launch launches a new agent for a task. Concurrent calls for the same

@@ -137,6 +137,14 @@ type Worktree struct {
 	// (e.g. missing patterns, traversal-rejected paths). Like CopiedFiles,
 	// this is in-memory only and read by the env preparer.
 	CopyFilesWarnings []string `json:"-"`
+
+	// Reused reports whether this call to Create returned an already-valid
+	// existing worktree unchanged, as opposed to creating or recreating the
+	// physical checkout. In-memory only (like CopiedFiles): callers that roll
+	// back a worktree on a later failure must never delete a worktree they
+	// did not create or modify, since it may still be a valid checkout owned
+	// by another session or execution.
+	Reused bool `json:"-"`
 }
 
 // CreateRequest contains the parameters for creating a new worktree.

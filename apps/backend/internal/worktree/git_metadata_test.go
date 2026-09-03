@@ -119,6 +119,19 @@ func TestResolveGitMetadataForRepositoryRejectsDifferentValidCommonDirectory(t *
 	}
 }
 
+func TestResolveGitMetadataForRepositoryRejectsCheckoutEqualToRepository(t *testing.T) {
+	// A task checkout must always be a distinct linked worktree. If a caller
+	// (by bug or forged durable state) passes the trusted repository's own
+	// path as checkoutPath, the self-comparison used to detect "is this a
+	// linked worktree" trivially matches; ResolveGitMetadataForRepository must
+	// still reject it rather than granting the source checkout a projection.
+	repository := initGitMetadataRepository(t)
+
+	if _, err := ResolveGitMetadataForRepository(repository, repository); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("ResolveGitMetadataForRepository error = %v, want rejection of checkoutPath == repositoryPath", err)
+	}
+}
+
 func TestGitMetadataProjectionRevalidateRejectsCommonDirectorySwap(t *testing.T) {
 	repositoryA := initGitMetadataRepository(t)
 	repositoryB := initGitMetadataRepository(t)

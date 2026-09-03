@@ -118,9 +118,11 @@ func (m *Manager) prepareGitMetadataRebind(ctx context.Context, execution *Agent
 	if err := validateGitMetadataProjections(projections); err != nil {
 		return nil, err
 	}
-	if len(projections) == 0 {
-		return nil, nil
-	}
+	// An empty (non-nil) projections slice is a real replacement: every
+	// repository was removed from the task's authorized set. It must still
+	// preflight and render the (empty-grant) policy so the running agent's
+	// old writable-path grants are actually revoked, not just the durable
+	// bookkeeping list. Only a nil slice means "no policy change requested".
 	return m.preflightGitMetadataRebind(ctx, execution, workspacePath, projections)
 }
 

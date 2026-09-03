@@ -84,10 +84,19 @@ func ResolveGitMetadataForRepository(checkoutPath, repositoryPath string) (*GitM
 	if projection.CommonDir != repository.CommonDir {
 		return nil, invalidGitMetadata(errors.New("checkout common directory does not match trusted repository"))
 	}
-	// A distinct task checkout must be a linked worktree in the trusted
-	// repository. A regular .git directory from a separately cloned repository
-	// would otherwise have no shared locking or cleanup relationship.
-	if projection.CheckoutPath != repository.CheckoutPath && projection.GitDir == projection.CommonDir {
+	// A task checkout must be a distinct linked worktree, never the source
+	// repository's own working tree. Without this check a caller that (by bug
+	// or forged durable state) passes checkoutPath == repositoryPath would
+	// receive a projection over the source checkout itself, granting Git
+	// metadata write access and an ACP root to the repository the task was
+	// cloned from.
+	if projection.CheckoutPath == repository.CheckoutPath {
+		return nil, invalidGitMetadata(errors.New("task checkout must not be the source repository"))
+	}
+	// A regular .git directory (not a linked worktree) here would otherwise
+	// have no shared locking or cleanup relationship with the trusted
+	// repository.
+	if projection.GitDir == projection.CommonDir {
 		return nil, invalidGitMetadata(errors.New("task checkout is not a trusted linked worktree"))
 	}
 	projection.TrustedCommonDir = repository.CommonDir
