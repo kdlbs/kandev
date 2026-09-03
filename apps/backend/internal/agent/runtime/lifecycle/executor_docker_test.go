@@ -142,8 +142,31 @@ func TestDockerExecutorCloneLaunchWiringUsesPathFreeRequirement(t *testing.T) {
 	if !strings.Contains(config.PrepareScript, "rev-parse --absolute-git-dir") {
 		t.Fatalf("normal Docker clone prepare script lacks in-container checkout attestation: %s", config.PrepareScript)
 	}
-	if strings.Contains(config.Credentials["CODEX_CONFIG"], "/host/") {
-		t.Fatalf("normal Docker clone wiring leaked a host path: %s", config.Credentials["CODEX_CONFIG"])
+}
+
+// TestPrepareRemoteRegularGitMetadataPolicyRendersOnlyInContainerPaths
+// exercises the actual CODEX_CONFIG-rendering code (buildContainerLaunchConfig
+// itself never transforms CODEX_CONFIG, so asserting against its untouched
+// pass-through value would be vacuous). It proves the rendered filesystem
+// policy grants exactly the in-container GitDir attested by the remote
+// resolver and never a host-looking path.
+func TestPrepareRemoteRegularGitMetadataPolicyRendersOnlyInContainerPaths(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		AgentConfig: agents.NewCodexACP(),
+		Env:         map[string]string{},
+	}
+	metadata := remoteRegularGitMetadata{CheckoutPath: dockerWorkspacePath, GitDir: dockerWorkspacePath + "/.git"}
+
+	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata); err != nil {
+		t.Fatalf("prepareRemoteRegularGitMetadataPolicy: %v", err)
+	}
+
+	rendered := req.Env["CODEX_CONFIG"]
+	if !strings.Contains(rendered, metadata.GitDir) {
+		t.Fatalf("rendered CODEX_CONFIG missing the in-container GitDir grant %q: %s", metadata.GitDir, rendered)
+	}
+	if strings.Contains(rendered, "/host/") {
+		t.Fatalf("rendered CODEX_CONFIG leaked a host path: %s", rendered)
 	}
 }
 

@@ -17,7 +17,7 @@ import (
 
 func TestTaskWorkspaceSourceRootsExcludesMaterializationSourceRepository(t *testing.T) {
 	sourceRepository := t.TempDir()
-	taskCheckout := t.TempDir()
+	taskCheckout := canonicalTempDir(t)
 	projection := &worktree.GitMetadataProjection{CheckoutPath: taskCheckout}
 
 	roots := taskWorkspaceSourceRoots(taskCheckout, nil, []*worktree.GitMetadataProjection{projection})

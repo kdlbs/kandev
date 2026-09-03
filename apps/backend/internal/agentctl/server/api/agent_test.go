@@ -359,7 +359,6 @@ func TestHandleWSNewSessionStartsAndConfiguresMCPAttachmentAttempt(t *testing.T)
 
 func TestHandleWSNewSessionForwardsServerOwnedAdditionalDirectories(t *testing.T) {
 	log := newTestLogger()
-	sourceCheckout := t.TempDir()
 	workspace := t.TempDir()
 	apiRoot := filepath.Join(workspace, "api")
 	if err := os.Mkdir(apiRoot, 0o755); err != nil {
@@ -378,11 +377,13 @@ func TestHandleWSNewSessionForwardsServerOwnedAdditionalDirectories(t *testing.T
 	if response := s.handleWSNewSession(context.Background(), msg); response.Type != ws.MessageTypeResponse {
 		t.Fatalf("response type = %q, want response", response.Type)
 	}
+	// The exact-equality check below is itself the leak guard: any directory
+	// this server does not own (e.g. a materialization source checkout the
+	// lifecycle layer deliberately excludes from WorkspaceSourceRoots) would
+	// fail it, since it asserts the complete forwarded set rather than mere
+	// membership.
 	if !slices.Equal(capture.directories, []string{workspace, apiRoot}) {
 		t.Fatalf("additional directories = %v, want %v", capture.directories, []string{workspace, apiRoot})
-	}
-	if slices.Contains(capture.directories, sourceCheckout) {
-		t.Fatalf("source checkout was exposed through ACP additional directories: %v", capture.directories)
 	}
 }
 

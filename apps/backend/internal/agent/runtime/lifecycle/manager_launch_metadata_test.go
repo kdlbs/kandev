@@ -452,6 +452,11 @@ func TestLaunchResumeMultiRepoWorktreeRebuildsGitMetadataProjections(t *testing.
 	if !checkouts[checkoutA] || !checkouts[checkoutB] {
 		t.Fatalf("projection checkouts = %#v, want %q and %q", checkouts, checkoutA, checkoutB)
 	}
+	commonDirs := gitMetadataCommonDirsByCheckout(backend.lastRequest.GitMetadataProjections)
+	if commonDirs[checkoutA] != filepath.Join(sourceA, ".git") || commonDirs[checkoutB] != filepath.Join(sourceB, ".git") {
+		t.Fatalf("projection commonDirs = %#v, want %q bound to %q and %q bound to %q",
+			commonDirs, checkoutA, filepath.Join(sourceA, ".git"), checkoutB, filepath.Join(sourceB, ".git"))
+	}
 }
 
 func TestLaunchResumeMultiRepoWorktreeUsesDurableCheckoutPaths(t *testing.T) {
@@ -510,6 +515,9 @@ func TestLaunchResumeMultiRepoWorktreeUsesDurableCheckoutPaths(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, backend.lastRequest)
 	require.ElementsMatch(t, []string{checkoutA, checkoutB}, gitMetadataCheckoutPaths(backend.lastRequest.GitMetadataProjections))
+	commonDirs := gitMetadataCommonDirsByCheckout(backend.lastRequest.GitMetadataProjections)
+	require.Equal(t, filepath.Join(sourceA, ".git"), commonDirs[checkoutA])
+	require.Equal(t, filepath.Join(sourceB, ".git"), commonDirs[checkoutB])
 }
 
 // TestLaunchResumeMultiRepoWorktreeRejectsForeignDurableCheckoutBeforeStart
@@ -581,6 +589,18 @@ func gitMetadataCheckoutPaths(projections []*worktree.GitMetadataProjection) []s
 		paths = append(paths, projection.CheckoutPath)
 	}
 	return paths
+}
+
+// gitMetadataCommonDirsByCheckout maps each projection's CheckoutPath to its
+// CommonDir, so multi-repository tests can assert that per-repository
+// projection derivation binds every checkout to its own repository's Git
+// directory rather than merely proving the checkout set is complete.
+func gitMetadataCommonDirsByCheckout(projections []*worktree.GitMetadataProjection) map[string]string {
+	commonDirs := make(map[string]string, len(projections))
+	for _, projection := range projections {
+		commonDirs[projection.CheckoutPath] = projection.CommonDir
+	}
+	return commonDirs
 }
 
 type gitMetadataResumeCreateInstanceExecutor struct {

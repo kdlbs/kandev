@@ -254,6 +254,9 @@ func TestWorktreePreparer_MultiRepo_CreatesWorktreePerRepo(t *testing.T) {
 			t.Errorf("invalid Git metadata projection for %s: %v", w.RepositoryID, err)
 		}
 	}
+	if res.Worktrees[0].GitMetadataProjection == nil || res.Worktrees[1].GitMetadataProjection == nil {
+		t.Fatal("missing Git metadata projection reported above; skipping distinct-GitDir check")
+	}
 	if res.Worktrees[0].GitMetadataProjection.GitDir == res.Worktrees[1].GitMetadataProjection.GitDir {
 		t.Fatal("independent repositories must receive distinct owned Git metadata directories")
 	}
