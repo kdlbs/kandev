@@ -120,6 +120,16 @@ type FilesystemPolicyRule struct {
 type FilesystemPolicy struct {
 	Name  string
 	Rules []FilesystemPolicyRule
+	// SkipHostFilesystemValidation must be set when the target Codex process
+	// runs on a different host than this backend process (SSH, Sprites, and
+	// other remote executors). The legacy-sandbox disk check below can only
+	// ever inspect this backend's own filesystem, so for a remote target it
+	// validates the wrong host: it neither detects a real conflicting config.toml
+	// on the remote host, nor may it reject a launch over an unrelated file
+	// that merely happens to exist locally. The env-payload-based check (which
+	// inspects the CODEX_CONFIG value actually forwarded to the target host)
+	// remains authoritative and is never skipped.
+	SkipHostFilesystemValidation bool
 }
 
 // FilesystemPolicyAgent is an optional agent capability for runtimes that

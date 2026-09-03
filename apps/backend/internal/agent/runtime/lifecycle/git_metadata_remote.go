@@ -140,7 +140,7 @@ func validateRemoteFilesystemPolicyAgent(req *ExecutorCreateRequest) error {
 	for key, value := range req.Env {
 		env[key] = value
 	}
-	return policyAgent.ApplyFilesystemPolicy(env, agents.FilesystemPolicy{Name: gitMetadataPolicyName})
+	return policyAgent.ApplyFilesystemPolicy(env, agents.FilesystemPolicy{Name: gitMetadataPolicyName, SkipHostFilesystemValidation: true})
 }
 
 // prepareRemoteRegularGitMetadataPolicy merges a server-authored filesystem
@@ -179,7 +179,10 @@ func remoteRegularGitMetadataFilesystemPolicy(metadata ...remoteRegularGitMetada
 		seen[item.GitDir] = struct{}{}
 		rules = append(rules, agents.FilesystemPolicyRule{Path: item.GitDir, Access: agents.FilesystemAccessWrite})
 	}
-	return agents.FilesystemPolicy{Name: gitMetadataPolicyName, Rules: rules}
+	// This checkout is materialized inside a clone-based executor's own
+	// container or remote host, never the backend's own filesystem. A
+	// legacy-sandbox disk check run from here would inspect the wrong host.
+	return agents.FilesystemPolicy{Name: gitMetadataPolicyName, Rules: rules, SkipHostFilesystemValidation: true}
 }
 
 func remoteGitMetadataRuntimeEnv(req *ExecutorCreateRequest) (map[string]string, error) {

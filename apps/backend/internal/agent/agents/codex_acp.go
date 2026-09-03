@@ -213,8 +213,10 @@ func applyCodexFilesystemPolicy(env map[string]string, policy FilesystemPolicy) 
 	if env == nil {
 		return errors.New("filesystem policy environment is unavailable")
 	}
-	if err := rejectLegacyCodexSandbox(env); err != nil {
-		return err
+	if !policy.SkipHostFilesystemValidation {
+		if err := rejectLegacyCodexSandbox(env); err != nil {
+			return err
+		}
 	}
 	config, err := codexConfigFromEnvironment(env)
 	if err != nil {
@@ -263,13 +265,32 @@ func renderCodexFilesystemPolicy(policy FilesystemPolicy) (map[string]any, error
 	}, nil
 }
 
+// resolveCodexHostHome finds the effective host home directory used to
+// locate a legacy on-disk Codex sandbox config, preferring the forwarded
+// environment's HOME, then the current process's HOME, then the OS user
+// home directory. It fails closed rather than resolving against an
+// unrelated working directory when none of these are available.
+func resolveCodexHostHome(env map[string]string) (string, error) {
+	if home := env["HOME"]; home != "" {
+		return home, nil
+	}
+	if home := os.Getenv("HOME"); home != "" {
+		return home, nil
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home, nil
+	}
+	return "", errors.New("unable to determine Codex home directory to validate sandbox configuration")
+}
+
 func rejectLegacyCodexSandbox(env map[string]string) error {
 	home := env["CODEX_HOME"]
 	if home == "" {
-		home = filepath.Join(env["HOME"], ".codex")
-	}
-	if home == "" {
-		return nil
+		effectiveHome, err := resolveCodexHostHome(env)
+		if err != nil {
+			return err
+		}
+		home = filepath.Join(effectiveHome, ".codex")
 	}
 	contents, err := os.ReadFile(filepath.Join(home, "config.toml"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -289,11 +310,19 @@ func rejectLegacyCodexSandbox(env map[string]string) error {
 }
 
 func codexConfigFromEnvironment(env map[string]string) (map[string]any, error) {
-	config := make(map[string]any)
 	if env["CODEX_CONFIG"] == "" {
-		return config, nil
+		return make(map[string]any), nil
 	}
+	config := make(map[string]any)
 	if err := json.Unmarshal([]byte(env["CODEX_CONFIG"]), &config); err != nil {
+		return nil, errors.New("unable to validate Codex session configuration")
+	}
+	if config == nil {
+		// A JSON "null" payload unmarshals successfully but leaves config nil.
+		// Reject explicitly: a nil map reads as empty but panics on the first
+		// write in mergeCodexConfig, and "no config" must never be confused
+		// with "and here is a config with nothing in it" this deep into a
+		// path malformed or forged input could reach.
 		return nil, errors.New("unable to validate Codex session configuration")
 	}
 	return config, nil
