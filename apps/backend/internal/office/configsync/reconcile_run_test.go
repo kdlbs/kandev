@@ -13,6 +13,7 @@ import (
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
@@ -129,6 +130,113 @@ func TestReconcile_RemovingUpstreamFileDeletesEntity(t *testing.T) {
 	agents, err := repo.ListAgentInstances(ctx, "ws-1")
 	require.NoError(t, err)
 	assert.Empty(t, agents)
+}
+
+// fakeSessionTerminator records every TerminateAllForAgent call so a test
+// can assert config sync's deletion sweep cascades session termination the
+// same way AgentService.DeleteAgentInstance does for the manual path.
+type fakeSessionTerminator struct {
+	calls   []string
+	failIDs map[string]bool
+}
+
+func (f *fakeSessionTerminator) TerminateAllForAgent(_ context.Context, agentInstanceID, _ string) error {
+	f.calls = append(f.calls, agentInstanceID)
+	if f.failIDs[agentInstanceID] {
+		return assert.AnError
+	}
+	return nil
+}
+
+func TestReconcile_DeletionSweepCascadesSessionTermination(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/agents"] = []github.RepoContentEntry{fileEntry("cfg/agents/ceo.yml")}
+	fg.files["cfg/agents/ceo.yml"] = []byte("name: ceo\nrole: manager\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	term := &fakeSessionTerminator{}
+	runner.SetSessionTerminator(term)
+	ctx := context.Background()
+	_, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	assert.Empty(t, term.calls, "no deletion happened yet")
+
+	agents, err := repo.ListAgentInstances(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	ceoID := agents[0].ID
+
+	fg.dirs["cfg/agents"] = []github.RepoContentEntry{}
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ceo"}, result.Deleted)
+	assert.Equal(t, []string{ceoID}, term.calls,
+		"a config-sync deletion sweep must cascade-terminate the deleted agent's sessions, "+
+			"mirroring AgentService.DeleteAgentInstance's cascade for the manual delete path")
+}
+
+func TestReconcile_DeletionSweepSessionTerminationFailureWarnsButDoesNotFailRun(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/agents"] = []github.RepoContentEntry{fileEntry("cfg/agents/ceo.yml")}
+	fg.files["cfg/agents/ceo.yml"] = []byte("name: ceo\nrole: manager\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	ctx := context.Background()
+	_, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+
+	agents, err := repo.ListAgentInstances(ctx, "ws-1")
+	require.NoError(t, err)
+	ceoID := agents[0].ID
+
+	term := &fakeSessionTerminator{failIDs: map[string]bool{ceoID: true}}
+	runner.SetSessionTerminator(term)
+	fg.dirs["cfg/agents"] = []github.RepoContentEntry{}
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err, "the entity delete already committed; a cascade failure must not fail the run")
+	assert.Equal(t, []string{"ceo"}, result.Deleted)
+	assert.Contains(t, strings.Join(result.Warnings, "\n"), "terminating its sessions failed")
+}
+
+func TestReconcile_ForeignCollisionLoserWarnsFetchedButNotAppliedForReportsTo(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+	ctx := context.Background()
+
+	// An unmanaged agent already holds the name "lead" before this run.
+	require.NoError(t, repo.CreateAgentInstance(ctx, &models.AgentInstance{
+		WorkspaceID: "ws-1", Name: "lead", Role: "manager",
+	}))
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/agents"] = []github.RepoContentEntry{
+		fileEntry("cfg/agents/lead.yml"),
+		fileEntry("cfg/agents/dev.yml"),
+	}
+	// "lead" collides with the unmanaged agent above (decisionForeign);
+	// "dev" declares reports_to: lead, so its reference must be warned as
+	// "fetched but not applied", not "not managed by this sync"
+	// (AC-OFFICE-CONFIG-SYNC-003.10b) — lead's file was fetched this run,
+	// it just lost the name collision.
+	fg.files["cfg/agents/lead.yml"] = []byte("name: lead\nrole: manager\n")
+	fg.files["cfg/agents/dev.yml"] = []byte("name: dev\nrole: contributor\nreports_to: lead\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+
+	warnings := strings.Join(result.Warnings, "\n")
+	assert.Contains(t, warnings, `reports_to "lead" was fetched but not applied`)
+	assert.NotContains(t, warnings, `reports_to "lead" is not managed by this sync`)
 }
 
 func TestReconcile_WalkFailureRecordsFailureAndReturnsError(t *testing.T) {
@@ -391,6 +499,44 @@ func TestReconcile_UnreadableSkillMDExemptsOnlyThatEntityFromDeletionWhenPathMat
 	require.NoError(t, err)
 	require.Len(t, skills, 1)
 	assert.Equal(t, "flaky", skills[0].Slug)
+}
+
+// TestReconcile_SkillDirectoryDisappearingWithinRunExemptsFromDeletion covers
+// the race between the round-1 skills/ listing (which still shows the
+// directory) and the round-2 listing of that same directory (which 404s):
+// unlike a genuine removal, where the parent listing itself stops naming
+// the directory, this must be treated as unreadable and exempt the skill
+// from this run's deletion sweep rather than deleting a still-real,
+// previously managed skill.
+func TestReconcile_SkillDirectoryDisappearingWithinRunExemptsFromDeletion(t *testing.T) {
+	repo, store := newReconcileTestRepo(t)
+	seedTestConfig(t, store, "ws-1", "cfg")
+
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/reviewer")}
+	fg.dirs["cfg/skills/reviewer"] = []github.RepoContentEntry{fileEntry("cfg/skills/reviewer/SKILL.md")}
+	fg.files["cfg/skills/reviewer/SKILL.md"] = []byte("---\nname: reviewer\n---\nBody.\n")
+
+	runner := NewRunner(fg, nil, repo, store)
+	ctx := context.Background()
+	result, err := runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"reviewer"}, result.Created)
+
+	// The parent listing still names "reviewer" as an existing directory
+	// entry, but listing the directory itself now 404s.
+	delete(fg.dirs, "cfg/skills/reviewer")
+
+	result, err = runner.Reconcile(ctx, newRunnerTestConfig("ws-1", "cfg"))
+	require.NoError(t, err)
+	assert.Empty(t, result.Deleted, "reviewer must survive: a within-run disappearance is a race, not a confirmed removal")
+	assert.NotEmpty(t, result.Warnings)
+
+	skills, err := repo.ListSkills(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Len(t, skills, 1)
+	assert.Equal(t, "reviewer", skills[0].Slug)
 }
 
 func TestReconcile_OrdinarySkillDeletionIsNotSuppressedByDefault(t *testing.T) {

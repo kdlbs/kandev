@@ -1400,6 +1400,9 @@ func wireOfficeSvcsDependencies(
 	officeSessionTerm := orchestratorSvc.OfficeSessionTerminator()
 	services.OfficeSvcs.Dashboard.SetSessionTerminator(officeSessionTerm)
 	services.OfficeSvcs.Agents.SetSessionTerminator(officeSessionTerm)
+	if services.OfficeSvcs.ConfigSync != nil {
+		services.OfficeSvcs.ConfigSync.SetSessionTerminator(officeSessionTerm)
+	}
 	// Wire the failure notifier so reassignments auto-dismiss the
 	// prior (task, agent) inbox entry.
 	services.OfficeSvcs.Dashboard.SetFailureNotifier(services.Office)

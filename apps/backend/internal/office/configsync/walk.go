@@ -124,12 +124,18 @@ type kindPlan struct {
 
 // skillPlan is one skill directory's selected file paths, found while
 // listing round 2, before any content fetch is issued. skillMDPath is empty
-// when the directory has no SKILL.md.
+// when the directory has no SKILL.md. skillMDUnread is set instead, in
+// place of an empty skillMDPath, when the directory itself vanished between
+// round 1 (which just listed it as an existing entry) and this listing: a
+// same-run disappearance is a race, not proof the directory never had a
+// SKILL.md, so it is carried through fetchSkills exactly like an unreadable
+// SKILL.md rather than as "genuinely empty" (AC-OFFICE-CONFIG-SYNC-002.6a).
 type skillPlan struct {
-	dirName     string
-	dirPath     string
-	skillMDPath string
-	refPaths    []string
+	dirName       string
+	dirPath       string
+	skillMDPath   string
+	skillMDUnread *unreadableFile
+	refPaths      []string
 }
 
 // candidateCount is the total number of files planFlatKinds and planSkills
@@ -331,12 +337,22 @@ func (w *walker) planOneSkill(ctx context.Context, cfg *Config, dir DirEntry) (s
 	sp := skillPlan{dirName: dir.Name, dirPath: dir.Path}
 
 	entries, err := w.list(ctx, cfg, dir.Path)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	switch {
+	case err != nil && errors.Is(err, ErrNotFound):
+		// The parent listing (planSkills) just returned dir as an existing
+		// directory entry this same run; a 404 re-listing it now is the
+		// directory disappearing mid-run, not proof it never had a
+		// SKILL.md. Recorded the same way fetchContent records a
+		// disappeared file, so skillDeletionExemptions exempts it instead
+		// of the deletion sweep reading "no SKILL.md" as "never managed".
+		sp.skillMDUnread = &unreadableFile{path: dir.Path, reason: err.Error()}
+	case err != nil:
 		return skillPlan{}, &walkFailure{reason: fmt.Sprintf("list %s: %v", dir.Path, err)}
-	}
-	for _, e := range entries {
-		if e.IsFile && e.Name == skillDefinitionName {
-			sp.skillMDPath = e.Path
+	default:
+		for _, e := range entries {
+			if e.IsFile && e.Name == skillDefinitionName {
+				sp.skillMDPath = e.Path
+			}
 		}
 	}
 
@@ -358,7 +374,9 @@ func (w *walker) fetchSkills(ctx context.Context, cfg *Config, plans []skillPlan
 	skills := make([]skillFiles, 0, len(plans))
 	for _, sp := range plans {
 		sf := skillFiles{dirName: sp.dirName, dirPath: sp.dirPath}
-		if sp.skillMDPath != "" {
+		if sp.skillMDUnread != nil {
+			sf.skillMDUnread = sp.skillMDUnread
+		} else if sp.skillMDPath != "" {
 			content, unread, ferr := w.fetchContent(ctx, cfg, sp.skillMDPath)
 			if ferr != nil {
 				return nil, ferr

@@ -254,6 +254,51 @@ func TestService_PurgeForWorkspaceDeletion_ReturnsLockStillHeld(t *testing.T) {
 	}
 }
 
+// TestService_SetConfigForWorkspace_RefusesAfterConcurrentWorkspaceDeletion
+// proves the race a same-name config row would otherwise resurrect: a
+// SetConfigForWorkspace call queued behind the same per-workspace lock as an
+// in-flight PurgeForWorkspaceDeletion must not upsert a config row once the
+// deletion has completed, even though PurgeForWorkspaceDeletion's own unlock
+// has not been called yet by the caller's later teardown steps (mirroring
+// office/service.DeleteWorkspace holding it through DeleteWorkspaceData).
+func TestService_SetConfigForWorkspace_RefusesAfterConcurrentWorkspaceDeletion(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.SetConfigForWorkspace(ctx, "ws-1", testSetConfigRequest("cfg"))
+	require.NoError(t, err)
+
+	unlock, err := svc.PurgeForWorkspaceDeletion(ctx, "ws-1")
+	require.NoError(t, err)
+	require.NotNil(t, unlock)
+
+	setDone := make(chan error, 1)
+	go func() {
+		_, err := svc.SetConfigForWorkspace(context.Background(), "ws-1", testSetConfigRequest("cfg"))
+		setDone <- err
+	}()
+
+	select {
+	case <-setDone:
+		t.Fatal("SetConfigForWorkspace returned before PurgeForWorkspaceDeletion's unlock was invoked")
+	case <-time.After(100 * time.Millisecond):
+		// Still blocked, as expected.
+	}
+
+	unlock()
+
+	select {
+	case err := <-setDone:
+		require.ErrorIs(t, err, ErrWorkspaceGone)
+	case <-time.After(2 * time.Second):
+		t.Fatal("SetConfigForWorkspace did not complete after unlock was called")
+	}
+
+	cfg, err := svc.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Nil(t, cfg, "no config row must be resurrected for the deleted workspace")
+}
+
 func TestService_SyncDueConfigs_SkipsPollDisabledAndNotDue(t *testing.T) {
 	svc, _, fg := newTestService(t)
 	ctx := context.Background()

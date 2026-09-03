@@ -169,10 +169,12 @@ const maxReportsToHops = 50
 // place. A name outside idsByKey (an agent not managed by this run's fetched
 // set), a self-reference, or a cycle resolves to empty with a warning instead
 // of a target ID — allowExternalManagers is always false. unappliedKeys is
-// buildKindsFetch's agent deletion-sweep exemption set (kindExemptions):
-// manifest entity keys whose file was unreadable or failed to parse this run,
-// reused here to distinguish that case from a target that names no agent at
-// all (AC-OFFICE-CONFIG-SYNC-003.10b).
+// the union of buildKindsFetch's agent deletion-sweep exemption set
+// (kindExemptions: manifest entity keys whose file was unreadable or failed
+// to parse this run) and this pass's own decisionForeign losers (fetched
+// but left untouched because an unmanaged entity already held the name),
+// reused here to distinguish "fetched but not applied" from a target that
+// names no agent at all (AC-OFFICE-CONFIG-SYNC-003.10b).
 func resolveAgentReportsTo(
 	ctx context.Context, repo *sqlite.Repository, reportsTo map[string]string,
 	idsByKey map[string]string, unappliedKeys map[string]bool,
@@ -201,9 +203,10 @@ func resolveAgentReportsTo(
 // against this run's fetched set, returning the target entity ID to write
 // (empty when the field must be cleared) and, when clearing is not simply
 // "no declaration", the warning explaining why. AC-OFFICE-CONFIG-SYNC-003.10b
-// requires a target that was fetched but not applied (its file was unreadable
-// or failed to parse this run) to be warned distinctly from a target that
-// names no agent anywhere; unappliedKeys carries that signal.
+// requires a target that was fetched but not applied this run (its file was
+// unreadable or failed to parse, or it lost a same-name collision to an
+// unmanaged entity) to be warned distinctly from a target that names no
+// agent anywhere; unappliedKeys carries that signal.
 func resolveOneAgentReportsTo(key string, reportsTo, idsByKey map[string]string, unappliedKeys map[string]bool) (targetID, warning string) {
 	target, declared := reportsTo[key]
 	switch {
@@ -219,20 +222,31 @@ func resolveOneAgentReportsTo(key string, reportsTo, idsByKey map[string]string,
 	}
 	if unappliedKeys[target] {
 		return "", fmt.Sprintf(
-			"agent %q: reports_to %q was fetched but not applied this run (its file was unreadable or failed to parse); leaving unset",
+			"agent %q: reports_to %q was fetched but not applied this run (its file was unreadable, failed to parse, "+
+				"or it lost a name collision to an unmanaged agent); leaving unset",
 			key, target)
 	}
 	return "", fmt.Sprintf("agent %q: reports_to %q is not managed by this sync; leaving unset", key, target)
 }
 
 // detectReportsToCycle walks the reports_to chain starting at target,
-// bounded by maxReportsToHops, and reports whether it loops back to key.
+// bounded by maxReportsToHops, and reports whether it loops back to key. A
+// revisit of any node other than key means the chain has wandered into a
+// cycle that does not involve key (someone else's problem, resolved when
+// their own reports_to is checked) and is not a cycle for key, so only
+// cur == key ends the walk positively; hitting the hop cap without
+// returning to key is not a cycle either, mirroring office/config's
+// reportsToCycleExists (import.go), which checks node == target the same
+// way.
 func detectReportsToCycle(key, target string, reportsTo map[string]string) bool {
-	visited := map[string]bool{key: true}
+	visited := map[string]bool{}
 	cur := target
 	for range maxReportsToHops {
-		if visited[cur] {
+		if cur == key {
 			return true
+		}
+		if visited[cur] {
+			return false
 		}
 		visited[cur] = true
 		next, ok := reportsTo[cur]
@@ -241,5 +255,5 @@ func detectReportsToCycle(key, target string, reportsTo map[string]string) bool 
 		}
 		cur = next
 	}
-	return true
+	return false
 }

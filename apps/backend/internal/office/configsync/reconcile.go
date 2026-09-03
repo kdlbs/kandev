@@ -51,10 +51,22 @@ type kindApplyResult struct {
 	// (the agent kind's reports_to second pass) can resolve names to IDs
 	// without a second read.
 	IDsByKey map[string]string
+	// ForeignKeys names every key this run fetched but left untouched
+	// because an unmanaged entity already held it (decisionForeign). The
+	// agent kind's reports_to second pass folds this into unappliedKeys so
+	// a reference to one of these names gets AC-OFFICE-CONFIG-SYNC-003.10b's
+	// "fetched but not applied" warning instead of the generic "not managed
+	// by this sync" one a name that appears nowhere gets.
+	ForeignKeys map[string]bool
+	// DeletedIDs carries the entity ID alongside every key in Deleted, in
+	// the same order, for the agent kind's post-delete session-termination
+	// cascade (Runner.terminateDeletedAgentSessions) — the only kind that
+	// needs the ID of what it just deleted rather than only its name.
+	DeletedIDs []string
 }
 
 func newKindApplyResult() *kindApplyResult {
-	return &kindApplyResult{IDsByKey: map[string]string{}}
+	return &kindApplyResult{IDsByKey: map[string]string{}, ForeignKeys: map[string]bool{}}
 }
 
 // applyKind runs the six-case table for one kind. fetched is the
@@ -193,6 +205,7 @@ func applyKindCreatesAndUpdates[P comparable](
 		case decisionForeign:
 			res.Warnings = append(res.Warnings, fmt.Sprintf(
 				"%s %q: an unmanaged entity already uses this name; leaving both untouched", ops.kind, fe.Key))
+			res.ForeignKeys[fe.Key] = true
 		case decisionNew:
 			id, err := applyCreate(ctx, writer, store, ops, workspaceID, fe)
 			if err != nil {
@@ -249,6 +262,7 @@ func applyKindDeletions[P comparable](
 				return err
 			}
 			res.Deleted = append(res.Deleted, m.EntityKey)
+			res.DeletedIDs = append(res.DeletedIDs, m.EntityID)
 		}
 	}
 	return nil

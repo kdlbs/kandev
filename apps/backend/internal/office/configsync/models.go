@@ -43,6 +43,14 @@ var ErrInvalidConfig = errors.New("invalid config sync config")
 // has no config sync configuration.
 var ErrNotConfigured = errors.New("config sync is not configured for this workspace")
 
+// ErrWorkspaceGone is returned by SetConfigForWorkspace when the workspace
+// finished PurgeForWorkspaceDeletion before this call reached the front of
+// the per-workspace lock. Without this check the write proceeds anyway (the
+// config row has no foreign key to catch it) and resurrects a config row,
+// and the poller a workspace no longer exists for, for a workspace the rest
+// of Office has already forgotten.
+var ErrWorkspaceGone = errors.New("workspace no longer exists")
+
 // Config is the per-workspace config sync configuration plus the status of
 // the most recent sync attempt (written by the poller and force syncs).
 type Config struct {

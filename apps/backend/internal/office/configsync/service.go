@@ -45,6 +45,14 @@ type Service struct {
 	// its own lock map — see the "Scheduling and concurrency" section of
 	// docs/specs/office/system-design/config-sync.md).
 	locks sync.Map // workspaceID → *sync.Mutex
+
+	// deleted marks a workspaceID once PurgeForWorkspaceDeletion has run for
+	// it, while still holding that workspace's lock. A SetConfigForWorkspace
+	// call already queued behind the same lock resumes after the workspace
+	// is gone; without this check it would upsert a config row for a
+	// workspace_id nothing else in Office still has (the table carries no
+	// foreign key), which the poller would then retry forever.
+	deleted sync.Map // workspaceID → struct{}
 }
 
 // NewService creates a config sync service over the given Runner and Store.
@@ -54,6 +62,13 @@ func NewService(runner *Runner, store *Store, log *logger.Logger) *Service {
 		store:  store,
 		logger: log.WithFields(zap.String("component", "office-configsync-service")),
 	}
+}
+
+// SetSessionTerminator wires the office session terminator onto the
+// underlying Runner. Called by the composition root; see
+// Runner.SetSessionTerminator.
+func (s *Service) SetSessionTerminator(t SessionTerminator) {
+	s.runner.SetSessionTerminator(t)
 }
 
 func (s *Service) workspaceLock(workspaceID string) *sync.Mutex {
@@ -94,6 +109,9 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()
+	if _, gone := s.deleted.Load(workspaceID); gone {
+		return nil, ErrWorkspaceGone
+	}
 	return s.store.UpsertConfigForWorkspace(ctx, workspaceID, req)
 }
 
@@ -137,6 +155,13 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 // workspace_id that no longer exists. The caller must defer the returned
 // unlock until its own teardown of this workspace's data is complete. A
 // non-nil error returns a nil unlock func with the lock already released.
+//
+// It also tombstones workspaceID in s.deleted before returning: a queued
+// SyncWorkspace call re-reads the config row after acquiring the lock and
+// is already safe (GetConfigForWorkspace returns nil, ErrNotConfigured), but
+// SetConfigForWorkspace has no read to fail — without the tombstone it would
+// simply upsert a fresh config row for a workspace nothing else in Office
+// still has.
 func (s *Service) PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) (unlock func(), err error) {
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
@@ -144,6 +169,7 @@ func (s *Service) PurgeForWorkspaceDeletion(ctx context.Context, workspaceID str
 		lock.Unlock()
 		return nil, err
 	}
+	s.deleted.Store(workspaceID, struct{}{})
 	return lock.Unlock, nil
 }
 

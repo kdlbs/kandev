@@ -65,6 +65,10 @@ func (h *Handler) httpSetConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{errorKey: err.Error()})
 		return
 	}
+	if errors.Is(err, ErrWorkspaceGone) {
+		c.JSON(http.StatusNotFound, gin.H{errorKey: err.Error()})
+		return
+	}
 	if err != nil {
 		h.internalError(c, "failed to save config sync config", err)
 		return

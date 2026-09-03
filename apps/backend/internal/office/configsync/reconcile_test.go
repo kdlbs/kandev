@@ -178,6 +178,9 @@ func TestApplyKind_ForeignKeyLeavesBothUntouchedWithWarning(t *testing.T) {
 	assert.Empty(t, res.Updated)
 	require.Len(t, res.Warnings, 1)
 	assert.Equal(t, "hand-made", entities.byID[unmanagedID].Projection.Value)
+	assert.True(t, res.ForeignKeys["ceo"],
+		"a Foreign-collision loser must be recorded so the agent kind's reports_to pass can distinguish it "+
+			"from a name that appears nowhere (AC-OFFICE-CONFIG-SYNC-003.10b)")
 
 	entries, err := store.ListManifest(ctx, "ws-1")
 	require.NoError(t, err)

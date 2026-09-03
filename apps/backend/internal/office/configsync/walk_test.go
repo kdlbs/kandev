@@ -270,6 +270,37 @@ func TestWalk_SkillWithoutSkillMDHasNilSkillMD(t *testing.T) {
 	}
 }
 
+// TestWalk_SkillDirectoryDisappearingBetweenListingsIsUnreadableNotEmpty
+// covers the race between planSkills' round-1 listing of skills/ (which
+// just returned "reviewer" as an existing directory entry) and planOneSkill's
+// round-2 listing of that same directory: a 404 there is the directory
+// vanishing mid-run, not proof it never had a SKILL.md, so it must be
+// recorded as unreadable (which exempts it from the deletion sweep) rather
+// than as a genuinely empty skill (which does not).
+func TestWalk_SkillDirectoryDisappearingBetweenListingsIsUnreadableNotEmpty(t *testing.T) {
+	fg := newFakeGitHub()
+	fg.dirs["cfg"] = []github.RepoContentEntry{}
+	fg.dirs["cfg/skills"] = []github.RepoContentEntry{dirEntry("cfg/skills/reviewer")}
+	// cfg/skills/reviewer is deliberately never registered in fg.dirs, so
+	// listing it 404s even though the parent listing just proved it exists.
+
+	w := newWalker(fg, nil, DefaultLimits)
+	result, ferr := w.Walk(context.Background(), testGitHubConfig())
+	if ferr != nil {
+		t.Fatalf("Walk() error = %v, want nil", ferr)
+	}
+	if len(result.skills) != 1 {
+		t.Fatalf("skills = %+v, want 1 entry", result.skills)
+	}
+	sf := result.skills[0]
+	if sf.skillMD != nil {
+		t.Errorf("skillMD = %+v, want nil (unreadable, not fetched)", sf.skillMD)
+	}
+	if sf.skillMDUnread == nil {
+		t.Fatal("skillMDUnread = nil, want set: a disappeared directory must be treated as unreadable, not genuinely empty")
+	}
+}
+
 func TestWalk_UnreadableFlatFilesAreSortedByPath(t *testing.T) {
 	// AC-OFFICE-CONFIG-SYNC-004.5a: two runs over the same repository must
 	// record warnings in the same order, which requires result.unreadable

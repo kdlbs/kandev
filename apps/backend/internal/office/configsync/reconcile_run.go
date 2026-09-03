@@ -32,12 +32,24 @@ func recordWriteContext(ctx context.Context) (context.Context, context.CancelFun
 	return context.WithTimeout(context.WithoutCancel(ctx), recordWriteTimeout)
 }
 
+// SessionTerminator cascades termination of an office agent's task sessions
+// when config sync's deletion sweep removes the agent instance, mirroring
+// AgentService.DeleteAgentInstance's own cascade for the manual delete path.
+// Declared locally, as agents.SessionTerminator's signature but not its
+// type, so this package gains no import to office/agents; the composition
+// root wires the real implementation via Runner.SetSessionTerminator. Optional
+// — when nil, a deletion sweep proceeds without flipping any session rows.
+type SessionTerminator interface {
+	TerminateAllForAgent(ctx context.Context, agentInstanceID, reason string) error
+}
+
 // Runner executes config sync runs: walk the configured repository, parse
 // and reconcile every kind, and record the outcome.
 type Runner struct {
-	walker *walker
-	repo   *sqlite.Repository
-	store  *Store
+	walker      *walker
+	repo        *sqlite.Repository
+	store       *Store
+	sessionTerm SessionTerminator
 }
 
 // NewRunner builds a Runner over the given repository read surfaces and
@@ -46,6 +58,14 @@ type Runner struct {
 // names.
 func NewRunner(gh GitHubClientProvider, gl GitLabClientProvider, repo *sqlite.Repository, store *Store) *Runner {
 	return &Runner{walker: newWalker(gh, gl, DefaultLimits), repo: repo, store: store}
+}
+
+// SetSessionTerminator wires the office session terminator. Called by the
+// composition root once the office/agents service (which owns the real
+// implementation) is constructed; optional, so wiring order the other way
+// (Runner before agents) never blocks construction.
+func (r *Runner) SetSessionTerminator(t SessionTerminator) {
+	r.sessionTerm = t
 }
 
 // Reconcile runs one sync for cfg.WorkspaceID and records the outcome
@@ -172,6 +192,7 @@ func (r *Runner) apply(
 	if err := r.reversePass(ctx, workspaceID, kf, byKind, kr); err != nil {
 		return &SyncResult{Warnings: partialWarnings(phases, kr)}, err
 	}
+	r.terminateDeletedAgentSessions(ctx, kr.agent)
 
 	result := &SyncResult{}
 	// AC-OFFICE-CONFIG-SYNC-004.5a's within-phase tiebreak for warnings naming
@@ -228,7 +249,9 @@ func (r *Runner) forwardPass(
 	if kr.agent, err = applyKindCreatesOnly(ctx, writer, r.store, agentOps(ctx, r.repo, workspaceID), workspaceID, kf.agent, byKind[kindAgent]); err != nil {
 		return kr, err
 	}
-	reportsToWarnings, reportsToErr := resolveAgentReportsTo(ctx, r.repo, kf.reportsTo, kr.agent.IDsByKey, kf.agentExempt)
+	reportsToWarnings, reportsToErr := resolveAgentReportsTo(
+		ctx, r.repo, kf.reportsTo, kr.agent.IDsByKey, unionKeySets(kf.agentExempt, kr.agent.ForeignKeys),
+	)
 	phases.reference = append(phases.reference, reportsToWarnings...)
 	if reportsToErr != nil {
 		return kr, reportsToErr
@@ -264,6 +287,28 @@ func (r *Runner) reversePass(ctx context.Context, workspaceID string, kf kindsFe
 		return err
 	}
 	return applySkillsDeletesOnly(ctx, r.repo, r.store, workspaceID, kf.skill, byKind[kindSkill], kf.skillExempt, kf.skillCoarse, kr.skill)
+}
+
+// terminateDeletedAgentSessions cascades session termination for every
+// agent this run's deletion sweep removed, mirroring
+// AgentService.DeleteAgentInstance's cascade for the manual delete path
+// (the deletion sweep writes to the repository directly and does not go
+// through that method). Runs after reversePass's transactions have all
+// committed, so a concurrent EnsureSessionForAgent cannot resurrect a row
+// this call is about to terminate sessions for. A termination failure is
+// folded into the agent kind's warnings rather than failing the run: the
+// deletion itself already committed, and the run's other three kinds still
+// need to report their own outcomes.
+func (r *Runner) terminateDeletedAgentSessions(ctx context.Context, agentResult *kindApplyResult) {
+	if r.sessionTerm == nil {
+		return
+	}
+	for _, id := range agentResult.DeletedIDs {
+		if err := r.sessionTerm.TerminateAllForAgent(ctx, id, "agent_instance_deleted"); err != nil {
+			agentResult.Warnings = append(agentResult.Warnings, fmt.Sprintf(
+				"agent %q: deleted, but terminating its sessions failed: %v", id, err))
+		}
+	}
 }
 
 func appendResult(dst *SyncResult, src *kindApplyResult) {
@@ -329,6 +374,19 @@ func kindExemptions(
 		check(p)
 	}
 	return exemptKeys, coarseExempt
+}
+
+// unionKeySets returns a new set containing every key present in either
+// input, leaving both inputs unmodified.
+func unionKeySets(a, b map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(a)+len(b))
+	for k := range a {
+		out[k] = true
+	}
+	for k := range b {
+		out[k] = true
+	}
+	return out
 }
 
 // unreadableWarnings renders one AC-OFFICE-CONFIG-SYNC-002.4a/002.6a warning

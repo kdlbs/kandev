@@ -2,6 +2,7 @@ package configsync
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -90,6 +91,27 @@ func TestDetectReportsToCycle(t *testing.T) {
 
 	chain := map[string]string{"a": "b", "b": "c"}
 	assert.False(t, detectReportsToCycle("a", "b", chain), "a -> b -> c terminates without looping back to a")
+}
+
+func TestDetectReportsToCycle_DownstreamCycleNotInvolvingKeyIsNotACycleForKey(t *testing.T) {
+	// a -> b -> c -> b: b and c cycle with each other, but a is never
+	// revisited. Resolving a's own reports_to must not be flagged; b's own
+	// resolution (starting at "b") independently catches the real cycle.
+	tree := map[string]string{"a": "b", "b": "c", "c": "b"}
+	assert.False(t, detectReportsToCycle("a", "b", tree),
+		"a's chain wanders into b/c's own cycle without ever returning to a")
+	assert.True(t, detectReportsToCycle("b", "c", tree), "b -> c -> b does loop back to b")
+}
+
+func TestDetectReportsToCycle_HopCapExhaustionIsNotACycle(t *testing.T) {
+	// A genuinely acyclic chain deeper than maxReportsToHops must not be
+	// misreported as cyclic; the cap is defensive, not a promise every
+	// legitimate chain fits under it.
+	tree := make(map[string]string, maxReportsToHops+5)
+	for i := range maxReportsToHops + 4 {
+		tree[fmt.Sprintf("n%d", i)] = fmt.Sprintf("n%d", i+1)
+	}
+	assert.False(t, detectReportsToCycle("n0", "n1", tree), "a long acyclic chain must not be reported as a cycle")
 }
 
 func TestAgentOps_CreateSeedsDefaultAgentIDAndRecordsManifest(t *testing.T) {
