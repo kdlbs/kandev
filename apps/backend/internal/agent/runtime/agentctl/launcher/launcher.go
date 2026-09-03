@@ -245,11 +245,22 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
 	}
 	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
-	l.cmd.SysProcAttr = buildSysProcAttr()
+	l.cmd.SysProcAttr = buildSysProcAttr(l.startupConfig.AgentSurvivalEnabled)
 
-	pipeWrite, err := setupLivenessPipe(l.cmd)
-	if err != nil {
-		return err
+	// Kill-path #1 (design 01's kill-paths list, "parent-liveness pipe"):
+	// skipped entirely when the capability is engaged for this launch, for
+	// the same AC-EXECUTORS-SURVIVAL-001.2 reason buildSysProcAttr above
+	// omits Pdeathsig -- both fire on any parent death, including SIGKILL,
+	// independent of anything Stop() does.
+	var pipeWrite *os.File
+	if l.startupConfig.AgentSurvivalEnabled {
+		clearInheritedLivenessPipeEnv(l.cmd)
+	} else {
+		var err error
+		pipeWrite, err = setupLivenessPipe(l.cmd)
+		if err != nil {
+			return err
+		}
 	}
 
 	stdout, err := l.cmd.StdoutPipe()
@@ -322,8 +333,20 @@ func (l *Launcher) performHandshake(ctx context.Context, nonce string) (string, 
 	return token, nil
 }
 
-// Stop gracefully shuts down the agentctl subprocess.
+// Stop gracefully shuts down the agentctl subprocess. Kill-path #5 (design
+// 01's kill-paths list, "registered cleanup"): when the agent-survival
+// capability is engaged for this launch, Stop is the sole thing the
+// backend's registered shutdown cleanup calls (see provider.go), and
+// AC-EXECUTORS-SURVIVAL-001.1 requires that a graceful backend shutdown
+// "shall not issue a stop" to the control server or its instances -- so
+// Stop becomes a no-op rather than closing the (already-unarmed) pipe and
+// sending SIGTERM.
 func (l *Launcher) Stop(ctx context.Context) error {
+	if l.startupConfig.AgentSurvivalEnabled {
+		l.logger.Info("agent-survival capability engaged; leaving agentctl running instead of stopping it")
+		return nil
+	}
+
 	l.mu.Lock()
 
 	if l.cmd == nil || l.cmd.Process == nil {
