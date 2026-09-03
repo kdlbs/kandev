@@ -6,6 +6,7 @@ import type {
   PlanComment,
   WalkthroughComment,
 } from "@/lib/state/slices/comments";
+import { WebSocketRequestError } from "@/lib/ws/request-error";
 
 // ---------------------------------------------------------------------------
 // Mocks — declared before imports that use them
@@ -13,8 +14,11 @@ import type {
 
 const mockRequest = vi.fn();
 const mockAppendToQueue = vi.fn();
+const mockQueueMessage = vi.fn();
+const mockSendMessageRequest = vi.fn();
 const mockMarkCommentsSent = vi.fn();
 const mockAddMessage = vi.fn();
+const mockSetTaskPlanComments = vi.fn();
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 let mockStoreState: Record<string, unknown> = {};
 
@@ -24,6 +28,11 @@ vi.mock("@/lib/ws/connection", () => ({
 
 vi.mock("@/lib/api/domains/queue-api", () => ({
   appendToQueue: (...args: unknown[]) => mockAppendToQueue(...args),
+  queueMessage: (...args: unknown[]) => mockQueueMessage(...args),
+}));
+
+vi.mock("@/hooks/use-message-handler", () => ({
+  sendMessageRequest: (...args: unknown[]) => mockSendMessageRequest(...args),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -52,17 +61,36 @@ import { useRunComment } from "./use-run-comment";
 // ---------------------------------------------------------------------------
 
 function makeStoreState(sessionState: string, planMode = false, foregroundActivity?: string) {
+  const selected = {
+    id: "sess-1",
+    task_id: "task-1",
+    state: sessionState,
+    foreground_activity: foregroundActivity,
+    is_primary: false,
+  };
+  const primary = {
+    id: "primary-session",
+    task_id: "task-1",
+    state: "WAITING_FOR_INPUT",
+    is_primary: true,
+  };
   return {
     taskSessions: {
       items: {
-        "sess-1": { state: sessionState, foreground_activity: foregroundActivity },
+        "sess-1": selected,
+        "primary-session": primary,
         "other-session": { state: "RUNNING", foreground_activity: "generating" },
       },
     },
+    taskSessionsByTask: { itemsByTaskId: { "task-1": [primary, selected] } },
     chatInput: {
       planModeBySessionId: { "sess-1": planMode },
     },
+    taskPlans: {
+      commentsMigrationStatusByTaskId: { "task-1": "complete" },
+    },
     addMessage: mockAddMessage,
+    setTaskPlanComments: mockSetTaskPlanComments,
   };
 }
 
@@ -86,7 +114,10 @@ function makePlanComment(text = "split step 2"): PlanComment {
   return {
     id: "c-2",
     source: "plan",
-    sessionId: "sess-1",
+    sessionId: "",
+    taskId: "task-1",
+    planId: "plan-1",
+    version: 2,
     text,
     selectedText: "step 2",
     createdAt: new Date().toISOString(),
@@ -339,32 +370,142 @@ describe("useRunComment — edge cases", () => {
     expect(mockRequest).not.toHaveBeenCalled();
     expect(mockAppendToQueue).not.toHaveBeenCalled();
   });
+});
 
-  it("includes plan_mode when plan mode is enabled", async () => {
-    mockStoreState = makeStoreState("WAITING_FOR_INPUT", true);
+describe("useRunComment — plan routing", () => {
+  beforeEach(setup);
+
+  it("routes a plan comment to the current primary with one guarded ref", async () => {
+    mockStoreState = makeStoreState("WAITING_FOR_INPUT", false);
     const { result } = renderCommentHook();
 
     await act(async () => {
       await result.current.runComment(makePlanComment());
     });
 
-    expect(mockRequest).toHaveBeenCalledWith(
-      "message.add",
-      expect.objectContaining({ plan_mode: true }),
-      10000,
+    expect(mockSendMessageRequest).toHaveBeenCalledWith({
+      taskId: "task-1",
+      resolvedSessionId: "primary-session",
+      clientMessageId: expect.any(String),
+      finalMessage: "",
+      modelToSend: undefined,
+      planMode: true,
+      planCommentRefs: [{ id: "c-2", version: 2 }],
+      requirePrimarySession: true,
+    });
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  });
+
+  it("rejects Run until legacy plan comments finish migrating", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    state.taskPlans.commentsMigrationStatusByTaskId["task-1"] = "failed";
+    mockStoreState = state;
+    const { result } = renderCommentHook();
+
+    await expect(result.current.runComment(makePlanComment())).rejects.toMatchObject({
+      code: "plan-comment-migration-pending",
+    });
+    expect(mockSendMessageRequest).not.toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
+  });
+
+  it("queues a busy primary as a distinct idempotent entry instead of appending", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    (state.taskSessions.items["primary-session"] as { state: string }).state = "RUNNING";
+    (state.taskSessionsByTask.itemsByTaskId["task-1"][0] as { state: string }).state = "RUNNING";
+    mockStoreState = state;
+    const { result } = renderCommentHook();
+
+    await act(async () => {
+      await result.current.runComment(makePlanComment());
+    });
+
+    expect(mockQueueMessage).toHaveBeenCalledWith({
+      session_id: "primary-session",
+      task_id: "task-1",
+      client_queue_id: expect.any(String),
+      content: "",
+      plan_mode: true,
+      plan_comment_refs: [{ id: "c-2", version: 2 }],
+      require_primary_session: true,
+    });
+    expect(mockAppendToQueue).not.toHaveBeenCalled();
+    expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  });
+
+  it("re-resolves the primary at action time", async () => {
+    const { result } = renderCommentHook();
+    const changed = makeStoreState("WAITING_FOR_INPUT");
+    const replacement = {
+      id: "new-primary",
+      task_id: "task-1",
+      state: "WAITING_FOR_INPUT",
+      is_primary: true,
+    };
+    changed.taskSessions.items["primary-session"].is_primary = false;
+    const sessions = changed.taskSessions.items as Record<
+      string,
+      { id?: string; task_id?: string; state: string; is_primary?: boolean }
+    >;
+    sessions["new-primary"] = replacement;
+    changed.taskSessionsByTask.itemsByTaskId["task-1"] = [replacement];
+    mockStoreState = changed;
+
+    await act(async () => {
+      await result.current.runComment(makePlanComment());
+    });
+
+    expect(mockSendMessageRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ resolvedSessionId: "new-primary" }),
     );
   });
+});
 
-  it("omits has_review_comments for plan comments", async () => {
+describe("useRunComment — plan availability failures", () => {
+  beforeEach(setup);
+
+  it("rejects Run when the task has no primary", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    state.taskSessions.items["primary-session"].is_primary = false;
+    state.taskSessionsByTask.itemsByTaskId["task-1"] = [];
+    mockStoreState = state;
     const { result } = renderCommentHook();
 
-    await act(async () => {
-      await result.current.runComment(makePlanComment());
+    await expect(result.current.runComment(makePlanComment())).rejects.toMatchObject({
+      code: "no-primary-session",
     });
-
-    const payload = mockRequest.mock.calls[0][1];
-    expect(payload.has_review_comments).toBeUndefined();
+    expect(mockSendMessageRequest).not.toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
   });
+
+  it("rejects Run when the primary is terminal", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    (state.taskSessions.items["primary-session"] as { state: string }).state = "COMPLETED";
+    (state.taskSessionsByTask.itemsByTaskId["task-1"][0] as { state: string }).state = "COMPLETED";
+    mockStoreState = state;
+    const { result } = renderCommentHook();
+
+    await expect(result.current.runComment(makePlanComment())).rejects.toMatchObject({
+      code: "primary-session-unavailable",
+    });
+  });
+
+  it("normalizes a stale-primary rejection for inline retry feedback", async () => {
+    mockSendMessageRequest.mockRejectedValueOnce(
+      new WebSocketRequestError("Primary session changed", "primary_session_changed"),
+    );
+    const { result } = renderCommentHook();
+
+    await expect(result.current.runComment(makePlanComment())).rejects.toMatchObject({
+      code: "primary-session-changed",
+    });
+    expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  });
+});
+
+describe("useRunComment — session delivery failures", () => {
+  beforeEach(setup);
 
   it("throws when WS client is null and does not mark comment sent", async () => {
     mockGetWebSocketClient.mockReturnValueOnce(null as unknown as { request: typeof mockRequest });

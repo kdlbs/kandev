@@ -177,6 +177,7 @@ export function PreviewSessionBody({ session, taskId }: { session: TaskSession; 
         hasReviewComments: !!payload.reviewComments?.length,
         attachments: payload.attachments,
         entityReferences: payload.entityReferences,
+        planCommentRefs: payload.planCommentRefs,
       });
     },
     [taskId, session.id],

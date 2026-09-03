@@ -250,7 +250,6 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
       id: "plan-comments",
       label: t("task:planCommentCount", { count: params.planComments.length }),
       comments: params.planComments,
-      onRemove: params.handleClearPlanComments,
       onOpen: params.addPlan,
     });
   }

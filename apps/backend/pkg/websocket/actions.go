@@ -89,6 +89,10 @@ const (
 	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
 	ActionTaskPlanRevert        = "task.plan.revert"
 	ActionTaskPlanImplement     = "task.plan.implementation_started"
+	ActionTaskPlanCommentsList  = "task.plan.comments.list"
+	ActionTaskPlanCommentCreate = "task.plan.comments.create"
+	ActionTaskPlanCommentUpdate = "task.plan.comments.update"
+	ActionTaskPlanCommentDelete = "task.plan.comments.delete"
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
@@ -189,6 +193,7 @@ const (
 	ActionTaskPlanDeleted                = "task.plan.deleted"
 	ActionTaskPlanRevisionCreated        = "task.plan.revision.created"
 	ActionTaskPlanReverted               = "task.plan.reverted"
+	ActionTaskPlanCommentsChanged        = "task.plan.comments.changed"
 	ActionTaskWalkthroughGet             = "task.walkthrough.get"
 	ActionTaskWalkthroughDelete          = "task.walkthrough.delete"
 	ActionTaskWalkthroughCreated         = "task.walkthrough.created"
@@ -690,13 +695,15 @@ const (
 
 // Error codes
 const (
-	ErrorCodeBadRequest    = "BAD_REQUEST"
-	ErrorCodeNotFound      = "NOT_FOUND"
-	ErrorCodeInternalError = "INTERNAL_ERROR"
-	ErrorCodeUnauthorized  = "UNAUTHORIZED"
-	ErrorCodeForbidden     = "FORBIDDEN"
-	ErrorCodeValidation    = "VALIDATION_ERROR"
-	ErrorCodeConflict      = "CONFLICT"
-	ErrorCodeUnavailable   = "UNAVAILABLE"
-	ErrorCodeUnknownAction = "UNKNOWN_ACTION"
+	ErrorCodeBadRequest            = "BAD_REQUEST"
+	ErrorCodeNotFound              = "NOT_FOUND"
+	ErrorCodeInternalError         = "INTERNAL_ERROR"
+	ErrorCodeUnauthorized          = "UNAUTHORIZED"
+	ErrorCodeForbidden             = "FORBIDDEN"
+	ErrorCodeValidation            = "VALIDATION_ERROR"
+	ErrorCodeConflict              = "CONFLICT"
+	ErrorCodeUnavailable           = "UNAVAILABLE"
+	ErrorCodeUnknownAction         = "UNKNOWN_ACTION"
+	ErrorCodePlanCommentsChanged   = "plan_comments_changed"
+	ErrorCodePrimarySessionChanged = "primary_session_changed"
 )

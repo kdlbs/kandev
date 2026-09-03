@@ -173,6 +173,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)
+	r.migrate.Apply("task_plans.comments_revision", `ALTER TABLE task_plans ADD COLUMN comments_revision INTEGER NOT NULL DEFAULT 0`)
 
 	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
 	// non-constant default on ADD COLUMN, so the column is added nullable and

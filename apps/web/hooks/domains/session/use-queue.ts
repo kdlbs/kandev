@@ -16,6 +16,7 @@ import {
 import type { QueueMessageParams } from "@/lib/api/domains/queue-api";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { TaskPlanCommentRef } from "@/lib/types/http";
 
 const EMPTY_ENTRIES: QueuedMessage[] = [];
 
@@ -37,6 +38,9 @@ export type QueueMessageInput = {
   attachments?: MessageAttachment[];
   entityReferences?: EntityReference[];
   contextFilesMeta?: QueueMessageParams["context_files"];
+  clientQueueId?: string;
+  planCommentRefs?: TaskPlanCommentRef[];
+  requirePrimarySession?: boolean;
 };
 
 /** Selectors over the queue slice for one session. */
@@ -210,6 +214,9 @@ function useQueueActions({
       attachments,
       entityReferences,
       contextFilesMeta,
+      clientQueueId,
+      planCommentRefs,
+      requirePrimarySession,
     }: QueueMessageInput) => {
       if (!sessionId) return;
       setQueueLoading(sessionId, true);
@@ -222,6 +229,9 @@ function useQueueActions({
           plan_mode: planMode,
           attachments,
           entity_references: entityReferences,
+          ...(clientQueueId ? { client_queue_id: clientQueueId } : {}),
+          ...(planCommentRefs?.length ? { plan_comment_refs: planCommentRefs } : {}),
+          ...(requirePrimarySession ? { require_primary_session: true } : {}),
           ...(contextFilesMeta ? { context_files: contextFilesMeta } : {}),
         });
         await refetch(sessionId);

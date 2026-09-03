@@ -3,12 +3,15 @@ import type { PlanComment } from "@/lib/state/slices/comments";
 import { describe, expect, it, vi } from "vitest";
 import { usePlanSelection } from "./use-plan-selection";
 
-const PRIMARY_SESSION_ID = "session-primary";
-const SECONDARY_SESSION_ID = "session-secondary";
+const TASK_ID = "task-1";
+const OTHER_TASK_ID = "task-2";
 
 const primaryComment: PlanComment = {
   id: "primary-comment",
-  sessionId: PRIMARY_SESSION_ID,
+  sessionId: "",
+  taskId: TASK_ID,
+  planId: "plan-1",
+  version: 1,
   source: "plan",
   text: "Keep this feedback",
   selectedText: "Primary",
@@ -18,15 +21,18 @@ const primaryComment: PlanComment = {
   status: "pending",
 };
 
-describe("plan selection session ownership", () => {
-  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.5
-  it("closes comment editing state when the active session changes", async () => {
+describe("plan selection task ownership", () => {
+  it("keeps comment editing state when only the selected session changes", async () => {
     const setEditingCommentId = vi.fn();
     const view = renderHook(
-      ({ sessionId, comments }) => usePlanSelection(sessionId, { comments, setEditingCommentId }),
+      ({ taskId, sessionId, comments }) => {
+        void sessionId;
+        return usePlanSelection(taskId, { comments, setEditingCommentId });
+      },
       {
         initialProps: {
-          sessionId: PRIMARY_SESSION_ID,
+          taskId: TASK_ID,
+          sessionId: "session-primary",
           comments: [primaryComment],
         },
       },
@@ -38,7 +44,12 @@ describe("plan selection session ownership", () => {
     expect(view.result.current.textSelection?.text).toBe(primaryComment.selectedText);
     setEditingCommentId.mockClear();
 
-    view.rerender({ sessionId: SECONDARY_SESSION_ID, comments: [] });
+    view.rerender({ taskId: TASK_ID, sessionId: "session-secondary", comments: [primaryComment] });
+
+    expect(view.result.current.textSelection?.text).toBe(primaryComment.selectedText);
+    expect(setEditingCommentId).not.toHaveBeenCalled();
+
+    view.rerender({ taskId: OTHER_TASK_ID, sessionId: "session-other", comments: [] });
 
     await waitFor(() => expect(view.result.current.textSelection).toBeNull());
     expect(setEditingCommentId).toHaveBeenLastCalledWith(null);

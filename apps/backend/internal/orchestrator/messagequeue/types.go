@@ -104,6 +104,9 @@ var (
 	// drained, removed, merged, or newly queued since the client's snapshot.
 	// The reorder is rejected atomically with no partial position rewrite.
 	ErrQueueChanged = errors.New("queue changed during reorder")
+	// ErrQueueIDConflict is returned when a caller-owned queue ID is replayed
+	// with different admission inputs.
+	ErrQueueIDConflict = errors.New("client queue id is already used")
 	// ErrTaskInactive means a lifecycle prompt could not be accepted because
 	// its task was deleted or archived before the queue transaction claimed it.
 	ErrTaskInactive = errors.New("queue task is inactive")

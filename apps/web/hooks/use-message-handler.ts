@@ -10,12 +10,13 @@ import type {
 } from "@/components/task/chat/chat-input-container";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { PlanComment } from "@/lib/state/slices/comments";
-import { toBlockquote } from "@/lib/state/slices/comments/format";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { CustomPrompt, Message } from "@/lib/types/http";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { AppState } from "@/lib/state/store";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { TaskPlanCommentRef } from "@/lib/types/http";
+import { planCommentAdmissionConflict, toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import {
   collectPromptReferenceExpansions,
   formatPromptReferenceExpansions,
@@ -29,27 +30,14 @@ import { t } from "@/lib/i18n";
 export function buildDocumentContext(
   activeDocument: ActiveDocument | null,
   planModeEnabled: boolean,
-  planComments?: PlanComment[],
 ): string {
   if (!activeDocument) return "";
 
   if (activeDocument.type === "plan") {
     if (!planModeEnabled) return "";
 
-    let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the get_task_plan_kandev MCP tool to understand the context before responding.\nAny plan modifications should use the update_task_plan_kandev MCP tool.`;
-
-    if (planComments && planComments.length > 0) {
-      context += `\n\nUser comments on the plan:\n`;
-      for (const c of planComments) {
-        if (c.selectedText) {
-          context += "```\n" + c.selectedText + "\n```\n";
-        }
-        context += toBlockquote(c.text) + "\n\n";
-      }
-    }
-
-    context += `\n</kandev-system>`;
-    return context;
+    // i18n-exempt: agent-facing prompt sent verbatim to the model, never rendered.
+    return `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the get_task_plan_kandev MCP tool to understand the context before responding.\nAny plan modifications should use the update_task_plan_kandev MCP tool.\n</kandev-system>`;
   }
 
   // i18n-exempt: agent-facing prompt sent verbatim to the model, never rendered.
@@ -169,6 +157,8 @@ type SendMessagePayload = {
   attachments?: MessageAttachment[];
   contextFilesMeta?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entityReferences?: EntityReference[];
+  planCommentRefs?: TaskPlanCommentRef[];
+  requirePrimarySession?: boolean;
 };
 
 type MessageListResponse = { messages?: Message[] };
@@ -252,6 +242,8 @@ export async function sendMessageRequest(
     attachments,
     contextFilesMeta,
     entityReferences,
+    planCommentRefs,
+    requirePrimarySession,
   } = payload;
   const hasAttachments = attachments && attachments.length > 0;
   const stableMessageId = clientMessageId ?? generateUUID();
@@ -266,6 +258,8 @@ export async function sendMessageRequest(
     ...(hasAttachments && { attachments }),
     ...(contextFilesMeta && { context_files: contextFilesMeta }),
     ...(entityReferences && { entity_references: entityReferences }),
+    ...(planCommentRefs?.length && { plan_comment_refs: planCommentRefs }),
+    ...(requirePrimarySession && { require_primary_session: true }),
   };
 
   const request = () =>
@@ -312,6 +306,92 @@ function buildQueueAttachments(attachments?: MessageAttachment[]) {
   }));
 }
 
+function normalizePlanCommentSendError(
+  error: unknown,
+  taskId: string,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+): unknown {
+  const conflict = planCommentAdmissionConflict(error);
+  if (!conflict) return error;
+  if (conflict.snapshot) storeApi.getState().setTaskPlanComments(taskId, conflict.snapshot);
+  return conflict.code === "plan_comments_changed"
+    ? new MessageSendError("plan-comments-changed", t("task:planCommentsChangedRetry"))
+    : new MessageSendError("primary-session-changed", t("task:primarySessionChangedRetry"));
+}
+
+function buildContextFilesMetadata(contextFiles: ContextFile[]) {
+  const realFiles = contextFiles.filter(
+    (file) => !file.path.startsWith("prompt:") && file.path !== "plan:context",
+  );
+  if (realFiles.length === 0) return undefined;
+  return realFiles.map((file) => ({
+    path: file.path,
+    name: file.name,
+    ...(file.isDirectory !== undefined ? { is_directory: file.isDirectory } : {}),
+  }));
+}
+
+async function deliverComposedMessage({
+  payload,
+  taskId,
+  resolvedSessionId,
+  finalMessage,
+  modelToSend,
+  planModeEnabled,
+  hasPendingClarification,
+  planCommentRefs,
+  contextFilesMeta,
+  inputMode,
+  queue,
+  storeApi,
+}: {
+  payload: ChatSubmitPayload;
+  taskId: string;
+  resolvedSessionId: string;
+  finalMessage: string;
+  modelToSend: string | undefined;
+  planModeEnabled: boolean;
+  hasPendingClarification: boolean;
+  planCommentRefs: TaskPlanCommentRef[];
+  contextFilesMeta: ReturnType<typeof buildContextFilesMetadata>;
+  inputMode: SessionInputMode;
+  queue: ReturnType<typeof useQueue>["queue"];
+  storeApi: ReturnType<typeof useAppStoreApi>;
+}) {
+  try {
+    if (hasPendingClarification || inputMode === "queue") {
+      await queue({
+        taskId,
+        content: finalMessage,
+        model: modelToSend,
+        planMode: planModeEnabled,
+        attachments: buildQueueAttachments(payload.attachments),
+        entityReferences: payload.entityReferences,
+        ...(planCommentRefs.length > 0 ? { clientQueueId: generateUUID(), planCommentRefs } : {}),
+        ...(contextFilesMeta ? { contextFilesMeta } : {}),
+      });
+      return;
+    }
+
+    const created = await sendMessageRequest({
+      taskId,
+      resolvedSessionId,
+      clientMessageId: generateUUID(),
+      finalMessage,
+      modelToSend,
+      planMode: planModeEnabled,
+      hasReviewComments: !!payload.reviewComments?.length,
+      attachments: payload.attachments,
+      contextFilesMeta,
+      entityReferences: payload.entityReferences,
+      planCommentRefs,
+    });
+    if (created?.id && created.session_id) storeApi.getState().addMessage(created);
+  } catch (error) {
+    throw normalizePlanCommentSendError(error, taskId, storeApi);
+  }
+}
+
 export function useMessageHandler({
   resolvedSessionId,
   taskId,
@@ -330,7 +410,7 @@ export function useMessageHandler({
   const buildFinalMessage = useCallback(
     (message: string, inlineMentions?: ContextFile[], inlineTaskMentions?: TaskMentionData[]) => {
       const allContextFiles = [...contextFiles, ...(inlineMentions || [])];
-      const documentContext = buildDocumentContext(activeDocument, planModeEnabled, planComments);
+      const documentContext = buildDocumentContext(activeDocument, planModeEnabled);
       const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
       const taskMentionsContext = inlineTaskMentions?.length
         ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
@@ -340,7 +420,7 @@ export function useMessageHandler({
         allContextFiles,
       };
     },
-    [contextFiles, activeDocument, planModeEnabled, planComments, prompts, storeApi],
+    [contextFiles, activeDocument, planModeEnabled, prompts, storeApi],
   );
 
   const handleSendMessage = useCallback(
@@ -360,51 +440,23 @@ export function useMessageHandler({
         payload.inlineTaskMentions,
       );
       const modelToSend = activeModel && activeModel !== sessionModel ? activeModel : undefined;
-      const realFiles = allContextFiles.filter(
-        (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
-      );
-      const contextFilesMeta =
-        realFiles.length > 0
-          ? realFiles.map((f) => ({
-              path: f.path,
-              name: f.name,
-              ...(f.isDirectory !== undefined ? { is_directory: f.isDirectory } : {}),
-            }))
-          : undefined;
-
+      const planCommentRefs = payload.planCommentRefs ?? toTaskPlanCommentRefs(planComments);
+      const contextFilesMeta = buildContextFilesMetadata(allContextFiles);
       const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
-      if (hasPendingClarification || inputMode === "queue") {
-        const queueAttachments = buildQueueAttachments(payload.attachments);
-        await queue({
-          taskId,
-          content: finalMessage,
-          model: modelToSend,
-          planMode: planModeEnabled,
-          attachments: queueAttachments,
-          entityReferences: payload.entityReferences,
-          ...(contextFilesMeta ? { contextFilesMeta } : {}),
-        });
-        return;
-      }
-
-      // Add the returned message to the store directly so the chat updates
-      // even if the session.message.added broadcast is missed (subscription
-      // gap, dropped frame, etc.). addMessage is idempotent on id.
-      const created = await sendMessageRequest({
+      await deliverComposedMessage({
+        payload,
         taskId,
         resolvedSessionId,
-        clientMessageId: generateUUID(),
         finalMessage,
         modelToSend,
-        planMode: planModeEnabled,
-        hasReviewComments: !!payload.reviewComments?.length,
-        attachments: payload.attachments,
+        planModeEnabled,
+        hasPendingClarification,
+        planCommentRefs,
         contextFilesMeta,
-        entityReferences: payload.entityReferences,
+        inputMode,
+        queue,
+        storeApi,
       });
-      if (created && created.id && created.session_id) {
-        storeApi.getState().addMessage(created);
-      }
     },
     [
       resolvedSessionId,
@@ -416,6 +468,7 @@ export function useMessageHandler({
       queue,
       buildFinalMessage,
       storeApi,
+      planComments,
     ],
   );
 

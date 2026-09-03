@@ -37,6 +37,31 @@ describe("buildSubmitMessage agent message comments", () => {
   });
 });
 
+describe("buildSubmitMessage plan comment ownership", () => {
+  it("leaves task-owned plan comments out of client-formatted Markdown", () => {
+    const result = buildSubmitMessage({
+      message: "Please continue.",
+      pendingPRFeedback: [],
+      planComments: [
+        {
+          id: "plan-comment-1",
+          sessionId: "",
+          taskId: "task-1",
+          planId: "plan-1",
+          version: 2,
+          source: "plan",
+          text: "Split this step.",
+          selectedText: "Large step",
+          createdAt: "2026-09-02T00:00:00Z",
+          status: "pending",
+        },
+      ],
+    });
+
+    expect(result).toBe("Please continue.");
+  });
+});
+
 describe("shouldRenderChatStatusBar", () => {
   it("removes empty taskless status chrome when its auto-scroll control is hidden", () => {
     expect(

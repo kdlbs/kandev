@@ -101,6 +101,7 @@ const (
 	TaskPlanDeleted         = "task_plan.deleted"
 	TaskPlanRevisionCreated = "task_plan.revision.created"
 	TaskPlanReverted        = "task_plan.reverted"
+	TaskPlanCommentsChanged = "task_plan.comments.changed"
 )
 
 // Event types for task walkthroughs (agent-authored guided code tours)

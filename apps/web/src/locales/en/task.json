@@ -1948,5 +1948,18 @@
   "uploadedTo": "Uploaded to {{path}}",
   "failedToUploadFile": "Failed to upload file",
   "uploadPartiallyFailed_one": "{{count}} file failed to upload",
-  "uploadPartiallyFailed_other": "{{count}} files failed to upload"
+  "uploadPartiallyFailed_other": "{{count}} files failed to upload",
+  "failedToLoadPlanComments": "Could not load plan comments. Try again.",
+  "failedToSavePlanComment": "Could not save this plan comment. Try again.",
+  "failedToDeletePlanComment": "Could not delete this plan comment. Try again.",
+  "failedToRunPlanComment": "Could not run this plan comment. Try again.",
+  "noPrimarySessionForPlanComment": "No primary session is available. Start a session or make one primary to use Run.",
+  "primarySessionUnavailableForPlanComment": "The primary session cannot accept input. Start or choose an available primary session.",
+  "planCommentNotReadyToRun": "This plan comment is still being saved. Try Run again.",
+  "planCommentsChangedRetry": "The plan comments changed. Review them and send again.",
+  "primarySessionChangedRetry": "The primary session changed. Try Run again.",
+  "restoringSavedPlanComments": "Restoring saved plan comments...",
+  "planCommentMigrationFailed": "Some saved plan comments could not be restored.",
+  "planCommentMigrationNeedsPlan": "Create or restore a plan to recover saved comments.",
+  "planCommentMigrationPending": "Saved plan comments are still being restored. Retry before sending."
 }

@@ -43,6 +43,13 @@ var (
 	revisionIDRequired   = mapping{service.ErrRevisionIDRequired, ws.ErrorCodeValidation, "revision_id is required"}
 	revisionNotFound     = mapping{service.ErrRevisionNotFound, ws.ErrorCodeNotFound, "Revision not found"}
 	revisionTaskMismatch = mapping{service.ErrRevisionTaskMismatch, ws.ErrorCodeValidation, "Revision does not belong to task"}
+	planIDRequired       = mapping{service.ErrPlanIDRequired, ws.ErrorCodeValidation, "plan_id is required"}
+	commentIDRequired    = mapping{service.ErrPlanCommentIDRequired, ws.ErrorCodeValidation, "comment id is required"}
+	commentIDInvalid     = mapping{service.ErrPlanCommentIDInvalid, ws.ErrorCodeValidation, "comment id must be a UUID"}
+	commentBodyRequired  = mapping{service.ErrPlanCommentBodyRequired, ws.ErrorCodeValidation, "comment body is required"}
+	commentVersionNeeded = mapping{service.ErrPlanCommentVersionNeeded, ws.ErrorCodeValidation, "expected_version must be positive"}
+	commentAnchorInvalid = mapping{service.ErrPlanCommentAnchorInvalid, ws.ErrorCodeValidation, "plan comment anchor is invalid"}
+	planCommentsChanged  = mapping{service.ErrTaskPlanCommentsChanged, ws.ErrorCodePlanCommentsChanged, "Task plan comments changed"}
 
 	// allMappings is the vocabulary reachable by an action that can surface any
 	// plan or revision failure.
@@ -91,6 +98,28 @@ func contentTooLargeResponse(msg *ws.Message, err error) (*ws.Message, bool, err
 			"submitted": sizeErr.Submitted,
 		})
 	return out, true, mapErr
+}
+
+// PlanCommentError maps task-plan comment validation, lookup, and conflict failures.
+// A conflict carries the current snapshot so the client can reconcile immediately.
+func PlanCommentError(msg *ws.Message, err error, snapshot interface{}) (*ws.Message, error) {
+	if errors.Is(err, service.ErrTaskPlanCommentsChanged) {
+		details := map[string]interface{}{}
+		if snapshot != nil {
+			details["snapshot"] = snapshot
+		}
+		return ws.NewError(msg.ID, msg.Action, planCommentsChanged.code, planCommentsChanged.message, details)
+	}
+	return errorResponse(msg, err, "Failed to update task plan comments", []mapping{
+		taskIDRequired,
+		planIDRequired,
+		commentIDRequired,
+		commentIDInvalid,
+		commentBodyRequired,
+		commentVersionNeeded,
+		commentAnchorInvalid,
+		planNotFound,
+	})
 }
 
 // CreateError maps a PlanService.CreatePlan failure.

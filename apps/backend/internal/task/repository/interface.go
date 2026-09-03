@@ -17,6 +17,7 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
@@ -594,6 +595,10 @@ type PlanRepository interface {
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error)
 	DeleteTaskPlan(ctx context.Context, taskID string) error
+	ListTaskPlanComments(ctx context.Context, taskID string) (*models.TaskPlanCommentSnapshot, error)
+	CreateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment) (*models.TaskPlanCommentSnapshot, error)
+	UpdateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
+	DeleteTaskPlanComment(ctx context.Context, taskID, planID, commentID string, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
 
 	// Revision history
 	InsertTaskPlanRevision(ctx context.Context, rev *models.TaskPlanRevision) error

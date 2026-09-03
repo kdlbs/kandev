@@ -1,11 +1,16 @@
 ---
-status: current
+status: superseded
 system: ui
 requirements:
   - REQ-UI-PLAN-COMMENT-DRAFTS-001
 ---
 
 # Plan Comment Drafts System Design
+
+> Superseded on 2026-09-02 by the task-owned
+> [Task Plan Comments system design](../../tasks/system-design/plan-comments.md).
+> This document remains as the implementation record for the interim
+> session-scoped loss-prevention repair.
 
 ## Purpose and boundaries
 
@@ -42,8 +47,8 @@ permanent failing-first regression.
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                      | Design section                                                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `REQ-UI-PLAN-COMMENT-DRAFTS-001` | [State and persistence](#state-and-persistence), [Transaction provenance](#transaction-provenance), [Session-switch flow](#session-switch-flow), [Verification](#verification) |
 
 ## Components and responsibilities

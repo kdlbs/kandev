@@ -39,6 +39,7 @@ import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification";
+import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comment-migration";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -276,12 +277,15 @@ export function useContextFiles(resolvedSessionId: string | null) {
   };
 }
 
-export function useCommentsState(resolvedSessionId: string | null): CommentsState {
+export function useCommentsState(
+  resolvedSessionId: string | null,
+  taskId: string | null,
+): CommentsState {
   const hydrateComments = useCommentsStore((state) => state.hydrateSession);
   useEffect(() => {
     if (resolvedSessionId) hydrateComments(resolvedSessionId);
   }, [resolvedSessionId, hydrateComments]);
-  const planComments = usePendingPlanComments(resolvedSessionId);
+  const planComments = usePendingPlanComments(taskId);
   const pendingCommentsByFile = usePendingDiffCommentsByFile(resolvedSessionId);
   const pendingPRFeedback = usePendingPRFeedback(resolvedSessionId);
   const walkthroughComments = usePendingWalkthroughComments(resolvedSessionId);
@@ -520,6 +524,43 @@ function deriveQueueAwareSessionInput(
   return { inputMode, isAgentBusy: inputMode === "queue" };
 }
 
+function useAutoDisableUnsupportedPlanMode({
+  planModeEnabled,
+  hasAgentProfile,
+  planModeAvailable,
+  resolvedSessionId,
+}: {
+  planModeEnabled: boolean;
+  hasAgentProfile: boolean;
+  planModeAvailable: boolean;
+  resolvedSessionId: string | null;
+}) {
+  const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const removeContextFile = useContextFilesStore((state) => state.removeFile);
+  const hasAutoDisabled = useRef(false);
+  useEffect(() => {
+    if (
+      planModeEnabled &&
+      hasAgentProfile &&
+      !planModeAvailable &&
+      resolvedSessionId &&
+      !hasAutoDisabled.current
+    ) {
+      hasAutoDisabled.current = true;
+      setPlanMode(resolvedSessionId, false);
+      removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
+    }
+    if (!planModeEnabled) hasAutoDisabled.current = false;
+  }, [
+    planModeEnabled,
+    hasAgentProfile,
+    planModeAvailable,
+    resolvedSessionId,
+    setPlanMode,
+    removeContextFile,
+  ]);
+}
+
 export type UseChatPanelStateOptions = {
   sessionId: string | null;
   taskId?: string | null;
@@ -565,34 +606,13 @@ export function useChatPanelState({
     [planModeAvailable, rawHandlePlanModeChange, togglePlanLayout, planLayoutVisible],
   );
 
-  // Auto-disable plan mode if agent doesn't support MCP (e.g. started from create dialog).
-  // Only clear state — do NOT call applyBuiltInPreset("default") because the layout
-  // may have just been set via URL intent (?layout=plan) and we don't want to overwrite it.
   const hasAgentProfile = Boolean(sessionState.session?.agent_profile_id);
-  const setPlanMode = useAppStore((s) => s.setPlanMode);
-  const removeCtxFile = useContextFilesStore((s) => s.removeFile);
-  const hasAutoDisabled = useRef(false);
-  useEffect(() => {
-    if (
-      planModeEnabled &&
-      hasAgentProfile &&
-      !planModeAvailable &&
-      resolvedSessionId &&
-      !hasAutoDisabled.current
-    ) {
-      hasAutoDisabled.current = true;
-      setPlanMode(resolvedSessionId, false);
-      removeCtxFile(resolvedSessionId, PLAN_CONTEXT_PATH);
-    }
-    if (!planModeEnabled) hasAutoDisabled.current = false;
-  }, [
+  useAutoDisableUnsupportedPlanMode({
     planModeEnabled,
     hasAgentProfile,
     planModeAvailable,
     resolvedSessionId,
-    setPlanMode,
-    removeCtxFile,
-  ]);
+  });
 
   const contextFilesState = useContextFiles(resolvedSessionId);
   const { contextFiles, removeContextFile, unpinFile } = contextFilesState;
@@ -602,7 +622,8 @@ export function useChatPanelState({
     taskId,
     sessionState.taskDescription,
   );
-  const comments = useCommentsState(resolvedSessionId);
+  const comments = useCommentsState(resolvedSessionId, taskId);
+  const planCommentMigration = usePlanCommentMigration(taskId);
 
   const planContextEnabled = useMemo(
     () => contextFiles.some((f) => f.path === PLAN_CONTEXT_PATH),
@@ -630,6 +651,7 @@ export function useChatPanelState({
     ...contextFilesState,
     ...sessionData,
     ...comments,
+    planCommentMigration,
     contextItems,
     planContextEnabled,
     planModeAvailable,

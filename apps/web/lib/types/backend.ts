@@ -1,4 +1,8 @@
-import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
+import type {
+  TaskPlanCommentEventPayload,
+  TaskPlanEventPayload,
+  TaskPlanRevisionEventPayload,
+} from "./task-plan-events";
 import type { CaptureRequest } from "@/lib/logger/capture";
 
 export const SYSTEM_AGENT_RUNTIME_STATUS_CHANGED = "system.agent_runtime.status_changed" as const;
@@ -381,7 +385,11 @@ export {
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
 
-export type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
+export type {
+  TaskPlanCommentEventPayload,
+  TaskPlanEventPayload,
+  TaskPlanRevisionEventPayload,
+} from "./task-plan-events";
 
 export type TaskStatusSummaryUpdatedPayload = {
   task_id: string;
@@ -405,6 +413,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.plan.created": BackendMessage<"task.plan.created", TaskPlanEventPayload>;
     "task.plan.updated": BackendMessage<"task.plan.updated", TaskPlanEventPayload>;
     "task.plan.deleted": BackendMessage<"task.plan.deleted", TaskPlanEventPayload>;
+    "task.plan.comments.changed": BackendMessage<
+      "task.plan.comments.changed",
+      TaskPlanCommentEventPayload
+    >;
     "task.plan.revision.created": BackendMessage<
       "task.plan.revision.created",
       TaskPlanRevisionEventPayload

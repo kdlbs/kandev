@@ -143,9 +143,9 @@ test.describe("Multi-session UX", () => {
     });
   });
 
-  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.2
-  // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.3
-  test("preserves pending plan comments across session switches", async ({
+  // @covers AC-TASKS-PLAN-COMMENTS-001.2
+  // @covers AC-TASKS-PLAN-COMMENTS-002.1
+  test("shows task-owned plan comments across session switches", async ({
     testPage,
     apiClient,
     seedData,
@@ -217,7 +217,8 @@ test.describe("Multi-session UX", () => {
 
     await secondaryTab.click();
     await waitForStableActiveSession(testPage, secondarySessionId);
-    await expect(badge).toHaveCount(0);
+    await expect(badge).toHaveCount(1);
+    await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
     await testPage.evaluate(
       () =>
         new Promise<void>((resolve) => {
@@ -228,6 +229,7 @@ test.describe("Multi-session UX", () => {
     await primaryTab.click();
     await waitForStableActiveSession(testPage, primarySessionId);
     await expect(badge).toHaveCount(1, { timeout: 10_000 });
+    await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
     await badge.locator("svg").click();
     await expect(textarea).toHaveValue(commentText);
   });

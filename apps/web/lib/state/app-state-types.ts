@@ -10,6 +10,9 @@ import type {
   TaskPendingActionRevision,
   Turn,
   TaskSession,
+  TaskPlan,
+  TaskPlanCommentSnapshot,
+  TaskPlanRevision,
   TaskWalkthrough,
 } from "@/lib/types/http";
 import type { SystemHealthResponse } from "@/lib/types/health";
@@ -495,20 +498,21 @@ export type AppState = KanbanSlice & {
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
   // Task plan actions
-  setTaskPlan: (taskId: string, plan: import("@/lib/types/http").TaskPlan | null) => void;
+  setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
+  setTaskPlanComments: (taskId: string, snapshot: TaskPlanCommentSnapshot) => void;
+  setTaskPlanCommentsLoading: (taskId: string, loading: boolean) => void;
+  setTaskPlanCommentsError: (taskId: string, error?: string) => void;
+  setTaskPlanCommentMigrationStatus: (
+    taskId: string,
+    status: import("./slices/session/types").PlanCommentMigrationStatus,
+  ) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
   // Plan revision actions
-  setPlanRevisions: (
-    taskId: string,
-    revisions: import("@/lib/types/http").TaskPlanRevision[],
-  ) => void;
-  upsertPlanRevision: (
-    taskId: string,
-    revision: import("@/lib/types/http").TaskPlanRevision,
-  ) => void;
+  setPlanRevisions: (taskId: string, revisions: TaskPlanRevision[]) => void;
+  upsertPlanRevision: (taskId: string, revision: TaskPlanRevision) => void;
   setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
   cachePlanRevisionContent: (revisionId: string, content: string) => void;
   // Plan revision preview + compare actions

@@ -1309,7 +1309,7 @@ export class SessionPage {
    * than a real bug.
    */
   async togglePlanMode() {
-    const btn = this.page.getByTestId("plan-mode-toggle-button");
+    const btn = this.activeChat().getByTestId("plan-mode-toggle-button");
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await expect(btn).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
     await btn.click();

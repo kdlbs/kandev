@@ -161,12 +161,19 @@ type SubmitDraftArgs = {
   clearArgs: Omit<ClearSubmittedInputArgs, "submittedText" | "submittedAttachments">;
 };
 
-function buildChatSubmitPayload(payload: Required<ChatSubmitPayload>): ChatSubmitPayload {
-  return Object.fromEntries(
-    Object.entries(payload).filter(
-      ([key, value]) => key === "message" || (Array.isArray(value) && value.length > 0),
-    ),
-  ) as ChatSubmitPayload;
+type DraftChatSubmitPayload = Required<Omit<ChatSubmitPayload, "planCommentRefs">>;
+
+function buildChatSubmitPayload(payload: DraftChatSubmitPayload): ChatSubmitPayload {
+  return {
+    message: payload.message,
+    ...(payload.reviewComments.length > 0 ? { reviewComments: payload.reviewComments } : {}),
+    ...(payload.attachments.length > 0 ? { attachments: payload.attachments } : {}),
+    ...(payload.inlineMentions.length > 0 ? { inlineMentions: payload.inlineMentions } : {}),
+    ...(payload.inlineTaskMentions.length > 0
+      ? { inlineTaskMentions: payload.inlineTaskMentions }
+      : {}),
+    ...(payload.entityReferences.length > 0 ? { entityReferences: payload.entityReferences } : {}),
+  };
 }
 
 function submitDraft(args: SubmitDraftArgs) {

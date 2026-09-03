@@ -1948,5 +1948,18 @@
   "uploadedTo": "已上傳至 {{path}}",
   "failedToUploadFile": "上傳檔案失敗",
   "uploadPartiallyFailed_one": "{{count}} 個檔案上傳失敗",
-  "uploadPartiallyFailed_other": "{{count}} 個檔案上傳失敗"
+  "uploadPartiallyFailed_other": "{{count}} 個檔案上傳失敗",
+  "failedToLoadPlanComments": "無法載入計劃評論。請重試。",
+  "failedToSavePlanComment": "無法儲存此計劃評論。請重試。",
+  "failedToDeletePlanComment": "無法刪除此計劃評論。請重試。",
+  "failedToRunPlanComment": "無法執行此計劃評論。請重試。",
+  "noPrimarySessionForPlanComment": "沒有可用的主工作階段。請啟動一個工作階段或將某個工作階段設為主工作階段後再執行。",
+  "primarySessionUnavailableForPlanComment": "主工作階段無法接收輸入。請啟動或選擇一個可用的主工作階段。",
+  "planCommentNotReadyToRun": "此計劃評論仍在儲存。請再次執行。",
+  "planCommentsChangedRetry": "計劃評論已更改。請檢查後重新傳送。",
+  "primarySessionChangedRetry": "主工作階段已更改。請再次執行。",
+  "restoringSavedPlanComments": "正在恢復已儲存的計劃評論...",
+  "planCommentMigrationFailed": "無法恢復部分已儲存的計劃評論。",
+  "planCommentMigrationNeedsPlan": "請建立或恢復計劃，以恢復已儲存的評論。",
+  "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。請重試後再傳送。"
 }
