@@ -9,6 +9,8 @@ import {
   type UtilityAgent,
 } from "@/lib/api/domains/utility-api";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { Separator } from "@kandev/ui/separator";
 import { UtilityAgentDialog } from "@/components/settings/utility-agent-dialog";
@@ -147,7 +149,8 @@ export function UtilityAgentsSection() {
             );
           })(),
       );
-      await Promise.all([
+      const settingsAtSubmit = storeApi.getState().userSettings;
+      const [userSettingsResponse] = await Promise.all([
         updateUserSettings({ default_utility_agent_profile_id: defaultProfileId }),
         ...changed.map((agent) =>
           updateUtilityAgent(agent.id, {
@@ -159,10 +162,16 @@ export function UtilityAgentsSection() {
       ]);
       setSavedAgents(agents);
       setSavedDefaultProfileId(defaultProfileId);
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        defaultUtilityAgentProfileId: defaultProfileId || null,
-      });
+      const latestUserSettings = storeApi.getState().userSettings;
+      const responseOrder = compareUserSettingsRevisions(
+        userSettingsResponse.settings.revision,
+        latestUserSettings.revision,
+      );
+      const responseIsCurrent =
+        responseOrder === null ? latestUserSettings === settingsAtSubmit : responseOrder >= 0;
+      if (responseIsCurrent) {
+        setUserSettings(mapUserSettingsResponse(userSettingsResponse, latestUserSettings));
+      }
     },
     discard: () => {
       setAgents(savedAgents);

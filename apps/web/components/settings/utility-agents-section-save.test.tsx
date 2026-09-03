@@ -80,7 +80,11 @@ function renderSection() {
 beforeEach(() => {
   listUtilityAgents.mockReset().mockResolvedValue({ agents: [agent("commit")] });
   fetchUserSettings.mockReset().mockResolvedValue({ settings: {} });
-  updateUserSettings.mockReset().mockResolvedValue({ settings: {} });
+  updateUserSettings
+    .mockReset()
+    .mockImplementation((payload: Record<string, unknown>) =>
+      Promise.resolve({ settings: { revision: 1, ...payload } }),
+    );
   updateUtilityAgent.mockReset().mockResolvedValue({});
   deleteUtilityAgent.mockReset().mockResolvedValue({});
 });
