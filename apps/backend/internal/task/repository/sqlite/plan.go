@@ -215,6 +215,68 @@ func (r *Repository) ListTaskPlanRevisions(ctx context.Context, taskID string, l
 	return out, nil
 }
 
+// ObsoletePlanRevisionCandidate identifies a plan revision that is
+// policy-eligible for future pruning by the maintenance command: never the
+// task's current HEAD, never referenced by another revision's revert-of
+// ancestry link, and outside the caller-supplied recency window.
+type ObsoletePlanRevisionCandidate struct {
+	ID             string
+	TaskID         string
+	RevisionNumber int
+	ContentBytes   int64
+}
+
+// ListObsoletePlanRevisionCandidates returns policy-eligible superseded plan
+// revisions for a task. It always protects the current HEAD
+// (MAX(revision_number)) and any revision that some other revision's
+// revert_of_revision_id points to (so revert ancestry - the "restore this
+// earlier plan" chain - is never broken). When keepLastN > 0, it further
+// protects that many of the most recent non-HEAD revisions from being
+// reported, regardless of ancestry. This is a read-only, non-destructive
+// selection: it reports candidates for a later maintenance command to act
+// on, and never deletes or modifies anything itself.
+func (r *Repository) ListObsoletePlanRevisionCandidates(ctx context.Context, taskID string, keepLastN int) ([]ObsoletePlanRevisionCandidate, error) {
+	query := `
+		SELECT rev.id, rev.task_id, rev.revision_number, LENGTH(rev.content)
+		FROM task_plan_revisions rev
+		WHERE rev.task_id = ?
+		  AND rev.revision_number < (
+			  SELECT MAX(revision_number) FROM task_plan_revisions WHERE task_id = ?
+		  )
+		  AND NOT EXISTS (
+			  SELECT 1 FROM task_plan_revisions child
+			  WHERE child.task_id = rev.task_id AND child.revert_of_revision_id = rev.id
+		  )`
+	args := []interface{}{taskID, taskID}
+	if keepLastN > 0 {
+		query += `
+		  AND rev.revision_number <= (
+			  SELECT MAX(revision_number) FROM task_plan_revisions WHERE task_id = ?
+		  ) - ?`
+		args = append(args, taskID, keepLastN)
+	}
+	query += ` ORDER BY rev.revision_number ASC`
+
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list obsolete plan revision candidates: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []ObsoletePlanRevisionCandidate
+	for rows.Next() {
+		var c ObsoletePlanRevisionCandidate
+		if err := rows.Scan(&c.ID, &c.TaskID, &c.RevisionNumber, &c.ContentBytes); err != nil {
+			return nil, fmt.Errorf("failed to scan obsolete plan revision candidate: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate obsolete plan revision candidates: %w", err)
+	}
+	return out, nil
+}
+
 // NextTaskPlanRevisionNumber returns max(revision_number)+1 for a task, or 1 if none exist.
 //
 // Note: prefer WritePlanRevision when writing a new revision — it computes the next number

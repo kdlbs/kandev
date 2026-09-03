@@ -208,6 +208,12 @@ type WorkflowRepository interface {
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	// RehydrateMessagePayload loads and verifies the externally stored
+	// payload for a message whose large tool output (e.g. shell command
+	// stdout/stderr) was moved out of the metadata column at write time, and
+	// merges the restored content back into message.Metadata. No-op when the
+	// message has no external payload (message.PayloadDigest == "").
+	RehydrateMessagePayload(ctx context.Context, message *models.Message) error
 	// GetMessageWithPromptIndex retrieves a message by ID with its computed
 	// prompt_index (1-based ordinal among the session's user messages).
 	// Used by the idempotent WS replay/response path and user update-event

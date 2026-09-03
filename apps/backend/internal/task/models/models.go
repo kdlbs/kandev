@@ -1168,6 +1168,20 @@ type Message struct {
 	// non-user messages and for legacy 12-column reads, and serialized only
 	// when > 0 (json omitempty).
 	PromptIndex int `json:"prompt_index,omitempty"`
+	// PayloadDigest is the SHA-256 digest of a large tool payload (currently
+	// shell command stdout/stderr) that CreateMessage/UpdateMessage
+	// externalized into task_message_payloads instead of inlining in
+	// Metadata. Empty when the message's metadata was small enough to stay
+	// inline. Internal repository/service bookkeeping only - never
+	// serialized to API/WS clients (json "-"): the client-visible signal is
+	// already the has_output/stdout_bytes summary ProjectMessageMetadata
+	// leaves in Metadata, and GetMessage is the only reader that resolves
+	// this digest, via RehydrateMessagePayload, for explicit authorized
+	// detail loading (see httpGetShellOutput).
+	PayloadDigest string `json:"-"`
+	// PayloadSize is the uncompressed byte size of the externalized payload
+	// referenced by PayloadDigest. Zero when PayloadDigest is empty.
+	PayloadSize int64 `json:"-"`
 }
 
 // ToAPI converts internal Message to API type.

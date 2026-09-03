@@ -35,6 +35,16 @@ type GitSnapshot struct {
 	TriggeredBy  string                 `json:"triggered_by"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt    time.Time              `json:"created_at"`
+	// ContentDigest is a SHA-256 digest over the fields that define two
+	// snapshots as equivalent (branch, remote branch, head/base commit,
+	// ahead/behind counts, and the serialized files diff), independent of
+	// session/triggered_by/created_at. CreateGitSnapshot uses it to skip
+	// inserting a duplicate of the immediately preceding snapshot for the
+	// same session (repeated no-op polling), and it identifies historical
+	// duplicate rows as retention candidates for the maintenance command.
+	// Internal repository bookkeeping only - not serialized to API/WS
+	// clients.
+	ContentDigest string `json:"-"`
 }
 
 // SessionCommit represents a commit made during a task session
