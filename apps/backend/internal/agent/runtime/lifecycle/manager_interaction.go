@@ -966,6 +966,14 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// a potentially live runtime as idle. RemoveExecution releases the lease on
 	// the successful path.
 
+	// AC-EXECUTORS-SURVIVAL kill-path #4 (design 01 "Kill paths that must
+	// change together", design 02 "Shutdown"): a graceful backend shutdown
+	// must not terminate the instance when the capability is enabled. Every
+	// other stop reason, including force, keeps the terminating path below.
+	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown {
+		return m.detachAgentExecution(executionID, execution)
+	}
+
 	m.logger.Info("stopping agent",
 		zap.String("execution_id", executionID),
 		zap.String("reason", reason),
@@ -1017,6 +1025,44 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 
 	// Publish stopped event
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
+
+	return nil
+}
+
+// detachAgentExecution implements the AC-EXECUTORS-SURVIVAL survivable-detach
+// branch of StopAgentWithReason (design 01/02 kill-path #4): when the
+// agent-survival capability is enabled and the stop reason is graceful
+// backend shutdown, this backend releases its own hold on the execution --
+// its agentctl stream subscription and in-memory tracking -- without
+// stopping the agentctl-side instance or calling the runtime backend's
+// StopInstance. The instance is left running, unowned by this backend, so
+// the adoption path (Layer 6.1) or a fresh recovery pass on the next startup
+// can find and re-track it.
+//
+// Deliberately does NOT: call client.Stop, call stopAgentViaBackend, set
+// execution.Status to stopped, or publish events.AgentStopped. The execution
+// is not stopped -- publishing that event would run the orchestrator's
+// handleAgentStopped, which persists a terminal task-session state for a
+// session whose agent is still running, corrupting the very state recovery
+// depends on. The executors_running row is intentionally left untouched so
+// AC-EXECUTORS-SURVIVAL-002's recovery-inventory read still finds it live.
+func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecution) error {
+	execution.agentctlLifecycleMu.Lock()
+	if client := execution.currentAgentCtlClient(); client != nil {
+		client.Close()
+	}
+	execution.detachAgentctlClient()
+	execution.agentctlLifecycleMu.Unlock()
+
+	execution.EndSessionSpan()
+	m.RemoveExecution(executionID)
+	m.clearRemoteStatus(execution.SessionID)
+
+	m.logger.Info("detached agent execution for survivable backend shutdown; instance left running",
+		zap.String("execution_id", executionID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("task_id", execution.TaskID),
+		zap.Stringer("runtime", execution.RuntimeName))
 
 	return nil
 }

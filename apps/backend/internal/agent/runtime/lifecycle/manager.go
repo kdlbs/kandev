@@ -115,6 +115,14 @@ type Manager struct {
 	recoveryDeadline      time.Duration
 	recoveryDeadlineStart time.Time
 
+	// agentSurvivalEnabled mirrors the features.agentSurvival runtime flag
+	// (config.Config.Features.AgentSurvival). When true and a stop's reason is
+	// StopReasonBackendShutdown, StopAgentWithReason takes the survivable-detach
+	// branch instead of the terminating one (design 01/02 kill-path #4). Set
+	// once during startup wiring via SetAgentSurvivalEnabled; false (today's
+	// unconditional terminating stop) is the correct zero value.
+	agentSurvivalEnabled bool
+
 	// environmentAccessCheck is the environment-keyed sibling of
 	// sessionAccessCheck, used by the terminal environment-shell route which
 	// resolves executions by environment ID. Nil = no scoping.
@@ -534,6 +542,14 @@ func (m *Manager) SetRecoveryDeadline(d time.Duration) {
 // before Start runs.
 func (m *Manager) SetRecoveryDeadlineStart(t time.Time) {
 	m.recoveryDeadlineStart = t
+}
+
+// SetAgentSurvivalEnabled installs the features.agentSurvival capability
+// state that StopAgentWithReason reads to decide between a survivable detach
+// and today's terminating stop on backend shutdown. Set once during startup
+// wiring, before Start runs.
+func (m *Manager) SetAgentSurvivalEnabled(enabled bool) {
+	m.agentSurvivalEnabled = enabled
 }
 
 // RecoveryGuard exposes the in-memory recovery guard so it can be wired into

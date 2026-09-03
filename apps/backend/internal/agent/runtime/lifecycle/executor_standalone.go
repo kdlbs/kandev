@@ -346,10 +346,6 @@ func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *Executo
 // the existing stale-execution repair path (AC-EXECUTORS-SURVIVAL-002.12)
 // rather than treating an enumeration failure as though every instance were
 // an orphan.
-//
-// Scope note: agent identity and the agent/continuation commands, arguments,
-// and history setting still need re-derivation from the restored agent
-// profile and the agent-type registry, not yet implemented here.
 func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	instances, err := r.listInstancesWithRetry(ctx)
 	if err != nil {

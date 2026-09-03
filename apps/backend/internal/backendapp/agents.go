@@ -185,6 +185,10 @@ func provideLifecycleManager(
 	if workspaceInfoProvider != nil {
 		lifecycleMgr.SetWorkspaceInfoProvider(workspaceInfoProvider)
 	}
+	// Kill-path #4 (design 01 "Kill paths that must change together"):
+	// StopAgentWithReason needs the capability state to decide survivable
+	// detach versus terminating stop on backend shutdown.
+	lifecycleMgr.SetAgentSurvivalEnabled(cfg.Features.AgentSurvival)
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err
