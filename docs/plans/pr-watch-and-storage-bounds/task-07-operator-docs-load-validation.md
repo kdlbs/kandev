@@ -138,4 +138,3 @@ verification commands do not target `internal/launcher`.
 
 This is the final task in the plan; all seven waves (Tasks 01-07) are now
 implemented, tested, documented, and committed.
-

@@ -136,4 +136,3 @@ go build ./...     # exit 0
 gofmt -l <changed files>   # no output
 golangci-lint run ./internal/github/... ./internal/orchestrator/...   # 0 issues
 ```
-

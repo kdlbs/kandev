@@ -143,5 +143,3 @@ offline/exclusive CLI path that reuses `persistence.SnapshotSQLite` and
 the same `ownershiplock` targets a live backend uses, but does not extend
 either existing package, per the plan's separation of the "live" and
 "offline" maintenance concepts.
-
-

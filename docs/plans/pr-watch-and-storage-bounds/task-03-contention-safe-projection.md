@@ -122,4 +122,3 @@ regression from this task.
 exponential backoff (`waitForSummaryReconcileRetry`) but no jitter; this task's
 file list scoped the fix to `internal/task/statussummary`, so that loop's
 jitter was left untouched to avoid broadening scope beyond this wave.
-

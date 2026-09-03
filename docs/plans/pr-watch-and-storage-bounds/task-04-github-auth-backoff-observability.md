@@ -179,4 +179,3 @@ git diff --check                                                             # c
 
 Preserves Tasks 01-03 unchanged (verified `git log` head still shows `0f80b3069` as
 parent, no history rewritten). Does not start Tasks 05-07.
-
