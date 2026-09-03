@@ -1306,7 +1306,10 @@ function performBuildDefault(
  */
 function resetToEffectiveDefault(set: StoreSet, get: StoreGet): void {
   const { api, currentLayoutEnvId, preMaximizeLayout } = get();
-  if (!api) return;
+  if (!api) {
+    useDockviewStore.setState({ pendingChatInitialPlacement: null });
+    return;
+  }
   if (preMaximizeLayout) {
     set({ preMaximizeLayout: null, maximizedGroupId: null });
     if (currentLayoutEnvId) removeEnvMaximizeState(currentLayoutEnvId);
@@ -1535,6 +1538,7 @@ export function releaseLayoutToDefault(oldEnvId: string | null): void {
     maximizedGroupId: null,
     currentLayoutEnvId: null,
     isRestoringLayout: true,
+    pendingChatInitialPlacement: null,
   });
   try {
     buildDefaultLayout(api);

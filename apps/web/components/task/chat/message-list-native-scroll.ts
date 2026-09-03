@@ -677,6 +677,11 @@ function usePersistedTranscriptScroll({
   initialPlacementPending: boolean;
 }) {
   const frozenScrollTopRef = useRef<number | null>(null);
+  const latestSessionIdRef = useRef(sessionId);
+  if (latestSessionIdRef.current !== sessionId) {
+    latestSessionIdRef.current = sessionId;
+    frozenScrollTopRef.current = null;
+  }
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -708,7 +713,7 @@ function usePersistedTranscriptScroll({
       // survives a dockview panel teardown/remount (e.g. navigating away
       // and back), even if no scroll event fired right before it, and even
       // if a coalesced write above was still pending.
-      if (!initialPlacementPending) coalescer.flush();
+      if (!initialPlacementPending || latestSessionIdRef.current !== sessionId) coalescer.flush();
     };
   }, [scrollRef, sessionId, storeApi, resyncIsNearBottom, enabled, initialPlacementPending]);
 

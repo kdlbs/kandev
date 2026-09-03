@@ -107,6 +107,7 @@ type ScrollToDividerOptions = {
   sessionId?: string | null;
   isProgrammaticScrollLocked?: () => boolean;
   isVisible?: boolean;
+  historyRefreshPending?: boolean;
 };
 
 function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
@@ -165,6 +166,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     sessionId,
     isProgrammaticScrollLocked,
     isVisible,
+    historyRefreshPending,
   });
   useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
     handleScrollToMessage,
@@ -321,6 +323,7 @@ export function useScrollToDividerOrBottom(
     sessionId = null,
     isProgrammaticScrollLocked = () => false,
     isVisible = true,
+    historyRefreshPending = false,
   } = options;
   const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
   const isUserScrollingRef = useDividerUserScrolling(scrollRef);
@@ -350,7 +353,7 @@ export function useScrollToDividerOrBottom(
       settlingDeadlineRef.current = Date.now() + DIVIDER_SETTLING_WINDOW_MS;
     }
     const el = scrollRef.current;
-    if (!el || itemCount === 0) return;
+    if (!el || itemCount === 0 || historyRefreshPending) return;
 
     const placeInitialPosition = () => {
       if (!isVisibleRef.current) return;
@@ -418,6 +421,7 @@ export function useScrollToDividerOrBottom(
     sessionId,
     isProgrammaticScrollLocked,
     isVisible,
+    historyRefreshPending,
     scrollRef,
   ]);
 }

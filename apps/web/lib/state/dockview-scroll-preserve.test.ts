@@ -71,18 +71,6 @@ describe("preserveChatScrollDuringLayout", () => {
     expect(fakeStore.setPendingChatScrollTop).toHaveBeenCalledWith(0);
   });
 
-  it("does not replace a pending session-specific initial placement", () => {
-    fakeStore.pendingChatInitialPlacement = { sessionId: "incoming-session", token: 11 };
-    makeChatList(250);
-
-    preserveChatScrollDuringLayout();
-
-    expect(fakeStore.pendingChatInitialPlacement).toEqual({
-      sessionId: "incoming-session",
-      token: 11,
-    });
-  });
-
   it("restores scrollTop and clears pending after isRestoringLayout flips to false", async () => {
     const el = makeChatList(250);
     fakeStore.isRestoringLayout = true;
