@@ -563,6 +563,85 @@ func TestRecoveryRecordIsAdoptableAfterRestart(t *testing.T) {
 	}
 }
 
+func TestBeginRecoveryAdoptsOrphanedClaimBeforeCreatingRecord(t *testing.T) {
+	worktreePath := t.TempDir()
+	claimPath := worktreePath + ".kandev-recovery.claim"
+	jobPath := worktreePath + ".kandev-recovery.json"
+	if err := os.WriteFile(claimPath, []byte("operation-from-crashed-process\n"), 0o600); err != nil {
+		t.Fatalf("write orphaned claim: %v", err)
+	}
+
+	wt := &Worktree{ID: "worktree-1", TaskID: "task-1", Path: worktreePath}
+	record, snapshot, claim, err := beginRecovery(wt, jobPath)
+	if err != nil {
+		t.Fatalf("begin recovery after crash: %v", err)
+	}
+	defer func() { _ = claim.Close() }()
+	if record.OperationID == "" || snapshot != record.Snapshot {
+		t.Fatalf("record = %+v, snapshot = %q, want one resumable operation", record, snapshot)
+	}
+	if _, err := os.Stat(jobPath); err != nil {
+		t.Fatalf("recovery record was not created: %v", err)
+	}
+}
+
+func TestBeginRecoveryCoalescesConcurrentCallers(t *testing.T) {
+	worktreePath := t.TempDir()
+	wt := &Worktree{ID: "worktree-1", TaskID: "task-1", Path: worktreePath}
+	jobPath := worktreePath + ".kandev-recovery.json"
+	type result struct {
+		record recoveryRecord
+		claim  *recoveryLock
+		err    error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			record, _, claim, err := beginRecovery(wt, jobPath)
+			results <- result{record: record, claim: claim, err: err}
+		}()
+	}
+	first, second := <-results, <-results
+	owner, blocked := first, second
+	if owner.err != nil {
+		owner, blocked = second, first
+	}
+	if owner.err != nil || owner.claim == nil {
+		t.Fatalf("concurrent recovery owner = %+v", owner)
+	}
+	if blocked.err == nil || !strings.Contains(blocked.err.Error(), errRecoveryOperationClaimed.Error()) {
+		t.Fatalf("concurrent recovery follower error = %v, want claimed", blocked.err)
+	}
+	if err := owner.claim.Close(); err != nil {
+		t.Fatalf("release recovery owner claim: %v", err)
+	}
+	adopted, _, claim, err := beginRecovery(wt, jobPath)
+	if err != nil {
+		t.Fatalf("retry recovery after owner exit: %v", err)
+	}
+	if err := claim.Close(); err != nil {
+		t.Fatalf("release adopted recovery claim: %v", err)
+	}
+	if owner.record.OperationID != adopted.OperationID || owner.record.Snapshot != adopted.Snapshot {
+		t.Fatalf("coalesced records differ: owner=%+v adopted=%+v", owner.record, adopted)
+	}
+}
+
+func TestBeginRecoveryRejectsIncompatibleClaimPath(t *testing.T) {
+	worktreePath := t.TempDir()
+	claimPath := worktreePath + ".kandev-recovery.claim"
+	if err := os.Remove(worktreePath); err != nil {
+		t.Fatalf("remove worktree directory: %v", err)
+	}
+	if err := os.Symlink(t.TempDir(), claimPath); err != nil {
+		t.Fatalf("create symlink claim: %v", err)
+	}
+	_, _, claim, err := beginRecovery(&Worktree{ID: "worktree-1", TaskID: "task-1", Path: worktreePath}, worktreePath+".kandev-recovery.json")
+	if err == nil || claim != nil {
+		t.Fatalf("begin recovery with symlink claim = record/claim=%v/%v, want rejection", err, claim)
+	}
+}
+
 func TestSanitizeForBranch(t *testing.T) {
 	tests := []struct {
 		name     string

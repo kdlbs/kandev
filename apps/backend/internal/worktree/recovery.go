@@ -124,13 +124,17 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 }
 
 func beginRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, *recoveryLock, error) {
-	record, snapshotPath, err := loadOrClaimRecovery(wt, jobPath)
-	if err != nil {
-		return recoveryRecord{}, "", nil, err
-	}
+	// The advisory lock is the first durable boundary. Its inode may survive a
+	// crash before the record is created, so taking the lock must never depend
+	// on the claim path being absent.
 	claim, err := acquireRecoveryOperation(wt.Path + ".kandev-recovery.claim")
 	if err != nil {
 		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, err.Error())
+	}
+	record, snapshotPath, err := loadOrClaimRecovery(wt, jobPath)
+	if err != nil {
+		_ = claim.Close()
+		return recoveryRecord{}, "", nil, err
 	}
 	return record, snapshotPath, claim, nil
 }
