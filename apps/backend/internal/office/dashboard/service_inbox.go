@@ -10,6 +10,11 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
+const (
+	budgetAlertAction    = "budget.alert"
+	budgetExceededAction = "budget.exceeded"
+)
+
 // GetInboxItems returns a computed view of all items needing user attention.
 func (s *DashboardService) GetInboxItems(ctx context.Context, wsID string) ([]*models.InboxItem, error) {
 	var items []*models.InboxItem
@@ -93,7 +98,7 @@ func (s *DashboardService) GetInboxCount(ctx context.Context, wsID string) (int,
 	if err != nil {
 		return 0, err
 	}
-	alerts, err := s.repo.ListActivityEntriesByAction(ctx, wsID, "budget.alert", 50)
+	alerts, err := s.listBudgetInboxEntries(ctx, wsID, 50)
 	if err != nil {
 		return 0, err
 	}
@@ -137,16 +142,20 @@ func (s *DashboardService) inboxApprovalItems(ctx context.Context, wsID string) 
 }
 
 func (s *DashboardService) inboxBudgetAlertItems(ctx context.Context, wsID string) ([]*models.InboxItem, error) {
-	entries, err := s.repo.ListActivityEntriesByAction(ctx, wsID, "budget.alert", 20)
+	entries, err := s.listBudgetInboxEntries(ctx, wsID, 20)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]*models.InboxItem, 0, len(entries))
 	for _, e := range entries {
+		title := "Budget alert"
+		if e.Action == budgetExceededAction {
+			title = "Budget exceeded"
+		}
 		item := &models.InboxItem{
 			ID:          e.ID,
 			Type:        "budget_alert",
-			Title:       "Budget alert",
+			Title:       title,
 			Description: e.Details,
 			Status:      "active",
 			EntityID:    e.TargetID,
@@ -156,6 +165,20 @@ func (s *DashboardService) inboxBudgetAlertItems(ctx context.Context, wsID strin
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (s *DashboardService) listBudgetInboxEntries(
+	ctx context.Context, wsID string, limit int,
+) ([]*models.ActivityEntry, error) {
+	alerts, err := s.repo.ListActivityEntriesByAction(ctx, wsID, budgetAlertAction, limit)
+	if err != nil {
+		return nil, err
+	}
+	exceeded, err := s.repo.ListActivityEntriesByAction(ctx, wsID, budgetExceededAction, limit)
+	if err != nil {
+		return nil, err
+	}
+	return append(alerts, exceeded...), nil
 }
 
 func (s *DashboardService) inboxAgentErrorItems(ctx context.Context, wsID string) ([]*models.InboxItem, error) {

@@ -77,6 +77,8 @@ function buildTaskHandlers(
       if (Array.isArray(fields) && fields.includes("project_id")) {
         triggerRefetch("costs");
         triggerRefetch("tasks");
+        triggerRefetch("inbox");
+        triggerRefetch("activity");
       }
     },
 

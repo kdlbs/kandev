@@ -107,6 +107,31 @@ export async function waitForActiveSessionForegroundActivity(
   );
 }
 
+/** Seed the stale activity projection that can survive a missed reconnect event. */
+export async function seedActiveSessionForegroundActivity(
+  page: Page,
+  activity: "generating" | "background" | null,
+): Promise<void> {
+  await page.evaluate((nextActivity) => {
+    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+    if (!store) {
+      throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
+    }
+    store.setState((state) => {
+      const sessionId = store.getState().tasks.activeSessionId;
+      if (!sessionId) throw new Error("No active session is available in the E2E store");
+      const session = state.taskSessions.items[sessionId];
+      if (!session) throw new Error(`Session ${sessionId} not found in store`);
+      // Intentionally skip the activity epoch: this stale projection predates
+      // the current backend process and its reconnect events.
+      state.taskSessions.items[sessionId] = {
+        ...session,
+        foreground_activity: nextActivity,
+      };
+    });
+  }, activity);
+}
+
 /** Wait for the backend-owned cancellation projection on the active session. */
 export async function waitForActiveSessionCancellationPending(
   page: Page,

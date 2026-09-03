@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestExecutionMetadataConcurrentAccessIsSafe pins the invariant behind the
@@ -187,4 +189,24 @@ func TestExecutionMetadataAccessors(t *testing.T) {
 	if got := nilExecution.MetadataSnapshot(); got != nil {
 		t.Fatalf("MetadataSnapshot on nil execution = %v, want nil", got)
 	}
+}
+
+func TestExecutionMetadataScopedRollbackPreservesConcurrentWrites(t *testing.T) {
+	execution := &AgentExecution{metadata: map[string]interface{}{
+		"refresh-owned": "before",
+		"unrelated":     "before",
+	}}
+	rollback := execution.mergeMetadataWithRollback(map[string]interface{}{
+		"refresh-owned": "applied",
+		"new-key":       "applied",
+	})
+	execution.setMetadataValue("refresh-owned", "newer-writer")
+	execution.setMetadataValue("unrelated", "newer-unrelated")
+
+	rollback()
+
+	require.Equal(t, "newer-writer", execution.metadataString("refresh-owned"))
+	require.Equal(t, "newer-unrelated", execution.metadataString("unrelated"))
+	_, exists := execution.metadataValue("new-key")
+	require.False(t, exists)
 }

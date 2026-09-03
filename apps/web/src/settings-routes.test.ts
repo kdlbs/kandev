@@ -2,12 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement } from "react";
 import { render, screen } from "@testing-library/react";
 
-import ExecutorEditPage from "@/app/settings/executor/[id]/page";
-import ProfileDetailPage from "@/app/settings/executor/[id]/profile/[profileId]/page";
 import ExecutorCreatePage from "@/app/settings/executor/new/page";
 import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
+import KubernetesExecutorPage from "@/app/settings/executors/k8s/[executorId]/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -18,6 +17,7 @@ import {
   type CrumbValues,
 } from "@/components/settings/settings-breadcrumbs";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
+import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
 import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
 import { SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } from "@/lib/settings-discovery/catalog";
 import { workspaceId, workflowId } from "@/lib/types/ids";
@@ -35,6 +35,7 @@ vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () =>
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
 const TIMESTAMP = "2026-01-01T00:00:00Z";
+const EXECUTOR_ID_WITH_SPACE = "executor one";
 // The merged page that Message Queue and the legacy task-actions URL both land on.
 const TASK_BEHAVIOR_PATH = "/settings/preferences/task-behavior";
 
@@ -248,6 +249,16 @@ describe("renderSettingsRoute", () => {
     expect((route as ReactElement).type).toBe(ExecutorCreatePage);
   });
 
+  it.each(["/settings/executor/exec-1", "/settings/executor/exec-1/profile/profile-1"])(
+    "delegates the legacy executor path through its type-aware route for %s",
+    (pathname) => {
+      const route = renderSettingsRoute(pathname) as ReactElement;
+
+      expect(isValidElement(route)).toBe(true);
+      expect((route.type as { name?: string }).name).toBe("LegacyExecutorSettingsRoute");
+    },
+  );
+
   it("reserves /settings/agents/browse for the install catalogue, not an agent named browse", () => {
     const route = renderSettingsRoute("/settings/agents/browse");
 
@@ -267,13 +278,13 @@ describe("renderSettingsRoute identifier decoding", () => {
     },
     {
       pathname: "/settings/executor/executor%20one/profile/profile%20one",
-      component: ProfileDetailPage,
-      identifiers: { executorId: "executor one", profileId: "profile one" },
+      component: LegacyExecutorSettingsRoute,
+      identifiers: { executorId: EXECUTOR_ID_WITH_SPACE, profileId: "profile one" },
     },
     {
       pathname: "/settings/executor/executor%20one",
-      component: ExecutorEditPage,
-      identifiers: { executorId: "executor one" },
+      component: LegacyExecutorSettingsRoute,
+      identifiers: { executorId: EXECUTOR_ID_WITH_SPACE },
     },
     {
       pathname: "/settings/executors/profile%20one",
@@ -288,7 +299,12 @@ describe("renderSettingsRoute identifier decoding", () => {
     {
       pathname: "/settings/executors/ssh/executor%20one",
       component: SSHExecutorPage,
-      identifiers: { executorId: "executor one" },
+      identifiers: { executorId: EXECUTOR_ID_WITH_SPACE },
+    },
+    {
+      pathname: "/settings/executors/k8s/executor%20one",
+      component: KubernetesExecutorPage,
+      identifiers: { executorId: EXECUTOR_ID_WITH_SPACE },
     },
     {
       pathname: "/settings/workspaces/workspace%20one",
@@ -458,6 +474,7 @@ describe("settings breadcrumb coverage", () => {
     "/settings/executors/exec-profile-1",
     "/settings/executors/new/local_docker",
     "/settings/executors/ssh/exec-1",
+    "/settings/executors/k8s/exec-1",
     "/settings/executor/exec-1",
     "/settings/executor/exec-1/profile/exec-profile-1",
   ];

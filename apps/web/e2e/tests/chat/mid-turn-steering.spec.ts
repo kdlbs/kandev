@@ -1,11 +1,8 @@
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import type { SeedData } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
-import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
-import { SessionPage } from "../../pages/session-page";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 
 registerSeparateQueueRows(test);
 
@@ -17,50 +14,6 @@ registerSeparateQueueRows(test);
 // The observable contract is delivered-vs-queued, not the placeholder text: the
 // tiptap placeholder is a cursor-anchored decoration and only renders under
 // focus, so asserting message delivery is the robust signal.
-
-interface SeedRunningGeneratingSessionOptions {
-  // Duration for the default `/sleep N` predecessor. Ignored when
-  // predecessorPrompt is set.
-  sleepSeconds?: number;
-  // Overrides the default `/sleep N` predecessor entirely — used by the
-  // folded/deferred tests to seed steer-fold-setup / steer-defer-setup
-  // instead.
-  predecessorPrompt?: string;
-}
-
-async function seedRunningGeneratingSession(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: SeedData,
-  title: string,
-  options: SeedRunningGeneratingSessionOptions = {},
-): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
-  const { sleepSeconds = 20, predecessorPrompt } = options;
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
-  // A no-tool sleep holds the foreground turn open and generating — the exact
-  // state that normally queues input, so it isolates the steering gate.
-  // steer-fold-setup/steer-defer-setup hold the same way, but differ in
-  // whether they answer on their own first (see the folded/deferred tests).
-  await session.sendMessage(predecessorPrompt ?? `/sleep ${sleepSeconds}`);
-  await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-  await waitForActiveSessionForegroundActivity(testPage, "generating");
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-  return { session, taskId: task.id, sessionId: task.session_id };
-}
 
 test.describe.serial("Claude mid-turn steering experiment", () => {
   test.describe.configure({ retries: 1 });

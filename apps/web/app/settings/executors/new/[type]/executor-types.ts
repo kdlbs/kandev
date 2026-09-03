@@ -3,7 +3,7 @@
 // the 600-line lint cap and new types can be added without touching layout.
 //
 // The map keys (`local`, `worktree`, `local_docker`, `remote_docker`,
-// `sprites`, `ssh`) are the persisted executor enum and the create route's
+// `sprites`, `ssh`, `k8s`) are the persisted executor enum and the create route's
 // path segment, and `executorId` is a backend row id — none of them is copy.
 // Labels and descriptions travel as catalog keys and resolve at render;
 // `brandLabel` carries a brand/protocol name that reads the same in every
@@ -51,6 +51,11 @@ export const EXECUTOR_TYPE_MAP: Record<string, ExecutorTypeInfo> = {
     executorId: "exec-ssh",
     brandLabel: "SSH",
     descriptionKey: "executors:descriptionSshCreate",
+  },
+  k8s: {
+    executorId: "exec-k8s",
+    labelKey: "executors:typeKubernetes",
+    descriptionKey: "executors:descriptionKubernetes",
   },
 };
 

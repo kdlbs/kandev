@@ -933,9 +933,30 @@ func (m *Manager) prepareTaskWorktreePath(req CreateRequest) (string, error) {
 		TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskDirName,
 		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
 	}); err != nil {
-		return "", fmt.Errorf("mark task directory ownership: %w", err)
+		return "", m.describeOwnershipMarkerFailure(taskDir, req.TaskID, err)
 	}
 	return worktreePath, nil
+}
+
+// describeOwnershipMarkerFailure enriches a WriteOwnershipMarker failure with
+// the conflicting owner's task id when one can be read back from disk. This
+// is the on-disk symptom of an inherit_parent child whose original owner
+// task (the parent it inherited a workspace from) was archived: the child's
+// session then has no bound environment, falls through to creating a fresh
+// worktree here, and finds the shared task directory still marked for the
+// now-archived owner. This package sits below internal/task and cannot look
+// up whether that owner is actually archived, so the message can only name
+// the conflicting task id and point at the workaround rather than confirm
+// the cause.
+func (m *Manager) describeOwnershipMarkerFailure(taskDir, requestedTaskID string, cause error) error {
+	existing, found, readErr := storageworkspaces.ReadOwnershipMarker(taskDir)
+	if readErr == nil && found && existing.TaskID != "" && existing.TaskID != requestedTaskID {
+		return fmt.Errorf(
+			"mark task directory ownership: %w (task directory is already owned by task %s; if that task was archived, this task can no longer reuse its workspace and needs workspace_mode=new_workspace)",
+			cause, existing.TaskID,
+		)
+	}
+	return fmt.Errorf("mark task directory ownership: %w", cause)
 }
 
 func (m *Manager) validateTaskDir(taskDir string) error {
