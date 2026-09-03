@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { PanelLoadingState } from "@/components/panel-loading-state";
@@ -15,6 +15,7 @@ import { sendMessageRequest } from "@/hooks/use-message-handler";
 import type { ChatSubmitPayload } from "./chat/chat-input-container";
 import { EnsureSessionErrorEmptyState, SessionRecoveryFeedback } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
+import { PreviewPlanPanel, usePreviewPlanSummary } from "./preview-plan-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
   buildAgentLabelsById,
@@ -26,6 +27,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 const LABEL_SEPARATOR = " \u2022 ";
+const PLAN_TAB_ID = "plan";
 
 type PreviewSessionTabsProps = {
   taskId: string;
@@ -73,9 +75,11 @@ export function PreviewSessionTabs({
   // restart where the session row is persisted but agentctl isn't alive).
   const resumption = useSessionResumption(taskId, activeSessionId);
 
+  const { viewMode, handleTabChange, planTab } = usePreviewPlanTab(taskId, onSessionChange);
+
   const tabs = useMemo<SessionTab[]>(
-    () =>
-      sortedSessions.map((session) => {
+    () => [
+      ...sortedSessions.map((session) => {
         const profile = session.agent_profile_id ? profilesById[session.agent_profile_id] : null;
         return {
           id: session.id,
@@ -89,7 +93,9 @@ export function PreviewSessionTabs({
           className: "bg-muted/50 data-[state=active]:bg-muted",
         };
       }),
-    [sortedSessions, agentLabelsById, profilesById],
+      planTab,
+    ],
+    [sortedSessions, agentLabelsById, profilesById, planTab],
   );
 
   if (!isLoaded && sortedSessions.length === 0) {
@@ -131,18 +137,67 @@ export function PreviewSessionTabs({
       <div className="border-b px-2 py-1">
         <SessionTabs
           tabs={tabs}
-          activeTab={activeSessionId ?? ""}
-          onTabChange={(id) => onSessionChange?.(id)}
+          activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
+          onTabChange={handleTabChange}
           listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         />
       </div>
       <div className="flex-1 min-h-0">
-        {activeSession && (
-          <PreviewSessionBody key={activeSession.id} session={activeSession} taskId={taskId} />
+        {viewMode === "plan" ? (
+          <PreviewPlanPanel taskId={taskId} />
+        ) : (
+          activeSession && (
+            <PreviewSessionBody key={activeSession.id} session={activeSession} taskId={taskId} />
+          )
         )}
       </div>
     </div>
   );
+}
+
+/**
+ * Owns the preview panel's Plan tab: local session-vs-plan view mode, the
+ * unseen-plan indicator (mirrors `plan-tab.tsx`'s dot logic, scoped to this
+ * task instead of the global active task), and clearing it on selection.
+ */
+function usePreviewPlanTab(taskId: string, onSessionChange?: (sessionId: string | null) => void) {
+  const { t } = useTranslation();
+  const { plan } = usePreviewPlanSummary(taskId);
+  const lastSeenPlanAt = useAppStore((state) => state.taskPlans.lastSeenUpdatedAtByTaskId[taskId]);
+  const markTaskPlanSeen = useAppStore((state) => state.markTaskPlanSeen);
+  const hasUnseenPlan = plan?.created_by === "agent" && lastSeenPlanAt !== plan.updated_at;
+
+  const [viewMode, setViewMode] = useState<"session" | "plan">("session");
+  // A new preview task shouldn't inherit the previous task's Plan selection.
+  useEffect(() => {
+    setViewMode("session");
+  }, [taskId]);
+
+  const handleTabChange = useCallback(
+    (id: string) => {
+      if (id === PLAN_TAB_ID) {
+        setViewMode("plan");
+        markTaskPlanSeen(taskId);
+      } else {
+        setViewMode("session");
+        onSessionChange?.(id);
+      }
+    },
+    [taskId, markTaskPlanSeen, onSessionChange],
+  );
+
+  const planTab = useMemo<SessionTab>(
+    () => ({
+      id: PLAN_TAB_ID,
+      label: t("task:plan"),
+      icon: <PlanTabIcon hasUnseen={hasUnseenPlan} />,
+      testId: "preview-plan-tab",
+      className: "bg-muted/50 data-[state=active]:bg-muted",
+    }),
+    [t, hasUnseenPlan],
+  );
+
+  return { viewMode, handleTabChange, planTab };
 }
 
 function resolveProfileSubLabel(
@@ -163,6 +218,21 @@ function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | un
     );
   }
   return <AgentLogo agentName={profile.agent_name} size={12} className="shrink-0" />;
+}
+
+/** Matches the full-page Plan tab's unseen dot (`plan-tab.tsx`), scoped to the previewed task. */
+function PlanTabIcon({ hasUnseen }: { hasUnseen: boolean }) {
+  return (
+    <span aria-hidden="true" className="relative inline-flex h-3 w-3 shrink-0 items-center">
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+      {hasUnseen && (
+        <span
+          data-testid="preview-plan-tab-indicator"
+          className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-primary"
+        />
+      )}
+    </span>
+  );
 }
 
 export function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {

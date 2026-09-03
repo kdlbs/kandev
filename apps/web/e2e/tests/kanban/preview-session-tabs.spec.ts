@@ -4,6 +4,14 @@ import { waitForSessionDone } from "../../helpers/session";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
+const CREATE_PLAN_SCRIPT = [
+  'e2e:thinking("creating plan")',
+  "e2e:delay(100)",
+  'e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"## Preview Plan\\n\\nStep one","title":"Plan v1"})',
+  "e2e:delay(100)",
+  'e2e:message("plan created")',
+].join("\n");
+
 /**
  * Tests the session tabs on the kanban right-side preview panel:
  * - Every session of the task shows up as a tab
@@ -291,5 +299,78 @@ test.describe("Preview auto-prepare", () => {
     await apiClient
       .updateWorkflowStep(seedData.startStepId, { agent_profile_id: "" })
       .catch(() => undefined);
+  });
+});
+
+/**
+ * Tests the read-only Plan tab added to the preview panel's tab bar: it
+ * carries the same unseen-plan indicator as the full-page Plan tab, and
+ * selecting it swaps the chat body for the read-only plan render without
+ * touching session selection.
+ */
+test.describe("Preview Plan tab", () => {
+  test("shows the unseen indicator and swaps the chat body for the read-only plan", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Preview Plan Tab Task",
+      seedData.agentProfileId,
+      {
+        description: CREATE_PLAN_SCRIPT,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await expect
+      .poll(
+        async () => {
+          const plan = await apiClient.getTaskPlan(task.id);
+          return plan?.created_by === "agent" && plan.content.includes("Step one");
+        },
+        { timeout: 30_000, message: "Waiting for agent-authored plan" },
+      )
+      .toBe(true);
+
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const previewCard = kanban.taskCardByTitle("Preview Plan Tab Task");
+    await expect(previewCard).toBeVisible({ timeout: 10_000 });
+    await previewCard.click();
+
+    const previewPanel = testPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+
+    // Chat is the default body, and the agent's plan-creation reply is visible.
+    await expect(previewPanel.getByText("plan created", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Plan tab is present with the unseen indicator (plan is agent-authored
+    // and has never been marked seen in this browser).
+    const planTab = previewPanel.getByTestId("preview-plan-tab");
+    await expect(planTab).toBeVisible({ timeout: 15_000 });
+    await expect(previewPanel.getByTestId("preview-plan-tab-indicator")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Selecting the Plan tab swaps the chat body for the read-only plan.
+    await planTab.click();
+    await expect(planTab).toHaveAttribute("data-state", "active");
+    await expect(previewPanel.getByText("plan created", { exact: false })).not.toBeVisible();
+    await expect(previewPanel.getByTestId("preview-plan-panel")).toBeVisible({ timeout: 10_000 });
+    await expect(previewPanel.getByText("Step one")).toBeVisible({ timeout: 10_000 });
+
+    // Selecting the tab cleared the unseen indicator, matching the full-page
+    // Plan tab's behavior.
+    await expect(previewPanel.getByTestId("preview-plan-tab-indicator")).toHaveCount(0);
   });
 });
