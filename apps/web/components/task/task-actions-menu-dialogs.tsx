@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, type RefObject } from "react";
 import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
@@ -44,6 +45,12 @@ type TaskActionsMenuEditDialogProps = {
   taskTitle: string;
   workspaceId: string | null;
   boardRow: TaskActionsMenuBoardRow;
+  /** Whether the dialog should be visually open. Distinct from
+   * `menu.showEditDialog`: this also folds in board-row availability, so a
+   * board row lost mid-edit closes the dialog through its own close
+   * transition (and focus-return) rather than an abrupt unmount. */
+  open: boolean;
+  focusReturnRef: RefObject<HTMLElement | null>;
   menu: TaskActionsMenuState;
 };
 
@@ -52,6 +59,8 @@ function TaskActionsMenuEditDialog({
   taskTitle,
   workspaceId,
   boardRow,
+  open,
+  focusReturnRef,
   menu,
 }: TaskActionsMenuEditDialogProps) {
   const store = useAppStoreApi();
@@ -59,8 +68,9 @@ function TaskActionsMenuEditDialog({
 
   return (
     <TaskCreateDialog
-      open={menu.showEditDialog}
+      open={open}
       onOpenChange={menu.setShowEditDialog}
+      focusReturnRef={focusReturnRef}
       mode="edit"
       workspaceId={workspaceId}
       workflowId={menu.currentWorkflowId}
@@ -89,6 +99,26 @@ function TaskActionsMenuEditDialog({
 }
 
 /**
+ * Tracks the most recent non-null board row seen for the current subject.
+ * Lets the Edit dialog stay mounted (and so run its own close-focus
+ * transition) when the row disappears mid-edit, instead of losing its data
+ * to an abrupt unmount the instant `boardRow` goes null.
+ */
+function useLastResolvedBoardRow(
+  taskId: string | null,
+  boardRow: TaskActionsMenuBoardRow | null,
+): TaskActionsMenuBoardRow | null {
+  const ref = useRef<{ taskId: string | null; boardRow: TaskActionsMenuBoardRow | null }>({
+    taskId,
+    boardRow,
+  });
+  if (ref.current.taskId !== taskId || boardRow != null) {
+    ref.current = { taskId, boardRow };
+  }
+  return ref.current.boardRow;
+}
+
+/**
  * Mounts every dialog a task actions menu entry can open. Hosted per surface
  * so a dialog outlives the menu that opened it.
  */
@@ -102,17 +132,20 @@ export function TaskActionsMenuDialogs({
   menu,
 }: TaskActionsMenuDialogsProps) {
   const repositories = useActiveWorkspaceRepositories();
+  const editBoardRow = useLastResolvedBoardRow(taskId, boardRow);
   if (!taskId) return null;
   const linkDialogTask = buildLinkDialogTask(taskId, taskTitle, boardRow);
 
   return (
     <>
-      {boardRow && (
+      {editBoardRow && (
         <TaskActionsMenuEditDialog
           taskId={taskId}
           taskTitle={taskTitle}
           workspaceId={workspaceId}
-          boardRow={boardRow}
+          boardRow={editBoardRow}
+          open={boardRow != null && menu.showEditDialog}
+          focusReturnRef={menu.triggerRef}
           menu={menu}
         />
       )}

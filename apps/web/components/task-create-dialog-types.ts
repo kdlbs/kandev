@@ -1,4 +1,5 @@
 import type React from "react";
+import type { RefObject } from "react";
 import type {
   LocalRepository,
   Repository,
@@ -84,6 +85,10 @@ export interface TaskCreateDialogProps {
   extraFormSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
   submitBlockedReason?: string | null;
+  /** Element to return keyboard focus to on close, confirmed or cancelled.
+   * Omitted callers keep Radix's default restore-to-previously-focused-element
+   * behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 }
 
 export type DialogPromptEnhance = {
