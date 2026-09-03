@@ -230,6 +230,9 @@ func (s *Service) SetWorktreeManager(mgr *worktree.Manager) {
 	}
 	s.worktreeReaper = mgr
 	s.taskLaunchRecoveryWorktree = mgr
+	if s.executor != nil {
+		s.executor.SetWorktreeRecoveryAdmission(mgr.AdmitTaskRecovery)
+	}
 }
 
 // subscribeAutomationEvents subscribes to automation-related events on the event bus.

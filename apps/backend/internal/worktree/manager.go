@@ -41,10 +41,11 @@ type Manager struct {
 	// For legacy single-repo writes the repositoryID may be empty, in which
 	// case the cache key collapses to "{sessionID}|" — still distinct from
 	// any per-repo entry the same session might gain later.
-	worktrees  map[string]*Worktree
-	mu         sync.RWMutex // Protects worktrees map
-	repoLocks  map[string]*repoLockEntry
-	repoLockMu sync.Mutex
+	worktrees     map[string]*Worktree
+	mu            sync.RWMutex // Protects worktrees map
+	repoLocks     map[string]*repoLockEntry
+	repoLockMu    sync.Mutex
+	recoveryLocks sync.Map // map[worktreeID]*sync.Mutex
 
 	// Optional dependencies for script execution
 	repoProvider      RepositoryProvider
@@ -192,6 +193,48 @@ func (m *Manager) CountActiveWorktreeReferences(
 // IsEnabled returns whether worktree mode is enabled.
 func (m *Manager) IsEnabled() bool {
 	return m.config.Enabled
+}
+
+// AdmitTaskRecovery prevents a task from creating a session while one of its
+// persisted checkouts is present but no longer has trustworthy linked-worktree
+// metadata. Missing paths remain eligible for ordinary materialization.
+func (m *Manager) AdmitTaskRecovery(ctx context.Context, taskID string) error {
+	if m == nil || taskID == "" || m.store == nil {
+		return nil
+	}
+	worktrees, err := m.store.GetWorktreesByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("inspect task worktrees for recovery: %w", err)
+	}
+	for _, wt := range worktrees {
+		if wt == nil || wt.Status != StatusActive || wt.Path == "" {
+			continue
+		}
+		if _, statErr := os.Lstat(wt.Path); statErr != nil {
+			continue
+		}
+		if !m.IsValid(wt.Path) {
+			lockValue, _ := m.recoveryLocks.LoadOrStore(wt.ID, &sync.Mutex{})
+			lock := lockValue.(*sync.Mutex)
+			lock.Lock()
+			if m.IsValid(wt.Path) {
+				lock.Unlock()
+				continue
+			}
+			recovered, recoveryErr := m.RecoverWorktree(ctx, wt, CreateRequest{
+				TaskID: taskID, RepositoryID: wt.RepositoryID,
+				RepositoryPath: wt.RepositoryPath, BaseBranch: wt.BaseBranch,
+			})
+			lock.Unlock()
+			if recoveryErr != nil {
+				return recoveryErr
+			}
+			if recovered == nil || !m.IsValid(recovered.Path) {
+				return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, Reason: "rematerialized checkout failed integrity validation"}
+			}
+		}
+	}
+	return nil
 }
 
 // getRepoLock returns a mutex for the given repository path and increments its reference count.

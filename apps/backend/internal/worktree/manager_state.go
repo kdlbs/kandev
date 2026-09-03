@@ -274,24 +274,29 @@ func (m *Manager) IsValid(path string) bool {
 	if adminPath == "" || !filepath.IsAbs(adminPath) {
 		return false
 	}
-	adminInfo, err := os.Stat(adminPath)
-	if err != nil || !adminInfo.IsDir() {
+	adminInfo, err := os.Lstat(adminPath)
+	if err != nil || !adminInfo.IsDir() || adminInfo.Mode()&os.ModeSymlink != 0 {
 		return false
 	}
 
-	backlink, err := os.ReadFile(filepath.Join(adminPath, "gitdir"))
+	backlinkPath := filepath.Join(adminPath, "gitdir")
+	backlinkInfo, err := os.Lstat(backlinkPath)
+	if err != nil || !backlinkInfo.Mode().IsRegular() {
+		return false
+	}
+	backlink, err := os.ReadFile(backlinkPath)
 	if err != nil {
 		return false
 	}
-	backlinkPath := strings.TrimSpace(string(backlink))
-	if backlinkPath == "" {
+	backlinkTarget := strings.TrimSpace(string(backlink))
+	if backlinkTarget == "" {
 		return false
 	}
 	expectedBacklink, err := filepath.Abs(gitFile)
 	if err != nil {
 		return false
 	}
-	actualBacklink, err := filepath.Abs(backlinkPath)
+	actualBacklink, err := filepath.Abs(backlinkTarget)
 	if err != nil || actualBacklink != expectedBacklink {
 		return false
 	}
@@ -313,10 +318,15 @@ func linkedWorktreeIntegrityReason(path string) string {
 	if adminPath == "" {
 		return fmt.Sprintf("git pointer %q has an empty gitdir target", gitFile)
 	}
-	if info, statErr := os.Stat(adminPath); statErr != nil || !info.IsDir() {
+	if info, statErr := os.Lstat(adminPath); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Sprintf("linked-worktree admin target %q is missing", adminPath)
 	}
-	backlink, err := os.ReadFile(filepath.Join(adminPath, "gitdir"))
+	backlinkPath := filepath.Join(adminPath, "gitdir")
+	backlinkInfo, err := os.Lstat(backlinkPath)
+	if err != nil || !backlinkInfo.Mode().IsRegular() {
+		return fmt.Sprintf("linked-worktree admin target %q has no reciprocal gitdir backlink", adminPath)
+	}
+	backlink, err := os.ReadFile(backlinkPath)
 	if err != nil {
 		return fmt.Sprintf("linked-worktree admin target %q has no reciprocal gitdir backlink", adminPath)
 	}
@@ -337,8 +347,8 @@ func isAdminDirectoryMissing(worktreePath string) bool {
 	if !found {
 		return false
 	}
-	info, statErr := os.Stat(strings.TrimSpace(adminPath))
-	return statErr != nil || !info.IsDir()
+	info, statErr := os.Lstat(strings.TrimSpace(adminPath))
+	return statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0
 }
 
 // linkedWorktreeRecoveryReason distinguishes a recoverable missing admin entry
