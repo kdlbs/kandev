@@ -161,9 +161,7 @@ export function KanbanCardBadges({
   if (!showRow) return null;
 
   return (
-    <div
-      className={cn("flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0", className)}
-    >
+    <div className={cn("flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0", className)}>
       {task.blocked && <BlockedBadge task={task} />}
       {task.queuedForStepId && (
         <Badge

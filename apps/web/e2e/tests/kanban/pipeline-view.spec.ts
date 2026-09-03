@@ -77,7 +77,9 @@ test.describe("Pipeline view", () => {
     await kanban.goto();
     await kanban.switchToPipelineView();
     await expect(kanban.pipelineTask(plain.id)).toBeVisible();
-    await expect(kanban.pipelineTask(loaded.id).getByTestId("kanban-card-blocked-badge")).toBeVisible();
+    await expect(
+      kanban.pipelineTask(loaded.id).getByTestId("kanban-card-blocked-badge"),
+    ).toBeVisible();
 
     const [plainInfo, loadedInfo, plainRun, loadedRun] = await Promise.all([
       kanban.pipelineTaskInfo(plain.id).boundingBox(),
@@ -308,7 +310,9 @@ test.describe("Pipeline view", () => {
 
     const region = kanban.pipelineOverflowRegion(task.id);
     await expect(region).toBeVisible();
-    await expect(kanban.pipelineTask(task.id).getByTestId("kanban-card-blocked-badge")).toBeVisible();
+    await expect(
+      kanban.pipelineTask(task.id).getByTestId("kanban-card-blocked-badge"),
+    ).toBeVisible();
 
     // Force the combined region far narrower than the status strip's natural
     // content so the strip alone cannot fit, driving the row into its
