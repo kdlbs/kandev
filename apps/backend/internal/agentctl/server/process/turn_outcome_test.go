@@ -36,7 +36,8 @@ func TestRecordTerminalOutcomeRetainsCompleteAndErrorEvents(t *testing.T) {
 			m := &Manager{}
 			m.SetTurnOutcomeRecorder("instance-1", recorder)
 
-			m.recordTerminalOutcome(adapter.AgentEvent{Type: eventType})
+			event := adapter.AgentEvent{Type: eventType}
+			m.recordTerminalOutcome(&event)
 
 			if len(recorder.calls) != 1 {
 				t.Fatalf("recorder calls = %d, want 1", len(recorder.calls))
@@ -46,6 +47,10 @@ func TestRecordTerminalOutcomeRetainsCompleteAndErrorEvents(t *testing.T) {
 			}
 			if recorder.calls[0].event.Type != eventType {
 				t.Fatalf("event type = %q, want %q", recorder.calls[0].event.Type, eventType)
+			}
+			if event.ControlTurnID != int64(len(recorder.calls)) {
+				t.Fatalf("event.ControlTurnID = %d, want %d (stamped from RetainTurnOutcome's return)",
+					event.ControlTurnID, len(recorder.calls))
 			}
 		})
 	}
@@ -70,7 +75,8 @@ func TestRecordTerminalOutcomeIgnoresNonTerminalEvents(t *testing.T) {
 			m := &Manager{}
 			m.SetTurnOutcomeRecorder("instance-1", recorder)
 
-			m.recordTerminalOutcome(adapter.AgentEvent{Type: eventType})
+			event := adapter.AgentEvent{Type: eventType}
+			m.recordTerminalOutcome(&event)
 
 			if len(recorder.calls) != 0 {
 				t.Fatalf("recorder calls = %d for type %q, want 0", len(recorder.calls), eventType)
@@ -84,7 +90,11 @@ func TestRecordTerminalOutcomeIgnoresNonTerminalEvents(t *testing.T) {
 // ignores terminal events instead of panicking.
 func TestRecordTerminalOutcomeNoopWithoutRecorder(t *testing.T) {
 	m := &Manager{}
-	m.recordTerminalOutcome(adapter.AgentEvent{Type: adapter.EventTypeComplete})
+	event := adapter.AgentEvent{Type: adapter.EventTypeComplete}
+	m.recordTerminalOutcome(&event)
+	if event.ControlTurnID != 0 {
+		t.Fatalf("ControlTurnID = %d, want 0 with no recorder wired", event.ControlTurnID)
+	}
 }
 
 // TestSendUpdateBlockingRecordsTerminalOutcomeOnDelivery pins that both the
@@ -177,5 +187,56 @@ func TestForwardUpdatesRecordsTerminalOutcomeForAdapterOriginatedEvents(t *testi
 	}
 	if recorder.calls[0].event.Type != adapter.EventTypeComplete {
 		t.Fatalf("retained event type = %q, want complete", recorder.calls[0].event.Type)
+	}
+}
+
+// TestSendUpdateBlockingStampsControlTurnIDOnDeliveredCopy and
+// TestForwardUpdatesStampsControlTurnIDOnDeliveredCopy pin
+// AC-EXECUTORS-SURVIVAL-004.4: the control-server-assigned turn identifier
+// must reach the copy actually delivered on m.updatesCh (the "delivered
+// event" observation), not just the pre-stamp copy Retain stores (the
+// "retained turn status" observation, which carries it via
+// TurnOutcome.TurnID instead). Without this stamp a backend re-attaching
+// after a restart has no way to recognize a live redelivery of the exact
+// turn it already applied from GetTurnOutcome.
+func TestSendUpdateBlockingStampsControlTurnIDOnDeliveredCopy(t *testing.T) {
+	recorder := &fakeTurnOutcomeRecorder{}
+	m := &Manager{updatesCh: make(chan adapter.AgentEvent, 1)}
+	m.SetTurnOutcomeRecorder("instance-1", recorder)
+
+	if !m.sendUpdateBlocking(adapter.AgentEvent{Type: adapter.EventTypeError}) {
+		t.Fatal("sendUpdateBlocking returned false with room available")
+	}
+
+	delivered := <-m.updatesCh
+	if delivered.ControlTurnID != 1 {
+		t.Fatalf("delivered.ControlTurnID = %d, want 1", delivered.ControlTurnID)
+	}
+}
+
+func TestForwardUpdatesStampsControlTurnIDOnDeliveredCopy(t *testing.T) {
+	recorder := &fakeTurnOutcomeRecorder{}
+	stopCh := make(chan struct{})
+	stub := newStubAdapter()
+	m := &Manager{
+		adapter:   stub,
+		updatesCh: make(chan adapter.AgentEvent, 10),
+		stopCh:    stopCh,
+		logger:    newTestLogger(t),
+	}
+	m.SetTurnOutcomeRecorder("instance-1", recorder)
+	m.wg.Add(1)
+	go m.forwardUpdates(stub, stopCh)
+	t.Cleanup(func() { close(stopCh) })
+
+	stub.updatesCh <- adapter.AgentEvent{Type: adapter.EventTypeComplete}
+
+	select {
+	case delivered := <-m.updatesCh:
+		if delivered.ControlTurnID != 1 {
+			t.Fatalf("delivered.ControlTurnID = %d, want 1", delivered.ControlTurnID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the complete event to be forwarded")
 	}
 }

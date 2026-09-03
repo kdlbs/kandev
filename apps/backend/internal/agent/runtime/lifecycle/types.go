@@ -95,6 +95,21 @@ type AgentExecution struct {
 	promptTurnID      string
 	promptLifecycleMu sync.Mutex
 
+	// recoveryAppliedControlTurnID is the control-server-assigned turn
+	// identifier (streams.AgentEvent.ControlTurnID) of a retained turn
+	// outcome this execution already applied during re-tracking
+	// (AC-EXECUTORS-SURVIVAL-004.2). A later live-delivered event carrying
+	// the same identifier is the redelivery design 03 describes -- the
+	// backend re-attaching finally unblocks agentctl's parked send of the
+	// exact same event the recovery loop already fetched and applied via
+	// GetTurnOutcome -- and must be a no-op (AC-EXECUTORS-SURVIVAL-004.4).
+	// Zero means "nothing applied via recovery," matching ControlTurnID's
+	// own "not retained" zero value, so the check in handleAgentEvent is a
+	// single comparison with no separate presence flag needed. atomic
+	// because it is set once during recovery (before streams reconnect) but
+	// read from the stream-processing goroutine handleAgentEvent runs on.
+	recoveryAppliedControlTurnID atomic.Int64
+
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
 	PrepareResult *EnvPrepareResult `json:"-"`
@@ -358,6 +373,31 @@ func (e *AgentExecution) promptGenerationSnapshot() uint64 {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptGeneration
+}
+
+// markRecoveryTurnOutcomeApplied records turnID as the control-server-
+// assigned identifier of a retained turn outcome just applied during
+// re-tracking (AC-EXECUTORS-SURVIVAL-004.2). A zero turnID is a no-op: it
+// means nothing was retained, and zero is also ControlTurnID's own
+// "not retained" value, so recording it would make every ordinary live
+// event with an unset ControlTurnID look like a match.
+func (e *AgentExecution) markRecoveryTurnOutcomeApplied(turnID int64) {
+	if turnID == 0 {
+		return
+	}
+	e.recoveryAppliedControlTurnID.Store(turnID)
+}
+
+// isRecoveryDuplicateEvent reports whether event is a live redelivery of a
+// turn outcome this execution already applied from a retained read
+// (AC-EXECUTORS-SURVIVAL-004.4). An event with no ControlTurnID stamp (the
+// overwhelming majority -- only a terminal event that was ever retained
+// while detached carries one) never matches.
+func (e *AgentExecution) isRecoveryDuplicateEvent(event *agentctl.AgentEvent) bool {
+	if event == nil || event.ControlTurnID == 0 {
+		return false
+	}
+	return e.recoveryAppliedControlTurnID.Load() == event.ControlTurnID
 }
 
 func (e *AgentExecution) armPromptActivity() {

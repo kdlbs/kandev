@@ -17,9 +17,10 @@ import "github.com/kandev/kandev/internal/agentctl/server/adapter"
 // (Start has not run) is treated as already stopped rather than parking
 // forever with no lifecycle that could ever release it.
 func (m *Manager) sendUpdateBlocking(event adapter.AgentEvent) bool {
+	m.recordTerminalOutcome(&event)
+
 	select {
 	case m.updatesCh <- event:
-		m.recordTerminalOutcome(event)
 		return true
 	default:
 	}
@@ -32,7 +33,6 @@ func (m *Manager) sendUpdateBlocking(event adapter.AgentEvent) bool {
 
 	select {
 	case m.updatesCh <- event:
-		m.recordTerminalOutcome(event)
 		return true
 	case <-stopCh:
 		return false

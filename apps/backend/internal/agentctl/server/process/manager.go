@@ -1806,9 +1806,9 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			if !ok {
 				return
 			}
+			m.recordTerminalOutcome(&update)
 			select {
 			case m.updatesCh <- update:
-				m.recordTerminalOutcome(update)
 			case <-stopCh:
 				return
 			}

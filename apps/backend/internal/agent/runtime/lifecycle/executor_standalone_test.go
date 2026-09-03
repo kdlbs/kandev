@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -53,16 +54,39 @@ type standaloneControlServer struct {
 	// still in flight, without the fixture holding s.mu for the whole sleep
 	// (which would otherwise serialize every other concurrent stop request).
 	deleteDelay map[string]time.Duration
+
+	// turnOutcomes, keyed by instance ID, is what GET
+	// .../turn-outcome answers with; an absent key answers "nothing
+	// retained" (retained: false), matching AC-EXECUTORS-SURVIVAL-004.5's
+	// no-outcome case.
+	turnOutcomes map[string]agentctlclient.TurnOutcome
+	// turnOutcomeFailures, keyed by instance ID, is the number of remaining
+	// GET .../turn-outcome attempts to fail (500) before it starts
+	// answering normally -- pins the bounded-retry attempt count
+	// (AC-EXECUTORS-SURVIVAL-004.5/002.13).
+	turnOutcomeFailures map[string]int
+	turnOutcomeAttempts map[string]int
+	// ackedTurnOutcomes records every accepted POST .../turn-outcome/ack
+	// call, in order.
+	ackedTurnOutcomes []ackedTurnOutcome
+}
+
+type ackedTurnOutcome struct {
+	instanceID string
+	turnID     int64
 }
 
 func newStandaloneControlServer(t *testing.T, healthy bool) *standaloneControlServer {
 	t.Helper()
 	s := &standaloneControlServer{
-		healthy:        healthy,
-		createStatus:   http.StatusOK,
-		deleteFailures: make(map[string]int),
-		deleteAttempts: make(map[string]int),
-		deleteDelay:    make(map[string]time.Duration),
+		healthy:             healthy,
+		createStatus:        http.StatusOK,
+		deleteFailures:      make(map[string]int),
+		deleteAttempts:      make(map[string]int),
+		deleteDelay:         make(map[string]time.Duration),
+		turnOutcomes:        make(map[string]agentctlclient.TurnOutcome),
+		turnOutcomeFailures: make(map[string]int),
+		turnOutcomeAttempts: make(map[string]int),
 	}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -117,6 +141,30 @@ func newStandaloneControlServer(t *testing.T, healthy bool) *standaloneControlSe
 			_ = json.NewEncoder(w).Encode(struct {
 				Instances []*agentctlclient.InstanceInfo `json:"instances"`
 			}{Instances: s.listInstances})
+		case strings.HasPrefix(r.URL.Path, "/api/v1/instances/") && strings.HasSuffix(r.URL.Path, "/turn-outcome") &&
+			r.Method == http.MethodGet:
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/instances/"), "/turn-outcome")
+			s.turnOutcomeAttempts[id]++
+			if s.turnOutcomeFailures[id] > 0 {
+				s.turnOutcomeFailures[id]--
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			outcome, retained := s.turnOutcomes[id]
+			_ = json.NewEncoder(w).Encode(struct {
+				Retained bool               `json:"retained"`
+				TurnID   int64              `json:"turn_id"`
+				Event    streams.AgentEvent `json:"event"`
+			}{Retained: retained, TurnID: outcome.TurnID, Event: outcome.Event})
+		case strings.HasPrefix(r.URL.Path, "/api/v1/instances/") && strings.HasSuffix(r.URL.Path, "/turn-outcome/ack") &&
+			r.Method == http.MethodPost:
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/instances/"), "/turn-outcome/ack")
+			var body struct {
+				TurnID int64 `json:"turn_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			s.ackedTurnOutcomes = append(s.ackedTurnOutcomes, ackedTurnOutcome{instanceID: id, turnID: body.TurnID})
+			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

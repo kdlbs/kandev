@@ -37,7 +37,16 @@ func (m *Manager) SetTurnOutcomeRecorder(instanceID string, recorder TurnOutcome
 // all converge on updatesCh regardless of origin -- this is the single
 // filter for all of them, called from every point an event is actually
 // delivered onto updatesCh (forwardUpdates, sendUpdateBlocking).
-func (m *Manager) recordTerminalOutcome(event adapter.AgentEvent) {
+//
+// event is a pointer so the assigned turn identifier can be stamped onto
+// ControlTurnID before the caller sends this same value onward -- callers
+// must call this before the channel send, not after, or the stamp never
+// reaches the delivered copy. AC-EXECUTORS-SURVIVAL-004.4 requires that
+// identifier to travel on both the retained-read observation (returned via
+// TurnOutcome.TurnID) and the live-delivered observation (this stamp); the
+// retained copy stored by Retain is deliberately the pre-stamp value, since
+// TurnOutcome.TurnID already carries the identifier for that side.
+func (m *Manager) recordTerminalOutcome(event *adapter.AgentEvent) {
 	if event.Type != adapter.EventTypeComplete && event.Type != adapter.EventTypeError {
 		return
 	}
@@ -48,5 +57,8 @@ func (m *Manager) recordTerminalOutcome(event adapter.AgentEvent) {
 	if recorder == nil {
 		return
 	}
-	recorder.RetainTurnOutcome(instanceID, event)
+	turnID, ok := recorder.RetainTurnOutcome(instanceID, *event)
+	if ok {
+		event.ControlTurnID = turnID
+	}
 }

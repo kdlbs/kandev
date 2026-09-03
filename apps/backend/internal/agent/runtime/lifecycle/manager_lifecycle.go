@@ -155,6 +155,20 @@ func (m *Manager) Start(ctx context.Context) error {
 				m.stopUnreconstructableRecoveredInstance(ctx, ri)
 				continue
 			}
+			// AC-EXECUTORS-SURVIVAL-004.2/004.5: retrieve this instance's
+			// retained turn status before this session's state is published.
+			// A read failure (retries exhausted) must not publish the session
+			// as running -- it is authoritatively unknown, not running -- so
+			// it takes the same not-re-tracked stop path as an
+			// unreconstructable agent identity above.
+			turnOutcome, turnOutcomeResult := m.retrieveRecoveredTurnOutcome(ctx, ri)
+			if turnOutcomeResult == recoveredTurnOutcomeReadFailed {
+				m.logger.Error("refusing to re-track recovered execution: turn status could not be retrieved",
+					zap.String("instance_id", execution.ID),
+					zap.String("session_id", execution.SessionID))
+				m.stopUnreconstructableRecoveredInstance(ctx, ri)
+				continue
+			}
 			// Create trace span for the recovered session
 			_, recoverySpan := tracing.TraceSessionRecovered(
 				context.Background(), execution.TaskID, execution.SessionID, execution.ID,
@@ -201,6 +215,18 @@ func (m *Manager) Start(ctx context.Context) error {
 				m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
 				m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
 				releaseClient()
+			}
+
+			// AC-EXECUTORS-SURVIVAL-004.2: apply the retained outcome, or
+			// publish running when nothing was retained, before streams
+			// reconnect below -- reconnecting is what would eventually
+			// deliver the same terminal event live (AC-EXECUTORS-SURVIVAL-
+			// 004.3/004.4), so this ordering makes the recovery-time
+			// application the one that wins in the common case.
+			if turnOutcomeResult == recoveredTurnOutcomeApplied {
+				m.applyRecoveredTurnOutcome(ctx, execution, ri, turnOutcome)
+			} else {
+				m.publishRecoveredExecutionRunning(ctx, execution)
 			}
 
 			// Reconnect to workspace streams (shell, git, file changes) in background
