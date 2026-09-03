@@ -108,9 +108,6 @@ func (r *SSHExecutor) HealthCheck(_ context.Context) error {
 // PrepareGitMetadataProjection attests the agent-side policy capability before
 // SSH provisioning. Remote paths are resolved only after the checkout exists.
 func (r *SSHExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
-	if req != nil && req.PreviousExecutionID != "" {
-		return unsupportedGitMetadataProjection("SSH resume cannot replace Git metadata permissions safely; start a new session")
-	}
 	return validateRemoteGitMetadataRequest(req)
 }
 

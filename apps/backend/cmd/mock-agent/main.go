@@ -110,7 +110,10 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 		AgentCapabilities: acp.AgentCapabilities{
 			LoadSession:     true,
 			McpCapabilities: acp.McpCapabilities{Sse: true},
-			Meta:            meta,
+			SessionCapabilities: acp.SessionCapabilities{
+				AdditionalDirectories: &acp.SessionAdditionalDirectoriesCapabilities{},
+			},
+			Meta: meta,
 		},
 	}, nil
 }

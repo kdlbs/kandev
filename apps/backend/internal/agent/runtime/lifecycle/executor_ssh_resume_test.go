@@ -10,8 +10,20 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+func TestSSHPrepareGitMetadataProjectionAllowsRemoteRecovery(t *testing.T) {
+	executor := &SSHExecutor{}
+	err := executor.PrepareGitMetadataProjection(context.Background(), &ExecutorCreateRequest{
+		PreviousExecutionID: "previous-instance",
+		AgentConfig:         agents.NewMockAgent(),
+	})
+	if err != nil {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want remote recovery capability validation", err)
+	}
+}
 
 func TestSSHBuildResumedInstanceRecordsProcessReuse(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())

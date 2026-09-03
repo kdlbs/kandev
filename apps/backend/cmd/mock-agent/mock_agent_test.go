@@ -89,6 +89,17 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestInitializeAdvertisesAdditionalDirectories(t *testing.T) {
+	agent := &mockAgent{}
+	response, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if response.AgentCapabilities.SessionCapabilities.AdditionalDirectories == nil {
+		t.Fatal("additional directories capability was not advertised")
+	}
+}
+
 func TestParseSavedPromptDeliveryScenarioRequiresTrustedExpansionShape(t *testing.T) {
 	const directive = savedPromptDeliveryDirective
 
