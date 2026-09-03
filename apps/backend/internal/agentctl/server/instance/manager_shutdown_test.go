@@ -335,6 +335,8 @@ func (e legacyResourceReleaseError) CanReleaseInstanceResources() bool {
 
 func (m *fakeProcessManager) CloseAdmission() {}
 
+func (m *fakeProcessManager) WorkspaceSourceRoots() []string { return nil }
+
 func (m *fakeProcessManager) StopForTeardown(context.Context) error {
 	m.stopped = true
 	if m.stopStarted != nil {

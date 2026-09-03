@@ -73,6 +73,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
+	if execution.OfficeAgentProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+	}
 	running := &models.ExecutorRunning{
 		ID:                 execution.SessionID,
 		SessionID:          execution.SessionID,

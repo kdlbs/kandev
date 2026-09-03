@@ -241,6 +241,93 @@ func TestManagerStartRecoveredExecutionToleratesWorkspaceInfoLookupFailure(t *te
 	require.Empty(t, execution.TaskEnvironmentID)
 }
 
+// TestManagerStartRecoveredExecutionCarriesOfficeAgentProfileID pins
+// AC-EXECUTORS-SURVIVAL-002.14's "Office profile identity" reconstruction
+// row: sourced from the recovery-inventory record's own persisted metadata
+// (a new key in the existing column), not re-derived or read from the
+// instance.
+func TestManagerStartRecoveredExecutionCarriesOfficeAgentProfileID(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:  "exec-recovered",
+			TaskID:      "task-1",
+			SessionID:   "session-1",
+			RuntimeName: executor.NameStandalone,
+			Metadata: map[string]interface{}{
+				MetadataKeyOfficeAgentProfileID: "office-profile-9",
+			},
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	require.NoError(t, mgr.Start(context.Background()))
+
+	execution, ok := mgr.GetExecutionBySessionID("session-1")
+	require.True(t, ok)
+	require.Equal(t, "office-profile-9", execution.OfficeAgentProfileID)
+}
+
+// TestManagerStartRecoveredExecutionLeavesOfficeAgentProfileIDEmptyForNonOffice
+// pins that an absent metadata key (the common, non-Office case) is a
+// legitimately empty value, not an error.
+func TestManagerStartRecoveredExecutionLeavesOfficeAgentProfileIDEmptyForNonOffice(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:  "exec-recovered",
+			TaskID:      "task-1",
+			SessionID:   "session-1",
+			RuntimeName: executor.NameStandalone,
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	require.NoError(t, mgr.Start(context.Background()))
+
+	execution, ok := mgr.GetExecutionBySessionID("session-1")
+	require.True(t, ok)
+	require.Empty(t, execution.OfficeAgentProfileID)
+}
+
+// TestManagerStartRecoveredExecutionCarriesWorkspaceSourceRoots pins
+// AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots" reconstruction
+// row: sourced from the adopted instance, read back rather than pushed.
+func TestManagerStartRecoveredExecutionCarriesWorkspaceSourceRoots(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:           "exec-recovered",
+			TaskID:               "task-1",
+			SessionID:            "session-1",
+			RuntimeName:          executor.NameStandalone,
+			WorkspaceSourceRoots: []string{"/ws/task-1/backend", "/ws/task-1/frontend"},
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	require.NoError(t, mgr.Start(context.Background()))
+
+	execution, ok := mgr.GetExecutionBySessionID("session-1")
+	require.True(t, ok)
+	require.Equal(t, []string{"/ws/task-1/backend", "/ws/task-1/frontend"}, execution.WorkspaceSourceRoots)
+}
+
 func TestManagerStartWithoutRegistryIsNoOp(t *testing.T) {
 	mgr := newTestManager(t)
 

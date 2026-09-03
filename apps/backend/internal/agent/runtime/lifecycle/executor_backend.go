@@ -258,7 +258,12 @@ const (
 	MetadataKeyModelOverride = "model_override"
 
 	// Office metadata keys
-	MetadataKeySkillManifestJSON    = "skill_manifest_json"
+	MetadataKeySkillManifestJSON = "skill_manifest_json"
+	// MetadataKeyOfficeAgentProfileID persists AgentExecution.OfficeAgentProfileID
+	// (AC-EXECUTORS-SURVIVAL-002.14's "Office profile identity" reconstruction
+	// row): a new key in the existing metadata column rather than a schema
+	// change. Empty for every non-Office launch, which is legitimate, not
+	// missing.
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
@@ -658,6 +663,11 @@ type ExecutorInstance struct {
 	// live instance; a fresh launch's environment flows through
 	// ExecutorCreateRequest.Env instead, never through this field.
 	Env map[string]string
+
+	// WorkspaceSourceRoots is the adopted instance's own live source-root
+	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
+	// "workspace source roots" row). Same recovery-only shape as Env above.
+	WorkspaceSourceRoots []string
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by authenticated container/remote executors for encrypted storage in SecretStore.

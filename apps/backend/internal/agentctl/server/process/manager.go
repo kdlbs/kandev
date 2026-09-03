@@ -483,6 +483,15 @@ func (m *Manager) currentWorkspaceSourceRoots() []string {
 	return append([]string(nil), m.workspaceSourceRoots...)
 }
 
+// WorkspaceSourceRoots returns the live, current source-root allowlist
+// (AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots" reconstruction
+// row: read back from the adopted instance, never pushed). A rescan or
+// rebind changes this in place, so callers always see the value this
+// instance is enforcing right now, not a snapshot from creation.
+func (m *Manager) WorkspaceSourceRoots() []string {
+	return m.currentWorkspaceSourceRoots()
+}
+
 // lookupBaseBranch reads the task's recorded base branch for a given
 // repository name from the per-instance map. The empty key "" addresses the
 // single-repo / root tracker. Falls back to the empty-key entry when the

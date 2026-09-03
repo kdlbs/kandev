@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -67,5 +68,55 @@ func TestListInstancesReturnsEnvelopeWithSessionAndTaskID(t *testing.T) {
 	}
 	if got.TaskID != "task-456" {
 		t.Errorf("TaskID = %q, want %q", got.TaskID, "task-456")
+	}
+}
+
+// TestListInstancesReturnsLiveWorkspaceSourceRoots drives GET
+// /api/v1/instances through the real handler and the real agentctl client to
+// pin AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots" reconstruction
+// row: the backend must read this back from the adopted instance rather than
+// push its own, so the wire contract has to expose whatever the instance is
+// currently enforcing, not just what it was created with.
+func TestListInstancesReturnsLiveWorkspaceSourceRoots(t *testing.T) {
+	log := logger.Default()
+	mgr := instance.NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 0, Max: 0},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+	t.Cleanup(func() { _ = mgr.Shutdown(t.Context()) })
+	mgr.SetServerFactory(func(*config.InstanceConfig, *process.Manager, *logger.Logger) http.Handler {
+		return http.NotFoundHandler()
+	})
+
+	workspacePath, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	created, err := mgr.CreateInstance(t.Context(), &instance.CreateRequest{
+		WorkspacePath:        workspacePath,
+		SessionID:            "session-123",
+		WorkspaceSourceRoots: []string{workspacePath},
+	})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.StopInstance(t.Context(), created.ID) })
+
+	cs := NewControlServer(&config.Config{}, mgr, log)
+	server := httptest.NewServer(cs.Router())
+	defer server.Close()
+	host, port := parseHostPort(t, server.URL)
+	client := agentctl.NewControlClient(host, port, log)
+
+	instances, err := client.ListInstances(t.Context())
+	if err != nil {
+		t.Fatalf("ListInstances: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("instances = %d, want 1", len(instances))
+	}
+	got := instances[0].WorkspaceSourceRoots
+	if len(got) != 1 || got[0] != workspacePath {
+		t.Errorf("WorkspaceSourceRoots = %v, want [%q]", got, workspacePath)
 	}
 }

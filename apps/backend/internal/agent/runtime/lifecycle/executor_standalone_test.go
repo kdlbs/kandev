@@ -343,7 +343,8 @@ func TestStandaloneExecutorRecoverInstancesReTracksWinnerAndStopsOrphan(t *testi
 	control.listInstances = []*agentctlclient.InstanceInfo{
 		{
 			ID: "instance-1", Port: 5001, SessionID: "session-1", TaskID: "task-1", WorkspacePath: "/ws/1",
-			Env: map[string]string{"KANDEV_RUN_ID": "run-42", "PATH": "/usr/bin"},
+			Env:                  map[string]string{"KANDEV_RUN_ID": "run-42", "PATH": "/usr/bin"},
+			WorkspaceSourceRoots: []string{"/ws/1", "/ws/1-sibling"},
 		},
 		{ID: "orphan-instance", Port: 5002, SessionID: "session-orphan"},
 	}
@@ -373,6 +374,9 @@ func TestStandaloneExecutorRecoverInstancesReTracksWinnerAndStopsOrphan(t *testi
 	}
 	if got.Env["KANDEV_RUN_ID"] != "run-42" || got.Env["PATH"] != "/usr/bin" {
 		t.Fatalf("Env = %+v, want the adopted instance's own runtime environment read back (AC-EXECUTORS-SURVIVAL-002.14)", got.Env)
+	}
+	if len(got.WorkspaceSourceRoots) != 2 || got.WorkspaceSourceRoots[0] != "/ws/1" || got.WorkspaceSourceRoots[1] != "/ws/1-sibling" {
+		t.Fatalf("WorkspaceSourceRoots = %+v, want the adopted instance's own live allowlist read back (AC-EXECUTORS-SURVIVAL-002.14)", got.WorkspaceSourceRoots)
 	}
 	if got.Client == nil {
 		t.Fatal("recovered instance must carry a usable agentctl client")

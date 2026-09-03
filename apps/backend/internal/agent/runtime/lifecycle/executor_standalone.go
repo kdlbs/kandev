@@ -552,6 +552,7 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 			WorkspacePath:        inst.WorkspacePath,
 			Metadata:             metadata,
 			Env:                  inst.Env,
+			WorkspaceSourceRoots: inst.WorkspaceSourceRoots,
 		})
 	}
 	return recovered

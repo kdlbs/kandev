@@ -112,6 +112,10 @@ type InstanceInfo struct {
 	SessionID string `json:"session_id,omitempty"`
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string `json:"task_id,omitempty"`
+	// WorkspaceSourceRoots is the instance's live, current source-root
+	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
+	// "workspace source roots" reconstruction row).
+	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
 }
 
 // ControlClientOption configures optional ControlClient settings.

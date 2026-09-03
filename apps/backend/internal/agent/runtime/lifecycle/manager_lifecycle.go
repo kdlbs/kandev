@@ -113,9 +113,18 @@ func (m *Manager) Start(ctx context.Context) error {
 				// memory-only, per design 03's "runtime environment" /
 				// "run identity" rows).
 				RunID: ri.Env["KANDEV_RUN_ID"],
+				// AC-EXECUTORS-SURVIVAL-002.14: workspace source roots are read
+				// back from the adopted instance, never pushed -- agentctl owns
+				// this allowlist and a rebind may have changed it since launch.
+				WorkspaceSourceRoots: ri.WorkspaceSourceRoots,
 			}
 			execution.setRuntimeEnvironment(ri.Env)
 			m.hydrateRecoveredTaskEnvironmentID(ctx, execution)
+			// AC-EXECUTORS-SURVIVAL-002.14: Office profile identity is a new key
+			// in the same persisted metadata this record already carries, not a
+			// new source -- an empty value here is a legitimate non-Office
+			// launch, not a missing reconstruction.
+			execution.OfficeAgentProfileID = getMetadataString(ri.Metadata, MetadataKeyOfficeAgentProfileID)
 			// Create trace span for the recovered session
 			_, recoverySpan := tracing.TraceSessionRecovered(
 				context.Background(), execution.TaskID, execution.SessionID, execution.ID,

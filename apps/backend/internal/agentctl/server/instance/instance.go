@@ -16,6 +16,10 @@ import (
 type processManager interface {
 	CloseAdmission()
 	StopForTeardown(context.Context) error
+	// WorkspaceSourceRoots returns the live, current source-root allowlist a
+	// rescan/rebind may have changed since creation (AC-EXECUTORS-SURVIVAL-
+	// 002.14's "workspace source roots" reconstruction row).
+	WorkspaceSourceRoots() []string
 }
 
 // Instance represents a single agent instance running as a subprocess.
@@ -246,6 +250,13 @@ type InstanceInfo struct {
 
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string `json:"task_id,omitempty"`
+
+	// WorkspaceSourceRoots is the live, current source-root allowlist this
+	// instance is enforcing right now -- a rescan or rebind can change it
+	// after creation, so this always reflects that, not a creation-time
+	// snapshot (AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots"
+	// reconstruction row: read back, never pushed).
+	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
 }
 
 // Info returns a safe copy of the instance data for API serialization.
@@ -263,16 +274,22 @@ func (i *Instance) Info() *InstanceInfo {
 		}
 	}
 
+	var sourceRoots []string
+	if i.manager != nil {
+		sourceRoots = i.manager.WorkspaceSourceRoots()
+	}
+
 	return &InstanceInfo{
-		ID:            i.ID,
-		Port:          i.Port,
-		Status:        i.Status,
-		WorkspacePath: i.WorkspacePath,
-		AgentCommand:  i.AgentCommand,
-		Env:           envCopy,
-		CreatedAt:     i.CreatedAt,
-		SessionID:     i.SessionID,
-		TaskID:        i.TaskID,
+		ID:                   i.ID,
+		Port:                 i.Port,
+		Status:               i.Status,
+		WorkspacePath:        i.WorkspacePath,
+		AgentCommand:         i.AgentCommand,
+		Env:                  envCopy,
+		CreatedAt:            i.CreatedAt,
+		SessionID:            i.SessionID,
+		TaskID:               i.TaskID,
+		WorkspaceSourceRoots: sourceRoots,
 	}
 }
 
