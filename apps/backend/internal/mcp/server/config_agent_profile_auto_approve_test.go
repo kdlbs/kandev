@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// @covers AC-AGENTS-MCP-PROFILE-MUTATION-001.1
 func TestCreateAgentProfileHandler_ForwardsExplicitAutoApprove(t *testing.T) {
 	for _, value := range []bool{true, false} {
 		backend := &testBackend{response: map[string]interface{}{"id": "profile-1"}}
@@ -26,7 +25,6 @@ func TestCreateAgentProfileHandler_ForwardsExplicitAutoApprove(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-MCP-PROFILE-MUTATION-001.2
 func TestUpdateAgentProfileHandler_ForwardsExplicitAutoApprove(t *testing.T) {
 	for _, value := range []bool{true, false} {
 		backend := &testBackend{response: map[string]interface{}{"id": "profile-1"}}

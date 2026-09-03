@@ -48,7 +48,6 @@ func decodeAgentProfileResponse(t *testing.T, resp *ws.Message) settingsdto.Agen
 	return profile
 }
 
-// @covers AC-AGENTS-MCP-PROFILE-MUTATION-001.1
 func TestHandleCreateAgentProfile_PersistsAutoApprove(t *testing.T) {
 	h, repo, _ := newAgentSettingsHandlers(t)
 	ctx := context.Background()
@@ -71,7 +70,6 @@ func TestHandleCreateAgentProfile_PersistsAutoApprove(t *testing.T) {
 	require.True(t, stored.AutoApprove)
 }
 
-// @covers AC-AGENTS-MCP-PROFILE-MUTATION-001.2
 func TestHandleUpdateAgentProfile_AppliesExplicitAutoApprove(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -106,7 +104,6 @@ func TestHandleUpdateAgentProfile_AppliesExplicitAutoApprove(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-MCP-PROFILE-MUTATION-001.3
 func TestHandleUpdateAgentProfile_OmittedAutoApprovePreservesValue(t *testing.T) {
 	h, repo, _ := newAgentSettingsHandlers(t)
 	ctx := context.Background()
