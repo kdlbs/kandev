@@ -54,7 +54,7 @@ func TestProcessOnEnter_UnrecognizedActionType_WarnsAndContinuesDispatch(t *test
 		}},
 	}
 
-	svc.processOnEnter(ctx, "task-a6", session, step, "", 0)
+	svc.processOnEnter(ctx, "task-a6", session, step, "", 0, nil)
 
 	var warnings []observer.LoggedEntry
 	for _, e := range logs.All() {
@@ -121,7 +121,7 @@ func TestProcessOnEnter_EnsureParticipantSeat_DoesNotWarn(t *testing.T) {
 		}},
 	}
 
-	svc.processOnEnter(ctx, "task-seat", session, step, "", 0)
+	svc.processOnEnter(ctx, "task-seat", session, step, "", 0, nil)
 
 	var warnings []observer.LoggedEntry
 	for _, e := range logs.All() {

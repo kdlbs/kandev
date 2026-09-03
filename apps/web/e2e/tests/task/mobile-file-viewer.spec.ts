@@ -66,6 +66,49 @@ async function setupMobileFileViewerTest({
   return { session, filePath };
 }
 
+test.describe("Mobile file tree keyboard shortcuts", () => {
+  test("select-all stays in the new-file name input", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.1
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.2
+    const { session, filePath } = await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile File Create Select All",
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    await expect(session.fileTreeNode(filePath)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.getByRole("button", { name: "New file" }).tap();
+    const input = testPage.getByPlaceholder("filename...");
+    await expect(input).toBeFocused({ timeout: 5_000 });
+
+    const draftName = "mobile-draft.ts";
+    await input.fill(draftName);
+    await input.press("ControlOrMeta+a");
+
+    await expect
+      .poll(async () => ({
+        selection: await input.evaluate((element) => ({
+          start: element.selectionStart,
+          end: element.selectionEnd,
+        })),
+        selectedRows: await session.fileTreeSelectedNodes().count(),
+      }))
+      .toEqual({
+        selection: { start: 0, end: draftName.length },
+        selectedRows: 0,
+      });
+  });
+});
+
 test.describe("Mobile file viewer panel", () => {
   test.describe.configure({ retries: 1 });
 

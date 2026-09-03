@@ -8,6 +8,7 @@ import (
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/skillslug"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 
@@ -25,6 +26,8 @@ type skillRepo interface {
 	GetSkillBySlug(ctx context.Context, workspaceID, slug string) (*models.Skill, error)
 	ListSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
 	ListSystemSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
+	ListNonSystemSkills(ctx context.Context, workspaceID string) ([]*models.Skill, error)
+	NormalizeSkillSlug(ctx context.Context, workspaceID, skillID, oldSlug, newSlug string) (bool, error)
 	UpdateSkill(ctx context.Context, skill *models.Skill) error
 	DeleteSkill(ctx context.Context, id string) error
 
@@ -130,13 +133,22 @@ func (s *SkillService) countSkillUsage(ctx context.Context) map[string]int {
 
 // ValidateAndPrepareSkill validates and prepares a skill for creation.
 // Call this before CreateSkill to auto-generate slug and validate uniqueness.
+//
+// Slug handling follows AC-001.11/AC-001.12: a caller-supplied slug must be
+// well-formed or the request is rejected outright (no coercion); a
+// well-formed slug is then normalized to its canonical (kandev-prefixed)
+// form before the uniqueness check runs, so both the persisted slug and the
+// duplicate check operate on the same canonical value.
 func (s *SkillService) ValidateAndPrepareSkill(ctx context.Context, skill *models.Skill) error {
 	if skill.Name == "" {
 		return fmt.Errorf("skill name is required")
 	}
 	if skill.Slug == "" {
 		skill.Slug = GenerateSlug(skill.Name)
+	} else if !skillslug.WellFormed(skill.Slug) {
+		return fmt.Errorf("invalid skill slug %q: must contain only letters, digits, underscore, and hyphen", skill.Slug)
 	}
+	skill.Slug = skillslug.Normalize(skill.Slug)
 	if err := s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, ""); err != nil {
 		return err
 	}
@@ -156,12 +168,19 @@ func prepareSkillPackageMetadata(skill *models.Skill) {
 	)
 }
 
-// ValidateSkillUpdate validates a skill update for slug uniqueness.
+// ValidateSkillUpdate validates a skill update for slug uniqueness. Slug
+// handling mirrors ValidateAndPrepareSkill: reject a not-well-formed slug
+// outright (AC-001.11), otherwise normalize to canonical before the
+// uniqueness check (AC-001.12).
 func (s *SkillService) ValidateSkillUpdate(ctx context.Context, skill *models.Skill) error {
-	if skill.Slug != "" {
-		return s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, skill.ID)
+	if skill.Slug == "" {
+		return nil
 	}
-	return nil
+	if !skillslug.WellFormed(skill.Slug) {
+		return fmt.Errorf("invalid skill slug %q: must contain only letters, digits, underscore, and hyphen", skill.Slug)
+	}
+	skill.Slug = skillslug.Normalize(skill.Slug)
+	return s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, skill.ID)
 }
 
 func (s *SkillService) validateSlugUnique(ctx context.Context, workspaceID, slug, excludeID string) error {

@@ -5,7 +5,6 @@ requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003
-  - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004
 ---
 
 # Agent resume and runtime recovery system design
@@ -17,8 +16,9 @@ also defines visible recovery errors and explicit continuation after confirmed
 Git branch loss.
 
 The orchestrator owns recovery authorization, session identity, and warning
-persistence. The worktree manager owns branch verification and fresh branch
-creation. The web client owns error presentation and recovery choices.
+persistence. The agent lifecycle manager owns balanced preparation progress and
+completion publication. The worktree manager owns branch verification and fresh
+branch creation. The web client owns error presentation and recovery choices.
 
 The task environment remains the owner of worktrees. A task session refers to
 that environment and does not acquire its own worktree lifecycle.
@@ -27,10 +27,9 @@ that environment and does not acquire its own worktree lifecycle.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity) |
+| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity), [Resume preparation lifecycle](#resume-preparation-lifecycle) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002` | [Visible recovery errors](#visible-recovery-errors) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003` | [Explicit branch replacement](#explicit-branch-replacement), [Warning persistence](#warning-persistence) |
-| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004` | [Preserved inventory repair](#preserved-inventory-repair) |
 
 ## Current failure path
 
@@ -58,6 +57,31 @@ branch deletion.
 The web client currently converts WebSocket failures to a plain `Error` and
 several resume call sites then discard that error. Automatic resume also hides
 the resume error when read-only workspace restore succeeds.
+
+## Resume preparation lifecycle
+
+Native ACP resume normally reuses an already prepared workspace. A worktree
+resume is different: `shouldPrepareEnvironment` can re-enter environment and
+runtime preparation so Git recovery can validate, recreate, or replace the
+task-owned worktree.
+
+Preparation event publication follows one balanced lifecycle. If a launch path
+can publish `executor.prepare.progress`, it publishes exactly one terminal
+`executor.prepare.completed` event for that attempt after environment and
+runtime preparation succeeds or fails. The presence of an ACP session ID can
+skip both event kinds when no preparation runs; it cannot suppress only the
+terminal event after a worktree resume has emitted progress.
+
+The web preparation handler projects progress as `preparing` and the terminal
+event as `completed` or `failed`. `useSessionState` can treat live preparation
+as working while the durable session is temporarily `STARTING` or
+`WAITING_FOR_INPUT`, but that derived state ends with the terminal event. A
+resumed session that settles at `WAITING_FOR_INPUT` without foreground or
+detached activity therefore renders as idle and keeps the composer available.
+
+Session snapshots remain recovery evidence, not a substitute for balancing the
+live stream. They can hydrate a missing preparation projection, while a live
+in-flight projection remains authoritative until its matching terminal event.
 
 ## Recovery protocol
 
@@ -100,50 +124,6 @@ workspace preparation succeeds.
 The existing guarded transition to `STARTING`, resume lock, failure rollback,
 and successful token replacement rules remain unchanged. Only **Start fresh**
 can intentionally remove the stored provider identity before launch.
-
-## Preserved inventory repair
-
-`validateReuseEnvironmentInventory` remains the admission guard for every
-resume and additional-session launch. Zero rows and non-empty mismatches both
-return `ErrWorkspaceReuseUnsafe`; neither state falls through to materialize a
-new checkout.
-
-The explicit recovery request names only a task, session, action, and
-idempotency key. The orchestrator authorizes the task/session pair before any
-environment, repository, runtime, or filesystem read. It then derives the
-required repository slots from canonical task-repository records and resolves
-the environment from the session. Caller-provided paths, repository IDs,
-branches, and environment IDs are not accepted.
-
-For one mismatched slot, the executor builds a candidate from an existing stale
-environment row or the target session's `executors_running` snapshot. Local
-worktree recovery validates all of these facts:
-
-- task, workspace, environment, repository, and session ownership agree;
-- the candidate path is the canonical path owned by the environment and is not
-  a symlink;
-- `git worktree list --porcelain`, the checkout's common Git directory, HEAD,
-  symbolic branch, and repository path are reciprocal;
-- the expected branch slot and observed branch/ref identity agree;
-- no competing session or runtime claims a live writer.
-
-The inspector captures HEAD, ref containment, porcelain status counts and
-hash, a bounded content hash over tracked and untracked files, executor state,
-and source record revisions. Host paths remain internal; public receipts expose
-only a path hash.
-
-`workspace_inventory_recovery_receipts` is an append-only audit and
-idempotency table. The repair transaction locks and rechecks the source rows,
-uses their expected revisions, writes exactly one environment-repository row,
-and appends one receipt. A unique `(task_id, idempotency_key)` identity returns
-the receipt when its request hash matches and conflicts otherwise. An existing
-valid slot, stale revisions, or any ambiguous proof returns a typed result
-without changing inventory.
-
-After commit, the same orchestrator call performs one resume attempt while the
-existing resume lock remains held. Checkout inspection after the transaction
-must match the preservation hashes. Launch failure does not undo the repair or
-start another attempt; a later call reuses the durable receipt.
 
 ## Explicit branch replacement
 
@@ -256,6 +236,18 @@ resumption hook also clears stale feedback when the shared live session state
 transitions to `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` after an external
 manual recovery.
 
+An automatic status or recovery attempt is owned by the complete task-session
+identity, not by the session ID alone. Task navigation can briefly present the
+new route session while the task store still contains the previously active
+task. Each callback therefore applies feedback and status only when both its
+captured task ID and session ID still match the current request identity. The
+identity also carries a monotonic generation that changes on every committed
+navigation cycle, so returning to the same task-session pair still invalidates
+callbacks from the earlier cycle. The frontend publishes the identity during
+the commit phase, before passive effects can start or finish a request. A late
+result from the prior task or navigation cycle cannot set an error, notice, or
+status on the newly selected task.
+
 ## Frontend status rendering
 
 `StatusMessage` maps `metadata.kind === "branch_recreated"` to localized
@@ -292,6 +284,9 @@ not translated strings. User-facing copy does not use a Unicode em dash.
 
 Backend tests start with the current failure:
 
+- An ACP worktree resume that publishes preparation progress also publishes one
+  terminal completion event. An ACP resume that skips preparation publishes
+  neither event.
 - Normal resume returns an error that matches `ErrBranchUnrecoverable` and does
   not mutate the branch.
 - Explicit replacement keeps the session and resume token, creates a unique
@@ -313,7 +308,8 @@ Backend tests start with the current failure:
 - The WebSocket handler maps the sentinel to a conflict with recovery details.
 
 Frontend unit tests cover the typed WebSocket error, both manual recovery
-surfaces, visible automatic fallback, dual failure detail, and
+surfaces, visible automatic fallback, dual failure detail, task navigation
+with the same route session while the task identity changes, and
 `branch_recreated` status rendering.
 
 Desktop and mobile Playwright tests cover the user sequence from a failed
@@ -326,4 +322,3 @@ size, keyboard reachability, and horizontal overflow.
 - [Keep Worktrees Owned by Task Environments](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
 - [Configurable worktree branch names](../../../decisions/0032-configurable-worktree-branch-names.md)
 - [Require Explicit User Action Before Continuing a Session on a Replacement Branch](../../../decisions/2026-08-31-explicit-new-branch-session-recovery.md)
-- [Preserve checkouts during inventory repair](../../../decisions/2026-09-01-preserve-checkouts-during-inventory-repair.md)

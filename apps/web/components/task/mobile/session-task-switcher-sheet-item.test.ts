@@ -49,3 +49,23 @@ describe("toSheetItem repository projection", () => {
     expect(item.repositoryLinks).toHaveLength(3);
   });
 });
+
+describe("toSheetItem remote executor projection", () => {
+  it("carries the exact remote executor scope onto the mobile sheet row", () => {
+    const item = toSheetItem(
+      task({
+        isRemoteExecutor: true,
+        primaryExecutorId: "executor-1",
+        primaryExecutorType: "k8s",
+        primaryExecutorName: "Cluster executor",
+        primarySessionId: "session-1",
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.remoteExecutorId).toBe("executor-1");
+    expect(item.remoteExecutorType).toBe("k8s");
+    expect(item.remoteExecutorName).toBe("Cluster executor");
+    expect(item.primarySessionId).toBe("session-1");
+  });
+});

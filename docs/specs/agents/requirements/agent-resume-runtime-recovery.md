@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-07-27
+updated: 2026-09-02
 owners:
   - Kandev
 ---
@@ -27,6 +28,7 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.6:** A completed turn remains represented by the task's review state while its persisted response and session lifecycle state settle. After a backend restart and automatic resume, the prior transcript remains visible and the task returns to the Turn Finished review bucket once the session is again `WAITING_FOR_INPUT`; it does not settle in Backlog or Running.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.7:** The explicit managed-runtime update path may invalidate only the deterministic `_npx` execution directory for the selected built-in package after an initial update failure, then retry once and run the normal ACP capability probe.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.8:** **GIVEN** a valid OpenCode resume token, **WHEN** the OpenCode child exits before answering ACP `initialize`, **THEN** Kandev shows the normal recovery action and retains the same token for the next Resume attempt.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.9:** When a resumed session re-enters workspace preparation, Kandev shall publish a terminal preparation result after preparation finishes. A session that has returned to `WAITING_FOR_INPUT` without detached activity shall not remain visibly preparing or appear to have background work.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002: Visible resume failure feedback
 
@@ -40,6 +42,7 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.4:** A user can select read-only workspace restore after a manual resume failure. Kandev does not silently replace a manual Resume request with read-only restore.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.5:** Desktop, narrow desktop, and mobile task views use the existing inline alert and chat recovery patterns. Recovery actions remain reachable by keyboard and touch without horizontal overflow.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.6:** A Retry recovery control is disabled while its recovery request is in flight on every recovery surface. A repeated attempt cannot create overlapping `session.recover` requests.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.7:** When task navigation changes the active task while an automatic session-status or recovery request is in flight, the task view ignores the result owned by the prior task-session identity. An error from the prior identity does not appear on the newly selected task. Each navigation cycle invalidates prior attempts even when the task-session pair later repeats.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003: Explicit continuation after branch loss
 
@@ -57,21 +60,6 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.8:** Other resume failures do not offer branch replacement. **Start fresh** keeps its current behavior and remains the only recovery action that intentionally clears the stored conversation identity.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.9:** Attach-only worktree preflight treats a branch as unrecoverable only after a bounded noninteractive probe confirms that the configured remote does not contain it. Authentication, network, timeout, and other probe failures remain ordinary recovery failures.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.10:** If replacement checkout creation succeeds but persistence of the existing task-environment repository record fails, Kandev removes the replacement checkout and its newly created branch. The prior record remains authoritative for retry.
-
-### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004: Preserved workspace inventory repair
-
-**Intent:** Recover a reusable checkout whose canonical inventory metadata drifted without changing the checkout.
-
-#### Acceptance criteria
-
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.1:** Normal workspace reuse shall fail closed when any required repository and branch slot lacks exactly one active canonical inventory row.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2:** An authorized recovery shall repair one missing or stale row only when server-owned task, workspace, environment, repository, session, runtime, path, and Git metadata prove one reciprocal checkout identity.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3:** Recovery shall preserve Git objects, refs, index state, tracked modifications, and untracked files byte-for-byte and shall return hashes that attest to the before and after state.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.4:** The same task-scoped idempotency key and payload shall return the existing receipt; the same key with a different payload shall conflict without mutation.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5:** Duplicate, conflicting, cross-task, cross-workspace, wrong-repository, wrong-branch, wrong-environment, deleted, failed, symlinked, or ambiguously dirty evidence shall return a stable non-leaking result and preserve every resource.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6:** A committed repair shall permit at most one orchestrator-owned resume or start attempt, and concurrent calls shall not create duplicate rows, receipts, sessions, or live writers.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7:** Recovery shall never delete, clean, reset, reseed, rematerialize, or broadly discover a checkout, and a post-repair launch failure shall remain retryable and audited.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.8:** Unauthorized and unrelated-task callers shall receive no repository path, worktree path, branch, or cross-workspace existence information.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003.11:** Once explicit replacement has materialized, Kandev attempts warning persistence on every terminal resume path, including provider startup and readiness failures. A later retry can recover a warning after a failed message write.
 
 ## Migrated source detail
@@ -125,9 +113,14 @@ without repairing it.
 - A failed resume stays visible with the backend cause and a recovery action.
 - An automatic read-only restore states that resume failed and that the
   restored workspace is read-only.
+- A task selected during navigation does not show a session-status or recovery
+  error produced for the task that was previously active.
 - A confirmed missing branch offers explicit continuation on a new branch from
   the task base branch. The same conversation continues, but lost code does
   not return.
+- A resumed session that performs workspace preparation leaves the preparing
+  state when preparation finishes. An idle resumed session does not display
+  background activity that is not running.
 
 ## Persistence and security constraints
 
@@ -199,6 +192,14 @@ without repairing it.
   workspace is read-only.
 - **GIVEN** automatic resume and read-only restore both fail, **WHEN** the task
   view loads, **THEN** it shows both failure causes.
+- **GIVEN** navigation selects a session on another task while the prior
+  task's automatic session-status request remains unresolved, **WHEN** the
+  prior result arrives after the current request starts, **THEN** the current
+  task ignores the prior result and does not show its recovery error.
+- **GIVEN** navigation leaves a task-session pair and then returns to the same
+  pair while the first request remains unresolved, **WHEN** the first result
+  arrives after the return request starts, **THEN** the returned task ignores
+  the obsolete result and keeps the return request's state.
 - **GIVEN** the stored worktree branch is absent locally and on its configured
   remote, **WHEN** Resume fails, **THEN** the UI offers **Continue on a new
   branch** and does not run it automatically.
@@ -220,6 +221,10 @@ without repairing it.
 - **GIVEN** replacement materializes before provider startup or readiness fails,
   **WHEN** the resume attempt reaches a terminal path, **THEN** one warning is
   persisted or remains retryable without changing the session identity.
+- **GIVEN** an ACP worktree resume emits workspace preparation progress,
+  **WHEN** preparation and agent reconnection finish successfully, **THEN** the
+  preparation state becomes terminal and the idle chat shows neither
+  **Preparing workspace** nor **Background work is running**.
 
 ## Out of scope
 

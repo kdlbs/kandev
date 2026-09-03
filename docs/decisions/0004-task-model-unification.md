@@ -82,7 +82,7 @@ The first-transition-wins, idempotent-by-`OperationID`, `EvaluateOnly`-mode cont
 
 Two entry paths:
 
-- **Engine-emitted runs** — every `queue_run` action lands here. Coalescing (5s window for same agent + reason), per-agent serialisation (one claimed run per agent), idempotency (24h dedup window), cooldown (per-agent), and atomic task checkout (one agent per task at a time) all apply. The scheduler claims runs and dispatches via `runtime.Launch`.
+- **Engine-emitted runs** — every `queue_run` action lands here. Coalescing (5s window for same agent + reason), per-agent serialisation (one claimed run per agent), idempotency (a 24h lookup plus a durable unique key), cooldown (per-agent), and atomic task checkout (one agent per task at a time) all apply. The scheduler claims runs and dispatches via `runtime.Launch`.
 - **User-initiated launches** — a user clicking Start on a kanban task bypasses the queue and calls `runtime.Launch` directly. The queue's coalescing isn't appropriate when latency matters and the user explicitly chose timing.
 
 `run_events` (the audit log we already have) keeps its current shape. Per-run streaming via `office.run.event_appended.<run_id>` works unchanged. The WS event subjects (`office.run.queued`, `office.run.processed`, `office.run.event_appended.*`) keep the `office.` prefix for now to preserve frontend stability — they're string constants we can rename later if we want.

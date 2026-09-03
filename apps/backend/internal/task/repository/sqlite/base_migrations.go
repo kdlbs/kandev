@@ -107,6 +107,7 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	r.migrate.Apply("idx_tasks_queued_for_step", `CREATE INDEX IF NOT EXISTS idx_tasks_queued_for_step ON tasks(queued_for_step_id, queued_at)`)
+	r.migrate.Apply("idx_tasks_updated_at_id", `CREATE INDEX IF NOT EXISTS idx_tasks_updated_at_id ON tasks(updated_at, id)`)
 	// Remove deprecated workflow_step_id column from task_sessions
 	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
 		return err
@@ -288,6 +289,8 @@ func (r *Repository) runMigrations() error {
 	// migrations are idempotent and preserve the false default for legacy rows.
 	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
+	r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'complete'`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The
@@ -344,6 +347,13 @@ func (r *Repository) runMigrations() error {
 	if err := r.backfillPromptSeq(); err != nil {
 		return err
 	}
+
+	// Workflow step display snapshot on plan revisions, same pattern as
+	// author_name: the step a task was on when the revision was written.
+	// Pre-existing revisions get empty strings, matching the fresh-DB default.
+	r.migrate.Apply("task_plan_revisions.workflow_step_id", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
 
 	return nil
 }

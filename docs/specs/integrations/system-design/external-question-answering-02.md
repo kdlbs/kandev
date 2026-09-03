@@ -114,7 +114,7 @@ Each criterion below is observable through the HTTP API, the MCP tool surface, o
 |---|---|---|
 | won the claim (R1) | 200 | `{"success": true, "claimed": true, "status": "...", "response": {...}}` |
 | lost to a resolved winner (R2 winner branch) | 200 | same shape, `"claimed": false`, winner's `status`/`response` |
-| not active, no winner (R2 no-winner branch) | 409 | `{"error": "clarification request is no longer active"}` |
+| not active, no winner (R2 no-winner branch) | 409 | `{"error": "clarification request is no longer active", "code": "not_active"}` |
 | validation failure (N6–N8b) | 400 | `{"error": "<message naming the offending field>"}` |
 | unknown / unauthorized `pending_id` | 404 | `{"error": "clarification request not found"}` |
 | claim error (R4a) or delivery failure (R7) | 500 | `{"error": "<message>"}` |
@@ -122,7 +122,7 @@ Each criterion below is observable through the HTTP API, the MCP tool surface, o
 - **R11. The `success` key SHALL be retained** on `POST` responses so an existing client that only
   checks `res.ok` and `success` keeps working. `claimed`, `status`, and `response` are additive.
   **The 409 is narrowed, not removed.** Upstream returns 409 for every `claimed == false`; after
-  this change 409 means *only* "not active and no winner", and the duplicate-answer case that used
+  this change 409 means *only* "not active and no winner" and carries `code: "not_active"`; the duplicate-answer case that used
   to share it becomes a 200 with `claimed: false`. Clients that already treat 409 as a successful
   submit (W2) keep working in both cases because they also treat 200 as success.
 - **R12. `response` SHALL always emit `answers`, `rejected` and `reject_reason`, and each entry's
@@ -217,7 +217,7 @@ below. The six auth-mode-independent changes enumerated in A4 are also intention
   middleware before this spec's changes. Authorization becomes load-bearing on this route, so the
   omission is fixed here.
 - **W2.** The web UI SHALL treat a `claimed: false` success as a successful submit and close the
-  overlay, the same way it already treats a 409. Both outcomes remain "someone else settled this";
+  overlay, the same way it already treats a 409 with `code: "not_active"`. Both outcomes remain "someone else settled this";
   the client's existing 409 handling SHALL be retained unchanged, because R11 keeps 409 reachable
   for a genuinely inactive bundle.
 - **W3.** On a `claimed: false` **200** the web UI SHALL apply the **winner's** returned `response`

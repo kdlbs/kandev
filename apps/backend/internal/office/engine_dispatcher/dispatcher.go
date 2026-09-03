@@ -443,6 +443,35 @@ func isActiveSessionState(state taskmodels.TaskSessionState) bool {
 // filters by task, so unlike resolveDeciderSessionID (which validates a
 // caller-supplied session id and must check task ownership itself), there
 // is no cross-task session id to smuggle in here.
+//
+// This resolver is deliberately task-scoped, and stays that way after
+// features.officeSessionIdentity gives each participant agent its own
+// session per task. Picking "the newest session" only stays well-defined
+// because EvaluateStepQuorum — its sole caller — evaluates guards off
+// TaskID, CurrentStepID and WorkflowID, all derived from the task row
+// rather than the session (see orchestrator.assembleMachineState).
+//
+// MachineState.SessionID, SessionState, Data and IsPassthrough are the
+// session-derived fields, so with several live sessions per task "newest" no
+// longer names a specific agent's session. That is latent, not live: none of
+// the four is read by the guard-evaluation path today (Data is written by
+// set_workflow_data through SetSessionMetadataKey and read back into
+// MachineState.Data on every state assembly, but never consumed by guard
+// evaluation), so which session is chosen is unobservable today.
+//
+// The first caller that genuinely needs per-session state must session-scope
+// its own call — pass the deciding session explicitly, as RecordDecision now
+// does via resolveDeciderSessionID — rather than adding a defensive check
+// here. Guarding this resolver would make a wrong-scoped read look safe and
+// remove the pressure to fix it properly.
+//
+// The invariant is pinned by
+// TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest
+// (internal/workflow/engine): it evaluates one step through two live
+// sessions carrying different SessionID, SessionState and Data, and requires
+// an identical snapshot — so a guard whose outcome starts depending on any
+// of the three changes that test's result instead of silently resolving
+// another agent's session through this function.
 func (d *Dispatcher) resolveLatestSessionID(ctx context.Context, taskID string) (string, error) {
 	session, err := d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err != nil {

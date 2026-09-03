@@ -1,0 +1,113 @@
+---
+status: current
+system: agents
+requirements:
+  - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004
+---
+
+# Preserved workspace inventory repair system design
+
+## Purpose and boundaries
+
+This design repairs a reusable task environment's durable
+`task_environment_repos` inventory when it no longer matches the
+repository/branch slots required by session resume or a fresh
+additional-session launch, without ever touching the preserved checkout.
+
+The orchestrator/executor owns admission (`validateReuseEnvironmentInventory`),
+candidate selection, and preservation evidence. The task repository owns the
+repair transaction, the idempotency ledger, and the append-only receipt. Both
+the explicit session-recovery path and the ordinary fresh/additional-session
+launch path share the same guarded repair function; neither ever deletes,
+cleans, resets, reseeds, rematerializes, or broadly discovers a checkout.
+
+## Admission guard
+
+`validateReuseEnvironmentInventory` remains the admission guard for every
+resume and additional-session launch. Zero rows and non-empty mismatches both
+return `ErrWorkspaceReuseUnsafe`; neither state falls through to materialize a
+new checkout.
+
+The explicit recovery request names only a task, session, action, and
+idempotency key. The orchestrator authorizes the task/session pair before any
+environment, repository, runtime, or filesystem read. It then derives the
+required repository slots from canonical task-repository records and resolves
+the environment from the session. Caller-provided paths, repository IDs,
+branches, and environment IDs are not accepted.
+
+## Candidate selection and checkout proof
+
+For one mismatched slot, the executor builds a candidate from an existing stale
+environment row or the target session's `executors_running` snapshot. Local
+worktree recovery validates all of these facts:
+
+- task, workspace, environment, repository, and session ownership agree;
+- the candidate path is the canonical path owned by the environment and is not
+  a symlink;
+- `git worktree list --porcelain`, the checkout's common Git directory, HEAD,
+  symbolic branch, and repository path are reciprocal;
+- the expected branch slot and observed branch/ref identity agree;
+- no competing session or runtime claims a live writer.
+
+The inspector captures HEAD, ref containment, porcelain status counts and
+hash, a bounded content hash over tracked and untracked files, executor state,
+and source record revisions. Host paths remain internal; public receipts expose
+only a path hash.
+
+## Repair transaction and idempotency
+
+`workspace_inventory_recovery_receipts` is an append-only audit and
+idempotency table. The repair transaction locks and rechecks the source rows,
+uses their expected revisions, writes exactly one environment-repository row,
+and appends one receipt. A unique `(task_id, idempotency_key)` identity returns
+the receipt when its request hash matches and conflicts otherwise.
+
+A same-idempotency-key retry is resolved before candidate selection runs:
+the executor looks up an existing receipt for `(task_id, idempotency_key)`
+first. When one exists and its session/environment identity still matches the
+caller's context, it is returned directly — including on a retry issued after
+the canonical inventory now matches (the ordinary case once a prior repair
+already committed), which would otherwise make candidate selection see zero
+provable mismatches and misreport a conflict. An existing receipt bound to a
+different session or environment is a genuine idempotency-key reuse and still
+conflicts. An existing valid slot, stale revisions, or any ambiguous proof
+returns a typed result without changing inventory.
+
+## Before-and-after checkout attestation
+
+The receipt's `preservation` field is the before-repair evidence, captured
+immediately before the repair transaction and persisted as part of the same
+receipt row. After the transaction commits, the executor re-inspects the same
+candidate checkout and persists that result as the receipt's post-repair
+attestation (`post_repair_evidence`, `post_repair_matched`,
+`post_repair_verified_at`) via a dedicated repository call, whether the
+checkout still matches or not. A mismatch is recorded before the repair call
+returns its conflict error, so an unexpected concurrent write during a
+metadata-only repair is itself part of the durable audit trail rather than a
+transient in-memory check that leaves no trace. Persisting the post-repair
+attestation is best-effort relative to the already-committed row/receipt
+write: a failure to persist it is logged and does not undo or fail an
+otherwise-successful repair.
+
+## Fresh and additional-session launch integration
+
+`LaunchPreparedSession` (the path used by a brand-new session, including
+`spawn_session_kandev`, on-entry auto-start, and the "New Session" launch)
+runs the same admission guard as resume. On an `ErrWorkspaceReuseUnsafe`
+failure while workspace reuse is required, it attempts the same guarded
+repair function with a deterministic, session-scoped idempotency key (derived
+from the session ID) rather than a caller-supplied one: there is no session
+identity for the caller to key on until the session row already exists, and
+the session row is created before this launch path runs. Repair failure
+propagates the original admission error unchanged (no regression versus the
+pre-repair behavior). Repair success re-validates once, then proceeds through
+the single existing launch attempt; the session-scoped `sessionLock` already
+serializes concurrent launches for that session, and the repair function's own
+active-session check rejects a competing sibling writer on the task. No
+primary-session flag is set or changed by this path: `SetSessionPrimary` runs
+earlier, at session creation, independent of whether the launch that follows
+repairs or launches cleanly.
+
+## Related decisions
+
+- [Preserve checkouts during inventory repair](../../../decisions/2026-09-01-preserve-checkouts-during-inventory-repair.md)

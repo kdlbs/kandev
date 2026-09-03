@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -140,6 +141,8 @@ func WithMCPToolNamespacingByServer(enabled bool) ServerOption {
 	}
 }
 
+type mcpAttachmentAttemptContextKey struct{}
+
 // New creates a new MCP server for agentctl.
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
@@ -160,6 +163,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 	// Create Streamable HTTP server for Codex
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 
 	return s
@@ -179,6 +183,7 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 	)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 	return s
 }
@@ -202,6 +207,7 @@ func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *
 	// Streamable HTTP transport handler — mounted at /mcp on the backend.
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 
 	return s
@@ -253,29 +259,35 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		"kandev-mcp",
 		"1.0.0",
 		server.WithToolCapabilities(true),
+		server.WithCacheHints(0, mcp.CacheScopePrivate),
 		server.WithHooks(hooks),
 	)
+	hooks.AddBeforeAny(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any) {
+		if server.IsModernRequest(ctx) {
+			s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceProtocolAccepted, 0, "")
+		}
+	})
 	hooks.AddOnRegisterSession(func(_ context.Context, session server.ClientSession) {
 		s.registerMCPConnection(session.SessionID())
 	})
 	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
 	hooks.AddBeforeCallTool(func(_ context.Context, _ any, request *mcp.CallToolRequest) {
 		s.restoreCanonicalToolName(request)
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
 		s.presentTransportToolNames(result)
-		s.observeMCPToolsList(mcpConnectionID(ctx), result.Tools)
+		s.observeMCPToolsListForRequest(ctx, result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
 		s.syncPluginTools(ctx)
 	})
-	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ *mcp.CallToolResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
+	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ any) {
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
 	})
 	hooks.AddOnError(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any, err error) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceExplicitError, 0, err.Error())
+		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceExplicitError, 0, err.Error())
 	})
 	hooks.AddOnUnregisterSession(func(_ context.Context, session server.ClientSession) {
 		s.unregisterMCPConnection(session.SessionID())
@@ -356,8 +368,28 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 	s.attachmentAttempt = attempt
 }
 
+// mcpHTTPContext snapshots the backend-owned attachment attempt before the MCP
+// transport dispatches a request. Modern requests are stateless, so their
+// hooks must retain the attempt that accepted the request even if a later
+// lifecycle operation rolls the server over to a new attempt.
+func (s *Server) mcpHTTPContext(ctx context.Context, _ *http.Request) context.Context {
+	s.attachmentMu.RLock()
+	attempt := s.attachmentAttempt
+	s.attachmentMu.RUnlock()
+	return context.WithValue(ctx, mcpAttachmentAttemptContextKey{}, attempt)
+}
+
+func mcpAttachmentAttemptFromContext(ctx context.Context) (streams.MCPAttachmentAttempt, bool) {
+	attempt, ok := ctx.Value(mcpAttachmentAttemptContextKey{}).(streams.MCPAttachmentAttempt)
+	return attempt, ok
+}
+
 func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
 	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
+}
+
+func (s *Server) observeMCPRequest(ctx context.Context, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
+	s.observeMCPRequestWithTools(ctx, kind, toolCount, summary, nil)
 }
 
 func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
@@ -366,6 +398,14 @@ func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
 		summaries = append(summaries, summarizeMCPTool(tool))
 	}
 	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
+}
+
+func (s *Server) observeMCPToolsListForRequest(ctx context.Context, tools []mcp.Tool) {
+	summaries := make([]streams.MCPToolSummary, 0, len(tools))
+	for _, tool := range tools {
+		summaries = append(summaries, summarizeMCPTool(tool))
+	}
+	s.observeMCPRequestWithTools(ctx, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
 }
 
 func summarizeMCPTool(tool mcp.Tool) streams.MCPToolSummary {
@@ -411,6 +451,46 @@ func (s *Server) observeMCPConnectionWithTools(
 		return
 	}
 	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
+}
+
+func (s *Server) observeMCPRequestWithTools(
+	ctx context.Context,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
+	if !server.IsModernRequest(ctx) {
+		connectionID := mcpConnectionID(ctx)
+		s.attachmentMu.RLock()
+		attempt, ok := s.attachmentAttempts[connectionID]
+		reporter := s.attachmentReporter
+		if !ok && connectionID != "" && kind == streams.MCPAttachmentEvidenceInitializeObserved {
+			// Streamable HTTP registers a legacy POST initialize session after
+			// handling the request. Attribute its initialize evidence to the
+			// current attempt until the registration hook records the connection.
+			attempt = s.attachmentAttempt
+			ok = attempt.AttemptID != ""
+		}
+		s.attachmentMu.RUnlock()
+		if !ok || reporter == nil || attempt.AttemptID == "" {
+			return
+		}
+		s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
+		return
+	}
+
+	attempt, hasSnapshot := mcpAttachmentAttemptFromContext(ctx)
+	s.attachmentMu.RLock()
+	if !hasSnapshot {
+		attempt = s.attachmentAttempt
+	}
+	reporter := s.attachmentReporter
+	s.attachmentMu.RUnlock()
+	if reporter == nil || attempt.AttemptID == "" {
+		return
+	}
+	s.reportMCPConnectionWithTools(reporter, attempt, "", kind, toolCount, summary, tools)
 }
 
 func (s *Server) registerMCPConnection(connectionID string) {
@@ -1742,7 +1822,7 @@ func (s *Server) registerPlanTools() {
 		mcp.NewTool("create_task_plan_kandev",
 			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). If a plan already exists for this task, this REPLACES ITS ENTIRE CONTENT — same as update_task_plan_kandev through a different door. Read it first with get_task_plan_kandev if you need to preserve any of it."),
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole — there is no partial update or append mode. To preserve prior content, call get_task_plan_kandev first and include its content plus your additions in this call.")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole — there is no partial update or append mode. To preserve prior content, call get_task_plan_kandev first and include its content plus your additions in this call. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
 		s.wrapHandler("create_task_plan_kandev", s.createTaskPlanHandler()),
@@ -1758,7 +1838,7 @@ func (s *Server) registerPlanTools() {
 		mcp.NewTool("update_task_plan_kandev",
 			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This REPLACES THE ENTIRE PLAN — there is no partial update, append, or section-patch mode. The correct sequence is: call get_task_plan_kandev, then send this call with the full document (prior content plus your changes), never just the new section."),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions.")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
 		s.wrapHandler("update_task_plan_kandev", s.updateTaskPlanHandler()),

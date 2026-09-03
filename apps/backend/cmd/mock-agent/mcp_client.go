@@ -16,6 +16,9 @@ var (
 	mcpClientsMu sync.Mutex
 )
 
+// mcpSSEProtocolVersion keeps the mock agent on the legacy SSE protocol.
+const mcpSSEProtocolVersion = mcp.ProtocolVersion20241105
+
 // getMCPClient returns (or creates) an initialized MCP client for the named server.
 func getMCPClient(serverName string) (*mcpclient.Client, error) {
 	mcpClientsMu.Lock()
@@ -41,7 +44,7 @@ func getMCPClient(serverName string) (*mcpclient.Client, error) {
 	}
 
 	initReq := mcp.InitializeRequest{}
-	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ProtocolVersion = mcpSSEProtocolVersion
 	initReq.Params.ClientInfo = mcp.Implementation{
 		Name:    "mock-agent",
 		Version: "1.0",

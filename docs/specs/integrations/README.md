@@ -52,6 +52,7 @@ outcomes that expose those contracts.
 - [GitLab Workflow Sync](requirements/gitlab-workflow-sync.md)
 - [Jira Watcher Task Prompts](requirements/jira-watcher-task-prompts.md)
 - [Jira Ticket Status Filter](requirements/jira-status-filter.md)
+- [Watcher Remote Base Branches](requirements/watcher-remote-base-branches.md)
 - [MCP Tool Argument Validation](requirements/mcp-tool-argument-validation.md)
 - [Pull request outcome attribution](requirements/pr-outcome-attribution.md)
 - [Pull request link copy actions](requirements/pr-link-copy-actions.md)
@@ -89,6 +90,7 @@ outcomes that expose those contracts.
 - [GitLab MR Badge on the Sidebar and Tasks-List Rows System Design Part 2](system-design/gitlab-mr-task-list-badges-02.md)
 - [GitLab MR Badge on the Sidebar and Tasks-List Rows System Design Part 3](system-design/gitlab-mr-task-list-badges-03.md)
 - [Jira Watcher Task Prompts](system-design/jira-watcher-task-prompts.md)
+- [Watcher Remote Base Branches](system-design/watcher-remote-base-branches.md)
 
 ## Migration record
 

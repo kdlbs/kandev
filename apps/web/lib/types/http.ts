@@ -113,6 +113,8 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
   route_state?: string;
@@ -138,6 +140,8 @@ export type WorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /**
@@ -207,6 +211,21 @@ export type TaskPendingActionRevision = {
   epoch: string;
   sequence: number;
 };
+
+export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
+export type WorkflowProfileSessionEndPolicy = "complete" | "park";
+
+export function normalizeWorkflowProfileSessionStartPolicy(
+  value: unknown,
+): WorkflowProfileSessionStartPolicy {
+  return typeof value === "string" && value.trim() === "new" ? "new" : "reuse";
+}
+
+export function normalizeWorkflowProfileSessionEndPolicy(
+  value: unknown,
+): WorkflowProfileSessionEndPolicy {
+  return typeof value === "string" && value.trim() === "park" ? "park" : "complete";
+}
 
 /**
  * Fine-grained busy substate of a session (see ADR-0049). Distinguishes
@@ -461,6 +480,8 @@ export type WorkflowStepDTO = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: AgentProfileId;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
   pull_from_step_id?: string | null;
@@ -857,10 +878,17 @@ export type WorkflowExportData = {
   workflows: WorkflowPortable[];
 };
 
+export type AgentProfilePortable = {
+  agent_name: string;
+  model?: string;
+  mode?: string;
+};
+
 export type WorkflowPortable = {
   name: string;
   description?: string;
   prompt?: string;
+  agent_profile?: AgentProfilePortable;
   steps: StepPortable[];
 };
 
@@ -871,8 +899,14 @@ export type StepPortable = {
   prompt?: string;
   events: StepEvents;
   is_start_step: boolean;
+  show_in_command_panel: boolean;
   allow_manual_move: boolean;
   auto_archive_after_hours?: number;
+  agent_profile?: AgentProfilePortable;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  auto_advance_requires_signal: boolean;
+  cancel_triggers_turn_complete: boolean;
   wip_limit?: number;
   pull_from_step_position?: number;
 };

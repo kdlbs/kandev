@@ -2,12 +2,8 @@
 package sqlite
 
 import (
-	"database/sql"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -78,29 +74,10 @@ func templateSeatRoles(step wfmodels.StepDefinition) []string {
 // transactional retry loop below never runs with an open read cursor over
 // the same table.
 func (r *Repository) healStepParticipantSeatRole(templateID, stepName, role string) error {
-	rows, err := r.db.Query(r.db.Rebind(`
-		SELECT ws.id, ws.workflow_id FROM workflow_steps ws
-		JOIN workflows w ON w.id = ws.workflow_id
-		WHERE w.is_system = 1 AND w.workflow_template_id = ? AND ws.name = ?
-	`), templateID, stepName)
+	targets, err := r.findSystemOwnedWorkflowSteps(templateID, stepName)
 	if err != nil {
-		return fmt.Errorf("find system-owned step rows: %w", err)
+		return err
 	}
-	type seatStepRow struct{ stepID, workflowID string }
-	var targets []seatStepRow
-	for rows.Next() {
-		var row seatStepRow
-		if scanErr := rows.Scan(&row.stepID, &row.workflowID); scanErr != nil {
-			_ = rows.Close()
-			return fmt.Errorf("scan step row: %w", scanErr)
-		}
-		targets = append(targets, row)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return fmt.Errorf("iterate step rows: %w", err)
-	}
-	_ = rows.Close()
 
 	for _, target := range targets {
 		if err := r.healParticipantSeatRowWithRetry(target.stepID, target.workflowID, templateID, stepName, role); err != nil {
@@ -151,66 +128,13 @@ func (r *Repository) tryHealParticipantSeatRow(stepID, role string) (applied, re
 		return false, true, nil
 	}
 
-	tx, err := r.db.Beginx()
-	if err != nil {
-		return false, false, fmt.Errorf("begin seat reconciliation tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var rawEvents sql.NullString
-	if err := tx.QueryRow(tx.Rebind(`SELECT events FROM workflow_steps WHERE id = ?`), stepID).Scan(&rawEvents); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return true, false, nil
+	return r.tryHealWorkflowStepEvents(stepID, "participant seat", func(events *wfmodels.StepEvents) bool {
+		if hasSeatRole(events.OnEnter, role) {
+			return true
 		}
-		return false, false, fmt.Errorf("read step events: %w", err)
-	}
-
-	var events wfmodels.StepEvents
-	if rawEvents.String != "" {
-		if err := json.Unmarshal([]byte(rawEvents.String), &events); err != nil {
-			return false, false, fmt.Errorf("parse step events: %w", err)
-		}
-	}
-
-	if hasSeatRole(events.OnEnter, role) {
-		return true, false, nil
-	}
-	events.OnEnter = insertSeatAction(events.OnEnter, role)
-
-	updated, err := json.Marshal(events)
-	if err != nil {
-		return false, false, fmt.Errorf("marshal step events: %w", err)
-	}
-
-	// events is TEXT and nullable; NULL requires "IS NULL" on both dialects
-	// since neither treats a bound parameter after IS/= as NULL-matching.
-	guardClause := "events = ?"
-	guardArg := any(rawEvents.String)
-	if !rawEvents.Valid {
-		guardClause = "events IS NULL"
-		guardArg = nil
-	}
-	args := []any{string(updated), time.Now().UTC(), stepID}
-	if guardArg != nil {
-		args = append(args, guardArg)
-	}
-	res, err := tx.Exec(tx.Rebind(`
-		UPDATE workflow_steps SET events = ?, updated_at = ?
-		WHERE id = ? AND `+guardClause), args...)
-	if err != nil {
-		return false, false, fmt.Errorf("write step events: %w", err)
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return false, false, fmt.Errorf("check seat reconciliation write: %w", err)
-	}
-	if affected == 0 {
-		return false, true, nil
-	}
-	if err := tx.Commit(); err != nil {
-		return false, false, fmt.Errorf("commit seat reconciliation: %w", err)
-	}
-	return true, false, nil
+		events.OnEnter = insertSeatAction(events.OnEnter, role)
+		return false
+	})
 }
 
 // hasSeatRole reports whether actions already declares an
