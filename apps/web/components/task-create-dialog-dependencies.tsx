@@ -23,13 +23,21 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { TaskMR } from "@/lib/types/gitlab";
 import { cn } from "@/lib/utils";
+import {
+  changeRequestNumbers,
+  compareDependencyCandidates,
+  dependencyOptionValue,
+} from "./task-create-dialog-dependency-search";
 
 // Keep stable empty fallbacks here. Creating a fresh array/object in a store
 // selector makes Object.is report a change on every read and can cause a
 // render loop, which previously blanked the dependency chip.
 const NO_TASKS: KanbanState["tasks"] = [];
 const NO_SNAPSHOTS: Record<string, { tasks?: KanbanState["tasks"] }> = {};
+const NO_MRS: TaskMR[] = [];
+const NO_MRS_BY_TASK_ID: Record<string, TaskMR[]> = {};
 
 export type TaskCreateDependenciesProps = {
   /** Selected predecessor task IDs. */
@@ -56,32 +64,46 @@ function useBoardTasks(): KanbanState["tasks"] {
   }, [boardTasks, snapshots]);
 }
 
+function useMRsByTaskId(): Record<string, TaskMR[]> {
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const byWorkspaceId = useAppStore((state) => state.taskMRs.byWorkspaceId);
+  return (activeWorkspaceId && byWorkspaceId[activeWorkspaceId]) || NO_MRS_BY_TASK_ID;
+}
+
 function DependencyTriggerLabel({
   value,
   selectedTitle,
+  selectedNumber,
   t,
 }: {
   value: string[];
   selectedTitle?: string;
-  t: (key: string, options?: { count?: number }) => string;
+  selectedNumber?: number;
+  t: (key: string, options?: { count?: number; number?: number }) => string;
 }) {
   if (value.length === 0) return t("task:noDependency");
-  if (value.length === 1 && selectedTitle) return selectedTitle;
+  if (value.length === 1 && selectedTitle) {
+    if (selectedNumber === undefined) return selectedTitle;
+    return `${t("task:dependencyChangeRequestLabel", { number: selectedNumber })} · ${selectedTitle}`;
+  }
   return t("task:dependencyCount", { count: value.length });
 }
 
 function DependencyOption({
   task,
+  numbers,
   selected,
   onSelect,
 }: {
   task: KanbanState["tasks"][number];
+  numbers: number[];
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <CommandItem
-      value={`${task.title} ${task.id}`}
+      value={dependencyOptionValue(task, numbers)}
       onSelect={onSelect}
       className="min-h-12 cursor-pointer gap-2 md:min-h-11"
       data-testid={`task-create-dependency-option-${task.id}`}
@@ -92,7 +114,16 @@ function DependencyOption({
         data-testid="task-create-dependency-task-icon"
         aria-hidden="true"
       />
-      <span className="min-w-0 flex-1 truncate">{task.title}</span>
+      <span className="min-w-0 flex-1 line-clamp-2">{task.title}</span>
+      {numbers.map((number) => (
+        <span
+          key={number}
+          className="shrink-0 text-xs text-muted-foreground"
+          aria-label={t("task:dependencyChangeRequestAria", { number })}
+        >
+          {t("task:dependencyChangeRequestLabel", { number })}
+        </span>
+      ))}
       <IconCheck
         className={cn("h-4 w-4 shrink-0", selected ? "opacity-100" : "opacity-0")}
         aria-hidden="true"
@@ -103,6 +134,7 @@ function DependencyOption({
 
 type DependencyPickerContentProps = {
   candidates: KanbanState["tasks"];
+  mrsByTaskId: Record<string, TaskMR[]>;
   value: string[];
   onChange: (next: string[]) => void;
   setOpen: (open: boolean) => void;
@@ -111,6 +143,7 @@ type DependencyPickerContentProps = {
 
 function DependencyPickerContent({
   candidates,
+  mrsByTaskId,
   value,
   onChange,
   setOpen,
@@ -120,7 +153,7 @@ function DependencyPickerContent({
   return (
     <PopoverContent
       align="start"
-      className="w-[var(--radix-popover-trigger-width)] min-w-[min(320px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0"
+      className="w-[var(--radix-popover-trigger-width)] min-w-[min(420px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0"
       data-testid="task-create-dependencies-popover"
       portalContainer={portalContainer}
       onWheel={(event) => event.stopPropagation()}
@@ -128,7 +161,7 @@ function DependencyPickerContent({
       <Command>
         <div className="flex items-center gap-1">
           <div className="min-w-0 flex-1">
-            <CommandInput placeholder={t("task:searchTasks")} />
+            <CommandInput placeholder={t("task:searchTasksOrChangeRequest")} />
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -173,6 +206,7 @@ function DependencyPickerContent({
               <DependencyOption
                 key={task.id}
                 task={task}
+                numbers={changeRequestNumbers(task, mrsByTaskId[task.id] ?? NO_MRS)}
                 selected={value.includes(task.id)}
                 onSelect={() => {
                   onChange(
@@ -195,16 +229,28 @@ export function TaskCreateDependencies({ value, onChange, disabled }: TaskCreate
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
   const tasks = useBoardTasks();
+  const mrsByTaskId = useMRsByTaskId();
 
-  const selectedTitle = useMemo(() => {
+  const selectedTask = useMemo(() => {
     if (value.length !== 1) return undefined;
-    return tasks.find((task) => task.id === value[0])?.title;
+    return tasks.find((task) => task.id === value[0]);
   }, [tasks, value]);
+  const selectedNumber = useMemo(() => {
+    if (!selectedTask) return undefined;
+    return changeRequestNumbers(selectedTask, mrsByTaskId[selectedTask.id] ?? NO_MRS)[0];
+  }, [selectedTask, mrsByTaskId]);
   const candidates = useMemo(
-    () => tasks.filter((task) => !task.isArchived).sort((a, b) => a.title.localeCompare(b.title)),
+    () => tasks.filter((task) => !task.isArchived).sort(compareDependencyCandidates),
     [tasks],
   );
-  const triggerLabel = <DependencyTriggerLabel value={value} selectedTitle={selectedTitle} t={t} />;
+  const triggerLabel = (
+    <DependencyTriggerLabel
+      value={value}
+      selectedTitle={selectedTask?.title}
+      selectedNumber={selectedNumber}
+      t={t}
+    />
+  );
 
   return (
     <div className="min-w-0" data-testid="task-create-dependencies">
@@ -239,6 +285,7 @@ export function TaskCreateDependencies({ value, onChange, disabled }: TaskCreate
         </PopoverTrigger>
         <DependencyPickerContent
           candidates={candidates}
+          mrsByTaskId={mrsByTaskId}
           value={value}
           onChange={onChange}
           setOpen={setOpen}

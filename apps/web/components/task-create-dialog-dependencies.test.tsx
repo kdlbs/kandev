@@ -3,11 +3,16 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { TaskMR } from "@/lib/types/gitlab";
 import { TaskCreateDependencies } from "./task-create-dialog-dependencies";
+
+const WORKSPACE_ID = "workspace-1";
 
 type MockStore = {
   kanban: { tasks: KanbanState["tasks"] };
   kanbanMulti: { snapshots: Record<string, { tasks?: KanbanState["tasks"] }> };
+  workspaces: { activeId: string | null };
+  taskMRs: { byWorkspaceId: Record<string, Record<string, TaskMR[]>> };
 };
 
 const ALPHA_ID = "task-alpha";
@@ -15,15 +20,22 @@ const BETA_ID = "task-beta";
 const ALPHA_TITLE = "Alpha task";
 const BETA_TITLE = "Beta task";
 const NO_DEPENDENCY_LABEL = "No dependency";
-const SEARCH_TASKS_LABEL = "Search tasks...";
+const SEARCH_TASKS_LABEL = "Search tasks or #PR/MR number...";
 const INFO_LABEL = "About task dependencies";
 const TWO_DEPENDENCIES_LABEL = "2 dependencies";
 const TRIGGER_TEST_ID = "task-create-dependencies-trigger";
+const POPOVER_TEST_ID = "task-create-dependencies-popover";
 
-let mockStore: MockStore = {
-  kanban: { tasks: [] },
-  kanbanMulti: { snapshots: {} },
-};
+function emptyStore(): MockStore {
+  return {
+    kanban: { tasks: [] },
+    kanbanMulti: { snapshots: {} },
+    workspaces: { activeId: WORKSPACE_ID },
+    taskMRs: { byWorkspaceId: {} },
+  };
+}
+
+let mockStore: MockStore = emptyStore();
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: MockStore) => unknown) => selector(mockStore),
@@ -58,12 +70,13 @@ function ControlledDependencies({ initialValue = [] }: { initialValue?: string[]
   return <TaskCreateDependencies value={value} onChange={setValue} />;
 }
 
+function optionTestId(taskId: string): string {
+  return `task-create-dependency-option-${taskId}`;
+}
+
 afterEach(() => {
   cleanup();
-  mockStore = {
-    kanban: { tasks: [] },
-    kanbanMulti: { snapshots: {} },
-  };
+  mockStore = emptyStore();
 });
 
 describe("TaskCreateDependencies", () => {
@@ -77,6 +90,7 @@ describe("TaskCreateDependencies", () => {
 
   it("shows searchable non-archived tasks with task icons and teaching help", async () => {
     mockStore = {
+      ...emptyStore(),
       kanban: {
         tasks: [
           task(ALPHA_ID, ALPHA_TITLE),
@@ -93,14 +107,14 @@ describe("TaskCreateDependencies", () => {
     renderDependencies();
     fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
 
-    const picker = screen.getByTestId("task-create-dependencies-popover");
+    const picker = screen.getByTestId(POPOVER_TEST_ID);
     expect(within(picker).getByPlaceholderText(SEARCH_TASKS_LABEL)).toBeTruthy();
     expect(within(picker).getByTestId("task-create-dependency-info")).toBeTruthy();
-    expect(within(picker).getByTestId(`task-create-dependency-option-${ALPHA_ID}`)).toBeTruthy();
-    expect(within(picker).getByTestId(`task-create-dependency-option-${BETA_ID}`)).toBeTruthy();
+    expect(within(picker).getByTestId(optionTestId(ALPHA_ID))).toBeTruthy();
+    expect(within(picker).getByTestId(optionTestId(BETA_ID))).toBeTruthy();
     expect(within(picker).queryByText("Archived task")).toBeNull();
     expect(
-      within(within(picker).getByTestId(`task-create-dependency-option-${ALPHA_ID}`)).getByTestId(
+      within(within(picker).getByTestId(optionTestId(ALPHA_ID))).getByTestId(
         "task-create-dependency-task-icon",
       ),
     ).toBeTruthy();
@@ -121,10 +135,10 @@ describe("TaskCreateDependencies", () => {
 
   it("toggles multiple predecessors and exposes a localized count", () => {
     mockStore = {
+      ...emptyStore(),
       kanban: {
         tasks: [task(ALPHA_ID, ALPHA_TITLE), task(BETA_ID, BETA_TITLE)],
       },
-      kanbanMulti: { snapshots: {} },
     };
 
     render(
@@ -134,22 +148,22 @@ describe("TaskCreateDependencies", () => {
     );
     fireEvent.click(screen.getByTestId("task-create-dependencies-trigger"));
 
-    fireEvent.click(screen.getByTestId(`task-create-dependency-option-${ALPHA_ID}`));
+    fireEvent.click(screen.getByTestId(optionTestId(ALPHA_ID)));
     expect(screen.getByTestId(TRIGGER_TEST_ID).textContent).toContain(ALPHA_TITLE);
 
-    fireEvent.click(screen.getByTestId(`task-create-dependency-option-${BETA_ID}`));
+    fireEvent.click(screen.getByTestId(optionTestId(BETA_ID)));
     expect(screen.getByTestId(TRIGGER_TEST_ID).textContent).toContain(TWO_DEPENDENCIES_LABEL);
 
-    fireEvent.click(screen.getByTestId(`task-create-dependency-option-${ALPHA_ID}`));
+    fireEvent.click(screen.getByTestId(optionTestId(ALPHA_ID)));
     expect(screen.getByTestId(TRIGGER_TEST_ID).textContent).toContain(BETA_TITLE);
   });
 
   it("clears all selected predecessors from the no-dependency entry", () => {
     mockStore = {
+      ...emptyStore(),
       kanban: {
         tasks: [task(ALPHA_ID, ALPHA_TITLE), task(BETA_ID, BETA_TITLE)],
       },
-      kanbanMulti: { snapshots: {} },
     };
 
     render(
@@ -162,5 +176,90 @@ describe("TaskCreateDependencies", () => {
     fireEvent.click(screen.getByTestId("task-create-no-dependency"));
 
     expect(screen.getByTestId(TRIGGER_TEST_ID).textContent).toContain(NO_DEPENDENCY_LABEL);
+  });
+});
+
+describe("TaskCreateDependencies change-request search", () => {
+  it("narrows to the PR-linked task when searching by PR number and shows its badge", () => {
+    const prTask = task(ALPHA_ID, "[Auto] PR merged - kdlbs/kandev#3295 fix flaky test", {
+      statusSummary: { pull_request: { number: 3295, state: "merged" } } as never,
+    });
+    mockStore = {
+      ...emptyStore(),
+      kanban: {
+        tasks: [prTask, task(BETA_ID, BETA_TITLE)],
+      },
+    };
+
+    renderDependencies();
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+
+    const picker = screen.getByTestId(POPOVER_TEST_ID);
+    const alphaOption = within(picker).getByTestId(optionTestId(ALPHA_ID));
+    expect(within(alphaOption).getByText("#3295")).toBeTruthy();
+
+    const search = within(picker).getByPlaceholderText(SEARCH_TASKS_LABEL);
+    fireEvent.change(search, { target: { value: "3295" } });
+    expect(within(picker).getByTestId(optionTestId(ALPHA_ID))).toBeTruthy();
+    expect(within(picker).queryByTestId(optionTestId(BETA_ID))).toBeNull();
+  });
+
+  it("narrows to the MR-linked task when searching with a leading #", () => {
+    const mrTask = task(ALPHA_ID, ALPHA_TITLE);
+    mockStore = {
+      ...emptyStore(),
+      kanban: { tasks: [mrTask, task(BETA_ID, BETA_TITLE)] },
+      taskMRs: {
+        byWorkspaceId: {
+          [WORKSPACE_ID]: {
+            [ALPHA_ID]: [
+              {
+                id: "mr-1",
+                task_id: ALPHA_ID,
+                host: "gitlab.com",
+                project_path: "kdlbs/kandev",
+                mr_iid: 42,
+                mr_url: "https://gitlab.com/kdlbs/kandev/-/merge_requests/42",
+                mr_title: "Fix",
+                head_branch: "fix",
+                base_branch: "main",
+                author_username: "nova28",
+                state: "open",
+              } as TaskMR,
+            ],
+          },
+        },
+      },
+    };
+
+    renderDependencies();
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+
+    const picker = screen.getByTestId(POPOVER_TEST_ID);
+    const search = within(picker).getByPlaceholderText(SEARCH_TASKS_LABEL);
+    fireEvent.change(search, { target: { value: "#42" } });
+    expect(within(picker).getByTestId(optionTestId(ALPHA_ID))).toBeTruthy();
+    expect(within(picker).queryByTestId(optionTestId(BETA_ID))).toBeNull();
+  });
+
+  it("lists unfiltered candidates most-recently-updated first", () => {
+    mockStore = {
+      ...emptyStore(),
+      kanban: {
+        tasks: [
+          task(ALPHA_ID, ALPHA_TITLE, { updatedAt: "2026-01-01T00:00:00Z" }),
+          task(BETA_ID, BETA_TITLE, { updatedAt: "2026-06-01T00:00:00Z" }),
+        ],
+      },
+    };
+
+    renderDependencies();
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+
+    const picker = screen.getByTestId(POPOVER_TEST_ID);
+    const options = within(picker)
+      .getAllByTestId(/task-create-dependency-option-/)
+      .map((option) => option.getAttribute("data-testid"));
+    expect(options).toEqual([optionTestId(BETA_ID), optionTestId(ALPHA_ID)]);
   });
 });
