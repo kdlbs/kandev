@@ -211,6 +211,7 @@
   "workflowPromptCollapsedHint": "可選；展開以新增共享的步驟入口說明",
   "workflowPromptSetHint": "已設定；展開以編輯",
   "workflowInstructionsCollapsed": "工作流程說明",
+  "workflowMoveInstructionsCollapsed": "一次性移動說明",
   "stepPrompt": "步驟提示詞",
   "stepPromptHelp": "為此步驟中的代理程式提供自訂指令。使用 {{taskPrompt}} 可插入任務描述。",
   "stepPromptPlaceholderExample": "使用 OAuth2 實現使用者身分驗證",

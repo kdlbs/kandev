@@ -211,6 +211,7 @@
   "workflowPromptCollapsedHint": "Optional; expand to add shared step-entry instructions",
   "workflowPromptSetHint": "Configured; expand to edit",
   "workflowInstructionsCollapsed": "Workflow instructions",
+  "workflowMoveInstructionsCollapsed": "One-time move instructions",
   "stepPrompt": "Step Prompt",
   "stepPromptHelp": "Custom instructions for the agent on this step. Use {{taskPrompt}} to include the task description.",
   "stepPromptPlaceholderExample": "Implement user authentication with OAuth2",

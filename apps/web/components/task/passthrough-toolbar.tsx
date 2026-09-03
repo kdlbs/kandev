@@ -10,7 +10,6 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  IconArrowRight,
   IconMessageCircle,
   IconMessageDots,
   IconSend,
@@ -42,6 +41,8 @@ import type { DiffComment } from "@/lib/diff/types";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 import { Trans, useTranslation } from "react-i18next";
+import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 function isEditableElement(element: Element | null) {
   if (element instanceof HTMLElement && element.closest(".xterm")) return false;
@@ -497,7 +498,7 @@ type StatusRowProps = {
   taskId: string | null;
   sessionId?: string | null;
   nextStepName: string | null;
-  onProceed: () => void;
+  onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isMoving: boolean;
   showProceed: boolean;
   composerOpen: boolean;
@@ -522,7 +523,6 @@ function PassthroughStatusRow({
   onToggleComments,
   pendingCommentsCount,
 }: StatusRowProps) {
-  const { t } = useTranslation();
   return (
     <div
       data-testid="passthrough-status-row"
@@ -547,23 +547,13 @@ function PassthroughStatusRow({
         <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 shrink-0 gap-1 px-2.5 text-xs cursor-pointer text-primary"
-                onClick={onProceed}
-                disabled={isMoving}
-                data-testid="passthrough-proceed-next-step"
-              >
-                {nextStepName}
-                <IconArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("task:moveTaskToTheNextWorkflow")}</TooltipContent>
-          </Tooltip>
+          <WorkflowMoveProceedButton
+            nextStepName={nextStepName}
+            onProceed={onProceed}
+            isMoving={isMoving}
+            className="h-6 shrink-0"
+            testId="passthrough-proceed-next-step"
+          />
         )}
       </div>
     </div>

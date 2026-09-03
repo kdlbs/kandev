@@ -3,8 +3,14 @@ import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
 import { replaceTaskUrl } from "@/lib/links";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
-type MovePayload = { workflow_id: string; workflow_step_id: string; position: number };
+type MovePayload = {
+  workflow_id: string;
+  workflow_step_id: string;
+  position: number;
+  entry_options?: WorkflowMoveEntryOptions;
+};
 
 export function useTaskActions() {
   const moveTaskById = useCallback(async (taskId: string, payload: MovePayload) => {

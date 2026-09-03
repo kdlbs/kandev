@@ -208,6 +208,7 @@
   "workflowPromptCollapsedHint": "Opcional; expanda para adicionar instruções partilhadas de entrada nos passos",
   "workflowPromptSetHint": "Configurado; expanda para editar",
   "workflowInstructionsCollapsed": "Instruções do fluxo de trabalho",
+  "workflowMoveInstructionsCollapsed": "Instruções pontuais de mudança",
   "stepPrompt": "Prompt do passo",
   "stepPromptHelp": "Instruções personalizadas para o agente neste passo. Use {{taskPrompt}} para incluir a descrição da tarefa.",
   "stepPromptPlaceholderExample": "Implementar a autenticação de utilizadores com OAuth2",
