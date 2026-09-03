@@ -4,10 +4,7 @@ import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task, type KanbanPresentation } from "../kanban-card";
-import {
-  compareTasksByCreatedDesc,
-  compareTasksByPriorityThenCreatedDesc,
-} from "@/lib/kanban/task-order";
+import { pickKanbanColumnComparator } from "@/lib/kanban/task-order";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
 import { useAppStore } from "@/components/state-provider";
 
@@ -108,10 +105,7 @@ export function SwipeableColumns({
   const [emblaRef, emblaApi] = useEmblaCarousel(options);
 
   const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
-  const comparator =
-    kanbanSort === "priority_desc"
-      ? compareTasksByPriorityThenCreatedDesc
-      : compareTasksByCreatedDesc;
+  const comparator = pickKanbanColumnComparator(kanbanSort);
   const getTasksForStep = useCallback(
     (stepId: string) => {
       return tasks

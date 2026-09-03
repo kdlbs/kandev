@@ -87,7 +87,6 @@ type KanbanUpdateTask = {
   blocks?: KanbanTask["blocks"];
   start_when_unblocked?: boolean;
   startWhenUnblocked?: boolean;
-  priority?: KanbanTask["priority"];
 };
 
 /**
