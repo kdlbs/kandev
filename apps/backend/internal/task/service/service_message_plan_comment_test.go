@@ -31,8 +31,9 @@ func TestServiceCreateMessageWithPlanCommentsConsumesAndReplays(t *testing.T) {
 	if first.Content != "### Plan Comments\n\n```\nselected\n```\n> accepted feedback\n\n---\n\ntyped body" {
 		t.Fatalf("stored content = %q", first.Content)
 	}
-	if got := eventTypesForPlanCommentTest(eventBus); len(got) != 2 ||
-		got[0] != events.MessageAdded || got[1] != events.TaskPlanCommentsChanged {
+	if got := eventTypesForPlanCommentTest(eventBus); len(got) != 3 ||
+		got[0] != events.MessageAdded || got[1] != events.SessionPendingActionChanged ||
+		got[2] != events.TaskPlanCommentsChanged {
 		t.Fatalf("published event types = %v", got)
 	}
 
@@ -43,7 +44,7 @@ func TestServiceCreateMessageWithPlanCommentsConsumesAndReplays(t *testing.T) {
 	if replayed.ID != first.ID || replayed.Content != first.Content {
 		t.Fatalf("replay = %#v, want %#v", replayed, first)
 	}
-	if got := eventTypesForPlanCommentTest(eventBus); len(got) != 2 {
+	if got := eventTypesForPlanCommentTest(eventBus); len(got) != 3 {
 		t.Fatalf("replay published events: %v", got)
 	}
 

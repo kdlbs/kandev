@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -26,7 +26,11 @@ import {
   usePendingAgentMessageComments,
 } from "@/hooks/domains/comments/use-pending-comments";
 import { buildContextItems } from "../chat-context-items";
-import { useAutoDisablePlanMode, usePlanLayoutHandlers } from "./use-plan-mode-helpers";
+import {
+  useAutoDisablePlanMode,
+  useAutoDisableUnsupportedPlanMode,
+  usePlanLayoutHandlers,
+} from "./use-plan-mode-helpers";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type {
@@ -522,43 +526,6 @@ function deriveQueueAwareSessionInput(
 ) {
   const inputMode = deriveSessionInputMode(session, queuedCount);
   return { inputMode, isAgentBusy: inputMode === "queue" };
-}
-
-function useAutoDisableUnsupportedPlanMode({
-  planModeEnabled,
-  hasAgentProfile,
-  planModeAvailable,
-  resolvedSessionId,
-}: {
-  planModeEnabled: boolean;
-  hasAgentProfile: boolean;
-  planModeAvailable: boolean;
-  resolvedSessionId: string | null;
-}) {
-  const setPlanMode = useAppStore((state) => state.setPlanMode);
-  const removeContextFile = useContextFilesStore((state) => state.removeFile);
-  const hasAutoDisabled = useRef(false);
-  useEffect(() => {
-    if (
-      planModeEnabled &&
-      hasAgentProfile &&
-      !planModeAvailable &&
-      resolvedSessionId &&
-      !hasAutoDisabled.current
-    ) {
-      hasAutoDisabled.current = true;
-      setPlanMode(resolvedSessionId, false);
-      removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
-    }
-    if (!planModeEnabled) hasAutoDisabled.current = false;
-  }, [
-    planModeEnabled,
-    hasAgentProfile,
-    planModeAvailable,
-    resolvedSessionId,
-    setPlanMode,
-    removeContextFile,
-  ]);
 }
 
 export type UseChatPanelStateOptions = {
