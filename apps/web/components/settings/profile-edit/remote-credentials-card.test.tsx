@@ -251,6 +251,47 @@ describe("RemoteCredentialsCard auth selections", () => {
   });
 });
 
+describe("RemoteCredentialsCard with multiple env auth methods", () => {
+  const antigravityAgentName = "Antigravity";
+  const geminiMethodId = "agent:antigravity-acp:env:GEMINI_API_KEY";
+  const googleMethodId = "agent:antigravity-acp:env:GOOGLE_API_KEY";
+
+  beforeEach(() => {
+    vi.mocked(listRemoteCredentials).mockResolvedValue({
+      auth_specs: [
+        {
+          id: "antigravity-acp",
+          display_name: antigravityAgentName,
+          methods: [
+            { method_id: geminiMethodId, type: "env", env_var: "GEMINI_API_KEY" },
+            { method_id: googleMethodId, type: "env", env_var: "GOOGLE_API_KEY" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("lets both declared env methods be selected independently", async () => {
+    const onAuthChange = vi.fn();
+    renderRemoteCredentialsCard(onAuthChange);
+
+    fireEvent.click(await screen.findByText(antigravityAgentName));
+    const geminiOption = screen.getByRole("checkbox", {
+      name: "Provide secret for GEMINI_API_KEY",
+    });
+    const googleOption = screen.getByRole("checkbox", {
+      name: "Provide secret for GOOGLE_API_KEY",
+    });
+
+    fireEvent.click(geminiOption);
+    fireEvent.click(googleOption);
+
+    expect(geminiOption.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+    expect(googleOption.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+    expect(onAuthChange).toHaveBeenLastCalledWith([geminiMethodId, googleMethodId]);
+  });
+});
+
 const PORTABLE_BUNDLES: AgentConfigBundle[] = [
   {
     id: "claude.settings",

@@ -127,6 +127,9 @@ func (a *AntigravityACP) IsInstalled(ctx context.Context) (*DiscoveryResult, err
 		return nil, err
 	}
 	harnessSatisfied := os.Getenv(antigravityHarnessPathEnv) != "" || antigravityHarnessPresent(filepath.Dir(path))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !harnessSatisfied {
 		return &DiscoveryResult{Available: false}, nil
 	}
@@ -173,8 +176,7 @@ func (a *AntigravityACP) RemoteAuth() *RemoteAuth {
 	return &RemoteAuth{
 		Methods: []RemoteAuthMethod{
 			{
-				Type:  "files",
-				Label: "Copy Antigravity auth files",
+				Type: "files",
 				SourceFiles: map[string][]string{
 					"darwin": files,
 					"linux":  files,

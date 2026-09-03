@@ -157,6 +157,7 @@
   "profileSaved": "Perfil guardado",
   "profiles": "Perfis",
   "provideSecret": "Indicar um segredo",
+  "provideSecretForEnvVar": "Indicar um segredo para {{envVar}}",
   "quickPresets": "Predefinições rápidas",
   "refresh": "Atualizar",
   "relatedDockerContainersRemoved_one": "{{count}} contentor Docker relacionado também será removido.",

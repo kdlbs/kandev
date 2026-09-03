@@ -304,6 +304,7 @@ func TestAntigravityACP_DiscoveryFailsClosedWithoutHarness(t *testing.T) {
 	binDir := t.TempDir()
 	path := writeFakeAntigravityBinary(t, binDir)
 	t.Setenv("PATH", binDir)
+	t.Setenv("ANTIGRAVITY_HARNESS_PATH", "")
 
 	result, err := NewAntigravityACP().IsInstalled(context.Background())
 	if err != nil {
@@ -361,6 +362,7 @@ func TestAntigravityACP_DiscoveryHarnessMustBeRegularFile(t *testing.T) {
 		t.Fatalf("mkdir fake harness dir: %v", err)
 	}
 	t.Setenv("PATH", binDir)
+	t.Setenv("ANTIGRAVITY_HARNESS_PATH", "")
 
 	result, err := NewAntigravityACP().IsInstalled(context.Background())
 	if err != nil {
@@ -382,6 +384,7 @@ func TestAntigravityACP_DiscoveryHarnessDanglingSymlinkDoesNotMatch(t *testing.T
 		t.Fatalf("symlink: %v", err)
 	}
 	t.Setenv("PATH", binDir)
+	t.Setenv("ANTIGRAVITY_HARNESS_PATH", "")
 
 	result, err := NewAntigravityACP().IsInstalled(context.Background())
 	if err != nil {
