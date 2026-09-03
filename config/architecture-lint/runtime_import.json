@@ -51,6 +51,10 @@
       "path": "apps/backend/internal/backendapp/agentctl.go"
     },
     {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/agentctl.go"
+    },
+    {
       "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
       "path": "apps/backend/internal/backendapp/agents.go"
     },

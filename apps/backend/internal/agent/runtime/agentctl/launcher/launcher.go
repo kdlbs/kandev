@@ -141,6 +141,16 @@ func agentctlBinaryName() string {
 	return "agentctl"
 }
 
+// FindAgentctlBinary resolves the local agentctl binary path using the same
+// search order New uses for an unspecified BinaryPath. Exported so a caller
+// that adopts an already-running control server -- and therefore never
+// calls New -- can still resolve the local binary artifact for callers that
+// need it (e.g. uploading it into a remote/container executor), independent
+// of whether this launch adopted or spawned.
+func FindAgentctlBinary() string {
+	return findAgentctlBinary()
+}
+
 // findAgentctlBinary attempts to locate the agentctl binary.
 func findAgentctlBinary() string {
 	name := agentctlBinaryName()
