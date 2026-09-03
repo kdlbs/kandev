@@ -286,9 +286,10 @@ func (r *Repository) GetWorkspaceInventoryRepairReceipt(
 }
 
 // RecordWorkspaceInventoryPostRepairAttestation persists the post-repair
-// checkout evidence onto an already-committed receipt. It is best-effort
-// audit evidence: the repair itself has already committed, so a failure here
-// must not be surfaced as a repair failure.
+// checkout evidence onto an already-committed receipt. The inventory repair
+// transaction itself has already committed, but lifecycle callers treat a
+// failure here as retryable and must not launch from the repaired row until
+// positive matching evidence is durably recorded.
 func (r *Repository) RecordWorkspaceInventoryPostRepairAttestation(
 	ctx context.Context,
 	taskID string,

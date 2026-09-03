@@ -91,9 +91,10 @@ checkout still matches or not. A mismatch is recorded before the repair call
 returns its conflict error, so an unexpected concurrent write during a
 metadata-only repair is itself part of the durable audit trail rather than a
 transient in-memory check that leaves no trace. Persisting the post-repair
-attestation is best-effort relative to the already-committed row/receipt
-write: a failure to persist it is logged and does not undo or fail an
-otherwise-successful repair.
+attestation is required before any launch can use the repaired inventory. A
+failure to persist it is logged and leaves the already-committed row/receipt
+retryable, but the repair result is not launchable until a later retry durably
+records positive matching evidence.
 
 ## Fresh and additional-session launch integration
 

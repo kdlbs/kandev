@@ -132,6 +132,22 @@ func (e *Executor) existingWorkspaceInventoryRepairReceipt(
 	return e.attestedExistingWorkspaceInventoryReceipt(ctx, repairer, existing, spec, session, info, candidate)
 }
 
+func (e *Executor) existingAttestedWorkspaceInventoryRepairReceipt(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	env *models.TaskEnvironment,
+	repositories []*repoInfo,
+	idempotencyKey string,
+) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	repairer, err := e.workspaceInventoryRepairer(task, session, req, env, idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	return e.existingWorkspaceInventoryRepairReceipt(ctx, repairer, task, session, req, env, repositories, idempotencyKey)
+}
+
 // attestedExistingWorkspaceInventoryReceipt gates an already-committed
 // receipt behind durable positive post-repair attestation before it is ever
 // handed back as a successful retry. The repair transaction and its

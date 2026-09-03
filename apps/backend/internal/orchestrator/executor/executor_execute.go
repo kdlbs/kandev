@@ -1354,6 +1354,21 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if validateErr := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); validateErr != nil {
 			return nil, validateErr
 		}
+	} else if req.WorkspaceReuseRequired && req.UseWorktree {
+		receipt, repairErr := e.existingAttestedWorkspaceInventoryRepairReceipt(
+			ctx, task, session, req, existingEnv, allRepos,
+			workspaceInventoryLaunchIdempotencyKey(session.ID),
+		)
+		if repairErr != nil {
+			if e.logger != nil {
+				e.logger.Info("automatic workspace inventory repair receipt is not launchable",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", sessionID),
+					zap.Error(repairErr))
+			}
+			return nil, fmt.Errorf("%w: workspace inventory repair receipt is not durably attested", models.ErrWorkspaceReuseUnsafe)
+		}
+		req.WorkspaceInventoryRecoveryReceipt = receipt
 	}
 
 	// Pass attachments for the initial prompt
