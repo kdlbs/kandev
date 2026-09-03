@@ -970,7 +970,10 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// change together", design 02 "Shutdown"): a graceful backend shutdown
 	// must not terminate the instance when the capability is enabled. Every
 	// other stop reason, including force, keeps the terminating path below.
-	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown {
+	// The capability covers only the standalone (worktree/local) runtime --
+	// every other runtime's StopAllAgents call must still terminate normally
+	// even while the capability is globally enabled for the installation.
+	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown && execution.RuntimeName == executor.NameStandalone {
 		return m.detachAgentExecution(executionID, execution)
 	}
 

@@ -113,3 +113,45 @@ func hasAgentStoppedEvent(published []*bus.Event) bool {
 	}
 	return false
 }
+
+// TestStopAgentWithReasonTerminatesNonStandaloneRuntimeEvenWhenSurvivalEnabled
+// pins the scope boundary the capability is documented to have: the
+// survivable-detach branch exists only for the standalone (worktree/local)
+// runtime this feature covers. `StopAllAgents` calls StopAgentWithReason with
+// StopReasonBackendShutdown for every tracked execution regardless of
+// runtime, so a Docker/SSH/Sprites/Kubernetes/remote-docker execution must
+// still reach the terminating path -- including the real StopInstance call
+// and the agent.stopped publish -- even while the capability is globally
+// enabled for the installation's standalone sessions.
+func TestStopAgentWithReasonTerminatesNonStandaloneRuntimeEvenWhenSurvivalEnabled(t *testing.T) {
+	log := newTestLogger()
+	mockExecutor := &MockExecutor{name: executor.NameDocker}
+	registry := NewExecutorRegistry(log)
+	registry.Register(mockExecutor)
+	eventBus := &MockEventBus{}
+	mgr := NewManager(newTestRegistry(), eventBus, registry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetAgentSurvivalEnabled(true)
+
+	execution := &AgentExecution{
+		ID:          "exec-docker",
+		SessionID:   "session-docker",
+		TaskID:      "task-exec-docker",
+		RuntimeName: executor.NameDocker,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	err := mgr.StopAgentWithReason(context.Background(), execution.ID, StopReasonBackendShutdown, false)
+	require.NoError(t, err)
+
+	require.Len(t, mockExecutor.stopInstanceCalls, 1,
+		"a non-standalone runtime must still be stopped on backend shutdown even when the survival capability is enabled")
+
+	eventBus2 := mgr.eventBus.(*MockEventBus)
+	require.True(t, hasAgentStoppedEvent(eventBus2.PublishedEvents),
+		"a non-standalone runtime's terminating stop must still publish agent.stopped")
+
+	_, exists := mgr.executionStore.Get(execution.ID)
+	require.False(t, exists, "a terminated (non-detached) execution must be removed from tracking")
+}
