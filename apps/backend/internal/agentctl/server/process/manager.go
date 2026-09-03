@@ -44,6 +44,14 @@ const (
 	StatusError    Status = "error"
 )
 
+// defaultUpdatesChannelCapacity is the updates channel buffer size used when
+// InstanceConfig.DetachedEventLimit is left at its Go zero value -- the
+// common case for tests and any other caller that builds a config.InstanceConfig
+// directly instead of going through Config.NewInstanceConfig. It matches the
+// agentctl.detachedEventLimit catalog tunable's own default
+// (AC-EXECUTORS-SURVIVAL-001.6).
+const defaultUpdatesChannelCapacity = 100
+
 // errorWrapper wraps an error so it can be stored in atomic.Value (which cannot store nil)
 type errorWrapper struct {
 	err error
@@ -241,10 +249,21 @@ type Manager struct {
 	finalCommand string
 
 	// Synchronization
-	mu               sync.RWMutex
-	wg               sync.WaitGroup
-	stopCh           chan struct{}
-	doneCh           chan struct{}
+	mu     sync.RWMutex
+	wg     sync.WaitGroup
+	stopCh chan struct{}
+	// stopChSnapshot mirrors stopCh for readers that must not take mu: Stop
+	// holds mu.Lock() for its entire teardown, including waiting for
+	// waitForExit to finish, so a stop-aware blocking send reached from that
+	// same goroutine (e.g. the exit-error send in waitForExit) would deadlock
+	// against Stop if it read stopCh under mu.RLock() instead. Start and
+	// startOneShot store the freshly created channel here in the same place
+	// they assign stopCh itself.
+	stopChSnapshot atomic.Value // chan struct{}
+	doneCh         chan struct{}
+	// attachedCount is the live count of backend event-stream connections
+	// (see attachment.go). Zero value correctly starts an instance detached.
+	attachedCount    atomic.Int32
 	startMu          sync.Mutex
 	admissionMu      sync.Mutex
 	admissionCount   int
@@ -366,11 +385,15 @@ func (m *Manager) BeginStop() {
 // NewManager creates a new process manager
 func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	cfg.WorkDir = resolveExistingWorkDir(cfg.WorkDir, log.WithFields(zap.String("component", "process-manager")))
+	updatesChannelCapacity := cfg.DetachedEventLimit
+	if updatesChannelCapacity <= 0 {
+		updatesChannelCapacity = defaultUpdatesChannelCapacity
+	}
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		cfg:                  cfg,
 		logger:               log.WithFields(zap.String("component", "process-manager")),
-		updatesCh:            make(chan adapter.AgentEvent, 100),
+		updatesCh:            make(chan adapter.AgentEvent, updatesChannelCapacity),
 		pendingPermissions:   make(map[string]*PendingPermission),
 		lifetimeCtx:          lifetimeCtx,
 		lifetimeCancel:       lifetimeCancel,
@@ -1259,6 +1282,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.processLifecycle = processLifecycle
 
 	m.stopCh = make(chan struct{})
+	m.stopChSnapshot.Store(m.stopCh)
 	m.doneCh = make(chan struct{})
 	m.stopChClosed.Store(false)
 
@@ -1314,6 +1338,7 @@ func (m *Manager) startOneShot() error {
 	}
 
 	m.stopCh = make(chan struct{})
+	m.stopChSnapshot.Store(m.stopCh)
 	m.doneCh = make(chan struct{})
 	m.stopChClosed.Store(false)
 
@@ -1788,21 +1813,21 @@ func (m *Manager) SendErrorEvent(errorMessage string, promptGeneration uint64) {
 // SendErrorEventWithProviderError sends an error event with optional safe
 // provider details. The details are already normalized by the adapter and are
 // never populated from the manager's raw stderr ring.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): the agent ERROR
+// event must park on a full channel rather than being dropped, since it is
+// one of the events most likely to matter across a detached gap.
 func (m *Manager) SendErrorEventWithProviderError(
 	errorMessage string,
 	promptGeneration uint64,
 	providerError *streams.ProviderError,
 ) {
-	select {
-	case m.updatesCh <- adapter.AgentEvent{
+	m.sendUpdateBlocking(adapter.AgentEvent{
 		Type:             adapter.EventTypeError,
 		Error:            errorMessage,
 		PromptGeneration: promptGeneration,
 		ProviderError:    providerError,
-	}:
-	default:
-		m.logger.Warn("updates channel full, could not send error event")
-	}
+	})
 }
 
 // PublishMCPAttachment forwards safe MCP attachment evidence through the
@@ -2485,23 +2510,26 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			zap.Int("exit_code", exitCode),
 			zap.Strings("recent_stderr", recentStderr))
 
-		// Send error event to the updates channel so UI can display it
+		// Send error event to the updates channel so UI can display it. This is
+		// a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6) and the only report
+		// that the agent process died at all, so it must park on a full
+		// channel rather than being dropped. sendUpdateBlocking selects
+		// against the stop-channel snapshot rather than m.mu-guarded state
+		// deliberately: Stop holds m.mu for its entire teardown, including
+		// waiting on this same waitForExit goroutine to finish, so reading
+		// stopCh under m.mu here would deadlock against it.
 		errorMsg := fmt.Sprintf("Agent process exited with code %d", exitCode)
 		if len(recentStderr) > 0 {
 			errorMsg = fmt.Sprintf("%s: %s", errorMsg, strings.Join(recentStderr, "; "))
 		}
-		select {
-		case m.updatesCh <- adapter.AgentEvent{
+		m.sendUpdateBlocking(adapter.AgentEvent{
 			Type:  adapter.EventTypeError,
 			Error: errorMsg,
 			Data: map[string]any{
 				"exit_code":     exitCode,
 				"recent_stderr": recentStderr,
 			},
-		}:
-		default:
-			m.logger.Warn("updates channel full, could not send exit error event")
-		}
+		})
 	default:
 		m.exitCode.Store(0)
 		m.logger.Info("agent process exited successfully")
@@ -2669,8 +2697,17 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 }
 
 // sendPermissionNotification sends a permission request notification through the updates channel.
-// Uses a blocking send with timeout to ensure delivery. If delivery fails within 5 seconds,
-// auto-cancels the permission so the agent doesn't hang waiting for a response.
+//
+// This is the eighth COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6) and the
+// only one of the eight that must branch on attached/detached state, rather
+// than always parking: while ATTACHED, a blocking send with a five-second
+// timeout is a deliberate safety valve against a stalled UI, and must
+// survive unchanged -- auto-cancelling the permission so the agent doesn't
+// hang waiting for a response. While DETACHED, that same auto-cancel would
+// silently deny every permission the agent asks for, five seconds apart, so
+// it must park instead: the wait ends either because a backend later
+// attaches (which starts draining the channel, satisfying the same select
+// sendUpdateBlocking already performs) or because the instance stops.
 func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 	options := make([]streams.PermissionOption, len(pending.Snapshot.Options))
 	for i, option := range pending.Snapshot.Options {
@@ -2696,6 +2733,11 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		zap.String("pending_id", pending.ID),
 		zap.String("action_type", pending.Request.ActionType))
 
+	if !m.IsAttached() {
+		m.sendUpdateBlocking(event)
+		return
+	}
+
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 	select {
@@ -2714,6 +2756,9 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 // sendPermissionCancelledNotification sends a notification that a permission request was cancelled.
 // This happens when the context is cancelled (e.g., agent completes or user stops the task)
 // before the user responds to the permission request.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): it must park on a
+// full channel rather than being dropped.
 func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission) {
 	event := adapter.AgentEvent{
 		Type:      adapter.EventTypePermissionCancelled,
@@ -2726,13 +2771,7 @@ func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission
 		zap.String("pending_id", pending.ID),
 		zap.String("session_id", pending.Request.SessionID))
 
-	select {
-	case m.updatesCh <- event:
-		// Sent successfully
-	default:
-		m.logger.Warn("updates channel full, dropping permission cancelled notification",
-			zap.String("pending_id", pending.ID))
-	}
+	m.sendUpdateBlocking(event)
 }
 
 func (m *Manager) permissionSessionID(pending *PendingPermission) string {

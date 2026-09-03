@@ -260,6 +260,11 @@ type InstanceConfig struct {
 	// inherited from the server startup contract.
 	NotificationQueueCapacity int
 
+	// DetachedEventLimit bounds the per-instance retained-event count
+	// (AC-EXECUTORS-SURVIVAL-001.6), inherited from the server startup
+	// contract. It sizes the process manager's updates channel buffer.
+	DetachedEventLimit int
+
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 
@@ -543,6 +548,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		LogFormat:                 c.LogFormat,
 		ProcessBufferMaxBytes:     c.Defaults.ProcessBufferMaxBytes,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		DetachedEventLimit:        c.DetachedEventLimit,
 		VscodeCommand:             c.VscodeCommand,
 		McpMode:                   "task",
 		AuthToken:                 c.AuthToken,

@@ -139,6 +139,13 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	s.logger.Info("agent stream WebSocket connected")
 	streamID := uuid.NewString()
 
+	// This is the agentctl-local "instance is attached" signal
+	// (AC-EXECUTORS-SURVIVAL-001.5/.6): the permission-request notification
+	// site reads it to decide whether to auto-cancel on a five-second
+	// timeout (attached) or park (detached) when its channel is full.
+	s.procMgr.MarkAttached()
+	defer s.procMgr.MarkDetached()
+
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 
