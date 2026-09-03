@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,7 @@ import { permissionsToProfilePatch, profilePermissionValues } from "@/lib/agent-
 import { listAvailableAgents, listWorkflowTemplates } from "@/lib/api";
 import { listAgentsAction, updateAgentProfileAction } from "@/app/actions/agents";
 import { isHandledApiError } from "@/lib/api/client";
+import { backendReloadCoordinator } from "@/lib/platform/backend-reload-coordinator";
 import { StepAgents, type AgentSetting } from "@/components/onboarding/step-agents";
 import type { AvailableAgent, ToolStatus, WorkflowTemplate, AgentProfile } from "@/lib/types/http";
 import { Trans, useTranslation } from "react-i18next";
@@ -262,6 +263,11 @@ function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: Onboar
 
 export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   const { t } = useTranslation();
+  const reloadRequired = useSyncExternalStore(
+    backendReloadCoordinator.subscribe,
+    backendReloadCoordinator.getSnapshot,
+    backendReloadCoordinator.getSnapshot,
+  ).reloadRequired;
   const [step, setStep] = useState(0);
   const {
     availableAgents,
@@ -273,7 +279,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     loadingTemplates,
   } = useOnboardingResources(open);
 
-  const saveAgentSettings = useCallback(async () => {
+  const saveAgentSettings = useCallback(async (): Promise<boolean> => {
     try {
       await Promise.all(
         Object.values(agentSettings)
@@ -288,8 +294,9 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
             }),
           ),
       );
+      return true;
     } catch (error) {
-      if (isHandledApiError(error)) return;
+      if (isHandledApiError(error)) return false;
       throw error;
     }
   }, [agentSettings]);
@@ -299,14 +306,14 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     setStep(0);
   };
   const handleNext = async () => {
-    if (step === 0) await saveAgentSettings();
+    if (step === 0 && !(await saveAgentSettings())) return;
     if (step < TOTAL_STEPS - 1) setStep(step + 1);
   };
   const handleBack = () => {
     if (step > 0) setStep(step - 1);
   };
   const handleGetStarted = async () => {
-    await saveAgentSettings();
+    if (!(await saveAgentSettings())) return;
     onComplete();
     setStep(0);
   };
@@ -322,7 +329,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open && !reloadRequired} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-3xl" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-center text-2xl">{t(STEP_TITLE_KEYS[step])}</DialogTitle>

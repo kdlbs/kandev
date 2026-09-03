@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 test.describe("Mobile backend restart page recovery", () => {
@@ -13,10 +14,14 @@ test.describe("Mobile backend restart page recovery", () => {
     await expect(testPage.getByTestId("app-shell")).toBeVisible();
     await testPage.waitForLoadState("networkidle");
 
+    const systemInfoRecovered = waitForHttp(testPage, "GET", /^\/api\/v1\/system\/info$/, {
+      predicate: (response) => response.ok(),
+    });
     await backend.restart();
+    await systemInfoRecovered;
 
     const alert = testPage.getByTestId("backend-reload-required-alert");
-    await expect(alert).toBeVisible({ timeout: 30_000 });
+    await expect(alert).toBeVisible();
     const action = alert.getByRole("button", { name: "Reload page" });
     const actionBox = await action.boundingBox();
     expect(actionBox, "backend restart recovery action has no rendered hitbox").not.toBeNull();
