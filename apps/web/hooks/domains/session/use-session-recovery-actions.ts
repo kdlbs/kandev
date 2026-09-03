@@ -5,8 +5,11 @@ import {
   branchRecoveryDetails,
   requestSessionRecover,
   restoreSessionWorkspace,
+  sessionRecoveryGuardDetails,
+  sessionRecoveryGuardMessage,
   type BranchRecoveryDetails,
   type SessionRecoveryAction,
+  type SessionRecoveryGuardDetails,
 } from "@/lib/services/session-recovery-service";
 
 export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null;
@@ -23,6 +26,7 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
   const [resumeError, setResumeError] = useState<Error | null>(null);
   const [restoreError, setRestoreError] = useState<Error | null>(null);
   const [branchDetails, setBranchDetails] = useState<BranchRecoveryDetails | null>(null);
+  const [guardDetails, setGuardDetails] = useState<SessionRecoveryGuardDetails | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
 
@@ -46,12 +50,19 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
         setResumeError(null);
         setRestoreError(null);
         setBranchDetails(null);
+        setGuardDetails(null);
         setLastFailedAction(null);
         setRecoveryNotice(null);
       } catch (cause) {
-        setResumeError(asRecoveryError(cause, t("task:failedToResumeSession")));
+        const guard = sessionRecoveryGuardDetails(cause);
+        setResumeError(
+          guard
+            ? new Error(sessionRecoveryGuardMessage(guard, t))
+            : asRecoveryError(cause, t("task:failedToResumeSession")),
+        );
         setRestoreError(null);
-        setBranchDetails(branchRecoveryDetails(cause));
+        setBranchDetails(guard ? null : branchRecoveryDetails(cause));
+        setGuardDetails(guard);
         setLastFailedAction(action);
         setRecoveryNotice(null);
         return false;
@@ -72,15 +83,22 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
       setResumeError(null);
       setRestoreError(null);
       setBranchDetails(null);
+      setGuardDetails(null);
       setLastFailedAction(null);
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly", { error: failedMessage }));
     } catch (cause) {
-      setRestoreError(asRecoveryError(cause, t("task:failedToRestoreWorkspace")));
+      const guard = sessionRecoveryGuardDetails(cause);
+      setRestoreError(
+        guard
+          ? new Error(sessionRecoveryGuardMessage(guard, t))
+          : asRecoveryError(cause, t("task:failedToRestoreWorkspace")),
+      );
+      setGuardDetails(guard ?? guardDetails);
       setRecoveryNotice(null);
     } finally {
       setBusyAction(null);
     }
-  }, [resumeError, sessionId, taskId, t]);
+  }, [guardDetails, resumeError, sessionId, taskId, t]);
 
   const handleRetry = useCallback(() => {
     return handleRecover(lastFailedAction ?? "resume");
@@ -94,6 +112,7 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
     busyAction,
     recoveryError,
     branchDetails,
+    guardDetails,
     recoveryNotice,
     handleRecover,
     handleRestore,

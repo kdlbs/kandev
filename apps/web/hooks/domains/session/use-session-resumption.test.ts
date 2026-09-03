@@ -39,11 +39,11 @@ const STARTED_AT = "2026-01-01T00:00:00.000Z";
 const LATER_AT = "2026-01-02T00:00:00.000Z";
 
 import {
-  resumeWithSilentFallback,
   useSessionResumption,
   type ResumeStateSetter,
   type ResumptionState,
 } from "./use-session-resumption";
+import { resumeWithSilentFallback } from "./use-session-resumption-launch";
 
 type SetterCalls = {
   resumptionStates: ResumptionState[];
