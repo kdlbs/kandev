@@ -474,6 +474,21 @@ describe("cross-agent persisted config reconciliation", () => {
     expect(hasCompleteDynamicConfig(session, catalogEntry(advertised, true), noAgents)).toBe(true);
   });
 
+  it("hydrates when a settled model catalog omits a profile-only option", () => {
+    const session = makeSession({
+      metadata: { runtime_config: { config_options: { model: providerModelId } } },
+      agent_profile_snapshot: { config_options: { fast: "false" } },
+    });
+
+    expect(
+      hasCompleteDynamicConfig(
+        session,
+        catalogEntry([modelConfigOption, selectOption("mode", "agent")], true),
+        noAgents,
+      ),
+    ).toBe(true);
+  });
+
   it("still requires persisted-only unadvertised keys while the catalog is unsettled", () => {
     const session = makeSession({
       metadata: { runtime_config: { config_options: { model: providerModelId, effort: "x" } } },
