@@ -22,6 +22,7 @@ import {
   InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
+import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
 import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
 import type {
@@ -118,6 +119,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onComposerSubmit={props.onComposerSubmit}
       />
       <CreateModeAgentSelectors {...props} />
+      {isCreateMode && <TaskCreatePrioritySelect value={fs.priority} onChange={fs.setPriority} />}
       {props.bottomSlot}
     </>
   );
