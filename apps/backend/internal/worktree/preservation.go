@@ -104,6 +104,17 @@ func inspectPreservedGitIdentity(
 }
 
 func canonicalDirectory(path string) (string, error) {
+	return CanonicalDirectory(path)
+}
+
+// CanonicalDirectory resolves path to its canonical, symlink-free absolute
+// form: it rejects a path whose final component is itself a symlink and
+// resolves every parent-directory symlink via filepath.EvalSymlinks, so a
+// symlink planted in a parent directory cannot be used to make a path lexically
+// compare as scoped to a root it does not actually resolve into. Callers that
+// need to prove canonical ownership of a directory (not just compare strings)
+// should use this instead of filepath.Abs/Clean.
+func CanonicalDirectory(path string) (string, error) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return "", ErrPreservedCheckoutUnproven

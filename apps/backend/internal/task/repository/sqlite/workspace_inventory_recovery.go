@@ -79,7 +79,10 @@ func newWorkspaceInventoryReceipt(repair *models.WorkspaceInventoryRepair) *mode
 		TaskRepositoryID: repair.TaskRepositoryID, EnvironmentRepoID: repair.EnvironmentRepoID,
 		RepositoryID: repair.RepositoryID, IdempotencyKey: repair.IdempotencyKey,
 		RequestHash: repair.RequestHash, ResultCode: models.WorkspaceInventoryRecoveryRepaired,
-		Preservation: repair.Preservation, CreatedAt: time.Now().UTC(),
+		ExpectedEnvironmentUpdatedAt:  repair.ExpectedEnvironmentUpdatedAt,
+		ExpectedTaskRepositoryUpdate:  repair.ExpectedTaskRepositoryUpdate,
+		ExpectedEnvironmentRepoUpdate: repair.ExpectedEnvironmentRepoUpdate,
+		Preservation:                  repair.Preservation, CreatedAt: time.Now().UTC(),
 	}
 }
 

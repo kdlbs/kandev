@@ -260,6 +260,263 @@ func TestRepairReuseEnvironmentInventoryRetryAfterCommitReturnsStoredReceipt(t *
 	}
 }
 
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+//
+// TestRepairReuseEnvironmentInventoryRetryAfterUnattestedCommitSafelyCompletesAttestation
+// proves the unsafe retry boundary is closed: a repair transaction can
+// commit and then crash — or its post-repair attestation write can itself
+// fail — leaving a committed receipt with no attestation durably recorded
+// (PostRepairVerifiedAt == nil). A retry with the same idempotency key must
+// not hand that receipt back as success; it must safely complete the
+// attestation now, by re-inspecting the exact preserved checkout, before it
+// can ever be reused, and it must never re-run the repair transaction or
+// duplicate the canonical row.
+func TestRepairReuseEnvironmentInventoryRetryAfterUnattestedCommitSafelyCompletesAttestation(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	row := &models.TaskEnvironmentRepo{
+		ID: "environment-repo", TaskEnvironmentID: "environment", RepositoryID: "repository",
+		BranchSlug: "stale", WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+		WorktreeBranch: "feature/recovery", Position: 0, Status: "active", UpdatedAt: now,
+	}
+	env := &models.TaskEnvironment{
+		ID: "environment", TaskID: "task", WorkspacePath: worktreePath,
+		Status: models.TaskEnvironmentStatusReady, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{row},
+	}
+	mockRepo := &mockRepository{
+		taskEnvironmentRepos:       map[string][]*models.TaskEnvironmentRepo{env.ID: env.Repos},
+		workspaceInventoryReceipts: map[string]*models.WorkspaceInventoryRecoveryReceipt{},
+	}
+	attestationAttempts := 0
+	mockRepo.recordWorkspaceInventoryPostRepairAttestationFunc = func(
+		_ context.Context, taskID, idempotencyKey string,
+		evidence *models.WorkspaceInventoryPreservation, matched bool, verifiedAt time.Time,
+	) error {
+		attestationAttempts++
+		if attestationAttempts == 1 {
+			// Simulate a crash (or a failed write) between the repair
+			// transaction committing and its attestation persisting.
+			return errors.New("simulated crash before attestation persists")
+		}
+		key := taskID + "\x00" + idempotencyKey
+		existing, ok := mockRepo.workspaceInventoryReceipts[key]
+		if !ok {
+			return models.ErrWorkspaceInventoryRecoveryInvalid
+		}
+		updated := *existing
+		updated.PostRepairEvidence = evidence
+		updated.PostRepairMatched = matched
+		verified := verifiedAt
+		updated.PostRepairVerifiedAt = &verified
+		mockRepo.workspaceInventoryReceipts[key] = &updated
+		return nil
+	}
+	executor := &Executor{repo: mockRepo}
+	task := &v1.Task{ID: "task", WorkspaceID: "workspace"}
+	session := &models.TaskSession{ID: "session", TaskID: "task", TaskEnvironmentID: env.ID, State: models.TaskSessionStateFailed}
+	req := &LaunchAgentRequest{TaskID: "task", WorkspaceID: "workspace", UseWorktree: true, WorkspaceReuseRequired: true,
+		Repositories: []RepoSpec{{TaskRepositoryID: "task-repository", RepositoryID: "repository", BranchIdentitySlug: "main"}}}
+	repositories := []*repoInfo{{
+		TaskRepositoryID: "task-repository", TaskRepositoryUpdatedAt: now,
+		RepositoryID: "repository", RepositoryPath: repositoryPath, Position: 0,
+		Repository: &models.Repository{ID: "repository", SourceType: "github"},
+	}}
+
+	first, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "crash-key")
+	if err != nil {
+		t.Fatalf("first repairReuseEnvironmentInventory: %v", err)
+	}
+	if first.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
+		t.Fatalf("first result code = %q", first.ResultCode)
+	}
+	stored := mockRepo.workspaceInventoryReceipts["task\x00crash-key"]
+	if stored == nil || stored.PostRepairVerifiedAt != nil {
+		t.Fatalf("stored receipt should be unattested after simulated crash: %+v", stored)
+	}
+
+	// Simulate the canonical-inventory reload that happens between calls in
+	// production: the repaired row now matches.
+	env.Repos[0].BranchSlug = "main"
+
+	second, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "crash-key")
+	if err != nil {
+		t.Fatalf("retry after unattested commit returned an error instead of safely completing attestation: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("retry produced a different receipt instead of completing the existing one: %+v vs %+v", second, first)
+	}
+	if !second.PostRepairMatched || second.PostRepairEvidence == nil || second.PostRepairVerifiedAt == nil {
+		t.Fatalf("retry did not durably complete post-repair attestation: %+v", second)
+	}
+	if attestationAttempts != 2 {
+		t.Fatalf("attestation attempts = %d, want exactly 2 (initial failed write + retry completion)", attestationAttempts)
+	}
+	if len(mockRepo.taskEnvironmentRepos[env.ID]) != 1 {
+		t.Fatalf("retry duplicated the canonical inventory row: %+v", mockRepo.taskEnvironmentRepos[env.ID])
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+//
+// TestRepairReuseEnvironmentInventoryRetryWithStoredNegativeAttestationConflicts
+// proves a receipt already carrying a negative/divergent post-repair
+// attestation (a prior attempt detected the checkout changed during the
+// metadata repair) is never retried as success. It must remain a stable,
+// typed conflict on every subsequent retry, not flip back to success.
+func TestRepairReuseEnvironmentInventoryRetryWithStoredNegativeAttestationConflicts(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	row := &models.TaskEnvironmentRepo{
+		ID: "environment-repo", TaskEnvironmentID: "environment", RepositoryID: "repository",
+		BranchSlug: "stale", WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+		WorktreeBranch: "feature/recovery", Position: 0, Status: "active", UpdatedAt: now,
+	}
+	env := &models.TaskEnvironment{
+		ID: "environment", TaskID: "task", WorkspacePath: worktreePath,
+		Status: models.TaskEnvironmentStatusReady, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{row},
+	}
+	mockRepo := &mockRepository{
+		taskEnvironmentRepos:       map[string][]*models.TaskEnvironmentRepo{env.ID: env.Repos},
+		workspaceInventoryReceipts: map[string]*models.WorkspaceInventoryRecoveryReceipt{},
+	}
+	executor := &Executor{repo: mockRepo}
+	task := &v1.Task{ID: "task", WorkspaceID: "workspace"}
+	session := &models.TaskSession{ID: "session", TaskID: "task", TaskEnvironmentID: env.ID, State: models.TaskSessionStateFailed}
+	req := &LaunchAgentRequest{TaskID: "task", WorkspaceID: "workspace", UseWorktree: true, WorkspaceReuseRequired: true,
+		Repositories: []RepoSpec{{TaskRepositoryID: "task-repository", RepositoryID: "repository", BranchIdentitySlug: "main"}}}
+	repositories := []*repoInfo{{
+		TaskRepositoryID: "task-repository", TaskRepositoryUpdatedAt: now,
+		RepositoryID: "repository", RepositoryPath: repositoryPath, Position: 0,
+		Repository: &models.Repository{ID: "repository", SourceType: "github"},
+	}}
+
+	first, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "divergent-key")
+	if err != nil {
+		t.Fatalf("first repairReuseEnvironmentInventory: %v", err)
+	}
+	if first.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
+		t.Fatalf("first result code = %q", first.ResultCode)
+	}
+
+	// Simulate a prior attempt whose post-repair inspection detected and
+	// durably recorded a divergent checkout.
+	key := "task\x00divergent-key"
+	stored := *mockRepo.workspaceInventoryReceipts[key]
+	stored.PostRepairMatched = false
+	verifiedAt := time.Now().UTC()
+	stored.PostRepairVerifiedAt = &verifiedAt
+	mockRepo.workspaceInventoryReceipts[key] = &stored
+
+	env.Repos[0].BranchSlug = "main"
+
+	if _, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "divergent-key"); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+		t.Fatalf("retry with stored negative attestation error = %v, want conflict", err)
+	}
+	// A second retry must still be refused; a negative attestation never
+	// self-heals into success.
+	if _, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "divergent-key"); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+		t.Fatalf("second retry with stored negative attestation error = %v, want conflict", err)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
+//
+// TestRepairReuseEnvironmentInventoryPreservationRecordsExecutorRuntimeEvidence
+// proves the durable preservation evidence captures the authoritative
+// executor/runtime record (models.ExecutorRunning) in effect for the
+// session, not just the session's own lifecycle state string.
+func TestRepairReuseEnvironmentInventoryPreservationRecordsExecutorRuntimeEvidence(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	row := &models.TaskEnvironmentRepo{
+		ID: "environment-repo", TaskEnvironmentID: "environment", RepositoryID: "repository",
+		BranchSlug: "stale", WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+		WorktreeBranch: "feature/recovery", Position: 0, Status: "active", UpdatedAt: now,
+	}
+	env := &models.TaskEnvironment{
+		ID: "environment", TaskID: "task", WorkspacePath: worktreePath,
+		Status: models.TaskEnvironmentStatusReady, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{row},
+	}
+	mockRepo := &mockRepository{
+		taskEnvironmentRepos:       map[string][]*models.TaskEnvironmentRepo{env.ID: env.Repos},
+		workspaceInventoryReceipts: map[string]*models.WorkspaceInventoryRecoveryReceipt{},
+		executorsRunning: map[string]*models.ExecutorRunning{
+			"session": {
+				SessionID: "session", TaskID: "task", ExecutorID: "executor-worktree",
+				Status: "running", AgentExecutionID: "agent-execution-1",
+			},
+		},
+	}
+	executor := &Executor{repo: mockRepo}
+	task := &v1.Task{ID: "task", WorkspaceID: "workspace"}
+	session := &models.TaskSession{ID: "session", TaskID: "task", TaskEnvironmentID: env.ID, State: models.TaskSessionStateFailed}
+	req := &LaunchAgentRequest{TaskID: "task", WorkspaceID: "workspace", UseWorktree: true, WorkspaceReuseRequired: true,
+		Repositories: []RepoSpec{{TaskRepositoryID: "task-repository", RepositoryID: "repository", BranchIdentitySlug: "main"}}}
+	repositories := []*repoInfo{{
+		TaskRepositoryID: "task-repository", TaskRepositoryUpdatedAt: now,
+		RepositoryID: "repository", RepositoryPath: repositoryPath, Position: 0,
+		Repository: &models.Repository{ID: "repository", SourceType: "github"},
+	}}
+
+	receipt, err := executor.repairReuseEnvironmentInventory(context.Background(), task, session, req, env, repositories, "runtime-evidence-key")
+	if err != nil {
+		t.Fatalf("repairReuseEnvironmentInventory: %v", err)
+	}
+	if receipt.Preservation.ExecutorID != "executor-worktree" ||
+		receipt.Preservation.ExecutorStatus != "running" ||
+		receipt.Preservation.AgentExecutionID != "agent-execution-1" {
+		t.Fatalf("preservation missing authoritative executor/runtime evidence: %+v", receipt.Preservation)
+	}
+	if receipt.PostRepairEvidence == nil || receipt.PostRepairEvidence.ExecutorID != "executor-worktree" {
+		t.Fatalf("post-repair evidence missing authoritative executor/runtime evidence: %+v", receipt.PostRepairEvidence)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6
+//
+// TestRepairPathIsTaskScopedRejectsParentDirectorySymlinkEscape proves
+// canonical task-root ownership resolves parent-directory symlinks rather
+// than comparing lexical paths: a symlink placed in a directory *above* the
+// candidate worktree path must not let a path outside the task workspace
+// root lexically compare as scoped to it.
+func TestRepairPathIsTaskScopedRejectsParentDirectorySymlinkEscape(t *testing.T) {
+	outsideRoot := t.TempDir()
+	outsideTarget := filepath.Join(outsideRoot, "outside-worktree")
+	if err := os.Mkdir(outsideTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	taskRoot := t.TempDir()
+	// linkedParent lexically lives under the task root, but is a symlink to
+	// a directory entirely outside it; escaped/worktree therefore resolves
+	// outside taskRoot even though the lexical path starts with taskRoot.
+	linkedParent := filepath.Join(taskRoot, "linked-parent")
+	if err := os.Symlink(outsideRoot, linkedParent); err != nil {
+		t.Fatal(err)
+	}
+	escapedWorktreePath := filepath.Join(taskRoot, "linked-parent", "outside-worktree")
+
+	env := &models.TaskEnvironment{WorkspacePath: taskRoot, TaskDirName: "task-dir"}
+	if repairPathIsTaskScoped(env, escapedWorktreePath) {
+		t.Fatalf("parent-directory symlink escape was accepted as task-scoped: %q under %q", escapedWorktreePath, taskRoot)
+	}
+
+	// A real, non-symlinked worktree directly under the task root must still
+	// be accepted.
+	genuineWorktree := filepath.Join(taskRoot, "genuine-worktree")
+	if err := os.Mkdir(genuineWorktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !repairPathIsTaskScoped(env, genuineWorktree) {
+		t.Fatalf("genuine task-scoped worktree was rejected: %q under %q", genuineWorktree, taskRoot)
+	}
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
 func TestRepairReuseEnvironmentInventoryRetryFromDifferentSessionConflicts(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
@@ -468,6 +725,66 @@ func TestLaunchPreparedSessionAutoRepairsRecoverableInventoryMismatchAndLaunches
 	}
 	rows := repo.taskEnvironmentRepos["env-auto-repair"]
 	if len(rows) != 1 || rows[0].BranchSlug != "main" {
+		t.Fatalf("canonical inventory not repaired in place: %+v", rows)
+	}
+}
+
+// TestLaunchPreparedSessionAutoRepairsExactStagingPy3IncidentAndLaunchesOnce
+// reproduces the exact field incident using the real reported identifiers —
+// task 96cfb14c-62f4-4048-bc03-813f1f123875, session
+// be3a413d-0891-4982-a563-b631028c36c6, branch "staging-py3" — with a single
+// provable stale canonical row. It proves the guarded recovery path repairs
+// exactly that row and admits exactly one Human-QA auto-start launch, rather
+// than repeating the originally logged
+// "canonical workspace repository inventory has no matching entry" failure.
+func TestLaunchPreparedSessionAutoRepairsExactStagingPy3IncidentAndLaunchesOnce(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	repo := newMockRepository()
+	const taskID = "96cfb14c-62f4-4048-bc03-813f1f123875"
+	const sessionID = "be3a413d-0891-4982-a563-b631028c36c6"
+	const branch = "staging-py3"
+	seedWorktreeExecutor(repo)
+	repo.repositories["repo-front"] = &models.Repository{
+		ID: "repo-front", Name: "frontend", Provider: "github", LocalPath: repositoryPath,
+	}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: taskID, RepositoryID: "repo-front", Position: 0, BaseBranch: branch,
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Staging Py3"}
+	repo.taskEnvironments["env-staging-py3"] = &models.TaskEnvironment{
+		ID: "env-staging-py3", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: worktreePath,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-staging-py3", TaskEnvironmentID: "env-staging-py3",
+			RepositoryID: "repo-front", BranchSlug: "stale",
+			WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+			WorktreeBranch: "feature/recovery", Position: 0, Status: "active",
+		}},
+	}
+	repo.taskEnvironmentRepos["env-staging-py3"] = repo.taskEnvironments["env-staging-py3"].Repos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: "env-staging-py3",
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+
+	manager := &mockAgentManager{}
+	exec := newTestExecutor(t, manager, repo)
+	execution, err := exec.LaunchPreparedSession(context.Background(),
+		&v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Staging Py3"}, sessionID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree, StartAgent: true})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession (staging-py3 reproduction): %v", err)
+	}
+	if manager.launchAgentCallCount != 1 {
+		t.Fatalf("LaunchAgent calls = %d, want exactly 1", manager.launchAgentCallCount)
+	}
+	if execution.WorkspaceInventoryRecoveryReceipt == nil ||
+		execution.WorkspaceInventoryRecoveryReceipt.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
+		t.Fatalf("execution receipt = %+v, want a committed repair", execution.WorkspaceInventoryRecoveryReceipt)
+	}
+	rows := repo.taskEnvironmentRepos["env-staging-py3"]
+	if len(rows) != 1 || rows[0].BranchSlug != branch {
 		t.Fatalf("canonical inventory not repaired in place: %+v", rows)
 	}
 }

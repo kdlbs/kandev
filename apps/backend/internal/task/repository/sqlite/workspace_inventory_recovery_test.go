@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -368,4 +369,331 @@ func TestRecordWorkspaceInventoryPostRepairAttestationPersistsBeforeAndAfterEvid
 	if found.PostRepairMatched || found.PostRepairEvidence == nil || found.PostRepairEvidence.HeadOID != "divergent" {
 		t.Fatalf("mismatch attestation not persisted: %+v", found)
 	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
+//
+// TestRepairWorkspaceInventoryReceiptPersistsSourceRecordRevisions proves the
+// durable receipt carries forward the exact source-record revisions
+// (task_environments.updated_at, task_repositories.updated_at,
+// task_environment_repos.updated_at) the repair transaction proved and
+// guarded against a concurrent writer, so an audit can verify which
+// authoritative revisions were preserved without re-deriving them from the
+// transient WorkspaceInventoryRepair request.
+func TestRepairWorkspaceInventoryReceiptPersistsSourceRecordRevisions(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx,
+		`UPDATE task_environment_repos SET branch_slug = ? WHERE id = ?`,
+		"stale", "environment-repository-recovery",
+	); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("load inventory: %+v, %v", rows, err)
+	}
+	row := rows[0]
+
+	receipt, err := repo.RepairWorkspaceInventory(ctx, &models.WorkspaceInventoryRepair{
+		TaskID: "task-recovery", WorkspaceID: "workspace-recovery", SessionID: "session-recovery",
+		TaskEnvironmentID: env.ID, TaskRepositoryID: taskRepo.ID, RepositoryID: taskRepo.RepositoryID,
+		EnvironmentRepoID: row.ID, BranchSlug: "main",
+		WorktreeID: row.WorktreeID, WorktreePath: row.WorktreePath,
+		WorktreeBranch: row.WorktreeBranch, Position: row.Position,
+		IdempotencyKey: "revision-key", RequestHash: "revision-request-hash",
+		ExpectedEnvironmentUpdatedAt:  env.UpdatedAt,
+		ExpectedTaskRepositoryUpdate:  taskRepo.UpdatedAt,
+		ExpectedEnvironmentRepoUpdate: row.UpdatedAt,
+		Preservation: models.WorkspaceInventoryPreservation{
+			HeadOID: "0123456789abcdef", StatusHash: "status", ContentHash: "content",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RepairWorkspaceInventory: %v", err)
+	}
+	if !receipt.ExpectedEnvironmentUpdatedAt.Equal(env.UpdatedAt) ||
+		!receipt.ExpectedTaskRepositoryUpdate.Equal(taskRepo.UpdatedAt) ||
+		!receipt.ExpectedEnvironmentRepoUpdate.Equal(row.UpdatedAt) {
+		t.Fatalf("receipt did not persist source-record revisions: %+v", receipt)
+	}
+
+	found, err := repo.GetWorkspaceInventoryRepairReceipt(ctx, "task-recovery", "revision-key")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInventoryRepairReceipt: %v", err)
+	}
+	if !found.ExpectedEnvironmentUpdatedAt.Equal(env.UpdatedAt) ||
+		!found.ExpectedTaskRepositoryUpdate.Equal(taskRepo.UpdatedAt) ||
+		!found.ExpectedEnvironmentRepoUpdate.Equal(row.UpdatedAt) {
+		t.Fatalf("reloaded receipt lost source-record revisions: %+v", found)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+//
+// TestRepairWorkspaceInventoryConcurrentRetryConvergesToOneRepairAndOneDeduplicated
+// races two RepairWorkspaceInventory calls for the SAME task-scoped
+// idempotency key and identical request hash against the same stale row.
+// Exactly one call must observe the atomic transaction as the original
+// repair; the other must observe its own committed receipt and return a
+// deduplicated copy — never a second repair, a duplicated canonical row, or
+// a duplicated receipt.
+func TestRepairWorkspaceInventoryConcurrentRetryConvergesToOneRepairAndOneDeduplicated(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx,
+		`UPDATE task_environment_repos SET branch_slug = ? WHERE id = ?`,
+		"stale", "environment-repository-recovery",
+	); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("load inventory: %+v, %v", rows, err)
+	}
+	row := rows[0]
+
+	buildRepair := func() *models.WorkspaceInventoryRepair {
+		return &models.WorkspaceInventoryRepair{
+			TaskID: "task-recovery", WorkspaceID: "workspace-recovery", SessionID: "session-recovery",
+			TaskEnvironmentID: env.ID, TaskRepositoryID: taskRepo.ID, RepositoryID: taskRepo.RepositoryID,
+			EnvironmentRepoID: row.ID, BranchSlug: "main",
+			WorktreeID: row.WorktreeID, WorktreePath: row.WorktreePath,
+			WorktreeBranch: row.WorktreeBranch, Position: row.Position,
+			IdempotencyKey: "concurrent-repair-key", RequestHash: "concurrent-request-hash",
+			ExpectedEnvironmentUpdatedAt:  env.UpdatedAt,
+			ExpectedTaskRepositoryUpdate:  taskRepo.UpdatedAt,
+			ExpectedEnvironmentRepoUpdate: row.UpdatedAt,
+			Preservation: models.WorkspaceInventoryPreservation{
+				HeadOID: "0123456789abcdef", StatusHash: "status", ContentHash: "content",
+			},
+		}
+	}
+
+	const attempts = 8
+	receipts := make([]*models.WorkspaceInventoryRecoveryReceipt, attempts)
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			receipts[i], errs[i] = repo.RepairWorkspaceInventory(ctx, buildRepair())
+		}(i)
+	}
+	wg.Wait()
+
+	repairedCount, deduplicatedCount := 0, 0
+	var firstID string
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent RepairWorkspaceInventory[%d]: %v", i, err)
+		}
+		switch receipts[i].ResultCode {
+		case models.WorkspaceInventoryRecoveryRepaired:
+			repairedCount++
+		case models.WorkspaceInventoryRecoveryDeduplicated:
+			deduplicatedCount++
+		default:
+			t.Fatalf("unexpected result code[%d] = %q", i, receipts[i].ResultCode)
+		}
+		if firstID == "" {
+			firstID = receipts[i].ID
+		} else if receipts[i].ID != firstID {
+			t.Fatalf("concurrent repairs produced divergent receipt IDs: %q vs %q", firstID, receipts[i].ID)
+		}
+	}
+	if repairedCount != 1 {
+		t.Fatalf("repaired count = %d, want exactly 1 (attempts=%d)", repairedCount, attempts)
+	}
+	if deduplicatedCount != attempts-1 {
+		t.Fatalf("deduplicated count = %d, want %d", deduplicatedCount, attempts-1)
+	}
+
+	after, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil || len(after) != 1 {
+		t.Fatalf("canonical inventory duplicated by concurrent repair: %+v, %v", after, err)
+	}
+	var receiptRowCount int
+	if err := repo.db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM workspace_inventory_recovery_receipts WHERE idempotency_key = ?`,
+		"concurrent-repair-key",
+	).Scan(&receiptRowCount); err != nil {
+		t.Fatal(err)
+	}
+	if receiptRowCount != 1 {
+		t.Fatalf("receipt row count = %d, want exactly 1", receiptRowCount)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5
+//
+// TestRepairWorkspaceInventoryRejectsCrossScopeAndTerminalStates proves each
+// non-reciprocal or terminal server-owned record state is refused with the
+// stable typed conflict error rather than silently repairing, leaking which
+// specific check failed, or partially mutating state.
+func TestRepairWorkspaceInventoryRejectsCrossScopeAndTerminalStates(t *testing.T) {
+	baseline := func(t *testing.T) (*Repository, *models.TaskEnvironment, *models.TaskRepository, *models.TaskEnvironmentRepo) {
+		t.Helper()
+		repo := newRepoForEntityTests(t)
+		env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
+		ctx := context.Background()
+		// Move the canonical row off its target branch_slug first so the
+		// repair's occupied-slot guard does not short-circuit before the
+		// scope/terminal-state check under test ever runs, mirroring
+		// TestRepairWorkspaceInventoryCorrectsOnlyTheProvenStaleSlot.
+		if _, err := repo.db.ExecContext(ctx,
+			`UPDATE task_environment_repos SET branch_slug = ? WHERE id = ?`,
+			"stale", "environment-repository-recovery",
+		); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("load inventory: %+v, %v", rows, err)
+		}
+		return repo, env, taskRepo, rows[0]
+	}
+	buildRepair := func(env *models.TaskEnvironment, taskRepo *models.TaskRepository, row *models.TaskEnvironmentRepo) *models.WorkspaceInventoryRepair {
+		return &models.WorkspaceInventoryRepair{
+			TaskID: "task-recovery", WorkspaceID: "workspace-recovery", SessionID: "session-recovery",
+			TaskEnvironmentID: env.ID, TaskRepositoryID: taskRepo.ID, RepositoryID: taskRepo.RepositoryID,
+			EnvironmentRepoID: row.ID, BranchSlug: "main",
+			WorktreeID: row.WorktreeID, WorktreePath: row.WorktreePath,
+			WorktreeBranch: row.WorktreeBranch, Position: row.Position,
+			IdempotencyKey: "cross-scope-key", RequestHash: "cross-scope-request-hash",
+			ExpectedEnvironmentUpdatedAt:  env.UpdatedAt,
+			ExpectedTaskRepositoryUpdate:  taskRepo.UpdatedAt,
+			ExpectedEnvironmentRepoUpdate: row.UpdatedAt,
+			Preservation: models.WorkspaceInventoryPreservation{
+				HeadOID: "0123456789abcdef", StatusHash: "status", ContentHash: "content",
+			},
+		}
+	}
+
+	t.Run("cross-workspace repository", func(t *testing.T) {
+		repo, env, taskRepo, row := baseline(t)
+		ctx := context.Background()
+		if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-other", Name: "other"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.db.ExecContext(ctx,
+			`UPDATE repositories SET workspace_id = ? WHERE id = ?`, "workspace-other", taskRepo.RepositoryID,
+		); err != nil {
+			t.Fatal(err)
+		}
+		repair := buildRepair(env, taskRepo, row)
+		if _, err := repo.RepairWorkspaceInventory(ctx, repair); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+			t.Fatalf("cross-workspace repository error = %v, want conflict", err)
+		}
+	})
+
+	t.Run("deleted repository", func(t *testing.T) {
+		repo, env, taskRepo, row := baseline(t)
+		ctx := context.Background()
+		if _, err := repo.db.ExecContext(ctx,
+			`UPDATE repositories SET deleted_at = ? WHERE id = ?`, time.Now().UTC(), taskRepo.RepositoryID,
+		); err != nil {
+			t.Fatal(err)
+		}
+		repair := buildRepair(env, taskRepo, row)
+		if _, err := repo.RepairWorkspaceInventory(ctx, repair); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+			t.Fatalf("deleted repository error = %v, want conflict", err)
+		}
+	})
+
+	t.Run("failed task environment", func(t *testing.T) {
+		repo, env, taskRepo, row := baseline(t)
+		ctx := context.Background()
+		if _, err := repo.db.ExecContext(ctx,
+			`UPDATE task_environments SET status = ? WHERE id = ?`, string(models.TaskEnvironmentStatusFailed), env.ID,
+		); err != nil {
+			t.Fatal(err)
+		}
+		repair := buildRepair(env, taskRepo, row)
+		if _, err := repo.RepairWorkspaceInventory(ctx, repair); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+			t.Fatalf("failed task environment error = %v, want conflict", err)
+		}
+	})
+
+	t.Run("wrong environment session", func(t *testing.T) {
+		repo, env, taskRepo, row := baseline(t)
+		ctx := context.Background()
+		if err := repo.CreateTask(ctx, &models.Task{ID: "task-recovery-wrong-env", WorkspaceID: "workspace-recovery", Title: "Wrong Env"}); err != nil {
+			t.Fatal(err)
+		}
+		other := &models.TaskEnvironment{
+			ID: "environment-recovery-other", TaskID: "task-recovery-wrong-env",
+			ExecutorType: string(models.ExecutorTypeWorktree), Status: models.TaskEnvironmentStatusReady,
+			WorkspacePath: "/synthetic/other",
+			Repos: []*models.TaskEnvironmentRepo{{
+				RepositoryID: taskRepo.RepositoryID, BranchSlug: "main",
+				WorktreeID: "worktree-other", WorktreePath: "/synthetic/other",
+				WorktreeBranch: "main",
+			}},
+		}
+		if err := repo.CreateTaskEnvironment(ctx, other); err != nil {
+			t.Fatal(err)
+		}
+		// The session still belongs to task-recovery, but now points at a
+		// different task's environment: the repair targets env.ID while the
+		// session's actual environment is other.ID.
+		if _, err := repo.db.ExecContext(ctx,
+			`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`, other.ID, "session-recovery",
+		); err != nil {
+			t.Fatal(err)
+		}
+		repair := buildRepair(env, taskRepo, row)
+		if _, err := repo.RepairWorkspaceInventory(ctx, repair); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+			t.Fatalf("wrong-environment session error = %v, want conflict", err)
+		}
+	})
+
+	t.Run("cross-task session", func(t *testing.T) {
+		repo, env, taskRepo, row := baseline(t)
+		ctx := context.Background()
+		if err := repo.CreateTask(ctx, &models.Task{ID: "task-recovery-other", WorkspaceID: "workspace-recovery", Title: "Other"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.db.ExecContext(ctx,
+			`UPDATE task_sessions SET task_id = ? WHERE id = ?`, "task-recovery-other", "session-recovery",
+		); err != nil {
+			t.Fatal(err)
+		}
+		repair := buildRepair(env, taskRepo, row)
+		if _, err := repo.RepairWorkspaceInventory(ctx, repair); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+			t.Fatalf("cross-task session error = %v, want conflict", err)
+		}
+	})
+
+	t.Run("deleted environment repo row", func(t *testing.T) {
+		repo, env, taskRepo, row := baseline(t)
+		ctx := context.Background()
+		if _, err := repo.db.ExecContext(ctx,
+			`UPDATE task_environment_repos SET deleted_at = ? WHERE id = ?`, time.Now().UTC(), row.ID,
+		); err != nil {
+			t.Fatal(err)
+		}
+		repair := buildRepair(env, taskRepo, row)
+		if _, err := repo.RepairWorkspaceInventory(ctx, repair); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+			t.Fatalf("deleted environment repo row error = %v, want conflict", err)
+		}
+	})
+
+	t.Run("failed environment repo row", func(t *testing.T) {
+		repo, env, taskRepo, row := baseline(t)
+		ctx := context.Background()
+		if _, err := repo.db.ExecContext(ctx,
+			`UPDATE task_environment_repos SET status = ? WHERE id = ?`, workspaceInventoryRepoStatusFailed, row.ID,
+		); err != nil {
+			t.Fatal(err)
+		}
+		repair := buildRepair(env, taskRepo, row)
+		if _, err := repo.RepairWorkspaceInventory(ctx, repair); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
+			t.Fatalf("failed environment repo row error = %v, want conflict", err)
+		}
+	})
 }

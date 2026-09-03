@@ -1305,9 +1305,18 @@ func (m *mockRepository) RepairWorkspaceInventory(ctx context.Context, repair *m
 		TaskRepositoryID: repair.TaskRepositoryID, EnvironmentRepoID: repair.EnvironmentRepoID,
 		RepositoryID: repair.RepositoryID, IdempotencyKey: repair.IdempotencyKey,
 		RequestHash: repair.RequestHash, ResultCode: models.WorkspaceInventoryRecoveryRepaired,
-		Preservation: repair.Preservation, CreatedAt: time.Now().UTC(),
+		ExpectedEnvironmentUpdatedAt:  repair.ExpectedEnvironmentUpdatedAt,
+		ExpectedTaskRepositoryUpdate:  repair.ExpectedTaskRepositoryUpdate,
+		ExpectedEnvironmentRepoUpdate: repair.ExpectedEnvironmentRepoUpdate,
+		Preservation:                  repair.Preservation, CreatedAt: time.Now().UTC(),
 	}
-	m.workspaceInventoryReceipts[key] = receipt
+	// Store an independent copy: like the real repository, the returned
+	// in-memory receipt is decoupled from committed storage once the
+	// transaction returns, so a caller mutating fields on its own copy (e.g.
+	// surfacing post-repair attestation results) never silently taints what
+	// a concurrent or later read observes as durably persisted.
+	stored := *receipt
+	m.workspaceInventoryReceipts[key] = &stored
 	rows := m.taskEnvironmentRepos[repair.TaskEnvironmentID]
 	repaired := &models.TaskEnvironmentRepo{
 		ID: repair.EnvironmentRepoID, TaskEnvironmentID: repair.TaskEnvironmentID,
