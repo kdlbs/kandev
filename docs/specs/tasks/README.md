@@ -91,6 +91,7 @@ signals, and task-scoped scheduling contracts.
 - [Edit task dependencies](requirements/task-dependency-detail-editing.md)
 - [Task Dependencies and Auto-Start Chains](requirements/task-dependencies.md)
 - [Task Launch Failure Recovery](requirements/task-launch-failure-recovery.md)
+- [Task priority visibility](requirements/task-priority-visibility.md)
 - [Task Title Length Limit](requirements/title-length-limit.md)
 - [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
 - [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
