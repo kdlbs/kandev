@@ -20,12 +20,16 @@ export function useBackendGenerationGuard(): void {
 
   useEffect(() => {
     mountedRef.current = true;
+    const cleanup = () => {
+      mountedRef.current = false;
+    };
+
     if (connectionStatus !== "connected") {
       previousStatusRef.current = connectionStatus;
       requestSequenceRef.current += 1;
-      return;
+      return cleanup;
     }
-    if (previousStatusRef.current === "connected") return;
+    if (previousStatusRef.current === "connected") return cleanup;
     previousStatusRef.current = "connected";
     const requestSequence = ++requestSequenceRef.current;
 
@@ -41,8 +45,6 @@ export function useBackendGenerationGuard(): void {
         // A failed request does not prove that the backend generation changed.
       });
 
-    return () => {
-      mountedRef.current = false;
-    };
+    return cleanup;
   }, [connectionStatus]);
 }

@@ -69,6 +69,23 @@ describe("useBackendGenerationGuard", () => {
     expect(mocks.signalBackendReloadRequired).toHaveBeenCalledOnce();
   });
 
+  it("does not signal a deferred request after the final StrictMode unmount", async () => {
+    const request = deferred<{ boot_id: string }>();
+    mocks.fetchSystemInfo.mockReturnValue(request.promise);
+
+    const hook = renderHook(() => useBackendGenerationGuard(), { wrapper: StrictMode });
+
+    await waitFor(() => expect(mocks.fetchSystemInfo).toHaveBeenCalledTimes(1));
+    hook.unmount();
+
+    await act(async () => {
+      request.resolve({ boot_id: "boot-2" });
+      await request.promise;
+    });
+
+    expect(mocks.signalBackendReloadRequired).not.toHaveBeenCalled();
+  });
+
   it("signals a changed boot id after a reconnect", async () => {
     mocks.fetchSystemInfo.mockResolvedValue({ boot_id: "boot-2" });
     const hook = renderHook(() => useBackendGenerationGuard());
