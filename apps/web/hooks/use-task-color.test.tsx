@@ -135,4 +135,30 @@ describe("useTaskColor", () => {
     await waitFor(() => expect(mockUpdateUserSettings).toHaveBeenCalledTimes(1));
     expect(result.current.color).toBe("green");
   });
+
+  it("keeps the first persisted color when a later queued edit fails without a WS echo", async () => {
+    let resolveFirst: ((value: UserSettingsResponse) => void) | undefined;
+    mockUpdateUserSettings.mockImplementation(() => {
+      if (mockUpdateUserSettings.mock.calls.length === 1) {
+        return new Promise<UserSettingsResponse>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+    const { result } = renderHook(
+      () => ({ color: useTaskColor("task-1"), setColor: useSetTaskColor() }),
+      { wrapper },
+    );
+
+    act(() => {
+      result.current.setColor("task-1", "blue");
+      result.current.setColor("task-1", "green");
+    });
+    await waitFor(() => expect(mockUpdateUserSettings).toHaveBeenCalledTimes(1));
+
+    act(() => resolveFirst?.(response({ "task-1": "blue" }, 2)));
+    await waitFor(() => expect(mockUpdateUserSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.color).toBe("blue"));
+  });
 });

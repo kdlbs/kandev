@@ -6,7 +6,6 @@ import { readQueuedTaskCreateLastUsedState } from "@/components/task-create-dial
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { TaskCreateLastUsedState, UserSettingsState } from "@/lib/state/slices/settings/types";
-import { useTaskColorMigration } from "./use-task-color-migration";
 
 type LoadedUserSettings = {
   settings: UserSettingsState;
@@ -79,7 +78,6 @@ export function __resetEnsureUserSettingsForTests() {
 export function useEnsureUserSettings(enabled = true) {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
-  useTaskColorMigration(enabled);
   const [fetchSettled, setFetchSettled] = useState(false);
 
   useEffect(() => {
