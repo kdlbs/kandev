@@ -244,7 +244,7 @@ func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) fun
 // container that's healthy enough to resume; otherwise (nil, false) and the
 // caller falls back to provisioning a fresh container.
 func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
-	if (req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "") || requiresCloneGitMetadataPolicy(req) {
+	if shouldSkipDockerReconnect(req) {
 		return nil, false
 	}
 	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
@@ -255,6 +255,14 @@ func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.
 		zap.String("previous_execution_id", req.PreviousExecutionID),
 		zap.Error(reconnectErr))
 	return nil, false
+}
+
+// shouldSkipDockerReconnect only answers whether the request identifies an
+// existing container. Clone-based Git metadata attestation happens after a
+// reconnect, against the checkout visible inside that container, so it must
+// not force a fresh container and lose the task environment.
+func shouldSkipDockerReconnect(req *ExecutorCreateRequest) bool {
+	return req == nil || (req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "")
 }
 
 // seedSessionDir copies the agent's auth files and selected configuration

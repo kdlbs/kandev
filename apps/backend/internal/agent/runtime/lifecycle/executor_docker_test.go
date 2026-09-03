@@ -108,14 +108,13 @@ func TestDockerExecutorRejectsClonePolicyWithoutCompatibleAgent(t *testing.T) {
 	}
 }
 
-func TestDockerExecutorSkipsReconnectWhenClonePolicyRequiresFreshAttestation(t *testing.T) {
-	exec := &DockerExecutor{}
-	instance, reused := exec.tryReconnect(context.Background(), nil, &ExecutorCreateRequest{
+func TestDockerExecutorAllowsReconnectWhenClonePolicyRequiresAttestation(t *testing.T) {
+	req := &ExecutorCreateRequest{
 		PreviousExecutionID:    "previous",
 		GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone},
-	})
-	if instance != nil || reused {
-		t.Fatalf("tryReconnect = (%+v, %t), want a fresh clone-policy launch", instance, reused)
+	}
+	if shouldSkipDockerReconnect(req) {
+		t.Fatal("clone metadata attestation must not disable reuse of an existing Docker container")
 	}
 }
 
