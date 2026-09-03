@@ -142,6 +142,16 @@ type Config struct {
 	// without independently re-deriving the same path formula.
 	DiagnosticLogPath string
 
+	// AgentSurvivalEnabled is whether the agent-survival capability is
+	// engaged for this launch, copied directly from the managed startup
+	// contract (never "unresolved" the way UnownedPeriod/DetachedEventLimit
+	// can be -- a managed launch always states it, and false is the
+	// legitimate "disabled" answer). An unmanaged/direct launch (Load(),
+	// no startup contract) always resolves this to false. Gates
+	// StartUnownedReaper, the detached diagnostic log sink switch, and the
+	// launcher-side kill-path removal (Layer 5.9).
+	AgentSurvivalEnabled bool
+
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
 }
@@ -394,6 +404,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	unownedPeriod := getEnvDuration("KANDEV_ACP_UNOWNED_PERIOD", defaultUnownedPeriod)
 	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
 	homeDir := resolveHomeDir()
+	agentSurvivalEnabled := false
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
@@ -408,6 +419,10 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		if startup.DetachedEventLimit != 0 {
 			detachedEventLimit = startup.DetachedEventLimit
 		}
+		// Unlike the two tunables above, false is a meaningful resolved
+		// answer here (every managed launch states it), so it is copied
+		// unconditionally rather than guarded by a zero-value check.
+		agentSurvivalEnabled = startup.AgentSurvivalEnabled
 	}
 
 	cfg := &Config{
@@ -440,6 +455,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		HomeDir:                   homeDir,
 		ServerIdentity:            generateSelfToken(),
 		DiagnosticLogPath:         resolveDiagnosticLogPath(homeDir),
+		AgentSurvivalEnabled:      agentSurvivalEnabled,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend

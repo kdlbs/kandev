@@ -238,6 +238,7 @@ func TestAgentctlStartupConfigRoundTripsAndRejectsInvalidValues(t *testing.T) {
 		OTLPEndpoint:              "http://collector:4318",
 		UnownedPeriod:             10 * time.Minute,
 		DetachedEventLimit:        100,
+		AgentSurvivalEnabled:      true,
 	}
 	raw, err := EncodeAgentctlStartupConfig(want)
 	if err != nil {
@@ -277,5 +278,26 @@ func TestAgentctlStartupConfigRoundTripsAndRejectsInvalidValues(t *testing.T) {
 	invalidDetachedEventLimit.DetachedEventLimit = 10001
 	if _, err := EncodeAgentctlStartupConfig(invalidDetachedEventLimit); err == nil {
 		t.Fatal("EncodeAgentctlStartupConfig accepted an out-of-range detached event limit")
+	}
+}
+
+// TestManagedAgentctlStartupConfigReflectsAgentSurvivalFlag pins that the
+// resolved child contract carries the current value of the
+// features.agentSurvival runtime flag (Config.Features.AgentSurvival) for
+// this launch, mirroring the always-on UnownedPeriod/DetachedEventLimit
+// passthrough rather than being gated on either of those being non-zero.
+func TestManagedAgentctlStartupConfigReflectsAgentSurvivalFlag(t *testing.T) {
+	cfg := &Config{}
+	cfg.Agentctl.NotificationQueueCapacity = 4096
+	cfg.Agentctl.IdleReaperInterval = time.Minute
+
+	cfg.Features.AgentSurvival = false
+	if got := cfg.ManagedAgentctlStartupConfig(); got.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true, want false when the runtime flag is off")
+	}
+
+	cfg.Features.AgentSurvival = true
+	if got := cfg.ManagedAgentctlStartupConfig(); !got.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = false, want true when the runtime flag is on")
 	}
 }

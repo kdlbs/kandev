@@ -28,6 +28,13 @@ type AgentctlStartupConfig struct {
 	// backend older than this contract.
 	UnownedPeriod      time.Duration `json:"unownedPeriod"`
 	DetachedEventLimit int           `json:"detachedEventLimit"`
+	// AgentSurvivalEnabled carries the current value of the
+	// features.agentSurvival runtime flag for this launch. Unlike
+	// UnownedPeriod/DetachedEventLimit, false is not "unresolved" -- a
+	// managed launch always sets Configured=true, so false is a meaningful
+	// "disabled for this launch" answer agentctl must not second-guess with
+	// its own default.
+	AgentSurvivalEnabled bool `json:"agentSurvivalEnabled"`
 }
 
 // ManagedAgentctlStartupConfig returns the agentctl settings resolved by the
@@ -44,6 +51,7 @@ func (c *Config) ManagedAgentctlStartupConfig() AgentctlStartupConfig {
 		OTLPEndpoint:              c.Observability.OTLPEndpoint,
 		UnownedPeriod:             c.Agentctl.UnownedPeriod,
 		DetachedEventLimit:        c.Agentctl.DetachedEventLimit,
+		AgentSurvivalEnabled:      c.Features.AgentSurvival,
 	}
 }
 
