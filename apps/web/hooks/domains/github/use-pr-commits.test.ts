@@ -290,6 +290,29 @@ describe("usePRCommits retained evidence", () => {
   });
 });
 
+describe("usePRCommits unavailable client", () => {
+  it("retains resolved display commits when the WebSocket client is unavailable", async () => {
+    requestMock.mockResolvedValueOnce({
+      commits: [commit(STABLE_COMMIT_SHA)],
+      head_sha: STABLE_COMMIT_SHA,
+      complete: true,
+    });
+    const resource = createPRCommitsResource(undefined, { retryDelayMs: 0 });
+    const initialRequest = resourceRequest("null-old-version");
+    const refreshedRequest = resourceRequest("null-new-version");
+
+    await resource.load(initialRequest);
+    websocketClient = null;
+
+    const failed = await resource.load(refreshedRequest);
+
+    expect(failed.commits).toEqual([commit(STABLE_COMMIT_SHA)]);
+    expect(failed.authoritativeCommits).toEqual([]);
+    expect(failed.error).not.toBeNull();
+    expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("usePRCommits stale results and eviction", () => {
   it("does not let an older sync-version response replace the active result", async () => {
     const first = deferred<{ commits: PRCommitInfo[]; head_sha: string; complete: boolean }>();

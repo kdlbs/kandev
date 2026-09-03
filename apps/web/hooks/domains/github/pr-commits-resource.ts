@@ -267,7 +267,11 @@ async function attempt(
   { response: PRCommitsResponse | null; error: null } | { response: null; error: unknown }
 > {
   try {
-    return { response: await requester(request), error: null };
+    const response = await requester(request);
+    if (response === null) {
+      return { response: null, error: new Error(t("github:failedToFetchPrCommits")) };
+    }
+    return { response, error: null };
   } catch (error) {
     return { response: null, error };
   }

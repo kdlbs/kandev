@@ -50,11 +50,11 @@ complete evidence, then prove the task-switch behavior through focused unit and 
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run hooks/domains/github/use-pr-commits.test.ts hooks/domains/session/use-remote-contribution-relation.test.tsx components/task/changes-panel-remote.test.ts
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
-cd apps/web && pnpm e2e:run tests/pr/pr-switcher-changes.spec.ts
-git diff --check
+(cd apps && pnpm --filter @kandev/web test -- --run hooks/domains/github/use-pr-commits.test.ts hooks/domains/session/use-remote-contribution-relation.test.tsx components/task/changes-panel-remote.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
+(cd apps/web && pnpm e2e:run tests/pr/pr-switcher-changes.spec.ts)
+(git diff --check)
 ```
 
 ## Files likely touched

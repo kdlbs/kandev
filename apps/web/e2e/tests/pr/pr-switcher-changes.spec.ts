@@ -257,7 +257,7 @@ test.describe("PR switcher changes panel", () => {
     // --- Switch back to Task A to confirm data reappears ---
     // Force the newly versioned provider request to fail. The last confirmed
     // same-PR provenance must remain visible while the selected task refreshes.
-    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 101, 2);
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 101, 100);
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: taskA.id,
       owner: "testorg",
