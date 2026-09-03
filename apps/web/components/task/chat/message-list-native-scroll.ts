@@ -678,7 +678,6 @@ function usePersistedTranscriptScroll({
 }) {
   const frozenScrollTopRef = useRef<number | null>(null);
   useEffect(() => {
-    if (initialPlacementPending) return;
     const el = scrollRef.current;
     if (!el) return;
     /** Persists the container's current scrollTop for the session (used when
@@ -709,7 +708,7 @@ function usePersistedTranscriptScroll({
       // survives a dockview panel teardown/remount (e.g. navigating away
       // and back), even if no scroll event fired right before it, and even
       // if a coalesced write above was still pending.
-      coalescer.flush();
+      if (!initialPlacementPending) coalescer.flush();
     };
   }, [scrollRef, sessionId, storeApi, resyncIsNearBottom, enabled, initialPlacementPending]);
 
@@ -1152,9 +1151,16 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
   };
   element.scrollTop = scrollTop;
   syncNearBottom();
-  completeEnvSwitchPlacement(envSwitchPlacementToken);
-  if (enabled || scrollTop <= 0 || element.scrollTop >= scrollTop - 1) return;
-  scheduleClampedScrollRestore({ element, targetScrollTop: scrollTop, onApply: syncNearBottom });
+  if (enabled || scrollTop <= 0 || element.scrollTop >= scrollTop - 1) {
+    completeEnvSwitchPlacement(envSwitchPlacementToken);
+    return;
+  }
+  scheduleClampedScrollRestore({
+    element,
+    targetScrollTop: scrollTop,
+    onApply: syncNearBottom,
+    onComplete: () => completeEnvSwitchPlacement(envSwitchPlacementToken),
+  });
 }
 
 function useInitialScrollPosition({
