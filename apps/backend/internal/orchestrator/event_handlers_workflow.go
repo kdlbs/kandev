@@ -5270,6 +5270,21 @@ func (s *Service) applyEngineTransition(
 	return s.applyEngineTransitionWithMode(ctx, taskID, session, result, trigger, taskDescription, mode)
 }
 
+// applyEngineTransitionWithCommit preserves the legacy helper contract for
+// session-originated transitions. Guarded decisions use the explicit mode
+// variant so they cannot be mistaken for on_turn_start.
+func (s *Service) applyEngineTransitionWithCommit(
+	ctx context.Context, taskID string, session *models.TaskSession,
+	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
+	triggerOnEnter bool, commit func(context.Context) (bool, error),
+) bool {
+	mode := transitionLifecycleOnTurnStart
+	if triggerOnEnter {
+		mode = transitionLifecycleWithOnEnter
+	}
+	return s.applyEngineTransitionWithCommitMode(ctx, taskID, session, result, trigger, taskDescription, mode, commit)
+}
+
 // applyEngineTransitionWithMode applies an engine-evaluated transition with
 // an explicit lifecycle mode: on_exit, DB transition, data patches, and
 // optional on_enter processing. Returns true if the transition was applied.
@@ -5330,7 +5345,12 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),
 			zap.Error(err))
-	} else if sessionLifecycle {
+		if sessionLifecycle {
+			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		}
+		return false
+	}
+	if sessionLifecycle {
 		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
