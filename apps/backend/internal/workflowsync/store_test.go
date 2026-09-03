@@ -10,6 +10,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/common/authcircuit"
 )
 
 func setupTestStore(t *testing.T) *Store {
@@ -61,7 +63,11 @@ func TestStore_UpsertResetsSyncStatus(t *testing.T) {
 	ctx := context.Background()
 	_, err := store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
 	require.NoError(t, err)
-	require.NoError(t, store.RecordSyncStatus(ctx, "ws-1", true, "", []string{"w1"}, "hash-1", time.Now().UTC()))
+	failAt := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, store.RecordSyncStatus(
+		ctx, "ws-1", false, "boom", nil, "", failAt,
+		authcircuit.State{FailureClass: authcircuit.FailureClassConfig, ConsecutiveFailures: 3, NextRetryAt: &failAt},
+	))
 
 	req := testRequest()
 	req.RepoName = "other"
@@ -71,6 +77,10 @@ func TestStore_UpsertResetsSyncStatus(t *testing.T) {
 	assert.Nil(t, cfg.LastSyncedAt, "changing the config resets sync status")
 	assert.Empty(t, cfg.LastHash)
 	assert.Empty(t, cfg.LastWarnings)
+	assert.Empty(t, cfg.FailureClass, "an explicit config change always resets an open circuit")
+	assert.Zero(t, cfg.ConsecutiveFailures)
+	assert.Nil(t, cfg.NextRetryAt)
+	assert.Equal(t, req.fingerprint(), cfg.ConfigFingerprint)
 }
 
 func TestStore_RecordSyncStatusRoundtrip(t *testing.T) {
@@ -81,7 +91,10 @@ func TestStore_RecordSyncStatusRoundtrip(t *testing.T) {
 
 	at := time.Now().UTC().Truncate(time.Second)
 	warnings := []string{"workflow \"X\" not updated", "flows/broken.yml: bad yaml"}
-	require.NoError(t, store.RecordSyncStatus(ctx, "ws-1", false, "boom", warnings, "hash-2", at))
+	require.NoError(t, store.RecordSyncStatus(
+		ctx, "ws-1", false, "boom", warnings, "hash-2", at,
+		authcircuit.State{FailureClass: authcircuit.FailureClassTransient, ConsecutiveFailures: 1, NextRetryAt: &at},
+	))
 
 	cfg, err := store.GetConfigForWorkspace(ctx, "ws-1")
 	require.NoError(t, err)
@@ -90,6 +103,69 @@ func TestStore_RecordSyncStatusRoundtrip(t *testing.T) {
 	assert.Equal(t, "boom", cfg.LastError)
 	assert.Equal(t, warnings, cfg.LastWarnings)
 	assert.Equal(t, "hash-2", cfg.LastHash)
+	assert.Equal(t, authcircuit.FailureClassTransient, cfg.FailureClass)
+	assert.Equal(t, 1, cfg.ConsecutiveFailures)
+	require.NotNil(t, cfg.NextRetryAt)
+	assert.True(t, at.Equal(*cfg.NextRetryAt))
+}
+
+// TestStore_RecordSyncStatus_SuccessClearsCircuit confirms a subsequent
+// successful sync clears a previously-recorded circuit-open state, matching
+// authcircuit.State.RecordSuccess's contract.
+func TestStore_RecordSyncStatus_SuccessClearsCircuit(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	_, err := store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
+	require.NoError(t, err)
+
+	failAt := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, store.RecordSyncStatus(
+		ctx, "ws-1", false, "boom", nil, "", failAt,
+		authcircuit.State{FailureClass: authcircuit.FailureClassAuth, ConsecutiveFailures: 2, NextRetryAt: &failAt},
+	))
+
+	cfg, err := store.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Equal(t, authcircuit.FailureClassAuth, cfg.FailureClass)
+
+	okAt := failAt.Add(time.Minute)
+	require.NoError(t, store.RecordSyncStatus(ctx, "ws-1", true, "", nil, "hash-ok", okAt, authcircuit.State{}))
+
+	cfg, err = store.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Empty(t, cfg.FailureClass)
+	assert.Zero(t, cfg.ConsecutiveFailures)
+	assert.Nil(t, cfg.NextRetryAt)
+}
+
+// TestStore_RecordCircuitState confirms the standalone circuit-only writer
+// used by the credential-fingerprint reset path persists exactly the given
+// state, including the fingerprint (which RecordSyncStatus never touches).
+func TestStore_RecordCircuitState(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	_, err := store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
+	require.NoError(t, err)
+
+	require.NoError(t, store.RecordCircuitState(ctx, "ws-1", authcircuit.State{
+		FailureClass:        authcircuit.FailureClassNone,
+		ConsecutiveFailures: 0,
+		Fingerprint:         "active:3",
+	}))
+
+	cfg, err := store.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Empty(t, cfg.FailureClass)
+	assert.Equal(t, "active:3", cfg.CredentialFingerprint)
+}
+
+// TestStore_addCircuitColumns_Idempotent confirms re-running the migration
+// (as happens on every backend boot) is a no-op, matching
+// addPollEnabledColumn/addProviderColumns.
+func TestStore_addCircuitColumns_Idempotent(t *testing.T) {
+	store := setupTestStore(t)
+	require.NoError(t, store.addCircuitColumns())
+	require.NoError(t, store.addCircuitColumns())
 }
 
 func TestStore_ListConfigs(t *testing.T) {

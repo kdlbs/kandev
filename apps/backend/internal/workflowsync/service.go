@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
+	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -56,6 +58,32 @@ type GitLabClientProvider interface {
 var (
 	_ GitHubClientProvider = (*github.Service)(nil)
 	_ GitLabClientProvider = (*gitlab.Service)(nil)
+)
+
+// CredentialFingerprintProvider optionally exposes a non-secret fingerprint
+// that changes whenever a workspace's integration credential is replaced,
+// rotated, reconnected, or revoked. When the configured GitHubClientProvider
+// or GitLabClientProvider also implements this, SyncDueConfigs resets an
+// open circuit as soon as the fingerprint changes instead of waiting out the
+// backoff schedule. Implementing it is optional: *github.Service does; a
+// provider that does not (GitLab today has no credential-generation concept)
+// simply keeps the "resume promptly on credential change" fast path
+// unavailable — its circuit still resets on any explicit SetConfig call and
+// self-probes at the capped backoff interval regardless.
+type CredentialFingerprintProvider interface {
+	WorkspaceConnectionFingerprint(ctx context.Context, workspaceID string) (string, error)
+}
+
+var _ CredentialFingerprintProvider = (*github.Service)(nil)
+
+// errGitHubClientNotConfigured and errGitLabClientNotConfigured are the
+// sentinels wrapped by listGitHubEntries/listGitLabEntries when the
+// workspace has no usable client for the configured provider. Kept distinct
+// from other fetch failures so classifySyncErr can recognize "not
+// configured" as a config-class failure independent of error string text.
+var (
+	errGitHubClientNotConfigured = errors.New("GitHub is not authenticated; configure a GitHub token to sync workflows")
+	errGitLabClientNotConfigured = errors.New("GitLab is not authenticated; configure a GitLab connection to sync workflows")
 )
 
 // dirEntry is a provider-neutral directory listing entry. It exists only to
@@ -216,18 +244,22 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncR
 
 	files, err := s.fetchFiles(ctx, cfg)
 	if err != nil {
-		s.recordFailure(ctx, workspaceID, err)
+		s.recordFailure(ctx, workspaceID, cfg, err)
 		return nil, err
 	}
 
 	parsed, warnings := parseFiles(files)
 	applied, err := s.applier.ApplySyncedWorkflows(ctx, workspaceID, parsed)
 	if err != nil {
-		s.recordFailure(ctx, workspaceID, err)
+		s.recordFailure(ctx, workspaceID, cfg, err)
 		return nil, err
 	}
 	warnings = append(warnings, applied.Warnings...)
-	if err := s.store.RecordSyncStatus(ctx, workspaceID, true, "", warnings, contentHash(files), time.Now().UTC()); err != nil {
+	successState := cfg.circuitState()
+	successState.RecordSuccess()
+	if err := s.store.RecordSyncStatus(
+		ctx, workspaceID, true, "", warnings, contentHash(files), time.Now().UTC(), successState,
+	); err != nil {
 		return nil, err
 	}
 	return &SyncResult{
@@ -239,9 +271,15 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncR
 	}, nil
 }
 
-func (s *Service) recordFailure(ctx context.Context, workspaceID string, syncErr error) {
+func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Config, syncErr error) {
+	class := classifySyncErr(syncErr)
+	state := cfg.circuitState()
+	state.RecordFailure(time.Now().UTC(), class, nil)
+	incSyncFailure(cfg.Provider, class)
 	// Clear the hash so the next successful fetch re-applies from scratch.
-	if err := s.store.RecordSyncStatus(ctx, workspaceID, false, syncErr.Error(), nil, "", time.Now().UTC()); err != nil {
+	if err := s.store.RecordSyncStatus(
+		ctx, workspaceID, false, syncErr.Error(), nil, "", time.Now().UTC(), state,
+	); err != nil {
 		s.logger.Warn("failed to record sync failure",
 			zap.String("workspace_id", workspaceID), zap.Error(err))
 	}
@@ -286,7 +324,7 @@ func (s *Service) listProviderEntries(ctx context.Context, cfg *Config) ([]dirEn
 
 func (s *Service) listGitHubEntries(ctx context.Context, cfg *Config) ([]dirEntry, fileGetter, error) {
 	if s.githubClients == nil {
-		return nil, nil, fmt.Errorf("GitHub is not authenticated; configure a GitHub token to sync workflows")
+		return nil, nil, errGitHubClientNotConfigured
 	}
 	raw, err := s.githubClients.ListRepoDirectoryForWorkspace(
 		ctx, cfg.WorkspaceID, cfg.RepoOwner, cfg.RepoName, cfg.Path, cfg.Branch,
@@ -306,7 +344,7 @@ func (s *Service) listGitHubEntries(ctx context.Context, cfg *Config) ([]dirEntr
 
 func (s *Service) listGitLabEntries(ctx context.Context, cfg *Config) ([]dirEntry, fileGetter, error) {
 	if s.gitlabClients == nil {
-		return nil, nil, fmt.Errorf("GitLab is not authenticated; configure a GitLab connection to sync workflows")
+		return nil, nil, errGitLabClientNotConfigured
 	}
 	raw, err := s.gitlabClients.ListRepoTreeForWorkspace(ctx, cfg.WorkspaceID, cfg.ProjectPath, cfg.Path, cfg.Branch)
 	if err != nil {
@@ -371,6 +409,14 @@ func parseExport(path string, data []byte) (*workflowmodels.WorkflowExport, erro
 
 // SyncDueConfigs runs a periodic sync for every workspace whose interval has
 // elapsed. Failures are recorded on the config row and logged, never fatal.
+// Before deciding whether to sync, each config's credential fingerprint is
+// re-checked: a changed fingerprint (reconnect/rotate/revoke) resets an open
+// circuit and forces an immediate attempt, so a fixed credential resumes
+// syncing on this tick rather than waiting out the remaining backoff. A
+// config whose circuit is still open after that check is skipped without
+// ever calling the provider — this is the behavior AC-9 (auth backoff)
+// requires: a broken credential/config does not keep costing GitHub/GitLab
+// requests every tick.
 func (s *Service) SyncDueConfigs(ctx context.Context) {
 	configs, err := s.store.ListConfigs(ctx)
 	if err != nil {
@@ -382,7 +428,12 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if !isSyncDue(cfg, now) {
+		forceSync := s.refreshCredentialFingerprint(ctx, cfg, now)
+		if cfg.circuitOpen(now) {
+			incCircuitSkip(cfg.Provider)
+			continue
+		}
+		if !forceSync && !isSyncDue(cfg, now) {
 			continue
 		}
 		if _, err := s.SyncWorkspace(ctx, cfg.WorkspaceID); err != nil {
@@ -390,6 +441,89 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 				zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
 		}
 	}
+}
+
+// refreshCredentialFingerprint re-derives the workspace's current credential
+// fingerprint (when the configured provider exposes one) and resets cfg's
+// circuit if it changed, persisting the reset immediately so it survives
+// even if this tick does not go on to attempt a sync. Returns true when a
+// reset happened, telling the caller to sync now regardless of the normal
+// interval.
+func (s *Service) refreshCredentialFingerprint(ctx context.Context, cfg *Config, now time.Time) bool {
+	provider := s.credentialFingerprintProvider(cfg.Provider)
+	if provider == nil {
+		return false
+	}
+	fingerprint, err := provider.WorkspaceConnectionFingerprint(ctx, cfg.WorkspaceID)
+	if err != nil || fingerprint == "" {
+		return false
+	}
+	state := cfg.circuitState()
+	if !state.ResetIfFingerprintChanged(fingerprint) {
+		cfg.applyCircuitState(state) // still record the first-observed fingerprint
+		return false
+	}
+	cfg.applyCircuitState(state)
+	incCircuitReset(cfg.Provider, "credential")
+	if err := s.store.RecordCircuitState(ctx, cfg.WorkspaceID, state); err != nil {
+		s.logger.Warn("failed to persist credential-triggered circuit reset",
+			zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
+	}
+	return true
+}
+
+func (s *Service) credentialFingerprintProvider(provider string) CredentialFingerprintProvider {
+	if provider == ProviderGitLab {
+		if p, ok := s.gitlabClients.(CredentialFingerprintProvider); ok {
+			return p
+		}
+		return nil
+	}
+	if p, ok := s.githubClients.(CredentialFingerprintProvider); ok {
+		return p
+	}
+	return nil
+}
+
+// WorkflowSyncCircuitSummary aggregates the current circuit-breaker state
+// across every configured workflow-sync target, for the health checker
+// (internal/health.WorkflowSyncStatusProvider). It returns only bounded
+// counts by failure class — never workspace IDs, repository/project
+// identifiers, or error text.
+func (s *Service) WorkflowSyncCircuitSummary(ctx context.Context) (workflowSyncCircuitSummary, error) {
+	configs, err := s.store.ListConfigs(ctx)
+	if err != nil {
+		return workflowSyncCircuitSummary{}, err
+	}
+	now := time.Now().UTC()
+	summary := workflowSyncCircuitSummary{Total: len(configs)}
+	for _, cfg := range configs {
+		if !cfg.circuitOpen(now) {
+			continue
+		}
+		switch cfg.FailureClass {
+		case authcircuit.FailureClassAuth:
+			summary.OpenAuth++
+		case authcircuit.FailureClassConfig:
+			summary.OpenConfig++
+		default:
+			summary.OpenTransient++
+		}
+	}
+	return summary, nil
+}
+
+// workflowSyncCircuitSummary mirrors health.WorkflowSyncCircuitSummary
+// field-for-field. It is defined locally (rather than importing the health
+// package here) to avoid making workflowsync depend on health; the health
+// package's checker consumes this through structural typing via its own
+// WorkflowSyncStatusProvider interface, matching the rest of this file's
+// provider-interface pattern.
+type workflowSyncCircuitSummary struct {
+	Total         int
+	OpenAuth      int
+	OpenConfig    int
+	OpenTransient int
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {

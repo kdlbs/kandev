@@ -2,7 +2,10 @@ package github
 
 import (
 	"errors"
+	"net/http"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/authcircuit"
 )
 
 // ErrInvalidPRURL signals that a caller-supplied PR URL could not be parsed.
@@ -111,4 +114,38 @@ func isRepoNotResolvableErr(err error) bool {
 		}
 	}
 	return false
+}
+
+// classifyPollErr maps a background PR-watch poll failure to an
+// authcircuit.FailureClass, for Poller's per-workspace in-memory circuit
+// (see poller_circuit.go). This is deliberately a coarser, workspace-level
+// signal than the existing repoErrorCache (which negative-caches a single
+// repo for 10 minutes): an auth failure means every watch in the workspace
+// is broken, not just one repo, so it uses the longer permanent-backoff
+// schedule and only resets on a credential change
+// (Service.WorkspaceConnectionFingerprint), while a repo-not-resolvable
+// signal is treated as a configuration problem here too — both caches agree
+// "stop retrying this" and neither depends on the other.
+func classifyPollErr(err error) authcircuit.FailureClass {
+	if err == nil {
+		return authcircuit.FailureClassNone
+	}
+	if errors.Is(err, ErrGitHubConnectionInvalid) || errors.Is(err, ErrGitHubNotConfigured) {
+		return authcircuit.FailureClassAuth
+	}
+	if isRepoNotResolvableErr(err) {
+		return authcircuit.FailureClassConfig
+	}
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return authcircuit.FailureClassAuth
+		case http.StatusNotFound, http.StatusUnprocessableEntity, http.StatusBadRequest:
+			return authcircuit.FailureClassConfig
+		default:
+			return authcircuit.FailureClassTransient
+		}
+	}
+	return authcircuit.FailureClassTransient
 }

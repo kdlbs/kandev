@@ -1456,9 +1456,14 @@ func registerHealthRoutes(p routeParams) {
 		oslimits.NewOSLimitsChecker(oslimits.NewInotifyProbe()),
 		5*time.Minute,
 	)
+	var workflowSyncProvider health.WorkflowSyncStatusProvider
+	if p.services.WorkflowSync != nil {
+		workflowSyncProvider = workflowSyncHealthAdapter{svc: p.services.WorkflowSync}
+	}
 	checkers := []health.Checker{
 		health.NewGitExecutableChecker(),
 		githubChecker,
+		health.NewWorkflowSyncChecker(workflowSyncProvider),
 		health.NewAgentChecker(p.agentSettingsController),
 		osLimitsChecker,
 	}
@@ -1467,6 +1472,32 @@ func registerHealthRoutes(p routeParams) {
 	}
 	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
+}
+
+// workflowSyncHealthAdapter bridges workflowsync.Service's own circuit
+// summary type to the structural shape consumed by the health package
+// without importing health into workflowsync (cycle), matching
+// githubWorkspaceHealthAdapter below.
+type workflowSyncHealthAdapter struct {
+	svc *workflowsync.Service
+}
+
+func (a workflowSyncHealthAdapter) WorkflowSyncCircuitSummary(
+	ctx context.Context,
+) (health.WorkflowSyncCircuitSummary, error) {
+	if a.svc == nil {
+		return health.WorkflowSyncCircuitSummary{}, nil
+	}
+	summary, err := a.svc.WorkflowSyncCircuitSummary(ctx)
+	if err != nil {
+		return health.WorkflowSyncCircuitSummary{}, err
+	}
+	return health.WorkflowSyncCircuitSummary{
+		Total:         summary.Total,
+		OpenAuth:      summary.OpenAuth,
+		OpenConfig:    summary.OpenConfig,
+		OpenTransient: summary.OpenTransient,
+	}, nil
 }
 
 type githubWorkspaceHealthAdapter struct {

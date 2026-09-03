@@ -37,6 +37,29 @@ func (s *Service) GetWorkspaceConnectionHealth(ctx context.Context) (WorkspaceCo
 	return s.store.GetWorkspaceConnectionHealth(ctx)
 }
 
+// WorkspaceConnectionFingerprint returns an opaque, non-secret string that
+// changes whenever the workspace's automation connection is replaced,
+// reconnected, or has its credential rotated/revoked (status or credential
+// generation changes). Callers (e.g. workflow-sync's and the PR-watch
+// poller's auth circuit breakers) use this to detect "the credential
+// changed" and reset an open backoff circuit promptly instead of waiting out
+// the schedule. Returns "" when no connection exists — an empty fingerprint
+// must never be treated as "changed" by callers, since there was nothing to
+// compare against.
+func (s *Service) WorkspaceConnectionFingerprint(ctx context.Context, workspaceID string) (string, error) {
+	if s == nil || s.store == nil {
+		return "", nil
+	}
+	connection, err := s.store.GetWorkspaceConnection(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if connection == nil {
+		return "", nil
+	}
+	return fmt.Sprintf("%s:%d", connection.Status, connection.CredentialGeneration), nil
+}
+
 func (s *Service) SetWorkspaceConnection(
 	ctx context.Context,
 	workspaceID string,
