@@ -78,3 +78,21 @@ func TestResolve(t *testing.T) {
 		})
 	}
 }
+
+// TestRenewalInterval pins AC-EXECUTORS-CONTROL-OWNERSHIP-003.2: three
+// consecutive intervals must sum to strictly less than the period, so a
+// third renewal attempt after two failures is still due strictly before the
+// unowned-period expiry test can fire.
+func TestRenewalInterval(t *testing.T) {
+	periods := []time.Duration{MinPeriod, 90 * time.Second, 5 * time.Minute, 10 * time.Minute, time.Hour}
+	for _, period := range periods {
+		interval := RenewalInterval(period)
+		if interval <= 0 {
+			t.Fatalf("RenewalInterval(%v) = %v, want > 0", period, interval)
+		}
+		if threeIntervals := 3 * interval; threeIntervals >= period {
+			t.Fatalf("RenewalInterval(%v) = %v; 3x = %v, want strictly less than the period",
+				period, interval, threeIntervals)
+		}
+	}
+}

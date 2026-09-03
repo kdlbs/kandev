@@ -43,3 +43,14 @@ func Resolve(configured, idleTimeout time.Duration) (period time.Duration, adjus
 
 	return period, adjustments
 }
+
+// RenewalInterval returns the cadence AC-EXECUTORS-CONTROL-OWNERSHIP-003.2
+// requires a renewing backend to use for a given resolved unowned period:
+// strictly shorter than one third of it, so that after two consecutive
+// failed renewals a third attempt still falls strictly inside the period.
+// Quartering rather than using period/3 leaves headroom against scheduling
+// jitter and network latency instead of relying on integer-division
+// rounding to satisfy "strictly shorter".
+func RenewalInterval(period time.Duration) time.Duration {
+	return period / 4
+}
