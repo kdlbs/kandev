@@ -175,9 +175,9 @@ const INERT_TITLE_DRAFT = {
   openCycle: 0,
   autopilot: false,
   setAutopilot: NOOP,
-  // The subtask dialog doesn't render a priority control (REQ-002 scopes it
-  // to the primary create-task dialog only); subtasks are created at the
-  // default priority.
+  // The subtask dialog doesn't render a priority control; subtasks are
+  // created at the default priority and can be changed from their card
+  // afterward.
   priority: "medium",
   setPriority: NOOP,
 } as const;
