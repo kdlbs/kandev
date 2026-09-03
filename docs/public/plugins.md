@@ -33,7 +33,9 @@ trust, see [Security posture](#security-posture).
 
 ![Plugin runtime lifecycle: Kandev installs, verifies, extracts, and supervises a plugin subprocess; bus events and external webhooks reach it, it calls the Host API, and the SPA can optionally load its native UI bundle.](../screenshots/plugin-architecture.svg)
 
-<a href="./screenshots/plugin-architecture.svg">Open full-size SVG diagram</a>
+[Open full-size SVG diagram][plugin-runtime-diagram]
+
+[plugin-runtime-diagram]: ../../docs/screenshots/plugin-architecture.svg
 
 Kandev owns the whole process lifecycle: it extracts the package, spawns the
 binary, completes the go-plugin handshake, health-checks it (`Ping` every

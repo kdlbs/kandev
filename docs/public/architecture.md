@@ -16,7 +16,9 @@ Kandev is a server-first development workbench. A Go backend owns durable produc
 
 ![Kandev architecture: a browser or Tauri window connects to the Go control plane, which owns persistence and provider access and routes scoped control channels to local and remote agentctl runtimes.](../screenshots/architecture.svg)
 
-<a href="./screenshots/architecture.svg">Open full-size SVG diagram</a>
+[Open full-size SVG diagram][architecture-diagram]
+
+[architecture-diagram]: ../../docs/screenshots/architecture.svg
 
 The diagram separates the user surface from the Go control plane and the task
 runtimes below it. The backend owns the durable state and external provider

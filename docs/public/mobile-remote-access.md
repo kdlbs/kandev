@@ -15,7 +15,9 @@ Each protected path reaches the same Kandev origin. Kandev then sends task work 
 
 ![Mobile remote access architecture: a phone reaches one Kandev origin through Tailscale Serve, Cloudflare Access with cloudflared, or a private VPN, then Kandev routes the task session to the selected executor and repository.](../screenshots/mobile-remote-access.svg)
 
-<a href="./screenshots/mobile-remote-access.svg">Open full-size SVG diagram</a>
+[Open full-size SVG diagram][mobile-remote-access-diagram]
+
+[mobile-remote-access-diagram]: ../../docs/screenshots/mobile-remote-access.svg
 
 The diagram shows the important boundary: Tailscale Serve, Cloudflare Access with
 `cloudflared`, and a private VPN are alternative protected paths to the same
