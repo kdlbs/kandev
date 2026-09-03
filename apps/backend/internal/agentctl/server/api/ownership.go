@@ -70,12 +70,17 @@ func (o *ownershipState) IsShuttingDown() bool {
 	return o.shuttingDown
 }
 
+// shuttingDownMessage is the shared one-way-door refusal message for every
+// ownership-lifecycle operation (claim, rotate, confirm) once
+// AC-EXECUTORS-CONTROL-OWNERSHIP-003.9's shutdown latch has fired.
+const shuttingDownMessage = "control server is shutting down"
+
 // handleOwnershipClaim establishes or renews ownership. Unlike /identity,
 // this is a normal authenticated endpoint: it sits above the identity and
 // capability negotiation in design 01's gate ordering.
 func (m *ControlServer) handleOwnershipClaim(c *gin.Context) {
 	if !m.ownership.Renew() {
-		c.JSON(http.StatusConflict, gin.H{errKey: "control server is shutting down"})
+		c.JSON(http.StatusConflict, gin.H{errKey: shuttingDownMessage})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{lspStatusKey: "claimed"})

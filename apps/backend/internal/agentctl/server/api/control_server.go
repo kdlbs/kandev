@@ -18,12 +18,22 @@ import (
 // ControlServer provides instance management endpoints on the control port.
 // It exposes the same API regardless of deployment context (Docker or host).
 // Each instance runs its own HTTP server with agent-specific endpoints.
+// adoptionOnlyPaths lists control-server routes where a superseded
+// credential remains valid on the adoption-only terms of
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.7/-002.9, until confirmed. Every other
+// authenticated route accepts only the current highest-numbered rotation's
+// credential.
+var adoptionOnlyPaths = map[string]bool{
+	"/api/v1/ownership/rotate": true,
+}
+
 type ControlServer struct {
-	cfg       *config.Config
-	instMgr   *instance.Manager
-	logger    *logger.Logger
-	router    *gin.Engine
-	ownership *ownershipState
+	cfg         *config.Config
+	instMgr     *instance.Manager
+	logger      *logger.Logger
+	router      *gin.Engine
+	ownership   *ownershipState
+	credentials *credentialState
 }
 
 // NewControlServer creates a new ControlServer for instance management.
@@ -31,15 +41,16 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	gin.SetMode(gin.ReleaseMode)
 
 	cs := &ControlServer{
-		cfg:       cfg,
-		instMgr:   instMgr,
-		logger:    log.WithFields(zap.String("component", "control-server")),
-		router:    gin.New(),
-		ownership: newOwnershipState(),
+		cfg:         cfg,
+		instMgr:     instMgr,
+		logger:      log.WithFields(zap.String("component", "control-server")),
+		router:      gin.New(),
+		ownership:   newOwnershipState(),
+		credentials: newCredentialState(cfg.AuthToken),
 	}
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
-	cs.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/auth/handshake", "/identity"))
+	cs.router.Use(controlCredentialAuth(cs.credentials, adoptionOnlyPaths, "/health", "/auth/handshake", "/identity"))
 
 	cs.setupRoutes()
 	return cs
@@ -68,6 +79,8 @@ func (m *ControlServer) setupRoutes() {
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
 	api.POST("/ownership/claim", m.handleOwnershipClaim)
+	api.POST("/ownership/rotate", m.handleCredentialRotate)
+	api.POST("/ownership/confirm", m.handleCredentialConfirm)
 }
 
 func (m *ControlServer) handleSubprocessAdmission(c *gin.Context) {
