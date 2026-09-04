@@ -2809,6 +2809,8 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 		// canonical inventory does not remain permanently excluded from reuse.
 		row.Status = taskEnvironmentRepoStatusActive
 		row.DeletedAt = nil
+		row.WorktreeRecoveryHeadSHA = ""
+		row.WorktreeBranchCompactedAt = nil
 	}
 	if err := e.repo.UpdateTaskEnvironmentRepo(ctx, row); err != nil {
 		e.logger.Warn("failed to update task environment repo",

@@ -555,16 +555,20 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	if replacePhysical {
 		row.Status = worktreeRepoStatusActive
 		row.DeletedAt = nil
+		row.WorktreeRecoveryHeadSHA = ""
+		row.WorktreeBranchCompactedAt = nil
 	}
 	row.UpdatedAt = time.Now().UTC()
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
 			worktree_branch_owner = ?, worktree_integration_ref = ?,
+			worktree_recovery_head_sha = ?, worktree_branch_compacted_at = ?,
 			position = ?, error_message = ?, status = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`), row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorktreeBranch,
 		row.WorktreeBranchOwner, row.WorktreeIntegrationRef,
+		row.WorktreeRecoveryHeadSHA, row.WorktreeBranchCompactedAt,
 		row.Position, row.ErrorMessage, row.Status, row.DeletedAt, row.UpdatedAt, row.ID)
 	return err
 }

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -370,6 +371,85 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 		if row.ID == "remove" && (row.Status != worktreeRepoStatusActive || row.DeletedAt != nil || row.WorktreeID != "wt-recreated") {
 			t.Fatalf("recreated row = %#v, want active row", row)
 		}
+	}
+}
+
+func TestPersistTaskEnvironmentTransitionClearsCompactionMetadataOnPhysicalReplacement(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-transition-compaction")
+	archivedAt := time.Now().UTC().Add(-time.Hour)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:          "task-transition-compaction",
+		WorkspaceID: "workspace-transition-compaction",
+		Title:       "transition compaction",
+		ArchivedAt:  &archivedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET archived_at = ? WHERE id = ?`), archivedAt, "task-transition-compaction"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	env := &models.TaskEnvironment{
+		ID: "env-transition-compaction", TaskID: "task-transition-compaction", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/workspace/old",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	compactedAt := time.Now().UTC().Add(-30 * time.Minute)
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "compacted-repo", TaskEnvironmentID: env.ID, RepositoryID: "repo-compacted", BranchSlug: "main",
+		WorktreeID: "wt-old", WorktreeBranch: "feature/old", WorktreeBranchOwner: "kandev",
+		WorktreeIntegrationRef: "main", WorktreeRecoveryHeadSHA: strings.Repeat("a", 40),
+		WorktreeBranchCompactedAt: &compactedAt, Status: worktreeRepoStatusDeleted, DeletedAt: &compactedAt,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
+	}
+
+	if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
+		RepositoryID: "repo-compacted", BranchSlug: "main", WorktreeID: "wt-new",
+		WorktreePath: "/workspace/new/repo", WorktreeBranch: "feature/new",
+		WorktreeBranchOwner: "kandev", WorktreeIntegrationRef: "main",
+	}}, true); err != nil {
+		t.Fatalf("PersistTaskEnvironmentTransition: %v", err)
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after replacement: %v", err)
+	}
+	if len(persisted.Repos) != 1 {
+		t.Fatalf("repository inventory after replacement = %#v, want one row", persisted.Repos)
+	}
+	replaced := persisted.Repos[0]
+	if replaced.Status != worktreeRepoStatusActive || replaced.DeletedAt != nil || replaced.WorktreeID != "wt-new" {
+		t.Fatalf("replaced row = %#v, want active replacement worktree", replaced)
+	}
+	if replaced.WorktreeRecoveryHeadSHA != "" || replaced.WorktreeBranchCompactedAt != nil {
+		t.Fatalf("replaced row kept stale compaction metadata: head=%q compacted_at=%v", replaced.WorktreeRecoveryHeadSHA, replaced.WorktreeBranchCompactedAt)
+	}
+
+	if err := repo.PersistTaskEnvironmentTransition(ctx, env, nil, true); err != nil {
+		t.Fatalf("PersistTaskEnvironmentTransition tombstone replacement: %v", err)
+	}
+	var candidateCount int
+	if err := repo.db.QueryRowContext(ctx, repo.db.Rebind(`
+		SELECT COUNT(1)
+		FROM task_environment_repos ter
+		INNER JOIN task_environments te ON ter.task_environment_id = te.id
+		INNER JOIN tasks t ON te.task_id = t.id
+		WHERE ter.worktree_id = ?
+		  AND t.archived_at IS NOT NULL
+		  AND ter.status = ?
+		  AND ter.deleted_at IS NOT NULL
+		  AND ter.worktree_branch_owner = ?
+		  AND ter.worktree_branch_compacted_at IS NULL
+	`), "wt-new", worktreeRepoStatusDeleted, "kandev").Scan(&candidateCount); err != nil {
+		t.Fatalf("query archived maintenance candidate predicate: %v", err)
+	}
+	if candidateCount != 1 {
+		t.Fatalf("archived maintenance candidates for replacement = %d, want 1", candidateCount)
 	}
 }
 
