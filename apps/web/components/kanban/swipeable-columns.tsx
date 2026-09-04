@@ -30,6 +30,7 @@ type SwipeableColumnsProps = {
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  activeTaskId?: string | null;
 };
 
 /** Two-way sync between Embla's carousel position and the external activeIndex. */
@@ -89,6 +90,7 @@ export function SwipeableColumns({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  activeTaskId,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -142,6 +144,7 @@ export function SwipeableColumns({
               onSelectRange={onSelectRange}
               isMultiSelectMode={isMultiSelectMode}
               externalLinkAvailability={externalLinkAvailability}
+              activeTaskId={activeTaskId}
               hideHeader
             />
           </div>

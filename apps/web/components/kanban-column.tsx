@@ -46,6 +46,8 @@ interface KanbanColumnProps {
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  /** The task currently being dragged anywhere on the board, if any (AC.7's insertion indicator). */
+  activeTaskId?: string | null;
 }
 
 function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
@@ -156,6 +158,7 @@ export const KanbanColumn = memo(function KanbanColumn({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  activeTaskId,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: step.id,
@@ -201,6 +204,7 @@ export const KanbanColumn = memo(function KanbanColumn({
         deletingTaskId={deletingTaskId}
         archivingTaskId={archivingTaskId}
         selectedIds={selectedIds}
+        activeTaskId={activeTaskId}
         onPreviewTask={onPreviewTask}
         onOpenTask={onOpenTask}
         onEditTask={onEditTask}

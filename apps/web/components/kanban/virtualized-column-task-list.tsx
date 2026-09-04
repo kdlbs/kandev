@@ -1,8 +1,10 @@
 "use client";
 
 import { memo, useCallback, useMemo, useRef } from "react";
+import { useDroppable } from "@dnd-kit/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
+import { cn } from "@kandev/ui/lib/utils";
 import {
   KanbanCard,
   resolveTaskRepositoryChips,
@@ -27,6 +29,8 @@ type VirtualizedColumnTaskListProps = {
   deletingTaskId?: string | null;
   archivingTaskId?: string | null;
   selectedIds?: Set<string>;
+  /** The task currently being dragged anywhere on the board, if any (AC.7's insertion indicator). */
+  activeTaskId?: string | null;
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
@@ -131,6 +135,72 @@ function useStableExternalLinkAvailability(
   return isUnchanged ? previous : availability;
 }
 
+/**
+ * Wraps one rendered card so it is also a dnd-kit drop target (`over.id`
+ * resolves to a task id, enabling within-band reorder classification) while
+ * staying measured by the virtualizer. Renders the AC.7 insertion-point
+ * indicator when this card is the current drop target for a same-band drag.
+ */
+function DroppableTaskRow({
+  taskId,
+  index,
+  top,
+  measureElement,
+  insertionEdge,
+  children,
+}: {
+  taskId: string;
+  index: number;
+  top: number;
+  measureElement: (node: HTMLDivElement | null) => void;
+  insertionEdge: "top" | "bottom" | null;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: taskId });
+  const mergedRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      measureElement(node);
+      setNodeRef(node);
+    },
+    [measureElement, setNodeRef],
+  );
+  const showIndicator = isOver && insertionEdge !== null;
+
+  return (
+    <div
+      ref={mergedRef}
+      data-index={index}
+      className={cn(
+        "absolute left-0 top-0 w-full",
+        showIndicator && insertionEdge === "top" && "border-t-2 border-primary",
+        showIndicator && insertionEdge === "bottom" && "border-b-2 border-primary",
+      )}
+      style={{ transform: `translateY(${top}px)` }}
+      data-testid={showIndicator ? `kanban-insertion-indicator-${insertionEdge}` : undefined}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * AC.7: while a card is dragged over its own band, show which edge of the
+ * hovered card the drop would insert next to. `null` for a different band
+ * (AC.11's cross-band reject) or when nothing is being dragged.
+ */
+export function computeInsertionEdge(
+  orderedTasks: Task[],
+  queuedStartIndex: number,
+  activeTaskId: string | null | undefined,
+  index: number,
+): "top" | "bottom" | null {
+  if (!activeTaskId) return null;
+  const activeIndex = orderedTasks.findIndex((task) => task.id === activeTaskId);
+  if (activeIndex === -1 || activeIndex === index) return null;
+  if (activeIndex < queuedStartIndex !== index < queuedStartIndex) return null;
+  return activeIndex < index ? "bottom" : "top";
+}
+
 export function VirtualizedColumnTaskList({
   orderedTasks,
   queuedStartIndex,
@@ -145,6 +215,7 @@ export function VirtualizedColumnTaskList({
   deletingTaskId,
   archivingTaskId,
   selectedIds,
+  activeTaskId,
   onPreviewTask,
   onOpenTask,
   onEditTask,
@@ -180,12 +251,18 @@ export function VirtualizedColumnTaskList({
           if (!task) return null;
 
           return (
-            <div
+            <DroppableTaskRow
               key={task.id}
-              ref={virtualizer.measureElement}
-              data-index={virtualItem.index}
-              className="absolute left-0 top-0 w-full"
-              style={{ transform: `translateY(${virtualItem.start}px)` }}
+              taskId={task.id}
+              index={virtualItem.index}
+              top={virtualItem.start}
+              measureElement={virtualizer.measureElement}
+              insertionEdge={computeInsertionEdge(
+                orderedTasks,
+                queuedStartIndex,
+                activeTaskId,
+                virtualItem.index,
+              )}
             >
               {queuedCount > 0 && virtualItem.index === queuedStartIndex && (
                 <div
@@ -219,7 +296,7 @@ export function VirtualizedColumnTaskList({
                 onSelectRange={onSelectRange}
                 isMultiSelectMode={isMultiSelectMode}
               />
-            </div>
+            </DroppableTaskRow>
           );
         })}
       </div>

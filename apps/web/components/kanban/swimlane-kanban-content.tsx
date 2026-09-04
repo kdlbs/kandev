@@ -33,6 +33,8 @@ import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import { resolveMobileColumnIndex } from "@/lib/kanban/mobile-column-index";
 import { compareStepOrder } from "@/lib/kanban/task-order";
+import { classifyDrop } from "@/lib/kanban/drop-classification";
+import { useStepReorder } from "@/hooks/domains/kanban/use-step-reorder";
 import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
@@ -80,33 +82,12 @@ type SwimlaneKanbanDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
+function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveTaskError) => void) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const tasksRef = useRef(tasks);
-  tasksRef.current = tasks;
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, TASK_POINTER_SENSOR_OPTIONS),
-    useSensor(TouchSensor, TASK_TOUCH_SENSOR_OPTIONS),
-  );
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveTaskId(event.active.id as string);
-  }, []);
-
-  const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
-      const { active, over } = event;
-      setActiveTaskId(null);
-      if (!over) return;
-
-      const taskId = active.id as string;
-      const targetStepId = over.id as string;
-      const task = tasksRef.current.find((candidate) => candidate.id === taskId);
-      if (!task || task.workflowStepId === targetStepId || isOrphanMoveTarget(targetStepId)) return;
-
+  return useCallback(
+    async (taskId: string, targetStepId: string, task: Task) => {
       const state = store.getState();
       const snapshot = state.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
@@ -142,6 +123,60 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
       }
     },
     [workflowId, store, moveTaskById, onMoveError],
+  );
+}
+
+function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
+  const { reorderBand } = useStepReorder();
+  const moveTaskAcrossSteps = useCrossStepMove(workflowId, onMoveError);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, TASK_POINTER_SENSOR_OPTIONS),
+    useSensor(TouchSensor, TASK_TOUCH_SENSOR_OPTIONS),
+  );
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveTaskId(event.active.id as string);
+  }, []);
+
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      setActiveTaskId(null);
+      if (!over) return;
+
+      const taskId = active.id as string;
+      const overId = over.id as string;
+      const task = tasksRef.current.find((t) => t.id === taskId);
+      if (!task) return;
+
+      const classification = classifyDrop({
+        draggedTaskId: taskId,
+        overId,
+        stepTasks: tasksRef.current.filter((t) => t.workflowStepId === task.workflowStepId),
+      });
+
+      if (classification.kind === "reorder") {
+        await reorderBand({
+          workflowId,
+          stepId: classification.stepId,
+          band: classification.band,
+          draggedId: taskId,
+          visibleOrderAfterMove: classification.visibleOrderAfterMove,
+        });
+        return;
+      }
+
+      if (classification.kind !== "cross-step" || isOrphanMoveTarget(classification.targetStepId)) {
+        return;
+      }
+
+      await moveTaskAcrossSteps(taskId, classification.targetStepId, task);
+    },
+    [workflowId, reorderBand, moveTaskAcrossSteps],
   );
 
   const handleDragCancel = useCallback(() => {
@@ -262,6 +297,7 @@ function MobileKanbanLayout({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  activeTaskId,
   mobileWorkflowNavigation,
 }: SharedKanbanLayoutProps & {
   activeIndex: number;
@@ -329,6 +365,7 @@ function MobileKanbanLayout({
           onSelectRange={onSelectRange}
           isMultiSelectMode={isMultiSelectMode}
           externalLinkAvailability={externalLinkAvailability}
+          activeTaskId={activeTaskId}
         />
       )}
       <MobileDropTargets
@@ -359,6 +396,7 @@ function TabletKanbanLayout({
   isMultiSelectMode,
   externalLinkAvailability,
   temporaryStepIds,
+  activeTaskId,
 }: SharedKanbanLayoutProps) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -395,6 +433,7 @@ function TabletKanbanLayout({
             onSelectRange={onSelectRange}
             isMultiSelectMode={isMultiSelectMode}
             externalLinkAvailability={externalLinkAvailability}
+            activeTaskId={activeTaskId}
           />
         </div>
       ))}
@@ -422,6 +461,7 @@ function DesktopKanbanLayout({
   externalLinkAvailability,
   temporaryStepIds,
   isDragging,
+  activeTaskId,
 }: SharedKanbanLayoutProps) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -450,6 +490,7 @@ function DesktopKanbanLayout({
             onSelectRange={onSelectRange}
             isMultiSelectMode={isMultiSelectMode}
             externalLinkAvailability={externalLinkAvailability}
+            activeTaskId={activeTaskId}
           />
         </div>
       )}

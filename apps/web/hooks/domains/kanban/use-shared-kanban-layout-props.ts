@@ -23,6 +23,7 @@ export type SharedKanbanLayoutProps = {
   externalLinkAvailability: KanbanExternalLinkAvailability;
   temporaryStepIds: Set<string>;
   isDragging: boolean;
+  activeTaskId: string | null;
 };
 
 type SharedLayoutDragState = {
@@ -34,7 +35,7 @@ type SharedLayoutDragState = {
 
 type SharedLayoutHookOptions = Omit<
   SharedKanbanLayoutProps,
-  "steps" | "tasks" | "moveTaskToStep" | "temporaryStepIds" | "isDragging"
+  "steps" | "tasks" | "moveTaskToStep" | "temporaryStepIds" | "isDragging" | "activeTaskId"
 > & {
   drag: SharedLayoutDragState;
   displayTasks: Task[];
@@ -65,6 +66,7 @@ export function useSharedKanbanLayoutProps(
       externalLinkAvailability,
       temporaryStepIds: drag.temporaryStepIds,
       isDragging: !!drag.activeTask,
+      activeTaskId: drag.activeTask?.id ?? null,
     }),
     [
       drag.renderedSteps,
