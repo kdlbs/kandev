@@ -634,6 +634,7 @@ export class ApiClient {
       model: string;
       fallback_model?: string;
       auto_fallback?: boolean;
+      auto_approve?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
@@ -647,6 +648,7 @@ export class ApiClient {
       model: opts.model,
       fallback_model: opts.fallback_model,
       auto_fallback: opts.auto_fallback,
+      auto_approve: opts.auto_approve,
       mode: opts.mode,
       config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
@@ -2337,6 +2339,23 @@ export class ApiClient {
   ): Promise<TaskDependencyProjection> {
     return this.request("POST", `/api/v1/tasks/${taskId}/dependencies`, {
       depends_on_task_id: dependsOnTaskId,
+    });
+  }
+
+  /** Replace the complete predecessor set, including an empty set. */
+  async replaceTaskDependencies(
+    taskId: string,
+    dependsOnTaskIds: string[],
+  ): Promise<TaskDependencyProjection> {
+    return this.request("PUT", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_ids: dependsOnTaskIds,
+    });
+  }
+
+  /** Raw replacement helper for asserting structured validation failures. */
+  async rawReplaceTaskDependencies(taskId: string, dependsOnTaskIds: string[]): Promise<Response> {
+    return this.rawRequest("PUT", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_ids: dependsOnTaskIds,
     });
   }
 

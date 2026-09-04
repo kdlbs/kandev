@@ -19,10 +19,20 @@ const mockDockviewState = vi.hoisted(
   () =>
     ({
       pendingChatScrollTop: null,
+      pendingChatInitialPlacement: null,
+      isRestoringLayout: false,
       scrollTarget: null,
+      completePendingChatInitialPlacement: vi.fn((token: number) => {
+        if (mockDockviewState.pendingChatInitialPlacement?.token === token) {
+          mockDockviewState.pendingChatInitialPlacement = null;
+        }
+      }),
     }) as {
       pendingChatScrollTop: number | null;
+      pendingChatInitialPlacement: { sessionId: string; token: number } | null;
+      isRestoringLayout: boolean;
       scrollTarget: { sessionId: string } | null;
+      completePendingChatInitialPlacement: ReturnType<typeof vi.fn>;
     },
 );
 
@@ -210,7 +220,10 @@ function setScrollMetrics(element: HTMLElement) {
 afterEach(() => {
   cleanup();
   mockDockviewState.pendingChatScrollTop = null;
+  mockDockviewState.pendingChatInitialPlacement = null;
+  mockDockviewState.isRestoringLayout = false;
   mockDockviewState.scrollTarget = null;
+  mockDockviewState.completePendingChatInitialPlacement.mockClear();
   sharedSentinelCalls.length = 0;
   sharedSentinelUserGesture.mockReset();
   sharedSentinelRetry.mockReset();
@@ -264,6 +277,7 @@ function NativeScrollManagementHarness({
   recoveryRef,
   isVisible = true,
   enabled = false,
+  historyRefreshPending = false,
 }: {
   items: RenderItem[];
   metrics?: NativeScrollMetrics;
@@ -273,6 +287,7 @@ function NativeScrollManagementHarness({
   recoveryRef?: { current: boolean };
   isVisible?: boolean;
   enabled?: boolean;
+  historyRefreshPending?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollMetrics(scrollRef, metrics);
@@ -289,6 +304,7 @@ function NativeScrollManagementHarness({
     isLoadingMore,
     loadMore,
     isVisible,
+    historyRefreshPending,
   });
   if (recoveryRef) recoveryRef.current = showRecovery;
   return (
@@ -337,6 +353,113 @@ describe("isElementInPreloadRegion", () => {
 
 // eslint-disable-next-line max-lines-per-function -- pagination invariants share one fixture and lifecycle.
 describe("useNativeScrollManagement transcript pagination", () => {
+  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.11
+  it("places an env-switched enabled transcript after layout and history settle", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const metrics = { scrollHeight: 600, scrollTop: 275, clientHeight: 400 };
+    mockDockviewState.pendingChatInitialPlacement = { sessionId: "session-b", token: 7 };
+    mockDockviewState.isRestoringLayout = true;
+    try {
+      const { rerender } = render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage("cached-message")]}
+          metrics={metrics}
+          sessionId="session-b"
+          enabled
+          historyRefreshPending
+        />,
+      );
+      const scrollContainer = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
+
+      expect(scrollContainer.scrollTop).toBe(275);
+      expect(sharedSentinelCalls.at(-1)?.[2]).toBe(true);
+
+      mockDockviewState.isRestoringLayout = false;
+      metrics.scrollHeight = 1400;
+      rerender(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage("settled-message")]}
+          metrics={metrics}
+          sessionId="session-b"
+          enabled
+        />,
+      );
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      expect(scrollContainer.scrollTop).toBe(1400);
+      expect(mockDockviewState.pendingChatInitialPlacement).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.12
+  it("restores only the incoming session offset after an env switch", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    transcriptScrollTopBySessionId.set("session-a", 810);
+    transcriptScrollTopBySessionId.set("session-b", 320);
+    const metrics = { scrollHeight: 1400, scrollTop: 810, clientHeight: 400 };
+    mockDockviewState.pendingChatInitialPlacement = { sessionId: "session-b", token: 8 };
+    mockDockviewState.isRestoringLayout = true;
+    try {
+      const { rerender } = render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage("cached-message")]}
+          metrics={metrics}
+          sessionId="session-b"
+          historyRefreshPending
+        />,
+      );
+      const scrollContainer = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
+      expect(scrollContainer.scrollTop).toBe(810);
+
+      mockDockviewState.isRestoringLayout = false;
+      rerender(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage("settled-message")]}
+          metrics={metrics}
+          sessionId="session-b"
+        />,
+      );
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      expect(scrollContainer.scrollTop).toBe(320);
+      expect(scrollContainer.scrollTop).not.toBe(810);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.13
+  it("does not defer a same-env session placement without an env-switch token", () => {
+    const metrics = { scrollHeight: 900, scrollTop: 125, clientHeight: 400 };
+
+    render(
+      <NativeScrollManagementHarness
+        items={[transcriptMessage("cached-message")]}
+        metrics={metrics}
+        sessionId="session-b"
+        enabled
+        historyRefreshPending
+      />,
+    );
+
+    expect(screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID).scrollTop).toBe(900);
+    expect(sharedSentinelCalls.at(-1)?.[2]).toBe(false);
+  });
+
   it("defers the native initial placement until a hidden transcript is active", () => {
     const frames: Array<FrameRequestCallback> = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

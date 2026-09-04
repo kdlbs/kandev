@@ -63,6 +63,7 @@ import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profile
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
+import { isHandledApiError } from "@/lib/api/client";
 
 type ProfileEditorProps = {
   agent: Agent;
@@ -472,13 +473,14 @@ function ProfileEditor({
         passthroughConfig={passthroughConfig}
         secrets={secrets}
         initialMcpConfig={initialMcpConfig}
-        onToastError={(error) =>
+        onToastError={(error) => {
+          if (isHandledApiError(error)) return;
           toast({
             title: t("agents:failedToSaveMcpConfig"),
             description: errorMessage(error),
             variant: "error",
-          })
-        }
+          });
+        }}
         onModelConfigResolutionPendingChange={setModelConfigResolutionPending}
       />
 

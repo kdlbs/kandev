@@ -393,10 +393,8 @@ func (d *Dispatcher) resolveActiveSessionID(ctx context.Context, taskID string) 
 // unresolvable active session already gets, rather than rejecting the
 // decision outright.
 //
-// The active-state set mirrors GetActiveTaskSessionByTaskID's own query
-// (internal/task/repository/sqlite/session.go) — there is no shared
-// models-level predicate for that set, so this local copy must be kept in
-// sync with it.
+// The active-state set is taskmodels.IsTaskLookupActiveSessionState, the same
+// predicate GetActiveTaskSessionByTaskID's own query is cross-checked against.
 func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessionID string) (string, error) {
 	session, err := d.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -410,7 +408,7 @@ func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessio
 		d.logSessionUnresolvable(taskID, sessionID, "foreign")
 		return "", nil
 	}
-	if !isActiveSessionState(session.State) {
+	if !taskmodels.IsTaskLookupActiveSessionState(session.State) {
 		d.logSessionUnresolvable(taskID, sessionID, "terminal")
 		return "", nil
 	}
@@ -422,18 +420,6 @@ func (d *Dispatcher) logSessionUnresolvable(taskID, sessionID, reason string) {
 		zap.String("task_id", taskID),
 		zap.String("supplied_session_id", sessionID),
 		zap.String("reason", reason))
-}
-
-func isActiveSessionState(state taskmodels.TaskSessionState) bool {
-	switch state {
-	case taskmodels.TaskSessionStateCreated,
-		taskmodels.TaskSessionStateStarting,
-		taskmodels.TaskSessionStateRunning,
-		taskmodels.TaskSessionStateWaitingForInput:
-		return true
-	default:
-		return false
-	}
 }
 
 // resolveLatestSessionID returns the F38 "any session" id (the task's

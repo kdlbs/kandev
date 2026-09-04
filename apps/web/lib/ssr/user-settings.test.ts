@@ -272,6 +272,18 @@ describe("buildCoreFields", () => {
     const result = buildCoreFields(settings);
     expect(result.terminalFontFamily).toBeNull();
   });
+
+  it("maps default_utility_agent_profile_id to defaultUtilityAgentProfileId", () => {
+    const settings = {
+      workspace_id: toWorkspaceId(""),
+      repository_ids: [],
+      default_utility_agent_profile_id: "profile-1",
+      updated_at: UPDATED_AT,
+    } as unknown as Parameters<typeof buildCoreFields>[0];
+
+    const result = buildCoreFields(settings);
+    expect(result.defaultUtilityAgentProfileId).toBe("profile-1");
+  });
 });
 
 describe("buildCoreFields task-create last-used mapping", () => {

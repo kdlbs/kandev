@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/planinjection"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -20,6 +21,12 @@ import (
 )
 
 const dynamicRouteStatusWaiting = "waiting"
+
+// dynamicSuccessorDetachedTimeout bounds one detached fallback launch: the
+// predecessor stop plus the successor launch. Without it the repository calls
+// inside the launch could hold the session's cancel guard indefinitely and
+// block every later stop or message for that session.
+const dynamicSuccessorDetachedTimeout = 2 * time.Minute
 
 // dynamicTaskDownstream adapts the task executor to the provider-neutral
 // conductor. The callback updates the task-session attribution before every
@@ -575,7 +582,155 @@ func (s *Service) launchDynamicSuccessorAfterFailure(
 			zap.String("session_id", session.ID), zap.Error(err))
 		return false
 	}
-	return s.relaunchDynamicTaskAfterFailure(ctx, data, next.ExecutionProfileID)
+	return s.launchDynamicSuccessorDetached(ctx, data, next.ExecutionProfileID)
+}
+
+// launchDynamicSuccessorDetached runs the predecessor stop and successor
+// launch outside the agent.failed dispatch that decided the route.
+//
+// The failure event is published synchronously by the lifecycle completion
+// handler while it still holds the execution's prompt lifecycle lock, and the
+// in-memory event bus delivers it on the publisher's goroutine. Stopping the
+// predecessor from that goroutine publishes agent.stopped for the same
+// execution, which needs the same lock to snapshot the prompt turn: the
+// dispatch deadlocks, the successor never starts, and the session stays
+// RUNNING without a process. Leaving the dispatch first lets the completion
+// handler release the lock before the stop runs.
+// The worker runs under the service-owned dynamicSuccessorCtx rather than
+// context.WithoutCancel(ctx): the launch must survive the dispatch that
+// scheduled it, but it must not outlive Stop and keep mutating session state
+// after shutdown has begun. Returning false means no worker was scheduled, so
+// the caller falls through to the ordinary terminal-failure path instead of
+// reporting a route that will never be taken.
+func (s *Service) launchDynamicSuccessorDetached(
+	_ context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+) bool {
+	s.dynamicSuccessorMu.Lock()
+	if s.dynamicSuccessorStopped {
+		s.dynamicSuccessorMu.Unlock()
+		s.logger.Warn("dynamic successor launch skipped; service is stopping",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID))
+		return false
+	}
+	if s.dynamicSuccessorCtx == nil {
+		s.dynamicSuccessorCtx, s.dynamicSuccessorCancel = context.WithCancel(context.Background())
+	}
+	workerCtx := s.dynamicSuccessorCtx
+	s.dynamicSuccessorWorkers.Add(1)
+	s.dynamicSuccessorMu.Unlock()
+	go func() {
+		defer s.dynamicSuccessorWorkers.Done()
+		launchCtx, cancel := context.WithTimeout(workerCtx, dynamicSuccessorDetachedTimeout)
+		defer cancel()
+		s.runDetachedDynamicSuccessorLaunch(launchCtx, data, executionProfileID)
+	}()
+	return true
+}
+
+// runDetachedDynamicSuccessorLaunch serializes with the session's cancel guard
+// like every other session-backed failure decision, then launches the
+// successor. A launch that cannot complete falls back to the ordinary
+// recoverable-failure surface instead of leaving the session RUNNING.
+func (s *Service) runDetachedDynamicSuccessorLaunch(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+) {
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if ctx.Err() != nil {
+		s.logger.Warn("dynamic successor launch abandoned before validation",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID),
+			zap.Error(ctx.Err()))
+		return
+	}
+	// A coordinator stop can win the guard between the route decision and this
+	// goroutine: it persists the session as cancelled and releases the guard
+	// before the launch acquires it. Relaunching from the stale event would
+	// reset that session back to CREATED and resurrect work after an
+	// acknowledged stop, so re-read the current state under the guard and
+	// abort unless the session is still nonterminal and still owns this
+	// execution.
+	if drop, _ := s.shouldDropSessionFailure(ctx, data, "dynamic.successor.detached", true); drop {
+		s.logger.Debug("dropping detached dynamic successor launch for stale session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("execution_profile_id", executionProfileID))
+		return
+	}
+	if ctx.Err() != nil {
+		s.logger.Warn("dynamic successor launch abandoned before start",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID),
+			zap.Error(ctx.Err()))
+		return
+	}
+	if s.relaunchDynamicTaskAfterFailure(ctx, data, executionProfileID) {
+		return
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		s.logger.Warn("dynamic successor launch abandoned after cancellation",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID),
+			zap.Error(ctx.Err()))
+		return
+	}
+	s.logger.Warn("dynamic successor launch failed; surfacing recoverable failure",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("agent_execution_id", data.AgentExecutionID),
+		zap.String("execution_profile_id", executionProfileID))
+	// The synchronous failure path finalized the automation run before
+	// surfacing the recoverable failure. handleAgentFailedLocked already
+	// returned here because the route was accepted, so this branch owns that
+	// finalization: without it an automation run stays nonterminal and holds a
+	// max_concurrent_runs slot and its worktree forever.
+	failureCtx := context.WithoutCancel(ctx)
+	s.retireExecutionActivityAndPublish(failureCtx, data.TaskID, data.SessionID, data.AgentExecutionID)
+	errMsg := data.ErrorMessage
+	if errMsg == "" {
+		errMsg = "dynamic successor launch failed"
+	}
+	s.finalizeAutomationRun(failureCtx, data.TaskID, false, errMsg)
+	s.handleRecoverableFailureLocked(failureCtx, data)
+}
+
+func (s *Service) resetDynamicSuccessorWorkers() {
+	s.dynamicSuccessorMu.Lock()
+	defer s.dynamicSuccessorMu.Unlock()
+	s.dynamicSuccessorStopped = false
+	s.dynamicSuccessorCtx, s.dynamicSuccessorCancel = context.WithCancel(context.Background())
+}
+
+func (s *Service) stopDynamicSuccessorWorkers() {
+	s.dynamicSuccessorMu.Lock()
+	s.dynamicSuccessorStopped = true
+	cancel := s.dynamicSuccessorCancel
+	s.dynamicSuccessorMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.dynamicSuccessorWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(sendNowClaimRecoveryTimeout):
+		s.logger.Warn("timed out waiting for dynamic successor workers during shutdown")
+	}
 }
 
 // LaunchDynamicRouteAction completes a manual retry/try-next operation after

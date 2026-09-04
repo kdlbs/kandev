@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -325,5 +326,90 @@ func TestTaskBlocker_SelfReferenceBlocked(t *testing.T) {
 	}
 	if err := repo.CreateTaskBlocker(ctx, blocker); err == nil {
 		t.Fatal("expected CHECK constraint error for self-reference")
+	}
+}
+
+func TestReplaceTaskBlockers_ReplacesSetAndPreservesExistingEdges(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	for _, blocker := range []*models.TaskBlocker{
+		{TaskID: "task-1", BlockerTaskID: "task-2"},
+		{TaskID: "task-1", BlockerTaskID: "task-4"},
+	} {
+		if err := repo.CreateTaskBlocker(ctx, blocker); err != nil {
+			t.Fatalf("create blocker: %v", err)
+		}
+	}
+	before, err := repo.ListTaskBlockers(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list before replacement: %v", err)
+	}
+	if len(before) != 2 {
+		t.Fatalf("before replacement count = %d, want 2", len(before))
+	}
+	var preservedCreatedAt = before[0].CreatedAt
+	for _, blocker := range before {
+		if blocker.BlockerTaskID == "task-2" {
+			preservedCreatedAt = blocker.CreatedAt
+		}
+	}
+
+	if err := repo.ReplaceTaskBlockers(ctx, "task-1", []string{"task-2", "task-3"}); err != nil {
+		t.Fatalf("replace blockers: %v", err)
+	}
+
+	after, err := repo.ListTaskBlockers(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list after replacement: %v", err)
+	}
+	if len(after) != 2 {
+		t.Fatalf("after replacement count = %d, want 2", len(after))
+	}
+	got := make(map[string]time.Time, len(after))
+	for _, blocker := range after {
+		got[blocker.BlockerTaskID] = blocker.CreatedAt
+	}
+	if _, ok := got["task-4"]; ok {
+		t.Error("omitted blocker task-4 remains after replacement")
+	}
+	if got["task-2"] != preservedCreatedAt {
+		t.Errorf("preserved task-2 timestamp changed from %v to %v", preservedCreatedAt, got["task-2"])
+	}
+	if got["task-3"].IsZero() {
+		t.Error("new task-3 blocker has no created timestamp")
+	}
+
+	if err := repo.ReplaceTaskBlockers(ctx, "task-1", nil); err != nil {
+		t.Fatalf("clear blockers: %v", err)
+	}
+	cleared, err := repo.ListTaskBlockers(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list after clear: %v", err)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("after clear count = %d, want 0", len(cleared))
+	}
+}
+
+func TestReplaceTaskBlockers_RollsBackPartialDiffOnWriteError(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateTaskBlocker(ctx, &models.TaskBlocker{
+		TaskID: "task-1", BlockerTaskID: "task-2",
+	}); err != nil {
+		t.Fatalf("create blocker: %v", err)
+	}
+
+	if err := repo.ReplaceTaskBlockers(ctx, "task-1", []string{"task-3", "task-1"}); err == nil {
+		t.Fatal("expected self-reference write to fail")
+	}
+
+	blockers, err := repo.ListTaskBlockers(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list after failed replacement: %v", err)
+	}
+	if len(blockers) != 1 || blockers[0].BlockerTaskID != "task-2" {
+		t.Fatalf("failed replacement changed the set: %+v", blockers)
 	}
 }

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PRCommitInfo, TaskPR } from "@/lib/types/github";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { useRemoteContributionRelation } from "./use-remote-contribution-relation";
+import { remoteContributionActionPolicy } from "./remote-contribution-relation";
 
 const mocks = vi.hoisted(() => ({
   statuses: [] as Array<{ repository_name: string; status: GitStatusEntry }>,
@@ -10,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   selectedPR: null as TaskPR | null,
   selectedKey: null as string | null,
   providerHead: "provider-head",
+  authoritativeCommits: [{ sha: "provider-head" }] as PRCommitInfo[],
+  loading: false,
+  error: null as string | null,
   repositoryName: "frontend",
 }));
 
@@ -29,10 +33,11 @@ vi.mock("@/hooks/domains/github/use-review-pr-selection", () => ({
 vi.mock("@/hooks/domains/github/use-pr-commits", () => ({
   usePRCommits: () => ({
     commits: [{ sha: mocks.providerHead }] as PRCommitInfo[],
+    authoritativeCommits: mocks.authoritativeCommits,
     providerHead: mocks.providerHead,
     providerCommitsComplete: true,
-    loading: false,
-    error: null,
+    loading: mocks.loading,
+    error: mocks.error,
     refresh: vi.fn(),
   }),
 }));
@@ -125,6 +130,9 @@ describe("useRemoteContributionRelation repository scoping", () => {
     mocks.selectedKey = null;
     mocks.statuses = [];
     mocks.repositoryName = "frontend";
+    mocks.authoritativeCommits = [{ sha: mocks.providerHead }] as PRCommitInfo[];
+    mocks.loading = false;
+    mocks.error = null;
   });
 
   it.each([
@@ -164,6 +172,34 @@ describe("useRemoteContributionRelation repository scoping", () => {
       canPull: false,
       canReplaceRemote: false,
       canUseRemote: false,
+    });
+  });
+
+  // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.7
+  it("keeps retained commits visible without authorizing actions during refresh", () => {
+    mocks.authoritativeCommits = [];
+    mocks.loading = true;
+    mocks.statuses = [
+      status("", mocks.providerHead, "provider-base", {
+        remote_ahead: 1,
+        remote_behind: 0,
+      }),
+    ];
+
+    const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.commits).toEqual([{ sha: mocks.providerHead }]);
+    expect(result.current.relation).toMatchObject({
+      kind: "unknown",
+      action: "unavailable_evidence",
+      canReplaceRemote: false,
+      canUseRemote: false,
+    });
+    expect(remoteContributionActionPolicy(result.current.relation)).toMatchObject({
+      pushDisabled: true,
+      pullDisabled: true,
+      replaceDisabled: true,
+      useDisabled: true,
     });
   });
 

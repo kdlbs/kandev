@@ -93,9 +93,13 @@ type Repository interface {
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
-	AddTaskParticipant(ctx context.Context, taskID, agentID, role string) error
+	AddTaskParticipant(ctx context.Context, taskID, agentID, role string) (sqlite.ParticipantWriteResult, error)
 	RemoveTaskParticipant(ctx context.Context, taskID, agentID, role string) error
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
+	// CancelDisplacedParticipantRun cancels the run(s) the step-entry
+	// fan-out queued for agentProfileID at (taskID, stepID). Used after a
+	// claim displaces an agent from a role.
+	CancelDisplacedParticipantRun(ctx context.Context, taskID, stepID, agentProfileID string) (int64, error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by

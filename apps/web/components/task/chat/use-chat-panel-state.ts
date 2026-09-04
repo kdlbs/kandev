@@ -451,6 +451,7 @@ function useSessionData(
     messages,
     isLoading: messagesLoading,
     isInitialMessagesLoading,
+    historyRefreshPending,
     historyInitialized,
     hasMore: hasOlderMessages,
   } = useSessionMessages(resolvedSessionId);
@@ -487,6 +488,7 @@ function useSessionData(
     messages,
     messagesLoading,
     isInitialMessagesLoading,
+    historyRefreshPending,
     ...processed,
     sessionModel,
     activeModel,

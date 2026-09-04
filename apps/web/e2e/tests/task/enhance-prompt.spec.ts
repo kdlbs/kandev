@@ -227,14 +227,36 @@ test.describe("Enhance prompt button in task creation", () => {
     await expect(testPage.getByTestId("prompt-result-recovery")).toHaveCount(0);
   });
 
+  test("enhance button is enabled when only the utility agent profile id is configured", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // This is the state every current user is in after using Settings > Utility
+    // Agents: the legacy default_utility_agent_id field is never written by the
+    // UI, only default_utility_agent_profile_id.
+    await apiClient.saveUserSettings({
+      default_utility_agent_id: "",
+      default_utility_agent_profile_id: seedData.agentProfileId,
+    });
+
+    await openCreateTaskDialog(testPage, seedData.workspaceId);
+
+    const enhanceBtn = testPage.getByTestId("enhance-prompt-button");
+    await expect(enhanceBtn).toBeVisible();
+    await expect(enhanceBtn).toBeEnabled();
+  });
+
   test("enhance button is disabled when no utility agent is configured", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // Clear any default utility agent
+    // Clear any default utility agent, both the current and legacy fields —
+    // an earlier test in this worker may have set either one.
     await apiClient.saveUserSettings({
       default_utility_agent_id: "",
+      default_utility_agent_profile_id: "",
     });
 
     const kanban = new KanbanPage(testPage);

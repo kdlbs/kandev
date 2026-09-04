@@ -137,14 +137,14 @@ The System Database and Backups pages use the configured SQLite file path. They 
 <details>
 <summary>Storage maintenance details</summary>
 
-Open **Settings > System > Data & Logs**, then use the **Storage** section to
-inspect Kandev-managed disk usage and configure cleanup.
+Open **Settings > System > Storage** to inspect Kandev-managed disk usage and
+configure cleanup.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while another maintenance run owns the cleanup gate. If task resources are active, the page names
 the active work and offers **Run anyway** after an explicit disruption warning. Use that override
 only when the active task work can tolerate cleanup running alongside it.
 
-![Settings > System > Data & Logs, Storage section showing disk capacity, storage analysis, and cleanup controls.](../screenshots/system-storage.png)
+![Settings > System > Storage showing disk capacity, storage analysis, and cleanup controls.](../screenshots/system-storage.png)
 
 Storage analysis results are cached in the running backend for 15 minutes, so page reloads and
 policy saves reuse the displayed snapshot instead of scanning disk again. The page shows when that
@@ -163,7 +163,7 @@ permanent deletion. Each entry shows its `delete_after` retention deadline: **De
 time, not an exact promise, the first successful scheduled or full manual maintenance run after the
 deadline performs the purge, subject to the idle gate and any preemption.
 
-![Settings > System > Data & Logs showing the maintenance policy, schedule, workspace cleanup, and folder allowlist.](../screenshots/system-maintenance-policy.png)
+![Settings > System > Storage showing the maintenance policy, schedule, workspace cleanup, and folder allowlist.](../screenshots/system-maintenance-policy.png)
 
 Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
 entries that remain. **Force clear all** requires typing `DELETE ALL NOW` and attempts to permanently
@@ -172,7 +172,7 @@ deleted. Safety-validation or deletion failures may leave entries visible and re
 override bypasses only the retention timestamp; path, ownership, state, and filesystem safety
 checks still apply.
 
-![Settings > System > Data & Logs showing quarantined resources with restore, delete, and force-clear controls.](../screenshots/system-quarantine.png)
+![Settings > System > Storage showing quarantined resources with restore, delete, and force-clear controls.](../screenshots/system-quarantine.png)
 
 Kandev keeps at most one restorable Go-cache generation for each original cache path. If that
 generation is still active when the replacement cache exceeds its limit, the next rotation is
@@ -205,7 +205,7 @@ Host-wide Docker build-cache and unused-image cleanup remain disabled until you 
 owns a dedicated Docker daemon.
 Do not enable those rules on a daemon shared with unrelated workloads.
 
-![Settings > System > Data & Logs showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
+![Settings > System > Storage showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
 
 The Storage page also reports **Kandev temporary artifacts** created by services that need a
 short-lived directory under the host temporary root. Each current artifact is registered in the

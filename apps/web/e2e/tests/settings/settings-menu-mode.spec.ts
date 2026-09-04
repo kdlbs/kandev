@@ -9,16 +9,18 @@ import {
 // specs assert against the sidebar and a reload rather than the API — there is
 // no server state to read back, which is the point of the setting.
 test.describe("Settings menu modes", () => {
-  test("previews the chosen shape in the sidebar before it is saved", async ({ testPage }) => {
+  // @covers AC-UI-SETTINGS-MENU-DEFAULT-001.1, AC-UI-SETTINGS-MENU-DEFAULT-001.2
+  test("uses accordion by default and previews flat before it is saved", async ({ testPage }) => {
     await testPage.goto(APPEARANCE_PATH);
     const takeover = testPage.getByTestId(TAKEOVER);
-    // Flat is the default: the Workspaces row is a link and nothing more.
-    await expect(takeover.getByRole("button", { name: /Expand Workspaces/ })).toHaveCount(0);
+    // Accordion is the default: the Workspaces branch can be opened without
+    // first changing the preference.
+    await expect(takeover.getByRole("button", { name: /Expand Workspaces/ })).toBeVisible();
 
-    await testPage.getByTestId("settings-menu-mode-accordion").click();
+    await testPage.getByTestId("settings-menu-mode-flat").click();
 
     // Previewed immediately — the sidebar is on screen beside the control.
-    await expect(takeover.getByRole("button", { name: /Expand Workspaces/ })).toBeVisible();
+    await expect(takeover.getByRole("button", { name: /Expand Workspaces/ })).toHaveCount(0);
     await expect(testPage.getByTestId("settings-menu-mode-card")).toHaveAttribute(
       "data-settings-dirty",
       "true",
@@ -37,7 +39,7 @@ test.describe("Settings menu modes", () => {
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Discard and leave" }).click();
 
-    await expect(takeover.getByRole("button", { name: /Expand Workspaces/ })).toHaveCount(0);
+    await expect(takeover.getByRole("button", { name: /Expand Workspaces/ })).toBeVisible();
   });
 
   test("keeps one branch open at a time in accordion mode", async ({ testPage, seedData }) => {

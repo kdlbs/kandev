@@ -64,6 +64,16 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 	return nil
 }
 
+// activeTargetForWorktree returns a target that can still own a physical
+// worktree during cutover. Deleted targets remain history, not ownership.
+func (t *taskWorktreeTargets) activeTargetForWorktree(worktreeID string) *envRepoTarget {
+	target := t.targetForWorktree(worktreeID)
+	if target == nil || target.status == worktreeRepoStatusDeleted || target.deletedAt != nil {
+		return nil
+	}
+	return target
+}
+
 // mergeLegacyEnvRepo merges a pre-existing environment-repository row. These
 // rows are the canonical source and win field conflicts (except for the
 // physical-worktree identity, which must agree everywhere).
@@ -121,6 +131,15 @@ func (t *taskWorktreeTargets) mergeSessionWorktree(wt legacySessionWorktree, his
 			return nil
 		}
 		return existing.verifyWorktree(wt.worktreeID, wt.worktreePath, wt.worktreeBranch)
+	}
+	// A superseded row is historical evidence, never an ownership source, so
+	// it must not open a repository slot of its own: the legacy worktree
+	// inventory already excludes it, and claiming an unowned slot would add a
+	// live worktree the inventory check then reports as extra. A deleted row
+	// is the exception, because its claim carries the deleted status and stays
+	// out of both inventories.
+	if historical && !isLegacyDeletedWorktree(wt) {
+		return nil
 	}
 	target := t.rowForKey(wt.repositoryID, wt.branchSlug)
 	if historical && target.worktreeID != "" {

@@ -166,6 +166,7 @@ export const test = backendFixture.extend<
   {
     testPage: Page;
     tabletTestPage: Page;
+    coarseDesktopTestPage: Page;
     prCapture: PrAssetCapture;
     /**
      * Auto fixture that resets integration mock state and any persisted
@@ -408,6 +409,20 @@ export const test = backendFixture.extend<
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
       viewport: { width: 900, height: 900 },
+      hasTouch: true,
+      isMobile: false,
+    });
+    const page = await context.newPage();
+    await setupPage(page, backend);
+    await use(page);
+    await context.close();
+  },
+
+  coarseDesktopTestPage: async ({ browser, backend, testPage }, use) => {
+    void testPage;
+    const context = await browser.newContext({
+      baseURL: backend.frontendUrl,
+      viewport: { width: 1280, height: 900 },
       hasTouch: true,
       isMobile: false,
     });
