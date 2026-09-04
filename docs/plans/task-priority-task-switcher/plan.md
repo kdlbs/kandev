@@ -1,6 +1,6 @@
 ---
 created: 2026-09-04
-status: draft
+status: implemented
 requirements:
   - REQ-TASKS-PRIORITY-VISIBILITY-001
   - REQ-TASKS-PRIORITY-VISIBILITY-003
@@ -99,7 +99,7 @@ that value for its current marker and prove live updates end to end.
   cover `AC-TASKS-PRIORITY-VISIBILITY-005.1` and `.7` by retaining priority in
   both task-switcher projections.
 - `apps/web/components/task/task-priority-indicator.test.tsx` and
-  `apps/web/components/task/task-item.test.tsx` cover
+  `apps/web/components/task/task-item-priority.test.tsx` cover
   `AC-TASKS-PRIORITY-VISIBILITY-005.1` through `.3`, including medium and invalid
   fallback plus localized accessible names.
 - `apps/web/components/task/task-switcher.test.tsx` covers
@@ -122,12 +122,19 @@ that value for its current marker and prove live updates end to end.
 
 ## Work orders
 
-- [ ] [Task 01: Project and render task-switcher priority](task-01-project-and-render-priority.md)
-- [ ] [Task 02: Add responsive task-switcher priority actions](task-02-add-priority-actions.md)
+- [x] [Task 01: Project and render task-switcher priority](task-01-project-and-render-priority.md)
+- [x] [Task 02: Add responsive task-switcher priority actions](task-02-add-priority-actions.md)
 
 ## Verification results
 
-Pending.
+- Focused Vitest suite: 146 tests passed across 10 files.
+- TypeScript typecheck passed.
+- Focused ESLint passed with no warnings or errors after threshold cleanup.
+- i18n catalog and literal-copy checks passed.
+- Production E2E web build passed.
+- Desktop Chromium priority ordering and update scenario passed.
+- Pixel 5 mobile priority ordering, visible action, 44-pixel option and update scenario passed.
+- `git diff --check` passed.
 
 ## Risks
 

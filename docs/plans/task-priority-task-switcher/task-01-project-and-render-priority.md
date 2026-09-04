@@ -1,7 +1,7 @@
 ---
 id: "01-project-and-render-priority"
 title: "Project and render task-switcher priority"
-status: pending
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -90,4 +90,8 @@ None.
 
 ## Results
 
-Pending.
+- Added task-owned priority tokens, labels and validation under `lib/tasks`.
+- Added a generic priority indicator and kept the kanban adapter compatible.
+- Projected priority into desktop and mobile task-switcher items.
+- Rendered non-medium priority after the title and before change-request badges.
+- Added focused projection, fallback, accessibility and ordering coverage.

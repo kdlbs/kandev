@@ -1,7 +1,7 @@
 ---
 id: "02-add-priority-actions"
 title: "Add responsive task-switcher priority actions"
-status: pending
+status: completed
 wave: 2
 depends_on:
   - "01-project-and-render-priority"
@@ -90,4 +90,8 @@ git diff --check
 
 ## Results
 
-Pending.
+- Added a flag-labelled four-option Priority submenu to live single-task menus.
+- Reused `useUpdateTaskPriority` and live `task.updated` convergence.
+- Kept the action out of archived and multi-selection menus.
+- Added desktop right-click and Pixel 5 visible Task actions E2E coverage.
+- Verified the mobile nested options settle at the existing 44-pixel touch target.

@@ -33,10 +33,10 @@ import {
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
 import {
-  isKanbanPriority,
-  KANBAN_PRIORITY_LABEL_KEYS,
-  KANBAN_PRIORITY_TOKENS,
-} from "@/lib/kanban/task-priority";
+  isTaskPriority,
+  TASK_PRIORITY_LABEL_KEYS,
+  TASK_PRIORITY_TOKENS,
+} from "@/lib/tasks/task-priority";
 import type { TaskPriority } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
@@ -202,12 +202,12 @@ function buildPriorityItemEntry(
   currentPriority: string | null | undefined,
   onSelect: (priority: TaskPriority) => void,
 ): KanbanCardMenuEntry {
-  const isCurrent = isKanbanPriority(currentPriority) && currentPriority === priority;
+  const isCurrent = isTaskPriority(currentPriority) && currentPriority === priority;
   return {
     kind: "item",
     key: `priority-${priority}`,
     testId: `task-context-priority-${priority}`,
-    label: <span className="flex-1 truncate">{t(KANBAN_PRIORITY_LABEL_KEYS[priority])}</span>,
+    label: <span className="flex-1 truncate">{t(TASK_PRIORITY_LABEL_KEYS[priority])}</span>,
     trailing: isCurrent ? (
       <span
         data-testid={`task-context-priority-current-${priority}`}
@@ -238,7 +238,7 @@ function buildPriorityMenuEntry({
     label: t("kanban:priority"),
     disabled,
     className: "w-40",
-    children: KANBAN_PRIORITY_TOKENS.map((priority) =>
+    children: TASK_PRIORITY_TOKENS.map((priority) =>
       buildPriorityItemEntry(priority, currentPriority, onSelectPriority),
     ),
   };

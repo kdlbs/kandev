@@ -13,7 +13,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
-import { KANBAN_PRIORITY_LABEL_KEYS, KANBAN_PRIORITY_TOKENS } from "@/lib/kanban/task-priority";
+import { TASK_PRIORITY_LABEL_KEYS, TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { TaskPriority } from "@/lib/types/http";
 
@@ -91,14 +91,14 @@ export function TaskCreatePrioritySelect({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {KANBAN_PRIORITY_TOKENS.map((token) => (
+          {TASK_PRIORITY_TOKENS.map((token) => (
             <SelectItem
               key={token}
               value={token}
               data-testid={`task-create-priority-option-${token}`}
               className="min-h-11 sm:min-h-7"
             >
-              {t(KANBAN_PRIORITY_LABEL_KEYS[token])}
+              {t(TASK_PRIORITY_LABEL_KEYS[token])}
             </SelectItem>
           ))}
         </SelectContent>

@@ -7,7 +7,7 @@ import { updateTask } from "@/lib/api/domains/kanban-api";
 import type { TaskPriority } from "@/lib/types/http";
 
 /**
- * Persists a priority change from the card menu. Not optimistic: the card
+ * Persists a priority change from a task menu. Not optimistic: each surface
  * follows the stored value from the resulting `task.updated` event, so a
  * failure here needs only a toast — the card keeps showing whatever it was
  * already showing.
