@@ -2244,15 +2244,16 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 		return commit()
 	}
 
+	const savepoint = "reset_pr_watch_update"
+	if _, err := tx.ExecContext(ctx, s.db.Rebind("SAVEPOINT "+savepoint)); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(
 		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ?`,
 	), branch, time.Now().UTC(), id); err != nil {
-		if isPRWatchUniqueViolation(err) {
-			if _, delErr := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`), id); delErr != nil {
-				return delErr
-			}
-			return commit()
-		}
+		return recoverResetPRWatchUpdate(ctx, tx, s.db.Rebind, savepoint, id, err, commit)
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind("RELEASE SAVEPOINT "+savepoint)); err != nil {
 		return err
 	}
 	return commit()
@@ -2269,6 +2270,31 @@ func isPRWatchUniqueViolation(err error) bool {
 		return pgErr.Code == "23505" && pgErr.ConstraintName == prWatchSearchingIndexName
 	}
 	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+func recoverResetPRWatchUpdate(
+	ctx context.Context,
+	tx prWatchTx,
+	rebind func(string) string,
+	savepoint, id string,
+	updateErr error,
+	commit func() error,
+) error {
+	if _, err := tx.ExecContext(ctx, rebind("ROLLBACK TO SAVEPOINT "+savepoint)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, rebind("RELEASE SAVEPOINT "+savepoint)); err != nil {
+		return err
+	}
+	if !isPRWatchUniqueViolation(updateErr) {
+		return updateErr
+	}
+	if _, err := tx.ExecContext(ctx, rebind(
+		`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`,
+	), id); err != nil {
+		return err
+	}
+	return commit()
 }
 
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0,

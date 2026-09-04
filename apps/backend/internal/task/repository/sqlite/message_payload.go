@@ -220,6 +220,9 @@ func gzipDecompressExpectedSize(data []byte, maxBytes, expectedSize int64) ([]by
 	if maxBytes < 0 || expectedSize < -1 {
 		return nil, fmt.Errorf("gzip decompress: invalid size limit")
 	}
+	if expectedSize > maxBytes {
+		return nil, fmt.Errorf("gzip decompress: expected size %d exceeds maximum size %d", expectedSize, maxBytes)
+	}
 	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("gzip decompress: %w", err)

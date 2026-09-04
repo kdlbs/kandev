@@ -294,3 +294,13 @@ func TestGzipDecompressRejectsActualOversize(t *testing.T) {
 		t.Fatal("gzipDecompress accepted output beyond the configured cap")
 	}
 }
+
+func TestGzipDecompressRejectsExpectedOversize(t *testing.T) {
+	compressed, err := gzipCompress([]byte("123456789"))
+	if err != nil {
+		t.Fatalf("gzipCompress: %v", err)
+	}
+	if _, err := gzipDecompressExpectedSize(compressed, 8, 9); err == nil {
+		t.Fatal("gzipDecompressExpectedSize accepted an expected size above the configured cap")
+	}
+}
