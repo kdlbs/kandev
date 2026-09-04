@@ -25,7 +25,7 @@ var payloadForbiddenShapes = []forbiddenShape{
 	{"vendor key prefix", regexp.MustCompile(`\b(?:sk|sess|org)-[A-Za-z0-9_-]+`)},
 	{"OpenCode identifier", regexp.MustCompile(`\b(?:ses|wrk)_[A-Za-z0-9_-]+`)},
 	{"URL", regexp.MustCompile(`(?i)\bhttps?://\S+`)},
-	{"absolute host path", regexp.MustCompile(`(?:^|[\s"'])/(?:Users|home|var)/\S+`)},
+	{"absolute host path", regexp.MustCompile(`(?:^|[^A-Za-z0-9_])/(?:Users|home|var)/\S+`)},
 	{"email address", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)},
 	{"RFC 4122 UUID", regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)},
 }

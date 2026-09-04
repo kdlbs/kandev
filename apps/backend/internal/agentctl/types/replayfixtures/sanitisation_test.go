@@ -121,3 +121,28 @@ func TestValidateFixtureAllowsPublicDocumentationURLInProvenance(t *testing.T) {
 		t.Fatalf("validateFixture() error = %v, want nil for a public documentation URL", err)
 	}
 }
+
+// TestValidateFixtureRejectsAbsolutePathRegardlessOfPrecedingPunctuation pins
+// that the "absolute host path" shape is caught by every boundary a real log
+// line or stack trace uses, not only whitespace and quotes. Every other
+// forbidden shape anchors on \b, which is punctuation-agnostic since it fires
+// between any word/non-word transition; this shape can't use \b directly
+// because '/' is not a word character, so its own boundary check must cover
+// the same ground by other means.
+func TestValidateFixtureRejectsAbsolutePathRegardlessOfPrecedingPunctuation(t *testing.T) {
+	cases := map[string]string{
+		"key-value form":  "env dump: path=/Users/alice/.ssh/id_rsa",
+		"file URI form":   "resolved to file:///Users/alice/.config/kandev/token",
+		"bracketed form":  "error[path:/home/bob/.aws/credentials]",
+		"paren form, var": "wrote to(/var/secrets/kandev/token)",
+	}
+	for name, text := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := validFixture()
+			f.Frames[0].Text = f.Frames[0].Text + " " + text
+			if err := validateFixture(f); err == nil {
+				t.Fatalf("validateFixture() error = nil for %q, want a sanitisation error (absolute host path leaked through an unblocked boundary character)", text)
+			}
+		})
+	}
+}
