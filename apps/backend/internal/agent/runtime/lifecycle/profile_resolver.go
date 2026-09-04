@@ -77,6 +77,9 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 
 	// Resolve agent capabilities from the registry.
 	model, nativeSessionResume := r.resolveAgentCapabilities(agent.Name, profile.Model)
+	if err := ValidateModelIdentity(agent.Name, model); err != nil {
+		return nil, ErrModelIdentityBlock
+	}
 
 	return &AgentProfileInfo{
 		ProfileID:                  profile.ID,

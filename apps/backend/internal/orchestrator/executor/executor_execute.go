@@ -875,8 +875,13 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 		baseBranch = primaryTaskRepo.BaseBranch
 	}
 
-	// Resolve agent profile to get model and other settings for snapshot
-	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
+	// Resolve agent profile to get model and other settings for snapshot. An
+	// unresolved profile must never become an empty snapshot: the executor
+	// cannot safely determine which model it is authorizing in that case.
+	agentProfileSnapshot, isPassthrough, err := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
+	if err != nil {
+		return "", err
+	}
 
 	// Determine whether this is the task's first session and whether it should
 	// become primary. The immutable origin marker follows creation order, not
@@ -1102,13 +1107,18 @@ func sharedWorkspaceGroupID(metadata map[string]interface{}) string {
 }
 
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
-func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfileID string) (map[string]interface{}, bool) {
+// Profile resolution and model identity are authorization boundaries, so failures
+// must be reported to the caller rather than persisted as a placeholder snapshot.
+func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfileID string) (map[string]interface{}, bool, error) {
 	profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID)
-	if err != nil || profileInfo == nil {
-		return map[string]interface{}{
-			"id":    agentProfileID,
-			"model": "",
-		}, false
+	if err != nil {
+		return nil, false, fmt.Errorf("resolve agent profile %q: %w", agentProfileID, err)
+	}
+	if profileInfo == nil {
+		return nil, false, fmt.Errorf("resolve agent profile %q: %w", agentProfileID, lifecycle.ErrModelIdentityBlock)
+	}
+	if err := lifecycle.ValidateModelIdentity(profileInfo.AgentName, profileInfo.Model); err != nil {
+		return nil, false, fmt.Errorf("resolve agent profile %q: %w", agentProfileID, err)
 	}
 	return map[string]interface{}{
 		"id":                           profileInfo.ProfileID,
@@ -1121,7 +1131,7 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 		"auto_approve":                 profileInfo.AutoApprove,
 		"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
 		"cli_passthrough":              profileInfo.CLIPassthrough,
-	}, profileInfo.CLIPassthrough
+	}, profileInfo.CLIPassthrough, nil
 }
 
 // LaunchPreparedSession launches the workspace (and optionally the agent) for a pre-created session.

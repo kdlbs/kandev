@@ -206,6 +206,22 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 }
 
+func TestStoreProfileResolver_RejectsOpaqueModelIdentity(t *testing.T) {
+	mockRepo := &MockRepository{
+		GetAgentProfileFn: func(context.Context, string) (*models.AgentProfile, error) {
+			return &models.AgentProfile{ID: "profile-opaque", AgentID: "agent-1", Model: "__MODEL_ID__"}, nil
+		},
+		GetAgentFn: func(context.Context, string) (*models.Agent, error) {
+			return &models.Agent{ID: "agent-1", Name: "claude"}, nil
+		},
+	}
+
+	_, err := NewStoreProfileResolver(mockRepo, nil).ResolveProfile(context.Background(), "profile-opaque")
+	if err == nil {
+		t.Fatal("ResolveProfile succeeded for an opaque model identity")
+	}
+}
+
 func TestStoreProfileResolver_MigratesCursorVariantModel(t *testing.T) {
 	profile := &models.AgentProfile{
 		ID:      "profile-cursor",
