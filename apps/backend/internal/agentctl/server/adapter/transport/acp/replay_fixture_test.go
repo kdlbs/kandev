@@ -108,10 +108,12 @@ func buildReplaySessionUpdate(frame replayfixtures.Frame) (acp.SessionUpdate, bo
 // provider-error-recovery-02.md#replay-harness-semantics describes: two pipe
 // pairs, a real acp.ClientSideConnection assigned to Adapter.acpConn, and a
 // real acp.AgentSideConnection wrapping the fixture-driven fake agent. It
-// returns the tokenized event sequence observed on updatesCh (excluding the
-// terminal error, which has no AgentEvent counterpart on this path) and the
-// error Adapter.Prompt returned.
-func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) ([]string, error) {
+// returns the live Adapter (so callers can read state the replay actually
+// settled, such as ProviderErrorContext), the tokenized event sequence
+// observed on updatesCh (excluding the terminal error, which has no
+// AgentEvent counterpart on this path), and the error Adapter.Prompt
+// returned.
+func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) (*Adapter, []string, error) {
 	t.Helper()
 
 	clientToAgentR, clientToAgentW := io.Pipe()
@@ -150,7 +152,7 @@ func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) ([]str
 		t.Fatal("Adapter.Prompt did not return")
 	}
 
-	return tokenizeEvents(drainEvents(a)), promptErr
+	return a, tokenizeEvents(drainEvents(a)), promptErr
 }
 
 // tokenizeEvents keeps only the events whose type is in the closed
@@ -191,7 +193,7 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 
 	for _, fx := range fixtures {
 		t.Run(fx.FileName, func(t *testing.T) {
-			tokens, promptErr := replayFixtureThroughAdapter(t, fx)
+			a, tokens, promptErr := replayFixtureThroughAdapter(t, fx)
 
 			wantTokens := fx.Expect.Events[:len(fx.Expect.Events)-1]
 			if len(tokens) != len(wantTokens) {
@@ -215,7 +217,7 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 				t.Fatalf("Adapter.Prompt error = %v, want *acp.RequestError", promptErr)
 			}
 
-			providerID, modelID := a2ProviderErrorContext(t, fx)
+			providerID, modelID := a.ProviderErrorContext()
 			got := ProviderErrorFromError(promptErr, providerID, modelID)
 			if got == nil {
 				t.Fatal("ProviderErrorFromError() = nil, want a projection")
@@ -246,22 +248,4 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 			}
 		})
 	}
-}
-
-// a2ProviderErrorContext replays the fixture's model_settled frame (if any)
-// through a throwaway adapter to obtain the same (providerID, modelID) pair
-// production reads via Adapter.ProviderErrorContext at projection time.
-func a2ProviderErrorContext(t *testing.T, fx replayfixtures.Fixture) (providerID, modelID string) {
-	t.Helper()
-	a := newTestAdapterForAgent(fx.AgentID)
-	for _, frame := range fx.Frames {
-		if frame.Kind != replayfixtures.FrameModelSettled {
-			continue
-		}
-		a.availableConfigOptions = append(a.availableConfigOptions, streams.ConfigOption{
-			ID:           configOptionIDModel,
-			CurrentValue: frame.ModelID,
-		})
-	}
-	return a.ProviderErrorContext()
 }
