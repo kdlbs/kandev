@@ -3,10 +3,15 @@ package worktree
 import (
 	"context"
 	"errors"
+	"expvar"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // hangOnRevParseScript is the shared fake-git script body used by the timeout
@@ -190,6 +195,133 @@ func TestDeleteExpectedBranchRef_BoundedWhenUpdateRefHangs(t *testing.T) {
 	if elapsed > 2*time.Second {
 		t.Fatalf("deleteExpectedBranchRef() took %v, want <2s", elapsed)
 	}
+}
+
+func TestRestoreManagedBranchFromRecoveryHead_BoundsUpdateRefAdmissionAndReleasesRepoLock(t *testing.T) {
+	restoreCap := setGitThrottleCapForTest(2)
+	t.Cleanup(restoreCap)
+
+	recoverySHA := strings.Repeat("a", 40)
+	barrierDir := t.TempDir()
+	revParseStarted := filepath.Join(barrierDir, "rev-parse-started")
+	allowRevParse := filepath.Join(barrierDir, "allow-rev-parse")
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  rev-parse)
+    : > "`+revParseStarted+`"
+    while [ ! -f "`+allowRevParse+`" ]; do sleep 0.01; done
+    printf '%s\n' "`+recoverySHA+`"
+    ;;
+  update-ref)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	mgr.inspectTimeout = 300 * time.Millisecond
+	repoPath := t.TempDir()
+	repoLock := mgr.getRepoLock(repoPath)
+	firstHold, err := subproc.AcquireGit(context.Background(), subproc.GitLifecycle)
+	if err != nil {
+		t.Fatalf("hold first lifecycle slot: %v", err)
+	}
+	t.Cleanup(firstHold)
+
+	resultCh := make(chan error, 1)
+	go func() {
+		repoLock.Lock()
+		err := mgr.restoreManagedBranchFromRecoveryHeadLocked(context.Background(), &Worktree{
+			RepositoryPath:  repoPath,
+			Branch:          "feature/recovery-timeout",
+			BranchOwner:     BranchOwnerManaged,
+			RecoveryHeadSHA: recoverySHA,
+		})
+		repoLock.Unlock()
+		resultCh <- err
+	}()
+	waitForFile(t, revParseStarted)
+
+	secondHoldCh := make(chan func(), 1)
+	secondHoldErrCh := make(chan error, 1)
+	go func() {
+		release, acquireErr := subproc.AcquireGit(context.Background(), subproc.GitLifecycle)
+		if acquireErr != nil {
+			secondHoldErrCh <- acquireErr
+			return
+		}
+		secondHoldCh <- release
+	}()
+	waitForGitLifecycleWaiters(t, 1)
+	if err := os.WriteFile(allowRevParse, []byte("go"), 0o600); err != nil {
+		t.Fatalf("release rev-parse barrier: %v", err)
+	}
+	var secondHold func()
+	select {
+	case err := <-secondHoldErrCh:
+		t.Fatalf("hold second lifecycle slot: %v", err)
+	case secondHold = <-secondHoldCh:
+	case <-time.After(time.Second):
+		t.Fatal("second lifecycle slot was not acquired")
+	}
+	t.Cleanup(secondHold)
+
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("restore error = %v, want bounded update-ref admission deadline", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("restore remained blocked on saturated update-ref admission")
+	}
+	if !repoLock.TryLock() {
+		t.Fatal("repository lock remained held after bounded recovery restore")
+	}
+	repoLock.Unlock()
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("file %s was not created", path)
+}
+
+func waitForGitLifecycleWaiters(t *testing.T, want int64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if got := gitLifecycleWaiters(); got == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("git lifecycle waiters did not reach %d (got %d)", want, gitLifecycleWaiters())
+}
+
+func gitLifecycleWaiters() int64 {
+	vars, ok := expvar.Get("subproc_class_waiters").(*expvar.Map)
+	if !ok {
+		return 0
+	}
+	value := vars.Get("pool=git;class=lifecycle")
+	if value == nil {
+		return 0
+	}
+	got, _ := strconv.ParseInt(value.String(), 10, 64)
+	return got
 }
 
 // TestCreate_HangingRevParseReleasesRepoLock is the core regression test for

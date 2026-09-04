@@ -317,7 +317,7 @@ func (m *Manager) restoreManagedBranchFromRecoveryHeadLocked(ctx context.Context
 	branchRef := "refs/heads/" + wt.Branch
 	zeroOID := strings.Repeat("0", len(resolved))
 	cmd := m.newNonInteractiveGitCmd(inspectCtx, wt.RepositoryPath, "update-ref", branchRef, resolved, zeroOID)
-	if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
+	if output, err := runGitCmdCombinedOutput(inspectCtx, cmd); err != nil {
 		return fmt.Errorf("restore managed branch: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 	return nil
