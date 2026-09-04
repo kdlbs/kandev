@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -626,8 +627,16 @@ func (s *Service) MoveTaskWithOptions(
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
-	task.Position = position
+	// A move naming the task's current step is not an arrival
+	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28): it keeps the position it
+	// already holds rather than the caller-supplied literal, which the
+	// updateMovedTaskSameStep write path below leaves untouched. A step
+	// change computes its own arrival position server-side further down
+	// this call chain (updateTaskWithWorkflowStepAdmission), so the
+	// caller-supplied position is ignored either way — position here is
+	// never read again.
 	if stepChanged {
+		task.Position = position
 		if task.Metadata == nil {
 			task.Metadata = make(map[string]interface{})
 		}
@@ -1250,34 +1259,13 @@ func (s *Service) nextFeederQueuedCandidate(
 	return nil, nil
 }
 
+// queuedTaskBefore is the WIP promotion comparator
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.1, .36): position, priority rank,
+// queued_at (coalesced to created_at when absent), created_at, id. Delegates
+// to models.StepOrderLess, the single source of truth this comparator's
+// byte-identical orchestrator copy and the reorder repository also use.
 func queuedTaskBefore(left, right *models.Task) bool {
-	if left.Position != right.Position {
-		return left.Position < right.Position
-	}
-	priority := func(value string) int {
-		switch value {
-		case "critical":
-			return 0
-		case "high":
-			return 1
-		case priorityMedium:
-			return 2
-		case priorityLow:
-			return 3
-		default:
-			return 4
-		}
-	}
-	if priority(left.Priority) != priority(right.Priority) {
-		return priority(left.Priority) < priority(right.Priority)
-	}
-	if left.QueuedAt != nil && right.QueuedAt != nil && !left.QueuedAt.Equal(*right.QueuedAt) {
-		return left.QueuedAt.Before(*right.QueuedAt)
-	}
-	if !left.CreatedAt.Equal(right.CreatedAt) {
-		return left.CreatedAt.Before(right.CreatedAt)
-	}
-	return left.ID < right.ID
+	return models.StepOrderLess(left, right)
 }
 
 func skippedTaskIDs(skipped map[string]struct{}) []string {
@@ -1564,23 +1552,104 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 	if err != nil {
 		return nil, err
 	}
-	nextPosition, err := s.tasks.CountTasksByWorkflowStep(ctx, targetStepID)
+	// The server now computes each arriving task's position from the target
+	// step's current max (REQ-TASKS-KANBAN-TASK-REORDERING-001.28), so the
+	// literal passed to MoveTask below is ignored and no longer needs
+	// precomputing. What still matters is dispatch order: MoveTask is called
+	// once per task, sequentially, so the final order is simply the call
+	// order (REQ-TASKS-KANBAN-TASK-REORDERING-001.29) — source step ordinal
+	// ascending, then within one source step that step's admitted band in
+	// step order followed by its queued band in step order.
+	orderedTasks, err := s.orderTasksForBulkMove(ctx, tasks)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count target workflow step tasks: %w", err)
+		return nil, err
 	}
 
 	movedCount := 0
-	for _, task := range tasks {
+	for _, task := range orderedTasks {
 		if task.WorkflowID == targetWorkflowID && task.WorkflowStepID == targetStepID {
 			continue
 		}
-		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, nextPosition+movedCount); err != nil {
+		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
 		}
 		movedCount++
 	}
 
 	return &BulkMoveTasksResult{MovedCount: movedCount}, nil
+}
+
+// orderTasksForBulkMove re-derives the AC.29 submission order from each
+// task's current source step, rather than trusting the caller-supplied list
+// order: source step ordinal ascending, ties on source step id ascending
+// (a selection can span workflows, so two source steps can share an
+// ordinal), then within one source step that step's admitted band in step
+// order followed by its queued band in step order.
+func (s *Service) orderTasksForBulkMove(ctx context.Context, tasks []*models.Task) ([]*models.Task, error) {
+	if s.workflowStepGetter == nil {
+		return nil, fmt.Errorf("workflow step getter not configured")
+	}
+	stepOrdinals := make(map[string]int, len(tasks))
+	for _, task := range tasks {
+		if _, ok := stepOrdinals[task.WorkflowStepID]; ok {
+			continue
+		}
+		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve source step %s: %w", task.WorkflowStepID, err)
+		}
+		stepOrdinals[task.WorkflowStepID] = step.Position
+	}
+	return bulkMoveSubmissionOrder(tasks, stepOrdinals), nil
+}
+
+func bulkMoveSubmissionOrder(tasks []*models.Task, stepOrdinals map[string]int) []*models.Task {
+	type sourceGroup struct {
+		stepID  string
+		ordinal int
+		tasks   []*models.Task
+	}
+	groupsByStep := make(map[string]*sourceGroup, len(tasks))
+	var groups []*sourceGroup
+	for _, task := range tasks {
+		group, ok := groupsByStep[task.WorkflowStepID]
+		if !ok {
+			group = &sourceGroup{stepID: task.WorkflowStepID, ordinal: stepOrdinals[task.WorkflowStepID]}
+			groupsByStep[task.WorkflowStepID] = group
+			groups = append(groups, group)
+		}
+		group.tasks = append(group.tasks, task)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].ordinal != groups[j].ordinal {
+			return groups[i].ordinal < groups[j].ordinal
+		}
+		return groups[i].stepID < groups[j].stepID
+	})
+
+	ordered := make([]*models.Task, 0, len(tasks))
+	for _, group := range groups {
+		admitted, queued := bulkMoveBandSplit(group.tasks, group.stepID)
+		sort.SliceStable(admitted, func(i, j int) bool { return models.StepOrderLess(admitted[i], admitted[j]) })
+		sort.SliceStable(queued, func(i, j int) bool { return models.StepOrderLess(queued[i], queued[j]) })
+		ordered = append(ordered, admitted...)
+		ordered = append(ordered, queued...)
+	}
+	return ordered
+}
+
+// bulkMoveBandSplit mirrors the reorder repository's band partition
+// (Terminology: the queued band is !wip_admitted && queued_for_step_id ==
+// stepID; everything else in the step is the admitted band).
+func bulkMoveBandSplit(tasks []*models.Task, stepID string) (admitted, queued []*models.Task) {
+	for _, task := range tasks {
+		if !task.WIPAdmitted && task.QueuedForStepID == stepID {
+			queued = append(queued, task)
+		} else {
+			admitted = append(admitted, task)
+		}
+	}
+	return admitted, queued
 }
 
 func uniqueTaskIDs(taskIDs []string) []string {

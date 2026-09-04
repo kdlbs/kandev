@@ -1248,9 +1248,12 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 // Unlike Update, Move transitions the task through the same path the board's
 // own move uses, so on_enter actions (auto-start included) actually fire.
 // WorkflowID is optional: nil inherits the task's current workflow; a
-// pointer to "" is rejected rather than treated as inherit. Position is not
-// optional: an omitted position and a position of zero are the same
-// request, both placing the task at the top of the target step.
+// pointer to "" is rejected rather than treated as inherit. Position stays
+// on the struct for wire compatibility but is ignored: the server computes
+// an arriving task's position from the target step's current highest
+// position, so it always sorts last there rather than displacing work a
+// user has already ordered. Naming the task's current step is not an
+// arrival and leaves its existing position untouched.
 type MoveTaskInput struct {
 	TaskID         string
 	WorkflowStepID string

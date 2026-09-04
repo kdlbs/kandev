@@ -1732,6 +1732,64 @@ type httpMoveTaskRequest struct {
 	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
+// httpReorderStepTasksRequest is the frozen reorder request contract
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.17): the step is the path parameter,
+// so the body never repeats it, and the band is an explicit discriminator
+// rather than inferred from the submitted ids.
+type httpReorderStepTasksRequest struct {
+	Band           string   `json:"band"`
+	OrderedTaskIDs []string `json:"ordered_task_ids"`
+}
+
+func (h *TaskHandlers) httpReorderStepTasks(c *gin.Context) {
+	var body httpReorderStepTasksRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_reorder"})
+		return
+	}
+	result, err := h.service.ReorderStepTasks(c.Request.Context(), c.Param("id"), body.Band, body.OrderedTaskIDs)
+	if err != nil {
+		h.handleReorderStepTasksError(c, err, result)
+		return
+	}
+	c.JSON(http.StatusOK, reorderStepTasksResponseBody(result))
+}
+
+// handleReorderStepTasksError maps a reorder failure to the frozen response
+// shapes: step_changed carries the authoritative whole-step order the board
+// reconciles to silently (REQ-TASKS-KANBAN-TASK-REORDERING-001.19);
+// invalid_reorder carries no task list, since a malformed request implies
+// nothing about the persisted order (REQ-TASKS-KANBAN-TASK-REORDERING-001.18).
+func (h *TaskHandlers) handleReorderStepTasksError(c *gin.Context, err error, result *service.ReorderStepTasksResult) {
+	switch {
+	case isClientDisconnect(err):
+		abortClientDisconnect(c)
+	case errors.Is(err, taskrepository.ErrStepChanged):
+		body := reorderStepTasksResponseBody(result)
+		body["code"] = "step_changed"
+		c.JSON(http.StatusConflict, body)
+	case errors.Is(err, taskrepository.ErrInvalidReorder):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_reorder"})
+	case isNotFound(err):
+		c.JSON(http.StatusNotFound, gin.H{"error": "workflow step not found"})
+	default:
+		h.logger.Error("reorder step tasks failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "reorder failed"})
+	}
+}
+
+func reorderStepTasksResponseBody(result *service.ReorderStepTasksResult) gin.H {
+	entries := make([]gin.H, len(result.Tasks))
+	for i, task := range result.Tasks {
+		entries[i] = gin.H{"id": task.ID, "position": task.Position}
+	}
+	return gin.H{
+		"workflow_step_id": result.WorkflowStepID,
+		"revision":         result.Revision,
+		"tasks":            entries,
+	}
+}
+
 func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	var body httpMoveTaskRequest
 	if err := c.ShouldBindJSON(&body); err != nil {

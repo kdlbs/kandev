@@ -1088,6 +1088,48 @@ func TestService_BulkMoveSelectedTasksSkipsCurrentTargetAndAppendsInOrder(t *tes
 	}
 }
 
+// TestService_BulkMoveSelectedTasksReordersBySourceStepRegardlessOfSubmissionOrder
+// pins AC-TASKS-KANBAN-TASK-REORDERING-001.29: the final order is derived
+// from each task's source step ordinal (ties on source step id), not from
+// the order the caller happened to list the ids in. step-source has ordinal
+// 0 and step-review-target has ordinal 1 (both in wf-source, wired by
+// seedMoveSteps), so a task from step-source must land before both
+// step-review-target tasks even though it is submitted in the middle.
+func TestService_BulkMoveSelectedTasksReordersBySourceStepRegardlessOfSubmissionOrder(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "late-1", "wf-source", "step-review-target", nil)
+	createMoveTask(t, ctx, repo, "late-2", "wf-source", "step-review-target", nil)
+	createMoveTask(t, ctx, repo, "early-1", "wf-source", "step-source", nil)
+
+	result, err := svc.BulkMoveSelectedTasks(
+		ctx,
+		[]string{"late-1", "early-1", "late-2"},
+		"wf-target",
+		"step-target",
+	)
+	if err != nil {
+		t.Fatalf("BulkMoveSelectedTasks: %v", err)
+	}
+	if result.MovedCount != 3 {
+		t.Fatalf("MovedCount = %d, want 3", result.MovedCount)
+	}
+
+	want := map[string]int{"early-1": 0, "late-1": 1, "late-2": 2}
+	for id, wantPosition := range want {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.Position != wantPosition {
+			t.Fatalf("%s position = %d, want %d (step-source ordinal 0 before step-review-target ordinal 1)",
+				id, task.Position, wantPosition)
+		}
+	}
+}
+
 func seedMoveWorkflows(t *testing.T, ctx context.Context, repo interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error

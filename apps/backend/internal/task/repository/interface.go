@@ -23,6 +23,8 @@ var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrStepChanged = repoerrors.ErrStepChanged
+var ErrInvalidReorder = repoerrors.ErrInvalidReorder
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {

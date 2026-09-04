@@ -78,3 +78,16 @@ var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 // did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
+
+// ErrStepChanged reports that a reorder's submitted band membership no
+// longer exactly matches the band's persisted membership
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.19). The whole request is rejected
+// atomically and the caller reconciles to the authoritative order the error
+// carries, silently rather than showing the user a message.
+var ErrStepChanged = errors.New("step_changed")
+
+// ErrInvalidReorder reports a malformed reorder request
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.18): no valid band named, an empty or
+// duplicate id list, or an id that names a task outside the named step/band.
+// Unlike ErrStepChanged this implies nothing about the persisted order.
+var ErrInvalidReorder = errors.New("invalid_reorder")

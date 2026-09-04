@@ -80,6 +80,7 @@ func (r *Repository) initSchema() error {
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 		cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
 		complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
+		order_revision INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
@@ -139,6 +140,11 @@ func (r *Repository) initSchema() error {
 		CREATE INDEX IF NOT EXISTS idx_workflow_steps_pull_from
 		ON workflow_steps(pull_from_step_id)
 	`)
+	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.25):
+	// per-step monotonic counter, incremented once per committed reorder in
+	// the same serialized section that renumbers the step. Starts at 0 for
+	// every existing row so a never-reordered step is not a special case.
+	r.migrate.Apply("workflow_steps.order_revision", `ALTER TABLE workflow_steps ADD COLUMN order_revision INTEGER NOT NULL DEFAULT 0`)
 
 	// Phase 2 — multi-agent participation tables. Empty rows for a step
 	// preserve today's single-agent behaviour, so existing kanban

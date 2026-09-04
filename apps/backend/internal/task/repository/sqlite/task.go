@@ -240,6 +240,14 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 		return err
 	}
 
+	// task.WorkflowStepID is now the actual placement (target or feeder) —
+	// REQ-TASKS-KANBAN-TASK-REORDERING-001.28 applies to creation too. Both
+	// candidate steps are already locked above (lockWorkflowStepsForAdmission),
+	// so this only needs the read.
+	if err := r.assignArrivalPosition(ctx, tx, task, task.WorkflowStepID); err != nil {
+		return err
+	}
+
 	entryID, err := r.insertTaskTx(ctx, tx, task)
 	if err != nil {
 		return err
@@ -315,6 +323,17 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 
 	if err := r.ensureWorkflowStepCapacity(ctx, tx, targetStepID, limit); err != nil {
 		return err
+	}
+
+	// Creation is an arrival too (REQ-TASKS-KANBAN-TASK-REORDERING-001.28):
+	// task.WorkflowStepID, not targetStepID, is the row's actual destination
+	// — targetStepID is "" whenever this runs through the bare CreateTask
+	// path (no WIP check requested), which is the common case since most
+	// steps carry no WIP limit.
+	if task.WorkflowStepID != "" && !isHiddenArrival(task) {
+		if err := r.assignArrivalPosition(ctx, tx, task, task.WorkflowStepID); err != nil {
+			return err
+		}
 	}
 
 	entryID, err := r.insertTaskTx(ctx, tx, task)
@@ -403,7 +422,7 @@ func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.
 		ids[0], ids[1] = ids[1], ids[0]
 	}
 	for _, id := range ids {
-		if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, id); err != nil {
+		if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, id); err != nil {
 			return err
 		}
 	}
@@ -426,7 +445,7 @@ func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx,
 	if limit <= 0 {
 		return nil
 	}
-	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+	if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
 		return err
 	}
 	var occupants int
@@ -445,12 +464,60 @@ func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx,
 	return nil
 }
 
-func lockWorkflowStepForCapacity(ctx context.Context, tx *sql.Tx, driver string, rebind func(string) string, stepID string) error {
+// lockWorkflowStepForWrite serializes callers writing tasks.position for the
+// same step (REQ-TASKS-KANBAN-TASK-REORDERING-001.28, .37, design
+// "## Concurrency"): a reorder's renumbering, and an arrival's
+// max(position)+1 read-then-write, must not straddle each other. On SQLite
+// the writer pool is a single connection (db.SetMaxOpenConns(1)), so any
+// caller running this inside its own write transaction already gets that
+// serialization for free and this is a no-op. On Postgres it takes the
+// step row's FOR UPDATE lock for the rest of the transaction, extending the
+// same primitive WIP-capacity callers already use.
+func lockWorkflowStepForWrite(ctx context.Context, tx *sql.Tx, driver string, rebind func(string) string, stepID string) error {
 	if !dialect.IsPostgres(driver) {
 		return nil
 	}
 	var lockedID string
 	return tx.QueryRowContext(ctx, rebind(`SELECT id FROM workflow_steps WHERE id = ? FOR UPDATE`), stepID).Scan(&lockedID)
+}
+
+// assignArrivalPosition locks stepID for the rest of tx (see
+// lockWorkflowStepForWrite) and sets task.Position to one greater than the
+// highest position held by any non-hidden task already in stepID, or 0 when
+// the step holds none (REQ-TASKS-KANBAN-TASK-REORDERING-001.28). Callers
+// must run this inside the same transaction that performs the arriving
+// insert/update, so the read cannot straddle a concurrent reorder's
+// renumbering — see the design's worked displacement example. Ignores
+// whatever position the caller had already set: every arrival path
+// (creation, manual move, bulk move, WIP promotion, automatic workflow
+// transition) computes it here instead.
+func (r *Repository) assignArrivalPosition(ctx context.Context, tx *sql.Tx, task *models.Task, stepID string) error {
+	if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID); err != nil {
+		return err
+	}
+	var maxPosition sql.NullInt64
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT MAX(position) FROM tasks
+		WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0`+andNotAutomationOrigin+`
+	`), stepID).Scan(&maxPosition); err != nil {
+		return err
+	}
+	if maxPosition.Valid {
+		task.Position = int(maxPosition.Int64) + 1
+	} else {
+		task.Position = 0
+	}
+	return nil
+}
+
+// isHiddenArrival reports whether task is excluded from the arrival-position
+// guarantee (REQ-TASKS-KANBAN-TASK-REORDERING-001.28's "non-hidden"
+// qualifier): ephemeral (quick chat) or automation-run tasks are never shown
+// in a step list, so locking a step to compute their position would be
+// unobservable overhead. Archived is not checked here — nothing arrives
+// pre-archived.
+func isHiddenArrival(task *models.Task) bool {
+	return task.IsEphemeral || task.Origin == models.TaskOriginAutomationRun
 }
 
 // upsertRunnerInTx writes (or replaces) a 'runner' participant row for
@@ -459,7 +526,7 @@ func lockWorkflowStepForCapacity(ctx context.Context, tx *sql.Tx, driver string,
 //
 // rebind is the caller's r.db.Rebind — required on Postgres, where the raw
 // "?" placeholders below are not valid bind syntax (unlike SQLite, which
-// accepts them natively). Mirrors lockWorkflowStepForCapacity's pattern for
+// accepts them natively). Mirrors lockWorkflowStepForWrite's pattern for
 // a free function that isn't a *Repository method.
 func upsertRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, stepID, taskID, agentProfileID string) error {
 	if stepID == "" || taskID == "" || agentProfileID == "" {
@@ -1041,7 +1108,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 		}
 	}
 
-	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+	// updateTaskWithWorkflowStepAdmission is always an arrival: every caller
+	// (manual cross-step move, CAS-guarded plugin/engine transitions, and
+	// feeder/same-step promotion's UpdateTaskWithWorkflowStepAdmission
+	// fallback) admits into targetStepID from a different step, never a
+	// same-step reorder — see updateMovedTaskSameStep, which writes through
+	// plain UpdateTask instead. So the caller-supplied task.Position is
+	// always overwritten here (REQ-TASKS-KANBAN-TASK-REORDERING-001.28).
+	if err := r.assignArrivalPosition(ctx, tx, task, targetStepID); err != nil {
 		return false, false, err
 	}
 	occupants, err := r.countAdmittedInTx(ctx, tx, targetStepID, task.ID)
@@ -1909,7 +1983,10 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+	// Always an arrival into targetStepID (the fallback promotion path used
+	// when the atomic PromoteQueuedTaskIfWorkflowStepHasCapacity is
+	// unavailable) — REQ-TASKS-KANBAN-TASK-REORDERING-001.28.
+	if err := r.assignArrivalPosition(ctx, tx, task, targetStepID); err != nil {
 		return err
 	}
 
@@ -1999,7 +2076,12 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, destinationStepID); err != nil {
+	// This is always an arrival — a promotion enters destinationStepID from a
+	// queued band, never a reorder — so the caller-supplied task.Position is
+	// overwritten (REQ-TASKS-KANBAN-TASK-REORDERING-001.28). Locks
+	// destinationStepID, superseding the standalone lock call below it used
+	// to be paired with.
+	if err := r.assignArrivalPosition(ctx, tx, task, destinationStepID); err != nil {
 		return false, err
 	}
 	if limit > 0 {

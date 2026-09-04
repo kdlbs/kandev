@@ -941,34 +941,13 @@ func (s *workflowStore) nextQueuedSameStepTask(ctx context.Context, stepID strin
 	return best
 }
 
+// queuedTaskBefore is the WIP promotion comparator
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.1, .36): position, priority rank,
+// queued_at (coalesced to created_at when absent), created_at, id. Delegates
+// to models.StepOrderLess, the single source of truth this comparator's
+// byte-identical task/service copy and the reorder repository also use.
 func queuedTaskBefore(left, right *models.Task) bool {
-	if left.Position != right.Position {
-		return left.Position < right.Position
-	}
-	priority := func(value string) int {
-		switch value {
-		case "critical":
-			return 0
-		case "high":
-			return 1
-		case "medium":
-			return 2
-		case "low":
-			return 3
-		default:
-			return 4
-		}
-	}
-	if priority(left.Priority) != priority(right.Priority) {
-		return priority(left.Priority) < priority(right.Priority)
-	}
-	if left.QueuedAt != nil && right.QueuedAt != nil && !left.QueuedAt.Equal(*right.QueuedAt) {
-		return left.QueuedAt.Before(*right.QueuedAt)
-	}
-	if !left.CreatedAt.Equal(right.CreatedAt) {
-		return left.CreatedAt.Before(right.CreatedAt)
-	}
-	return left.ID < right.ID
+	return models.StepOrderLess(left, right)
 }
 
 func (s *workflowStore) feederCandidateBlocked(ctx context.Context, taskID string) bool {
