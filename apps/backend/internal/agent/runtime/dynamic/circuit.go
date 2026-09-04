@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
@@ -66,19 +68,48 @@ func WithCircuitPersistence(persistence CircuitPersistence) CircuitRegistryOptio
 	return func(registry *CircuitRegistry) { registry.persist = persistence }
 }
 
+// WithCircuitLogger sets the logger used to report a failed durable write.
+// Defaults to a no-op logger.
+func WithCircuitLogger(log *zap.Logger) CircuitRegistryOption {
+	return func(registry *CircuitRegistry) {
+		if log != nil {
+			registry.logger = log
+		}
+	}
+}
+
 type CircuitRegistry struct {
 	mu       sync.Mutex
 	now      func() time.Time
 	circuits map[string]circuit
 	persist  CircuitPersistence
+	logger   *zap.Logger
+	pending  map[string]struct{}
 }
 
 func NewCircuitRegistry(options ...CircuitRegistryOption) *CircuitRegistry {
-	registry := &CircuitRegistry{now: time.Now, circuits: make(map[string]circuit)}
+	registry := &CircuitRegistry{
+		now:      time.Now,
+		circuits: make(map[string]circuit),
+		logger:   zap.NewNop(),
+		pending:  make(map[string]struct{}),
+	}
 	for _, option := range options {
 		option(registry)
 	}
 	return registry
+}
+
+// PendingPersists reports the keys whose durable state failed to persist and
+// has not yet been successfully flushed.
+func (r *CircuitRegistry) PendingPersists() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	keys := make([]string, 0, len(r.pending))
+	for key := range r.pending {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // Restore loads durable circuit state before routing workers start.
@@ -107,8 +138,9 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.flushPendingLocked()
 	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code}
-	r.persistSnapshotLocked(key)
+	_ = r.persistSnapshotLocked(key)
 }
 
 func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {
@@ -138,6 +170,7 @@ func (r *CircuitRegistry) AcquireProbe(key string, duration time.Duration) (Prob
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.flushPendingLocked()
 	now := r.now()
 	entry, ok := r.circuits[key]
 	if !ok || entry.state == CircuitClosed || now.Before(entry.until) || now.Before(entry.probeUntil) {
@@ -147,7 +180,7 @@ func (r *CircuitRegistry) AcquireProbe(key string, duration time.Duration) (Prob
 	entry.state = CircuitHalfOpen
 	entry.probeUntil = lease.ExpiresAt
 	r.circuits[key] = entry
-	r.persistSnapshotLocked(key)
+	_ = r.persistSnapshotLocked(key)
 	return lease, true
 }
 
@@ -157,6 +190,7 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.flushPendingLocked()
 	entry, ok := r.circuits[lease.Key]
 	if !ok || entry.state != CircuitHalfOpen || !entry.probeUntil.Equal(lease.ExpiresAt) {
 		return
@@ -171,22 +205,48 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 		entry.until = r.now().Add(backoff)
 	}
 	r.circuits[lease.Key] = entry
-	r.persistSnapshotLocked(lease.Key)
+	_ = r.persistSnapshotLocked(lease.Key)
 }
 
-func (r *CircuitRegistry) persistSnapshotLocked(key string) {
+// flushPendingLocked retries the durable write for every key whose previous
+// SaveCircuit failed, using each key's current in-memory snapshot. Called at
+// the start of every mutator so a transient persistence failure self-heals
+// on the next circuit event instead of leaving the durable row permanently
+// behind memory.
+func (r *CircuitRegistry) flushPendingLocked() {
+	for key := range r.pending {
+		_ = r.persistSnapshotLocked(key)
+	}
+}
+
+// persistSnapshotLocked writes key's current snapshot and returns the
+// persistence error, if any. A failure is logged at WARN and the key is
+// recorded in pending so a later mutation retries the write; a caller-visible
+// error here would either fail routing decisions that must still complete
+// (Open) or make every candidate unselectable while the store is down
+// (AcquireProbe), so callers do not act on the return value directly.
+func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 	if r.persist == nil {
-		return
+		return nil
 	}
 	entry, ok := r.circuits[key]
 	if !ok {
-		return
+		return nil
 	}
-	// Selection remains fail-closed in memory if persistence is temporarily
-	// unavailable. Startup Restore and health reconciliation surface durable
-	// read failures to their caller.
-	_ = r.persist.SaveCircuit(context.Background(), CircuitSnapshot{
+	err := r.persist.SaveCircuit(context.Background(), CircuitSnapshot{
 		Key: key, State: entry.state, Until: entry.until,
 		Code: entry.code, ProbeUntil: entry.probeUntil,
 	})
+	if err != nil {
+		r.pending[key] = struct{}{}
+		r.logger.Warn("failed to persist circuit snapshot",
+			zap.String("key", key),
+			zap.String("state", string(entry.state)),
+			zap.Time("until", entry.until),
+			zap.Error(err),
+		)
+		return err
+	}
+	delete(r.pending, key)
+	return nil
 }

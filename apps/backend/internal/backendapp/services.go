@@ -96,6 +96,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}))
 	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repos.Task),
+		dynamicruntime.WithCircuitLogger(log.Zap()),
 	)
 	if err := dynamicCircuits.Restore(context.Background()); err != nil {
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
