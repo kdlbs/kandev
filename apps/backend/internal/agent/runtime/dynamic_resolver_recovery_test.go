@@ -32,10 +32,12 @@ func (f *fixedProfileRepository) GetAgentProfile(_ context.Context, id string) (
 // fixedRouteStateLoader hands the engine one durable route state on first
 // access, standing in for a state restored after a backend restart.
 type fixedRouteStateLoader struct {
-	state dynamic.RouteState
+	state          dynamic.RouteState
+	loadStateCalls int
 }
 
 func (f *fixedRouteStateLoader) LoadRouteState(_ context.Context, sessionID string) (*dynamic.RouteState, error) {
+	f.loadStateCalls++
 	if sessionID != f.state.SessionID {
 		return nil, nil
 	}
@@ -73,6 +75,9 @@ func TestResumePendingRoute_DisabledFlagRefusesWithoutMutatingState(t *testing.T
 	ctx := context.Background()
 	if _, err := resolver.ResumePendingRoute(ctx, sessionID, persisted.Generation); !errors.Is(err, agentruntime.ErrDynamicRoutingDisabled) {
 		t.Fatalf("ResumePendingRoute with flag off = %v, want ErrDynamicRoutingDisabled", err)
+	}
+	if loader.loadStateCalls != 0 {
+		t.Fatalf("LoadRouteState calls = %d, want 0 when flag disabled", loader.loadStateCalls)
 	}
 
 	state, exists, err := engine.LoadState(ctx, sessionID)

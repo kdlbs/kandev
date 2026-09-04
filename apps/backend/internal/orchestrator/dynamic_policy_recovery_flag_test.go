@@ -11,6 +11,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -19,6 +20,16 @@ import (
 // under test reach the embedded interface's methods.
 type fakeSettingsRepo struct {
 	store.Repository
+}
+
+type recordingRouteActionRepo struct {
+	sessionExecutorStore
+	getTaskSessionCalls int
+}
+
+func (r *recordingRouteActionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	r.getTaskSessionCalls++
+	return nil, nil
 }
 
 func policyStateJSON(t *testing.T, deadline time.Time) string {
@@ -146,10 +157,14 @@ func TestLaunchDynamicRouteAction_DisabledFlagRefuses(t *testing.T) {
 	ctx := context.Background()
 	engine := dynamicruntime.NewEngine()
 	resolver := agentruntime.NewProfileExecutionResolver(&fakeSettingsRepo{}, engine, false)
-	svc := &Service{logger: testLogger(), profileExecutionResolver: resolver}
+	repo := &recordingRouteActionRepo{}
+	svc := &Service{logger: testLogger(), repo: repo, profileExecutionResolver: resolver}
 
 	err := svc.LaunchDynamicRouteAction(ctx, "session-launch-disabled")
 	if !errors.Is(err, agentruntime.ErrDynamicRoutingDisabled) {
 		t.Fatalf("LaunchDynamicRouteAction with flag off = %v, want ErrDynamicRoutingDisabled", err)
+	}
+	if repo.getTaskSessionCalls != 0 {
+		t.Fatalf("GetTaskSession calls = %d, want 0 when flag disabled", repo.getTaskSessionCalls)
 	}
 }
