@@ -29,6 +29,8 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -89,6 +91,7 @@ func RegisterRoutes(
 	agentSvc *agents.AgentService,
 	eventBus bus.EventBus,
 	log *logger.Logger,
+	orchestratorSvc *orchestrator.Service,
 ) {
 	g := router.Group("/api/v1/_test")
 	g.GET("/health", func(c *gin.Context) {
@@ -101,6 +104,11 @@ func RegisterRoutes(
 	g.PUT("/repositories/:id/git-remote", configureGitRemoteHandler(repo, log))
 	g.DELETE("/repositories/:id/git-remote", configureGitRemoteHandler(repo, log))
 	g.GET("/repositories/:id/git-push-record", gitPushRecordHandler(repo))
+	if orchestratorSvc != nil {
+		probe := NewScriptedBackgroundProbe()
+		orchestratorSvc.SetBackgroundProbe(probe)
+		g.POST("/background-probe", scriptBackgroundProbeHandler(probe))
+	}
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
 		g.POST("/agent-failures", seedAgentFailureHandler(officeRepo, eventBus, log))
@@ -818,3 +826,47 @@ func setDesiredSkillsHandler(repo settingsstore.Repository, log *logger.Logger) 
 }
 
 func errBadField(msg string) error { return &validationError{msg: msg} }
+
+// probeResultLiterals maps the three wire literals (spec
+// docs/specs/disambiguate-waiting/spec.md, AC-45) to their typed value. Kept
+// local to the handler rather than exported — the ScriptedBackgroundProbe
+// type itself is literal-agnostic.
+var probeResultLiterals = map[string]executor.ProbeResult{
+	"live":    executor.ProbeResultLive,
+	"settled": executor.ProbeResultSettled,
+	"unknown": executor.ProbeResultUnknown,
+}
+
+type scriptBackgroundProbeRequest struct {
+	SessionID string   `json:"session_id"`
+	Results   []string `json:"results"`
+}
+
+// scriptBackgroundProbeHandler lets the Playwright suite script a session's
+// BackgroundProbe answer sequence (AC-73/AC-62/AC-68/AC-51) without a real
+// process tree. Registered only when orchestratorSvc is non-nil, which
+// RegisterRoutes only does behind the KANDEV_E2E_MOCK gate.
+func scriptBackgroundProbeHandler(probe *ScriptedBackgroundProbe) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req scriptBackgroundProbeRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errJSON(c, http.StatusBadRequest, errInvalidJSONPrefix+err.Error())
+			return
+		}
+		if req.SessionID == "" {
+			errJSON(c, http.StatusBadRequest, "session_id is required")
+			return
+		}
+		results := make([]executor.ProbeResult, 0, len(req.Results))
+		for _, raw := range req.Results {
+			result, ok := probeResultLiterals[raw]
+			if !ok {
+				errJSON(c, http.StatusBadRequest, "results must each be one of live, settled, unknown; got "+raw)
+				return
+			}
+			results = append(results, result)
+		}
+		probe.Script(req.SessionID, results)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}

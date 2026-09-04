@@ -279,6 +279,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           <Button
             variant="ghost"
             size="sm"
+            data-testid="sessions-dropdown-trigger"
             className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
           >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
@@ -470,6 +471,7 @@ function SessionRow({
   return (
     <div
       onClick={() => onSelect(session.id)}
+      data-testid={`session-row-${session.id}`}
       className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${isActive ? "bg-muted/50" : ""}`}
     >
       <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">#{number}</span>

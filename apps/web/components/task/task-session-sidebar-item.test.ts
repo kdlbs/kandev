@@ -166,6 +166,18 @@ describe("buildSidebarItem", () => {
     expect(item.wipQueue).toEqual(wipQueue);
     expect(item.queuedCount).toBeUndefined();
   });
+
+  it("carries the parked-on-background-work projection through to the sidebar row", () => {
+    const item = buildSidebarItem(task({ parkedOnBackgroundWork: true }), emptyContext());
+
+    expect(item.parkedOnBackgroundWork).toBe(true);
+  });
+
+  it("leaves parkedOnBackgroundWork undefined when the task record has no projection", () => {
+    const item = buildSidebarItem(task(), emptyContext());
+
+    expect(item.parkedOnBackgroundWork).toBeUndefined();
+  });
 });
 
 // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10

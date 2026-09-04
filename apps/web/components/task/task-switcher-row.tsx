@@ -159,6 +159,7 @@ function TaskRowItem({
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
       interrupted={task.interrupted}
+      parkedOnBackgroundWork={task.parkedOnBackgroundWork}
       isArchived={task.isArchived}
       isSelected={isSelected}
       diffStats={task.diffStats}

@@ -1359,6 +1359,24 @@ export class ApiClient {
   }
 
   /**
+   * Scripts a session's BackgroundProbe answer sequence (spec
+   * docs/specs/disambiguate-waiting/spec.md, "Probe port (backend)"). Each
+   * probe call for the session consumes the next entry in order and holds at
+   * the last one once exhausted — mirrors the backend's own
+   * ScriptedBackgroundProbe test double. Only mounted when the backend was
+   * started with KANDEV_E2E_MOCK=true.
+   */
+  async scriptBackgroundProbe(
+    sessionId: string,
+    results: Array<"live" | "settled" | "unknown">,
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/_test/background-probe", {
+      session_id: sessionId,
+      results,
+    });
+  }
+
+  /**
    * Seeds a message via the e2e harness. `metadata` lands on the message row;
    * `turnMetadata` is persisted on the ensured turn so specs can exercise the
    * metadata dialog's `turn_metadata` field. `authorType` defaults to agent;
