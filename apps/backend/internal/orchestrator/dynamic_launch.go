@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/planinjection"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -20,6 +21,14 @@ import (
 )
 
 const dynamicRouteStatusWaiting = "waiting"
+const dynamicRouteStatusActive = "active"
+const dynamicRouteStatusActionRequired = "action_required"
+
+// dynamicSuccessorDetachedTimeout bounds one detached fallback launch: the
+// predecessor stop plus the successor launch. Without it the repository calls
+// inside the launch could hold the session's cancel guard indefinitely and
+// block every later stop or message for that session.
+const dynamicSuccessorDetachedTimeout = 2 * time.Minute
 
 // dynamicTaskDownstream adapts the task executor to the provider-neutral
 // conductor. The callback updates the task-session attribution before every
@@ -165,6 +174,167 @@ func (s *Service) persistDynamicACPSession(
 	}
 	session.DownstreamACPSessionID = acpSessionID
 	return s.repo.UpdateTaskSession(ctx, session)
+}
+
+// markDynamicRouteActive completes the durable "starting" -> "active"
+// transition after a concrete launch has actually succeeded, and mirrors the
+// status onto the task-session projection so both durable stores agree.
+// Best-effort: a launch that already succeeded is not undone by a failure to
+// record this side transition.
+func (s *Service) markDynamicRouteActive(ctx context.Context, sessionID string, generation int64) {
+	if s.profileExecutionResolver == nil || sessionID == "" || generation <= 0 {
+		return
+	}
+	if err := s.profileExecutionResolver.MarkRouteActive(ctx, sessionID, generation); err != nil {
+		if !errors.Is(err, dynamicruntime.ErrStaleGeneration) && !errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
+			s.logger.Warn("failed to mark dynamic route active",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration != generation {
+		return
+	}
+	if loader, ok := s.repo.(dynamicRouteStateLoader); ok {
+		state, loadErr := loader.LoadRouteState(ctx, sessionID)
+		if loadErr != nil || state == nil || state.Generation != generation || state.Status != dynamicRouteStatusActive {
+			return
+		}
+	}
+	s.mirrorDynamicRouteProjection(ctx, session, generation, dynamicRouteStatusActive, session.RouteReason)
+}
+
+// markDynamicRouteActionRequired transitions a claimed dynamic route to
+// durable action_required and mirrors the status onto the task-session
+// projection. It is the catch-all recovery marker every declined or failed
+// dynamic launch path falls back to, so a claimed route is never left
+// silently stuck at "starting" with no recovery affordance. The underlying
+// engine call only transitions a route that is still "starting" (see
+// Engine.MarkActionRequired), so calling this on a route a launch already
+// carried to "active" is a safe no-op: neither store is touched, and an
+// unrelated later failure cannot overwrite a healthy route's reason.
+func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID string, generation int64, reason string) {
+	if s.profileExecutionResolver == nil || sessionID == "" || generation <= 0 {
+		return
+	}
+	decision, err := s.profileExecutionResolver.MarkRouteActionRequired(ctx, sessionID, generation, reason)
+	if err != nil {
+		if !errors.Is(err, dynamicruntime.ErrStaleGeneration) && !errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
+			s.logger.Warn("failed to mark dynamic route action_required",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return
+	}
+	if decision.Status != dynamicRouteStatusActionRequired {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration != generation {
+		return
+	}
+	s.mirrorDynamicRouteProjection(ctx, session, generation, decision.Status, reason)
+}
+
+type dynamicRouteSessionProjector interface {
+	UpdateTaskSessionDynamicRouteIfCurrent(
+		context.Context,
+		string,
+		int64,
+		string,
+		string,
+		string,
+	) (bool, time.Time, error)
+}
+
+func (s *Service) mirrorDynamicRouteProjection(
+	ctx context.Context,
+	session *models.TaskSession,
+	generation int64,
+	status, reason string,
+) {
+	if session == nil || session.RouteGeneration != generation || status == "" {
+		return
+	}
+	if session.RouteState == status && session.RouteReason == reason {
+		return
+	}
+	oldState := session.State
+	if projector, ok := s.repo.(dynamicRouteSessionProjector); ok {
+		changed, updatedAt, err := projector.UpdateTaskSessionDynamicRouteIfCurrent(
+			ctx, session.ID, generation, session.RouteState, status, reason,
+		)
+		if err != nil {
+			s.logger.Warn("failed to mirror dynamic route state to task session",
+				zap.String("session_id", session.ID), zap.Error(err))
+			return
+		}
+		if !changed {
+			return
+		}
+		session.RouteState = status
+		session.RouteReason = reason
+		session.UpdatedAt = updatedAt
+		s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, oldState, session.State, session.ErrorMessage, &updatedAt, session)
+		return
+	}
+	// Legacy repositories do not expose the narrow route projection update. Keep
+	// the fallback for tests and older adapters, while production SQLite uses the
+	// generation/status-guarded method above.
+	session.RouteState = status
+	session.RouteReason = reason
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.logger.Warn("failed to mirror dynamic route state to task session",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return
+	}
+	updatedAt := session.UpdatedAt
+	s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, oldState, session.State, session.ErrorMessage, &updatedAt, session)
+}
+
+// handleAgentProcessStarted settles a dynamic route only after the asynchronous
+// process start succeeds. LaunchPreparedSession returns before this point.
+func (s *Service) handleAgentProcessStarted(
+	ctx context.Context,
+	_, sessionID, agentExecutionID string,
+) {
+	if s.profileExecutionResolver == nil || sessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
+		return
+	}
+	if session.AgentExecutionID != "" && agentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return
+	}
+	if session.State != models.TaskSessionStateStarting && session.State != models.TaskSessionStateRunning {
+		return
+	}
+	s.markDynamicRouteActive(ctx, sessionID, session.RouteGeneration)
+}
+
+// handleAgentProcessStartFailed settles a claimed dynamic route when process
+// startup fails after LaunchPreparedSession already returned successfully.
+func (s *Service) handleAgentProcessStartFailed(
+	ctx context.Context,
+	_, sessionID, agentExecutionID string,
+	_ error,
+) {
+	if s.profileExecutionResolver == nil || sessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
+		return
+	}
+	if session.AgentExecutionID != "" && agentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return
+	}
+	if session.State == models.TaskSessionStateCancelled || session.State == models.TaskSessionStateCompleted {
+		return
+	}
+	s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "agent_process_start_failed")
 }
 
 func applyDynamicRouteDecisionProjection(
@@ -475,12 +645,35 @@ func (s *Service) routeDynamicAgentFailure(
 	data watcher.AgentEventData,
 	classified *routingerr.Error,
 ) bool {
-	if classified == nil || !classified.FallbackAllowed {
-		return false
-	}
 	data = s.withDynamicAttemptEvidence(data)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
+		return false
+	}
+	reason := "dynamic_recovery_declined"
+	if classified != nil {
+		reason = classified.Error()
+	}
+	// The route already holds a claimed generation the moment
+	// dynamicFailureSession succeeds. Every return below is a decline, so the
+	// deferred guard covers every early return uniformly (including any added
+	// later) instead of relying on each branch to remember its own
+	// transition. `generation` is updated in place once RouteAfterFailure
+	// claims a new one so the guard marks the generation actually holding the
+	// failed attempt, not the one this call started from. The guard is safe
+	// to arm this early even for a failure the classifier forbids fallback
+	// for: markDynamicRouteActionRequired only transitions a route that is
+	// still "starting", so it is a no-op once this generation's launch has
+	// already reached "active" (an ordinary runtime failure on a healthy
+	// session), and only fires for a route genuinely stranded mid-launch.
+	generation := session.RouteGeneration
+	handled := false
+	defer func() {
+		if !handled {
+			s.markDynamicRouteActionRequired(ctx, session.ID, generation, reason)
+		}
+	}()
+	if classified == nil || !classified.FallbackAllowed {
 		return false
 	}
 	if !dynamicPreResultSafe(data) {
@@ -505,9 +698,12 @@ func (s *Service) routeDynamicAgentFailure(
 		session.RouteGeneration, classified,
 	)
 	if err != nil {
-		return s.persistPendingDynamicRecovery(ctx, session, decision, err)
+		handled = s.persistPendingDynamicRecovery(ctx, session, decision, err)
+		return handled
 	}
-	return s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
+	generation = decision.Generation
+	handled = s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
+	return handled
 }
 
 func (s *Service) persistPendingDynamicRecovery(
@@ -575,7 +771,155 @@ func (s *Service) launchDynamicSuccessorAfterFailure(
 			zap.String("session_id", session.ID), zap.Error(err))
 		return false
 	}
-	return s.relaunchDynamicTaskAfterFailure(ctx, data, next.ExecutionProfileID)
+	return s.launchDynamicSuccessorDetached(ctx, data, next.ExecutionProfileID)
+}
+
+// launchDynamicSuccessorDetached runs the predecessor stop and successor
+// launch outside the agent.failed dispatch that decided the route.
+//
+// The failure event is published synchronously by the lifecycle completion
+// handler while it still holds the execution's prompt lifecycle lock, and the
+// in-memory event bus delivers it on the publisher's goroutine. Stopping the
+// predecessor from that goroutine publishes agent.stopped for the same
+// execution, which needs the same lock to snapshot the prompt turn: the
+// dispatch deadlocks, the successor never starts, and the session stays
+// RUNNING without a process. Leaving the dispatch first lets the completion
+// handler release the lock before the stop runs.
+// The worker runs under the service-owned dynamicSuccessorCtx rather than
+// context.WithoutCancel(ctx): the launch must survive the dispatch that
+// scheduled it, but it must not outlive Stop and keep mutating session state
+// after shutdown has begun. Returning false means no worker was scheduled, so
+// the caller falls through to the ordinary terminal-failure path instead of
+// reporting a route that will never be taken.
+func (s *Service) launchDynamicSuccessorDetached(
+	_ context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+) bool {
+	s.dynamicSuccessorMu.Lock()
+	if s.dynamicSuccessorStopped {
+		s.dynamicSuccessorMu.Unlock()
+		s.logger.Warn("dynamic successor launch skipped; service is stopping",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID))
+		return false
+	}
+	if s.dynamicSuccessorCtx == nil {
+		s.dynamicSuccessorCtx, s.dynamicSuccessorCancel = context.WithCancel(context.Background())
+	}
+	workerCtx := s.dynamicSuccessorCtx
+	s.dynamicSuccessorWorkers.Add(1)
+	s.dynamicSuccessorMu.Unlock()
+	go func() {
+		defer s.dynamicSuccessorWorkers.Done()
+		launchCtx, cancel := context.WithTimeout(workerCtx, dynamicSuccessorDetachedTimeout)
+		defer cancel()
+		s.runDetachedDynamicSuccessorLaunch(launchCtx, data, executionProfileID)
+	}()
+	return true
+}
+
+// runDetachedDynamicSuccessorLaunch serializes with the session's cancel guard
+// like every other session-backed failure decision, then launches the
+// successor. A launch that cannot complete falls back to the ordinary
+// recoverable-failure surface instead of leaving the session RUNNING.
+func (s *Service) runDetachedDynamicSuccessorLaunch(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+) {
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if ctx.Err() != nil {
+		s.logger.Warn("dynamic successor launch abandoned before validation",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID),
+			zap.Error(ctx.Err()))
+		return
+	}
+	// A coordinator stop can win the guard between the route decision and this
+	// goroutine: it persists the session as cancelled and releases the guard
+	// before the launch acquires it. Relaunching from the stale event would
+	// reset that session back to CREATED and resurrect work after an
+	// acknowledged stop, so re-read the current state under the guard and
+	// abort unless the session is still nonterminal and still owns this
+	// execution.
+	if drop, _ := s.shouldDropSessionFailure(ctx, data, "dynamic.successor.detached", true); drop {
+		s.logger.Debug("dropping detached dynamic successor launch for stale session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("execution_profile_id", executionProfileID))
+		return
+	}
+	if ctx.Err() != nil {
+		s.logger.Warn("dynamic successor launch abandoned before start",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID),
+			zap.Error(ctx.Err()))
+		return
+	}
+	if s.relaunchDynamicTaskAfterFailure(ctx, data, executionProfileID) {
+		return
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		s.logger.Warn("dynamic successor launch abandoned after cancellation",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID),
+			zap.Error(ctx.Err()))
+		return
+	}
+	s.logger.Warn("dynamic successor launch failed; surfacing recoverable failure",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("agent_execution_id", data.AgentExecutionID),
+		zap.String("execution_profile_id", executionProfileID))
+	// The synchronous failure path finalized the automation run before
+	// surfacing the recoverable failure. handleAgentFailedLocked already
+	// returned here because the route was accepted, so this branch owns that
+	// finalization: without it an automation run stays nonterminal and holds a
+	// max_concurrent_runs slot and its worktree forever.
+	failureCtx := context.WithoutCancel(ctx)
+	s.retireExecutionActivityAndPublish(failureCtx, data.TaskID, data.SessionID, data.AgentExecutionID)
+	errMsg := data.ErrorMessage
+	if errMsg == "" {
+		errMsg = "dynamic successor launch failed"
+	}
+	s.finalizeAutomationRun(failureCtx, data.TaskID, false, errMsg)
+	s.handleRecoverableFailureLocked(failureCtx, data)
+}
+
+func (s *Service) resetDynamicSuccessorWorkers() {
+	s.dynamicSuccessorMu.Lock()
+	defer s.dynamicSuccessorMu.Unlock()
+	s.dynamicSuccessorStopped = false
+	s.dynamicSuccessorCtx, s.dynamicSuccessorCancel = context.WithCancel(context.Background())
+}
+
+func (s *Service) stopDynamicSuccessorWorkers() {
+	s.dynamicSuccessorMu.Lock()
+	s.dynamicSuccessorStopped = true
+	cancel := s.dynamicSuccessorCancel
+	s.dynamicSuccessorMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.dynamicSuccessorWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(sendNowClaimRecoveryTimeout):
+		s.logger.Warn("timed out waiting for dynamic successor workers during shutdown")
+	}
 }
 
 // LaunchDynamicRouteAction completes a manual retry/try-next operation after
@@ -587,6 +931,9 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return errors.New("dynamic route action launch is not configured")
 	}
+	if !s.profileExecutionResolver.Enabled() {
+		return agentruntime.ErrDynamicRoutingDisabled
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		if err != nil {
@@ -594,6 +941,15 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 		}
 		return errors.New("dynamic route action session not found")
 	}
+	// The backend route-action handler has already claimed session.RouteGeneration
+	// as "starting" before calling this. Every error return below leaves that
+	// claim without an owner unless the deferred guard marks it action_required.
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "manual dynamic route action failed")
+		}
+	}()
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err
@@ -628,6 +984,7 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 	if !s.relaunchDynamicTaskAfterFailure(ctx, data, session.ExecutionProfileID) {
 		return errors.New("dynamic route action successor launch failed")
 	}
+	succeeded = true
 	return nil
 }
 
@@ -653,7 +1010,29 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	executionProfileID string,
-) bool {
+) (succeeded bool) {
+	defer func() {
+		if succeeded || s.profileExecutionResolver == nil || data.SessionID == "" {
+			return
+		}
+		// This helper is used by both the synchronous route-failure path and
+		// the detached successor worker. The caller's deferred guard covers
+		// the former, but the detached path reports handled=true before the
+		// worker completes, so this helper must settle the claimed generation
+		// when the relaunch fails.
+		markCtx := context.WithoutCancel(ctx)
+		session, err := s.repo.GetTaskSession(markCtx, data.SessionID)
+		if err != nil || session == nil || session.RouteGeneration <= 0 {
+			return
+		}
+		s.markDynamicRouteActionRequired(
+			markCtx,
+			data.SessionID,
+			session.RouteGeneration,
+			"dynamic_successor_launch_failed",
+		)
+	}()
+
 	prompt, ok := s.dynamicRelaunchPrompt(ctx, data.SessionID)
 	if !ok {
 		return false

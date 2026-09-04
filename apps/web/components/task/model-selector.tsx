@@ -141,19 +141,16 @@ export function hasCompleteDynamicConfig(
   const hasFlatModelList = !!sessionModelsData.models.length;
   const catalogSettled = sessionModelsData.configOptionsSettled === true;
   const hasLegacyAgentConfig = catalogSettled && isLegacyAgentConfig(session, agents);
-  // Keys written only by a prior agent type into persisted runtime metadata are
-  // not required for the selector to render: once the current agent's catalog
-  // has settled without advertising them, they are stale cross-agent leftovers
-  // that the backend replay also drops.
-  const profileRequired = session ? profileRequiredConfigKeys(session, agents) : new Set<string>();
-  const isPersistedOnlyStaleKey = (key: string): boolean =>
-    key !== AGENT_CONFIG_KEY && catalogSettled && !available.has(key) && !profileRequired.has(key);
+  // A settled catalog is authoritative for which non-agent config keys apply
+  // to the selected model.
+  const isUnadvertisedSettledKey = (key: string): boolean =>
+    key !== AGENT_CONFIG_KEY && catalogSettled && !available.has(key);
   return required.every(
     (key) =>
       available.has(key) ||
       (key === AGENT_CONFIG_KEY && hasLegacyAgentConfig) ||
       (key === MODEL_CONFIG_KEY && hasFlatModelList) ||
-      isPersistedOnlyStaleKey(key),
+      isUnadvertisedSettledKey(key),
   );
 }
 

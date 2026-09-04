@@ -79,6 +79,8 @@
   "resetAutoUpdateFor": "將 {{name}} 的自動更新重置為預設",
   "savingRestartsPlugin": "儲存後將重啓外掛程式以使新設定生效。",
   "searchPlugins": "搜尋外掛程式…",
+  "shortcuts": "鍵盤快捷鍵",
+  "shortcutsDescription": "這些快捷鍵屬於您的個人帳戶，僅在此外掛程式處於活躍狀態時執行。",
   "selectAUtilityAgent": "選擇輔助代理程式…",
   "selectPlaceholder": "選擇…",
   "selectedUtilityAgentUnavailable": "所選輔助代理程式不可用",

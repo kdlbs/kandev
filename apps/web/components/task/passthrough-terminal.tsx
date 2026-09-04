@@ -32,6 +32,7 @@ import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
 import { useTerminalTheme } from "./use-terminal-theme";
 import { useTranslation } from "react-i18next";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -54,9 +55,9 @@ type BaseProps = {
    * Mobile uses this to register a key-bar sender that writes raw bytes
    * directly to this terminal's socket. */
   onWsReady?: (ws: WebSocket) => void;
-  /** Translate single-finger touch swipes on the terminal area into xterm
-   * scrollback navigation. Mobile callers set this so the xterm canvas no
-   * longer silently absorbs touch gestures. */
+  /** Optional touch-scroll override. Coarse-pointer shell terminals enable
+   * touch scrolling by default, while fine pointers never install the custom
+   * handler. */
   enableTouchScroll?: boolean;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; sessionId?: string | null; label?: string };
@@ -146,6 +147,15 @@ export function computeCanConnect(
   // identically on every attempt. Connecting anyway only restarts the retry
   // timer, so stop before opening the socket at all.
   return !environmentEnded;
+}
+
+export function resolveTouchScrollEnabled(
+  mode: "agent" | "shell",
+  isFinePointer: boolean,
+  requested?: boolean,
+): boolean {
+  if (isFinePointer) return false;
+  return requested ?? mode === "shell";
 }
 
 const SESSION_TERMINAL_STATES = new Set<TaskSessionState>(["COMPLETED", "FAILED", "CANCELLED"]);
@@ -405,6 +415,7 @@ function usePassthroughEffects({
 
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { mode, autoFocus, onXtermReady } = props;
+  const { isFinePointer } = useResponsiveBreakpoint();
   const { resolvedTheme } = useTheme();
   const terminalId = mode === "shell" ? props.terminalId : undefined;
   const environmentId = mode === "shell" ? props.environmentId : undefined;
@@ -428,8 +439,12 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     wsRef,
   });
   const paneState = computeTerminalPaneState(mode, environmentEnded, connection.isConnected);
+  const effectiveProps: PassthroughTerminalProps = {
+    ...props,
+    enableTouchScroll: resolveTouchScrollEnabled(mode, isFinePointer, props.enableTouchScroll),
+  };
   const { containerRef, search } = usePassthroughEffects({
-    props,
+    props: effectiveProps,
     refs,
     terminalId,
     environmentId,

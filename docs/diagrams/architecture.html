@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kandev architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --paper: #0d0d10;
+      --paper-2: #111114;
+      --ink: #ffffff;
+      --muted: #a1a1a1;
+      --soft: #737373;
+      --rule: rgba(255,255,255,0.12);
+      --rule-solid: #404040;
+      --accent: #6468f0;
+      --accent-tint: rgba(100,104,240,0.16);
+      --link: #53eafd;
+      --sans: 'Figtree', 'Geist', system-ui, sans-serif;
+      --serif: 'Instrument Serif', serif;
+      --mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 32px 24px 40px;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: var(--sans);
+    }
+    .frame { width: min(100%, 960px); margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--soft);
+      font: 500 10px/1.4 var(--mono);
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font: 400 clamp(28px, 4vw, 36px)/1.1 var(--serif);
+      letter-spacing: -.02em;
+    }
+    .lede {
+      max-width: 64ch;
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    svg { display: block; width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <p class="eyebrow">Architecture · Kandev · doc-inline · balanced</p>
+    <h1>How Kandev runs agent work</h1>
+    <p class="lede">The Go backend is the control plane. It owns persistence and provider access, then routes scoped control channels to local or remote agent runtimes.</p>
+
+    <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
+      <title id="architecture-title">How Kandev runs agent work</title>
+      <desc id="architecture-desc">A browser or Tauri window connects to the Go backend, which owns database and provider access and routes control channels to local and remote agentctl runtimes. Each runtime starts an agent CLI with task MCP.</desc>
+      <defs>
+        <marker id="architecture-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#a1a1a1"/>
+        </marker>
+        <marker id="architecture-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#6468f0"/>
+        </marker>
+        <marker id="architecture-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#53eafd"/>
+        </marker>
+      </defs>
+
+      <rect x="0" y="0" width="960" height="600" fill="#0d0d10"/>
+
+      <!-- Zones establish ownership without adding another visual register. -->
+      <rect x="320" y="32" width="320" height="112" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <rect x="280" y="152" width="400" height="112" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <rect x="40" y="280" width="880" height="240" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <text x="336" y="52" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">USER SURFACE</text>
+      <text x="296" y="172" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">CONTROL PLANE</text>
+      <text x="56" y="300" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">PERSISTENCE + TASK RUNTIMES</text>
+
+      <!-- Arrows are painted before nodes so node surfaces stay clean. -->
+      <path d="M480 120 V184" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+      <path d="M400 248 V272 H152 Q144 272 144 280 V336" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+      <path d="M432 248 V288 H368 Q360 288 360 296 V336" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+      <path d="M528 248 V272 H584 Q592 272 592 280 V336" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+      <path d="M560 248 V288 H800 Q808 288 808 296 V336" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+      <path d="M592 392 V432" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+      <path d="M808 392 V432" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+
+      <!-- Opaque masks keep technical labels legible over routes. -->
+      <rect x="480" y="132" width="208" height="20" rx="4" fill="#0d0d10"/>
+      <text x="584" y="146" text-anchor="middle" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">HTTP + WEBSOCKET</text>
+      <rect x="512" y="248" width="160" height="20" rx="4" fill="#0d0d10"/>
+      <text x="592" y="262" text-anchor="middle" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">CONTROL CHANNEL</text>
+      <rect x="672" y="260" width="160" height="20" rx="4" fill="#0d0d10"/>
+      <text x="752" y="274" text-anchor="middle" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">CONTROL CHANNEL</text>
+
+      <!-- Nodes. -->
+      <g role="group" aria-label="Browser or Tauri window">
+        <rect x="360" y="72" width="240" height="48" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="480" y="96" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Browser / Tauri window</text>
+        <text x="480" y="112" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">HTTP + WebSocket</text>
+      </g>
+      <g role="group" aria-label="Go backend control plane">
+        <rect x="360" y="184" width="240" height="64" rx="8" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1.2"/>
+        <text x="480" y="212" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Go backend</text>
+        <text x="480" y="232" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace">orchestrator · control plane</text>
+      </g>
+      <g role="group" aria-label="SQLite or PostgreSQL persistence">
+        <rect x="56" y="336" width="176" height="56" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="144" y="360" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">SQLite / PostgreSQL</text>
+        <text x="144" y="380" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">persistent state</text>
+      </g>
+      <g role="group" aria-label="Git and provider APIs">
+        <rect x="272" y="336" width="176" height="56" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="360" y="360" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Git + provider APIs</text>
+        <text x="360" y="380" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">external systems</text>
+      </g>
+      <g role="group" aria-label="Local agentctl runtime">
+        <rect x="504" y="336" width="176" height="56" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="592" y="360" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">agentctl: local</text>
+        <text x="592" y="380" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">worktree runtime</text>
+      </g>
+      <g role="group" aria-label="Remote agentctl runtime">
+        <rect x="720" y="336" width="176" height="56" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="808" y="360" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">agentctl: remote</text>
+        <text x="808" y="380" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">Docker / K8s / SSH / Sprites</text>
+      </g>
+      <g role="group" aria-label="Local agent CLI with task MCP">
+        <rect x="504" y="432" width="176" height="56" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="592" y="456" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Agent CLI + task MCP</text>
+        <text x="592" y="476" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">local task execution</text>
+      </g>
+      <g role="group" aria-label="Remote agent CLI with task MCP">
+        <rect x="720" y="432" width="176" height="56" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="808" y="456" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Agent CLI + task MCP</text>
+        <text x="808" y="476" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">remote task execution</text>
+      </g>
+
+      <!-- Legend is kept in its own strip so it cannot compete with the topology. -->
+      <line x1="56" y1="548" x2="88" y2="548" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+      <text x="104" y="552" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">INTERNAL ROUTE</text>
+      <line x1="280" y1="548" x2="312" y2="548" stroke="#53eafd" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+      <text x="328" y="552" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">UI / CONTROL CHANNEL</text>
+      <rect x="552" y="540" width="12" height="12" rx="2" fill="#6468f0"/>
+      <text x="580" y="552" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">CONTROL PLANE FOCAL</text>
+    </svg>
+  </main>
+</body>
+</html>

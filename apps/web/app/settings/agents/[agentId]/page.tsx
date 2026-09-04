@@ -29,6 +29,7 @@ import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
+import { isHandledApiError } from "@/lib/api/client";
 
 const defaultMcpConfig: NonNullable<DraftProfile["mcp_config"]> = {
   enabled: false,
@@ -582,6 +583,7 @@ export default function AgentSetupPage() {
   if (!initialAgent) return null;
 
   const handleToastError = (error: unknown) => {
+    if (isHandledApiError(error)) return;
     toast({
       title: t("agents:failedToSaveAgent"),
       description: error instanceof Error ? error.message : t("agents:requestFailed"),

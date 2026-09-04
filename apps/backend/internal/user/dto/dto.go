@@ -51,6 +51,9 @@ type UserSettingsDTO struct {
 	SidebarViews                      []models.SidebarView                `json:"sidebar_views"`
 	SidebarActiveViewID               string                              `json:"sidebar_active_view_id"`
 	SidebarDraft                      *models.SidebarViewDraft            `json:"sidebar_draft"`
+	ThreadViews                       []models.ThreadView                 `json:"thread_views"`
+	ThreadActiveViewID                string                              `json:"thread_active_view_id"`
+	ThreadViewDraft                   *models.ThreadViewDraft             `json:"thread_view_draft"`
 	SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
 	TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views,omitempty"`
@@ -70,6 +73,7 @@ type UserSettingsDTO struct {
 	LastSeenDisplay                   string                              `json:"last_seen_display"`
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                `json:"app_status_bar_enabled"`
+	ResolveSessionHostnames           bool                                `json:"resolve_session_hostnames"`
 	AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string                 `json:"kanban_hidden_step_ids"`
@@ -154,6 +158,9 @@ type UpdateUserSettingsRequest struct {
 	SidebarViews                      *[]models.SidebarView              `json:"sidebar_views,omitempty"`
 	SidebarActiveViewID               *string                            `json:"sidebar_active_view_id,omitempty"`
 	SidebarDraft                      NullableSidebarDraft               `json:"sidebar_draft,omitempty"`
+	ThreadViews                       *[]models.ThreadView               `json:"thread_views,omitempty"`
+	ThreadActiveViewID                *string                            `json:"thread_active_view_id,omitempty"`
+	ThreadViewDraft                   NullableThreadViewDraft            `json:"thread_view_draft,omitempty"`
 	SidebarTaskPrefs                  *models.SidebarTaskPrefs           `json:"sidebar_task_prefs,omitempty"`
 	TaskCreateLastUsed                *models.TaskCreateLastUsed         `json:"task_create_last_used,omitempty"`
 	JiraSavedViews                    NullableRawMessage                 `json:"jira_saved_views,omitempty"`
@@ -173,6 +180,7 @@ type UpdateUserSettingsRequest struct {
 	LastSeenDisplay                   *string                            `json:"last_seen_display,omitempty"`
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
+	ResolveSessionHostnames           *bool                              `json:"resolve_session_hostnames,omitempty"`
 	AppStatusBarOrder                 *models.AppStatusBarOrder          `json:"app_status_bar_order,omitempty"`
 	QuickChatTabOrderByWorkspace      *map[string][]string               `json:"quick_chat_tab_order_by_workspace,omitempty"`
 	KanbanHiddenStepIDs               *map[string][]string               `json:"kanban_hidden_step_ids,omitempty"`
@@ -217,6 +225,37 @@ func (n *NullableSidebarDraft) UnmarshalJSON(data []byte) error {
 // nil when the field was omitted, otherwise a pointer to the value (possibly
 // nil when explicitly cleared).
 func (n NullableSidebarDraft) ServiceValue() **models.SidebarViewDraft {
+	if !n.Set {
+		return nil
+	}
+	return &n.Value
+}
+
+// NullableThreadViewDraft preserves the JSON PATCH distinction between an
+// omitted thread_view_draft field and an explicit null value.
+type NullableThreadViewDraft struct {
+	Set   bool
+	Value *models.ThreadViewDraft
+}
+
+// UnmarshalJSON decodes an explicitly supplied Threads draft.
+func (n *NullableThreadViewDraft) UnmarshalJSON(data []byte) error {
+	n.Set = true
+	if string(data) == "null" {
+		n.Value = nil
+		return nil
+	}
+	var value models.ThreadViewDraft
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	n.Value = &value
+	return nil
+}
+
+// ServiceValue returns the service-layer pointer for an omitted or explicit
+// thread draft update.
+func (n NullableThreadViewDraft) ServiceValue() **models.ThreadViewDraft {
 	if !n.Set {
 		return nil
 	}
@@ -306,6 +345,9 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		SidebarViews:                      settings.SidebarViews,
 		SidebarActiveViewID:               settings.SidebarActiveViewID,
 		SidebarDraft:                      settings.SidebarDraft,
+		ThreadViews:                       settings.ThreadViews,
+		ThreadActiveViewID:                settings.ThreadActiveViewID,
+		ThreadViewDraft:                   settings.ThreadViewDraft,
 		SidebarTaskPrefs:                  settings.SidebarTaskPrefs,
 		TaskCreateLastUsed:                settings.TaskCreateLastUsed,
 		JiraSavedViews:                    settings.JiraSavedViews,
@@ -325,6 +367,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LastSeenDisplay:                   models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
+		ResolveSessionHostnames:           settings.ResolveSessionHostnames,
 		AppStatusBarOrder:                 settings.AppStatusBarOrder,
 		QuickChatTabOrderByWorkspace:      settings.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               settings.KanbanHiddenStepIDs,

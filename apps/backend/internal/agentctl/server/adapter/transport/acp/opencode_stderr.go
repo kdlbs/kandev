@@ -20,7 +20,7 @@ const (
 var (
 	openCodeIdentifierPattern = regexp.MustCompile(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
 	openCodeURLPattern        = regexp.MustCompile(`https?://[^\s]+`)
-	openCodeResetPattern      = regexp.MustCompile(`(?i)\bresets?\s+in\s+(?:(\d+)\s*(?:hours?|hrs?|h))?\s*(?:(\d+)\s*(?:minutes?|mins?|m|min))?`)
+	openCodeResetPattern      = regexp.MustCompile(`(?i)\bresets?\s+in\s+(?:(\d+)\s*(?:days?|d)\b)?\s*(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*(?:(\d+)\s*(?:minutes?|mins?|m|min)\b)?`)
 )
 
 type openCodeStderrDiagnostic struct {
@@ -267,14 +267,15 @@ func safeOpenCodeField(value string) string {
 
 func openCodeResetAt(message string, occurredAt time.Time) *time.Time {
 	matches := openCodeResetPattern.FindStringSubmatch(message)
-	if len(matches) != 3 || (matches[1] == "" && matches[2] == "") {
+	if len(matches) != 4 || (matches[1] == "" && matches[2] == "" && matches[3] == "") {
 		return nil
 	}
-	hours, _ := strconv.Atoi(matches[1])
-	minutes, _ := strconv.Atoi(matches[2])
-	if hours == 0 && minutes == 0 {
+	days, _ := strconv.Atoi(matches[1])
+	hours, _ := strconv.Atoi(matches[2])
+	minutes, _ := strconv.Atoi(matches[3])
+	if days == 0 && hours == 0 && minutes == 0 {
 		return nil
 	}
-	resetAt := occurredAt.Add(time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute)
+	resetAt := occurredAt.Add(time.Duration(days)*24*time.Hour + time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute)
 	return &resetAt
 }

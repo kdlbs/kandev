@@ -175,6 +175,7 @@
   "portableConfigNotFoundHint": "Ţĥĩś ĩś àń ēďĩţĩńĝ ĥĩńţ. Ŷōũ ćàń śàvē ţĥē ƥŕōƒĩĺē àńď àďď ţĥē ƒĩĺē ĺàţēŕ.",
   "portableConfigTitle": "Àĝēńţ ćōńƒĩĝũŕàţĩōń",
   "provideSecret": "Ƥŕōvĩďē śēćŕēţ",
+  "provideSecretForEnvVar": "Ƥŕōvĩďē śēćŕēţ ƒōŕ {{envVar}}",
   "quickPresets": "Qũĩćķ ƥŕēśēţś",
   "refresh": "Ŕēƒŕēśĥ",
   "relatedDockerContainersRemoved_one": "{{count}} ŕēĺàţēď Ďōćķēŕ ćōńţàĩńēŕ ŵĩĺĺ àĺśō ƀē ŕēḿōvēď.",

@@ -16,6 +16,14 @@ Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset
 3. Run required checks before pushing or opening a change request.
 4. Treat discard, reset, amend, force-push, and cleanup as irreversible or history-changing operations.
 
+![Git lifecycle from a working copy through inspected changes, commit, pushed branch, change request, and cleanup.](../screenshots/git-operations.svg)
+
+[Open full-size SVG diagram][git-operations-diagram]
+
+[git-operations-diagram]: ../../docs/screenshots/git-operations.svg
+
+The state transitions are separate operations. Inspect the diff before staging, verify checks before pushing, and decide whether cleanup may remove a worktree or other local data.
+
 ## Prerequisites and trust boundary
 
 The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials in the executor where the command runs before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not. The workspace's provider automation identity does not replace the task's Git credential policy or executor-local SSH setup; see [Executors](executors.md#workspace-automation-identity-and-task-git-transport).

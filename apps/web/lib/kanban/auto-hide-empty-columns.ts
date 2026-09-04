@@ -1,12 +1,6 @@
 type Step = { id: string };
 type StepTask = { workflowStepId: string | null };
 
-export function sortWorkflowStepsByPosition<T extends Step & { position: number }>(
-  steps: T[],
-): T[] {
-  return [...steps].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
-}
-
 export function areAllEmptyStepsAutoHidden(visibleSteps: Step[], moveTargetSteps: Step[]): boolean {
   return visibleSteps.length === 0 && moveTargetSteps.length > 0;
 }

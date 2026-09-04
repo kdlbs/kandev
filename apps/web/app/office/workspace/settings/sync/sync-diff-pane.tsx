@@ -14,6 +14,13 @@ type SyncDiffPaneProps = {
   applying: boolean;
   applyLabel: string;
   onApply: () => void;
+  /**
+   * AC-OFFICE-CONFIG-SYNC-006.6: when config sync owns this workspace, apply
+   * is refused server-side. Passing a reason disables the button and states
+   * why, instead of letting the operator hit the 409. The read-only diff
+   * below keeps rendering either way (AC-OFFICE-CONFIG-SYNC-005.3).
+   */
+  disabledReason?: string;
 };
 
 export function SyncDiffPane({
@@ -25,6 +32,7 @@ export function SyncDiffPane({
   applying,
   applyLabel,
   onApply,
+  disabledReason,
 }: SyncDiffPaneProps) {
   const { t } = useTranslation();
   const totalChanges = diff ? countChanges(diff) : 0;
@@ -40,13 +48,14 @@ export function SyncDiffPane({
           <Button
             size="sm"
             onClick={onApply}
-            disabled={applying || loading || totalChanges === 0}
+            disabled={applying || loading || totalChanges === 0 || Boolean(disabledReason)}
             className="cursor-pointer shrink-0"
           >
             {applying ? t("office:applying") : applyLabel}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground mt-1">{description}</p>
+        {disabledReason && <p className="text-xs text-muted-foreground mt-1">{disabledReason}</p>}
       </div>
       <div className="flex-1 p-4 space-y-4">
         <DiffBody diff={diff} loading={loading} totalChanges={totalChanges} />

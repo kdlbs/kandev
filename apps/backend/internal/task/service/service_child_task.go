@@ -59,6 +59,7 @@ func (s *Service) CreateChildTask(
 		AssigneeAgentProfileID: assignee,
 		Origin:                 models.TaskOriginAgentCreated,
 		ProjectID:              parent.ProjectID,
+		WorkspacePolicy:        &WorkspacePolicy{Mode: workspaceModeInheritParent},
 	}
 	result, err := s.CreateTask(ctx, req)
 	if err != nil {

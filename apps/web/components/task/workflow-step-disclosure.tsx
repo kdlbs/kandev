@@ -48,6 +48,8 @@ type MinimalWorkflowStepperProps = {
   workflowId?: string | null;
   movingToStepId: string | null;
   onMove: (stepId: string) => Promise<boolean>;
+  /** Notified whenever the disclosure surface opens or closes. */
+  onDisclosureOpenChange?: (open: boolean) => void;
 };
 
 export function MinimalWorkflowStepper({
@@ -58,6 +60,7 @@ export function MinimalWorkflowStepper({
   workflowId,
   movingToStepId,
   onMove,
+  onDisclosureOpenChange,
 }: MinimalWorkflowStepperProps) {
   const { t } = useTranslation();
 
@@ -95,6 +98,7 @@ export function MinimalWorkflowStepper({
       workflowId={workflowId}
       movingToStepId={movingToStepId}
       onMove={onMove}
+      onDisclosureOpenChange={onDisclosureOpenChange}
     />
   );
 }
@@ -308,6 +312,7 @@ function CompactWorkflowStepDisclosure({
   workflowId,
   movingToStepId,
   onMove,
+  onDisclosureOpenChange,
 }: {
   sortedSteps: Step[];
   current: Step;
@@ -317,10 +322,20 @@ function CompactWorkflowStepDisclosure({
   workflowId: string;
   movingToStepId: string | null;
   onMove: (stepId: string) => Promise<boolean>;
+  onDisclosureOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const controls = useCompactWorkflowDisclosure();
+  useEffect(() => {
+    onDisclosureOpenChange?.(controls.open);
+  }, [controls.open, onDisclosureOpenChange]);
+  useEffect(
+    () => () => {
+      onDisclosureOpenChange?.(false);
+    },
+    [onDisclosureOpenChange],
+  );
   const trigger = (
     <CompactWorkflowTrigger
       current={current}
@@ -376,6 +391,7 @@ function CompactWorkflowStepDisclosure({
         className="w-72 max-w-[calc(100vw-1rem)] p-2"
         onOpenAutoFocus={controls.handleOpenAutoFocus}
         onCloseAutoFocus={controls.handleCloseAutoFocus}
+        onEscapeKeyDown={(event) => event.stopPropagation()}
         onMouseEnter={controls.openDisclosure}
         onMouseLeave={controls.scheduleClose}
         onFocusCapture={controls.handleContentFocus}
@@ -423,8 +439,8 @@ function MinimalStepContents({
         aria-current={currentIndex >= 0 ? "step" : undefined}
         className="flex min-w-0 items-center gap-1.5 text-xs"
       >
-        <StepCircleIndicator isCurrent isCompleted={false} />
-        <span className="truncate text-xs font-medium leading-none text-foreground">
+        <StepCircleIndicator isCurrent={currentIndex >= 0} isCompleted={false} />
+        <span className="min-w-0 truncate text-xs font-medium leading-none text-foreground">
           {current.name}
         </span>
       </div>
@@ -531,6 +547,8 @@ export function canMoveToStep(params: {
   return params.isAdjacent || !!params.allowManualMove;
 }
 
+export type StepMarkerState = "current" | "completed" | "upcoming";
+
 export function StepCircleIndicator({
   isCurrent,
   isCompleted,
@@ -538,9 +556,15 @@ export function StepCircleIndicator({
   isCurrent: boolean;
   isCompleted: boolean;
 }) {
+  let state: StepMarkerState = "upcoming";
+  if (isCurrent) state = "current";
+  else if (isCompleted) state = "completed";
   if (isCurrent) {
     return (
-      <span className="relative flex items-center justify-center shrink-0">
+      <span
+        data-marker-state={state}
+        className="relative flex items-center justify-center shrink-0"
+      >
         <span className="absolute h-3.5 w-3.5 rounded-full border-2 border-primary/40" />
         <span className="h-2 w-2 rounded-full bg-primary" />
       </span>
@@ -548,13 +572,16 @@ export function StepCircleIndicator({
   }
   if (isCompleted) {
     return (
-      <span className="relative flex items-center justify-center shrink-0">
+      <span
+        data-marker-state={state}
+        className="relative flex items-center justify-center shrink-0"
+      >
         <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
       </span>
     );
   }
   return (
-    <span className="relative flex items-center justify-center shrink-0">
+    <span data-marker-state={state} className="relative flex items-center justify-center shrink-0">
       <span className="h-2 w-2 rounded-full border border-muted-foreground/40" />
     </span>
   );

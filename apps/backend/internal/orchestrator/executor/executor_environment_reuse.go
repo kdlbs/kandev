@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	taskEnvironmentRepoStatusActive  = "active"
 	taskEnvironmentRepoStatusFailed  = "failed"
 	taskEnvironmentRepoStatusDeleted = "deleted"
 )
@@ -176,6 +177,24 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 			applyExecutorRunningMetadata(req, running)
 		}
 	}
+}
+
+// prepareExecutorTransition removes launch-local workspace authority inherited
+// from a session that belonged to a different executor type. The existing
+// environment remains available to persistTaskEnvironment as the durable row
+// to rebind after (and only after) the new executor launches successfully.
+//
+// In particular, a non-empty session.WorkspacePath is not a safe fallback: it
+// may name a deleted worktree or an ordinary directory left behind by an older
+// executor. Clearing it makes local execution fall back to RepositoryPath and
+// makes worktree execution materialize through its normal preparer.
+func prepareExecutorTransition(req *LaunchAgentRequest, env *models.TaskEnvironment) bool {
+	if req == nil || env == nil || env.ExecutorType == "" || env.ExecutorType == req.ExecutorType {
+		return false
+	}
+	req.WorkspacePath = ""
+	req.WorkspaceReuseRequired = false
+	return true
 }
 
 func extractContainerBootstrapNonceSecretID(metadata map[string]interface{}) string {
