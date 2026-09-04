@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -187,22 +188,22 @@ const automationColumns = `id, workspace_id, name, description, workflow_id, wor
 	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
-	s.db.Exec(migrateTaskTitleSQL)          //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateExecutionModeSQL)      //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRepositoryIDSQL)       //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateContinuationPolicySQL) //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateContinuationTaskSQL)   //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateTaskModeSQL)           //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRepositoryModeSQL)     //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRepositoryBranchSQL)   //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRunSessionSQL)         //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRunTurnSQL)            //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRunThreadActionSQL)    //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRunThreadReasonSQL)    //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRunDisplayTitleSQL)    //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateTaskTitleSQL, s.db.DriverName()))          //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateExecutionModeSQL, s.db.DriverName()))      //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateRepositoryIDSQL, s.db.DriverName()))       //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateContinuationPolicySQL, s.db.DriverName())) //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateContinuationTaskSQL, s.db.DriverName()))   //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateTaskModeSQL, s.db.DriverName()))           //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateRepositoryModeSQL, s.db.DriverName()))     //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateRepositoryBranchSQL, s.db.DriverName()))   //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateRunSessionSQL, s.db.DriverName()))         //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateRunTurnSQL, s.db.DriverName()))            //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateRunThreadActionSQL, s.db.DriverName()))    //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateRunThreadReasonSQL, s.db.DriverName()))    //nolint:errcheck // duplicate-column on existing DBs
+	s.db.Exec(schemaSQLForDriver(migrateRunDisplayTitleSQL, s.db.DriverName()))    //nolint:errcheck // duplicate-column on existing DBs
 	if err := s.backfillLegacyRepositoryIDs(); err != nil {
 		return err
 	}
@@ -221,8 +222,8 @@ func (s *Store) backfillLegacyRepositoryIDs() error {
 		CreatedAt    time.Time `db:"created_at"`
 	}
 	var rows []legacyRow
-	err := s.db.Select(&rows,
-		`SELECT id, repository_id, created_at FROM automations WHERE repository_id != ''`)
+	err := s.db.Select(&rows, s.db.Rebind(
+		`SELECT id, repository_id, created_at FROM automations WHERE repository_id != ''`))
 	if err != nil {
 		return fmt.Errorf("select legacy repository_id rows: %w", err)
 	}
@@ -236,9 +237,10 @@ func (s *Store) backfillLegacyRepositoryIDs() error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, row := range rows {
-		_, err := tx.Exec(
-			`INSERT OR IGNORE INTO automation_repositories (id, automation_id, repository_id, position, created_at)
-			VALUES (?, ?, ?, 0, ?)`,
+		_, err := tx.Exec(tx.Rebind(
+			`INSERT INTO automation_repositories (id, automation_id, repository_id, position, created_at)
+			VALUES (?, ?, ?, 0, ?)
+			ON CONFLICT(automation_id, repository_id) DO NOTHING`),
 			uuid.New().String(), row.ID, row.RepositoryID, row.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("backfill automation_repositories for %s: %w", row.ID, err)
@@ -248,7 +250,7 @@ func (s *Store) backfillLegacyRepositoryIDs() error {
 		// repository from automation_repositories would resurrect it on
 		// the next boot's backfill pass (INSERT OR IGNORE only blocks
 		// exact re-insertion, not re-addition after deletion).
-		if _, err := tx.Exec(`UPDATE automations SET repository_id = '' WHERE id = ?`, row.ID); err != nil {
+		if _, err := tx.Exec(tx.Rebind(`UPDATE automations SET repository_id = '' WHERE id = ?`), row.ID); err != nil {
 			return fmt.Errorf("clear legacy repository_id for %s: %w", row.ID, err)
 		}
 	}
@@ -320,13 +322,13 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	// indistinguishable from a pre-upgrade one, and the one-time notice would
 	// never stop being true. Empty means "no mode was ever chosen", which is
 	// the honest record for a row created after the choice was withdrawn.
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
 			agent_profile_id, executor_profile_id,
 			task_mode, repository_mode, prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
 			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`),
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), string(a.RepositoryMode),
@@ -348,9 +350,9 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 func insertAutomationRepositories(ctx context.Context, tx *sqlx.Tx, automationID string, repositories []AutomationRepository) error {
 	now := time.Now().UTC()
 	for i, repository := range repositories {
-		_, err := tx.ExecContext(ctx, `
+		_, err := tx.ExecContext(ctx, tx.Rebind(`
 			INSERT INTO automation_repositories (id, automation_id, repository_id, base_branch, position, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?)`),
 			uuid.New().String(), automationID, repository.RepositoryID, repository.BaseBranch, i, now)
 		if err != nil {
 			return fmt.Errorf("insert automation_repositories: %w", err)
@@ -363,7 +365,7 @@ func insertAutomationRepositories(ctx context.Context, tx *sqlx.Tx, automationID
 // repository_ids hydrated.
 func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, error) {
 	var a Automation
-	err := s.ro.GetContext(ctx, &a, `SELECT `+automationColumns+` FROM automations WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &a, s.ro.Rebind(`SELECT `+automationColumns+` FROM automations WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -439,7 +441,7 @@ func (s *Store) ListEnabledByAgentProfile(ctx context.Context, agentProfileID st
 	var rows []AgentProfileBinding
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT id, name, workspace_id FROM automations
-		WHERE agent_profile_id = ? AND enabled = 1
+		WHERE agent_profile_id = ? AND enabled = TRUE
 		ORDER BY name
 	`), agentProfileID)
 	if err != nil {
@@ -467,8 +469,8 @@ func (s *Store) DisableByAgentProfile(ctx context.Context, agentProfileID string
 		return nil, nil
 	}
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
-		UPDATE automations SET enabled = 0, updated_at = ?
-		WHERE agent_profile_id = ? AND enabled = 1
+		UPDATE automations SET enabled = FALSE, updated_at = ?
+		WHERE agent_profile_id = ? AND enabled = TRUE
 	`), time.Now().UTC(), agentProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("disable automations for agent profile: %w", err)
@@ -480,8 +482,8 @@ func (s *Store) DisableByAgentProfile(ctx context.Context, agentProfileID string
 // repository_ids hydrated.
 func (s *Store) ListAutomations(ctx context.Context, workspaceID string) ([]*Automation, error) {
 	var automations []*Automation
-	err := s.ro.SelectContext(ctx, &automations,
-		`SELECT `+automationColumns+` FROM automations WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+	err := s.ro.SelectContext(ctx, &automations, s.ro.Rebind(
+		`SELECT `+automationColumns+` FROM automations WHERE workspace_id = ? ORDER BY created_at DESC`), workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -491,8 +493,8 @@ func (s *Store) ListAutomations(ctx context.Context, workspaceID string) ([]*Aut
 // ListAllEnabled returns all enabled automations (across workspaces).
 func (s *Store) ListAllEnabled(ctx context.Context) ([]*Automation, error) {
 	var automations []*Automation
-	err := s.ro.SelectContext(ctx, &automations,
-		`SELECT `+automationColumns+` FROM automations WHERE enabled = 1 ORDER BY created_at`)
+	err := s.ro.SelectContext(ctx, &automations, s.ro.Rebind(
+		`SELECT `+automationColumns+` FROM automations WHERE enabled = TRUE ORDER BY created_at`))
 	if err != nil {
 		return nil, err
 	}
@@ -569,12 +571,12 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			task_mode = ?, repository_mode = ?, prompt = ?, task_title_template = ?,
 			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?, updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ?`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), string(a.RepositoryMode),
@@ -584,14 +586,14 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		return err
 	}
 	if req.Repositories != nil || req.RepositoryIDs != nil {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM automation_repositories WHERE automation_id = ?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_repositories WHERE automation_id = ?`), id); err != nil {
 			return fmt.Errorf("clear automation_repositories: %w", err)
 		}
 		if err := insertAutomationRepositories(ctx, tx, id, a.Repositories); err != nil {
 			return err
 		}
 	} else if req.RepositoryMode != nil && *req.RepositoryMode != RepositoryModeSelected {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM automation_repositories WHERE automation_id = ?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_repositories WHERE automation_id = ?`), id); err != nil {
 			return fmt.Errorf("clear automation_repositories for repository mode: %w", err)
 		}
 	}
@@ -691,7 +693,7 @@ func repositoryIDs(repositories []AutomationRepository) []string {
 
 // DeleteAutomation removes an automation and its triggers/runs (CASCADE).
 func (s *Store) DeleteAutomation(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automations WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automations WHERE id = ?`), id)
 	return err
 }
 
@@ -713,10 +715,10 @@ type AutomationTaskCleanupJob struct {
 // limit was applied.
 func (s *Store) ListOpenRuns(ctx context.Context, automationID string) ([]*AutomationRun, error) {
 	var runs []*AutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
 		SELECT * FROM automation_runs
 		WHERE automation_id = ? AND status IN (?, ?)
-		ORDER BY created_at ASC, id ASC`,
+		ORDER BY created_at ASC, id ASC`),
 		automationID, string(RunStatusTriggered), string(RunStatusTaskCreated))
 	for _, run := range runs {
 		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
@@ -729,10 +731,10 @@ func (s *Store) ListOpenRuns(ctx context.Context, automationID string) ([]*Autom
 // disappear from recovery.
 func (s *Store) ListAllOpenRuns(ctx context.Context) ([]*AutomationRun, error) {
 	var runs []*AutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
 		SELECT * FROM automation_runs
 		WHERE status IN (?, ?)
-		ORDER BY automation_id, created_at ASC, id ASC`,
+		ORDER BY automation_id, created_at ASC, id ASC`),
 		string(RunStatusTriggered), string(RunStatusTaskCreated))
 	for _, run := range runs {
 		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
@@ -776,7 +778,7 @@ func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string, clea
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM automations WHERE id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automations WHERE id = ?`), id); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -790,13 +792,13 @@ func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string, clea
 // origin to keep visible normal tasks out of hidden-task cleanup jobs.
 func (s *Store) ListAutomationTaskIDs(ctx context.Context, id string) ([]string, error) {
 	var taskIDs []string
-	if err := s.ro.SelectContext(ctx, &taskIDs,
-		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`, id); err != nil {
+	if err := s.ro.SelectContext(ctx, &taskIDs, s.ro.Rebind(
+		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`), id); err != nil {
 		return nil, err
 	}
 	var continuationTaskID string
-	if err := s.ro.GetContext(ctx, &continuationTaskID,
-		`SELECT continuation_task_id FROM automations WHERE id = ?`, id); err == nil && continuationTaskID != "" {
+	if err := s.ro.GetContext(ctx, &continuationTaskID, s.ro.Rebind(
+		`SELECT continuation_task_id FROM automations WHERE id = ?`), id); err == nil && continuationTaskID != "" {
 		taskIDs = append(taskIDs, continuationTaskID)
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -806,8 +808,8 @@ func (s *Store) ListAutomationTaskIDs(ctx context.Context, id string) ([]string,
 
 func loadAutomationCleanupOwner(ctx context.Context, tx *sqlx.Tx, id string) (automationCleanupOwner, bool, error) {
 	var owner automationCleanupOwner
-	err := tx.GetContext(ctx, &owner,
-		`SELECT workspace_id, continuation_task_id FROM automations WHERE id = ?`, id)
+	err := tx.GetContext(ctx, &owner, tx.Rebind(
+		`SELECT workspace_id, continuation_task_id FROM automations WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return owner, false, nil
 	}
@@ -816,8 +818,8 @@ func loadAutomationCleanupOwner(ctx context.Context, tx *sqlx.Tx, id string) (au
 
 func listAutomationCleanupTaskIDs(ctx context.Context, tx *sqlx.Tx, id, continuationTaskID string) ([]string, error) {
 	var taskIDs []string
-	if err := tx.SelectContext(ctx, &taskIDs,
-		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`, id); err != nil {
+	if err := tx.SelectContext(ctx, &taskIDs, tx.Rebind(
+		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`), id); err != nil {
 		return nil, err
 	}
 	if continuationTaskID != "" {
@@ -851,14 +853,14 @@ func insertAutomationCleanupJobs(
 		if !owned {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
 			INSERT INTO automation_task_cleanup_jobs
 				(task_id, workspace_id, automation_id, last_error, created_at, updated_at)
 			VALUES (?, ?, ?, '', ?, ?)
 			ON CONFLICT(task_id) DO UPDATE SET
 				workspace_id = excluded.workspace_id,
 				automation_id = excluded.automation_id,
-				updated_at = excluded.updated_at`,
+				updated_at = excluded.updated_at`),
 			taskID, owner.WorkspaceID, automationID, now, now); err != nil {
 			return nil, err
 		}
@@ -869,18 +871,18 @@ func insertAutomationCleanupJobs(
 
 func automationCleanupTaskIsUnreferenced(ctx context.Context, tx *sqlx.Tx, automationID, taskID string) (bool, error) {
 	var refs int
-	if err := tx.GetContext(ctx, &refs, `
+	if err := tx.GetContext(ctx, &refs, tx.Rebind(`
 		SELECT COUNT(*) FROM automation_runs
-		WHERE task_id = ? AND automation_id != ?`, taskID, automationID); err != nil {
+		WHERE task_id = ? AND automation_id != ?`), taskID, automationID); err != nil {
 		return false, err
 	}
 	if refs > 0 {
 		return false, nil
 	}
 	var pointers int
-	if err := tx.GetContext(ctx, &pointers, `
+	if err := tx.GetContext(ctx, &pointers, tx.Rebind(`
 		SELECT COUNT(*) FROM automations
-		WHERE continuation_task_id = ? AND id != ?`, taskID, automationID); err != nil {
+		WHERE continuation_task_id = ? AND id != ?`), taskID, automationID); err != nil {
 		return false, err
 	}
 	return pointers == 0, nil
@@ -895,9 +897,9 @@ func (s *Store) IsTaskReferencedByOtherAutomation(ctx context.Context, automatio
 		return false, nil
 	}
 	var refs int
-	err := s.ro.GetContext(ctx, &refs, `
+	err := s.ro.GetContext(ctx, &refs, s.ro.Rebind(`
 		SELECT COUNT(*) FROM automation_runs
-		WHERE task_id = ? AND automation_id != ?`, taskID, automationID)
+		WHERE task_id = ? AND automation_id != ?`), taskID, automationID)
 	if err != nil {
 		return false, err
 	}
@@ -905,9 +907,9 @@ func (s *Store) IsTaskReferencedByOtherAutomation(ctx context.Context, automatio
 		return true, nil
 	}
 	var pointers int
-	err = s.ro.GetContext(ctx, &pointers, `
+	err = s.ro.GetContext(ctx, &pointers, s.ro.Rebind(`
 		SELECT COUNT(*) FROM automations
-		WHERE continuation_task_id = ? AND id != ?`, taskID, automationID)
+		WHERE continuation_task_id = ? AND id != ?`), taskID, automationID)
 	return pointers > 0, err
 }
 
@@ -918,9 +920,9 @@ func (s *Store) IsTaskReferencedByRun(ctx context.Context, automationID, runID, 
 		return false, nil
 	}
 	var count int
-	err := s.ro.GetContext(ctx, &count, `
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(`
 		SELECT COUNT(*) FROM automation_runs
-		WHERE automation_id = ? AND id != ? AND task_id = ?`, automationID, runID, taskID)
+		WHERE automation_id = ? AND id != ? AND task_id = ?`), automationID, runID, taskID)
 	return count > 0, err
 }
 
@@ -928,34 +930,34 @@ func (s *Store) IsTaskReferencedByRun(ctx context.Context, automationID, runID, 
 // task from run-row deletion.
 func (s *Store) IsContinuationTask(ctx context.Context, automationID, taskID string) (bool, error) {
 	var count int
-	err := s.ro.GetContext(ctx, &count,
-		`SELECT COUNT(*) FROM automations WHERE id = ? AND continuation_task_id = ?`, automationID, taskID)
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(
+		`SELECT COUNT(*) FROM automations WHERE id = ? AND continuation_task_id = ?`), automationID, taskID)
 	return count > 0, err
 }
 
 func (s *Store) ListCleanupJobs(ctx context.Context) ([]*AutomationTaskCleanupJob, error) {
 	var jobs []*AutomationTaskCleanupJob
-	err := s.ro.SelectContext(ctx, &jobs,
-		`SELECT * FROM automation_task_cleanup_jobs ORDER BY created_at ASC, task_id ASC`)
+	err := s.ro.SelectContext(ctx, &jobs, s.ro.Rebind(
+		`SELECT * FROM automation_task_cleanup_jobs ORDER BY created_at ASC, task_id ASC`))
 	return jobs, err
 }
 
 func (s *Store) DeleteCleanupJob(ctx context.Context, taskID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_task_cleanup_jobs WHERE task_id = ?`, taskID)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_task_cleanup_jobs WHERE task_id = ?`), taskID)
 	return err
 }
 
 func (s *Store) UpdateCleanupJobError(ctx context.Context, taskID, message string) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE automation_task_cleanup_jobs SET last_error = ?, updated_at = ? WHERE task_id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_task_cleanup_jobs SET last_error = ?, updated_at = ? WHERE task_id = ?`),
 		message, time.Now().UTC(), taskID)
 	return err
 }
 
 // UpdateLastTriggered updates the last_triggered_at timestamp.
 func (s *Store) UpdateLastTriggered(ctx context.Context, id string, t time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE automations SET last_triggered_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE automations SET last_triggered_at = ?, updated_at = ? WHERE id = ?`),
 		t, time.Now().UTC(), id)
 	return err
 }
@@ -971,9 +973,9 @@ func (s *Store) CreateTrigger(ctx context.Context, t *AutomationTrigger) error {
 	t.CreatedAt = now
 	t.UpdatedAt = now
 	t.ConfigJSON = string(t.Config)
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO automation_triggers (id, automation_id, type, config, enabled, last_evaluated_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		t.ID, t.AutomationID, t.Type, t.ConfigJSON, t.Enabled, t.LastEvaluatedAt, t.CreatedAt, t.UpdatedAt)
 	return err
 }
@@ -982,16 +984,16 @@ func (s *Store) CreateTrigger(ctx context.Context, t *AutomationTrigger) error {
 // the auth layer to authorize trigger mutations by workspace ownership.
 func (s *Store) GetTriggerAutomationID(ctx context.Context, triggerID string) (string, error) {
 	var automationID string
-	err := s.ro.GetContext(ctx, &automationID,
-		`SELECT automation_id FROM automation_triggers WHERE id = ?`, triggerID)
+	err := s.ro.GetContext(ctx, &automationID, s.ro.Rebind(
+		`SELECT automation_id FROM automation_triggers WHERE id = ?`), triggerID)
 	return automationID, err
 }
 
 // GetTrigger returns a single trigger, or nil when it no longer exists.
 func (s *Store) GetTrigger(ctx context.Context, id string) (*AutomationTrigger, error) {
 	var triggers []AutomationTrigger
-	if err := s.ro.SelectContext(ctx, &triggers,
-		`SELECT * FROM automation_triggers WHERE id = ?`, id); err != nil {
+	if err := s.ro.SelectContext(ctx, &triggers, s.ro.Rebind(
+		`SELECT * FROM automation_triggers WHERE id = ?`), id); err != nil {
 		return nil, err
 	}
 	if len(triggers) == 0 {
@@ -1004,8 +1006,8 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*AutomationTrigger, 
 // ListTriggers returns all triggers for an automation.
 func (s *Store) ListTriggers(ctx context.Context, automationID string) ([]AutomationTrigger, error) {
 	var triggers []AutomationTrigger
-	err := s.ro.SelectContext(ctx, &triggers,
-		`SELECT * FROM automation_triggers WHERE automation_id = ? ORDER BY created_at`, automationID)
+	err := s.ro.SelectContext(ctx, &triggers, s.ro.Rebind(
+		`SELECT * FROM automation_triggers WHERE automation_id = ? ORDER BY created_at`), automationID)
 	hydrateTriggers(triggers)
 	return triggers, err
 }
@@ -1042,7 +1044,7 @@ func (s *Store) listTriggersForAutomations(ctx context.Context, automationIDs []
 // UpdateTrigger applies partial updates to a trigger.
 func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTriggerRequest) error {
 	var t AutomationTrigger
-	err := s.ro.GetContext(ctx, &t, `SELECT * FROM automation_triggers WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &t, s.ro.Rebind(`SELECT * FROM automation_triggers WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("trigger not found: %s", id)
 	}
@@ -1056,22 +1058,22 @@ func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigger
 		t.Enabled = *req.Enabled
 	}
 	t.UpdatedAt = time.Now().UTC()
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE automation_triggers SET config = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE automation_triggers SET config = ?, enabled = ?, updated_at = ? WHERE id = ?`),
 		t.ConfigJSON, t.Enabled, t.UpdatedAt, id)
 	return err
 }
 
 // DeleteTrigger removes a trigger.
 func (s *Store) DeleteTrigger(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_triggers WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_triggers WHERE id = ?`), id)
 	return err
 }
 
 // UpdateTriggerEvaluatedAt sets the last_evaluated_at timestamp.
 func (s *Store) UpdateTriggerEvaluatedAt(ctx context.Context, id string, t time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE automation_triggers SET last_evaluated_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE automation_triggers SET last_evaluated_at = ?, updated_at = ? WHERE id = ?`),
 		t, time.Now().UTC(), id)
 	return err
 }
@@ -1079,11 +1081,11 @@ func (s *Store) UpdateTriggerEvaluatedAt(ctx context.Context, id string, t time.
 // ListEnabledTriggersByType returns enabled triggers of a specific type (across all enabled automations).
 func (s *Store) ListEnabledTriggersByType(ctx context.Context, triggerType TriggerType) ([]AutomationTrigger, error) {
 	var triggers []AutomationTrigger
-	err := s.ro.SelectContext(ctx, &triggers, `
+	err := s.ro.SelectContext(ctx, &triggers, s.ro.Rebind(`
 		SELECT t.* FROM automation_triggers t
 		JOIN automations a ON a.id = t.automation_id
-		WHERE t.type = ? AND t.enabled = 1 AND a.enabled = 1
-		ORDER BY t.created_at ASC, t.id ASC`, string(triggerType))
+		WHERE t.type = ? AND t.enabled = TRUE AND a.enabled = TRUE
+		ORDER BY t.created_at ASC, t.id ASC`), string(triggerType))
 	hydrateTriggers(triggers)
 	return triggers, err
 }
@@ -1097,11 +1099,11 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 	}
 	r.CreatedAt = time.Now().UTC()
 	r.TriggerDataJSON = string(r.TriggerData)
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO automation_runs (id, automation_id, trigger_id, trigger_type, task_id, status,
 			dedup_key, trigger_data, error_message, session_id, turn_id, thread_action, thread_reason,
 			display_title, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
 		r.DedupKey, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
 		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.CreatedAt)
@@ -1116,14 +1118,14 @@ func (s *Store) AdoptTriggeredRun(ctx context.Context, r *AutomationRun) (bool, 
 	if r == nil || r.DedupKey == "" {
 		return false, nil
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs SET task_id = ?, status = ?, trigger_data = ?, error_message = ?,
 			session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, display_title = ?
 		WHERE id = (
 			SELECT id FROM automation_runs
 			WHERE automation_id = ? AND dedup_key = ? AND status = ?
 			ORDER BY created_at DESC, id DESC LIMIT 1
-		) AND status = ?`,
+		) AND status = ?`),
 		r.TaskID, r.Status, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
 		r.ThreadAction, r.ThreadReason, r.DisplayTitle,
 		r.AutomationID, r.DedupKey, string(RunStatusTriggered), string(RunStatusTriggered))
@@ -1138,9 +1140,9 @@ func (s *Store) AdoptTriggeredRun(ctx context.Context, r *AutomationRun) (bool, 
 // run in triggered state. This closes the task ownership gap before the agent
 // session is ready, so a failed launch can still settle the exact run.
 func (s *Store) BindRunTask(ctx context.Context, runID, taskID string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs SET task_id = ?
-		WHERE id = ? AND status = ?`, taskID, runID, string(RunStatusTriggered))
+		WHERE id = ? AND status = ?`), taskID, runID, string(RunStatusTriggered))
 	if err != nil {
 		return err
 	}
@@ -1151,8 +1153,8 @@ func (s *Store) BindRunTask(ctx context.Context, runID, taskID string) error {
 }
 
 func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE automations SET continuation_task_id = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE automations SET continuation_task_id = ?, updated_at = ? WHERE id = ?`),
 		taskID, time.Now().UTC(), automationID)
 	return err
 }
@@ -1161,10 +1163,10 @@ func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID 
 // task_created. The identity is kept on the row so shared-task completion can
 // never settle a different firing.
 func (s *Store) BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action ThreadAction, reason string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs
 		SET task_id = ?, session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, status = ?
-		WHERE id = ? AND status IN (?, ?)`,
+		WHERE id = ? AND status IN (?, ?)`),
 		taskID, sessionID, turnID, action, reason, string(RunStatusTaskCreated),
 		runID, string(RunStatusTriggered), string(RunStatusTaskCreated))
 	if err != nil {
@@ -1190,7 +1192,7 @@ func (s *Store) MarkRunTerminal(ctx context.Context, runID, sessionID, turnID st
 		query += ` AND turn_id = ?`
 		args = append(args, turnID)
 	}
-	res, err := s.db.ExecContext(ctx, query, args...)
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
@@ -1207,9 +1209,9 @@ func (s *Store) MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID,
 	if taskID == "" || sessionID == "" || turnID == "" {
 		return fmt.Errorf("exact automation run binding is required")
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs SET status = ?, error_message = ?
-		WHERE task_id = ? AND session_id = ? AND turn_id = ? AND status = ?`,
+		WHERE task_id = ? AND session_id = ? AND turn_id = ? AND status = ?`),
 		string(status), errMsg, taskID, sessionID, turnID, string(RunStatusTaskCreated))
 	if err != nil {
 		return err
@@ -1240,13 +1242,13 @@ func (s *Store) updateRunTerminalStatus(ctx context.Context, taskID string, stat
 	if taskID == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs SET status = ?, error_message = ?
 		WHERE id = (
 			SELECT id FROM automation_runs
 			WHERE task_id = ? AND status = ?
 			ORDER BY created_at DESC LIMIT 1
-		)`,
+		)`),
 		string(status), errMsg, taskID, string(RunStatusTaskCreated))
 	return err
 }
@@ -1316,7 +1318,7 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 		args[i] = turnID
 	}
 	var summaries []runSummaryRow
-	err := s.ro.SelectContext(ctx, &summaries, `
+	err := s.ro.SelectContext(ctx, &summaries, s.ro.Rebind(`
 		SELECT m.turn_id, substr(m.content, 1, 280) AS summary
 		FROM task_session_messages m
 		WHERE m.turn_id IN (`+placeholders+`)
@@ -1325,9 +1327,9 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 			SELECT 1 FROM task_session_messages newer
 			WHERE newer.turn_id = m.turn_id
 			  AND newer.author_type = 'agent' AND newer.type = 'message'
-			  AND (newer.created_at > m.created_at OR
-				(newer.created_at = m.created_at AND newer.id > m.id))
-		  )`, args...)
+				AND (newer.created_at > m.created_at OR
+					(newer.created_at = m.created_at AND newer.id > m.id))
+			)`), args...)
 	if db.IsMissingTableError(err) {
 		return nil
 	}
@@ -1400,7 +1402,7 @@ const runTaskStateColumnsSQL = `
 			WHEN ar.status = ? AND t.archived_at IS NOT NULL THEN ?
 			WHEN ar.status = ? AND EXISTS (
 				SELECT 1 FROM task_sessions ts
-				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = TRUE AND ts.state = ?
 			) THEN ?
 			ELSE ar.status
 		END AS status,
@@ -1420,7 +1422,7 @@ const runTaskStateColumnsSQL = `
 		-- one query instead of one per run on the client.
 		COALESCE(NULLIF(ar.session_id, ''), (
 			SELECT ts.id FROM task_sessions ts
-			WHERE ts.task_id = ar.task_id AND ts.is_primary = 1
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = TRUE
 			LIMIT 1
 		), ar.session_id, '') AS session_id`
 
@@ -1437,20 +1439,20 @@ func runTaskStateArgs() []any {
 
 func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	var runs []*AutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
 		SELECT`+runTaskStateColumnsSQL+`
 		FROM automation_runs ar
 		LEFT JOIN tasks t ON t.id = ar.task_id
 		WHERE ar.automation_id = ?
-		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`),
 		append(runTaskStateArgs(), automationID, limit)...)
 	return runs, err
 }
 
 func (s *Store) listRunsRaw(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	var runs []*AutomationRun
-	err := s.ro.SelectContext(ctx, &runs,
-		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(
+		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`),
 		automationID, limit)
 	return runs, err
 }
@@ -1504,14 +1506,14 @@ func (s *Store) listWorkspaceRunsWithTaskState(ctx context.Context, workspaceID 
 	// automation is gone can't be attributed to anything the reader can
 	// open, and the ON DELETE CASCADE means it shouldn't exist anyway.
 	var runs []*WorkspaceAutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
 		SELECT`+runTaskStateColumnsSQL+`,
 			a.name AS automation_name
 		FROM automation_runs ar
 		JOIN automations a ON a.id = ar.automation_id
 		LEFT JOIN tasks t ON t.id = ar.task_id
 		WHERE a.workspace_id = ?
-		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`),
 		append(runTaskStateArgs(), workspaceID, limit)...)
 	return runs, err
 }
@@ -1607,13 +1609,13 @@ func (s *Store) selectSummaries(ctx context.Context, scope string, arg any) ([]s
 	args := runTaskStateArgs()
 	args = append(args, openRunArgs()...)
 	args = append(args, arg)
-	err := s.ro.SelectContext(ctx, &rows, `
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT`+runTaskStateColumnsSQL+`,
 			`+openRunsSubquerySQL+`
 		FROM automation_runs ar
 		JOIN automations a ON a.id = ar.automation_id
 		LEFT JOIN tasks t ON t.id = ar.task_id
-		WHERE `+scope+` AND `+latestRunPerAutomationSQL,
+		WHERE `+scope+` AND `+latestRunPerAutomationSQL),
 		args...)
 	return rows, err
 }
@@ -1624,26 +1626,26 @@ func (s *Store) selectSummaries(ctx context.Context, scope string, arg any) ([]s
 // open count is a plain status match.
 func (s *Store) selectSummariesRaw(ctx context.Context, scope string, arg any) ([]summaryRow, error) {
 	var rows []summaryRow
-	err := s.ro.SelectContext(ctx, &rows, `
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT ar.*, (
 		SELECT COUNT(*) FROM automation_runs aro
 			WHERE aro.automation_id = ar.automation_id AND aro.status IN (?, ?)
 		) AS open_runs
 		FROM automation_runs ar
 		JOIN automations a ON a.id = ar.automation_id
-		WHERE `+scope+` AND `+latestRunPerAutomationSQL,
+		WHERE `+scope+` AND `+latestRunPerAutomationSQL),
 		string(RunStatusTriggered), string(RunStatusTaskCreated), arg)
 	return rows, err
 }
 
 func (s *Store) listWorkspaceRunsRaw(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceAutomationRun, error) {
 	var runs []*WorkspaceAutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
 		SELECT ar.*, a.name AS automation_name
 		FROM automation_runs ar
 		JOIN automations a ON a.id = ar.automation_id
 		WHERE a.workspace_id = ?
-		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`),
 		workspaceID, limit)
 	return runs, err
 }
@@ -1654,8 +1656,8 @@ func (s *Store) HasRunWithDedupKey(ctx context.Context, automationID, dedupKey s
 		return false, nil
 	}
 	var count int
-	err := s.ro.GetContext(ctx, &count,
-		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND dedup_key = ?`,
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(
+		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND dedup_key = ?`),
 		automationID, dedupKey)
 	return count > 0, err
 }
@@ -1694,7 +1696,7 @@ const openRunPredicateSQL = `(
 		OR (ar.status = ? AND t.id IS NOT NULL AND t.archived_at IS NULL
 			AND NOT EXISTS (
 			SELECT 1 FROM task_sessions ts
-			WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = TRUE AND ts.state = ?
 			)
 		))`
 
@@ -1725,18 +1727,18 @@ func openRunArgs() []any {
 
 func (s *Store) countActiveRunsWithTaskState(ctx context.Context, automationID string) (int, error) {
 	var count int
-	err := s.ro.GetContext(ctx, &count, `
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(`
 		SELECT COUNT(*) FROM automation_runs ar
 		LEFT JOIN tasks t ON t.id = ar.task_id
-		WHERE ar.automation_id = ? AND `+openRunPredicateSQL,
+		WHERE ar.automation_id = ? AND `+openRunPredicateSQL),
 		append([]any{automationID}, openRunArgs()...)...)
 	return count, err
 }
 
 func (s *Store) countActiveRunsRaw(ctx context.Context, automationID string) (int, error) {
 	var count int
-	err := s.ro.GetContext(ctx, &count,
-		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND status IN (?, ?)`,
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(
+		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND status IN (?, ?)`),
 		automationID, string(RunStatusTriggered), string(RunStatusTaskCreated))
 	return count, err
 }
@@ -1744,8 +1746,8 @@ func (s *Store) countActiveRunsRaw(ctx context.Context, automationID string) (in
 // GetRun returns a single run by ID, or nil if not found.
 func (s *Store) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
 	var r AutomationRun
-	err := s.ro.GetContext(ctx, &r,
-		`SELECT * FROM automation_runs WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &r, s.ro.Rebind(
+		`SELECT * FROM automation_runs WHERE id = ?`), id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -1758,7 +1760,7 @@ func (s *Store) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
 
 // DeleteRun removes a single run row.
 func (s *Store) DeleteRun(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_runs WHERE id = ?`), id)
 	return err
 }
 
@@ -1766,15 +1768,15 @@ func (s *Store) DeleteRun(ctx context.Context, id string) error {
 // Used by DeleteAllRuns so the service can clean up tasks before purging rows.
 func (s *Store) ListRunTaskIDs(ctx context.Context, automationID string) ([]string, error) {
 	var ids []string
-	err := s.ro.SelectContext(ctx, &ids,
-		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`,
+	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(
+		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`),
 		automationID)
 	return ids, err
 }
 
 // DeleteAllRuns removes every run row for an automation.
 func (s *Store) DeleteAllRuns(ctx context.Context, automationID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE automation_id = ?`, automationID)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_runs WHERE automation_id = ?`), automationID)
 	return err
 }
 
@@ -1787,12 +1789,12 @@ func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automatio
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE automations SET continuation_task_id = '', updated_at = ? WHERE id = ?`, time.Now().UTC(), automationID); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE automations SET continuation_task_id = '', updated_at = ? WHERE id = ?`), time.Now().UTC(), automationID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM automation_runs WHERE automation_id = ?`, automationID); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM automation_runs WHERE automation_id = ?`), automationID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1803,23 +1805,34 @@ func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automatio
 func (s *Store) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID string) (int, error) {
 	// Get automation IDs first for cascade cleanup.
 	var ids []string
-	if err := s.ro.SelectContext(ctx, &ids,
-		`SELECT id FROM automations WHERE workspace_id = ?`, workspaceID); err != nil {
+	if err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(
+		`SELECT id FROM automations WHERE workspace_id = ?`), workspaceID); err != nil {
 		return 0, err
 	}
 	if len(ids) == 0 {
 		return 0, nil
 	}
 	for _, id := range ids {
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM automation_triggers WHERE automation_id = ?`, id)
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE automation_id = ?`, id)
+		_, _ = s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_triggers WHERE automation_id = ?`), id)
+		_, _ = s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_runs WHERE automation_id = ?`), id)
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM automations WHERE workspace_id = ?`, workspaceID)
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automations WHERE workspace_id = ?`), workspaceID)
 	if err != nil {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
+}
+
+func schemaSQLForDriver(schema, driver string) string {
+	schema = strings.ReplaceAll(schema, "DATETIME", dialect.TimestampType(driver))
+	if dialect.IsPostgres(driver) {
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+	}
+	return schema
 }
 
 // generateSecret creates a random hex string for webhook authentication.

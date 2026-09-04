@@ -74,9 +74,9 @@ func (s *Store) UpsertTaskPR(ctx context.Context, taskPR *TaskPR) error {
 // ListTaskPRsByTask returns all associations for one task in creation order.
 func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR, error) {
 	var rows []TaskPR
-	if err := s.ro.SelectContext(ctx, &rows,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT `+taskPRSelectColumns+` FROM azure_devops_task_prs
-		 WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
+		 WHERE task_id = ? ORDER BY created_at ASC`), taskID); err != nil {
 		return nil, err
 	}
 	return taskPRPointers(rows), nil
@@ -95,10 +95,10 @@ func (s *Store) DeleteTaskPRsByTask(ctx context.Context, taskID string) error {
 // ListTaskPRsByWorkspace groups associations for tasks owned by one workspace.
 func (s *Store) ListTaskPRsByWorkspace(ctx context.Context, workspaceID string) (map[string][]*TaskPR, error) {
 	var rows []TaskPR
-	if err := s.ro.SelectContext(ctx, &rows,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT `+qualifiedTaskPRSelectColumns+` FROM azure_devops_task_prs atp
 		 INNER JOIN tasks t ON atp.task_id = t.id
-		 WHERE t.workspace_id = ? ORDER BY atp.created_at ASC`, workspaceID); err != nil {
+		 WHERE t.workspace_id = ? ORDER BY atp.created_at ASC`), workspaceID); err != nil {
 		return nil, err
 	}
 	grouped := make(map[string][]*TaskPR)
