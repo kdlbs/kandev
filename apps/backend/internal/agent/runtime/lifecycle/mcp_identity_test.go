@@ -32,7 +32,7 @@ func newMCPStreamManager(t *testing.T, inner *recordingMCPHandler, scoper MCPIde
 		t.Fatalf("logger: %v", err)
 	}
 	sm := NewStreamManager(log, StreamCallbacks{}, inner, nil)
-	sm.mcpIdentityScoper = scoper
+	sm.setMCPIdentityScoper(scoper)
 	return sm
 }
 
@@ -171,8 +171,12 @@ func TestMCPHandlerForPassesThroughWithoutTaskID(t *testing.T) {
 		return ctx, nil
 	})
 
-	if got := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1"}); got != inner {
-		t.Errorf("handler = %T, want the unwrapped inner handler", got)
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1"})
+	if _, err := handler.Dispatch(context.Background(), mcpRequest(t, nil)); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if inner.calls != 1 {
+		t.Errorf("dispatcher calls = %d, want 1", inner.calls)
 	}
 }
 
@@ -185,7 +189,8 @@ func TestSetMCPIdentityScoperReachesStreamManager(t *testing.T) {
 
 	m.SetMCPIdentityScoper(func(ctx context.Context, _ string) (context.Context, error) { return ctx, nil })
 
-	if m.streamManager.mcpIdentityScoper == nil {
+	_, scoper, _ := m.streamManager.mcpDispatchState()
+	if scoper == nil {
 		t.Error("SetMCPIdentityScoper did not reach the stream manager")
 	}
 }
