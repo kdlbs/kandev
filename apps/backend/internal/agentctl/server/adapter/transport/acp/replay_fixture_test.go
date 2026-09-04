@@ -241,7 +241,7 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 
 			diagnosticCode := routingerr.Classify(routingerr.Input{
 				Phase:  routingerr.PhasePromptSend,
-				Stderr: reqErr.Message,
+				Stderr: got.Message,
 			}).Code
 			if string(diagnosticCode) != fx.Expect.DiagnosticCode {
 				t.Fatalf("diagnosticCode = %q, want %q", diagnosticCode, fx.Expect.DiagnosticCode)
