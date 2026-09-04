@@ -224,7 +224,9 @@ test.describe("Automation run composer", () => {
     );
     expect(replyMessage).toBeTruthy();
     expect(replyMessage?.turn_id).toBe(replyTurnId);
-    await expect(transcript.locator(`#msg-${replyMessage?.id}`)).toBeVisible();
+    const replyRow = transcript.locator(`#msg-${replyMessage?.id}`);
+    await expect(replyRow).toHaveCount(1);
+    await expect(replyRow).toBeVisible();
   });
 
   test("sits on the run page's own background, not the task workbench's card", async ({
