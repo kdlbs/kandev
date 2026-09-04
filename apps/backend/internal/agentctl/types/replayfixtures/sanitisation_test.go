@@ -79,6 +79,26 @@ func TestValidateFixtureRejectsForbiddenPayloadShapesInExpect(t *testing.T) {
 	}
 }
 
+// TestValidateFixtureRejectsForbiddenPayloadShapesInIdentity pins that a
+// captured identifier pasted into identity.sessionId or identity.executionId
+// is caught the same as one appearing in frame text — these fields are part
+// of the replayed payload, not exempt from the scan.
+func TestValidateFixtureRejectsForbiddenPayloadShapesInIdentity(t *testing.T) {
+	cases := map[string]func(*Fixture){
+		"sessionId":   func(f *Fixture) { f.Identity.SessionID = "4b1f6f1a-4a2b-4c3d-8e9f-0123456789ab" },
+		"executionId": func(f *Fixture) { f.Identity.ExecutionID = "sess-abcdef123456" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := validFixture()
+			mutate(&f)
+			if err := validateFixture(f); err == nil {
+				t.Fatalf("validateFixture() error = nil, want a sanitisation error for a forbidden shape in identity.%s", name)
+			}
+		})
+	}
+}
+
 // TestValidateFixtureRejectsForbiddenProvenanceShapes pins the narrower
 // provenance rule over capture/source/capturedAt: the same credential and
 // identifier shapes, plus a private-host check, but — unlike the payload

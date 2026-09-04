@@ -14,12 +14,12 @@ type forbiddenShape struct {
 	pattern *regexp.Regexp
 }
 
-// payloadForbiddenShapes is the enforced definition of
-// AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.18's "credential, bearer token,
-// account or organization identifier" prohibition over a fixture's replayed
-// payload (frames and expect) — provider-error-recovery-02.md#fixture-document,
-// "Sanitisation, scoped". This list is the definition, not a sample of it:
-// extending it is a catalogue revision, not a design change.
+// payloadForbiddenShapes is the enforced definition of the "credential,
+// bearer token, account or organization identifier" prohibition over a
+// fixture's replayed payload (identity, frames and expect) —
+// provider-error-recovery-02.md#fixture-document, "Sanitisation, scoped".
+// This list is the definition, not a sample of it: extending it is a
+// catalogue revision, not a design change.
 var payloadForbiddenShapes = []forbiddenShape{
 	{"Bearer token", regexp.MustCompile(`(?i)\bBearer\s+\S+`)},
 	{"vendor key prefix", regexp.MustCompile(`\b(?:sk|sess|org)-[A-Za-z0-9_-]+`)},
@@ -57,17 +57,20 @@ func scanForbiddenShapes(text string, shapes []forbiddenShape) []string {
 }
 
 // validateSanitisation enforces provider-error-recovery-02.md's two
-// sanitisation rules. The payload rule scans frames and expect — the
-// replayed payload — against payloadForbiddenShapes; identity.sessionId and
-// identity.executionId are outside this subtree and exempt by construction.
+// sanitisation rules. The payload rule scans identity, frames and expect —
+// the full replayed payload, including the corpus-unique session and
+// execution identifiers a fixture must declare — against
+// payloadForbiddenShapes, so a real captured identifier shape (a UUID, a
+// vendor session prefix) is caught the same as one pasted into frame text.
 // The provenance rule scans capture, source and capturedAt against the
 // narrower provenanceForbiddenShapes, which permits a bare URL so a
 // reconstructed fixture can cite its published contract.
 func validateSanitisation(f Fixture) error {
 	payload, err := json.Marshal(struct {
-		Frames []Frame `json:"frames"`
-		Expect Expect  `json:"expect"`
-	}{f.Frames, f.Expect})
+		Identity Identity `json:"identity"`
+		Frames   []Frame  `json:"frames"`
+		Expect   Expect   `json:"expect"`
+	}{f.Identity, f.Frames, f.Expect})
 	if err != nil {
 		return fmt.Errorf("marshal payload for sanitisation: %w", err)
 	}
