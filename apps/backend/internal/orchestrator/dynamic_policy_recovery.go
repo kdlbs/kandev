@@ -157,9 +157,9 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	if !ok {
 		return
 	}
-	// Hold the same per-session guard ApplyRouteAction holds through the
-	// durable claim and task-session projection. Release it before lifecycle
-	// launch because that path acquires the session lifecycle lock.
+	// Serialize route recovery with manual actions through the durable
+	// projection. Release before lifecycle launch because launch takes the
+	// session lifecycle lock.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 	locked := true
@@ -293,8 +293,11 @@ func (s *Service) markDynamicPolicyRecoveryActionRequired(
 	if err != nil || session == nil {
 		return
 	}
+	if session.RouteGeneration != generation {
+		return
+	}
 	session.RouteState = "action_required"
-	session.RouteReason = "route_action_launch_failed"
+	session.RouteReason = RouteActionLaunchFailedReason
 	session.State = models.TaskSessionStateWaitingForInput
 	session.ErrorMessage = launchErr.Error()
 	session.DownstreamACPSessionID = ""

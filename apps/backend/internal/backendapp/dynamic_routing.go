@@ -47,6 +47,11 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return nil, err
 	}
+	if err := repairDynamicRouteAfterLaunchFailure(
+		ctx, session, request.ExpectedGeneration, resolver.MarkRouteActionRequired,
+	); err != nil {
+		return nil, routeActionError(ctx, repo, session, err)
+	}
 	decision, err := resolveDynamicRouteAction(ctx, resolver, request, session)
 	if err != nil {
 		return handleDynamicRouteActionError(ctx, repo, session, err)
@@ -185,10 +190,6 @@ func recoverDynamicRouteAction(
 	expectedGeneration int64,
 	launchErr error,
 ) (*orchestrator.RouteActionResult, error) {
-	// Best effort: sync the durable route state so a subsequent manual
-	// retry/skip/stop is not permanently rejected by a "retrying" status this
-	// failed launch never advanced past. The session projection below is the
-	// state the UI reads, so a sync failure here does not block recovery.
 	if resolver != nil {
 		_ = resolver.MarkRouteActionRequired(ctx, sessionID, expectedGeneration)
 	}
@@ -196,8 +197,11 @@ func recoverDynamicRouteAction(
 	if err != nil {
 		return nil, err
 	}
+	if session.RouteGeneration != expectedGeneration {
+		return routeActionResult(ctx, repo, session), nil
+	}
 	session.RouteState = "action_required"
-	session.RouteReason = "route_action_launch_failed"
+	session.RouteReason = orchestrator.RouteActionLaunchFailedReason
 	session.State = models.TaskSessionStateWaitingForInput
 	session.ErrorMessage = launchErr.Error()
 	session.DownstreamACPSessionID = ""
@@ -205,6 +209,23 @@ func recoverDynamicRouteAction(
 		return nil, routeActionPersistenceError(ctx, repo, session, err)
 	}
 	return routeActionResult(ctx, repo, session), nil
+}
+
+func repairDynamicRouteAfterLaunchFailure(
+	ctx context.Context,
+	session *models.TaskSession,
+	expectedGeneration int64,
+	mark func(context.Context, string, int64) error,
+) error {
+	if session == nil || mark == nil ||
+		session.RouteReason != orchestrator.RouteActionLaunchFailedReason ||
+		session.RouteGeneration != expectedGeneration {
+		return nil
+	}
+	if err := mark(ctx, session.ID, expectedGeneration); err != nil {
+		return fmt.Errorf("restore dynamic route after failed launch: %w", err)
+	}
+	return nil
 }
 
 func routeActionResult(

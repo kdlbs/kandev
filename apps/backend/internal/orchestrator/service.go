@@ -1176,6 +1176,10 @@ const (
 	RouteActionSkip       RouteAction = "skip"
 	RouteActionCancelWait RouteAction = "cancel_wait"
 	RouteActionStop       RouteAction = "stop"
+
+	// RouteActionLaunchFailedReason marks a task-session projection whose
+	// successor launch failed before durable recovery could be confirmed.
+	RouteActionLaunchFailedReason = "route_action_launch_failed"
 )
 
 type RouteActionRequest struct {

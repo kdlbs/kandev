@@ -577,12 +577,8 @@ func (e *Engine) persistInitialGeneration(
 	return true, nil
 }
 
-// persistExpectedStatus fences a same-generation status transition so exactly
-// one concurrent caller can claim it. It type-asserts the narrower
-// GenerationStatusClaimer seam and fails closed when the persistence layer
-// does not implement it: silently degrading to persistSameGeneration's
-// generation-only fencing would let two concurrent callers both win the same
-// transition, which is exactly the double-launch this seam exists to prevent.
+// persistExpectedStatus atomically updates a same-generation route status.
+// Persistence without status-fencing support fails closed.
 func (e *Engine) persistExpectedStatus(ctx context.Context, expectedGeneration int64, expectedStatus string, state RouteState) error {
 	if e.persistence == nil {
 		return nil
@@ -750,13 +746,8 @@ func (e *Engine) MarkActionRequired(
 	}, nil
 }
 
-// MarkRecoveryActionRequired transitions a claimed "retrying" state to
-// "action_required" after its resumed launch failed. Without this, the
-// durable state stays at "retrying" forever, and every manual recovery path
-// (retry, skip, stop) rejects that status — the user is locked out with no
-// way back. No-op if the generation is stale or the state already moved on,
-// since this runs as a best-effort cleanup after a launch failure the caller
-// cannot retry synchronously.
+// MarkRecoveryActionRequired returns an in-flight route to manual recovery.
+// Stale generations and states that already moved on are no-ops.
 func (e *Engine) MarkRecoveryActionRequired(ctx context.Context, sessionID string, expectedGeneration int64) error {
 	state, exists, err := e.stateForFailure(ctx, sessionID)
 	if err != nil {
