@@ -87,6 +87,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     gitlabSavedPresets: undefined,
     azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
+    defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
     terminalFontFamily: null,
@@ -247,6 +248,10 @@ function buildIdentityFields(s: UserSettingsData, current: UserSettingsState) {
     defaultUtilityAgentId: mapNullableString(
       s.default_utility_agent_id,
       current.defaultUtilityAgentId,
+    ),
+    defaultUtilityAgentProfileId: mapNullableString(
+      s.default_utility_agent_profile_id,
+      current.defaultUtilityAgentProfileId,
     ),
   };
 }

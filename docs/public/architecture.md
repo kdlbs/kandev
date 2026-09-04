@@ -14,16 +14,15 @@ Kandev is a server-first development workbench. A Go backend owns durable produc
 3. Use the protocol and event sections for cross-process contracts.
 4. Check trust boundaries before changing credentials, executors, providers, or MCP.
 
-```mermaid
-flowchart LR
-    UI["Browser or Tauri window"] -->|HTTP + WebSocket| BE["Go backend"]
-    BE --> DB[("SQLite or PostgreSQL")]
-    BE --> Providers["Git and provider APIs"]
-    BE -->|control channel| A1["agentctl: local/worktree"]
-    BE -->|control channel| A2["agentctl: Docker/Kubernetes/SSH/Sprites"]
-    A1 --> Agent1["Agent CLI + task MCP"]
-    A2 --> Agent2["Agent CLI + task MCP"]
-```
+![Kandev architecture: a browser or Tauri window connects to the Go control plane, which owns persistence and provider access and routes scoped control channels to local and remote agentctl runtimes.](../screenshots/architecture.svg)
+
+[Open full-size SVG diagram][architecture-diagram]
+
+[architecture-diagram]: ../../docs/screenshots/architecture.svg
+
+The diagram separates the user surface from the Go control plane and the task
+runtimes below it. The backend owns the durable state and external provider
+boundary; `agentctl` owns the local or remote agent process and task MCP.
 
 ## Processes and launchers
 

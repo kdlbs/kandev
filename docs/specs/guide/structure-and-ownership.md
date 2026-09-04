@@ -114,7 +114,7 @@ capability.
 The specification linter reads the default limits from `docs/specs/spec-lint.json`.
 The default limits are:
 
-- System index: 12 KiB.
+- System index: 16 KiB.
 - Product or guide document: 16 KiB.
 - Requirement document: 20 KiB.
 - System-design document: 32 KiB.

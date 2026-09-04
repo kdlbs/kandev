@@ -30,6 +30,7 @@ import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-d
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import { t } from "@/lib/i18n";
 import { listRepositoryBranchPolicies } from "@/lib/api";
+import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 
 // Catalog key: module scope, so it is resolved at the call site.
 const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
@@ -112,6 +113,23 @@ function useLinearImportHandler(
   );
 }
 
+function useEditDialogDependencies(
+  open: boolean,
+  isEditMode: boolean,
+  workspaceId: string | null | undefined,
+  taskId: string | null | undefined,
+) {
+  return useTaskEditDialogDependencies({
+    open: open && isEditMode,
+    workspaceId,
+    taskId,
+  });
+}
+
+function isFreshBranchAvailable(fs: DialogFormState, isLocalExecutor: boolean): boolean {
+  return !fs.useRemote && isLocalExecutor && fs.repositories.length === 1;
+}
+
 type SubmitWiringArgs = {
   props: TaskCreateDialogProps;
   fs: ReturnType<typeof useDialogFormState>;
@@ -121,6 +139,7 @@ type SubmitWiringArgs = {
   isSessionMode: boolean;
   isEditMode: boolean;
   autoTitle: boolean;
+  editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
 };
@@ -134,6 +153,7 @@ function useSubmitHandlersWiring({
   isSessionMode,
   isEditMode,
   autoTitle,
+  editDependencies,
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
 }: SubmitWiringArgs) {
@@ -196,6 +216,7 @@ function useSubmitHandlersWiring({
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
     blockedBy: fs.blockedBy,
+    editDependencies,
   });
 }
 
@@ -309,8 +330,14 @@ export function useTaskCreateDialogSetup(
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
 ) {
   const resolvedProps = useResolvedTaskCreateWorkflowContext(props);
-  const { open, mode = "create", workspaceId, workflowId } = resolvedProps;
-  const { editingTask, initialValues } = resolvedProps;
+  const {
+    open,
+    mode = "create",
+    workspaceId,
+    workflowId,
+    editingTask,
+    initialValues,
+  } = resolvedProps;
   const isSessionMode = mode === "session";
   const isEditMode = mode === "edit";
   const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
@@ -325,31 +352,25 @@ export function useTaskCreateDialogSetup(
     initialValues,
     resolvedProps.lockedFields?.workflow === true,
   );
+  const editDependencies = useEditDialogDependencies(
+    open,
+    isEditMode,
+    workspaceId,
+    editingTask?.id ?? null,
+  );
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
-  const {
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    refreshRepositories,
-    taskCreateLastUsed,
-    userSettingsLoaded,
-    computed,
-    handlers,
-    repositoryLocalPath,
-    refreshBranchPolicies,
-  } = data;
+  const { computed, handlers, repositoryLocalPath, refreshBranchPolicies } = data;
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
     computed,
-    workspaceRepositories: repositories,
+    workspaceRepositories: data.repositories,
     repositoryLocalPath,
     isSessionMode,
     isEditMode,
     autoTitle,
+    editDependencies,
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
   });
@@ -363,18 +384,18 @@ export function useTaskCreateDialogSetup(
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);
   const handleLinearImport = useLinearImportHandler(fs, data.handlers.handleTaskNameChange);
-  const freshBranchAvailable =
-    !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
+  const freshBranchAvailable = isFreshBranchAvailable(fs, computed.isLocalExecutor);
   const repositorySets = useRepositorySetsForDialog({
     workspaceId: resolvedProps.workspaceId ?? null,
     open: resolvedProps.open,
     rows: fs.repositories,
-    repositories,
+    repositories: data.repositories,
     setRepositories: fs.setRepositories,
     setRepositoriesDirty: fs.setRepositoriesDirty,
-    userSettingsLoaded,
+    userSettingsLoaded: data.userSettingsLoaded,
   });
   return {
+    ...data,
     fs,
     isSessionMode,
     isEditMode,
@@ -382,24 +403,17 @@ export function useTaskCreateDialogSetup(
     autoTitle,
     isTaskStarted,
     sessionRepoName,
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    refreshRepositories,
     computed,
     handlers,
     submitHandlers,
     handleKeyDown,
     freshBranchAvailable,
     repositorySets,
-    taskCreateLastUsed,
-    userSettingsLoaded,
     guardedHandleSubmit,
     enhance,
     handleJiraImport,
     handleLinearImport,
+    editDependencies,
   };
 }
 

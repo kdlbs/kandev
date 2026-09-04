@@ -175,6 +175,7 @@
   "portableConfigNotFoundHint": "This is an editing hint. You can save the profile and add the file later.",
   "portableConfigTitle": "Agent configuration",
   "provideSecret": "Provide secret",
+  "provideSecretForEnvVar": "Provide secret for {{envVar}}",
   "quickPresets": "Quick presets",
   "refresh": "Refresh",
   "relatedDockerContainersRemoved_one": "{{count}} related Docker container will also be removed.",

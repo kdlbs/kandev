@@ -461,4 +461,24 @@ describe("useActivationPending", () => {
     rerender({ isVisible: true });
     expect(result.current.activationPendingRef.current).toBe(true);
   });
+
+  it("treats a new external token as activation while the panel stays visible", () => {
+    const { result, rerender } = renderHook(
+      ({ token }: { token: number | null }) => useActivationPending(true, token),
+      { initialProps: { token: null as number | null } },
+    );
+
+    expect(result.current.activationPendingRef.current).toBe(false);
+
+    rerender({ token: 1 });
+
+    expect(result.current.activationPendingRef.current).toBe(true);
+
+    result.current.activationPendingRef.current = false;
+    rerender({ token: 1 });
+    expect(result.current.activationPendingRef.current).toBe(false);
+
+    rerender({ token: 2 });
+    expect(result.current.activationPendingRef.current).toBe(true);
+  });
 });

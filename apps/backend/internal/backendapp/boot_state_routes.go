@@ -660,6 +660,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"sidebarTaskColors":                 settings.SidebarTaskColors,
 		"taskCreateLastUsed":                mapTaskCreateLastUsed(settings.TaskCreateLastUsed),
 		"defaultUtilityAgentId":             nullString(settings.DefaultUtilityAgentID),
+		"defaultUtilityAgentProfileId":      nullString(settings.DefaultUtilityAgentProfileID),
 		"keyboardShortcuts":                 mapStringAny(settings.KeyboardShortcuts),
 		"terminalLinkBehavior":              terminalLinkBehavior(settings.TerminalLinkBehavior),
 		"terminalFontFamily":                nullString(settings.TerminalFontFamily),

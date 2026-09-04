@@ -172,7 +172,7 @@ func newSubagentMigrationTestRepo(t *testing.T) (*Repository, *sqlx.DB) {
 // invalid JSON outright, which real corrupt rows predate.
 func dropMessageMetadataIndex(t *testing.T, db *sqlx.DB) {
 	t.Helper()
-	for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id"} {
+	for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id", "idx_messages_metadata_pending_id_lookup"} {
 		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + index); err != nil {
 			t.Fatalf("drop %s: %v", index, err)
 		}

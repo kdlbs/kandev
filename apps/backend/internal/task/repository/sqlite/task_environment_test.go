@@ -527,6 +527,40 @@ func TestUpdateTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.2
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.8
+func TestUpdateTaskEnvironmentAllowsFailedMaterializationWithoutWorkspacePath(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-pathless-failed-materialization")
+
+	environment := &models.TaskEnvironment{
+		ID:                       "env-pathless-failed-materialization",
+		TaskID:                   "task-pathless-failed-materialization",
+		ExecutorType:             string(models.ExecutorTypeWorktree),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "session-materializer",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, environment); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	environment.Status = models.TaskEnvironmentStatusFailed
+	environment.MaterializationSessionID = ""
+	if err := repo.UpdateTaskEnvironment(ctx, environment); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, environment.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.Status != models.TaskEnvironmentStatusFailed ||
+		persisted.WorkspacePath != "" || persisted.MaterializationSessionID != "" {
+		t.Fatalf("persisted environment = %+v, want pathless failed state without materialization claim", persisted)
+	}
+}
+
 func TestTransferTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	repo := newRepoForHealTests(t)
 

@@ -164,6 +164,17 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	if _, err := r.db.Exec(pendingIndex); err != nil {
 		return err
 	}
+	// idx_messages_metadata_pending_id leads with task_session_id, so it
+	// cannot be used by the clarification claim query, which filters on
+	// pending_id alone across all sessions. This bare-expression index makes
+	// that lookup seekable.
+	pendingIndexLookup := fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_messages_metadata_pending_id_lookup ON task_session_messages((%s))`,
+		dialect.JSONExtract(driver, "metadata", "pending_id"),
+	)
+	if _, err := r.db.Exec(pendingIndexLookup); err != nil {
+		return err
+	}
 	return nil
 }
 
