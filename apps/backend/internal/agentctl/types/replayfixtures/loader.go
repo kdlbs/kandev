@@ -108,6 +108,9 @@ func validateFixture(f Fixture) error {
 	if err := validateExpect(f.Expect); err != nil {
 		return err
 	}
+	if err := validateSanitisation(f); err != nil {
+		return err
+	}
 	return nil
 }
 
