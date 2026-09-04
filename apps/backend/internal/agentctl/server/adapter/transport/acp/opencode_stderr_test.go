@@ -86,7 +86,7 @@ func TestProviderErrorFromACPRequestErrorReadsOnlyStructuredActionURL(t *testing
 			Message: "AI_APICallError: 5-hour usage limit reached: " + wantURL,
 			Data:    map[string]any{"action_url": wantURL},
 		}
-		got := ProviderErrorFromError(err)
+		got := ProviderErrorFromError(err, "", "")
 		if got == nil {
 			t.Fatal("ProviderErrorFromError() = nil, want provider error")
 		}
@@ -132,7 +132,7 @@ func TestProviderErrorFromACPRequestErrorReadsOnlyStructuredActionURL(t *testing
 			{name: "wrapped generic error", err: fmt.Errorf("provider failed")},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
-				got := ProviderErrorFromError(tt.err)
+				got := ProviderErrorFromError(tt.err, "", "")
 				if tt.wantProvider && (got == nil || got.Source != streams.ProviderErrorSourceACPPrompt) {
 					t.Fatalf("ProviderErrorFromError() = %+v, want generic ACP provider error", got)
 				}
@@ -177,7 +177,7 @@ func TestProviderErrorFromACPRequestErrorProjectsGenericPromptFailure(t *testing
 		Data:    map[string]any{"errorKind": "server_error", "private_token": "must-not-cross-boundary"},
 	}
 
-	got := ProviderErrorFromError(err)
+	got := ProviderErrorFromError(err, "", "")
 	if got == nil {
 		t.Fatal("ProviderErrorFromError() = nil, want a sanitized generic ACP provider error")
 	}

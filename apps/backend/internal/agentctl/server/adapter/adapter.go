@@ -132,6 +132,16 @@ type AuthenticatableAdapter interface {
 	Authenticate(ctx context.Context, methodID string) error
 }
 
+// ProviderErrorContextProvider exposes the adapter state a generic ACP
+// prompt-error projection needs but cannot read from the error itself: the
+// negotiated provider identity and the session's settled model identity, read
+// under the adapter's own lock at projection time
+// (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22). modelID is empty when no model
+// has been settled for the session yet.
+type ProviderErrorContextProvider interface {
+	ProviderErrorContext() (providerID, modelID string)
+}
+
 // ConfigOptionSettableAdapter is an optional interface implemented by adapters
 // that support setting an arbitrary session config option (ACP
 // session/set_config_option). Useful for agent-specific runtime knobs that

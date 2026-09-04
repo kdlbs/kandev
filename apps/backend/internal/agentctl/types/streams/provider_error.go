@@ -23,9 +23,16 @@ const (
 // account/workspace identifiers. RemediationURL is only ever populated by the
 // adapter-specific allowlist validator; it is never reconstructed from prose.
 type ProviderError struct {
-	Source         string     `json:"source,omitempty"`
-	ProviderID     string     `json:"provider_id,omitempty"`
-	ModelID        string     `json:"model_id,omitempty"`
+	Source     string `json:"source,omitempty"`
+	ProviderID string `json:"provider_id,omitempty"`
+	ModelID    string `json:"model_id,omitempty"`
+	// RPCCode is the JSON-RPC error code from a terminal ACP prompt error,
+	// carried verbatim. JSON-RPC forbids code 0, so 0 means absent.
+	RPCCode int `json:"rpc_code,omitempty"`
+	// ErrorKind is the adapter-declared error kind from a terminal ACP prompt
+	// error's structured Data, allowlisted and validated before it crosses the
+	// boundary (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22).
+	ErrorKind      string     `json:"error_kind,omitempty"`
 	Message        string     `json:"message,omitempty"`
 	RemediationURL string     `json:"remediation_url,omitempty"`
 	OccurredAt     time.Time  `json:"occurred_at,omitempty"`

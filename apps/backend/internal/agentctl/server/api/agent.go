@@ -676,7 +676,8 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 					zap.Error(err))
 				return
 			}
-			providerError := acptransport.ProviderErrorFromError(err)
+			providerID, modelID := providerErrorContext(adapter)
+			providerError := acptransport.ProviderErrorFromError(err, providerID, modelID)
 			// The raw error string is only safe for the correlated stderr
 			// diagnostic (its Error() is the sanitized message). A structured
 			// ACP RequestError serializes its Data — including action_url and
@@ -937,6 +938,20 @@ func sessionModelState(agentAdapter adapter.AgentAdapter) *streams.SessionModelS
 		return nil
 	}
 	return provider.GetSessionModelState()
+}
+
+// providerErrorContext reads the adapter state a generic ACP prompt-error
+// projection needs but cannot derive from the error itself: the negotiated
+// provider identity and the session's settled model identity
+// (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22). An adapter that does not
+// implement the optional interface yields no context, and the projection
+// omits both fields.
+func providerErrorContext(agentAdapter adapter.AgentAdapter) (providerID, modelID string) {
+	provider, ok := agentAdapter.(adapter.ProviderErrorContextProvider)
+	if !ok {
+		return "", ""
+	}
+	return provider.ProviderErrorContext()
 }
 
 // promptOrSteer routes a prompt to the steering path when the caller asked for it

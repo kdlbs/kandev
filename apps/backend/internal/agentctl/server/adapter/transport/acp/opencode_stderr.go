@@ -43,8 +43,22 @@ func (e *providerPromptError) Error() string {
 // error without exposing the provider-specific wrapper to lifecycle callers.
 // It first unwraps the correlated stderr diagnostic; for a structured ACP
 // service-failure it reads only the explicit `action_url` field and the safe
-// message — never the raw error string.
-func ProviderErrorFromError(err error) *streams.ProviderError {
+// message — never the raw error string. providerID and modelID are the
+// adapter's own state at the moment of projection
+// (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22) and are merged onto whichever
+// projection wins, filling only fields that projection left empty so a richer
+// provider-specific extractor is never overwritten by the generic allowlisted
+// metadata.
+func ProviderErrorFromError(err error, providerID, modelID string) *streams.ProviderError {
+	projection := winningProviderErrorProjection(err)
+	if projection == nil {
+		return nil
+	}
+	mergeAllowlistedProviderErrorMetadata(projection, err, providerID, modelID)
+	return projection
+}
+
+func winningProviderErrorProjection(err error) *streams.ProviderError {
 	var providerErr *providerPromptError
 	if errors.As(err, &providerErr) && providerErr != nil && providerErr.ProviderError.Valid() {
 		copy := providerErr.ProviderError
@@ -54,6 +68,58 @@ func ProviderErrorFromError(err error) *streams.ProviderError {
 		return providerErr
 	}
 	return providerErrorFromACPPrompt(err)
+}
+
+// providerErrorMetadataPattern bounds an allowlisted metadata field to at most
+// 64 bytes of `[A-Za-z0-9_.-]`, applied identically to error_kind, provider_id
+// and model_id: a malformed or oversized field is dropped rather than
+// invalidating the projection (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22).
+var providerErrorMetadataPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+func validProviderErrorMetadataField(value string) string {
+	if providerErrorMetadataPattern.MatchString(value) {
+		return value
+	}
+	return ""
+}
+
+// acpErrorKindFromData reads the allowlisted `errorKind` field from a terminal
+// ACP prompt error's structured Data. Data is adapter-defined `any`; only the
+// exact map[string]any shape encoding/json produces is accepted, and no other
+// field of Data is ever read.
+func acpErrorKindFromData(data any) string {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	kind, ok := m["errorKind"].(string)
+	if !ok {
+		return ""
+	}
+	return validProviderErrorMetadataField(kind)
+}
+
+// mergeAllowlistedProviderErrorMetadata fills provider_id and model_id from
+// the adapter's own state, and rpc_code/error_kind from the underlying
+// *acp.RequestError when err is (or wraps) one. Raw RequestError.Data never
+// crosses this call other than through the validated error_kind extraction.
+func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, err error, providerID, modelID string) {
+	if projection.ProviderID == "" {
+		projection.ProviderID = validProviderErrorMetadataField(providerID)
+	}
+	if projection.ModelID == "" {
+		projection.ModelID = validProviderErrorMetadataField(modelID)
+	}
+	var reqErr *acp.RequestError
+	if !errors.As(err, &reqErr) || reqErr == nil {
+		return
+	}
+	if projection.RPCCode == 0 {
+		projection.RPCCode = reqErr.Code
+	}
+	if projection.ErrorKind == "" {
+		projection.ErrorKind = acpErrorKindFromData(reqErr.Data)
+	}
 }
 
 // providerErrorFromACPPrompt projects the safe message from a terminal ACP
