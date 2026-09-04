@@ -253,8 +253,7 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 // text is contained in the terminal failure's normalized message: a matching
 // classification code alone is not enough, since assistant prose narrating a
 // failure can classify identically without being the transport diagnostic
-// itself (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.23). Callers must hold
-// e.mu.
+// itself. Callers must hold e.mu.
 func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
 	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
 		matchingProviderFailureCode(data) == e.providerDiagnosticCode &&

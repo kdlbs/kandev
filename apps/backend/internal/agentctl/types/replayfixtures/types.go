@@ -1,9 +1,8 @@
 // Package replayfixtures is the leaf package for the ACP provider-error
-// replay fixture matrix (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.17-.19). It
-// has no production dependencies so both the ACP transport package and the
-// orchestrator package can import it without an import cycle, and it embeds
-// the fixture corpus via go:embed so both test packages read one source of
-// truth instead of two drifting copies.
+// replay fixture matrix. It has no production dependencies so both the ACP
+// transport package and the orchestrator package can import it without an
+// import cycle, and it embeds the fixture corpus via go:embed so both test
+// packages read one source of truth instead of two drifting copies.
 //
 // See docs/specs/platform/system-design/provider-error-recovery-02.md for the
 // full contract this package implements.

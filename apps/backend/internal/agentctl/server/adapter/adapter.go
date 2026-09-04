@@ -135,9 +135,8 @@ type AuthenticatableAdapter interface {
 // ProviderErrorContextProvider exposes the adapter state a generic ACP
 // prompt-error projection needs but cannot read from the error itself: the
 // negotiated provider identity and the session's settled model identity, read
-// under the adapter's own lock at projection time
-// (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22). modelID is empty when no model
-// has been settled for the session yet.
+// under the adapter's own lock at projection time. modelID is empty when no
+// model has been settled for the session yet.
 type ProviderErrorContextProvider interface {
 	ProviderErrorContext() (providerID, modelID string)
 }

@@ -623,8 +623,8 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 	}
 }
 
-// ProviderErrorContext implements adapter.ProviderErrorContextProvider. modelID
-// is empty until the adapter has settled a model for the session (AC.22): a
+// ProviderErrorContext implements adapter.ProviderErrorContextProvider.
+// modelID is empty until the adapter has settled a model for the session: a
 // non-empty currentModelFromConfig(availableConfigOptions) value at read time.
 func (a *Adapter) ProviderErrorContext() (providerID, modelID string) {
 	a.mu.RLock()

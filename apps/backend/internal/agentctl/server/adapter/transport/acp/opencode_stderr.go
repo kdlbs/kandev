@@ -44,11 +44,10 @@ func (e *providerPromptError) Error() string {
 // It first unwraps the correlated stderr diagnostic; for a structured ACP
 // service-failure it reads only the explicit `action_url` field and the safe
 // message — never the raw error string. providerID and modelID are the
-// adapter's own state at the moment of projection
-// (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22) and are merged onto whichever
-// projection wins, filling only fields that projection left empty so a richer
-// provider-specific extractor is never overwritten by the generic allowlisted
-// metadata.
+// adapter's own state at the moment of projection and are merged onto
+// whichever projection wins, filling only fields that projection left empty
+// so a richer provider-specific extractor is never overwritten by the generic
+// allowlisted metadata.
 func ProviderErrorFromError(err error, providerID, modelID string) *streams.ProviderError {
 	projection := winningProviderErrorProjection(err)
 	if projection == nil {
@@ -73,7 +72,7 @@ func winningProviderErrorProjection(err error) *streams.ProviderError {
 // providerErrorMetadataPattern bounds an allowlisted metadata field to at most
 // 64 bytes of `[A-Za-z0-9_.-]`, applied identically to error_kind, provider_id
 // and model_id: a malformed or oversized field is dropped rather than
-// invalidating the projection (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22).
+// invalidating the projection.
 var providerErrorMetadataPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 func validProviderErrorMetadataField(value string) string {

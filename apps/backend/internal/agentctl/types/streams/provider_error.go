@@ -31,7 +31,7 @@ type ProviderError struct {
 	RPCCode int `json:"rpc_code,omitempty"`
 	// ErrorKind is the adapter-declared error kind from a terminal ACP prompt
 	// error's structured Data, allowlisted and validated before it crosses the
-	// boundary (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22).
+	// boundary.
 	ErrorKind      string     `json:"error_kind,omitempty"`
 	Message        string     `json:"message,omitempty"`
 	RemediationURL string     `json:"remediation_url,omitempty"`

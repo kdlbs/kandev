@@ -942,10 +942,9 @@ func sessionModelState(agentAdapter adapter.AgentAdapter) *streams.SessionModelS
 
 // providerErrorContext reads the adapter state a generic ACP prompt-error
 // projection needs but cannot derive from the error itself: the negotiated
-// provider identity and the session's settled model identity
-// (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.22). An adapter that does not
-// implement the optional interface yields no context, and the projection
-// omits both fields.
+// provider identity and the session's settled model identity. An adapter that
+// does not implement the optional interface yields no context, and the
+// projection omits both fields.
 func providerErrorContext(agentAdapter adapter.AgentAdapter) (providerID, modelID string) {
 	provider, ok := agentAdapter.(adapter.ProviderErrorContextProvider)
 	if !ok {
