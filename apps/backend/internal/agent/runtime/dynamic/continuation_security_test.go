@@ -159,3 +159,77 @@ func TestContinuationWithFailureSanitizesFallbackReason(t *testing.T) {
 		t.Fatalf("continuationWithFailure retained the raw secret: %q", updated.FailureReason)
 	}
 }
+
+// TestContinuationRedactsUserAuthoredFieldSecrets is the deferred-finding
+// regression: TaskDescription, PlanSummary, and RepositorySummary are
+// user/agent-authored carrier text that crosses to a different provider via
+// ContinuationPrompt, so a credential pasted into any of them must not
+// survive into the persisted continuation JSON or the rendered prompt any
+// more than one in ToolSummary, FailureReason, or Conversation does.
+func TestContinuationRedactsUserAuthoredFieldSecrets(t *testing.T) {
+	fields := map[string]func(Continuation) string{
+		"TaskDescription":   func(c Continuation) string { return c.TaskDescription },
+		"PlanSummary":       func(c Continuation) string { return c.PlanSummary },
+		"RepositorySummary": func(c Continuation) string { return c.RepositorySummary },
+	}
+	for name, get := range fields {
+		t.Run(name, func(t *testing.T) {
+			input := ContinuationInput{}
+			carrier := "token=" + secretShapedToken
+			switch name {
+			case "TaskDescription":
+				input.TaskDescription = carrier
+			case "PlanSummary":
+				input.PlanSummary = carrier
+			case "RepositorySummary":
+				input.RepositorySummary = carrier
+			}
+
+			continuation := BuildBoundedContinuation(input)
+			if strings.Contains(get(continuation), secretShapedToken) {
+				t.Fatalf("%s retained the raw secret: %q", name, get(continuation))
+			}
+
+			payload, err := json.Marshal(continuation)
+			if err != nil {
+				t.Fatalf("marshal continuation: %v", err)
+			}
+			if strings.Contains(string(payload), secretShapedToken) {
+				t.Fatalf("continuation_json retained the raw secret via %s: %s", name, payload)
+			}
+
+			prompt := ContinuationPrompt("do the task", continuation)
+			if strings.Contains(prompt, secretShapedToken) {
+				t.Fatalf("rendered prompt retained the raw secret via %s: %q", name, prompt)
+			}
+		})
+	}
+}
+
+// TestContinuationPreservesNonCredentialContentInUserAuthoredFields is the
+// collateral-damage guard: the credential-only tier used for
+// TaskDescription, PlanSummary, and RepositorySummary must not run the full
+// Sanitize rule set, which would collapse a legitimate 40-char commit SHA (or
+// any other 32+ char identifier) to "***".
+func TestContinuationPreservesNonCredentialContentInUserAuthoredFields(t *testing.T) {
+	commitSHA := "bda95f25f3ef161764b0c710205e08fb13f3ef80"
+	if len(commitSHA) != 40 {
+		t.Fatalf("test fixture commitSHA is %d chars, want 40", len(commitSHA))
+	}
+
+	continuation := BuildBoundedContinuation(ContinuationInput{
+		TaskDescription:   "fixes regression introduced in " + commitSHA,
+		PlanSummary:       "verified against " + commitSHA,
+		RepositorySummary: "HEAD at " + commitSHA,
+	})
+
+	if !strings.Contains(continuation.TaskDescription, commitSHA) {
+		t.Fatalf("TaskDescription mangled a non-credential commit SHA: %q", continuation.TaskDescription)
+	}
+	if !strings.Contains(continuation.PlanSummary, commitSHA) {
+		t.Fatalf("PlanSummary mangled a non-credential commit SHA: %q", continuation.PlanSummary)
+	}
+	if !strings.Contains(continuation.RepositorySummary, commitSHA) {
+		t.Fatalf("RepositorySummary mangled a non-credential commit SHA: %q", continuation.RepositorySummary)
+	}
+}

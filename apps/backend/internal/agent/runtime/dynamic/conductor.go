@@ -420,15 +420,20 @@ const continuationFieldLimit = 4000
 // predecessor left off, not where it began. ToolSummary and FailureReason can
 // carry raw tool output or provider-controlled error text respectively, so
 // both are sanitized before crossing to a different provider or reaching
-// durable storage.
+// durable storage. TaskDescription, PlanSummary, and RepositorySummary are
+// user/agent-authored carrier text rather than diagnostics: a credential
+// pasted into any of them must not cross to a different provider either, but
+// the full Sanitize rule set would mangle legitimate long identifiers (commit
+// SHAs, UUIDs) these fields routinely contain, so they use the narrower
+// credential-only tier instead.
 func BuildBoundedContinuation(input ContinuationInput) Continuation {
 	return Continuation{
-		TaskDescription:   bounded(input.TaskDescription),
+		TaskDescription:   bounded(routingerr.SanitizeCredentials(input.TaskDescription)),
 		WorkflowStep:      bounded(input.WorkflowStep),
 		Conversation:      boundedConversation(input.UserMessages, input.Conversation),
 		ToolSummary:       bounded(routingerr.Sanitize(input.ToolSummary)),
-		RepositorySummary: bounded(input.RepositorySummary),
-		PlanSummary:       bounded(input.PlanSummary),
+		RepositorySummary: bounded(routingerr.SanitizeCredentials(input.RepositorySummary)),
+		PlanSummary:       bounded(routingerr.SanitizeCredentials(input.PlanSummary)),
 		FailureReason:     bounded(routingerr.Sanitize(input.FailureReason)),
 	}
 }

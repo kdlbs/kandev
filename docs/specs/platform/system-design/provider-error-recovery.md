@@ -409,6 +409,33 @@ an earlier decision occurred.
 Raw streams, credentials, account identifiers, and unbounded error text are not
 stored in policy or route state.
 
+### Continuation package sanitization tiers
+
+The dynamic-routing continuation package (`dynamic.BuildBoundedContinuation`,
+persisted as `dynamic_route_states.continuation_json` and rendered into the
+successor's prompt by `ContinuationPrompt`) mixes two kinds of carrier text,
+and `routingerr` sanitizes them with two different rule sets:
+
+- **Provider diagnostics** (`ToolSummary`, `FailureReason`, and the agent half
+  of `Conversation`) run through `routingerr.Sanitize`, the full rule set. In
+  addition to credential patterns it collapses any 32-plus-character run,
+  rewrites URLs down to scheme and host, and normalizes home paths — accepted
+  collateral damage for text Kandev never shows the user verbatim.
+- **User/agent-authored carrier text** (`TaskDescription`, `PlanSummary`,
+  `RepositorySummary`, and the user-message half of `Conversation`) runs
+  through `routingerr.SanitizeCredentials`, a narrower tier covering only
+  credential-shaped patterns (`sk-`, `ghp_`, `github_pat_`, `kandev_pat_`,
+  `Bearer`, `Authorization:`, `--api-key`, and `password|secret|token`
+  assignments). It excludes the 32-plus-char catch-all, the URL rewrite, and
+  home-path normalization, because this text is already shown to the user
+  unredacted and commonly carries legitimate long identifiers — commit SHAs,
+  UUIDs, file hashes — that the full rule set would render as `***`.
+
+Both tiers are credential-safe: a live token in either kind of field is
+redacted before it is persisted or crosses to a different provider on
+fallback. The narrower tier exists to avoid mangling non-credential content
+in fields the user already sees, not to admit a class of allowed leak.
+
 ## API surface
 
 - Dynamic profile CRUD accepts and returns the versioned per-class policy

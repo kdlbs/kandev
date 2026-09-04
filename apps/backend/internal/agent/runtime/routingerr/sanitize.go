@@ -12,7 +12,26 @@ type redaction struct {
 	replace string
 }
 
-var redactions = []redaction{
+// credentialRedactions matches only credential-shaped patterns: API keys,
+// personal access tokens, auth headers, and password/secret/token
+// assignments. It excludes the URL rewrite, the opaque session-id rule, the
+// 32-plus-char catch-all, and home-path normalization, all of which are safe
+// to apply to provider diagnostics but would mangle unrelated content (commit
+// SHAs, UUIDs, base64 samples, URLs with paths) in user-authored text.
+var credentialRedactions = []redaction{
+	{regexp.MustCompile(`sk-[A-Za-z0-9_-]{12,}`), "sk-" + redactionMask},
+	{regexp.MustCompile(`github_pat_[A-Za-z0-9_]{50,}`), "github_pat_" + redactionMask},
+	{regexp.MustCompile(`ghp_[A-Za-z0-9]{30,}`), "ghp_" + redactionMask},
+	// Kandev personal access tokens, including the ?token=<PAT> form used by
+	// headerless WS clients.
+	{regexp.MustCompile(`kandev_pat_[A-Za-z0-9_]+`), "kandev_pat_" + redactionMask},
+	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]{20,}`), "Bearer " + redactionMask},
+	{regexp.MustCompile(`(?i)Authorization:\s*[^\r\n]+`), "Authorization: " + redactionMask},
+	{regexp.MustCompile(`--api-key[= ]\S+`), "--api-key " + redactionMask},
+	{regexp.MustCompile(`(?i)(password|secret|token)\s*[:=]\s*\S+`), "$1: " + redactionMask},
+}
+
+var redactions = append(append([]redaction{
 	// Provider diagnostics may include account/workspace links and opaque
 	// session identifiers. These are not useful recovery details and must not
 	// cross the lifecycle or message boundaries.
@@ -21,33 +40,40 @@ var redactions = []redaction{
 	// fragments that can carry account or workspace identifiers.
 	{regexp.MustCompile(`(https?://)(?:[^@\s/]+@)?([^/\s?#]+)[^\s]*`), "$1$2"},
 	{regexp.MustCompile(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`), "[redacted-id]"},
-	{regexp.MustCompile(`sk-[A-Za-z0-9_-]{12,}`), "sk-" + redactionMask},
-	{regexp.MustCompile(`github_pat_[A-Za-z0-9_]{50,}`), "github_pat_" + redactionMask},
-	{regexp.MustCompile(`ghp_[A-Za-z0-9]{30,}`), "ghp_" + redactionMask},
-	// Kandev personal access tokens, including the ?token=<PAT> form used by
-	// headerless WS clients. The generic token/32-char rules below also catch
-	// these; this keeps the credential type visible in redacted logs.
-	{regexp.MustCompile(`kandev_pat_[A-Za-z0-9_]+`), "kandev_pat_" + redactionMask},
-	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]{20,}`), "Bearer " + redactionMask},
-	{regexp.MustCompile(`(?i)Authorization:\s*[^\r\n]+`), "Authorization: " + redactionMask},
-	{regexp.MustCompile(`--api-key[= ]\S+`), "--api-key " + redactionMask},
-	{regexp.MustCompile(`(?i)(password|secret|token)\s*[:=]\s*\S+`), "$1: " + redactionMask},
+}, credentialRedactions...), []redaction{
 	{regexp.MustCompile(`[A-Za-z0-9+/=_-]{32,}`), redactionMask},
 	{regexp.MustCompile(`/Users/[^/\s]+/`), "/Users/<redacted>/"},
 	{regexp.MustCompile(`/home/[^/\s]+/`), "/home/<redacted>/"},
-}
+}...)
 
-// Sanitize redacts likely credentials, normalizes home paths, and truncates
-// to MaxRawExcerptBytes. The function is idempotent: applying it twice
-// equals applying it once.
-func Sanitize(s string) string {
-	for _, r := range redactions {
+func applyRedactions(s string, rules []redaction) string {
+	for _, r := range rules {
 		s = r.pattern.ReplaceAllString(s, r.replace)
 	}
 	if len(s) > MaxRawExcerptBytes {
 		s = s[:MaxRawExcerptBytes]
 	}
 	return s
+}
+
+// Sanitize redacts likely credentials, normalizes home paths, and truncates
+// to MaxRawExcerptBytes. The function is idempotent: applying it twice
+// equals applying it once. Use this for provider stdout/stderr and other
+// diagnostic text, where collapsing opaque identifiers and paths is
+// acceptable collateral.
+func Sanitize(s string) string {
+	return applyRedactions(s, redactions)
+}
+
+// SanitizeCredentials redacts only credential-shaped patterns (API keys,
+// tokens, auth headers, password/secret/token assignments) and truncates to
+// MaxRawExcerptBytes. Unlike Sanitize, it leaves URLs, opaque IDs, and any
+// other 32-plus-char run untouched, so it is safe to apply to user-authored
+// text (a task description, a plan) that must not carry a live credential
+// across a provider boundary but should otherwise survive intact. It is
+// idempotent for the same reason Sanitize is.
+func SanitizeCredentials(s string) string {
+	return applyRedactions(s, credentialRedactions)
 }
 
 type sanitizedError struct {
