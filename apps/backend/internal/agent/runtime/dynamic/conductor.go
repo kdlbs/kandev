@@ -447,42 +447,74 @@ const conversationUserBudget = continuationFieldLimit / 2
 // bounding the worst case.
 const maxRedactionInputBytes = 256 * 1024
 
+// redactionLookbackBytes bounds how far sanitizedTail/sanitizedHead may
+// extend their scan window past its edge to reach a line boundary. Every
+// rule in redactions is confined to a single line except Bearer,
+// Authorization: and (password|secret|token), which use \s and can span
+// one newline; snapping the window's edge to the nearest line boundary
+// within this many bytes keeps those three rules from being bisected by
+// the window itself, at a fixed extra cost regardless of how large the
+// caller's raw input is.
+const redactionLookbackBytes = 64 * 1024
+
 // sanitizedTail returns up to budget bytes of the newest content in raw,
 // with credentials redacted. For input at or under maxRedactionInputBytes,
 // Redact sees the complete input before any cut, so an anchored rule (e.g.
 // "Authorization:") always sees its full literal prefix and value together
-// and cannot be bisected by a budget window. For larger input, Redact runs
-// only over the newest maxRedactionInputBytes window; a rule bisected at
-// that window's leading edge can only reach the output if the redacted
-// window's trimmed length is at or under budget (boundedTailN otherwise
-// discards everything near the window's leading edge), so that case redacts
-// the complete input instead.
+// and cannot be bisected by a budget window. For larger input, the window's
+// leading edge is snapped back to the nearest preceding line boundary
+// (within redactionLookbackBytes) before Redact runs, so an anchored rule
+// starting on an earlier line is not split by the window itself. The scan
+// stays bounded by maxRedactionInputBytes+redactionLookbackBytes regardless
+// of how large raw is — unlike a full-input fallback, its cost cannot grow
+// with session size.
 func sanitizedTail(raw string, budget int) string {
 	if len(raw) <= maxRedactionInputBytes {
 		return boundedTailN(routingerr.Redact(raw), budget)
 	}
-	redacted := routingerr.Redact(raw[len(raw)-maxRedactionInputBytes:])
-	if len(strings.TrimSpace(redacted)) <= budget {
-		return boundedTailN(routingerr.Redact(raw), budget)
-	}
-	return boundedTailN(redacted, budget)
+	start := snapWindowStartToLineBoundary(raw, len(raw)-maxRedactionInputBytes)
+	return boundedTailN(routingerr.Redact(raw[start:]), budget)
 }
 
-// sanitizedHead mirrors sanitizedTail's fast-path/exact-fallback shape for
-// ToolSummary, whose final cut (bounded()) keeps the head instead of the
-// tail. A window taken from the same edge the final cut keeps can still
-// have a rule bisected at its far edge; that fragment only reaches the
-// output if the window's redacted length collapses to at or under
-// continuationFieldLimit, so that case redacts the complete input instead.
+// sanitizedHead mirrors sanitizedTail for ToolSummary, whose final cut
+// (bounded()) keeps the head instead of the tail: the window's trailing
+// edge is snapped forward to the nearest following line boundary (within
+// redactionLookbackBytes) so an anchored rule ending on a later line is not
+// split by the window itself.
 func sanitizedHead(raw string) string {
 	if len(raw) <= maxRedactionInputBytes {
 		return bounded(routingerr.Redact(raw))
 	}
-	redacted := routingerr.Redact(raw[:maxRedactionInputBytes])
-	if len(strings.TrimSpace(redacted)) <= continuationFieldLimit {
-		return bounded(routingerr.Redact(raw))
+	end := snapWindowEndToLineBoundary(raw, maxRedactionInputBytes)
+	return bounded(routingerr.Redact(raw[:end]))
+}
+
+// snapWindowStartToLineBoundary moves start back to just after the nearest
+// preceding newline within redactionLookbackBytes, or to the lookback
+// boundary itself if no newline is found there.
+func snapWindowStartToLineBoundary(raw string, start int) int {
+	floor := start - redactionLookbackBytes
+	if floor < 0 {
+		floor = 0
 	}
-	return bounded(redacted)
+	if idx := strings.LastIndexByte(raw[floor:start], '\n'); idx >= 0 {
+		return floor + idx + 1
+	}
+	return floor
+}
+
+// snapWindowEndToLineBoundary moves end forward to just before the nearest
+// following newline within redactionLookbackBytes, or to the lookback
+// boundary itself if no newline is found there.
+func snapWindowEndToLineBoundary(raw string, end int) int {
+	ceil := end + redactionLookbackBytes
+	if ceil > len(raw) {
+		ceil = len(raw)
+	}
+	if idx := strings.IndexByte(raw[end:ceil], '\n'); idx >= 0 {
+		return end + idx
+	}
+	return ceil
 }
 
 // boundedConversation bounds user messages and the agent conversation on

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
@@ -308,4 +309,48 @@ func TestContinuationWithFailureSanitizesFallbackReason(t *testing.T) {
 	if strings.Contains(updated.FailureReason, secretShapedToken) {
 		t.Fatalf("continuationWithFailure retained the raw secret: %q", updated.FailureReason)
 	}
+}
+
+// TestSanitizedTailAndHeadStayBoundedForLargeCollapsingInput is the
+// regression for R3-BLOCKER-1: once an input exceeds maxRedactionInputBytes,
+// a run the generic credential rule collapses to a few bytes must not
+// trigger a fallback that redacts the complete raw input, or scan cost
+// becomes linear in session size (measured: 45s for a 64MiB input on the
+// pre-fix fallback). Both sanitizedTail (Conversation) and sanitizedHead
+// (ToolSummary) must stay bounded. 32MiB is well past a linear fallback's
+// budget for boundedCeiling, while the fixed-window scan this asserts
+// completes in milliseconds regardless of input size.
+func TestSanitizedTailAndHeadStayBoundedForLargeCollapsingInput(t *testing.T) {
+	const size = 32 * 1024 * 1024
+	const boundedCeiling = 5 * time.Second
+	// A single giant alnum run: the generic 32+ char credential rule
+	// collapses every match to "***", which is what defeated the old
+	// collapse-triggers-full-scan fallback.
+	collapsing := strings.Repeat("a", size)
+
+	t.Run("conversation", func(t *testing.T) {
+		start := time.Now()
+		continuation := BuildBoundedContinuation(ContinuationInput{Conversation: collapsing})
+		elapsed := time.Since(start)
+
+		if elapsed > boundedCeiling {
+			t.Fatalf("sanitizedTail took %s for a %d-byte collapsing input; want bounded scan cost (<%s)", elapsed, size, boundedCeiling)
+		}
+		if len(continuation.Conversation) > continuationFieldLimit {
+			t.Fatalf("Conversation exceeded continuationFieldLimit: %d bytes", len(continuation.Conversation))
+		}
+	})
+
+	t.Run("tool_summary", func(t *testing.T) {
+		start := time.Now()
+		continuation := BuildBoundedContinuation(ContinuationInput{ToolSummary: collapsing})
+		elapsed := time.Since(start)
+
+		if elapsed > boundedCeiling {
+			t.Fatalf("sanitizedHead took %s for a %d-byte collapsing input; want bounded scan cost (<%s)", elapsed, size, boundedCeiling)
+		}
+		if len(continuation.ToolSummary) > continuationFieldLimit {
+			t.Fatalf("ToolSummary exceeded continuationFieldLimit: %d bytes", len(continuation.ToolSummary))
+		}
+	})
 }
