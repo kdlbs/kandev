@@ -15,15 +15,17 @@ On fine-pointer layouts, the action shares the file-type icon slot and normally
 appears only while the row is hovered. Once an action starts, its progress
 feedback must remain visible until the associated request finishes, even when
 the pointer leaves the row. The UI system owns this transient presentation
-contract; Git operation execution and pending-state lifetime remain owned by
-their existing systems.
+contract and the per-file pending lifetime that drives it; Git operation
+execution and refreshed repository status remain owned by their existing
+systems.
 
 ## Terminology
 
 - **File action slot:** The leading Changes-row position that shows either the
   file-type icon, the stage or unstage action, or its pending indicator.
-- **Pending file action:** A stage or unstage request whose per-file pending
-  state has started and has not yet cleared.
+- **Pending file action:** The latest stage or unstage request that owns the
+  pending state for one repository and file and has not reached its target state
+  or failed.
 
 ## Requirements
 
@@ -56,11 +58,18 @@ the action is complete.
   shall retain their always-visible, touch-sized file actions and show the same
   pending indicator without introducing a hover dependency or reducing the
   existing touch target.
+- **AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.6:** A successful stage or unstage
+  request shall remain pending through stale status updates and clear only when
+  refreshed status reaches the requested staged or unstaged state.
+- **AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.7:** When the current stage or
+  unstage request fails, its pending feedback shall clear. If an inverse request
+  has superseded it for the same repository and file, the older request's
+  completion or failure shall not clear the newer request's pending feedback.
 
 ## Out of scope
 
-- Changing Git stage or unstage execution, pending-state creation, or
-  pending-state cleanup.
+- Changing Git stage or unstage execution, transport, or repository status
+  refresh.
 - Changing bulk stage, bulk unstage, discard, edit, or commit feedback.
 - Adding user-facing copy, notifications, cancellation, or progress estimates.
 - Changing Changes-panel navigation, grouping, row density, or scroll

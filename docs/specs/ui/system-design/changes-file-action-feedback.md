@@ -10,23 +10,27 @@ requirements:
 ## Purpose and boundaries
 
 This design keeps the existing per-file stage and unstage spinner visible after
-a fine-pointer user leaves the affected Changes row. It changes only the
-presentation precedence inside the shared file-action slot. Git operation
-dispatch, repository scoping, status refresh, and pending-state cleanup remain
-unchanged.
+a fine-pointer user leaves the affected Changes row. It defines both the
+presentation precedence inside the shared file-action slot and operation-owned
+pending cleanup in `useSessionGit`. Git operation transport, repository
+scoping, and status acquisition remain unchanged.
 
 ## Requirement mapping
 
-| Requirement                               | Design section                                                                                                                                                                                       |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REQ-UI-CHANGES-FILE-ACTION-FEEDBACK-001` | [Components and responsibilities](#components-and-responsibilities), [Visibility precedence](#visibility-precedence), [Responsive behavior](#responsive-behavior), and [Verification](#verification) |
+| Requirement                               | Design section                                                                                                                                                                                                                                      |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-UI-CHANGES-FILE-ACTION-FEEDBACK-001` | [Components and responsibilities](#components-and-responsibilities), [Visibility precedence](#visibility-precedence), [Responsive behavior](#responsive-behavior), [Failure and recovery](#failure-and-recovery), and [Verification](#verification) |
 
 ## Components and responsibilities
 
 - `useSessionGit` continues to own `pendingStageFiles`, keyed by repository and
-  path. It records the requested stage or unstage transition before dispatch
-  and clears it when refreshed status reaches that transition or the request
-  fails. A stale same-repository snapshot cannot clear a newer action.
+  path, plus the latest requested stage or unstage operation for each key. It
+  records that operation before dispatch and replaces the owner when an inverse
+  operation supersedes it.
+- Pending reconciliation clears a successful operation only when refreshed
+  status reaches its requested staged or unstaged state. Failure cleanup clears
+  a key only while the failed request still owns it, so stale status and an
+  older superseded request cannot clear a newer action.
 - `changes-panel-tree.tsx` and `changes-panel-timeline.tsx` continue to derive
   `FileRow.isPending` from that set. No additional local loading state is added.
 - `FileRow` continues to share one implementation across the desktop Changes
@@ -77,11 +81,17 @@ section.
 
 ## Failure and recovery
 
-The UI does not infer completion from hover or elapsed time. It follows the
-existing `isPending` input. Status refresh clears pending state only when the acted-on file has reached the
-requested staged or unstaged state. Request failures clear it directly. The
-slot then restores the idle icon/action presentation, and backend or WebSocket
-errors remain surfaced through their current paths.
+The UI does not infer completion from hover, elapsed time, or a successful
+operation response. It follows the existing `isPending` input. A status refresh
+clears pending state only when the acted-on file has reached the target state
+of the operation that currently owns its repository/path key.
+
+A failed or thrown request clears its keys only when it remains their current
+owner. If an inverse operation supersedes it, its later completion or failure
+cannot clear the newer pending state. The newer action remains pending until
+its own target state appears or its request fails. After cleanup, the slot
+restores the idle icon/action presentation, and backend or WebSocket errors
+remain surfaced through their current paths.
 
 ## Verification
 
