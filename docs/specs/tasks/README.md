@@ -58,6 +58,7 @@ signals, and task-scoped scheduling contracts.
 - [External task ID idempotency](requirements/external-id-idempotency.md)
 - [Interrupted Task Indicator](requirements/interrupted-task-indicator.md)
 - [Kanban task cache preserves executor fields across merges](requirements/kanban-task-executor-cache-staleness.md)
+- [Kanban Task Reordering](requirements/kanban-task-reordering.md)
 - [Task Labels](requirements/labels.md)
 - [Link Existing Task to External References](requirements/link-existing-task-github-issue.md)
 - [MCP-Created Task Agent Profile Default](requirements/mcp-task-agent-profile-default.md)
@@ -141,7 +142,7 @@ signals, and task-scoped scheduling contracts.
 ### System design
 
 - [Task completion and conversation follow-ups](system-design/task-completion.md)
-
+- [Kanban Task Reordering](system-design/kanban-task-reordering.md)
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
