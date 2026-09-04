@@ -42,7 +42,7 @@ func TestWorkspaceInventoryRepairSessionUsesOnlyMatchingServerRuntimeIdentity(t 
 		},
 	}}
 	executor := &Executor{repo: mockRepo}
-	session, err := executor.workspaceInventoryRepairSession(
+	session, _, err := executor.workspaceInventoryRepairSession(
 		context.Background(),
 		&LaunchAgentRequest{Repositories: []RepoSpec{{TaskRepositoryID: "task-repo", RepositoryID: "repo"}}},
 		&models.TaskEnvironment{ID: "environment"},
@@ -58,7 +58,7 @@ func TestWorkspaceInventoryRepairSessionUsesOnlyMatchingServerRuntimeIdentity(t 
 	}
 
 	mockRepo.executorsRunning["session"].TaskID = "other-task"
-	_, err = executor.workspaceInventoryRepairSession(
+	_, _, err = executor.workspaceInventoryRepairSession(
 		context.Background(),
 		&LaunchAgentRequest{Repositories: []RepoSpec{{TaskRepositoryID: "task-repo", RepositoryID: "repo"}}},
 		&models.TaskEnvironment{ID: "environment"},

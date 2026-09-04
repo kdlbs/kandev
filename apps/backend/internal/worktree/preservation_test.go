@@ -82,6 +82,96 @@ func TestInspectPreservedCheckoutHashesIgnoredState(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+func TestInspectPreservedCheckoutDistinguishesRegularFileFromSymlink(t *testing.T) {
+	repositoryPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "preserved")
+	runGit(t, repositoryPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	uniquePath := filepath.Join(worktreePath, "unique-state")
+	if err := os.WriteFile(uniquePath, []byte("target.txt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	regular, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
+		RepositoryPath: repositoryPath,
+		WorktreePath:   worktreePath,
+		ExpectedBranch: "feature/pr-branch",
+		WorktreeID:     "synthetic-worktree",
+	})
+	if err != nil {
+		t.Fatalf("InspectPreservedCheckout(regular): %v", err)
+	}
+	if err := os.Remove(uniquePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target.txt", uniquePath); err != nil {
+		t.Fatal(err)
+	}
+
+	symlink, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
+		RepositoryPath: repositoryPath,
+		WorktreePath:   worktreePath,
+		ExpectedBranch: "feature/pr-branch",
+		WorktreeID:     "synthetic-worktree",
+	})
+	if err != nil {
+		t.Fatalf("InspectPreservedCheckout(symlink): %v", err)
+	}
+	if regular.StatusHash != symlink.StatusHash || regular.IndexHash != symlink.IndexHash {
+		t.Fatalf("fixture changed status or index evidence: regular=%+v symlink=%+v", regular, symlink)
+	}
+	if regular.ContentHash == symlink.ContentHash {
+		t.Fatalf("regular file and symlink produced the same content hash: %s", regular.ContentHash)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+func TestInspectPreservedCheckoutLengthFramesAdjacentEntries(t *testing.T) {
+	repositoryPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "preserved")
+	runGit(t, repositoryPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	pathA := filepath.Join(worktreePath, "a")
+	pathB := filepath.Join(worktreePath, "b")
+	if err := os.WriteFile(pathA, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pathB, []byte("b\x00y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
+		RepositoryPath: repositoryPath,
+		WorktreePath:   worktreePath,
+		ExpectedBranch: "feature/pr-branch",
+		WorktreeID:     "synthetic-worktree",
+	})
+	if err != nil {
+		t.Fatalf("InspectPreservedCheckout(first): %v", err)
+	}
+	if err := os.WriteFile(pathA, []byte("xb\x00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pathB, []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
+		RepositoryPath: repositoryPath,
+		WorktreePath:   worktreePath,
+		ExpectedBranch: "feature/pr-branch",
+		WorktreeID:     "synthetic-worktree",
+	})
+	if err != nil {
+		t.Fatalf("InspectPreservedCheckout(second): %v", err)
+	}
+	if first.StatusHash != second.StatusHash || first.IndexHash != second.IndexHash {
+		t.Fatalf("fixture changed status or index evidence: first=%+v second=%+v", first, second)
+	}
+	if first.ContentHash == second.ContentHash {
+		t.Fatalf("different adjacent file payloads produced the same content hash: %s", first.ContentHash)
+	}
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6
 // TestInspectPreservedCheckoutDoesNotMutateIndex proves the read-only
 // inspection required by the preservation contract: a status-only probe

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,7 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	} else if existing != nil {
 		return existing, nil
 	}
-	repairSession, err := e.workspaceInventoryRepairSession(ctx, req, env, session, repositories)
+	repairSession, sourceRuntime, err := e.workspaceInventoryRepairSession(ctx, req, env, session, repositories)
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +67,7 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	if err != nil {
 		return nil, err
 	}
+	running = workspaceInventoryEvidenceRuntime(running, sourceRuntime)
 	preservation := workspaceInventoryPreservation(spec, session, evidence, running)
 	repair := &models.WorkspaceInventoryRepair{
 		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
@@ -100,6 +102,13 @@ func (e *Executor) repairReuseEnvironmentInventory(
 		return nil, fmt.Errorf("%w: checkout changed during metadata repair", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
 	return receipt, nil
+}
+
+func workspaceInventoryEvidenceRuntime(current, source *models.ExecutorRunning) *models.ExecutorRunning {
+	if current != nil {
+		return current
+	}
+	return source
 }
 
 // existingWorkspaceInventoryRepairReceipt returns an already-committed receipt
@@ -340,6 +349,9 @@ func (e *Executor) workspaceInventoryRuntimeEvidence(
 	sessionID string,
 ) (*models.ExecutorRunning, error) {
 	running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: cannot load authoritative runtime evidence", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
@@ -598,38 +610,6 @@ func workspaceInventoryPreservation(
 		preservation.AgentExecutionID = running.AgentExecutionID
 	}
 	return preservation
-}
-
-func (e *Executor) workspaceInventoryRepairSession(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	env *models.TaskEnvironment,
-	session *models.TaskSession,
-	repositories []*repoInfo,
-) (*models.TaskSession, error) {
-	if len(env.Repos) != 0 || len(session.Worktrees) != 0 {
-		return session, nil
-	}
-	spec, ok := singleWorkspaceInventoryRepairSpec(req)
-	if !ok {
-		return nil, models.ErrWorkspaceInventoryRecoveryConflict
-	}
-	position, ok := workspaceInventoryRepairPosition(spec, repositories)
-	if !ok {
-		return nil, models.ErrWorkspaceInventoryRecoveryConflict
-	}
-	running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
-	if err != nil || running == nil || running.TaskID != session.TaskID ||
-		running.WorktreeID == "" || running.WorktreePath == "" || running.WorktreeBranch == "" {
-		return nil, fmt.Errorf("%w: no server-owned checkout identity", models.ErrWorkspaceInventoryRecoveryConflict)
-	}
-	copySession := *session
-	copySession.Worktrees = []*models.TaskEnvironmentRepo{{
-		TaskEnvironmentID: env.ID, RepositoryID: spec.RepositoryID,
-		WorktreeID: running.WorktreeID, WorktreePath: running.WorktreePath,
-		WorktreeBranch: running.WorktreeBranch, Position: position,
-	}}
-	return &copySession, nil
 }
 
 func singleWorkspaceInventoryRepairSpec(req *LaunchAgentRequest) (RepoSpec, bool) {

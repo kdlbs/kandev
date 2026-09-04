@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -199,6 +200,7 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 	paths := bytes.Split(output, []byte{0})
 	sort.Slice(paths, func(i, j int) bool { return bytes.Compare(paths[i], paths[j]) < 0 })
 	hash := sha256.New()
+	_, _ = hash.Write([]byte("kandev-checkout-content-v1\x00"))
 	for _, rawPath := range paths {
 		if len(rawPath) == 0 {
 			continue
@@ -208,20 +210,28 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 		if statErr != nil || info.IsDir() {
 			return "", fmt.Errorf("%w: checkout content", ErrPreservedCheckoutUnproven)
 		}
-		_, _ = hash.Write(rawPath)
-		_, _ = hash.Write([]byte{0})
+		var contents []byte
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, readErr := os.Readlink(path)
 			if readErr != nil {
 				return "", readErr
 			}
-			_, _ = hash.Write([]byte(target))
-			continue
+			contents = []byte(target)
+		} else {
+			if !info.Mode().IsRegular() {
+				return "", fmt.Errorf("%w: unsupported checkout entry", ErrPreservedCheckoutUnproven)
+			}
+			contents, err = os.ReadFile(path)
+			if err != nil {
+				return "", err
+			}
 		}
-		contents, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return "", readErr
-		}
+		var frame [20]byte
+		binary.BigEndian.PutUint32(frame[0:4], uint32(info.Mode()))
+		binary.BigEndian.PutUint64(frame[4:12], uint64(len(rawPath)))
+		binary.BigEndian.PutUint64(frame[12:20], uint64(len(contents)))
+		_, _ = hash.Write(frame[:])
+		_, _ = hash.Write(rawPath)
 		_, _ = hash.Write(contents)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil

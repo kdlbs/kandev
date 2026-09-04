@@ -38,8 +38,11 @@ branches, and environment IDs are not accepted.
 ## Candidate selection and checkout proof
 
 For one mismatched slot, the executor builds a candidate from an existing stale
-environment row or the target session's `executors_running` snapshot. Local
-worktree recovery validates all of these facts:
+environment row, the target session's `executors_running` snapshot, or exactly
+one checkout identity retained by a prior session bound to the same task and
+environment. The prior-session fallback joins server-owned task-session and
+runtime records; it does not discover paths from the filesystem. Local worktree
+recovery validates all of these facts:
 
 - task, workspace, environment, repository, and session ownership agree;
 - the candidate path is the canonical path owned by the environment and is not
@@ -55,8 +58,9 @@ worktree recovery validates all of these facts:
   cleanup still in flight.
 
 The inspector captures HEAD, ref containment, porcelain status counts and
-hash, a bounded content hash over tracked, untracked, and ignored files, a
-staged-index hash over every index entry's path/mode/blob identity,
+hash, a bounded content hash over tracked, untracked, and ignored files using
+typed, length-delimited path/mode/payload entries, a staged-index hash over
+every index entry's path/mode/blob identity,
 executor state, and source record revisions. The staged-index hash exists
 because the content hash alone reads only working-tree bytes: a low-level
 index write (for example `git update-index --cacheinfo`) can repoint a
@@ -66,11 +70,12 @@ never mutates `.git/index`, including its own status call's normal
 opportunistic index refresh. Host paths remain internal; public
 receipts expose only a path hash.
 
-Executor/runtime evidence is read through the authoritative session-scoped
-runtime store. A lookup failure or a runtime record whose task/session identity
-does not match fails closed before either the repair transaction or a recovered
-attestation write; absence is evidence only when the authoritative lookup
-succeeds and returns no record.
+Executor/runtime evidence is read through the authoritative runtime store. A
+lookup failure or a runtime record whose task/session identity does not match
+fails closed before either the repair transaction or a recovered attestation
+write. A new session's typed not-found result is the expected proof that it has
+no runtime yet; in the zero-row case, the unique prior environment-bound runtime
+that supplies checkout identity is retained in the preservation receipt.
 
 ## Repair transaction and idempotency
 
