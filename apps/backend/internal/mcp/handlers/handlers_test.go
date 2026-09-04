@@ -41,6 +41,12 @@ import (
 
 // newTestTaskService creates a real task service with a temporary file-backed SQLite DB for integration tests.
 // Returns the service and the raw repo (for seeding data).
+type testWorkspacePolicyAttacher struct{}
+
+func (testWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, service.WorkspacePolicy) error {
+	return nil
+}
+
 func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository) {
 	svc, repo, _ := newTestTaskServiceWithEventBus(t)
 	return svc, repo
@@ -101,6 +107,7 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 		Environments:     repo,
 		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	return svc, repo, eventBus
 }
 
@@ -140,6 +147,7 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 		Environments:     repo,
 		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
 	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo
@@ -310,6 +318,14 @@ func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
 	taskRepos, err := repo.ListTaskRepositories(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, taskRepos, 1)
+	if remote.repositoryID != taskRepos[0].RepositoryID {
+		t.Fatalf("Associate received repositoryID %q, want task_repositories.repository_id %q",
+			remote.repositoryID, taskRepos[0].RepositoryID)
+	}
+	if remote.repositoryID == taskRepos[0].ID {
+		t.Fatalf("Associate received task_repositories row id %q instead of repository_id",
+			remote.repositoryID)
+	}
 	binding, found, err := models.LoadRemoteContribution(taskRepos[0].Metadata)
 	require.NoError(t, err)
 	if !found || binding.SourceRepository.Path != "contributor/widget" {

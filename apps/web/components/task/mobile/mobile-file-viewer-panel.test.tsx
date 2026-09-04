@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const state = {
@@ -47,19 +48,21 @@ afterEach(cleanup);
 describe("MobileFileViewerPanel workspace path", () => {
   it("uses the effective workspace path for binary file viewers", () => {
     render(
-      <MobileFileViewerPanel
-        file={{
-          path: "dist/archive.zip",
-          name: "archive.zip",
-          content: "",
-          originalContent: "",
-          originalHash: "hash",
-          isDirty: false,
-          isBinary: true,
-        }}
-        sessionId="session-1"
-        onClose={vi.fn()}
-      />,
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: "dist/archive.zip",
+            name: "archive.zip",
+            content: "",
+            originalContent: "",
+            originalHash: "hash",
+            isDirty: false,
+            isBinary: true,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+        />
+      </TooltipProvider>,
     );
 
     expect(screen.getByTestId("binary-viewer").getAttribute("data-worktree-path")).toBe(
@@ -71,19 +74,21 @@ describe("MobileFileViewerPanel workspace path", () => {
 describe("MobileFileViewerPanel external file action", () => {
   it("renders a touch-sized action scoped to the open file's repository", () => {
     render(
-      <MobileFileViewerPanel
-        file={{
-          path: "src/new.ts",
-          name: "new.ts",
-          repo: "frontend",
-          content: "",
-          originalContent: "",
-          originalHash: "hash",
-          isDirty: false,
-        }}
-        sessionId="session-1"
-        onClose={vi.fn()}
-      />,
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: "src/new.ts",
+            name: "new.ts",
+            repo: "frontend",
+            content: "",
+            originalContent: "",
+            originalHash: "hash",
+            isDirty: false,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+        />
+      </TooltipProvider>,
     );
 
     const props = JSON.parse(
@@ -101,19 +106,21 @@ describe("MobileFileViewerPanel external file action", () => {
 
   it("opens a Markdown file directly in preview mode when requested", () => {
     render(
-      <MobileFileViewerPanel
-        file={{
-          path: "README.md",
-          name: "README.md",
-          content: "# README",
-          originalContent: "# README",
-          originalHash: "hash",
-          isDirty: false,
-        }}
-        sessionId="session-1"
-        onClose={vi.fn()}
-        initialMarkdownPreview
-      />,
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: "README.md",
+            name: "README.md",
+            content: "# README",
+            originalContent: "# README",
+            originalHash: "hash",
+            isDirty: false,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+          initialMarkdownPreview
+        />
+      </TooltipProvider>,
     );
 
     expect(screen.getByTestId("markdown-preview")).toBeTruthy();
@@ -122,38 +129,42 @@ describe("MobileFileViewerPanel external file action", () => {
 
   it("resets preview mode when the same path is opened from another repository", () => {
     const { rerender } = render(
-      <MobileFileViewerPanel
-        file={{
-          path: "README.md",
-          name: "README.md",
-          repo: "frontend",
-          content: "# README",
-          originalContent: "# README",
-          originalHash: "hash",
-          isDirty: false,
-        }}
-        sessionId="session-1"
-        onClose={vi.fn()}
-      />,
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: "README.md",
+            name: "README.md",
+            repo: "frontend",
+            content: "# README",
+            originalContent: "# README",
+            originalHash: "hash",
+            isDirty: false,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+        />
+      </TooltipProvider>,
     );
 
     fireEvent.click(screen.getByTestId("markdown-preview-toggle"));
     expect(screen.getByTestId("markdown-preview")).toBeTruthy();
 
     rerender(
-      <MobileFileViewerPanel
-        file={{
-          path: "README.md",
-          name: "README.md",
-          repo: "backend",
-          content: "# README",
-          originalContent: "# README",
-          originalHash: "hash",
-          isDirty: false,
-        }}
-        sessionId="session-1"
-        onClose={vi.fn()}
-      />,
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: "README.md",
+            name: "README.md",
+            repo: "backend",
+            content: "# README",
+            originalContent: "# README",
+            originalHash: "hash",
+            isDirty: false,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+        />
+      </TooltipProvider>,
     );
 
     expect(screen.getByTestId("file-content")).toBeTruthy();

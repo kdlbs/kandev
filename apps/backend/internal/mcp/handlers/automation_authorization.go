@@ -59,11 +59,14 @@ var automationSurfaceActions = map[string]struct{}{
 	ws.ActionMCPResolveAgentPermission:      {},
 }
 
+// ActionMCPArchiveTask is deliberately absent: a hidden automation_run task
+// archiving itself is its normal end-of-run completion signal, not the kind
+// of self-mutation (messaging, stopping, spawning a session on itself) this
+// list exists to block.
 var automationSelfDeniedActions = map[string]struct{}{
 	ws.ActionMCPCreateTask:                  {},
 	ws.ActionMCPUpdateTask:                  {},
 	ws.ActionMCPMoveTask:                    {},
-	ws.ActionMCPArchiveTask:                 {},
 	ws.ActionMCPAddTaskDependency:           {},
 	ws.ActionMCPRemoveTaskDependency:        {},
 	ws.ActionMCPMessageTask:                 {},

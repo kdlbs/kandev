@@ -59,6 +59,7 @@ func TestRowProcessLivenessUnknownCases(t *testing.T) {
 	}{
 		{"nil", nil},
 		{"docker", &models.ExecutorRunning{Runtime: agentruntime.RuntimeDocker, LocalPID: os.Getpid()}},
+		{"kubernetes", &models.ExecutorRunning{Runtime: agentruntime.RuntimeKubernetes, PID: os.Getpid(), LocalPID: os.Getpid()}},
 		{"empty-runtime", &models.ExecutorRunning{Runtime: "", LocalPID: os.Getpid()}},
 		{"local-no-handle", &models.ExecutorRunning{Runtime: agentruntime.RuntimeStandalone, LocalPID: 0}},
 	}

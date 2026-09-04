@@ -18,6 +18,8 @@ import (
 // re-scan the block and append a duplicate one below it.
 const expansionMarker = "EXPANDED PROMPT REFERENCES:"
 
+const browserPromptContextMarker = "CONTEXT PROMPTS:"
+
 // expansionBlockPrefix is the exact, literal prefix that
 // FormatPromptReferenceExpansions' output has once wrapped by sysprompt.Wrap:
 // the opening <kandev-system> tag immediately followed by expansionMarker,
@@ -32,14 +34,32 @@ var expansionBlockRegex = regexp.MustCompile(
 	regexp.QuoteMeta(expansionBlockPrefix) + `[\s\S]*?` + regexp.QuoteMeta(sysprompt.TagEnd) + `\s*`,
 )
 
+// browserPromptContextBlockRegex matches the context block emitted by the
+// browser when it attaches saved prompts. Browser-provided definitions are
+// compatibility metadata only; the backend replaces them with the current
+// saved prompt record before the message is persisted or dispatched.
+var browserPromptContextBlockRegex = regexp.MustCompile(
+	regexp.QuoteMeta(sysprompt.TagStart) + `\s*` + regexp.QuoteMeta(browserPromptContextMarker) +
+		`[\s\S]*?` + regexp.QuoteMeta(sysprompt.TagEnd) + `\s*(` + regexp.QuoteMeta(sysprompt.TagStart) + `|$)`,
+)
+
+// browserPromptContextUnclosedBlockRegex fails closed for a matching browser
+// block without an outer closing tag. The browser block is compatibility
+// metadata, so dropping it is safer than allowing forged content to reach
+// resolution or persistence.
+var browserPromptContextUnclosedBlockRegex = regexp.MustCompile(
+	regexp.QuoteMeta(sysprompt.TagStart) + `\s*` + regexp.QuoteMeta(browserPromptContextMarker) + `[\s\S]*$`,
+)
+
 // AppendReferenceExpansions resolves any "@name" saved-prompt references in
 // prompt and, when at least one resolves, appends a hidden
 // <kandev-system>-wrapped block containing the expanded content while leaving
 // the original @mentions in place in the visible prompt body.
 //
-// Before resolution it removes any expansion-shaped input block. This keeps
-// the operation idempotent while ensuring an untrusted lookalike cannot
-// suppress a real lookup or acquire trusted provenance.
+// Before resolution it removes any browser prompt-definition or
+// expansion-shaped input block. This keeps the operation idempotent while
+// ensuring an untrusted lookalike cannot suppress a real lookup or acquire
+// trusted provenance.
 //
 // It returns the cleaned prompt without an expansion when the prompt contains
 // no "@", resolution fails (the failure is logged via log, when non-nil, and
@@ -63,9 +83,27 @@ func (s *Service) AppendReferenceExpansionsWithContext(
 	prompt string,
 	log *zap.Logger,
 ) (expandedPrompt, trustedContext string) {
-	// Expansion-shaped input blocks carry no provenance. Remove them before
-	// resolving so a forged block cannot suppress a real saved-prompt lookup.
-	cleanedPrompt := expansionBlockRegex.ReplaceAllString(prompt, "")
+	// Browser-provided prompt definitions and expansion-shaped input blocks
+	// carry no provenance. Remove them before resolving so stale or forged
+	// content cannot reach the agent or suppress a real saved-prompt lookup.
+	// Keep searching after a literal closing tag embedded in a browser-supplied
+	// definition. The outer block's closing tag is the one followed by another
+	// system block or the end of the prompt; the captured boundary preserves a
+	// following system block for its own canonicalization.
+	cleanedPrompt := prompt
+	for {
+		replaced := browserPromptContextBlockRegex.ReplaceAllString(cleanedPrompt, "$1")
+		if replaced != cleanedPrompt {
+			cleanedPrompt = replaced
+			continue
+		}
+		replaced = browserPromptContextUnclosedBlockRegex.ReplaceAllString(cleanedPrompt, "")
+		if replaced == cleanedPrompt {
+			break
+		}
+		cleanedPrompt = replaced
+	}
+	cleanedPrompt = expansionBlockRegex.ReplaceAllString(cleanedPrompt, "")
 	if cleanedPrompt != prompt {
 		prompt = strings.TrimSpace(cleanedPrompt)
 	}

@@ -107,6 +107,7 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	r.migrate.Apply("idx_tasks_queued_for_step", `CREATE INDEX IF NOT EXISTS idx_tasks_queued_for_step ON tasks(queued_for_step_id, queued_at)`)
+	r.migrate.Apply("idx_tasks_updated_at_id", `CREATE INDEX IF NOT EXISTS idx_tasks_updated_at_id ON tasks(updated_at, id)`)
 	// Remove deprecated workflow_step_id column from task_sessions
 	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
 		return err
@@ -127,6 +128,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_environments.materialization_session_id", `ALTER TABLE task_environments ADD COLUMN materialization_session_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_environments.container_bootstrap_nonce_secret_id", `ALTER TABLE task_environments ADD COLUMN container_bootstrap_nonce_secret_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_environments.container_control_auth_token_secret_id", `ALTER TABLE task_environments ADD COLUMN container_control_auth_token_secret_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.ownership_generation", `ALTER TABLE task_environments ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -288,6 +290,8 @@ func (r *Repository) runMigrations() error {
 	// migrations are idempotent and preserve the false default for legacy rows.
 	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
+	r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'complete'`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The
@@ -344,6 +348,13 @@ func (r *Repository) runMigrations() error {
 	if err := r.backfillPromptSeq(); err != nil {
 		return err
 	}
+
+	// Workflow step display snapshot on plan revisions, same pattern as
+	// author_name: the step a task was on when the revision was written.
+	// Pre-existing revisions get empty strings, matching the fresh-DB default.
+	r.migrate.Apply("task_plan_revisions.workflow_step_id", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
 
 	return nil
 }
@@ -933,6 +944,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		`CREATE TABLE task_environments_new (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
+			ownership_generation INTEGER NOT NULL DEFAULT 1,
 			repository_id TEXT DEFAULT '',
 			executor_type TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
@@ -954,7 +966,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_environments_new SELECT
-			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
+			id, task_id, ownership_generation, repository_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, '', worktree_id, worktree_path, worktree_branch,
 			workspace_path, container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			COALESCE(task_dir_name, ''), created_at, updated_at

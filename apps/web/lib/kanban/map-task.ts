@@ -71,6 +71,10 @@ export type TaskLike = {
   primary_executor_id?: string | null;
   primary_executor_type?: string | null;
   primary_executor_name?: string | null;
+  primary_agent_name?: string | null;
+  primary_agent_profile_id?: string | null;
+  labels?: string | string[] | null;
+  origin?: string | null;
   is_remote_executor?: boolean;
   parent_id?: string | null;
   updated_at?: string;
@@ -109,6 +113,20 @@ function pickRepositoryId(source: TaskLike): string | undefined {
 
 function pickId(source: TaskLike): string {
   return (source.id ?? source.task_id ?? "") as string;
+}
+
+function pickLabels(source: TaskLike): string[] {
+  if (Array.isArray(source.labels))
+    return source.labels.filter((label) => typeof label === "string");
+  if (!source.labels) return [];
+  try {
+    const decoded: unknown = JSON.parse(source.labels);
+    return Array.isArray(decoded)
+      ? decoded.filter((label): label is string => typeof label === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 export function pickPendingAction(action: unknown): TaskPendingAction | null | undefined {
@@ -204,6 +222,7 @@ export function copyPrimaryExecutorFields(merged: KanbanTask, existing: KanbanTa
   merged.isRemoteExecutor = existing.isRemoteExecutor;
 }
 
+// eslint-disable-next-line complexity -- Maps the complete task wire contract into the shared Kanban model.
 export function toKanbanTask(source: TaskLike): KanbanTask {
   return {
     id: pickId(source),
@@ -232,6 +251,10 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primaryExecutorId: source.primary_executor_id ?? undefined,
     primaryExecutorType: source.primary_executor_type ?? undefined,
     primaryExecutorName: source.primary_executor_name ?? undefined,
+    primaryAgentProfileId: source.primary_agent_profile_id ?? undefined,
+    primaryAgentName: source.primary_agent_name ?? undefined,
+    labels: pickLabels(source),
+    origin: source.origin ?? undefined,
     isRemoteExecutor: source.is_remote_executor ?? false,
     parentTaskId: source.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(source.metadata),

@@ -1,17 +1,17 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef } from "react";
 import { cn } from "@kandev/ui/lib/utils";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
 import { IconArrowRight } from "@tabler/icons-react";
-import { moveTask } from "@/lib/api";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
-import { useAppStore } from "@/components/state-provider";
-import { useContextFilesStore } from "@/lib/state/context-files-store";
-import { useLayoutStore } from "@/lib/state/layout-store";
-import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
+import {
+  usePresentationToken,
+  useWorkflowStepMove,
+} from "@/hooks/domains/kanban/use-workflow-step-move";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { useTranslation } from "react-i18next";
 import {
   MinimalWorkflowStepper,
@@ -22,38 +22,6 @@ import {
 } from "./workflow-step-disclosure";
 
 type Step = WorkflowStepperStep;
-
-const PLAN_CONTEXT_PATH = "plan:context";
-
-/** Returns a callback that disables plan mode for the active session of a task. */
-function useDisablePlanMode() {
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const planModeEnabled = useAppStore((s) =>
-    activeSessionId ? (s.chatInput.planModeBySessionId[activeSessionId] ?? false) : false,
-  );
-  const setPlanMode = useAppStore((s) => s.setPlanMode);
-  const setActiveDocument = useAppStore((s) => s.setActiveDocument);
-  const closeDocument = useLayoutStore((s) => s.closeDocument);
-  const removeContextFile = useContextFilesStore((s) => s.removeFile);
-  const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
-
-  return useCallback(() => {
-    if (!activeSessionId || !planModeEnabled) return;
-    applyBuiltInPreset("default");
-    closeDocument(activeSessionId);
-    setActiveDocument(activeSessionId, null);
-    setPlanMode(activeSessionId, false);
-    removeContextFile(activeSessionId, PLAN_CONTEXT_PATH);
-  }, [
-    activeSessionId,
-    planModeEnabled,
-    setPlanMode,
-    setActiveDocument,
-    closeDocument,
-    removeContextFile,
-    applyBuiltInPreset,
-  ]);
-}
 
 type WorkflowStepperProps = {
   steps: Step[];
@@ -75,43 +43,24 @@ const WorkflowStepper = memo(function WorkflowStepper({
   onMoveError,
 }: WorkflowStepperProps) {
   const { t } = useTranslation();
-  const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
-  const disablePlanMode = useDisablePlanMode();
-  // Only the in-flight step's own button is disabled, so every other step stays
-  // clickable and two moves can overlap. This counter marks which one is the
-  // latest; a slower predecessor must not own the banner or the loading state.
-  const moveRequestRef = useRef(0);
+  // The task route's continuous presentation of this task: a navigation away
+  // and back changes taskId and back, which must invalidate a request left
+  // over from the earlier presentation the same way a preview close-and-reopen
+  // does for the kanban preview header.
+  const presentationToken = usePresentationToken(taskId ?? null);
+  const { movingToStepId, handleMove } = useWorkflowStepMove({
+    taskId,
+    workflowId,
+    presentationToken,
+    onMoveStart,
+    onMoveError,
+  });
 
-  const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
+  const sortedSteps = useMemo(() => sortWorkflowStepsByPosition(steps), [steps]);
 
   const currentIndex = useMemo(
     () => sortedSteps.findIndex((s) => s.id === currentStepId),
     [sortedSteps, currentStepId],
-  );
-
-  const handleMove = useCallback(
-    async (stepId: string): Promise<boolean> => {
-      if (!taskId || !workflowId) return false;
-      onMoveStart?.();
-      disablePlanMode();
-      const requestId = ++moveRequestRef.current;
-      setMovingToStepId(stepId);
-      try {
-        await moveTask(taskId, {
-          workflow_id: workflowId,
-          workflow_step_id: stepId,
-          position: 0,
-        });
-        return true;
-      } catch (err) {
-        console.error("[WorkflowStepper] Failed to move task:", err);
-        if (requestId === moveRequestRef.current) onMoveError?.(err);
-        return false;
-      } finally {
-        if (requestId === moveRequestRef.current) setMovingToStepId(null);
-      }
-    },
-    [taskId, workflowId, disablePlanMode, onMoveStart, onMoveError],
   );
 
   // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).

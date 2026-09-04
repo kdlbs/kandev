@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useWebSocketClient } from "@/lib/ws/connection";
 import { subscribeRunEvents } from "@/lib/ws/handlers/run";
 import type { RunDetail, RunEvent } from "@/lib/api/domains/office-extended-api";
 import { getRunDetail } from "@/lib/api/domains/office-runs-api";
@@ -64,6 +64,7 @@ export function useRunLiveSync(
   });
   const outputSnapshotRef = useRef({ runId, value: initialOutputSummary });
   const refreshedTerminalRunRef = useRef<string | null>(null);
+  const client = useWebSocketClient();
 
   useEffect(() => {
     const nextSeqs = new Set(initialEvents.map((e) => e.seq));
@@ -129,9 +130,7 @@ export function useRunLiveSync(
     if (status !== "claimed") return;
     if (TERMINAL_STATUSES.has(status)) return;
 
-    const client = getWebSocketClient();
     if (!client) return;
-
     const unsubscribeWs = client.subscribeRun(runId);
     const unsubscribeListener = subscribeRunEvents(runId, (payload) => {
       if (payload.run_id !== runId) return;
@@ -147,7 +146,7 @@ export function useRunLiveSync(
       unsubscribeListener();
       unsubscribeWs();
     };
-  }, [runId, status]);
+  }, [client, runId, status]);
 
   return { events, status, outputSummary };
 }

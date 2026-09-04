@@ -18,6 +18,14 @@ A workspace has at most one sync configuration, pointed at exactly one provider 
 3. Pick the provider, then fill in the repository (or project path), branch, and directory in **Workflows > Sync**.
 4. Run a sync and review created, updated, skipped, and removed definitions.
 
+![Workflow sync flow from repository files through fetch, per-file validation, safe reconciliation, and a result with counts and warnings.](../screenshots/workflow-sync.svg)
+
+[Open full-size SVG diagram][workflow-sync-diagram]
+
+[workflow-sync-diagram]: ../../docs/screenshots/workflow-sync.svg
+
+One invalid file freezes the workflows last synced from that file, while valid files continue through reconciliation. This protects existing definitions from a bad edit.
+
 ## Prerequisites and credentials
 
 You need a repository and a branch containing valid portable workflow files. The Kandev backend, not the browser and not a task executor, reads the repository. The repository must be inside the workspace's effective scope.

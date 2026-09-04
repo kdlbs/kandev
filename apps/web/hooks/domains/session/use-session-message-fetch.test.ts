@@ -79,4 +79,20 @@ describe("doFetchMessages", () => {
     await secondFetch;
     expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
   });
+
+  it("clears hook gates when an active fetch becomes stale before settling", async () => {
+    const result = deferred<Message[]>();
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(vi.fn().mockReturnValue(result.promise), setMessagesLoading);
+    const isActive = { value: true };
+    const fetch = doFetchMessages({ ...params, isActive: () => isActive.value } as never);
+
+    isActive.value = false;
+    result.resolve([]);
+    await fetch;
+
+    expect(params.setIsLoading).toHaveBeenLastCalledWith(false);
+    expect(params.setIsWaitingForInitialMessages).toHaveBeenLastCalledWith(false);
+    expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
 });

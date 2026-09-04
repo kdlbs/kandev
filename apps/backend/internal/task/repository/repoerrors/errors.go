@@ -12,6 +12,9 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrMessageNotFound reports that no message row matched the supplied id.
+var ErrMessageNotFound = errors.New("message not found")
+
 // ErrTaskParentMismatch reports that a task no longer has the parent/workspace
 // relation a cross-task mutation was authorized against.
 var ErrTaskParentMismatch = errors.New("task parent relation no longer matches")
@@ -34,6 +37,10 @@ var ErrRepositoryBranchPoliciesExist = errors.New("repository branch policies al
 
 // ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
 var ErrTaskEnvironmentNotFound = errors.New("task environment not found")
+
+// ErrTaskEnvironmentOwnershipChanged reports that an ownership transfer's
+// expected owner or generation is no longer current.
+var ErrTaskEnvironmentOwnershipChanged = errors.New("task environment ownership changed")
 
 // ErrExternalIDConflict reports that a task insert lost the uniqueness race
 // on uniq_tasks_external_id — the TOCTOU backstop for the create sequence's

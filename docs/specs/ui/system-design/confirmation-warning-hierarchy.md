@@ -4,24 +4,27 @@ system: ui
 requirements:
   - REQ-TASKS-CONFIRMATION-WARNING-001
   - REQ-TASKS-CONFIRMATION-SURFACE-002
+  - REQ-UI-TASK-CLEANUP-CONFIRMATION-001
 ---
 
-# Task Confirmation Warning Hierarchy System Design
+# Task Confirmation Surface System Design
 
 ## Purpose and boundaries
 
-This design owns the presentation contract for the shared still-working warning
-and the fine-pointer archive confirmation surface used by task archive and
-delete workflows. It changes density, archive-only width, and mounting location
-only; the task in-flight signal and destructive-action behavior remain owned by
-their existing components and runtime contracts.
+This design owns the presentation contract for the shared still-working warning,
+the fine-pointer archive confirmation surface, and the cleanup consequence
+hierarchy used by task archive and delete workflows. It changes density,
+surface-local composition, localized presentation, action semantics, and archive
+mounting only; task state, cleanup rules, and callbacks remain owned by their
+existing components and runtime contracts.
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-TASKS-CONFIRMATION-WARNING-001` | [Components and responsibilities](#components-and-responsibilities) and [Mobile and desktop containment](#mobile-and-desktop-containment) |
-| `REQ-TASKS-CONFIRMATION-SURFACE-002` | [Popover width contract](#popover-width-contract), [Fine-pointer mounting](#fine-pointer-mounting), and [Mobile and desktop containment](#mobile-and-desktop-containment) |
+| Requirement                            | Design section                                                                                                                                                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-TASKS-CONFIRMATION-WARNING-001`   | [Components and responsibilities](#components-and-responsibilities) and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                                                    |
+| `REQ-TASKS-CONFIRMATION-SURFACE-002`   | [Popover width contract](#popover-width-contract), [Fine-pointer mounting](#fine-pointer-mounting), and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                    |
+| `REQ-UI-TASK-CLEANUP-CONFIRMATION-001` | [Task cleanup content model](#task-cleanup-content-model), [Full-dialog composition](#full-dialog-composition), [Compact archive surfaces](#compact-archive-surfaces), and [Mobile and desktop containment](#mobile-and-desktop-containment) |
 
 ## Components and responsibilities
 
@@ -33,6 +36,62 @@ their existing components and runtime contracts.
   `ArchiveDescription` for the desktop popover and phone inline branch.
 - Consumers continue to decide whether a warning mounts. The shared component
   does not inspect task state or alter callbacks.
+
+### Task cleanup content model
+
+`getCleanupSummary` and `getBulkCleanupSummary` remain the single place that
+maps executor types to localized cleanup consequences. Their return value moves
+from a flat `lines` array to structured effects and supporting notes. Effects
+cover resources that are stopped, removed, or destroyed. Notes explain
+unaffected repository scope or best-effort qualifications. The generic running
+session effect remains present for every executor path.
+
+The task subject sentence stays outside that model because archive and delete
+describe different task outcomes. Single-task delete uses direct declarative
+copy naming the task and its irreversibility. Archive uses corresponding
+archive copy without describing archive as irreversible. Bulk strings retain
+locale-aware count handling. Translations land together in the five real
+catalogs: `en`, `pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw`. The Traditional Chinese
+catalogs are generated through the repository's `i18n:zh-hant` workflow. The
+QA-only `pseudo` locale remains hidden in production, must stay synchronized
+with `en` under `i18n:check`, and is regenerated with `pnpm run i18n:pseudo`.
+
+A shared task-local renderer presents effects as a semantic list and notes as
+supporting prose. Full dialogs use paragraphs and a list. The existing compact
+archive popover and inline confirmation use the same ordered model with their
+established compact spacing. This removes copy drift without moving cleanup
+policy into a visual component.
+
+### Full-dialog composition
+
+`TaskArchiveConfirmDialog` and `TaskDeleteConfirmDialog` keep Radix
+`AlertDialog` and the existing centered inset surface. The current `size="lg"`
+phone width remains because prose benefits from the available line length and
+the primitive already preserves 16px viewport insets.
+
+Each full surface uses an auto/minmax/auto layout: title in the first row, one
+`minmax(0, 1fr)` body containing description, cleanup consequences, warning,
+and cascade choice, then the persistent action footer. The surface is capped by
+the dynamic viewport; the body owns vertical overflow. Short confirmations
+retain intrinsic height, while long task names, bulk executor groups, longer
+locales, warnings, and cascade copy remain reachable.
+
+Both footer actions use `min-h-11 w-full` below `sm`, restoring compact
+automatic dimensions at `sm`. Delete selects `variant="destructive"` on
+`AlertDialogAction` and removes manual color utilities. This matters because
+the action is slotted through `Button`: a default wrapper currently contributes
+`bg-primary` while the child contributes `bg-destructive`, and stylesheet order
+allows the primary color to win. Archive continues to use the default action
+variant.
+
+### Compact archive surfaces
+
+`TaskArchiveConfirmation` consumes the same structured cleanup model for its
+fine-pointer popover and coarse-pointer inline confirmation. It keeps the
+existing `ActionConfirmPopover` and `InlineConfirmActions` components, widths,
+touch density, callbacks, and focus-return behavior. Only the internal copy
+hierarchy changes: direct archive outcome, ordered effects, then supporting
+notes and the existing still-working warning.
 
 ### Popover width contract
 
@@ -74,25 +133,27 @@ yellow border/background/text classes. The compact style contract is:
 - existing rounded border, yellow semantic colors, and dark-mode contrast stay
   unchanged.
 
-No API, WebSocket, state, localization catalog, or persisted-data contract
-changes are required.
+No API, WebSocket, state, or persisted-data contract changes are required.
+Localization catalogs change only for task confirmation presentation; executor
+cleanup semantics remain unchanged.
 
 ## Control flow
 
 The existing task-level `foregroundActivity` projection and explicit
-`isInFlight` props continue to determine whether the warning is rendered. Once
-mounted, the shared component formats the same localized subject and warning
-text, then returns the compact alert markup. Archive/delete callbacks and
-dialog state remain untouched. The context-menu adapter only chooses the
-mounting branch described above based on the existing responsive pointer
-classification.
+`isInFlight` props continue to determine whether the warning is rendered. The
+dialog computes the localized task outcome and cleanup model during render,
+then passes the model to the shared task-local renderer. Archive/delete
+callbacks and dialog state remain untouched. The context-menu adapter only
+chooses the mounting branch described above based on the existing responsive
+pointer classification.
 
 ## Failure and recovery
 
-No new failure path exists. If localized text is longer than the available
-width, `text-pretty` and the explicit line height allow natural wrapping inside
-the existing flex container. If no task activity is present, no warning mounts,
-as before.
+No new runtime failure path exists. If localized text is longer than the
+available width, the shared surface-text contract wraps it inside the body. If
+content becomes taller than the dynamic viewport, the body scrolls without
+moving the title or actions. Unknown executor types retain the generic running
+session effect. If no task activity is present, no warning mounts, as before.
 
 ## Persistence
 
@@ -101,11 +162,12 @@ None. This is a client-side presentation-only change.
 ## Observability
 
 Existing component tests continue to assert warning presence and absence for
-generating, background, and idle activity. A compactness regression asserts the
-shared class contract. A focused archive-popover regression asserts the wider
-archive-only class contract. Rendered desktop and phone checks inspect
-computed type hierarchy, popover width and viewport bounds, source-row height
-before/open/cancel, action reachability, and document overflow.
+generating, background, and idle activity. Cleanup-summary tests cover every
+executor, bulk grouping, ordering, effects, and supporting notes. Dialog and
+compact-surface tests assert equivalent structured content, semantic action
+variants, and unchanged callbacks. Rendered desktop and phone checks inspect
+computed text wrapping, viewport bounds, scroll ownership, action reachability,
+and document overflow.
 
 ## Mobile and desktop containment
 
@@ -119,7 +181,17 @@ The phone check keeps the existing coarse-pointer sidebar inline flow. It
 expects the inline confirmation to remain intentionally row-owned, keeps
 actions at or above 44px, and asserts zero document horizontal overflow.
 
+The task-delete phone check enters through the real task drawer action menu and
+opens Delete with a long task title and a longer bundled locale. After portal
+animations settle, it verifies the surface's 16px viewport insets, zero
+document horizontal overflow, title/body wrapping, body scroll ownership when
+needed, and visible persistent actions. Both actions are full-width and at
+least 44px high, Delete exposes `data-variant="destructive"`, and Cancel closes
+the alert without deleting the task. A desktop check retains compact row
+actions and the existing deletion flow.
+
 ## Related decisions
 
 - [ADR 0049: Fine-grained foreground-idle busy signal](../../../decisions/0049-fine-grained-foreground-idle-busy-signal.md)
 - [Mobile task navigation](../requirements/mobile-task-navigation.md)
+- [Surface text hierarchy](../requirements/surface-text-hierarchy.md)

@@ -23,6 +23,7 @@ function makePermissionRequest(id: string, status?: string): Message {
 }
 
 type KanbanTask = KanbanState["tasks"][number];
+const ACTIVE_TASK_UPDATED_AT = "2026-08-29T09:14:02Z";
 
 function makeStep(
   id: string,
@@ -192,7 +193,7 @@ describe("aggregateSidebarTasks active precedence", () => {
     expect(result.allTasks.find((t) => t.id === "t2")).toBeDefined();
   });
 
-  it("keeps a projected snapshot when the active task has no newer revision", () => {
+  it("keeps a newer projected summary when the active task has no summary", () => {
     const projected = makeTask("t1", "s1", {
       statusSummary: {
         revision: 4,
@@ -231,6 +232,131 @@ describe("aggregateSidebarTasks active precedence", () => {
     );
 
     expect(result.allTasks[0].autopilot).toBe(true);
+  });
+});
+
+describe("aggregateSidebarTasks task lifecycle freshness", () => {
+  it("uses newer task state when status-summary revisions are equal", () => {
+    // @covers AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.4
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:01Z",
+      statusSummary: {
+        revision: 4,
+        updated_at: "2026-08-29T09:14:01Z",
+        queued_prompt_count: 5,
+      },
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+      statusSummary: {
+        revision: 4,
+        updated_at: ACTIVE_TASK_UPDATED_AT,
+        queued_prompt_count: 0,
+      },
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].state).toBe("IN_PROGRESS");
+    expect(result.allTasks[0].statusSummary?.queued_prompt_count).toBe(5);
+  });
+
+  it("prefers the active task when task timestamps are equal", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].state).toBe("IN_PROGRESS");
+  });
+
+  it("keeps task freshness independent from status-summary freshness", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:01Z",
+      statusSummary: { revision: 5, updated_at: "2026-08-29T09:14:03Z" },
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+      statusSummary: { revision: 4, updated_at: ACTIVE_TASK_UPDATED_AT },
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0]).toMatchObject({
+      state: "IN_PROGRESS",
+      statusSummary: { revision: 5 },
+    });
+  });
+
+  it("keeps a newer workflow snapshot task over an older active task", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:03Z",
+    });
+    const active = makeTask("t1", "s1", {
+      state: "IN_PROGRESS",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0]).toMatchObject({
+      state: "REVIEW",
+      updatedAt: "2026-08-29T09:14:03Z",
+    });
+  });
+});
+
+describe("aggregateSidebarTasks interruption projection", () => {
+  it("preserves projected interruption when an equal-timestamp active task omits it", () => {
+    const projected = makeTask("t1", "s1", {
+      state: "REVIEW",
+      interrupted: true,
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+    const active = makeTask("t1", "s1", {
+      state: "REVIEW",
+      updatedAt: ACTIVE_TASK_UPDATED_AT,
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].interrupted).toBe(true);
   });
 });
 

@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
-import { seedClarificationSession } from "../../helpers/clarification";
+import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
+import { watchWs } from "../../helpers/causal-waits";
+import { waitForSessionSettled } from "./quick-chat-helpers";
 
 /**
  * Mobile parity for the multiline custom clarification answer. On a coarse-pointer
@@ -84,6 +86,124 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(session.chat).toContainText("first line");
     await expect(session.chat).toContainText("second line");
     await expect(session.chat).not.toContainText("linesecond line");
+  });
+
+  test("shows the header submitting status for a single-question answer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Submit Feedback",
+      { scenario: "clarification" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    const overlay = session.clarificationOverlay();
+    const header = overlay.getByTestId("clarification-overlay-header");
+    const status = session.clarificationSubmittingStatus();
+    await expect(status).toHaveCount(0);
+
+    let releaseResponse = () => undefined;
+    const heldResponse = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      await heldResponse;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    try {
+      await session.clarificationOption("PostgreSQL").tap();
+      await expect(status).toBeVisible();
+      await expect(status).toHaveAttribute("aria-label", "Submitting…");
+      await expect(session.clarificationSkip()).toBeDisabled();
+
+      const [headerBox, statusBox, skipBox, collapseBox] = await Promise.all([
+        header.boundingBox(),
+        status.boundingBox(),
+        session.clarificationSkip().boundingBox(),
+        session.clarificationCollapseToggle().boundingBox(),
+      ]);
+      if (!headerBox || !statusBox || !skipBox || !collapseBox) {
+        throw new Error("expected mobile clarification header controls to have bounding boxes");
+      }
+
+      expect(statusBox.x).toBeGreaterThanOrEqual(headerBox.x);
+      expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(headerBox.x + headerBox.width);
+      expect(skipBox.height).toBeGreaterThanOrEqual(44);
+      expect(skipBox.width).toBeGreaterThanOrEqual(44);
+      expect(collapseBox.height).toBeGreaterThanOrEqual(44);
+      expect(collapseBox.width).toBeGreaterThanOrEqual(44);
+
+      const statusPrecedesSkip = await header.evaluate((node) => {
+        const submitting = node.querySelector('[data-testid="clarification-submitting-status"]');
+        const skip = node.querySelector('[data-testid="clarification-skip"]');
+        return Boolean(
+          submitting &&
+          skip &&
+          submitting.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      });
+      expect(statusPrecedesSkip).toBe(true);
+      await expect(
+        testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).resolves.toBe(true);
+    } finally {
+      releaseResponse();
+    }
+
+    await expect(overlay).not.toBeVisible({ timeout: 30_000 });
+  });
+
+  test("keeps the failed-submit Retry action reachable on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ws = watchWs(testPage);
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Retry",
+      { scenario: "clarification" },
+    );
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for mobile clarification retry");
+
+    let attempt = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempt += 1;
+      if (attempt === 1) {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "temporary failure" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await session.clarificationOption("PostgreSQL").tap();
+    const retry = testPage.getByTestId("clarification-retry");
+    await expect(retry).toBeVisible();
+    const retryBox = await retry.boundingBox();
+    if (!retryBox) throw new Error("expected mobile clarification Retry to have a bounding box");
+    expect(retryBox.height).toBeGreaterThanOrEqual(44);
+    expect(retryBox.width).toBeGreaterThanOrEqual(44);
+
+    const settled = waitForSessionSettled(ws, sessionId);
+    await retry.tap();
+    await settled;
+    await expect(session.idleInput()).toBeVisible();
+    expect(attempt).toBe(2);
   });
 
   test("keeps the over-limit counter inside the phone viewport", async ({
@@ -283,23 +403,45 @@ test.describe("Mobile clarification multiline answer", () => {
     expect(collapseBox.width).toBeGreaterThanOrEqual(44);
     expect(idleSubmitBox.x).toBeGreaterThanOrEqual(headerBox.x);
     expect(collapseBox.x + collapseBox.width).toBeLessThanOrEqual(headerBox.x + headerBox.width);
-    await submit.tap();
-    await expect(submit).toContainText("Submitting");
-    await expect(submit).toBeDisabled();
-    await expect(submit.locator('[role="status"]')).toBeVisible();
-    await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
-    await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
-    const pendingSubmitBox = await submit.boundingBox();
-    if (!pendingSubmitBox) {
-      throw new Error("expected pending mobile clarification Submit button to have a bounding box");
-    }
-    await expect(
-      testPage.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
-    ).resolves.toBe(true);
-
     try {
+      await submit.tap();
+      await expect(submit).toContainText("Submitting");
+      await expect(submit).toBeDisabled();
+      const status = session.clarificationSubmittingStatus();
+      await expect(status).toBeVisible();
+      await expect(status).toHaveAttribute("aria-label", "Submitting…");
+      await expect(status).not.toHaveAttribute("aria-hidden");
+      await expect(submit).toHaveAttribute("aria-label", "Submit");
+      await expect(submit.locator('[role="status"]')).toHaveCount(0);
+      await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
+      const statusPrecedesSkip = await header.evaluate((node) => {
+        const submitting = node.querySelector('[data-testid="clarification-submitting-status"]');
+        const headerSkip = node.querySelector('[data-testid="clarification-skip"]');
+        return Boolean(
+          submitting &&
+          headerSkip &&
+          submitting.compareDocumentPosition(headerSkip) & Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      });
+      expect(statusPrecedesSkip).toBe(true);
+      const [pendingSubmitBox, pendingSkipBox, pendingCollapseBox] = await Promise.all([
+        submit.boundingBox(),
+        skip.boundingBox(),
+        collapse.boundingBox(),
+      ]);
+      if (!pendingSubmitBox || !pendingSkipBox || !pendingCollapseBox) {
+        throw new Error("expected pending mobile clarification controls to have bounding boxes");
+      }
+      expect(pendingSkipBox.height).toBeGreaterThanOrEqual(44);
+      expect(pendingSkipBox.width).toBeGreaterThanOrEqual(44);
+      expect(pendingCollapseBox.height).toBeGreaterThanOrEqual(44);
+      expect(pendingCollapseBox.width).toBeGreaterThanOrEqual(44);
+      await expect(
+        testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).resolves.toBe(true);
+
       expect(idleSubmitBox.height).toBeGreaterThanOrEqual(44);
       expect(pendingSubmitBox.height).toBeGreaterThanOrEqual(44);
       expect(Math.abs(pendingSubmitBox.height - idleSubmitBox.height)).toBeLessThanOrEqual(1);

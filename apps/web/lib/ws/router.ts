@@ -9,6 +9,7 @@ import { registerAgentCapabilitiesHandlers } from "@/lib/ws/handlers/agent-capab
 import { registerSessionModelsHandlers } from "@/lib/ws/handlers/session-models";
 import { registerSessionMCPStatusHandlers } from "@/lib/ws/handlers/session-mcp-status";
 import { registerSessionInfoHandlers } from "@/lib/ws/handlers/session-info";
+import { registerSessionPendingActionHandlers } from "@/lib/ws/handlers/session-pending-action";
 import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
 import { registerPromptUsageHandlers } from "@/lib/ws/handlers/prompt-usage";
 import { registerWorkflowsHandlers } from "@/lib/ws/handlers/workflows";
@@ -30,6 +31,7 @@ import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
 import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
+import { registerSessionHostnamesHandlers } from "@/lib/ws/handlers/session-hostnames";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
 import { registerRepositorySetsHandlers } from "@/lib/ws/handlers/repository-sets";
 import { registerRepositoryBranchPoliciesHandlers } from "@/lib/ws/handlers/repository-branch-policies";
@@ -63,9 +65,11 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSessionModelsHandlers(store),
     ...registerSessionMCPStatusHandlers(store),
     ...registerSessionInfoHandlers(store),
+    ...registerSessionPendingActionHandlers(store),
     ...registerSessionTodosHandlers(store),
     ...registerPromptUsageHandlers(store),
     ...registerUsersHandlers(store),
+    ...registerSessionHostnamesHandlers(store),
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),
     ...messages.handlers,

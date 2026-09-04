@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-19
+updated: 2026-08-30
 owners:
   - kandev
 ---
@@ -33,6 +34,51 @@ preserving independent session runtime state.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.4:** Unsafe or unsupported
   reuse shall fail with a typed, recoverable API error without creating a
   session or replacement workspace.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.5:** Desktop and mobile
+  workspace views shall show one current Git status for sessions that share a
+  task environment. A response from a non-canonical workspace or an older
+  observation shall not replace that status.
+
+### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002: Canonical Workspace Identity Continuity
+
+**Intent:** Keep the task's effective workspace identity stable when Kandev
+reconstructs or resumes its runtime.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1:** When Kandev recovers
+  or resumes a task with a ready canonical environment, the persisted and
+  projected workspace path shall remain the materialized workspace used by the
+  recovered runtime.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.2:** When the task reloads
+  after recovery, Files and later attached sessions shall resolve the same
+  canonical workspace; the repository's source checkout shall not replace it.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.3:** When no materialized
+  or recovered runtime workspace exists, a legacy repository-backed session
+  can continue to use its source checkout as a compatibility fallback.
+
+### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003: Executor Transition Workspace Validation
+
+**Intent:** Prevent a session launched with a different executor type from
+starting in a stale workspace retained by the previous executor.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.1:** When the requested
+  executor type differs from the canonical task environment executor type, the
+  launch shall not reuse that environment's workspace path, repository
+  inventory, execution identity, or runtime handles.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.2:** A repo-backed launch
+  may become ready only after its selected environment has a complete canonical
+  repository inventory and every selected local workspace path resolves to the
+  expected Git repository checkout.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.3:** A missing, non-Git,
+  path-mismatched, or executor-mismatched workspace shall fail before agent
+  process startup with a typed, recoverable error; it shall not expose the
+  invalid workspace as ready or as the task's current change projection.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.4:** Rejecting an invalid
+  workspace shall not delete, move, reset, clean, checkout, or otherwise modify
+  the stale path, the canonical repository, or either environment inventory.
 
 ## Migrated source detail
 
@@ -71,6 +117,11 @@ the task and can hide or modify uncommitted work from the new agent.
 | `shared_group` | creating | Return recoverable `workspace_preparing`. |
 | `shared_group` | ready and complete | Attach to the group environment. |
 
+An executor-type transition is not an attach. It must select or materialize an
+environment owned by the requested executor before a session can start. A
+persisted session or environment workspace path from the previous executor is
+diagnostic evidence only and is never a fallback launch directory.
+
 An incomplete, failed, deleted, path-mismatched, branch-mismatched, or
 duplicate repository slot is `workspace_reuse_unsafe`. An executor that cannot
 create an independent session runtime against the validated environment returns
@@ -96,6 +147,8 @@ an optional session name remains best effort after a successful launch.
 
 - A named or unnamed additional session sees the same uncommitted tracked and
   untracked files as the task's first session.
+- A late status response from a sibling session does not clear or replace the
+  current task-environment status in desktop or mobile workspace views.
 - Git worktree inventory, HEAD, index, branch and status remain unchanged by
   an additional launch.
 - A terminal primary or zero-session task can reuse its retained ready
@@ -111,3 +164,4 @@ an optional session name remains best effort after a successful launch.
 - A trusted filesystem read-only agent mode.
 - Automatic workspace repair, reset, branch switching, or replacement during
   session spawn.
+- Reconstructing a missing physical worktree from filesystem guesses.

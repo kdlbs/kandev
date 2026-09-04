@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-26
-updated: 2026-08-22
+updated: 2026-09-04
 owners:
   - Kandev
 ---
@@ -28,6 +28,8 @@ Operators need newly released agent models without waiting for a Kandev release.
 - **AC-AGENTS-RUNTIME-UPDATES-001.6:** Kandev does not persist the default as a selection. An installation without an operator selection follows default-pin changes delivered by later Kandev releases.
 - **AC-AGENTS-RUNTIME-UPDATES-001.7:** Every Kandev-built ACP command for the managed package uses the effective exact version, including probes, utility calls, standalone sessions, containers, and SSH executors. Active sessions continue unchanged.
 - **AC-AGENTS-RUNTIME-UPDATES-001.8:** Settings lets the operator clear the selected version and return to the Kandev default after that default passes the normal candidate validation.
+- **AC-AGENTS-RUNTIME-UPDATES-001.9:** When the weekly or manually started pin-maintenance run finds a changed stable default, it validates the catalogue and opens or refreshes one grouped review pull request without activating a runtime or merging the pull request. When no default changes, it creates no branch or pull request.
+- **AC-AGENTS-RUNTIME-UPDATES-001.10:** The pin-maintenance run operates with the repository's built-in Actions authorization and does not require a separately provisioned GitHub App or personal access token. Because built-in-token branch and pull-request events do not recursively start validation workflows, the run explicitly dispatches the six required validation workflows against the exact updater branch commit after creating or refreshing the pull request. The repository or organization setting **Allow GitHub Actions to create and approve pull requests** must be enabled, and verification checks that setting.
 
 ## System design
 

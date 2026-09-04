@@ -121,7 +121,7 @@ function PipelineStepNodes({
   currentStepIndex,
   task,
   onMoveTask,
-  onPreviewTask,
+  onOpenTask,
   isMoving,
 }: {
   steps: WorkflowStep[];
@@ -129,7 +129,7 @@ function PipelineStepNodes({
   currentStepIndex: number;
   task: Task;
   onMoveTask: (task: Task, targetStepId: string) => void;
-  onPreviewTask: (task: Task) => void;
+  onOpenTask: (task: Task) => void;
   isMoving?: boolean;
 }) {
   return (
@@ -158,7 +158,7 @@ function PipelineStepNodes({
               prevStepHidden={moveTargets.prevStepHidden}
               nextStepHidden={moveTargets.nextStepHidden}
               onMoveTask={onMoveTask}
-              onPreviewTask={onPreviewTask}
+              onOpenTask={onOpenTask}
               isMoving={isMoving}
             />
 
@@ -192,7 +192,8 @@ function TaskActions({
           <button
             ref={archiveAnchorRef}
             type="button"
-            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+            data-testid={`pipeline-task-actions-trigger-${task.id}`}
+            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           >
             <IconDots className="h-3.5 w-3.5" />
           </button>
@@ -334,7 +335,7 @@ export function Graph2TaskPipeline({
       onToggleSelect?.(task.id);
       return;
     }
-    onOpenTask(task);
+    onPreviewTask(task);
   };
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
@@ -345,7 +346,7 @@ export function Graph2TaskPipeline({
   return (
     <div
       data-testid={`pipeline-task-${task.id}`}
-      className="flex min-w-max items-center justify-start rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
+      className="group flex min-w-max items-center justify-start rounded-lg hover:bg-muted/30 transition-colors px-3 py-2"
     >
       <div className="flex items-center gap-3">
         {showCheckbox && (
@@ -373,17 +374,24 @@ export function Graph2TaskPipeline({
           currentStepIndex={currentStepIndex}
           task={task}
           onMoveTask={onMoveTask}
-          onPreviewTask={onPreviewTask}
+          onOpenTask={onOpenTask}
           isMoving={isMoving}
         />
         {!isMultiSelectMode && (
-          <TaskActions
-            task={task}
-            onDeleteTask={onDeleteTask}
-            onArchiveTask={onArchiveTask}
-            isDeleting={isDeleting}
-            isArchiving={isArchiving}
-          />
+          <div
+            data-testid={`pipeline-task-actions-sticky-${task.id}`}
+            className="sticky right-0 z-20 shrink-0 self-stretch bg-background"
+          >
+            <div className="flex h-full items-center group-hover:bg-muted/30 transition-colors">
+              <TaskActions
+                task={task}
+                onDeleteTask={onDeleteTask}
+                onArchiveTask={onArchiveTask}
+                isDeleting={isDeleting}
+                isArchiving={isArchiving}
+              />
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { updateAgentProfileAction } from "@/app/actions/agents";
+import { isHandledApiError } from "@/lib/api/client";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { t as translate } from "@/lib/i18n";
@@ -58,6 +59,7 @@ export function useProfileEnabledToggle() {
         const updated = await updateAgentProfileAction(profile.id, { enabled });
         storeApi.setState((state) => applyEnabledProfileUpdate(state, profile, updated));
       } catch (error) {
+        if (isHandledApiError(error)) return;
         toast({
           title: translate("agents:failedToUpdateProfile"),
           description: error instanceof Error ? error.message : translate("agents:requestFailed"),

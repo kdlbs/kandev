@@ -152,7 +152,7 @@ func TestForwardMessageAsPrompt_RetriesOnceWhenAgentNotReadyAfterResume(t *testi
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
-		"", false, nil, nil, false,
+		"", false, nil, nil, false, "",
 	)
 
 	assert.Equal(t, 2, orch.promptCalls, "PromptTask must be retried once after the readiness timeout")
@@ -182,7 +182,7 @@ func TestForwardMessageAsPrompt_SurfacesErrorWhenResumeRetryAlsoFails(t *testing
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
-		"", false, nil, nil, false,
+		"", false, nil, nil, false, "",
 	)
 
 	assert.Equal(t, 1, orch.promptCalls, "PromptTask must not be retried when the resume itself fails")
@@ -213,7 +213,7 @@ func TestForwardMessageAsPrompt_RetryGoesThroughResumeBeforeReprompting(t *testi
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
-		"", false, nil, nil, false,
+		"", false, nil, nil, false, "",
 	)
 
 	assert.Equal(t, []string{"prompt:1", "resume", "prompt:2"}, orch.callOrder)
@@ -241,7 +241,7 @@ func TestForwardMessageAsPrompt_DoesNotRetryGenericTimeout(t *testing.T) {
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
-		"", false, nil, nil, false,
+		"", false, nil, nil, false, "",
 	)
 
 	assert.Equal(t, 1, orch.promptCalls, "a generic timeout unrelated to the typed sentinels must not be retried")
@@ -276,7 +276,7 @@ func TestForwardMessageAsPrompt_SurfacesOrigErrorWhenReadinessWaitFails(t *testi
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
-		"", false, nil, nil, false,
+		"", false, nil, nil, false, "",
 	)
 
 	assert.Equal(t, 1, orch.promptCalls, "PromptTask must not be retried when the post-resume readiness wait itself fails")
@@ -313,7 +313,7 @@ func TestForwardMessageAsPrompt_SurfacesRetryErrorWhenRetryPromptFails(t *testin
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
-		"", false, nil, nil, false,
+		"", false, nil, nil, false, "",
 	)
 
 	assert.Equal(t, 2, orch.promptCalls, "the retry must still be attempted even though it goes on to fail")
@@ -350,7 +350,7 @@ func TestForwardMessageAsPrompt_SuppressesMessageWhenRetryIsAgentReported(t *tes
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
-		"", false, nil, nil, false,
+		"", false, nil, nil, false, "",
 	)
 
 	assert.Equal(t, 2, orch.promptCalls)

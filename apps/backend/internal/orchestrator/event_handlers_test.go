@@ -274,7 +274,10 @@ type mockAgentManager struct {
 	// getGitLogFunc, when non-nil, overrides GetGitLog. Lets tests model a
 	// commit reconcile sweep (or archive capture) observing new commits, or
 	// simulate the agent process being gone (nil, nil).
-	getGitLogFunc func(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error)
+	getGitLogFunc         func(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error)
+	getCumulativeDiffFunc func(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error)
+	getGitStatusFunc      func(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
+	getGitStatusFreshFunc func(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
 	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
@@ -304,6 +307,7 @@ type mockAgentManager struct {
 	stopAgentWithReasonFunc func(context.Context, string, string, bool) error
 	stopAgentArgs           []stopAgentCall // tracks StopAgent calls (no reason)
 	stopAgentErr            error           // optional error to return from StopAgent
+	stopAgentFunc           func(context.Context, string, bool) error
 
 	// Prompt tracking — capturedPrompts records prompts only (legacy, several
 	// tests assert on it directly). capturedPromptCalls records the same with
@@ -317,6 +321,9 @@ type mockAgentManager struct {
 	// steerAgentWithDispatchCallback capability.
 	capturedSteerCalls []promptCall
 	steerErr           error
+	steerStarted       chan struct{}
+	steerRelease       chan struct{}
+	steerStartOnce     sync.Once
 	// Optional: closed once on the first PromptAgent call so tests can wait
 	// deterministically without polling. Tests opt in by initializing the channel.
 	promptDone chan struct{}
@@ -452,11 +459,16 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID stri
 	return err
 }
 func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool { return true }
-func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string, force bool) error {
+func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.stopAgentArgs = append(m.stopAgentArgs, stopAgentCall{ExecutionID: agentExecutionID, Force: force})
-	return m.stopAgentErr
+	hook := m.stopAgentFunc
+	err := m.stopAgentErr
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, agentExecutionID, force)
+	}
+	return err
 }
 func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
 	m.mu.Lock()
@@ -510,7 +522,15 @@ func (m *mockAgentManager) SteerAgentWithDispatchCallback(_ context.Context, exe
 	m.mu.Lock()
 	m.capturedSteerCalls = append(m.capturedSteerCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
 	steerErr := m.steerErr
+	steerStarted := m.steerStarted
+	steerRelease := m.steerRelease
 	m.mu.Unlock()
+	if steerStarted != nil {
+		m.steerStartOnce.Do(func() { close(steerStarted) })
+	}
+	if steerRelease != nil {
+		<-steerRelease
+	}
 	if steerErr != nil {
 		return nil, steerErr
 	}
@@ -776,17 +796,27 @@ func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit 
 	}
 	return nil, nil
 }
-func (m *mockAgentManager) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {
+
+func (m *mockAgentManager) GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error) {
+	if m.getCumulativeDiffFunc != nil {
+		return m.getCumulativeDiffFunc(ctx, sessionID, baseCommit)
+	}
 	return nil, nil
 }
-func (m *mockAgentManager) GetGitStatus(_ context.Context, _ string) (*client.GitStatusResult, error) {
+func (m *mockAgentManager) GetGitStatus(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	if m.getGitStatusFunc != nil {
+		return m.getGitStatusFunc(ctx, sessionID)
+	}
 	return &client.GitStatusResult{
 		Success:    true,
 		Branch:     "main",
 		HeadCommit: "mock-commit",
 	}, nil
 }
-func (m *mockAgentManager) GetGitStatusFresh(_ context.Context, _ string) (*client.GitStatusResult, error) {
+func (m *mockAgentManager) GetGitStatusFresh(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	if m.getGitStatusFreshFunc != nil {
+		return m.getGitStatusFreshFunc(ctx, sessionID)
+	}
 	return nil, nil
 }
 func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {
@@ -3124,6 +3154,56 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 				models.TaskSessionStateRunning, updated.State)
 		}
 	})
+}
+
+func TestHandleAgentStopped_DefersUntilSessionGuardIsReleased(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	lock, release := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+	defer release()
+
+	eventDone := make(chan struct{})
+	go func() {
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+		})
+		close(eventDone)
+	}()
+
+	// The handler must return while the current lifecycle owner still holds the
+	// mutex. This is required for synchronous stop callbacks from the in-memory
+	// event bus; the deferred reconciliation waits for the owner below.
+	select {
+	case <-eventDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent.stopped handler blocked behind the session guard")
+	}
+
+	lockedSession, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session while guard is held: %v", err)
+	}
+	if lockedSession.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state changed before guard release: %q", lockedSession.State)
+	}
+
+	lock.Unlock()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		if err == nil && updated.State == models.TaskSessionStateCancelled {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("deferred agent.stopped reconciliation did not run after guard release")
 }
 
 // waitForStopCall polls until the mock agent manager has received at least one

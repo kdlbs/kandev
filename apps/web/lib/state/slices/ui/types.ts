@@ -10,6 +10,12 @@ import type {
   SidebarViewDraft,
   SortSpec,
 } from "./sidebar-view-types";
+import type {
+  ThreadFilterClause,
+  ThreadSortSpec,
+  ThreadViewSliceState,
+  ThreadView,
+} from "./thread-view-types";
 
 export type PreviewStage = "closed" | "logs" | "preview";
 export type PreviewViewMode = "preview" | "output";
@@ -290,6 +296,7 @@ export type UISliceState = {
   updateAvailableNotification: UpdateAvailableNotification | null;
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
+  threadViews: ThreadViewSliceState;
   /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
   collapsedSubtaskParents: string[];
   /** Task ID currently shown in the kanban preview side-panel, or null if closed. */
@@ -416,6 +423,25 @@ export type UISliceActions = {
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: () => void;
+  setThreadActiveView: (viewId: string) => void;
+  createThreadView: () => string | null;
+  updateThreadViewDraft: (
+    patch: Partial<{
+      taskScope: ThreadView["taskScope"];
+      filters: ThreadFilterClause[];
+      sort: ThreadSortSpec;
+      maxColumns: number | null;
+    }>,
+  ) => void;
+  saveThreadViewDraftAs: (name: string) => void;
+  saveThreadViewDraftOverwrite: () => void;
+  discardThreadViewDraft: () => void;
+  deleteThreadView: (viewId: string) => void;
+  renameThreadView: (viewId: string, name: string) => void;
+  duplicateThreadView: (viewId: string, name: string) => void;
+  reapplyThreadViewSort: () => void;
+  retryThreadViewSync: () => void;
+  clearThreadViewSyncError: () => void;
   clearSidebarTaskPrefsSyncError: () => void;
   setKanbanPreviewedTaskId: (taskId: string | null) => void;
   togglePinnedTask: (taskId: string) => void;

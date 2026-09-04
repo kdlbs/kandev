@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 // WorkspacePollMode mirrors process.PollMode for the lifecycle layer. Defined
@@ -78,10 +76,11 @@ type workspacePollAggregator struct {
 	pushInFlight map[string]bool
 }
 
-// workspacePushTarget bundles the queued mode and the agentctl client captured at enqueue time.
+// workspacePushTarget bundles the queued mode and execution resolved at enqueue time.
+// The worker pins that execution's current client only while issuing the RPC.
 type workspacePushTarget struct {
-	mode   WorkspacePollMode
-	client *agentctl.Client
+	mode      WorkspacePollMode
+	execution *AgentExecution
 }
 
 // newWorkspacePollAggregator wires an aggregator to the lifecycle manager.
@@ -288,12 +287,13 @@ func (a *workspacePollAggregator) recordRuntimeAndCompute(sessionID string, acti
 
 // pushAsync queues the latest mode and ensures exactly one pusher goroutine per workspace drains it (last-write-wins).
 func (a *workspacePollAggregator) pushAsync(execution *AgentExecution, workspacePath string, mode WorkspacePollMode) {
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		return
 	}
+	releaseClient()
 	a.mu.Lock()
-	a.pendingPush[workspacePath] = workspacePushTarget{mode: mode, client: client}
+	a.pendingPush[workspacePath] = workspacePushTarget{mode: mode, execution: execution}
 	if a.pushInFlight[workspacePath] {
 		a.mu.Unlock()
 		return
@@ -316,9 +316,14 @@ func (a *workspacePollAggregator) pushLoop(workspacePath string) {
 		delete(a.pendingPush, workspacePath)
 		a.mu.Unlock()
 
+		client, releaseClient := target.execution.AcquireAgentCtlClient()
+		if client == nil {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), pushPollModeTimeout)
-		err := target.client.SetWorkspacePollMode(ctx, string(target.mode))
+		err := client.SetWorkspacePollMode(ctx, string(target.mode))
 		cancel()
+		releaseClient()
 		if err != nil {
 			a.mgr.logger.Warn("failed to push workspace poll mode",
 				zap.String("workspace", workspacePath),

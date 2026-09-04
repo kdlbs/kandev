@@ -87,6 +87,14 @@ func autoApprovePermissionsOverride(enabled bool, override *bool) *bool {
 	return nil
 }
 
+func namespacesMCPToolsByServerFromAgent(agent agents.Agent) bool {
+	if agent == nil {
+		return false
+	}
+	rt := agent.Runtime()
+	return rt != nil && rt.NamespacesMCPToolsByServer
+}
+
 func buildContainerCreateInstanceRequest(
 	config ContainerConfig,
 	agentType string,
@@ -103,21 +111,22 @@ func buildContainerCreateInstanceRequest(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,
 		),
-		AutoStart:                false,
-		McpServers:               config.McpServers,
-		SessionID:                config.SessionID,
-		DisableAskQuestion:       disableAskQuestion,
-		AssumeMcpSse:             assumeMcpSse,
-		AssumeMcpHttp:            assumeMcpHttp,
-		McpMode:                  config.McpMode,
-		McpProviders:             config.McpProviders,
-		McpProfile:               config.McpProfile,
-		RequiresProcessKill:      requiresProcessKill,
-		StripEnv:                 stripEnv,
-		BaseBranches:             config.BaseBranches,
-		RemoteContributions:      config.RemoteContributions,
-		ContributionDestinations: config.ContributionDestinations,
-		ComparisonTargets:        config.ComparisonTargets,
+		AutoStart:                  false,
+		McpServers:                 config.McpServers,
+		SessionID:                  config.SessionID,
+		DisableAskQuestion:         disableAskQuestion,
+		AssumeMcpSse:               assumeMcpSse,
+		AssumeMcpHttp:              assumeMcpHttp,
+		McpMode:                    config.McpMode,
+		McpProviders:               config.McpProviders,
+		McpProfile:                 config.McpProfile,
+		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
+		RequiresProcessKill:        requiresProcessKill,
+		StripEnv:                   stripEnv,
+		BaseBranches:               config.BaseBranches,
+		RemoteContributions:        config.RemoteContributions,
+		ContributionDestinations:   config.ContributionDestinations,
+		ComparisonTargets:          config.ComparisonTargets,
 	}
 }
 

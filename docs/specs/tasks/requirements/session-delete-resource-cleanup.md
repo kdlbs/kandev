@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-08
+updated: 2026-08-31
 owners:
   - cfl
 ---
@@ -27,7 +28,10 @@ A session is a conversation and execution reference inside a task; it is not the
 - **AC-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001.6:** Task archive/delete, cascade archive/delete, workspace delete, quick-chat task expiry, and explicit task-environment reset remain the owners of physical cleanup.
 - **AC-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001.7:** Task lifecycle cleanup discovers task-owned resources without joining through a session row and executes asynchronously through the durable cleanup worker.
 - **AC-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001.8:** Resources borrowed by another task or referenced through a shared environment are preserved or transferred according to existing ownership rules.
+- **AC-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001.9:** When an active session is deleted, another session can continue to use the same task environment. Desktop and mobile workspace-derived views shall continue to show current data. This data includes changed files, commits, and branch-matching remote contributions. The views shall not require a reload or replacement session.
 
 ## System design
 
-The migrated technical source is split into [part 1](../system-design/session-delete-resource-cleanup.md).
+The migrated technical source is split into
+[resource ownership](../system-design/session-delete-resource-cleanup.md) and
+[environment-owned Git status](../system-design/environment-owned-git-status.md).

@@ -4,10 +4,11 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import type { Page } from "@playwright/test";
+import type { Page, WebSocketRoute } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { waitForDiffText, waitForDiffTextAbsent } from "./diff-update-helpers";
 
 // ---------------------------------------------------------------------------
 // Git helper for E2E tests - runs git commands in the test repository
@@ -91,6 +92,78 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   const session = new SessionPage(page);
   await session.waitForLoad();
   return session;
+}
+
+type WorktreeFileAction = "worktree.stage" | "worktree.unstage";
+
+type PausedWorktreeFileAction = {
+  action: WorktreeFileAction;
+  frame: string;
+  server: WebSocketRoute;
+};
+
+function isWorktreeFileActionFrame(part: string, action: WorktreeFileAction): boolean {
+  if (!part.trim()) return false;
+  try {
+    const frame = JSON.parse(part) as { type?: unknown; action?: unknown };
+    return frame.type === "request" && frame.action === action;
+  } catch {
+    return false;
+  }
+}
+
+function partitionWorktreeFileAction(
+  message: string | Buffer,
+  action: WorktreeFileAction,
+): { frame: string; passthrough: string | null } | null {
+  if (typeof message !== "string") return null;
+  const frames = message.split("\n");
+  const actionIndex = frames.findIndex((part) => isWorktreeFileActionFrame(part, action));
+  if (actionIndex === -1) return null;
+  const passthrough = frames.filter((_, index) => index !== actionIndex).join("\n");
+  return {
+    frame: frames[actionIndex]!,
+    passthrough: passthrough.trim() ? passthrough : null,
+  };
+}
+
+async function pauseNextWorktreeFileAction(page: Page) {
+  let armedAction: WorktreeFileAction | null = null;
+  let paused: PausedWorktreeFileAction | null = null;
+
+  await page.routeWebSocket(/\/ws$/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const partition = armedAction ? partitionWorktreeFileAction(message, armedAction) : null;
+      if (partition && armedAction) {
+        paused = { action: armedAction, frame: partition.frame, server };
+        armedAction = null;
+        if (partition.passthrough) server.send(partition.passthrough);
+        return;
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => socket.send(message));
+  });
+
+  return {
+    arm(action: WorktreeFileAction) {
+      if (armedAction || paused) throw new Error("A worktree file action is already paused");
+      armedAction = action;
+    },
+    async waitForRequest(action: WorktreeFileAction) {
+      await expect
+        .poll(() => paused?.action ?? null, {
+          message: `${action} should reach the paused WebSocket boundary`,
+        })
+        .toBe(action);
+    },
+    release(action: WorktreeFileAction) {
+      if (paused?.action !== action) throw new Error(`No paused ${action} request`);
+      paused.server.send(paused.frame);
+      paused = null;
+    },
+  };
 }
 
 /** Create a non-passthrough (standard) agent profile for the mock agent. */
@@ -206,6 +279,174 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("test-file.txt")).toBeVisible({ timeout: 15_000 });
   });
 
+  // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.1
+  // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.2
+  // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.3
+  // @covers AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.4
+  test("keeps stage and unstage progress visible after pointer leaves", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const pausedAction = await pauseNextWorktreeFileAction(testPage);
+    const profile = await createStandardProfile(apiClient, "Git Pending Action Profile");
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Pending Action Test",
+      profile.id,
+      {
+        description: "Testing pending stage and unstage feedback",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git Pending Action Test");
+    await session.waitForChatIdle();
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+    git.createFile("pending-action.txt", "base\n");
+    git.createFile("pending-sibling.txt", "base\n");
+    git.stageAll();
+    git.commit("Add pending action fixtures");
+    git.modifyFile("pending-action.txt", "base\nchanged\n");
+    git.modifyFile("pending-sibling.txt", "base\nunchanged pending state\n");
+
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await session.expandChangesSection("unstaged-files-section");
+
+    const unstagedSection = testPage.getByTestId("unstaged-files-section");
+    const unstagedRow = unstagedSection.getByTestId("file-row-pending-action.txt");
+    const siblingRow = unstagedSection.getByTestId("file-row-pending-sibling.txt");
+    await expect(unstagedRow).toBeVisible();
+    await expect(siblingRow).toBeVisible();
+
+    pausedAction.arm("worktree.stage");
+    await unstagedRow.hover();
+    await unstagedRow.getByTitle("Stage file").click();
+    await pausedAction.waitForRequest("worktree.stage");
+    await testPage.mouse.move(0, 0);
+
+    const pendingStageSlot = unstagedRow.getByTestId("file-row-icon-action-slot");
+    expect(await unstagedRow.evaluate((row) => row.matches(":hover"))).toBe(false);
+    await expect(pendingStageSlot.locator(":scope > div")).toHaveCSS("opacity", "1");
+    await expect(pendingStageSlot.locator(":scope > span[aria-hidden='true']")).toHaveCSS(
+      "opacity",
+      "0",
+    );
+    await expect(pendingStageSlot.locator("svg.animate-spin")).toBeVisible();
+    await expect(siblingRow.locator("svg.animate-spin")).toHaveCount(0);
+
+    pausedAction.release("worktree.stage");
+    await session.expandChangesSection("staged-files-section");
+    const stagedSection = testPage.getByTestId("staged-files-section");
+    const stagedRow = stagedSection.getByTestId("file-row-pending-action.txt");
+    await expect(stagedRow).toBeVisible();
+    // The stage response and its status refresh arrive on separate WebSocket
+    // frames. Wait for the first operation's pending state to clear before
+    // starting the second operation, so a late stage refresh cannot clear the
+    // unstage marker that the next assertion is checking.
+    await expect(
+      stagedRow.getByTestId("file-row-icon-action-slot").locator(":scope > div"),
+    ).toHaveCSS("opacity", "0");
+
+    pausedAction.arm("worktree.unstage");
+    await stagedRow.hover();
+    await stagedRow.getByTitle("Unstage file").click();
+    await pausedAction.waitForRequest("worktree.unstage");
+    await testPage.mouse.move(0, 0);
+
+    const pendingUnstageSlot = stagedRow.getByTestId("file-row-icon-action-slot");
+    expect(await stagedRow.evaluate((row) => row.matches(":hover"))).toBe(false);
+    await expect(pendingUnstageSlot.locator(":scope > div")).toHaveCSS("opacity", "1");
+    await expect(pendingUnstageSlot.locator(":scope > span[aria-hidden='true']")).toHaveCSS(
+      "opacity",
+      "0",
+    );
+    await expect(pendingUnstageSlot.locator("svg.animate-spin")).toBeVisible();
+
+    pausedAction.release("worktree.unstage");
+    await expect(unstagedSection.getByTestId("file-row-pending-action.txt")).toBeVisible();
+    await expect(stagedRow).toHaveCount(0);
+  });
+
+  // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.10
+  test("shows same path in staged and unstaged sections", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git Mixed Change Profile");
+
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Mixed Change Test", profile.id, {
+      description: "Testing mixed staged and unstaged changes",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const session = await openTaskSession(testPage, "Git Mixed Change Test");
+    await session.waitForChatIdle();
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+
+    git.createFile("mixed-layer.txt", "base\n");
+    git.stageFile("mixed-layer.txt");
+    git.commit("Add mixed layer fixture");
+    git.modifyFile("mixed-layer.txt", "base\nSTAGED_LAYER_MARKER\n");
+    git.stageFile("mixed-layer.txt");
+    git.modifyFile("mixed-layer.txt", "base\nSTAGED_LAYER_MARKER\nUNSTAGED_LAYER_MARKER\n");
+
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await session.expandChangesSection("unstaged-files-section");
+    await session.expandChangesSection("staged-files-section");
+
+    const unstagedRow = testPage
+      .getByTestId("unstaged-files-section")
+      .getByTestId("file-row-mixed-layer.txt");
+    const stagedRow = testPage
+      .getByTestId("staged-files-section")
+      .getByTestId("file-row-mixed-layer.txt");
+    await expect(unstagedRow).toBeVisible();
+    await expect(stagedRow).toBeVisible();
+    await expect(unstagedRow.getByText("+1", { exact: true })).toBeVisible();
+    await expect(stagedRow.getByText("+1", { exact: true })).toBeVisible();
+
+    await unstagedRow.click();
+    await waitForDiffText(testPage, "UNSTAGED_LAYER_MARKER");
+
+    await stagedRow.click();
+    await waitForDiffText(testPage, "STAGED_LAYER_MARKER");
+    await waitForDiffTextAbsent(testPage, "UNSTAGED_LAYER_MARKER");
+
+    await stagedRow.getByTitle("Unstage file").click();
+    await expect(stagedRow).toHaveCount(0);
+    await expect(unstagedRow).toBeVisible();
+    await expect(unstagedRow.getByText("+2", { exact: true })).toBeVisible();
+  });
+
   /**
    * Verifies that new untracked files appear in the unstaged section.
    */
@@ -252,6 +493,75 @@ test.describe("Git Changes Panel", () => {
 
     // Clean up
     git.deleteFile("new-feature.ts");
+  });
+
+  // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.13, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14
+  test("omits untracked node_modules before repository ignore exists", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git Dependency Tree Profile");
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Dependency Tree Test",
+      profile.id,
+      {
+        description: "Testing untracked dependency-tree exclusion",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const session = await openTaskSession(testPage, "Git Dependency Tree Test");
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+
+    const sourcePath = "untracked-source.ts";
+    const dependencyPaths = [
+      "node_modules/demo-package/package.json",
+      "packages/app/node_modules/nested-package/package.json",
+    ];
+    try {
+      git.createFile(sourcePath, "export const source = true;\n");
+      for (const dependencyPath of dependencyPaths) {
+        fs.mkdirSync(path.dirname(path.join(repoDir, dependencyPath)), { recursive: true });
+        git.createFile(dependencyPath, '{"name":"demo-package"}\n');
+      }
+
+      await session.clickTab("Changes");
+      await expect(session.changes).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(session.changes.getByTestId(`file-row-${sourcePath}`)).toBeVisible({
+        timeout: 15_000,
+      });
+
+      for (const dependencyPath of dependencyPaths) {
+        const rowTestId = `file-row-${dependencyPath.replace(/[/\\]/g, "-")}`;
+        await expect(session.changes.getByTestId(rowTestId)).toHaveCount(0);
+      }
+    } finally {
+      git.deleteFile(sourcePath);
+      for (const dependencyPath of dependencyPaths) {
+        git.deleteFile(dependencyPath);
+        fs.rmSync(path.dirname(path.join(repoDir, dependencyPath)), {
+          recursive: true,
+          force: true,
+        });
+      }
+    }
   });
 
   /**
