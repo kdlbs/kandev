@@ -39,7 +39,7 @@ func (r *Repository) validateTransferCoordinatorActor(
 			AND caller.workspace_id = ?
 			AND `+IsFromOfficePredicate("caller")+`
 			AND profile.workspace_id = ? AND profile.role = 'ceo' AND profile.deleted_at IS NULL
-			AND profile.status NOT IN ('stopped', 'pending_approval')`),
+			AND profile.status IN ('idle', 'working')`),
 		command.Actor.SessionID, command.Actor.CallerTaskID, command.Actor.ID,
 		models.TaskSessionStateRunning, command.ExpectedSourceWorkspaceID, command.ExpectedSourceWorkspaceID); err != nil {
 		return err
@@ -173,7 +173,7 @@ func (r *Repository) destinationTransferCEOProfile(
 	if err := tx.SelectContext(ctx, &candidates, r.db.Rebind(`
 		SELECT id FROM agent_profiles
 		WHERE workspace_id = ? AND role = 'ceo' AND deleted_at IS NULL AND enabled = 1
-			AND status NOT IN ('stopped', 'pending_approval') ORDER BY id`), workspaceID); err != nil {
+			AND status IN ('idle', 'working') ORDER BY id`), workspaceID); err != nil {
 		return "", err
 	}
 	if len(candidates) != 1 {

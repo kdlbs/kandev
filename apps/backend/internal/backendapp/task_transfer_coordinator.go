@@ -127,8 +127,8 @@ func (a taskTransferCoordinatorAttestor) resolveTaskTransferCoordinator(
 
 func taskTransferActiveCEO(agent *settingsmodels.AgentProfile, workspaceID string) bool {
 	return agent != nil && agent.WorkspaceID == workspaceID && agent.Role == settingsmodels.AgentRoleCEO &&
-		agent.DeletedAt == nil && agent.Status != settingsmodels.AgentStatusStopped &&
-		agent.Status != settingsmodels.AgentStatusPendingApproval
+		agent.DeletedAt == nil && (agent.Status == settingsmodels.AgentStatusIdle ||
+		agent.Status == settingsmodels.AgentStatusWorking)
 }
 
 func taskTransferSessionMatches(session *models.TaskSession, principal mcpscope.Principal) bool {

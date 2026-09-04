@@ -53,6 +53,7 @@ func TestTaskTransferCoordinatorAttestorRequiresAssignedSourceCEO(t *testing.T) 
 	}
 	validAgent := &settingsmodels.AgentProfile{
 		ID: "ceo-1", WorkspaceID: "ws-source", Role: settingsmodels.AgentRoleCEO,
+		Status: settingsmodels.AgentStatusWorking,
 	}
 	tests := []struct {
 		name    string
@@ -71,11 +72,18 @@ func TestTaskTransferCoordinatorAttestorRequiresAssignedSourceCEO(t *testing.T) 
 		{name: "different assigned agent", task: &models.Task{
 			ID: "caller-task", WorkspaceID: "ws-source", IsFromOffice: true, AssigneeAgentProfileID: "ceo-other",
 		}, session: validSession, agent: validAgent},
-		{name: "worker", task: validTask, agent: &settingsmodels.AgentProfile{
+		{name: "worker", task: validTask, session: validSession, agent: &settingsmodels.AgentProfile{
 			ID: "ceo-1", WorkspaceID: "ws-source", Role: settingsmodels.AgentRoleWorker,
 		}},
-		{name: "other workspace", task: validTask, agent: &settingsmodels.AgentProfile{
+		{name: "other workspace", task: validTask, session: validSession, agent: &settingsmodels.AgentProfile{
 			ID: "ceo-1", WorkspaceID: "ws-other", Role: settingsmodels.AgentRoleCEO,
+		}},
+		{name: "paused CEO", task: validTask, session: validSession, agent: &settingsmodels.AgentProfile{
+			ID: "ceo-1", WorkspaceID: "ws-source", Role: settingsmodels.AgentRoleCEO,
+			Status: settingsmodels.AgentStatusPaused,
+		}},
+		{name: "unknown CEO status", task: validTask, session: validSession, agent: &settingsmodels.AgentProfile{
+			ID: "ceo-1", WorkspaceID: "ws-source", Role: settingsmodels.AgentRoleCEO, Status: "future-status",
 		}},
 	}
 	for _, tt := range tests {
