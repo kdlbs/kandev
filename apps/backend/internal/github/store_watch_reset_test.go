@@ -7,12 +7,57 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 func TestIsPRWatchUniqueViolation_PostgresConstraint(t *testing.T) {
 	err := &pgconn.PgError{Code: "23505", ConstraintName: prWatchSearchingIndexName}
 	if !isPRWatchUniqueViolation(errors.Join(errors.New("wrapped"), err)) {
 		t.Fatal("expected PostgreSQL PR-watch unique violation to be recognized")
+	}
+}
+
+func TestStore_UpdatePRWatchBranchIfSearching_PostgresDifferentSessionCollision(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at TIMESTAMP);
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		INSERT INTO workspaces (id) VALUES ('ws-1');
+		INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1');`); err != nil {
+		t.Fatalf("create task fixtures: %v", err)
+	}
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new postgres store: %v", err)
+	}
+	now := time.Now().UTC()
+	source := &PRWatch{
+		ID: "watch-source-pg", WorkspaceID: "ws-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repo-1", Owner: "owner", Repo: "repo", Branch: "feature/A",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	sibling := &PRWatch{
+		ID: "watch-sibling-pg", WorkspaceID: "ws-1", SessionID: "session-2", TaskID: "task-1",
+		RepositoryID: "repo-1", Owner: "owner", Repo: "repo", Branch: "feature/B",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	for _, watch := range []*PRWatch{source, sibling} {
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create watch %s: %v", watch.ID, err)
+		}
+	}
+
+	if err := store.UpdatePRWatchBranchIfSearching(ctx, source.ID, sibling.Branch); err != nil {
+		t.Fatalf("different-session task-owned collision must coalesce: %v", err)
+	}
+	watches, err := store.ListPRWatchesByTask(ctx, source.TaskID)
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(watches) != 1 || watches[0].ID != sibling.ID {
+		t.Fatalf("expected sibling to survive alone, got %+v", watches)
 	}
 }
 

@@ -141,7 +141,7 @@ func TestUpdatePRWatchBranchIfSearching_NoCollision_UpdatesBranch(t *testing.T) 
 
 // TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource locks
 // the fix for the UNIQUE-constraint collision: when a sibling watch already
-// owns the destination (session, repo, branch) triple, the source row is
+// owns the destination (task, repo, branch) triple, even from another session, the source row is
 // deleted instead of triggering a UNIQUE constraint error.
 func TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
@@ -152,7 +152,7 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource(t *testi
 	if err != nil {
 		t.Fatalf("create source watch: %v", err)
 	}
-	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-2", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
 	if err != nil {
 		t.Fatalf("create sibling watch: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource(t *testi
 		t.Fatalf("UpdatePRWatchBranchIfSearching must not error on sibling collision: %v", err)
 	}
 
-	all, err := store.ListPRWatchesBySession(ctx, "session-1")
+	all, err := store.ListPRWatchesByTask(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("list watches: %v", err)
 	}

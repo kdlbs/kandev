@@ -2251,7 +2251,7 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(
 		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ?`,
 	), branch, time.Now().UTC(), id); err != nil {
-		return recoverResetPRWatchUpdate(ctx, tx, s.db.Rebind, savepoint, id, err, commit)
+		return recoverPRWatchUniqueUpdate(ctx, tx, s.db.Rebind, savepoint, id, err, commit)
 	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind("RELEASE SAVEPOINT "+savepoint)); err != nil {
 		return err
@@ -2272,7 +2272,7 @@ func isPRWatchUniqueViolation(err error) bool {
 	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
-func recoverResetPRWatchUpdate(
+func recoverPRWatchUniqueUpdate(
 	ctx context.Context,
 	tx prWatchTx,
 	rebind func(string) string,
@@ -2313,11 +2313,11 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var sessionID, repositoryID string
+	var taskID, repositoryID string
 	var prNumber int
 	err = tx.QueryRowContext(ctx,
-		`SELECT session_id, repository_id, pr_number FROM github_pr_watches WHERE id = ?`, id).
-		Scan(&sessionID, &repositoryID, &prNumber)
+		s.db.Rebind(`SELECT task_id, repository_id, pr_number FROM github_pr_watches WHERE id = ?`), id).
+		Scan(&taskID, &repositoryID, &prNumber)
 	if errors.Is(err, sql.ErrNoRows) {
 		return tx.Commit()
 	}
@@ -2330,28 +2330,26 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 
 	var probe int // existence probe only; value unused
 	err = tx.QueryRowContext(ctx,
-		`SELECT 1 FROM github_pr_watches
-		 WHERE session_id = ? AND repository_id = ? AND branch = ? AND id <> ?`,
-		sessionID, repositoryID, branch, id).Scan(&probe)
+		s.db.Rebind(`SELECT 1 FROM github_pr_watches
+			 WHERE task_id = ? AND repository_id = ? AND branch = ? AND id <> ?`),
+		taskID, repositoryID, branch, id).Scan(&probe)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil {
-		return dropSourceAndCommit(ctx, tx, id)
+		return dropSourceAndCommit(ctx, tx, s.db.Rebind, id)
 	}
 
-	if _, err := tx.ExecContext(ctx,
+	const savepoint = "update_pr_watch_branch"
+	if _, err := tx.ExecContext(ctx, s.db.Rebind("SAVEPOINT "+savepoint)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(
 		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`,
-		branch, time.Now().UTC(), id); err != nil {
-		// Defensive belt-and-suspenders: the SQLite writer pool is
-		// SetMaxOpenConns(1), so an in-process CreatePRWatch cannot
-		// commit a sibling row between our probe and this UPDATE. But
-		// an external writer (separate process touching the same file,
-		// future pool reshuffle) could; if the UPDATE still trips
-		// UNIQUE, treat it identically to the probe-found path.
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return dropSourceAndCommit(ctx, tx, id)
-		}
+	), branch, time.Now().UTC(), id); err != nil {
+		return recoverPRWatchUniqueUpdate(ctx, tx, s.db.Rebind, savepoint, id, err, tx.Commit)
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind("RELEASE SAVEPOINT "+savepoint)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2364,9 +2362,9 @@ type prWatchTx interface {
 
 // dropSourceAndCommit removes a still-searching source watch (pr_number=0)
 // whose destination branch is already owned by a sibling row, then commits.
-func dropSourceAndCommit(ctx context.Context, tx *sql.Tx, id string) error {
+func dropSourceAndCommit(ctx context.Context, tx *sql.Tx, rebind func(string) string, id string) error {
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`, id); err != nil {
+		rebind(`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`), id); err != nil {
 		return err
 	}
 	return tx.Commit()
