@@ -75,6 +75,25 @@ afterEach(() => {
 });
 
 describe("useLazyLoadSentinel", () => {
+  it("rechecks current geometry when a restored viewport becomes eligible", async () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn(async () => 20);
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        isCurrentGeometryEligible: () => true,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    expect(result.current).toHaveProperty("recheck");
+    if (!("recheck" in result.current)) return;
+    act(() => result.current.recheck());
+    await act(async () => {});
+
+    expect(loadMore).toHaveBeenCalledTimes(1);
+  });
+
   it("defaults exactly to the transcript margin, no re-arm, and no join", () => {
     const scrollRef = makeScrollRef();
     const loadMore = vi.fn(async () => 20);

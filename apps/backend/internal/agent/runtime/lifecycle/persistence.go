@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -76,6 +77,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		ID:                 execution.SessionID,
 		SessionID:          execution.SessionID,
 		TaskID:             execution.TaskID,
+		ExecutorID:         strings.TrimSpace(getMetadataString(metadata, "executor_id")),
 		ExecutionProfileID: execution.AgentProfileID,
 		Runtime:            execution.RuntimeName,
 		Status:             executorRunningStatusFromExecution(execution),
@@ -92,7 +94,9 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		LastSeenAt:         lastSeenAt,
 	}
 	if prior != nil {
-		running.ExecutorID = prior.ExecutorID
+		if strings.TrimSpace(prior.ExecutorID) != "" {
+			running.ExecutorID = prior.ExecutorID
+		}
 		if prior.ExecutionProfileID == execution.AgentProfileID {
 			running.ResumeToken = prior.ResumeToken
 			running.LastMessageUUID = prior.LastMessageUUID

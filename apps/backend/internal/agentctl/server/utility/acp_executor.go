@@ -1183,19 +1183,22 @@ func derefString(p *string) string {
 // is not derived from untrusted input — even though the value is
 // semantically the same as the base name taken from InferenceConfig.Command.
 var allowedProbeCommands = map[string]string{
-	"auggie":        "auggie",
-	"cursor-agent":  "cursor-agent",
-	"devin":         "devin",
-	"grok":          "grok",
-	"hermes":        "hermes",
-	"kimi":          "kimi",
-	"kiro-cli-chat": "kiro-cli-chat",
-	"mock-agent":    "mock-agent",
-	"npx":           "npx",
-	"omp":           "omp",
-	openCodeCommand: openCodeCommand,
-	"qodercli":      "qodercli",
-	"traecli":       "traecli",
+	"agy_acp_server.par": "agy_acp_server.par",
+	"agy_acp_server.exe": "agy_acp_server.exe",
+	"auggie":             "auggie",
+	"cursor-agent":       "cursor-agent",
+	"devin":              "devin",
+	"goose":              "goose",
+	"grok":               "grok",
+	"hermes":             "hermes",
+	"kimi":               "kimi",
+	"kiro-cli-chat":      "kiro-cli-chat",
+	"mock-agent":         "mock-agent",
+	"npx":                "npx",
+	"omp":                "omp",
+	openCodeCommand:      openCodeCommand,
+	"qodercli":           "qodercli",
+	"traecli":            "traecli",
 }
 
 // resolveProbeCommand validates and returns a hard-coded executable name for

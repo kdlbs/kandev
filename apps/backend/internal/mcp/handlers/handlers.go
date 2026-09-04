@@ -147,6 +147,9 @@ type TaskRepository interface {
 // exists. Implementations must return only server-authored identity data.
 type RemoteContributionService interface {
 	Resolve(ctx context.Context, workspaceID, userID, rawURL string) (*models.RemoteContributionResolution, bool, error)
+	// Associate's repositoryID is repositories.ID — the repository_id COLUMN
+	// on the task's task_repositories row, not that row's own id. Callers
+	// must pass task.Repositories[i].RepositoryID, never .ID.
 	Associate(ctx context.Context, workspaceID, userID, taskID, repositoryID string, resolution *models.RemoteContributionResolution) error
 }
 
@@ -926,7 +929,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
 		}
-		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].ID, resolution); err != nil {
+		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].RepositoryID, resolution); err != nil {
 			h.logger.Error("associate remote contribution; rolling back task creation",
 				zap.String("task_id", task.ID), zap.Error(err))
 			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
@@ -4035,19 +4038,22 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
-	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
-	plan, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
-		TaskID:           req.TaskID,
-		Title:            req.Title,
-		Content:          req.Content,
-		CreatedBy:        createdBy,
-		ForceNewRevision: guard.forceNewRevision,
+	result, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID:             req.TaskID,
+		Title:              req.Title,
+		Content:            req.Content,
+		CreatedBy:          createdBy,
+		EvaluateTruncation: true,
 	})
 	if err != nil {
 		return planws.CreateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
+	warning := ""
+	if result.TruncationDetected {
+		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
 }
 
 // handleGetTaskPlan retrieves a task plan.
@@ -4089,19 +4095,22 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		createdBy = "agent"
 	}
 
-	guard := h.evaluatePlanWriteGuard(ctx, req.TaskID, req.Content)
-	plan, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
-		TaskID:           req.TaskID,
-		Title:            req.Title,
-		Content:          req.Content,
-		CreatedBy:        createdBy,
-		ForceNewRevision: guard.forceNewRevision,
+	result, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
+		TaskID:             req.TaskID,
+		Title:              req.Title,
+		Content:            req.Content,
+		CreatedBy:          createdBy,
+		EvaluateTruncation: true,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(plan), guard))
+	warning := ""
+	if result.TruncationDetected {
+		warning = planTruncationWarning(result.ReplacedRunes, result.NewRunes, result.PriorRevisionNumber)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planWritePayload(dto.TaskPlanFromModel(result.Plan), warning, result.PriorRevisionNumber))
 }
 
 // handleDeleteTaskPlan deletes a task plan.

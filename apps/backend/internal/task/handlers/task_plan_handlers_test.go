@@ -230,6 +230,8 @@ func (r *missingTaskOnPlanWriteRepo) WritePlanRevision(
 	*models.TaskPlan,
 	*models.TaskPlanRevision,
 	*string,
+	bool,
+	bool,
 ) error {
 	return repository.ErrTaskNotFound
 }

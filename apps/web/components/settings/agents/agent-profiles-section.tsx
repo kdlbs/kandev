@@ -175,6 +175,7 @@ type ProfileRowDeleteConfirmationProps = {
   onConfirm: () => void | Promise<void>;
   placement: "inline" | "popover";
 };
+type ProfileRowDeleteConfirmationBaseProps = Omit<ProfileRowDeleteConfirmationProps, "placement">;
 
 function ProfileRowDeleteConfirmation({
   open,
@@ -205,46 +206,85 @@ function ProfileRowDeleteConfirmation({
   );
 }
 
-/** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
-/**
- * The row's write controls, in the variant the pointer calls for.
- *
- * Duplicating and deleting a profile are both org.config.manage writes, so a
- * caller without that scope gets none of them. The row itself stays: seeing
- * which profiles exist is a read, and the task dialog offers the same list.
- */
-function ProfileRowActionsSlot({
-  profile,
-  canManage,
-  hidden,
-  isFullDesktop,
-  deleteAnchorRef,
-  onDuplicate,
-  onConfirmDelete,
-}: {
+type ProfileRowCardProps = {
   profile: AgentProfile;
+  href: string;
   canManage: boolean;
-  hidden: boolean;
+  confirmOpen: boolean;
+  isFinePointer: boolean;
   isFullDesktop: boolean;
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
-}) {
-  const Actions = isFullDesktop ? ProfileRowInlineActions : ProfileRowActions;
+  confirmationProps: ProfileRowDeleteConfirmationBaseProps;
+};
+
+function ProfileRowCard({
+  profile,
+  href,
+  canManage,
+  confirmOpen,
+  isFinePointer,
+  isFullDesktop,
+  deleteAnchorRef,
+  onDuplicate,
+  onConfirmDelete,
+  confirmationProps,
+}: ProfileRowCardProps) {
   return (
-    <div className="relative z-10 flex shrink-0 items-center gap-1">
-      {canManage && !hidden && (
-        <Actions
-          profile={profile}
-          deleteAnchorRef={deleteAnchorRef}
-          onDuplicate={onDuplicate}
-          onConfirmDelete={onConfirmDelete}
-        />
-      )}
-    </div>
+    <Card
+      // Same surface treatment as the workspace section tiles.
+      className="relative gap-0 border-border/70 bg-background/50 py-1.5 transition-colors hover:border-foreground/30 hover:bg-muted/50"
+      data-testid="agent-profile-row"
+    >
+      {/* Whole-card link as an overlay — the action buttons sit above it (z-10). */}
+      <Link
+        href={href}
+        aria-label={profile.name}
+        className="absolute inset-0"
+        data-testid="agent-profile-row-link"
+      />
+      <CardContent className="flex items-center justify-between gap-2 px-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <RecordDot />
+            <span className="truncate text-sm font-medium">{profile.name}</span>
+            {profile.enabled === false && <DisabledBadge />}
+          </div>
+          {(profile.model || profile.mode) && (
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5">
+              {profile.model && <Badge variant="outline">{profile.model}</Badge>}
+              {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
+            </div>
+          )}
+        </div>
+        <div className="relative z-10 flex shrink-0 items-center gap-1">
+          {canManage &&
+            !(confirmOpen && !isFinePointer) &&
+            (isFullDesktop ? (
+              <ProfileRowInlineActions
+                profile={profile}
+                deleteAnchorRef={deleteAnchorRef}
+                onDuplicate={onDuplicate}
+                onConfirmDelete={onConfirmDelete}
+              />
+            ) : (
+              <ProfileRowActions
+                profile={profile}
+                deleteAnchorRef={deleteAnchorRef}
+                onDuplicate={onDuplicate}
+                onConfirmDelete={onConfirmDelete}
+              />
+            ))}
+        </div>
+        <ProfileRowDeleteConfirmation {...confirmationProps} placement="inline" />
+      </CardContent>
+      <ProfileRowDeleteConfirmation {...confirmationProps} placement="popover" />
+    </Card>
   );
 }
 
+/** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
 export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
   const canManage = useIsAdmin();
   const { t } = useTranslation();
@@ -290,6 +330,10 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       router.push(href);
       return;
     }
+    if (result.handled) {
+      closeDeleteConfirmation();
+      return;
+    }
     toast({
       title: t("agents:cannotDeleteAgentProfile"),
       description: result.message,
@@ -306,44 +350,17 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
     onConfirm: () => void handleDelete(),
   };
   return (
-    <Card
-      // Same surface treatment as the workspace section tiles.
-      className="relative gap-0 border-border/70 bg-background/50 py-1.5 transition-colors hover:border-foreground/30 hover:bg-muted/50"
-      data-testid="agent-profile-row"
-    >
-      {/* Whole-card link as an overlay — the action buttons sit above it (z-10). */}
-      <Link
-        href={href}
-        aria-label={profile.name}
-        className="absolute inset-0"
-        data-testid="agent-profile-row-link"
-      />
-      <CardContent className="flex items-center justify-between gap-2 px-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <RecordDot />
-            <span className="truncate text-sm font-medium">{profile.name}</span>
-            {profile.enabled === false && <DisabledBadge />}
-          </div>
-          {(profile.model || profile.mode) && (
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5">
-              {profile.model && <Badge variant="outline">{profile.model}</Badge>}
-              {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
-            </div>
-          )}
-        </div>
-        <ProfileRowActionsSlot
-          profile={profile}
-          canManage={canManage}
-          hidden={confirmOpen && !isFinePointer}
-          isFullDesktop={isFullDesktop}
-          deleteAnchorRef={deleteAnchorRef}
-          onDuplicate={() => void handleDuplicate(agent, profile)}
-          onConfirmDelete={() => setConfirmOpen(true)}
-        />
-        <ProfileRowDeleteConfirmation {...confirmationProps} placement="inline" />
-      </CardContent>
-      <ProfileRowDeleteConfirmation {...confirmationProps} placement="popover" />
-    </Card>
+    <ProfileRowCard
+      profile={profile}
+      href={href}
+      canManage={canManage}
+      confirmOpen={confirmOpen}
+      isFinePointer={isFinePointer}
+      isFullDesktop={isFullDesktop}
+      deleteAnchorRef={deleteAnchorRef}
+      onDuplicate={() => void handleDuplicate(agent, profile)}
+      onConfirmDelete={() => setConfirmOpen(true)}
+      confirmationProps={confirmationProps}
+    />
   );
 }

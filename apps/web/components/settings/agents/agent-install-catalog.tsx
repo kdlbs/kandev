@@ -12,6 +12,7 @@ import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery"
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { installAgent, listAgentDiscovery, listAvailableAgents, listInstallJobs } from "@/lib/api";
 import type { InstallJob } from "@/lib/api";
+import { isHandledApiError } from "@/lib/api/client";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import type { AvailableAgent, ToolStatus } from "@/lib/types/http";
 
@@ -130,6 +131,27 @@ function ToolInstallCard({
   );
 }
 
+export async function enqueueAgentInstall(
+  name: string,
+  upsertInstallJob: (job: InstallJob) => void,
+): Promise<void> {
+  try {
+    const job = await installAgent(name);
+    // The WS event will normally arrive first, but seed the store in case the
+    // WS round-trip is slower than the HTTP response.
+    upsertInstallJob(job);
+  } catch (err) {
+    if (isHandledApiError(err)) return;
+    upsertInstallJob({
+      job_id: `local-error-${name}`,
+      agent_name: name,
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+      started_at: new Date().toISOString(),
+    });
+  }
+}
+
 /**
  * Install state is held in the store (driven by WS events
  * agent.install.{started,output,finished}). This hook:
@@ -174,22 +196,7 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
   }, [Object.values(installJobs).filter((j) => j.status === "succeeded").length]);
 
   const handleInstall = useCallback(
-    async (name: string) => {
-      try {
-        const job = await installAgent(name);
-        // The WS event will normally arrive first, but seed the store in case
-        // the WS round-trip is slower than the HTTP response.
-        upsertInstallJob(job);
-      } catch (err) {
-        upsertInstallJob({
-          job_id: `local-error-${name}`,
-          agent_name: name,
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-          started_at: new Date().toISOString(),
-        });
-      }
-    },
+    (name: string) => enqueueAgentInstall(name, upsertInstallJob),
     [upsertInstallJob],
   );
 

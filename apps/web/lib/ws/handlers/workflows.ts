@@ -2,6 +2,10 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { WorkflowPayload } from "@/lib/types/backend";
+import {
+  normalizeWorkflowProfileSessionStartPolicy,
+  normalizeWorkflowProfileSessionEndPolicy,
+} from "@/lib/types/http";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function stepFromPayload(step: any) {
@@ -16,6 +20,12 @@ function stepFromPayload(step: any) {
     prompt: step.prompt,
     is_start_step: step.is_start_step,
     agent_profile_id: step.agent_profile_id,
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      step.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      step.profile_session_end_policy,
+    ),
     wip_limit: step.wip_limit,
     pull_from_step_id: step.pull_from_step_id ?? null,
     stage_type: step.stage_type,

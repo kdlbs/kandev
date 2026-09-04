@@ -53,6 +53,14 @@ type WorktreeProvider interface {
 	GetAllByTaskID(ctx context.Context, taskID string) ([]*worktree.Worktree, error)
 }
 
+// WorktreeCleanupIdentityProvider captures immutable checkout identities before
+// a durable cleanup snapshot is stored. Implementations that do not provide it
+// remain compatible with legacy cleanup wiring, which uses the older live-state
+// fallback in the worktree manager.
+type WorktreeCleanupIdentityProvider interface {
+	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
+}
+
 // WorktreeBatchCleaner extends WorktreeProvider with batch cleanup.
 type WorktreeBatchCleaner interface {
 	WorktreeProvider
@@ -80,6 +88,13 @@ type TaskExecutionStopper interface {
 	// RegisterExecutionStopOwner records exact teardown ownership before a
 	// terminal session mutation. It never replaces the explicit stop call.
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
+}
+
+// synchronousTaskExecutionStopper is an optional cleanup-only extension. The
+// normal StopSession contract schedules process teardown asynchronously, but
+// destructive resource cleanup must wait until the process exits.
+type synchronousTaskExecutionStopper interface {
+	StopSessionSynchronously(ctx context.Context, sessionID, reason string, force bool) error
 }
 
 // TerminalClarificationCanceller expires durable input requests after a task
@@ -365,17 +380,13 @@ type Service struct {
 	repositorySelectionResolver     RepositorySelectionResolver
 	repoCloneLocation               RepoCloneLocation
 	blockers                        BlockerRepository
-	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
-	// two concurrent adds cannot each pass a cycle walk that predates the
-	// other's insert and commit a cycle between them.
-	dependencyEdgeMu       sync.Mutex
-	comments               CommentRepository
-	taskStateActivity      TaskStateActivityLogger
-	secretStore            secrets.SecretStore
-	workspaceSecretDeleter WorkspaceSecretDeleter
-	baseBranchPusher       AgentBaseBranchPusher
-	comparisonTargetPusher AgentComparisonTargetPusher
-	runtimeOverridesMu     sync.Mutex
+	comments                        CommentRepository
+	taskStateActivity               TaskStateActivityLogger
+	secretStore                     secrets.SecretStore
+	workspaceSecretDeleter          WorkspaceSecretDeleter
+	baseBranchPusher                AgentBaseBranchPusher
+	comparisonTargetPusher          AgentComparisonTargetPusher
+	runtimeOverridesMu              sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -417,6 +428,7 @@ type Service struct {
 	pendingActionProjectionMu       sync.Mutex
 	pendingActionProjectionEpoch    string
 	pendingActionProjectionSequence uint64
+	lastPendingActionProjections    map[string]pendingActionProjectionState
 }
 
 // SetAttachmentService wires the file-backed prompt attachment owner into the
@@ -486,6 +498,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		// Focused service tests do not run backend composition. Production
 		// replaces this fallback with a database-allocated generation.
 		pendingActionProjectionEpoch: "1",
+		lastPendingActionProjections: make(map[string]pendingActionProjectionState),
 	}
 }
 

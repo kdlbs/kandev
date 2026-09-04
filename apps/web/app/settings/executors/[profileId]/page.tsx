@@ -6,7 +6,6 @@ import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { IconShieldLock } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
@@ -26,15 +25,11 @@ import {
 import {
   EnvVarsCard,
   useEnvVarRows,
-  rowsToEnvVars,
   envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
-import {
-  SSHTaskDirReclamationCard,
-  isSSHReclaimEnabled,
-} from "@/components/settings/ssh-task-dir-reclamation-card";
+import { SSHTaskDirReclamationCard } from "@/components/settings/ssh-task-dir-reclamation-card";
 import {
   type GitIdentityMode,
   type GitIdentityState,
@@ -52,9 +47,17 @@ import {
   upsertExecutorProfile,
   type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
+import { ProfileConnectionSettingsAction } from "@/components/settings/profile-edit/profile-connection-settings-action";
+import type { ExecutorProfileSavePayload } from "@/components/settings/profile-edit/use-executor-profile-save-contributor";
+import {
+  useKubernetesProfileConnection,
+  useProfileSettingsSave,
+} from "@/components/settings/profile-edit/use-profile-settings-save";
+import {
+  buildProfileEnvVars,
+  profileSaveInvalidReason,
+} from "@/components/settings/profile-edit/profile-edit-form-helpers";
 import { useToast } from "@/components/toast-provider";
-import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
-import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import {
   deriveSpritesSecretId,
   getGitIdentityBaseline,
@@ -63,13 +66,27 @@ import {
   parseRemoteAuthSecrets,
   parseRemoteCredentials,
 } from "@/components/settings/profile-edit/executor-profile-baselines";
-import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
+import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
+import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
+import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
+import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
+import { KubernetesProfileClusterSection } from "@/components/settings/kubernetes-profile-cluster-section";
+import {
+  parseKubernetesProfileConfig,
+  replaceKubernetesProfileConfig,
+} from "@/components/settings/kubernetes-config";
+import { kubernetesExecutorInvalidReason } from "@/components/settings/kubernetes-validation";
+import {
+  useKubernetesAdminAccess,
+  useKubernetesDiagnostics,
+  useKubernetesSessions,
+} from "@/hooks/domains/settings/use-kubernetes-settings";
 
 const EXECUTORS_ROUTE = "/settings/executors";
-const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
+
 function useProfileFromStore(profileId: string) {
   const executor = useAppStore(
     (state) =>
@@ -78,23 +95,6 @@ function useProfileFromStore(profileId: string) {
   );
   const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
   return executor && profile ? { executor, profile } : null;
-}
-
-function useRemoteExecutorFlags(executorType: ExecutorType) {
-  // SSH joins the "remote" set because it runs the agent on a host whose
-  // filesystem doesn't share paths with the kandev backend — so the same
-  // remote-credentials + auth-secrets surface applies (the SSH executor
-  // SFTPs files into the remote user's $HOME).
-  const isRemote =
-    executorType === "local_docker" ||
-    executorType === "remote_docker" ||
-    executorType === "sprites" ||
-    executorType === "ssh";
-  return {
-    isRemote,
-    isDocker: executorType === "local_docker" || executorType === "remote_docker",
-    isSprites: executorType === "sprites",
-  };
 }
 
 function useRemoteAuthState(profile: ExecutorProfile) {
@@ -115,6 +115,13 @@ function useRemoteAuthState(profile: ExecutorProfile) {
     setAgentEnvVars((prev) => ({ ...prev, [agentId]: secretId }));
   }, []);
 
+  const reset = useCallback(() => {
+    setNetworkPolicyRules(parseNetworkPolicyRules(profile.config));
+    setRemoteCredentials(parseRemoteCredentials(profile.config));
+    setConfigBundleIds(parseAgentConfigBundles(profile.config));
+    setAgentEnvVars(parseRemoteAuthSecrets(profile.config));
+  }, [profile.config]);
+
   return {
     networkPolicyRules,
     setNetworkPolicyRules,
@@ -124,6 +131,7 @@ function useRemoteAuthState(profile: ExecutorProfile) {
     setConfigBundleIds,
     agentEnvVars,
     handleAgentEnvVarChange,
+    reset,
   };
 }
 
@@ -172,6 +180,13 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
       .finally(() => setLoaded(true));
   }, [isRemote, profile.config?.git_user_email, profile.config?.git_user_name]);
 
+  const reset = useCallback(() => {
+    const baseline = getGitIdentityBaseline(profile, localGitIdentity);
+    setGitIdentityMode(baseline.mode);
+    setGitUserName(baseline.userName);
+    setGitUserEmail(baseline.userEmail);
+  }, [localGitIdentity, profile]);
+
   return {
     localGitIdentity,
     gitIdentityMode,
@@ -181,6 +196,7 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
     gitUserEmail,
     setGitUserEmail,
     loaded,
+    reset,
   };
 }
 
@@ -219,14 +235,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const [deleting, setDeleting] = useState(false);
 
   const save = useCallback(
-    async (data: {
-      name: string;
-      mcp_policy?: string;
-      config?: Record<string, string>;
-      prepare_script: string;
-      cleanup_script: string;
-      env_vars: ProfileEnvVar[];
-    }) => {
+    async (data: ExecutorProfileSavePayload) => {
       setSaveStatus("loading");
       setError(null);
       try {
@@ -275,26 +284,22 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   return { saveStatus, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
 }
 
-function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
+export function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const { t } = useTranslation();
   const [name, setName] = useState(profile.name);
   const [mcpPolicy, setMcpPolicy] = useState(profile.mcp_policy ?? "");
   const [prepareScript, setPrepareScript] = useState(profile.prepare_script ?? "");
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
-  const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
-  const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
-  const [sshShell, setSshShell] = useState(profile.config?.ssh_shell ?? "");
-  const [sshReclaimTaskDir, setSshReclaimTaskDir] = useState(() =>
-    isSSHReclaimEnabled(profile.config),
+  const runtime = useProfileRuntimeFormState(executor, profile);
+  const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
+    profile.env_vars,
   );
-  const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(profile.env_vars);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
     deriveSpritesSecretId(profile.env_vars),
   );
-  const flags = useRemoteExecutorFlags(executor.type);
   const remoteAuth = useRemoteAuthState(profile);
-  const gitIdentity = useGitIdentityState(flags.isRemote, profile);
+  const gitIdentity = useGitIdentityState(runtime.isRemote, profile);
   const mcpPolicyErrorKey = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
 
   useEffect(() => {
@@ -303,19 +308,29 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
       .catch(() => {});
   }, []);
 
-  const buildEnvVars = useCallback((): ProfileEnvVar[] => {
-    const vars = rowsToEnvVars(envVarRows).filter((ev) => ev.key !== SPRITES_TOKEN_KEY);
-    if (flags.isSprites && spritesSecretId) {
-      vars.push({ key: SPRITES_TOKEN_KEY, secret_id: spritesSecretId });
-    }
-    return vars;
-  }, [envVarRows, flags.isSprites, spritesSecretId]);
+  const buildEnvVars = useCallback(
+    () => buildProfileEnvVars(envVarRows, runtime.isSprites, spritesSecretId),
+    [envVarRows, runtime.isSprites, spritesSecretId],
+  );
 
-  const prepareDesc = flags.isRemote
+  const prepareDesc = runtime.isRemote
     ? t("executors:prepareScriptDescriptionRemote", { trigger: "{{" })
     : t("executors:prepareScriptDescriptionLocal");
 
+  const reset = useCallback(() => {
+    setName(profile.name);
+    setMcpPolicy(profile.mcp_policy ?? "");
+    setPrepareScript(profile.prepare_script ?? "");
+    setCleanupScript(profile.cleanup_script ?? "");
+    runtime.resetRuntime();
+    resetEnvVars(profile.env_vars);
+    setSpritesSecretId(deriveSpritesSecretId(profile.env_vars));
+    remoteAuth.reset();
+    gitIdentity.reset();
+  }, [gitIdentity, profile, remoteAuth, resetEnvVars, runtime]);
+
   return {
+    ...runtime,
     name,
     setName,
     mcpPolicy,
@@ -324,14 +339,6 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setPrepareScript,
     cleanupScript,
     setCleanupScript,
-    dockerfile,
-    setDockerfile,
-    imageTag,
-    setImageTag,
-    sshShell,
-    setSshShell,
-    sshReclaimTaskDir,
-    setSshReclaimTaskDir,
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -355,13 +362,10 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setGitUserName: gitIdentity.setGitUserName,
     gitUserEmail: gitIdentity.gitUserEmail,
     setGitUserEmail: gitIdentity.setGitUserEmail,
-    isRemote: flags.isRemote,
-    isDocker: flags.isDocker,
-    isSprites: flags.isSprites,
-    isSSH: executor.type === "ssh",
     mcpPolicyErrorKey,
     buildEnvVars,
     prepareDesc,
+    reset,
   };
 }
 
@@ -374,6 +378,7 @@ type ProfileEditSectionsProps = {
 
 function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
   const gitIdentityBaseline = getGitIdentityBaseline(profile, form.localGitIdentity);
+  const canManageKubernetes = useKubernetesAdminAccess();
   return (
     <>
       {executor.type === "ssh" && (
@@ -407,6 +412,14 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+        />
+      )}
+      {form.isKubernetes && (
+        <KubernetesProfileSections
+          form={form.kubernetesProfile}
+          baseline={parseKubernetesProfileConfig(profile.config)}
+          onChange={form.setKubernetesProfile}
+          canManage={canManageKubernetes}
         />
       )}
       {form.isRemote && (
@@ -496,62 +509,45 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
 
 function ProfileEditForm({ executor, profile }: { executor: Executor; profile: ExecutorProfile }) {
   const { t } = useTranslation();
-  const router = useRouter();
   const { items: secrets } = useSecrets();
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
+  const canManageKubernetes = useKubernetesAdminAccess();
+  const connection = useKubernetesProfileConnection(executor, form.isKubernetes);
+  const diagnostics = useKubernetesDiagnostics();
+  const sessions = useKubernetesSessions(executor.id, form.isKubernetes);
   const relatedContainers = useDockerProfileContainers(profile.id, form.isDocker);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
-  const headerActions =
-    executor.type === "ssh" ? (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => router.push(`/settings/executors/ssh/${executor.id}`)}
-        className="w-full cursor-pointer sm:w-auto"
-        data-testid="ssh-connection-settings-link"
-      >
-        <IconShieldLock className="mr-1.5 h-4 w-4" />
-        {t("executors:connectionSettings")}
-      </Button>
-    ) : undefined;
-
+  const memberReadOnly = form.isKubernetes && !canManageKubernetes;
+  const sharedConfig = buildSaveConfig(form, profile.config);
   const savePayload = {
     name: form.name.trim(),
     mcp_policy: form.mcpPolicy || undefined,
-    config: buildSaveConfig(form, profile.config),
+    config: form.isKubernetes
+      ? replaceKubernetesProfileConfig(sharedConfig, form.kubernetesProfile)
+      : sharedConfig,
     prepare_script: form.prepareScript,
     cleanup_script: form.cleanupScript,
     env_vars: form.buildEnvVars(),
   };
-  const saveRevision = serializeSettingsRevision(savePayload);
-  const [savedRevision, setSavedRevision] = useState(saveRevision);
-  const [baselineReady, setBaselineReady] = useState(!form.isRemote);
-  useEffect(() => {
-    if (!baselineReady && form.gitIdentityLoaded) {
-      setSavedRevision(saveRevision);
-      setBaselineReady(true);
-    }
-  }, [baselineReady, form.gitIdentityLoaded, saveRevision]);
-  const handleSave = async () => {
-    const submittedPayload = savePayload;
-    const submittedRevision = saveRevision;
-    await persistence.save(submittedPayload);
-    setSavedRevision(submittedRevision);
-  };
-  let invalidReason: string | undefined;
-  if (!form.name.trim()) invalidReason = t("executors:profileNameIsRequired");
-  else if (form.mcpPolicyErrorKey) invalidReason = t(form.mcpPolicyErrorKey);
-  else if (spritesTokenMissing) invalidReason = t("executors:spritesTokenIsRequired");
-  useSettingsSaveContributor({
-    id: `executor-profile:${profile.id}`,
-    revision: saveRevision,
-    isDirty: baselineReady && saveRevision !== savedRevision,
-    canSave:
-      baselineReady && Boolean(form.name.trim()) && !form.mcpPolicyErrorKey && !spritesTokenMissing,
+  const profileInvalidReason = profileSaveInvalidReason(form, canManageKubernetes, t);
+  const connectionInvalidReason = form.isKubernetes
+    ? kubernetesExecutorInvalidReason(connection.form, canManageKubernetes, t)
+    : undefined;
+  const invalidReason = connectionInvalidReason ?? profileInvalidReason;
+  const baselineReady = useProfileSettingsSave({
+    executorId: executor.id,
+    profileId: profile.id,
+    payload: savePayload,
+    isKubernetes: form.isKubernetes,
+    isRemote: form.isRemote,
+    gitIdentityLoaded: form.gitIdentityLoaded,
+    canManageKubernetes,
     invalidReason,
-    save: handleSave,
-    discard: () => undefined,
+    saveProfile: persistence.save,
+    discardProfile: form.reset,
+    clearDiagnostics: diagnostics.clear,
+    connection,
   });
 
   const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {
@@ -567,16 +563,29 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   };
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-8 overflow-x-clip">
       <ProfileHeader
         executor={executor}
         profileName={profile.name}
         description={getExecutorDescription(executor.type)}
-        actions={headerActions}
+        actions={<ProfileConnectionSettingsAction executor={executor} />}
       />
+      {memberReadOnly && <KubernetesReadOnlyNotice />}
+      {form.isKubernetes && (
+        <KubernetesProfileClusterSection
+          executor={executor}
+          form={form.kubernetesProfile}
+          connectionForm={connection.form}
+          connectionBaseline={connection.baseline}
+          onConnectionChange={connection.setForm}
+          canManage={canManageKubernetes}
+          diagnosticsState={diagnostics}
+          sessionsState={sessions}
+        />
+      )}
       <fieldset
-        disabled={!baselineReady || persistence.saveStatus === "loading"}
-        className="space-y-8"
+        disabled={!baselineReady || persistence.saveStatus === "loading" || memberReadOnly}
+        className="min-w-0 space-y-8"
       >
         <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
       </fieldset>
@@ -584,7 +593,10 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         <p className="text-sm text-destructive">{t("executors:spritesApiKeyIsRequired")}</p>
       )}
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
-      <ProfileFormActions onDelete={() => persistence.setDeleteDialogOpen(true)} />
+      <ProfileFormActions
+        onDelete={() => persistence.setDeleteDialogOpen(true)}
+        disabled={memberReadOnly}
+      />
       <DeleteProfileDialog
         open={persistence.deleteDialogOpen}
         onOpenChange={persistence.setDeleteDialogOpen}

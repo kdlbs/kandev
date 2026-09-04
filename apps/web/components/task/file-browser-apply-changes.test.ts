@@ -112,6 +112,20 @@ describe("applyFileChanges — refresh operation expands to all expanded folders
     expect(requestFileTreeMock.mock.calls.map((c) => c[2]).sort()).toEqual(["thm"]);
   });
 
+  it("refreshes the nearest loaded ancestor for a new nested path", async () => {
+    mockEmptyTree();
+    applyFileChanges({
+      client: client(),
+      sessionId: SESSION_ID,
+      expandedPaths: new Set<string>(),
+      changes: [{ path: "upload-bundle/nested/leaf.txt", operation: "create" }],
+      setTree: vi.fn(),
+      setLoadState: vi.fn(),
+    });
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(requestFileTreeMock.mock.calls.map((c) => c[2])).toEqual([""]);
+  });
+
   it("merges fresh children into the expanded subtree", async () => {
     requestFileTreeMock.mockImplementation((_c: unknown, _s: string, folder: string) =>
       folder === "thm"

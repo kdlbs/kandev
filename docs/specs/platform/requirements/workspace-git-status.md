@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-08-30
+updated: 2026-08-31
 owners:
   - kandev
 ---
@@ -40,6 +40,9 @@ Users opening or focusing Changes and Review need a current workspace snapshot w
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.13:** An untracked path inside a dependency tree does not appear in a workspace snapshot and does not receive per-file status or diff enrichment, even when the repository has no matching ignore rule.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14:** A tracked changed path inside `node_modules` remains visible. An untracked path outside dependency trees remains visible when Git does not ignore it.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.15:** Creating, changing, or removing only untracked dependency-tree content does not change the workspace monitor fingerprint or start a full status refresh.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.16:** Kandev-owned comparison-target Git commands do not request credentials or confirmation through a terminal. Each command uses the instance's effective Git credential environment, enforces non-interactive prompt controls, and ends within its command deadline.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.17:** Comparison-target materialization does not delay instance readiness or a Git-status UI request. Until background materialization succeeds, file status remains usable and comparison-derived data reports unavailable.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.18:** When a comparison-target fetch fails over its canonical HTTPS transport, Kandev does not retry SSH or another transport automatically. It preserves checkout and push routing and reports that comparison data is unavailable.
 
 ## Out of scope
 
@@ -47,6 +50,7 @@ Users opening or focusing Changes and Review need a current workspace snapshot w
 - Suppressing tracked paths based on a directory name.
 - Filtering dependency trees only after Git has enumerated their files.
 - Changing the Git-status API or WebSocket payload shape.
+- Automatically changing the Git transport after an authentication or transport error.
 
 ## System design
 

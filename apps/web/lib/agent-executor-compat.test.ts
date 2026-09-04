@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shouldFilterHandoffByHostHealth } from "./agent-executor-compat";
+import {
+  executorRequiresAgentCredentials,
+  shouldFilterHandoffByHostHealth,
+} from "./agent-executor-compat";
 import type { ExecutorType } from "@/lib/types/http";
 
 describe("shouldFilterHandoffByHostHealth", () => {
@@ -20,5 +23,9 @@ describe("shouldFilterHandoffByHostHealth", () => {
 
   it("does not apply a host-health filter while the executor is unknown", () => {
     expect(shouldFilterHandoffByHostHealth(null)).toBe(false);
+  });
+
+  it("requires remote agent credentials for Kubernetes profiles", () => {
+    expect(executorRequiresAgentCredentials("k8s")).toBe(true);
   });
 });

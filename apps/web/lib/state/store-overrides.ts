@@ -9,6 +9,7 @@ export function buildStateOverrides(m: DefaultState) {
     kanban: m.kanban,
     kanbanMulti: m.kanbanMulti,
     workflows: m.workflows,
+    workspaceContextGeneration: m.workspaceContextGeneration,
     tasks: m.tasks,
     workspaces: m.workspaces,
     repositories: m.repositories,
@@ -31,6 +32,7 @@ export function buildStateOverrides(m: DefaultState) {
     turns: m.turns,
     taskSessions: m.taskSessions,
     taskSessionsByTask: m.taskSessionsByTask,
+    pendingActionProjectionsBySessionId: m.pendingActionProjectionsBySessionId,
     sessionAgentctl: m.sessionAgentctl,
     worktrees: m.worktrees,
     sessionWorktreesBySessionId: m.sessionWorktreesBySessionId,
@@ -94,6 +96,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionFailureNotification: m.sessionFailureNotification,
     bottomTerminal: m.bottomTerminal,
     sidebarViews: m.sidebarViews,
+    threadViews: m.threadViews,
     sidebarTaskPrefs: m.sidebarTaskPrefs,
   };
 }

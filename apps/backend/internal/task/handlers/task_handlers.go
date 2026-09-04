@@ -204,6 +204,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// equivalents of the Office-only blocker routes; both go through the single
 	// validator in the task service.
 	api.POST("/tasks/:id/dependencies", h.httpAddTaskDependency)
+	api.PUT("/tasks/:id/dependencies", h.httpReplaceTaskDependencies)
 	api.DELETE("/tasks/:id/dependencies/:depId", h.httpRemoveTaskDependency)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)

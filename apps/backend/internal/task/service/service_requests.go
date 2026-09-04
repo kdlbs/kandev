@@ -328,6 +328,8 @@ type ListMessagesRequest struct {
 	Before        string
 	After         string
 	Sort          string
+	AuthorType    string
+	Around        string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script

@@ -25,6 +25,18 @@ function primaryExecutorFields(task: Task) {
   };
 }
 
+function parseLabels(value: string | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((label): label is string => typeof label === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
   // Handle empty snapshot (ephemeral tasks have no workflow)
   if (!snapshot.workflow) {
@@ -40,6 +52,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
 
   const tasks = snapshot.tasks
     .filter((task) => !task.is_ephemeral) // Filter out ephemeral tasks (e.g., quick chat)
+    // eslint-disable-next-line complexity -- The boot mapper projects one complete task record for hydration.
     .map((task) => {
       const workflowStepId = task.workflow_step_id;
       if (!workflowStepId) return null;
@@ -79,6 +92,10 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         primarySessionId: task.primary_session_id ?? undefined,
         primarySessionState: task.primary_session_state ?? undefined,
         ...primaryExecutorFields(task),
+        primaryAgentProfileId: task.primary_agent_profile_id ?? undefined,
+        primaryAgentName: task.primary_agent_name ?? undefined,
+        labels: parseLabels(task.labels),
+        origin: task.origin,
         primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,

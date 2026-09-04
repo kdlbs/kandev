@@ -4,7 +4,9 @@ import { useDockviewStore } from "./dockview-store";
 
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
+  getEnvLayoutProfile: vi.fn(() => null),
   setEnvLayout: vi.fn(),
+  setEnvLayoutProfile: vi.fn(),
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
@@ -21,7 +23,12 @@ vi.mock("@/lib/layout/panel-portal-manager", () => ({
   },
 }));
 
-import { setEnvLayout, getEnvMaximizeState } from "@/lib/local-storage";
+import {
+  getEnvLayoutProfile,
+  getEnvMaximizeState,
+  setEnvLayout,
+  setEnvLayoutProfile,
+} from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 
 function makeMockApi(): DockviewApi {
@@ -134,6 +141,7 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
       preMaximizeLayout: null,
       maximizedGroupId: null,
       isRestoringLayout: false,
+      pendingChatInitialPlacement: null,
     });
   });
 
@@ -148,6 +156,7 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     expect(api.fromJSON).not.toHaveBeenCalled();
     expect(panelPortalManager.releaseByEnv).not.toHaveBeenCalled();
     expect(setEnvLayout).not.toHaveBeenCalled();
+    expect(useDockviewStore.getState().pendingChatInitialPlacement).toBeNull();
   });
 
   it("saves outgoing env + releases its portals when switching to a new env", () => {
@@ -157,8 +166,58 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     useDockviewStore.getState().switchEnvLayout("env-old", "env-new", "session-X");
 
     expect(setEnvLayout).toHaveBeenCalledWith("env-old", expect.anything());
+    expect(setEnvLayoutProfile).toHaveBeenCalledWith("env-old", expect.anything());
     expect(panelPortalManager.releaseByEnv).toHaveBeenCalledWith("env-old");
     expect(useDockviewStore.getState().currentLayoutEnvId).toBe("env-new");
+  });
+
+  it("arms fresh transcript placement for the incoming session without capturing scrollTop", () => {
+    const api = makeMockApi();
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-old",
+      pendingChatScrollTop: null,
+    });
+
+    useDockviewStore.getState().switchEnvLayout("env-old", "env-new", "session-X");
+
+    const state = useDockviewStore.getState();
+    expect(state.pendingChatInitialPlacement).toEqual({
+      sessionId: "session-X",
+      token: expect.any(Number),
+    });
+    expect(state.pendingChatScrollTop).toBeNull();
+  });
+
+  it("ignores completion from a superseded env-switch placement", () => {
+    const api = makeMockApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-a" });
+
+    useDockviewStore.getState().switchEnvLayout("env-a", "env-b", "session-B");
+    const firstRequest = useDockviewStore.getState().pendingChatInitialPlacement;
+    useDockviewStore.getState().switchEnvLayout("env-b", "env-c", "session-C");
+    const secondRequest = useDockviewStore.getState().pendingChatInitialPlacement;
+
+    expect(firstRequest).not.toBeNull();
+    expect(secondRequest).not.toBeNull();
+    useDockviewStore.getState().completePendingChatInitialPlacement(firstRequest?.token ?? -1);
+    expect(useDockviewStore.getState().pendingChatInitialPlacement).toEqual(secondRequest);
+
+    useDockviewStore.getState().completePendingChatInitialPlacement(secondRequest?.token ?? -1);
+    expect(useDockviewStore.getState().pendingChatInitialPlacement).toBeNull();
+  });
+
+  it("restores the saved env layout profile when switching to a new env", () => {
+    const api = makeMockApi();
+    vi.mocked(getEnvLayoutProfile).mockReturnValue({ kind: "built-in", id: "vscode" });
+    useDockviewStore.setState({ api, currentLayoutEnvId: null });
+
+    useDockviewStore.getState().switchEnvLayout(null, "env-saved", "session-X");
+
+    expect(useDockviewStore.getState().activeLayoutProfile).toEqual({
+      kind: "built-in",
+      id: "vscode",
+    });
   });
 
   it("first adoption applies the env's layout without overwriting it or releasing portals", () => {

@@ -79,6 +79,9 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// AllowBranchReplacement is set only by RecoverSession for the explicit
+	// resume_new_branch action. Clients cannot grant this permission directly.
+	AllowBranchReplacement bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -157,8 +160,14 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.authorizeTaskPrompt(ctx, req.TaskID); err != nil {
 		return nil, err
 	}
-	if err := s.authorizeSession(ctx, req.SessionID); err != nil {
+	// Existing-session launches must also prove that the supplied session and
+	// task belong together; independent reach checks do not establish that
+	// binding when a caller can access more than one task.
+	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
+	}
+	if err := s.claimLaunchAttachments(ctx, req); err != nil {
+		return nil, fmt.Errorf("claim launch attachments: %w", err)
 	}
 	intent := ResolveIntent(req)
 	req.Prompt = strings.TrimSpace(req.Prompt)
@@ -179,6 +188,28 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	default:
 		return nil, fmt.Errorf("unknown intent: %s", intent)
 	}
+}
+
+func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSessionRequest) error {
+	hasDescriptor := false
+	for _, attachment := range req.Attachments {
+		if attachment.AttachmentID != "" {
+			hasDescriptor = true
+			break
+		}
+	}
+	if !hasDescriptor {
+		return nil
+	}
+	if s.launchAttachmentClaimer == nil {
+		return errors.New("launch attachment claimer is not configured")
+	}
+	return s.launchAttachmentClaimer.ClaimMessageAttachments(
+		ctx,
+		req.TaskID,
+		req.SessionID,
+		req.Attachments,
+	)
 }
 
 // launchPrepare creates a session entry without launching the agent.
@@ -318,7 +349,9 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	execution, err := s.ResumeTaskSession(ctx, req.TaskID, req.SessionID)
+	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
+		AllowBranchReplacement: req.AllowBranchReplacement,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +410,9 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
-// action is "resume" (retry with existing ACP session) or "fresh_start" (clear token, start fresh).
+// action is "resume" (retry with existing ACP session), "resume_new_branch"
+// (retry after replacing a confirmed missing branch), or "fresh_start" (clear
+// token, start fresh).
 func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string) (*LaunchSessionResponse, error) {
 	// Guard before the switch: "fresh_start" clears the resume token, so an
 	// unauthorized call would mutate the session even if the launch failed.
@@ -402,14 +437,18 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		}
 	case "resume":
 		// no-op — relaunch with existing resume token
+	case "resume_new_branch":
+		// The launch carries the explicit permission. It is not persisted on the
+		// session and cannot be inferred from a previous failed attempt.
 	default:
 		return nil, fmt.Errorf("invalid recovery action: %s", action)
 	}
 
 	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
-		TaskID:    taskID,
-		SessionID: sessionID,
-		Intent:    IntentResume,
+		TaskID:                 taskID,
+		SessionID:              sessionID,
+		Intent:                 IntentResume,
+		AllowBranchReplacement: action == "resume_new_branch",
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)

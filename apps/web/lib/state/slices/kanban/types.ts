@@ -121,6 +121,10 @@ export type KanbanState = {
     primaryExecutorId?: string | null;
     primaryExecutorType?: string | null;
     primaryExecutorName?: string | null;
+    primaryAgentProfileId?: string | null;
+    primaryAgentName?: string | null;
+    labels?: string[];
+    origin?: string;
     isRemoteExecutor?: boolean;
     /** Human assignee (user id). Independent of any agent assignment. */
     assigneeUserId?: string;

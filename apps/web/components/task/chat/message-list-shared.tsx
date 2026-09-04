@@ -30,6 +30,8 @@ export type MessageListProps = {
   taskId?: string;
   sessionId: string | null;
   messagesLoading: boolean;
+  /** Latest-session history is still reconciling while cached rows remain visible. */
+  historyRefreshPending?: boolean;
   isWorking: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
@@ -61,6 +63,10 @@ export type MessageListProps = {
    * to the top of the transcript (e.g. the unread "New" divider) reserve
    * room for the overlay instead of being covered by it. */
   anchoredBarHeight?: number;
+  /** Whether the host panel is actually visible. Persistent Dockview panels
+   * remain mounted while inactive and use this transition to recover missed
+   * oldest-page sentinel observations. */
+  isVisible?: boolean;
 };
 
 /** Imperative handle exposed by `MessageList`, letting the chat panel scroll

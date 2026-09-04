@@ -160,10 +160,10 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 // UpdateTaskEnvironment updates an existing task environment.
 // Per-repo rows are not touched; use the TaskEnvironmentRepo CRUD methods.
 func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
-	// Refuse to clear workspace_path on a worktree-mode env. Same rationale
-	// as CreateTaskEnvironment: empty workspace_path produces permanent 503
-	// on shell terminal connect.
-	if env.ExecutorType == string(models.ExecutorTypeWorktree) && env.WorkspacePath == "" && env.Status != models.TaskEnvironmentStatusCreating {
+	// Creating and failed worktree environments can lack a path because
+	// materialization can fail before one exists. Reusable states require it.
+	if env.ExecutorType == string(models.ExecutorTypeWorktree) && env.WorkspacePath == "" &&
+		env.Status != models.TaskEnvironmentStatusCreating && env.Status != models.TaskEnvironmentStatusFailed {
 		return fmt.Errorf("update task environment: worktree-mode env requires workspace_path (id=%s)", env.ID)
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)

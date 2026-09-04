@@ -236,7 +236,8 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 		return nil, fmt.Errorf("session not found")
 	}
 
-	agentctlClient := execution.GetAgentCtlClient()
+	agentctlClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentctlClient == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl client not available"})
 		return nil, fmt.Errorf("agentctl client not available")

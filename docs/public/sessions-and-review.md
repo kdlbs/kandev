@@ -71,6 +71,16 @@ Every row has **Send Now** for targeted priority. It sends that row directly whe
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
+## View active conversations in Threads
+
+Use **Threads** to read active task conversations side by side without opening each task. Open it from the workspace view control or navigation, or go to **`/threads`**.
+
+Threads shows one column for each task with an active primary agent session. The column header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
+
+On desktop, use the session tabs in a column to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. The selected conversation keeps its normal reply controls, so you can answer the agent without leaving Threads.
+
+Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+
 <details>
 <summary>Let agents coordinate sessions</summary>
 
@@ -124,6 +134,9 @@ Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings
 ![Settings > Preferences > Keyboard Shortcuts showing chat input and command panel bindings.](../screenshots/settings-keyboard-shortcuts.png)
 
 Open **Settings > Preferences > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.
+
+When you save a custom default, Kandev reapplies its split proportions to new
+and reset desktop tasks and scales them to the available workbench.
 
 ![Settings > Preferences > Layouts showing built-in desktop workbench profiles and the Default layout editor.](../screenshots/settings-layouts.png)
 

@@ -24,6 +24,8 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/quickterminal"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
+	systemsvc "github.com/kandev/kandev/internal/system"
+	systeminfo "github.com/kandev/kandev/internal/system/info"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -116,7 +118,7 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 }
 
 func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
-	msg := buildGitStatusNotification("session-1", "web", client.GitStatusResult{
+	msg := buildGitStatusNotification("session-1", "env-1", "web", client.GitStatusResult{
 		Branch:           "feature/rewrite",
 		RemoteBranch:     "origin/feature/rewrite",
 		HeadCommit:       "local-head",
@@ -131,6 +133,9 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		t.Fatal("buildGitStatusNotification returned nil")
 	}
 	payload := decodePayload(t, msg.Payload)
+	if got := payload["task_environment_id"]; got != "env-1" {
+		t.Fatalf("task_environment_id = %#v, want env-1", got)
+	}
 	status, ok := payload["status"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("status payload = %#v, want an object", payload["status"])
@@ -1424,6 +1429,34 @@ func TestBootPayloadOmitsUnsetTitlePrefix(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "titlePrefix") {
 		t.Fatalf("expected titlePrefix to be omitted, got: %s", raw)
+	}
+}
+
+func TestBootPayloadCarriesSystemInfoBootID(t *testing.T) {
+	t.Parallel()
+
+	infoSvc := systeminfo.NewService("version", "commit", "build-time")
+	payload := bootPayload(
+		context.Background(),
+		nil,
+		routeParams{systemSvc: &systemsvc.Service{Info: infoSvc}},
+		webapp.ClassifyRoute("/"),
+	)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	var decoded struct {
+		Runtime struct {
+			BootID string `json:"bootId"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal payload: %v", err)
+	}
+	if decoded.Runtime.BootID != infoSvc.Info().BootID {
+		t.Fatalf("runtime.bootId = %q, want %q", decoded.Runtime.BootID, infoSvc.Info().BootID)
 	}
 }
 

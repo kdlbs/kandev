@@ -115,7 +115,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	for _, git := range input.Git {
 		repository := strings.TrimSpace(git.Repository)
 		if repository == "" {
-			repository = "default"
+			repository = RootRepositoryKey
 		}
 		state.git[repository] = git.Summary
 	}

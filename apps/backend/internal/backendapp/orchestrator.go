@@ -83,6 +83,8 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
+	serviceCfg.OfficeSessionIdentity =
+		cfg != nil && cfg.Features.OfficeSessionIdentity
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -129,9 +131,11 @@ func provideOrchestrator(
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
 	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
+	orchestratorSvc.SetLaunchAttachmentClaimer(taskSvc)
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
+		orchestratorSvc.SetPRBaseResolver(githubPRBaseResolver{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
@@ -268,6 +272,20 @@ type githubCredentialPolicyService interface {
 
 type githubExecutorCredentialPolicyAdapter struct {
 	service githubCredentialPolicyService
+}
+
+type githubPRBaseResolver struct {
+	service *githubpkg.Service
+}
+
+func (r githubPRBaseResolver) ResolvePRBaseBranch(
+	ctx context.Context, workspaceID, owner, repo string, number int,
+) (string, error) {
+	pr, err := r.service.GetPRForAutomation(ctx, workspaceID, owner, repo, number)
+	if err != nil || pr == nil {
+		return "", err
+	}
+	return pr.BaseBranch, nil
 }
 
 func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(

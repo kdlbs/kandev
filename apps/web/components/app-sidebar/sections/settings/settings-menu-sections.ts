@@ -39,6 +39,7 @@ import {
   SECRETS_SETTINGS_HREF,
   SYSTEM_ABOUT_SETTINGS_HREF,
   SYSTEM_DATA_STORAGE_SETTINGS_HREF,
+  SYSTEM_STORAGE_SETTINGS_HREF,
   SYSTEM_STATUS_SETTINGS_HREF,
   TASK_BEHAVIOR_SETTINGS_HREF,
   TERMINAL_EDITORS_SETTINGS_HREF,
@@ -214,6 +215,11 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
       {
         href: SYSTEM_DATA_STORAGE_SETTINGS_HREF,
         labelKey: "system:navDataStorage",
+        icon: IconDatabase,
+      },
+      {
+        href: SYSTEM_STORAGE_SETTINGS_HREF,
+        labelKey: "system:storageTitle",
         icon: IconDatabase,
       },
       {

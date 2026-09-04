@@ -86,7 +86,8 @@ test.describe("chat attachment delivery mode", () => {
       ),
     );
 
-    await testPage.locator('input[type="file"]').setInputFiles(imagePath);
+    const fileInput = testPage.getByTestId("chat-input-editor-shell").locator('input[type="file"]');
+    await fileInput.setInputFiles(imagePath);
     const imageChip = testPage.getByText(/Image \(/).first();
     await expect(imageChip).toBeVisible({ timeout: 10_000 });
     await imageChip.hover();
@@ -116,7 +117,7 @@ test.describe("chat attachment delivery mode", () => {
     const textPath = path.join(testInfo.outputDir, "notes.txt");
     fs.writeFileSync(textPath, "plain text attachment");
 
-    await testPage.locator('input[type="file"]').setInputFiles(textPath);
+    await fileInput.setInputFiles(textPath);
     await expect(testPage.getByText("notes.txt", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
