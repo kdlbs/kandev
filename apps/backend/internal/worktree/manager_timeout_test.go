@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,6 +24,32 @@ case "${1:-}" in
     ;;
 esac
 `
+
+const hangOnUpdateRefScript = `
+case "${1:-}" in
+  update-ref)
+    sleep 30
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`
+
+type boundedBranchMetadataStore struct{ mockStore }
+
+func (s *boundedBranchMetadataStore) CountWorktreeBranchOwners(context.Context, string, string) (int, error) {
+	return 1, nil
+}
+
+func (s *boundedBranchMetadataStore) PersistBranchRecoveryHead(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
+func (s *boundedBranchMetadataStore) PersistBranchCompactionComplete(context.Context, string, string) (bool, error) {
+	return true, nil
+}
 
 // TestBranchExists_RespectsContextDeadline verifies that branchExists cancels
 // the underlying git subprocess when its caller-provided context expires.
@@ -138,6 +165,30 @@ func TestResolveCommit_BoundedWhenCallerHasNoDeadline(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("resolveCommit() took %v, want <2s (inspect timeout not applied)", elapsed)
+	}
+}
+
+func TestDeleteExpectedBranchRef_BoundedWhenUpdateRefHangs(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, hangOnUpdateRefScript)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	store := &boundedBranchMetadataStore{mockStore: *newMockStore()}
+	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	mgr.inspectTimeout = 300 * time.Millisecond
+
+	wt := &Worktree{ID: "wt-timeout", RepositoryPath: t.TempDir(), Branch: "feature/timeout"}
+	start := time.Now()
+	reason := mgr.deleteExpectedBranchRef(context.Background(), store, wt, strings.Repeat("a", 40))
+	elapsed := time.Since(start)
+
+	if reason != RetainedSafeDeleteRefused {
+		t.Fatalf("deleteExpectedBranchRef() reason = %q, want %q", reason, RetainedSafeDeleteRefused)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("deleteExpectedBranchRef() took %v, want <2s", elapsed)
 	}
 }
 

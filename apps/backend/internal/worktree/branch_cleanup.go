@@ -340,8 +340,10 @@ func (m *Manager) deleteExpectedBranchRef(
 		m.clearBranchRecoveryHead(ctx, metadataStore, wt, branchHead)
 		return RetainedLiveWorktree
 	}
-	cmd := m.newNonInteractiveGitCmd(ctx, wt.RepositoryPath, "update-ref", "-d", branchRef, branchHead)
-	output, err := runGitCmdCombinedOutput(ctx, cmd)
+	mutationCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(mutationCtx, wt.RepositoryPath, "update-ref", "-d", branchRef, branchHead)
+	output, err := runGitCmdCombinedOutput(mutationCtx, cmd)
 	if err == nil {
 		return m.verifyDeletionDidNotRaceLiveness(ctx, metadataStore, wt, branchRef, branchHead)
 	}
