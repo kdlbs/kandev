@@ -14,15 +14,10 @@ import (
 
 const (
 	opencodeAgentID             = "opencode-acp"
-	maxProviderMessageBytes     = 2048
 	genericProviderErrorMessage = "provider prompt error"
 )
 
-var (
-	openCodeIdentifierPattern = regexp.MustCompile(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
-	openCodeURLPattern        = regexp.MustCompile(`https?://[^\s]+`)
-	openCodeResetPattern      = regexp.MustCompile(`(?i)\bresets?\s+in\s+(?:(\d+)\s*(?:days?|d)\b)?\s*(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*(?:(\d+)\s*(?:minutes?|mins?|m|min)\b)?`)
-)
+var openCodeResetPattern = regexp.MustCompile(`(?i)\bresets?\s+in\s+(?:(\d+)\s*(?:days?|d)\b)?\s*(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*(?:(\d+)\s*(?:minutes?|mins?|m|min)\b)?`)
 
 type openCodeStderrDiagnostic struct {
 	SessionID     string
@@ -135,7 +130,7 @@ func providerErrorFromACPPrompt(err error) *streams.ProviderError {
 	if !errors.As(err, &reqErr) || reqErr == nil {
 		return nil
 	}
-	message := sanitizeProviderMessage(reqErr.Message)
+	message := streams.SanitizeProviderMessage(reqErr.Message)
 	if message == "" {
 		message = genericProviderErrorMessage
 	}
@@ -170,7 +165,7 @@ func providerErrorFromACPActionURL(err error) *streams.ProviderError {
 	if remediationURL == "" {
 		return nil
 	}
-	message := sanitizeProviderMessage(reqErr.Message)
+	message := streams.SanitizeProviderMessage(reqErr.Message)
 	if message == "" {
 		return nil
 	}
@@ -239,7 +234,7 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	if remediationURL == "" {
 		remediationURL = extractOpenCodeActionURL(fields["error.error"])
 	}
-	message := sanitizeProviderMessage(fields["error.error"])
+	message := streams.SanitizeProviderMessage(fields["error.error"])
 	if message == "" {
 		return openCodeStderrDiagnostic{}, false
 	}
@@ -324,17 +319,6 @@ func parseOpenCodeFieldValue(line string, start int) (string, int, bool) {
 		}
 	}
 	return "", len(line), false
-}
-
-func sanitizeProviderMessage(message string) string {
-	message = openCodeURLPattern.ReplaceAllString(message, "")
-	message = openCodeIdentifierPattern.ReplaceAllString(message, "[redacted]")
-	message = strings.Join(strings.Fields(message), " ")
-	message = strings.TrimSpace(strings.TrimRight(message, ".:;,-"))
-	if len(message) > maxProviderMessageBytes {
-		message = message[:maxProviderMessageBytes]
-	}
-	return message
 }
 
 func safeOpenCodeIdentifier(value, prefix string) bool {

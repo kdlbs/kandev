@@ -46,19 +46,31 @@ func replayEvidenceLayer(service *Service, fx replayfixtures.Fixture) watcher.Ag
 		}
 	}
 
+	// The transport layer never hands the evidence layer a raw terminal
+	// message: SendErrorEventWithProviderError's caller sets the event's
+	// error text to providerError.Message once a provider diagnostic exists
+	// (server/api/agent.go), and that Message is always
+	// streams.SanitizeProviderMessage's output. Comparing against the raw
+	// fixture text here would let the fixture matrix pass even when
+	// sanitization changes the terminal message enough to break AC.23
+	// containment — which is exactly the CRIT-001 regression class this
+	// layer exists to catch.
+	sanitizedMessage := streams.SanitizeProviderMessage(promptErrorFrame.Message)
+
 	return watcher.AgentEventData{
 		SessionID:           fx.Identity.SessionID,
 		AgentExecutionID:    fx.Identity.ExecutionID,
 		PromptGeneration:    fx.Identity.PromptGeneration,
 		EvidenceKnown:       true,
 		DynamicRouteAttempt: false,
-		ErrorMessage:        promptErrorFrame.Message,
+		ErrorMessage:        sanitizedMessage,
 		ProviderError: &streams.ProviderError{
 			Source:     fx.Expect.ProviderError.Source,
 			ProviderID: fx.Expect.ProviderError.ProviderID,
 			ModelID:    fx.Expect.ProviderError.ModelID,
 			RPCCode:    fx.Expect.ProviderError.RPCCode,
 			ErrorKind:  fx.Expect.ProviderError.ErrorKind,
+			Message:    sanitizedMessage,
 		},
 	}
 }

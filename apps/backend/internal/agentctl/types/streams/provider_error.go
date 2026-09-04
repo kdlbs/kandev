@@ -1,6 +1,36 @@
 package streams
 
-import "time"
+import (
+	"regexp"
+	"strings"
+	"time"
+)
+
+// MaxProviderMessageBytes bounds a sanitized provider diagnostic message.
+const MaxProviderMessageBytes = 2048
+
+var (
+	providerMessageURLPattern        = regexp.MustCompile(`https?://[^\s]+`)
+	providerMessageIdentifierPattern = regexp.MustCompile(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
+)
+
+// SanitizeProviderMessage strips URLs, redacts workspace/session/run
+// identifiers, collapses internal whitespace, and trims trailing punctuation
+// from a raw provider-supplied error string, bounding it to
+// MaxProviderMessageBytes. It is the single sanitized-projection transform
+// AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.19 requires the ACP transport layer
+// and the recovery-evidence layer to observe identically, so both call this
+// rather than each keeping their own copy.
+func SanitizeProviderMessage(message string) string {
+	message = providerMessageURLPattern.ReplaceAllString(message, "")
+	message = providerMessageIdentifierPattern.ReplaceAllString(message, "[redacted]")
+	message = strings.Join(strings.Fields(message), " ")
+	message = strings.TrimSpace(strings.TrimRight(message, ".:;,-"))
+	if len(message) > MaxProviderMessageBytes {
+		message = message[:MaxProviderMessageBytes]
+	}
+	return message
+}
 
 const (
 	ProviderErrorSourceOpenCodeStderr = "opencode_stderr"
