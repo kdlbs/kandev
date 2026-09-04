@@ -84,30 +84,33 @@ func (r *Repository) GetWorkflowStepStageType(ctx context.Context, stepID string
 type ParticipantWriteOutcome string
 
 // IsTaskWorkflowStepTerminal reports whether a task's current workflow step
-// is the last step, by position, in its workflow. Unlike
-// orchestrator.workflowStepIsTerminal, this does not additionally require
-// the step name to match models.IsTerminalStepName: a workflow's final
-// column is terminal regardless of what its author named it, so this gate
-// never locks a task out of completion just because the last step isn't
-// named done/complete/completed/approved.
+// is the last step, by position, in its workflow, and whether the task has
+// a resolvable step at all. Unlike orchestrator.workflowStepIsTerminal,
+// terminal does not additionally require the step name to match
+// models.IsTerminalStepName: a workflow's final column is terminal
+// regardless of what its author named it, so this gate never locks a task
+// out of completion just because the last step isn't named
+// done/complete/completed/approved.
 // workflowStepIsTerminal keeps the name test because it decides whether a
 // step *move* should auto-complete — a different decision from "may this
 // task be marked done".
-// Returns false, nil when the task has no resolvable step.
-func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (bool, error) {
+// Returns (false, false, nil) when the task has no resolvable step — a
+// task with no workflow step at all is not the same fact as a task sitting
+// on a genuine non-terminal step, and callers must not conflate the two.
+func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error) {
 	var workflowID string
 	var position int
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT ws.workflow_id, ws.position
 		FROM tasks t
 		JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 		WHERE t.id = ?
 	`), taskID).Scan(&workflowID, &position)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	var hasNext bool
@@ -115,9 +118,9 @@ func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID stri
 		SELECT EXISTS(SELECT 1 FROM workflow_steps WHERE workflow_id = ? AND position > ?)
 	`), workflowID, position).Scan(&hasNext)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return !hasNext, nil
+	return !hasNext, true, nil
 }
 
 const (

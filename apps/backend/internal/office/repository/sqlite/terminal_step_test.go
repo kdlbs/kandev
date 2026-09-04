@@ -48,28 +48,32 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 	seedParticipantTask(t, repo, "task-no-step", "")
 
 	cases := []struct {
-		name   string
-		taskID string
-		want   bool
+		name        string
+		taskID      string
+		want        bool
+		wantHasStep bool
 	}{
-		{"backlog: not last position", "task-backlog", false},
-		{"work: not last position", "task-work", false},
-		{"review: not last position (this is the live bug's step)", "task-review", false},
-		{"approval: not last position", "task-approval", false},
-		{"done: last position and terminal name", "task-done", true},
-		{"named Done but not last position", "task-early-done", false},
-		{"last position with non-terminal name is still terminal", "task-mixed-last", true},
-		{"no workflow_step_id", "task-no-step", false},
-		{"missing task", "task-missing", false},
+		{"backlog: not last position", "task-backlog", false, true},
+		{"work: not last position", "task-work", false, true},
+		{"review: not last position (this is the live bug's step)", "task-review", false, true},
+		{"approval: not last position", "task-approval", false, true},
+		{"done: last position and terminal name", "task-done", true, true},
+		{"named Done but not last position", "task-early-done", false, true},
+		{"last position with non-terminal name is still terminal", "task-mixed-last", true, true},
+		{"no workflow_step_id", "task-no-step", false, false},
+		{"missing task", "task-missing", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := repo.IsTaskWorkflowStepTerminal(ctx, tc.taskID)
+			got, hasStep, err := repo.IsTaskWorkflowStepTerminal(ctx, tc.taskID)
 			if err != nil {
 				t.Fatalf("IsTaskWorkflowStepTerminal: %v", err)
 			}
 			if got != tc.want {
-				t.Errorf("got %v, want %v", got, tc.want)
+				t.Errorf("terminal = %v, want %v", got, tc.want)
+			}
+			if hasStep != tc.wantHasStep {
+				t.Errorf("hasStep = %v, want %v", hasStep, tc.wantHasStep)
 			}
 		})
 	}

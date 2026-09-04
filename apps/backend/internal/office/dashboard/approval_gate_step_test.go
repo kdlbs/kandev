@@ -94,6 +94,43 @@ func TestUpdateTaskStatus_AgentDoneAtReview_NoApproverSeats_RedirectsToReview(t 
 	}
 }
 
+// insertChannelShapedTask inserts a task exactly as
+// office/repository/sqlite/channels.go CreateChannelTask does: no
+// workflow_id, no workflow_step_id. Channel tasks (the long-lived
+// Telegram/Slack/email assistant tasks) are the production shape that
+// exercises the "no workflow step at all" branch of the approval gate.
+func insertChannelShapedTask(t *testing.T, db sqlxExecutor, id, wsID, title string) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO tasks (id, workspace_id, title, state, created_at, updated_at)
+		VALUES (?, ?, ?, 'IN_PROGRESS', datetime('now'), datetime('now'))
+	`, id, wsID, title); err != nil {
+		t.Fatalf("insert channel-shaped task: %v", err)
+	}
+}
+
+// TestUpdateTaskStatus_ChannelTaskNoWorkflowStep_ReachesDone is the
+// regression test for Build round 5, Finding 1: a task with no
+// workflow_step_id at all (the channel-task shape) must still be able to
+// reach done. IsTaskWorkflowStepTerminal reporting "not terminal" for a
+// step that does not exist is not the same fact as a task sitting on a
+// genuine non-terminal step, and the gate must not conflate the two.
+func TestUpdateTaskStatus_ChannelTaskNoWorkflowStep_ReachesDone(t *testing.T) {
+	deps := newTestDeps(t)
+	insertChannelShapedTask(t, deps.db, "chan1", "ws-g", "Channel task")
+
+	err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
+		TaskID:    "chan1",
+		NewStatus: "done",
+	})
+	if err != nil {
+		t.Fatalf("err = %v, want nil: a task with no workflow step must fall through to the approver check", err)
+	}
+	if state := readTaskState(t, deps, "chan1"); state != "COMPLETED" {
+		t.Errorf("state = %q, want COMPLETED", state)
+	}
+}
+
 // erroringTerminalStepRepo wraps a real *sqlite.Repository, replacing
 // IsTaskWorkflowStepTerminal with one that always fails, to test the
 // gate's behavior on a transient lookup error.
@@ -102,8 +139,8 @@ type erroringTerminalStepRepo struct {
 	err error
 }
 
-func (r *erroringTerminalStepRepo) IsTaskWorkflowStepTerminal(context.Context, string) (bool, error) {
-	return false, r.err
+func (r *erroringTerminalStepRepo) IsTaskWorkflowStepTerminal(context.Context, string) (bool, bool, error) {
+	return false, false, r.err
 }
 
 // TestUpdateTaskStatus_TerminalStepLookupError_AbortsWithoutPersistingRedirect
