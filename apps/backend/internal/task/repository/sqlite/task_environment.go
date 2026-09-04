@@ -540,6 +540,12 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 		row.WorktreePath = incoming.WorktreePath
 		row.WorktreeBranch = incoming.WorktreeBranch
 	}
+	if incoming.WorktreeBranchOwner != "" || incoming.WorktreeID == "" {
+		row.WorktreeBranchOwner = incoming.WorktreeBranchOwner
+	}
+	if incoming.WorktreeIntegrationRef != "" || incoming.WorktreeID == "" {
+		row.WorktreeIntegrationRef = incoming.WorktreeIntegrationRef
+	}
 	row.Position = position
 	row.ErrorMessage = incoming.ErrorMessage
 	// A later successful transition can recreate a slot that an earlier
@@ -554,9 +560,11 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+			worktree_branch_owner = ?, worktree_integration_ref = ?,
 			position = ?, error_message = ?, status = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`), row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorktreeBranch,
+		row.WorktreeBranchOwner, row.WorktreeIntegrationRef,
 		row.Position, row.ErrorMessage, row.Status, row.DeletedAt, row.UpdatedAt, row.ID)
 	return err
 }

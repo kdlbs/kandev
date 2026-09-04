@@ -331,6 +331,7 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 	env.WorkspacePath = "/workspace/new"
 	if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
 		RepositoryID: "repo-keep", BranchSlug: "main", WorktreeID: "wt-new", WorktreePath: "/workspace/new/repo",
+		WorktreeBranchOwner: "kandev", WorktreeIntegrationRef: "develop",
 	}}, true); err != nil {
 		t.Fatalf("PersistTaskEnvironmentTransition: %v", err)
 	}
@@ -346,8 +347,8 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 		t.Fatalf("repository inventory = %#v, want active row plus tombstone", persisted.Repos)
 	}
 	for _, row := range persisted.Repos {
-		if row.ID == "keep" && row.WorktreeID != "wt-new" {
-			t.Fatalf("kept row = %#v, want refreshed worktree", row)
+		if row.ID == "keep" && (row.WorktreeID != "wt-new" || row.WorktreeBranchOwner != "kandev" || row.WorktreeIntegrationRef != "develop") {
+			t.Fatalf("kept row = %#v, want refreshed worktree safety metadata", row)
 		}
 		if row.ID == "remove" && (row.Status != worktreeRepoStatusDeleted || row.DeletedAt == nil) {
 			t.Fatalf("removed row = %#v, want deleted tombstone", row)
