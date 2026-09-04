@@ -137,8 +137,10 @@ opens reviewable pin-update PRs without changing runtimes automatically.
 - Add `.github/workflows/update-agent-runtime-pins.yml` with weekly and manual
   triggers, least-privilege permissions, pinned action SHAs, a stable bot
   branch, and one grouped Conventional Commit PR. Use the repository-scoped
-  `GITHUB_TOKEN` with only contents and pull-request write permissions. Generated
-  PR checks can require maintainer approval. Do not auto-merge.
+  `GITHUB_TOKEN` with contents, pull-request, and workflow-dispatch write
+  permissions. Explicitly dispatch the six required validation workflows
+  against the bot branch because built-in-token branch and PR events do not
+  recursively start them. Do not auto-merge.
 - Run the updater tests, targeted managed-runtime Go tests, action-pinning lint,
   and workflow contract test before opening a PR. When no pin changes, exit
   without a branch or PR mutation.
@@ -223,8 +225,9 @@ and retain the complete backend version projection, derives managed-runtime
 test expectations from the catalogue, and validates those commands before the
 weekly workflow commits or pushes. It also keeps the repository token on the push
 step and refreshes existing updater PRs by number. The authentication follow-up
-replaces the unconfigured App token with the repository-scoped `GITHUB_TOKEN`
-and records the approval-required PR-check consequence.
+replaces the unconfigured App token with the repository-scoped `GITHUB_TOKEN`,
+adds explicit dispatch of all required validation workflows, and records the
+repository Actions setting prerequisite.
 
 Follow-up verification passes 2,594 focused backend tests, 32 focused web
 tests, full web lint/typecheck/i18n, 7 pin updater tests, 8 workflow-contract
@@ -282,6 +285,6 @@ Task 06 owns E2E fixtures and specs.
 - Registry checks must not delay application boot or agent launches. They are
   page-triggered, read-only, cached, and separate from the agent catalogue boot
   payload.
-- A bot-created PR can require maintainer approval for its checks when the
-  repository-scoped `GITHUB_TOKEN` creates it. Unattended PR checks require a
-  separately managed GitHub App or personal access token.
+- Built-in-token branch and PR events do not recursively start validation
+  workflows. The updater dispatches each required check explicitly, and the
+  repository or organization must allow Actions to create and approve PRs.

@@ -493,17 +493,29 @@ changed. It creates or refreshes one grouped review pull request and never
 merges it or activates a runtime.
 
 The workflow uses the repository-scoped built-in `GITHUB_TOKEN`. Its effective
-permissions are limited to `contents: write` and `pull-requests: write`, and
-`gh auth setup-git` configures the token after the trusted checkout. No
-GitHub-App variable, private-key secret, or personal access token is required.
-The workflow keeps `persist-credentials: false` on checkout and does not run
-pull-request-controlled code.
+permissions are limited to `contents: write`, `pull-requests: write`, and
+`actions: write`. `gh auth setup-git` configures the token after the trusted
+checkout. No GitHub-App variable, private-key secret, or personal access token
+is required. The workflow keeps `persist-credentials: false` on checkout and
+does not run pull-request-controlled code.
 
-GitHub may place checks for a pull request created by `GITHUB_TOKEN` into an
-approval-required state. This is an accepted operational consequence of the
-built-in-token boundary. An unattended PR-check requirement would require the
-separate GitHub App or personal-token boundary described in
-[ADR-2026-09-04](../../../decisions/2026-09-04-use-repository-token-for-runtime-pin-prs.md).
+GitHub does not recursively start `push` or `pull_request` workflows for events
+created with `GITHUB_TOKEN`. Each required validation workflow therefore also
+declares `workflow_dispatch`, and the pin-maintenance workflow explicitly
+dispatches these workflows against the exact
+`automation/update-managed-runtime-pins` commit after the grouped PR exists:
+`backend-tests.yml`, `frontend-tests.yml`, `e2e-tests.yml`,
+`architecture-lint.yml`, `lint-action-pinning.yml`, and
+`lint-harness-files.yml`. The manual architecture run derives its baseline from
+the fork point with `main`; the other validation gates fail open to a full run
+when a manual event has no push or pull-request base. This keeps the six
+required check contexts reportable without a separate App or PAT.
+
+The repository or organization setting **Allow GitHub Actions to create and
+approve pull requests** must remain enabled for the built-in token to create or
+refresh the grouped PR. GitHub may still apply its approval policy to generated
+workflow runs; that policy is operationally distinct from the event-suppression
+problem solved by explicit dispatch.
 
 ## Out of scope
 

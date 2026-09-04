@@ -7,11 +7,13 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
-# The job uses the repository-scoped workflow token for the branch and PR
-# mutations. Generated pull-request checks can require maintainer approval.
+# The job uses the repository-scoped workflow token for the branch, PR, and
+# explicit validation-workflow dispatches. A GITHUB_TOKEN-created push or PR
+# does not recursively trigger push/pull_request workflows.
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 concurrency:
   group: managed-runtime-pin-update
@@ -102,3 +104,25 @@ jobs:
               --title "chore: update managed runtime pins" \
               --body-file /tmp/managed-runtime-pin-pr-body.md
           fi
+
+      # GITHUB_TOKEN-created push and pull-request events do not recursively
+      # start validation workflows. Dispatch the six required checks explicitly
+      # against the exact bot-branch commit after the PR exists.
+      - name: Dispatch required checks for generated PR
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for workflow in \
+            backend-tests.yml \
+            frontend-tests.yml \
+            e2e-tests.yml \
+            architecture-lint.yml \
+            lint-action-pinning.yml \
+            lint-harness-files.yml
+          do
+            gh workflow run "$workflow" \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref "$BOT_BRANCH"
+          done

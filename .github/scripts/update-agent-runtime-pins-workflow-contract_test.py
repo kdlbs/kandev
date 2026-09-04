@@ -10,6 +10,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "update-agent-runtime-pins.yml"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 SCRIPT = REPO_ROOT / "scripts" / "update-agent-runtime-pins.mjs"
+REQUIRED_CHECK_WORKFLOWS = (
+    "backend-tests.yml",
+    "frontend-tests.yml",
+    "e2e-tests.yml",
+    "architecture-lint.yml",
+    "lint-action-pinning.yml",
+    "lint-harness-files.yml",
+)
 
 
 class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
@@ -46,7 +54,30 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         push_start = self.workflow.index("- name: Commit and push one grouped change")
         pr_start = self.workflow.index("- name: Create or refresh the single grouped PR")
         push_step = self.workflow[push_start:pr_start]
+        pr_step = self.workflow[pr_start:]
         self.assertIn("GH_TOKEN: ${{ github.token }}", push_step)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", pr_step)
+
+    def test_workflow_dispatches_required_checks_for_builtin_token_prs(self) -> None:
+        self.assertIn("actions: write", self.workflow)
+        dispatch_start = self.workflow.index(
+            "- name: Dispatch required checks for generated PR"
+        )
+        dispatch_step = self.workflow[dispatch_start:]
+        self.assertIn("gh workflow run", dispatch_step)
+        self.assertIn('--ref "$BOT_BRANCH"', dispatch_step)
+        self.assertIn('--repo "$GITHUB_REPOSITORY"', dispatch_step)
+
+        for workflow_name in REQUIRED_CHECK_WORKFLOWS:
+            self.assertIn(workflow_name, dispatch_step)
+            workflow = (REPO_ROOT / ".github" / "workflows" / workflow_name).read_text(
+                encoding="utf-8"
+            )
+            self.assertRegex(
+                workflow,
+                r"(?m)^  workflow_dispatch:\s*$",
+                f"{workflow_name} must accept explicit validation dispatches",
+            )
 
     def test_workflow_validates_before_any_commit_or_push(self) -> None:
         update_pos = self.workflow.index("node scripts/update-agent-runtime-pins.mjs")

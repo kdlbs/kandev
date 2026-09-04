@@ -17,16 +17,19 @@ decisions:
 Replace the unavailable GitHub App credential in the managed runtime pin
 workflow with the repository's built-in `GITHUB_TOKEN`. Preserve trusted-main
 checkout, validation before mutation, the stable updater branch, one grouped
-pull request, and no auto-merge. The generated pull request can require
-maintainer approval for its checks because it is created by the built-in token.
+pull request, and no auto-merge. Explicitly dispatch the required validation
+workflows because built-in-token branch and pull-request events do not
+recursively start them.
 
 ## Scope
 
 ### In scope
 
 - Change workflow permissions and authentication to the repository token.
+- Add manual dispatch support to every required validation workflow and
+  dispatch each one against the exact generated branch commit.
 - Update the workflow contract test to reject the unavailable App boundary and
-  require the built-in token boundary.
+  require the built-in token and explicit validation-dispatch boundaries.
 - Reconcile the runtime-update requirement, system design, ADR index, and the
   completed workflow work-order record.
 
@@ -40,9 +43,15 @@ maintainer approval for its checks because it is created by the built-in token.
 ## Technical approach
 
 - In `.github/workflows/update-agent-runtime-pins.yml`, grant only
-  `contents: write` and `pull-requests: write`, remove
-  `actions/create-github-app-token`, and use `${{ github.token }}` for Git and
-  `gh` operations.
+  `contents: write`, `pull-requests: write`, and `actions: write`, remove
+  `actions/create-github-app-token`, and use `${{ github.token }}` for Git,
+  `gh`, and workflow-dispatch operations.
+- Add `workflow_dispatch` to the six required validation workflows. Make the
+  manual architecture run use the `main` fork point and let the other gates
+  fail open to a full validation run when no event base exists.
+- Dispatch `backend-tests.yml`, `frontend-tests.yml`, `e2e-tests.yml`,
+  `architecture-lint.yml`, `lint-action-pinning.yml`, and
+  `lint-harness-files.yml` after the grouped PR is created or refreshed.
 - Keep `persist-credentials: false`, the trusted `main` checkout, updater and
   Go validation order, stable branch, grouped PR selection, and no-auto-merge
   behavior unchanged.
@@ -58,7 +67,8 @@ maintainer approval for its checks because it is created by the built-in token.
   validation-before-mutation, stable branch, grouped PR, and no-auto-merge
   behavior.
 - `AC-AGENTS-RUNTIME-UPDATES-001.10`: workflow contract tests require the
-  repository token and reject the unavailable App credential boundary.
+  repository token, explicit required-check dispatch, and reject the
+  unavailable App credential boundary.
 - The existing updater fixture tests remain green to prove the updater itself
   is unchanged.
 
@@ -73,7 +83,7 @@ mutated as part of local verification.
 
 ## Verification results
 
-The updater tests passed 7/7, the workflow contract tests passed 8/8, the
+The updater tests passed 7/7, the workflow contract tests passed 9/9, the
 action-pinning tests passed 9/9, the action-pinning linter accepted all 21
 workflow files, and `zizmor .github/workflows/update-agent-runtime-pins.yml`
 reported no findings. Specification lint passed for all specification files,
@@ -81,7 +91,9 @@ and `git diff --check` passed.
 
 ## Risks
 
-- Pull-request checks created by `GITHUB_TOKEN` can require maintainer approval.
-- Repository policy must continue to allow Actions to create pull requests.
-- The workflow's write token must remain limited to this repository and the two
-  required permissions.
+- GitHub's event suppression for built-in-token pushes and PRs is avoided by
+  explicit manual dispatch of every required validation workflow.
+- Repository policy must continue to allow Actions to create and approve pull
+  requests.
+- The workflow's write token must remain limited to this repository and the
+  three required permissions.
