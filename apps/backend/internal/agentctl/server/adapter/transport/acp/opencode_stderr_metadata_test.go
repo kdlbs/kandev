@@ -55,12 +55,12 @@ func TestProviderErrorFromErrorOmitsModelIDWhenNoModelSettled(t *testing.T) {
 	}
 }
 
-// TestProviderErrorFromErrorDropsMalformedOrOversizedMetadata pins R3-F9 and
-// R3-F10: error_kind, provider_id and model_id share one allowlist rule (at
-// most 64 bytes of [A-Za-z0-9_.-]), and a Data shape other than
-// map[string]any yields no error_kind at all. A dropped field never
-// invalidates the rest of the projection.
-func TestProviderErrorFromErrorDropsMalformedOrOversizedMetadata(t *testing.T) {
+// TestProviderErrorFromErrorDropsMalformedOrOversizedErrorKind pins the
+// metadata table's error_kind-only allowlist rule (at most 64 bytes of
+// [A-Za-z0-9_.-]): a Data shape other than map[string]any, or an oversized
+// value, yields no error_kind at all. A dropped error_kind never invalidates
+// the rest of the projection.
+func TestProviderErrorFromErrorDropsMalformedOrOversizedErrorKind(t *testing.T) {
 	oversized := strings.Repeat("x", 65)
 
 	t.Run("oversized error_kind dropped", func(t *testing.T) {
@@ -71,28 +71,6 @@ func TestProviderErrorFromErrorDropsMalformedOrOversizedMetadata(t *testing.T) {
 		}
 		if got.ErrorKind != "" {
 			t.Fatalf("error_kind = %q, want empty", got.ErrorKind)
-		}
-	})
-
-	t.Run("malformed provider_id dropped", func(t *testing.T) {
-		err := &sdk.RequestError{Code: -32603, Message: "provider failed"}
-		got := ProviderErrorFromError(err, "claude acp!", "")
-		if got == nil {
-			t.Fatal("ProviderErrorFromError() = nil, want a projection")
-		}
-		if got.ProviderID != "" {
-			t.Fatalf("provider_id = %q, want empty", got.ProviderID)
-		}
-	})
-
-	t.Run("oversized model_id dropped", func(t *testing.T) {
-		err := &sdk.RequestError{Code: -32603, Message: "provider failed"}
-		got := ProviderErrorFromError(err, "", oversized)
-		if got == nil {
-			t.Fatal("ProviderErrorFromError() = nil, want a projection")
-		}
-		if got.ModelID != "" {
-			t.Fatalf("model_id = %q, want empty", got.ModelID)
 		}
 	})
 
@@ -112,6 +90,26 @@ func TestProviderErrorFromErrorDropsMalformedOrOversizedMetadata(t *testing.T) {
 			t.Fatalf("message leaked raw Data: %q", got.Message)
 		}
 	})
+}
+
+// TestProviderErrorFromErrorPreservesProviderAndModelIDVerbatim pins the
+// metadata table: provider_id comes from "the adapter's negotiated agent id"
+// and model_id from "the session's settled model id", never parsed out of
+// error text, so neither is subject to error_kind's charset allowlist. Real
+// model ids from codex-acp/opencode-acp routinely contain '/' (for example
+// "github-copilot/claude-haiku-4.5/max"), which the allowlist would reject.
+func TestProviderErrorFromErrorPreservesProviderAndModelIDVerbatim(t *testing.T) {
+	err := &sdk.RequestError{Code: -32603, Message: "provider failed"}
+	got := ProviderErrorFromError(err, "opencode-acp", "github-copilot/claude-haiku-4.5/max")
+	if got == nil {
+		t.Fatal("ProviderErrorFromError() = nil, want a projection")
+	}
+	if got.ProviderID != "opencode-acp" {
+		t.Fatalf("provider_id = %q, want opencode-acp", got.ProviderID)
+	}
+	if got.ModelID != "github-copilot/claude-haiku-4.5/max" {
+		t.Fatalf("model_id = %q, want github-copilot/claude-haiku-4.5/max", got.ModelID)
+	}
 }
 
 // TestProviderErrorFromErrorNeverLeaksRawDataWhenMessageSanitizesEmpty pins

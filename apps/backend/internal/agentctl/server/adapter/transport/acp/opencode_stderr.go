@@ -70,10 +70,10 @@ func winningProviderErrorProjection(err error) *streams.ProviderError {
 	return providerErrorFromACPPrompt(err)
 }
 
-// providerErrorMetadataPattern bounds an allowlisted metadata field to at most
-// 64 bytes of `[A-Za-z0-9_.-]`, applied identically to error_kind, provider_id
-// and model_id: a malformed or oversized field is dropped rather than
-// invalidating the projection.
+// providerErrorMetadataPattern bounds error_kind to at most 64 bytes of
+// `[A-Za-z0-9_.-]`: a malformed or oversized value is dropped rather than
+// invalidating the projection. provider_id and model_id are adapter state,
+// never parsed out of error text, so this allowlist does not apply to them.
 var providerErrorMetadataPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 func validProviderErrorMetadataField(value string) string {
@@ -99,16 +99,17 @@ func acpErrorKindFromData(data any) string {
 	return validProviderErrorMetadataField(kind)
 }
 
-// mergeAllowlistedProviderErrorMetadata fills provider_id and model_id from
-// the adapter's own state, and rpc_code/error_kind from the underlying
-// *acp.RequestError when err is (or wraps) one. Raw RequestError.Data never
-// crosses this call other than through the validated error_kind extraction.
+// mergeAllowlistedProviderErrorMetadata fills provider_id and model_id
+// verbatim from the adapter's own state, and rpc_code/error_kind from the
+// underlying *acp.RequestError when err is (or wraps) one. Raw
+// RequestError.Data never crosses this call other than through the
+// validated error_kind extraction.
 func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, err error, providerID, modelID string) {
 	if projection.ProviderID == "" {
-		projection.ProviderID = validProviderErrorMetadataField(providerID)
+		projection.ProviderID = providerID
 	}
 	if projection.ModelID == "" {
-		projection.ModelID = validProviderErrorMetadataField(modelID)
+		projection.ModelID = modelID
 	}
 	var reqErr *acp.RequestError
 	if !errors.As(err, &reqErr) || reqErr == nil {
