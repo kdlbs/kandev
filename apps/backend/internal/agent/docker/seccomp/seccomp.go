@@ -67,7 +67,13 @@ var usernsRelaxedSyscalls = []string{
 // those supported daemons while retaining Docker's default deny behavior.
 var legacyDaemonUnsupportedSyscalls = []string{
 	"futex_requeue",
+	"getxattrat",
+	"listmount",
 	"listxattrat",
+	"mseal",
+	"removexattrat",
+	"setxattrat",
+	"statmount",
 	"uretprobe",
 }
 

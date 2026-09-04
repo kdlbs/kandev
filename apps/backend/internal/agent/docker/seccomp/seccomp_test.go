@@ -198,11 +198,20 @@ func TestUsernsProfile_OmitsSyscallsUnsupportedByLegacyDaemons(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UsernsProfileJSON() returned error: %v", err)
 	}
-	for _, raw := range strings.Split(profileJSON, "\"") {
-		for _, syscall := range legacyDaemonUnsupportedSyscalls {
-			if raw == syscall {
-				t.Fatalf("profile contains syscall %q unsupported by legacy daemons", syscall)
-			}
+	legacySyscalls := []string{
+		"futex_requeue",
+		"getxattrat",
+		"listmount",
+		"listxattrat",
+		"mseal",
+		"removexattrat",
+		"setxattrat",
+		"statmount",
+		"uretprobe",
+	}
+	for _, syscall := range legacySyscalls {
+		if strings.Contains(profileJSON, `"`+syscall+`"`) {
+			t.Fatalf("profile contains syscall %q unsupported by legacy daemons", syscall)
 		}
 	}
 }
