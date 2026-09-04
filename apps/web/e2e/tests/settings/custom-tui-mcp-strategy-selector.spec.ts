@@ -18,13 +18,13 @@ test.describe("Custom TUI MCP strategy selector", () => {
     const dialogBox = await dialog.boundingBox();
     await trigger.click();
 
-    const option = testPage.getByRole("option").filter({ hasText: /^opencode/i });
+    const listbox = testPage.getByRole("listbox");
+    const option = listbox.getByRole("option").filter({ hasText: /^opencode/i });
     await expect(option).toBeVisible();
     const descriptionId = await option.getAttribute("aria-describedby");
     expect(descriptionId).toBeTruthy();
     await expect(testPage.locator(`[id="${descriptionId}"]`)).toContainText("OPENCODE_CONFIG");
 
-    const listbox = testPage.getByRole("listbox");
     const [listboxBox, viewport] = await Promise.all([
       listbox.boundingBox(),
       testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),

@@ -50,13 +50,14 @@ widths.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm test -- components/settings/mcp-strategy-select.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm exec eslint components/settings/mcp-strategy-select.tsx components/settings/mcp-strategy-select.test.tsx e2e/tests/settings/custom-tui-mcp-strategy-selector.spec.ts e2e/tests/settings/mobile-custom-tui-mcp-strategy-selector.spec.ts
-cd apps/web && pnpm run i18n:check
-cd apps/web && pnpm e2e:run --project chromium tests/settings/custom-tui-mcp-strategy-selector.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-custom-tui-mcp-strategy-selector.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+cd apps/web
+pnpm test -- components/settings/mcp-strategy-select.test.tsx
+pnpm run typecheck
+pnpm exec eslint components/settings/mcp-strategy-select.tsx components/settings/mcp-strategy-select.test.tsx e2e/tests/settings/custom-tui-mcp-strategy-selector.spec.ts e2e/tests/settings/mobile-custom-tui-mcp-strategy-selector.spec.ts
+pnpm run i18n:check
+pnpm e2e:run --project chromium tests/settings/custom-tui-mcp-strategy-selector.spec.ts
+pnpm e2e:run --project mobile-chrome tests/settings/mobile-custom-tui-mcp-strategy-selector.spec.ts
 ```
 
 The desktop and mobile browser regressions must fail for the expected

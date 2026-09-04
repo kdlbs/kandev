@@ -20,14 +20,14 @@ test.describe("Custom TUI MCP strategy selector on mobile", () => {
     const dialogBox = await dialog.boundingBox();
 
     await trigger.tap();
-    const option = testPage.getByRole("option").filter({ hasText: /^opencode/i });
+    const listbox = testPage.getByRole("listbox");
+    const option = listbox.getByRole("option").filter({ hasText: /^opencode/i });
     await expect(option).toBeVisible();
 
     const descriptionId = await option.getAttribute("aria-describedby");
     expect(descriptionId).toBeTruthy();
     await expect(testPage.locator(`[id="${descriptionId}"]`)).toContainText("OPENCODE_CONFIG");
 
-    const listbox = testPage.getByRole("listbox");
     await expect
       .poll(async () => (await option.boundingBox())?.height ?? 0)
       .toBeGreaterThanOrEqual(44);
