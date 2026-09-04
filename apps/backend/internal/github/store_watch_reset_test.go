@@ -2,9 +2,19 @@ package github
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+func TestIsPRWatchUniqueViolation_PostgresConstraint(t *testing.T) {
+	err := &pgconn.PgError{Code: "23505", ConstraintName: prWatchSearchingIndexName}
+	if !isPRWatchUniqueViolation(errors.Join(errors.New("wrapped"), err)) {
+		t.Fatal("expected PostgreSQL PR-watch unique violation to be recognized")
+	}
+}
 
 // TestStore_ReviewWatch_ListTaskIDsAndReset pins the contract used by the
 // review watch reset flow: every dedup row's task_id (including empty

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 
 	dbutil "github.com/kandev/kandev/internal/db"
@@ -2218,8 +2219,8 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 	defer rollback()
 
 	var taskID, repositoryID string
-	err := tx.QueryRowContext(ctx,
-		`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`, id).
+	err := tx.QueryRowContext(ctx, s.db.Rebind(
+		`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`), id).
 		Scan(&taskID, &repositoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return commit()
@@ -2229,25 +2230,25 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 	}
 
 	var probe int
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx, s.db.Rebind(
 		`SELECT 1 FROM github_pr_watches
-		 WHERE task_id = ? AND repository_id = ? AND branch = ? AND id <> ?`,
-		taskID, repositoryID, branch, id).Scan(&probe)
+			 WHERE task_id = ? AND repository_id = ? AND branch = ? AND id <> ?`,
+	), taskID, repositoryID, branch, id).Scan(&probe)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`), id); err != nil {
 			return err
 		}
 		return commit()
 	}
 
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(
 		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ?`,
-		branch, time.Now().UTC(), id); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			if _, delErr := tx.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`, id); delErr != nil {
+	), branch, time.Now().UTC(), id); err != nil {
+		if isPRWatchUniqueViolation(err) {
+			if _, delErr := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`), id); delErr != nil {
 				return delErr
 			}
 			return commit()
@@ -2255,6 +2256,19 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 		return err
 	}
 	return commit()
+}
+
+const prWatchSearchingIndexName = "idx_github_pr_watches_searching"
+
+func isPRWatchUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == prWatchSearchingIndexName
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0,
