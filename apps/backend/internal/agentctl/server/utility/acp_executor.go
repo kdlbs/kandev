@@ -1188,6 +1188,7 @@ var allowedProbeCommands = map[string]string{
 	"auggie":             "auggie",
 	"cursor-agent":       "cursor-agent",
 	"devin":              "devin",
+	"goose":              "goose",
 	"grok":               "grok",
 	"hermes":             "hermes",
 	"kimi":               "kimi",
