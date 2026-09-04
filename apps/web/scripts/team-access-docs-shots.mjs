@@ -107,7 +107,8 @@ try {
   await ana.goto(`${BASE}/settings/workspace/${team.id}`, { waitUntil: "networkidle" });
   await shot(ana, "team-access-owner-card", TEAM_ACCESS_CARD);
 
-  await ana.goto(`${BASE}/settings/users`, { waitUntil: "networkidle" });
+  await ana.goto(`${BASE}/settings/system/users`, { waitUntil: "networkidle" });
+  await ana.getByTestId("users-table-card").waitFor({ state: "visible", timeout: 20000 });
   await shot(ana, "team-access-user-roles");
 
   const bruno = await signIn(await browser.newContext({ viewport: desktop }), "bruno@example.com");

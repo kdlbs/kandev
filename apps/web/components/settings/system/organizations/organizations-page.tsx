@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { useOrganizations } from "@/hooks/domains/org/use-organizations";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { Org } from "@/lib/types/org";
 import { CreateOrgCard } from "./create-org-card";
 import { DeleteOrgDialog } from "./delete-org-dialog";
@@ -21,54 +22,122 @@ type OrgRowProps = {
   onAddAdmin: (org: Org) => void;
 };
 
-function OrgRow({ org, busy, onSuspend, onResume, onDelete, onAddAdmin }: OrgRowProps) {
+function OrgIdentity({ org, mobile = false }: { org: Org; mobile?: boolean }) {
+  return (
+    <>
+      <IconBuilding className="text-muted-foreground size-5 shrink-0" aria-hidden />
+      <div className="min-w-0 flex-1">
+        <p className={mobile ? "break-words font-medium" : "truncate font-medium"}>{org.name}</p>
+        <p
+          className={
+            mobile
+              ? "text-muted-foreground break-all font-mono text-xs"
+              : "text-muted-foreground truncate font-mono text-xs"
+          }
+        >
+          {org.slug}
+        </p>
+      </div>
+    </>
+  );
+}
+
+function OrgBadges({ org }: { org: Org }) {
   const { t } = useTranslation();
   const suspended = org.status === "suspended";
   return (
+    <>
+      {org.is_default ? <Badge variant="outline">{t("orgs:defaultBadge")}</Badge> : null}
+      <Badge variant={suspended ? "destructive" : "secondary"}>
+        {suspended ? t("orgs:statusSuspended") : t("orgs:statusActive")}
+      </Badge>
+    </>
+  );
+}
+
+function OrgActions({
+  org,
+  busy,
+  onSuspend,
+  onResume,
+  onDelete,
+  onAddAdmin,
+  mobile = false,
+}: OrgRowProps & { mobile?: boolean }) {
+  const { t } = useTranslation();
+  const suspended = org.status === "suspended";
+  const actionClassName = mobile
+    ? "min-h-11 w-full cursor-pointer justify-start"
+    : "cursor-pointer";
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size={mobile ? "default" : "sm"}
+        className={actionClassName}
+        disabled={busy}
+        onClick={() => onAddAdmin(org)}
+      >
+        {t("orgs:addAdmin")}
+      </Button>
+      <Button
+        variant="ghost"
+        size={mobile ? "default" : "sm"}
+        className={actionClassName}
+        disabled={busy}
+        onClick={() => (suspended ? onResume(org.id) : onSuspend(org.id))}
+      >
+        {suspended ? (
+          <IconPlayerPlay className="size-4" aria-hidden />
+        ) : (
+          <IconPlayerPause className="size-4" aria-hidden />
+        )}
+        {suspended ? t("orgs:resume") : t("orgs:suspend")}
+      </Button>
+      <Button
+        variant="ghost"
+        size={mobile ? "default" : "icon"}
+        className={mobile ? `${actionClassName} text-destructive` : actionClassName}
+        disabled={busy || org.is_default}
+        aria-label={t("orgs:delete")}
+        onClick={() => onDelete(org)}
+      >
+        <IconTrash className="size-4" aria-hidden />
+        {mobile ? t("orgs:delete") : null}
+      </Button>
+    </>
+  );
+}
+
+function OrgRow(props: OrgRowProps) {
+  const { org } = props;
+  const { isMobile } = useResponsiveBreakpoint();
+
+  if (isMobile) {
+    return (
+      <Card data-testid="organization-row">
+        <CardContent className="space-y-4 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <OrgIdentity org={org} mobile />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <OrgBadges org={org} />
+          </div>
+          <div className="grid gap-2">
+            <OrgActions {...props} mobile />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
     <Card data-testid="organization-row">
       <CardContent className="flex flex-wrap items-center gap-3 py-4">
-        <IconBuilding className="text-muted-foreground size-5" aria-hidden />
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-medium">{org.name}</p>
-          <p className="text-muted-foreground truncate font-mono text-xs">{org.slug}</p>
-        </div>
-        {org.is_default ? <Badge variant="outline">{t("orgs:defaultBadge")}</Badge> : null}
-        <Badge variant={suspended ? "destructive" : "secondary"}>
-          {suspended ? t("orgs:statusSuspended") : t("orgs:statusActive")}
-        </Badge>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="cursor-pointer"
-          disabled={busy}
-          onClick={() => onAddAdmin(org)}
-        >
-          {t("orgs:addAdmin")}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="cursor-pointer"
-          disabled={busy}
-          onClick={() => (suspended ? onResume(org.id) : onSuspend(org.id))}
-        >
-          {suspended ? (
-            <IconPlayerPlay className="size-4" aria-hidden />
-          ) : (
-            <IconPlayerPause className="size-4" aria-hidden />
-          )}
-          {suspended ? t("orgs:resume") : t("orgs:suspend")}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="cursor-pointer"
-          disabled={busy || org.is_default}
-          aria-label={t("orgs:delete")}
-          onClick={() => onDelete(org)}
-        >
-          <IconTrash className="size-4" aria-hidden />
-        </Button>
+        <OrgIdentity org={org} />
+        <OrgBadges org={org} />
+        <OrgActions {...props} />
       </CardContent>
     </Card>
   );
