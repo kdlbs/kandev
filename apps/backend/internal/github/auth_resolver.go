@@ -465,7 +465,13 @@ func (r *CredentialResolver) resolveLegacy(
 		tracker = NewRateTracker(nil, nil)
 	}
 	wireRateTracker(client, tracker)
-	login, _ := client.GetAuthenticatedUser(ctx)
+	login, err := client.GetAuthenticatedUser(ctx)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, fmt.Errorf("resolve legacy GitHub identity: %w", err)
+	}
 	return &ResolvedCredential{
 		Client:       client,
 		Capabilities: allTokenCapabilities(),

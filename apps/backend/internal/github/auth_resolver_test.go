@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,6 +26,12 @@ func (f *fakeConnectionReader) GetUserConnection(_ context.Context, workspaceID,
 }
 
 type fakeAuthSecrets map[string]string
+
+type legacyIdentityRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f legacyIdentityRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 type repoScopedInstallationProvider struct {
 	clients map[string]Client
@@ -266,6 +273,93 @@ func TestCredentialResolverUsesLegacyOnlyForMigratedSource(t *testing.T) {
 	}
 	if resolved.Principal.Source != ConnectionSourceLegacyShared || resolved.Principal.Login != "legacy-user" {
 		t.Fatalf("principal = %+v", resolved.Principal)
+	}
+}
+
+func TestCredentialResolverLegacyIdentityProbeErrors(t *testing.T) {
+	probeErr := errors.New("identity probe failed")
+
+	t.Run("TokenClient error", func(t *testing.T) {
+		client := NewPATClient("legacy-token")
+		client.httpClient.Transport = legacyIdentityRoundTripper(func(req *http.Request) (*http.Response, error) {
+			if req.Context().Err() != nil {
+				return nil, req.Context().Err()
+			}
+			return nil, probeErr
+		})
+		resolver := NewCredentialResolver(nil, nil)
+		resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+			return client, AuthMethodPAT, nil
+		})
+
+		resolved, err := resolver.resolveLegacy(context.Background(), &WorkspaceConnection{}, CredentialPurposeAutomation)
+		if resolved != nil {
+			t.Fatalf("resolved = %+v, want nil", resolved)
+		}
+		if !errors.Is(err, probeErr) {
+			t.Fatalf("err = %v, want identity probe error", err)
+		}
+	})
+
+	t.Run("GHClient error", func(t *testing.T) {
+		newFakeGH(t, ghResponse{Prefix: "api user", Stderr: probeErr.Error(), Exit: 1})
+		resolver := NewCredentialResolver(nil, nil)
+		resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+			return NewGHClient(), AuthMethodPAT, nil
+		})
+
+		resolved, err := resolver.resolveLegacy(context.Background(), &WorkspaceConnection{}, CredentialPurposeAutomation)
+		if resolved != nil {
+			t.Fatalf("resolved = %+v, want nil", resolved)
+		}
+		if err == nil || !strings.Contains(err.Error(), probeErr.Error()) {
+			t.Fatalf("err = %v, want identity probe error", err)
+		}
+	})
+}
+
+func TestCredentialResolverLegacyIdentityProbeCancellation(t *testing.T) {
+	tests := []struct {
+		name   string
+		client func(*testing.T) Client
+	}{
+		{
+			name: "TokenClient",
+			client: func(t *testing.T) Client {
+				client := NewPATClient("legacy-token")
+				client.httpClient.Transport = legacyIdentityRoundTripper(func(req *http.Request) (*http.Response, error) {
+					return nil, req.Context().Err()
+				})
+				return client
+			},
+		},
+		{
+			name: "GHClient",
+			client: func(t *testing.T) Client {
+				newFakeGH(t, ghResponse{Prefix: "api user", Stdout: "ignored", Exit: 0})
+				return NewGHClient()
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := NewCredentialResolver(nil, nil)
+			client := test.client(t)
+			resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+				return client, AuthMethodPAT, nil
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			resolved, err := resolver.resolveLegacy(ctx, &WorkspaceConnection{}, CredentialPurposeAutomation)
+			if resolved != nil {
+				t.Fatalf("resolved = %+v, want nil", resolved)
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v, want context.Canceled", err)
+			}
+		})
 	}
 }
 
