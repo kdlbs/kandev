@@ -48,7 +48,7 @@ func applyDynamicRouteAction(
 		return nil, err
 	}
 	if err := repairDynamicRouteAfterLaunchFailure(
-		ctx, session, request.ExpectedGeneration, resolver.MarkRouteActionRequired,
+		ctx, session, request.ExpectedGeneration, resolver.MarkRouteRecoveryActionRequired,
 	); err != nil {
 		return nil, routeActionError(ctx, repo, session, err)
 	}
@@ -191,7 +191,7 @@ func recoverDynamicRouteAction(
 	launchErr error,
 ) (*orchestrator.RouteActionResult, error) {
 	if resolver != nil {
-		_ = resolver.MarkRouteActionRequired(ctx, sessionID, expectedGeneration)
+		_ = resolver.MarkRouteRecoveryActionRequired(ctx, sessionID, expectedGeneration)
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {

@@ -44,8 +44,8 @@ func TestMarkRouteActionRequiredUnblocksRetryAndSkipAfterFailedLaunch(t *testing
 
 	// Simulate the launch-failure handler's sync (dynamic_policy_recovery.go
 	// and dynamic_routing.go both call this after a resumed launch fails).
-	if err := resolver.MarkRouteActionRequired(ctx, "session-retry", generation); err != nil {
-		t.Fatalf("MarkRouteActionRequired: %v", err)
+	if err := resolver.MarkRouteRecoveryActionRequired(ctx, "session-retry", generation); err != nil {
+		t.Fatalf("MarkRouteRecoveryActionRequired: %v", err)
 	}
 	state, ok := engine.State("session-retry")
 	if !ok || state.Status != "action_required" {

@@ -284,7 +284,7 @@ func (s *Service) markDynamicPolicyRecoveryActionRequired(
 	ctx context.Context, sessionID string, generation int64, launchErr error,
 ) {
 	if s.profileExecutionResolver != nil {
-		if err := s.profileExecutionResolver.MarkRouteActionRequired(ctx, sessionID, generation); err != nil {
+		if err := s.profileExecutionResolver.MarkRouteRecoveryActionRequired(ctx, sessionID, generation); err != nil {
 			s.logger.Warn("failed to sync durable route state to action_required after launch failure",
 				zap.String("session_id", sessionID), zap.Error(err))
 		}

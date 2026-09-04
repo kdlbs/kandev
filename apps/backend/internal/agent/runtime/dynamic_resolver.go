@@ -447,8 +447,9 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 	return r.executionFromDecision(ctx, state.LogicalProfileID, sessionID, decision)
 }
 
-// MarkRouteActionRequired returns a claimed route to manual recovery.
-func (r *ProfileExecutionResolver) MarkRouteActionRequired(
+// MarkRouteRecoveryActionRequired returns a claimed "retrying" route to
+// manual recovery after its resumed launch failed.
+func (r *ProfileExecutionResolver) MarkRouteRecoveryActionRequired(
 	ctx context.Context,
 	sessionID string,
 	expectedGeneration int64,
