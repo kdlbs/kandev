@@ -437,9 +437,12 @@ and `routingerr` sanitizes them with two different rule sets:
 
 Both tiers close the credential shapes they explicitly pattern-match: a `sk-`
 key, a GitHub/Kandev PAT, a bearer/auth header, a `--api-key` flag, a
-`password`/`secret`/`token`/`api_key` assignment, or a URL's `user:pass@`
-userinfo is redacted before persistence or a cross-provider fallback, in
-either tier. Neither tier is a general secret scanner: a credential shaped
+`password`/`secret`/`token`/`api_key` assignment — including a qualified
+env-var key where the keyword is a prefix or suffix rather than the whole
+name (`AWS_SECRET_ACCESS_KEY=`, `SECRET_KEY=`), and including a value that
+contains an embedded quote character — or a URL's `user:pass@` userinfo is
+redacted before persistence or a cross-provider fallback, in either tier.
+Neither tier is a general secret scanner: a credential shaped
 like something not on that list (a vendor-specific token prefix, for example)
 survives the narrow tier unless it also matches a listed pattern. The
 narrower tier's purpose is to avoid mangling non-credential content in fields

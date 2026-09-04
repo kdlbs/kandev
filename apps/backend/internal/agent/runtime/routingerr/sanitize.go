@@ -28,9 +28,17 @@ var credentialRedactions = []redaction{
 	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]{20,}`), "Bearer " + redactionMask},
 	{regexp.MustCompile(`(?i)Authorization:\s*[^\r\n]+`), "Authorization: " + redactionMask},
 	{regexp.MustCompile(`--api-key[= ]\S+`), "--api-key " + redactionMask},
-	// Tolerates an optional quote around the key and the value, so a JSON
-	// field ("password": "...") is caught along with a bare assignment.
-	{regexp.MustCompile(`(?i)["']?(password|secret|token|api[_-]?key)["']?\s*[:=]\s*["']?[^\s"']+`), "$1: " + redactionMask},
+	// Tolerates an optional quote around the key, a qualifier prefix/suffix on
+	// the keyword itself (AWS_SECRET_ACCESS_KEY, SECRET_KEY), and a quoted or
+	// bare value. The value alternation consumes a quoted value through its
+	// closing quote so an embedded quote character does not truncate the
+	// match early and leave the value's tail in cleartext. The bare-value
+	// fallback allows embedded quote characters for the same reason but stops
+	// before a trailing structural delimiter (closing brace/bracket/paren,
+	// comma, semicolon) so a value directly followed by one of those, as in
+	// `{"password": "***"}` after an earlier redaction pass, does not consume
+	// it and stays idempotent.
+	{regexp.MustCompile(`(?i)["']?([A-Za-z0-9_.-]*(?:password|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s}\])>,;]+)`), "$1: " + redactionMask},
 	// URL userinfo (user:pass@host) carries a live credential even though the
 	// rest of the URL does not. Unlike the full Sanitize tier's URL rewrite,
 	// this masks only the userinfo and keeps the path and query intact. The

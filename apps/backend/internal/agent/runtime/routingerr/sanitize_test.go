@@ -57,6 +57,18 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 			mustHave:    []string{"password: ***"},
 		},
 		{
+			name:        "password value contains a quote",
+			in:          "password=p@ss'word-tail",
+			mustNotHave: []string{"word-tail", "p@ss"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "secret value contains multiple quotes",
+			in:          "secret=abc'def'ghi",
+			mustNotHave: []string{"abc", "def", "ghi"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
 			name:        "user home path",
 			in:          "file at /Users/alice/work/repo/main.go failed",
 			mustNotHave: []string{"/Users/alice/"},
@@ -95,6 +107,8 @@ func TestSanitize_Idempotent(t *testing.T) {
 		"--api-key=ABCDEFGHIJKLMNOPQRSTUV --rest",
 		"password: hunter2 token: foobar secret=abc",
 		"/Users/me/projects/x /home/me/x",
+		"password=p@ss'word-tail",
+		"secret=abc'def'ghi",
 	}
 	for _, in := range inputs {
 		first := Sanitize(in)
@@ -221,6 +235,30 @@ func TestSanitizeCredentials_RedactsCredentialPatterns(t *testing.T) {
 			mustNotHave: []string{"hunter2-rocks"},
 			mustHave:    []string{"token: ***"},
 		},
+		{
+			name:        "password value contains a quote",
+			in:          "password=p@ss'word-tail",
+			mustNotHave: []string{"word-tail", "p@ss"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "secret value contains multiple quotes",
+			in:          "secret=abc'def'ghi",
+			mustNotHave: []string{"abc", "def", "ghi"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
+			name:        "qualified env var key AWS_SECRET_ACCESS_KEY",
+			in:          "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
+			mustNotHave: []string{"wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY"},
+			mustHave:    []string{"***"},
+		},
+		{
+			name:        "qualified env var key SECRET_KEY",
+			in:          "SECRET_KEY=django-insecure-abc123def456ghi789",
+			mustNotHave: []string{"django-insecure-abc123def456ghi789"},
+			mustHave:    []string{"***"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -275,6 +313,10 @@ func TestSanitizeCredentials_Idempotent(t *testing.T) {
 		"commit 94e7b02458b6c1a2d3e4f5061728394a5b6c7d8",
 		"https://user:pass@host/path",
 		`{"password": "hunter2-rocks"}`,
+		"password=p@ss'word-tail",
+		"secret=abc'def'ghi",
+		"AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
+		"SECRET_KEY=django-insecure-abc123def456ghi789",
 	}
 	for _, in := range inputs {
 		first := SanitizeCredentials(in)
