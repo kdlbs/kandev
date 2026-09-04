@@ -103,6 +103,16 @@ export function useFileBrowserSearch(sessionId: string) {
   };
 }
 
+function nearestExpandedFolder(parentPath: string, expandedPaths: ReadonlySet<string>): string {
+  let candidate = parentPath;
+  while (candidate) {
+    if (expandedPaths.has(candidate)) return candidate;
+    const lastSlash = candidate.lastIndexOf("/");
+    candidate = lastSlash === -1 ? "" : candidate.substring(0, lastSlash);
+  }
+  return "";
+}
+
 /** Apply incoming file changes to the tree by refreshing affected folders. */
 export function applyFileChanges(ctx: {
   client: ReturnType<typeof getWebSocketClient>;
@@ -128,7 +138,7 @@ export function applyFileChanges(ctx: {
     const p = change.path;
     const lastSlash = p.lastIndexOf("/");
     const parent = lastSlash === -1 ? "" : p.substring(0, lastSlash);
-    if (parent === "" || expandedPaths.has(parent)) foldersToRefresh.add(parent);
+    foldersToRefresh.add(nearestExpandedFolder(parent, expandedPaths));
     if (p === "" || expandedPaths.has(p)) foldersToRefresh.add(p);
   }
   if (foldersToRefresh.size === 0) {

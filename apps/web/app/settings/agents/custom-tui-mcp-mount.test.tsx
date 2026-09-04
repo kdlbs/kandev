@@ -1,15 +1,26 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import { ApiError, INTERIM_SETTINGS_INTERLOCK_ERROR_CODE } from "@/lib/api/client";
 import type { Agent } from "@/lib/types/http-agents";
+
+const { updateMcpStrategy, toast } = vi.hoisted(() => ({
+  updateMcpStrategy: vi.fn(),
+  toast: vi.fn(),
+}));
 
 // The strategy list is fetched on mount; the mount assertion below is about
 // whether the control is reachable at all, not about the option list.
 vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listMCPStrategies: vi.fn(async () => [{ key: "claude", description: "a config file" }]),
-  updateCustomTUIAgentMCPStrategy: vi.fn(),
+  updateCustomTUIAgentMCPStrategy: updateMcpStrategy,
+}));
+
+vi.mock("@/components/toast-provider", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useToast: () => ({ toast }),
 }));
 
 const { CustomTUIMcpCard } = await import("@/components/settings/custom-tui-mcp-card");
@@ -74,6 +85,7 @@ function renderIndexComposition(saved: Agent | undefined, name = "fuel-claude") 
 
 describe("custom TUI MCP control on the agents index", () => {
   afterEach(cleanup);
+  afterEach(() => vi.clearAllMocks());
 
   it("renders for a saved custom TUI agent", async () => {
     renderIndexComposition(tuiAgent());
@@ -105,5 +117,21 @@ describe("custom TUI MCP control on the agents index", () => {
   it("renders nothing for an agent that has not been saved yet", () => {
     renderIndexComposition(undefined);
     expect(screen.queryByTestId(STRATEGY_SELECT)).toBeNull();
+  });
+
+  it("does not toast a handled stale-page update error", async () => {
+    const staleError = new ApiError("interim settings interlock required", 403, {
+      error_code: INTERIM_SETTINGS_INTERLOCK_ERROR_CODE,
+    });
+    staleError.handled = true;
+    updateMcpStrategy.mockRejectedValueOnce(staleError);
+    renderIndexComposition(tuiAgent());
+
+    fireEvent.click(await screen.findByTestId(STRATEGY_SELECT));
+    fireEvent.click(await screen.findByRole("option", { name: /claude/ }));
+
+    await waitFor(() => expect(updateMcpStrategy).toHaveBeenCalledOnce());
+    expect(toast).not.toHaveBeenCalled();
+    expect(screen.queryByText(staleError.message)).toBeNull();
   });
 });

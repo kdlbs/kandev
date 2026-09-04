@@ -194,6 +194,7 @@ type TaskDTO struct {
 	PrimaryExecutorType         *string                  `json:"primary_executor_type,omitempty"`
 	PrimaryExecutorName         *string                  `json:"primary_executor_name,omitempty"`
 	PrimaryAgentName            *string                  `json:"primary_agent_name,omitempty"`
+	PrimaryAgentProfileID       *string                  `json:"primary_agent_profile_id,omitempty"`
 	PrimaryWorkingDirectory     *string                  `json:"primary_working_directory,omitempty"`
 	PrimarySessionState         *string                  `json:"primary_session_state,omitempty"`
 	PrimarySessionPendingAction *string                  `json:"primary_session_pending_action"`
@@ -801,7 +802,7 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
@@ -814,6 +815,7 @@ func FromTaskWithSessionInfo(
 	primaryExecutorType *string,
 	primaryExecutorName *string,
 	primaryAgentName *string,
+	primaryAgentProfileID *string,
 	primaryWorkingDirectory *string,
 	primarySessionState *string,
 	primarySessionPendingAction *string,
@@ -873,6 +875,7 @@ func FromTaskWithSessionInfo(
 		PrimaryExecutorType:         primaryExecutorType,
 		PrimaryExecutorName:         primaryExecutorName,
 		PrimaryAgentName:            primaryAgentName,
+		PrimaryAgentProfileID:       primaryAgentProfileID,
 		PrimaryWorkingDirectory:     primaryWorkingDirectory,
 		PrimarySessionState:         primarySessionState,
 		PrimarySessionPendingAction: primarySessionPendingAction,
@@ -1061,20 +1064,22 @@ func steerEligible(sessionID string, state models.TaskSessionState, provider For
 
 // WorkflowStepDTO represents a workflow step for API responses
 type WorkflowStepDTO struct {
-	ID                    string         `json:"id"`
-	WorkflowID            string         `json:"workflow_id"`
-	Name                  string         `json:"name"`
-	Position              int            `json:"position"`
-	Color                 string         `json:"color"`
-	Prompt                string         `json:"prompt,omitempty"`
-	Events                *StepEventsDTO `json:"events,omitempty"`
-	AllowManualMove       bool           `json:"allow_manual_move"`
-	IsStartStep           bool           `json:"is_start_step"`
-	ShowInCommandPanel    bool           `json:"show_in_command_panel"`
-	AutoArchiveAfterHours int            `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID        string         `json:"agent_profile_id,omitempty"`
-	WIPLimit              int            `json:"wip_limit"`
-	PullFromStepID        string         `json:"pull_from_step_id,omitempty"`
+	ID                        string                                   `json:"id"`
+	WorkflowID                string                                   `json:"workflow_id"`
+	Name                      string                                   `json:"name"`
+	Position                  int                                      `json:"position"`
+	Color                     string                                   `json:"color"`
+	Prompt                    string                                   `json:"prompt,omitempty"`
+	Events                    *StepEventsDTO                           `json:"events,omitempty"`
+	AllowManualMove           bool                                     `json:"allow_manual_move"`
+	IsStartStep               bool                                     `json:"is_start_step"`
+	ShowInCommandPanel        bool                                     `json:"show_in_command_panel"`
+	AutoArchiveAfterHours     int                                      `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID            string                                   `json:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
+	ProfileSessionEndPolicy   models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
+	WIPLimit                  int                                      `json:"wip_limit"`
+	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
 	StageType                  string    `json:"stage_type,omitempty"`

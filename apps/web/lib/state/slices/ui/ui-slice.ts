@@ -21,7 +21,9 @@ import { DEFAULT_SETTINGS_MENU_MODE } from "@/lib/settings/settings-menu-mode";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
+import { buildThreadViewActions } from "./thread-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
+import { DEFAULT_THREAD_VIEW, DEFAULT_THREAD_VIEW_ID } from "./thread-view-builtins";
 import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
 import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 import type { SystemHealthResponse } from "@/lib/types/health";
@@ -32,6 +34,19 @@ import { buildQuickTerminalActions } from "./quick-terminal-actions";
 /** Default sidebar view state: the single built-in "All tasks" view, active, no draft. */
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
   return { views: [DEFAULT_VIEW], activeViewId: DEFAULT_VIEW.id, draft: null, syncError: null };
+}
+
+/** Default Threads view state: the canonical unbounded all-threads view. */
+function createDefaultThreadViewState(): UISliceState["threadViews"] {
+  return {
+    views: [DEFAULT_THREAD_VIEW],
+    activeViewId: DEFAULT_THREAD_VIEW_ID,
+    draft: null,
+    syncError: null,
+    syncPending: false,
+    deferredServerState: null,
+    orderResetGeneration: 0,
+  };
 }
 
 export const KNOWN_DIMENSIONS = new Set<string>([
@@ -140,6 +155,7 @@ export const defaultUIState: UISliceState = {
   updateAvailableNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: createDefaultSidebarState(),
+  threadViews: createDefaultThreadViewState(),
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
@@ -362,6 +378,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
   ...buildSidebarViewActions(set, get),
+  ...buildThreadViewActions(set, get),
   ...buildSidebarTaskPrefsActions(set, get),
   ...buildCollapsedSubtaskActions(set, get),
   ...buildSystemHealthActions(set),

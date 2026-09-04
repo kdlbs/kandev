@@ -31,6 +31,17 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	}
 }
 
+func TestMapKanbanStepStateIncludesProfileSessionPolicies(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:                        "step-policy",
+		ProfileSessionStartPolicy: "new",
+		ProfileSessionEndPolicy:   "park",
+	})
+	if step["profile_session_start_policy"] != "new" || step["profile_session_end_policy"] != "park" {
+		t.Fatalf("profile session policies = %#v/%#v, want new/park", step["profile_session_start_policy"], step["profile_session_end_policy"])
+	}
+}
+
 // TestMapKanbanTaskStateIncludesAutoStartFailed regression-tests Review round
 // 2's MAJOR finding: mapKanbanTaskState is a camelCase whitelist that omitted
 // auto_start_failed, so a task whose auto-start already failed rendered with
@@ -90,6 +101,7 @@ func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) 
 }
 
 func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T) {
+	maxColumns := 3
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{
 			SidebarViews: []usermodels.SidebarView{{
@@ -113,6 +125,21 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 					Trailing:       "none",
 				},
 			},
+			ThreadViews: []usermodels.ThreadView{{
+				ID:         "thread-view-1",
+				Name:       "Thread view",
+				TaskScope:  usermodels.ThreadTaskScope{Mode: usermodels.ThreadTaskScopeSelected, TaskIDs: []string{"task-1"}},
+				Filters:    []usermodels.ThreadViewClause{},
+				Sort:       usermodels.ThreadViewSort{Key: "attention", Direction: "asc"},
+				MaxColumns: &maxColumns,
+			}},
+			ThreadActiveViewID: "thread-view-1",
+			ThreadViewDraft: &usermodels.ThreadViewDraft{
+				BaseViewID: "thread-view-1",
+				TaskScope:  usermodels.ThreadTaskScope{Mode: usermodels.ThreadTaskScopeAll, TaskIDs: []string{}},
+				Filters:    []usermodels.ThreadViewClause{},
+				Sort:       usermodels.ThreadViewSort{Key: "attention", Direction: "asc"},
+			},
 			SidebarTaskPrefs: usermodels.SidebarTaskPrefs{
 				PinnedTaskIDs:          []string{"task-1"},
 				OrderedTaskIDs:         []string{"task-2"},
@@ -130,6 +157,21 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 
 	if state["sidebarActiveViewId"] != "view-1" {
 		t.Fatalf("sidebarActiveViewId = %#v, want view-1", state["sidebarActiveViewId"])
+	}
+	if state["threadActiveViewId"] != "thread-view-1" {
+		t.Fatalf("threadActiveViewId = %#v, want thread-view-1", state["threadActiveViewId"])
+	}
+	threadViews, ok := state["threadViews"].([]map[string]any)
+	if !ok || len(threadViews) != 1 {
+		t.Fatalf("threadViews = %#v, want one mapped view", state["threadViews"])
+	}
+	threadScope, ok := threadViews[0]["taskScope"].(map[string]any)
+	if !ok || threadScope["mode"] != "selected" {
+		t.Fatalf("thread taskScope = %#v, want selected scope", threadViews[0]["taskScope"])
+	}
+	threadDraft, ok := state["threadViewDraft"].(map[string]any)
+	if !ok || threadDraft["baseViewId"] != "thread-view-1" {
+		t.Fatalf("threadViewDraft = %#v, want mapped draft", state["threadViewDraft"])
 	}
 	draft, ok := state["sidebarDraft"].(map[string]any)
 	if !ok || draft["baseViewId"] != "view-1" || draft["group"] != "repository" {

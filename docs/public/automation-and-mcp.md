@@ -29,6 +29,14 @@ Across Kandev's task, configuration, external, and Office MCP modes, each tool c
 - Use **external MCP** to expose Kandev tools to third-party clients.
 - Treat credentials delivered through any MCP or executor profile as available to the receiving agent.
 
+![Automation flow from an external trigger to an AutomationRun, a task or continued session, and run history.](../screenshots/automation-and-mcp.svg)
+
+[Open full-size SVG diagram][automation-and-mcp-diagram]
+
+[automation-and-mcp-diagram]: ../../docs/screenshots/automation-and-mcp.svg
+
+Every firing gets a traceable run identity. The task destination and context setting determine whether Kandev creates a new thread or continues the previous session.
+
 ## Workflow events and human gates
 
 Regular workflow entry actions can enable plan mode, reset agent context, or auto-start an agent; auto-start can use the step prompt or a stored prompt override. Turn-start and turn-complete events can move the task, while turn-complete and step-exit actions can disable plan mode. There is no regular standalone **stop agent** or **send prompt** workflow action. Approval/review steps and steps without automatic start remain the supported human gates. Inspect events on both the source and destination step before enabling a move or automatic start; otherwise two steps can form a loop.
@@ -668,7 +676,8 @@ A profile server can show **Delivered, connection unverified**. That server
 connects directly to the agent, so Kandev cannot inspect its `tools/list`
 result, descriptions, schemas, or token estimates. The explorer still shows
 safe status metadata. The built-in Kandev server becomes **Connected** after
-MCP initialize. It becomes **Active** after it serves `tools/list`. Missing
+protocol acceptance, either legacy MCP initialize or an accepted modern
+request. It becomes **Active** after it serves `tools/list`. Missing
 observation is not a failure. Red appears only for an explicit sanitized error.
 
 The report is per Kandev session and execution. It stores only bounded,
@@ -691,6 +700,27 @@ http://127.0.0.1:<backend-port>/mcp
 ```
 
 SSE compatibility uses `/mcp/sse` with messages sent to `/mcp/message`. A reverse proxy must support long-lived streaming connections.
+
+### MCP protocol versions
+
+The `/mcp` endpoint supports protocol negotiation for modern and legacy clients.
+
+- Modern clients can select `2026-07-28` with `server/discover`, or send a direct request with the modern request metadata.
+- Legacy clients use `initialize` and can negotiate `2025-11-25`, `2025-06-18`, `2025-03-26`, or `2024-11-05`.
+- Modern requests are stateless. They do not use `Mcp-Session-Id`.
+- SSE remains a legacy transport. Use `/mcp` when the client supports `2026-07-28`.
+
+Automatic client negotiation depends on the client SDK. Some clients need an explicit option to enable discovery. Kandev does not enable modern protocol use for every client by default.
+
+Agent-attached MCP servers keep `/mcp`, `/sse`, and `/message` on the agentctl port. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
+
+### Configured third-party MCP servers
+
+Kandev delivers configured third-party MCP server definitions directly to the agent. The agent and each third-party server negotiate their own protocol and authentication.
+
+Kandev does not upgrade or proxy configured third-party MCP servers. Their supported versions depend on the agent, client, and server.
+
+This compatibility work does not add MCP Tasks, new OAuth behavior, or third-party MCP proxying.
 
 External MCP exposes 42 tools in these groups:
 

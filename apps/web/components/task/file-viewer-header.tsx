@@ -1,6 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { IconDownload } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toRelativePath } from "@/lib/utils";
 import {
   ExternalVcsFileLink,
@@ -61,5 +65,36 @@ export function FileViewerExternalLink({
       repositoryName={repositoryName}
       size="sm"
     />
+  );
+}
+
+type FileViewerDownloadButtonProps = {
+  onDownload?: () => void;
+};
+
+/**
+ * Download control for the viewer header. Shared by the binary and image
+ * viewers so both screens, and the mobile viewer that renders the same
+ * `headerActions`, gain the action from one place.
+ */
+export function FileViewerDownloadButton({ onDownload }: FileViewerDownloadButtonProps) {
+  const { t } = useTranslation();
+  if (!onDownload) return null;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onDownload}
+          aria-label={t("editors:downloadFile")}
+          className="h-11 w-11 p-0 cursor-pointer sm:h-8 sm:w-8"
+        >
+          <IconDownload className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("editors:downloadFile")}</TooltipContent>
+    </Tooltip>
   );
 }

@@ -151,6 +151,64 @@ func TestSentinelsMatchThroughWrapping(t *testing.T) {
 	}
 }
 
+// TestContentTooLargeMapsToValidationWithDetails pins the dynamic-message
+// branch (REQ-TASKS-PLAN-CONTENT-SIZE-LIMIT-002/-003): CreateError and
+// UpdateError report service.PlanContentTooLargeError as VALIDATION_ERROR
+// with a message carrying both numbers, plus the structured details map the
+// browser classifies from.
+func TestContentTooLargeMapsToValidationWithDetails(t *testing.T) {
+	sizeErr := &service.PlanContentTooLargeError{Submitted: 300000, Limit: 262144}
+
+	cases := []struct {
+		name   string
+		mapper func(*ws.Message, error) (*ws.Message, error)
+	}{
+		{"create", CreateError},
+		{"update", UpdateError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, mapErr := tc.mapper(request(), sizeErr)
+			payload := decode(t, out, mapErr)
+			if payload.Code != ws.ErrorCodeValidation {
+				t.Errorf("code = %q, want %q", payload.Code, ws.ErrorCodeValidation)
+			}
+			if payload.Message != sizeErr.Error() {
+				t.Errorf("message = %q, want %q", payload.Message, sizeErr.Error())
+			}
+			if payload.Details == nil {
+				t.Fatal("details is nil, want reason/limit/submitted")
+			}
+			if payload.Details["reason"] != "plan_content_too_large" {
+				t.Errorf("details[reason] = %v, want %q", payload.Details["reason"], "plan_content_too_large")
+			}
+			if limit, ok := payload.Details["limit"].(float64); !ok || int(limit) != sizeErr.Limit {
+				t.Errorf("details[limit] = %v, want %d", payload.Details["limit"], sizeErr.Limit)
+			}
+			if submitted, ok := payload.Details["submitted"].(float64); !ok || int(submitted) != sizeErr.Submitted {
+				t.Errorf("details[submitted] = %v, want %d", payload.Details["submitted"], sizeErr.Submitted)
+			}
+		})
+	}
+}
+
+// TestContentTooLargeMatchesThroughWrapping mirrors
+// TestSentinelsMatchThroughWrapping for the dynamic-message branch: it must
+// match via errors.As even when the service wraps the typed error.
+func TestContentTooLargeMatchesThroughWrapping(t *testing.T) {
+	sizeErr := &service.PlanContentTooLargeError{Submitted: 300000, Limit: 262144}
+	wrapped := fmt.Errorf("create plan: %w", sizeErr)
+
+	out, mapErr := CreateError(request(), wrapped)
+	payload := decode(t, out, mapErr)
+	if payload.Code != ws.ErrorCodeValidation {
+		t.Errorf("code = %q, want %q", payload.Code, ws.ErrorCodeValidation)
+	}
+	if payload.Details["reason"] != "plan_content_too_large" {
+		t.Errorf("details[reason] = %v, want %q", payload.Details["reason"], "plan_content_too_large")
+	}
+}
+
 // TestErrorResponsePreservesEnvelope checks the mappers copy the request's ID
 // and action onto the reply, which is how the caller correlates it.
 func TestErrorResponsePreservesEnvelope(t *testing.T) {

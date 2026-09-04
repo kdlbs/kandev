@@ -9,6 +9,7 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Spinner } from "@kandev/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
+import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   Drawer,
@@ -27,18 +28,20 @@ import {
   revokeSession,
   type AuthSession,
 } from "@/lib/api/domains/auth-api";
+import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useSettingsTargetRegistration } from "@/components/settings/settings-target-provider";
 import { ACCOUNT_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/account";
 import { formatDateTime, formatRelativeTime } from "@/lib/i18n/formats";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { isUserSettingsResponseCurrent } from "@/lib/settings/user-settings-revision";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SettingsErrorText, SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { useNow } from "@/hooks/use-now";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createQueuedUserSettingsSyncWithResponse } from "@/lib/user-settings-sync";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { toast } from "@/lib/toast/sonner";
 import type { LastSeenDisplay } from "@/lib/types/http";
 
@@ -136,26 +139,45 @@ function ChangePasswordCard() {
 }
 
 /** Loads the active sessions list and exposes reload/error state. */
-function useSessionsList() {
+function useSessionsList(resolveHostnames: boolean) {
   const { t } = useTranslation();
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fetching = useRef(false);
+  const reloadPending = useRef(false);
 
   /** Fetches the latest sessions from the API and updates state. */
   const reload = useCallback(async () => {
-    setError(null);
+    if (fetching.current) {
+      reloadPending.current = true;
+      return;
+    }
+    fetching.current = true;
     try {
-      const res = await listSessions({ cache: "no-store" });
-      setSessions(res.sessions);
-      setLoaded(true);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("account:failedToLoadSessions"));
+      do {
+        reloadPending.current = false;
+        setError(null);
+        try {
+          const res = await listSessions({ cache: "no-store" });
+          setSessions(res.sessions);
+          setLoaded(true);
+        } catch (err) {
+          setError(err instanceof ApiError ? err.message : t("account:failedToLoadSessions"));
+        }
+      } while (reloadPending.current);
+    } finally {
+      fetching.current = false;
     }
   }, [t]);
 
   useEffect(() => {
     void reload();
+  }, [reload, resolveHostnames]);
+  useEffect(() => {
+    const onFocus = () => void reload();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [reload]);
 
   return { sessions, loaded, error, reload, setError };
@@ -285,10 +307,14 @@ function LastSeenDisplaySelect({
 function SessionsTable({
   sessions,
   display,
+  resolveHostnames,
+  streamed,
   onRevoke,
 }: {
   sessions: AuthSession[];
   display: LastSeenDisplay;
+  resolveHostnames: boolean;
+  streamed: Record<string, { hostname: string; resolvedAt: string | null }>;
   onRevoke: (id: string) => void;
 }) {
   const { t } = useTranslation();
@@ -298,6 +324,7 @@ function SessionsTable({
         <TableRow>
           <TableHead>{t("account:device")}</TableHead>
           <TableHead>{t("account:ipAddress")}</TableHead>
+          {resolveHostnames && <TableHead>{t("account:hostname")}</TableHead>}
           <TableHead>{t("account:lastSeen")}</TableHead>
           <TableHead className="text-right">{t("account:actions")}</TableHead>
         </TableRow>
@@ -318,6 +345,12 @@ function SessionsTable({
               )}
             </TableCell>
             <TableCell className="text-xs">{session.ip}</TableCell>
+            {resolveHostnames && (
+              <TableCell className="text-xs" data-testid="account-session-hostname">
+                {hostnameForSession(session, streamed[session.ip]) ||
+                  t("account:hostnameNotAvailable")}
+              </TableCell>
+            )}
             <LastSeenCell lastSeenAt={session.last_seen_at} display={display} />
             <TableCell className="text-right">
               {!session.current && (
@@ -342,7 +375,9 @@ function SessionsTable({
 /** Renders the active-sessions settings card with display preference and revoke. */
 function SessionsCard() {
   const { t } = useTranslation();
-  const { sessions, loaded, error, reload, setError } = useSessionsList();
+  const resolveHostnames = useAppStore((state) => state.userSettings.resolveSessionHostnames);
+  const streamed = useAppStore((state) => state.sessionHostnames);
+  const { sessions, loaded, error, reload, setError } = useSessionsList(resolveHostnames);
   const savedDisplay = useAppStore((state) => state.userSettings.lastSeenDisplay);
   const store = useAppStoreApi();
   const [draftDisplay, setDraftDisplay] = useState<LastSeenDisplay>(savedDisplay);
@@ -423,7 +458,86 @@ function SessionsCard() {
           </div>
         )}
         {loaded && sessions.length > 0 && (
-          <SessionsTable sessions={sessions} display={draftDisplay} onRevoke={onRevoke} />
+          <SessionsTable
+            sessions={sessions}
+            display={draftDisplay}
+            resolveHostnames={resolveHostnames}
+            streamed={streamed}
+            onRevoke={onRevoke}
+          />
+        )}
+      </CardContent>
+    </SettingsCard>
+  );
+}
+
+function hostnameForSession(
+  session: AuthSession,
+  streamed: { hostname: string; resolvedAt: string | null } | undefined,
+) {
+  const response = { hostname: session.hostname, resolvedAt: session.hostname_resolved_at };
+  if (!streamed) return response.hostname;
+  if (response.resolvedAt === null)
+    return streamed.resolvedAt === null
+      ? streamed.hostname || response.hostname
+      : streamed.hostname;
+  if (streamed.resolvedAt === null) return response.hostname;
+  if (streamed.resolvedAt > response.resolvedAt) return streamed.hostname;
+  if (streamed.resolvedAt < response.resolvedAt) return response.hostname;
+  return streamed.hostname || response.hostname;
+}
+
+function ResolveHostnamesCard() {
+  const { t } = useTranslation();
+  const settings = useAppStore((state) => state.userSettings);
+  const store = useAppStoreApi();
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const onChange = async (checked: boolean) => {
+    const settingsAtSubmit = store.getState().userSettings;
+    setError(null);
+    setSaving(true);
+    try {
+      const response = await updateUserSettings({ resolve_session_hostnames: checked });
+      const state = store.getState();
+      const responseIsCurrent = isUserSettingsResponseCurrent(
+        response.settings.revision,
+        state.userSettings.revision,
+        state.userSettings === settingsAtSubmit,
+      );
+      if (responseIsCurrent) {
+        state.setUserSettings(mapUserSettingsResponse(response, state.userSettings));
+      }
+    } catch {
+      setError(t("account:couldNotUpdateHostnameResolution"));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <SettingsCard data-testid="account-resolve-hostnames-card">
+      <CardContent className="space-y-3">
+        <div className="flex min-h-11 items-center justify-between gap-4">
+          <div className="space-y-1">
+            <SettingsFieldLabel htmlFor="account-resolve-hostnames-switch">
+              {t("account:resolveDeviceHostnames")}
+            </SettingsFieldLabel>
+            <p className="text-sm text-muted-foreground">
+              {t("account:resolveDeviceHostnamesDescription")}
+            </p>
+          </div>
+          <Switch
+            id="account-resolve-hostnames-switch"
+            data-testid="account-resolve-hostnames-switch"
+            checked={settings.resolveSessionHostnames}
+            disabled={saving}
+            onCheckedChange={(checked) => void onChange(checked)}
+          />
+        </div>
+        {error && (
+          <SettingsErrorText data-testid="account-resolve-hostnames-error">
+            {error}
+          </SettingsErrorText>
         )}
       </CardContent>
     </SettingsCard>
@@ -435,6 +549,7 @@ export function SecuritySettings() {
   return (
     <div className="space-y-4">
       <ChangePasswordCard />
+      <ResolveHostnamesCard />
       <SessionsCard />
     </div>
   );

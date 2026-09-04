@@ -395,8 +395,13 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 	message := data.ErrorMessage
 	var resetHint *time.Time
 	if providerError := data.ProviderError; providerError != nil {
-		if providerError.ProviderID != "" {
-			providerID = providerError.ProviderID
+		// Provider rules are keyed by agent ID. OpenCode diagnostics carry the
+		// model-provider ID instead ("opencode-go"), which has no rules; keeping
+		// the agent ID there lets the OpenCode usage-limit rule classify the
+		// failure so dynamic routing can advance to the next candidate.
+		if id := providerError.ProviderID; id != "" &&
+			!routingerr.HasProviderRules(providerID) && routingerr.HasProviderRules(id) {
+			providerID = id
 		}
 		if providerError.Message != "" {
 			message = providerError.Message
@@ -567,6 +572,7 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		SessionID:        sessionID,
 		AgentExecutionID: execID,
 		ErrorMessage:     "Automatic provider retries cancelled. Resume or start fresh to continue.",
+		UserInitiated:    true,
 	})
 	return true
 }

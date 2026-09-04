@@ -140,6 +140,8 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
 		api.POST("/workspace/file/create", s.handleFileCreate)
+		api.POST("/workspace/file/upload", s.handleFileUpload)
+		api.POST("/workspace/file/upload-preflight", s.handleUploadPreflight)
 		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)

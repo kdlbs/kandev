@@ -1272,27 +1272,21 @@ export class SessionPage {
 
   /**
    * Resolve the active chat's ProseMirror composer and wait until it is
-   * actually editable before returning it.
+   * ready for a normal prompt before returning it.
    *
    * TipTap uses `immediatelyRender: false`, so `EditorContent` mounts the
    * `.tiptap.ProseMirror` node only after the editor instance is created in a
    * post-mount effect; until then the contenteditable host is absent or still
-   * `contenteditable="false"`. Callers reach here after `waitForLoad` /
-   * `waitForChatIdle` have already driven hydration, so the default
-   * `toBeEditable` wait is the correct condition to synchronize on.
+   * `contenteditable="false"`. Startup now intentionally leaves that host
+   * editable while the submit button remains disabled, so editability alone
+   * no longer proves that a prompt can be sent. Wait for the idle placeholder
+   * and editable host together, which also handles callers that only waited for
+   * the chat panel to mount.
    */
   async composerReady(): Promise<Locator> {
+    await this.waitForChatIdle({ timeout: 30_000, requireEditable: true });
     const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    try {
-      await expect(editor).toBeEditable();
-    } catch {
-      // `waitForChatIdle` intentionally treats the visible idle placeholder as
-      // sufficient for terminal workflow states, where the composer may stay
-      // disabled. Sending requires the stronger editable condition; re-drive
-      // that condition when startup hydration exposed a stale idle placeholder.
-      await this.waitForChatIdle({ timeout: 30_000, requireEditable: true });
-      await expect(editor).toBeEditable();
-    }
+    await expect(editor).toBeEditable();
     return editor;
   }
 

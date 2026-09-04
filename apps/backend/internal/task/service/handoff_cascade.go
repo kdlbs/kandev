@@ -22,10 +22,11 @@ type workspaceEnvironmentRepository interface {
 }
 
 type workspaceEnvironmentOwnershipTransfer struct {
-	groupID        string
-	environmentID  string
-	oldOwnerTaskID string
-	newOwnerTaskID string
+	groupID             string
+	environmentID       string
+	oldOwnerTaskID      string
+	newOwnerTaskID      string
+	resultingGeneration int64
 }
 
 // publishUpdatedTask re-reads the task row and forwards it to the event
@@ -95,11 +96,14 @@ func (s *HandoffService) evaluateWorkspaceGroupCleanup(ctx context.Context, grou
 			orchmodels.WorkspaceCleanupStatusPending,
 			"active executor still bound to group's member session", nil)
 	}
-	// Mark the group as cleanup_pending before invoking the cleaner so
-	// any concurrent observer sees a consistent state machine.
-	if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, groupID,
-		orchmodels.WorkspaceCleanupStatusPending, "", nil); err != nil {
+	// Claim this ownership generation before invoking the cleaner. A stale
+	// evaluator or a concurrent membership admission cannot pass this write.
+	claimed, err := claimWorkspaceGroupCleanup(ctx, s.wsGroups, g)
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		return nil
 	}
 	if s.cleaner == nil {
 		// No cleaner wired — leave the group in cleanup_pending so the
@@ -108,12 +112,12 @@ func (s *HandoffService) evaluateWorkspaceGroupCleanup(ctx context.Context, grou
 		return nil
 	}
 	if err := s.runWorkspaceGroupCleanup(ctx, g); err != nil {
-		_ = s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, groupID,
+		_ = completeWorkspaceGroupCleanup(ctx, s.wsGroups, g,
 			orchmodels.WorkspaceCleanupStatusFailed, err.Error(), nil)
 		return err
 	}
 	now := time.Now().UTC()
-	return s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, groupID,
+	return completeWorkspaceGroupCleanup(ctx, s.wsGroups, g,
 		orchmodels.WorkspaceCleanupStatusCleaned, "", &now)
 }
 
@@ -230,8 +234,12 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	// the walk; not strictly required by the schema (no FK on parent_id)
 	// but keeps the audit log readable.
 	postArchiveCtx := ctx
+	vacatedStepIDs := make(map[string]struct{})
+	defer func() {
+		s.pullTasksForVacatedSteps(postArchiveCtx, vacatedStepIDs)
+	}()
 	for i := len(all) - 1; i >= 0; i-- {
-		ok, err := s.tasks.ArchiveTaskIfActive(postArchiveCtx, all[i], cascadeID)
+		vacatedStepID, ok, err := s.archiveTaskWithVacatedStep(postArchiveCtx, all[i], cascadeID)
 		if err != nil {
 			s.cancelCascadeResourceCleanupRange(postArchiveCtx, all[:i+1], cleanupOps)
 			return out, fmt.Errorf("archive %s: %w", all[i], err)
@@ -241,6 +249,7 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 			// survive a disconnected caller.
 			postArchiveCtx = context.WithoutCancel(ctx)
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
+			recordVacatedStep(vacatedStepIDs, vacatedStepID)
 			// The archive mutation committed, so it is now safe to finalize
 			// any session that the runtime canceller could not update.
 			s.finalizeActiveSessions(postArchiveCtx, all[i], models.SessionArchiveTreeCancelReason)
@@ -346,6 +355,10 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	// the caller can retry. We do NOT roll back partial deletions —
 	// delete is destructive by design and re-running is idempotent.
 	postDeleteCtx := ctx
+	vacatedStepIDs := make(map[string]struct{})
+	defer func() {
+		s.pullTasksForVacatedSteps(postDeleteCtx, vacatedStepIDs)
+	}()
 	for i := len(all) - 1; i >= 0; i-- {
 		// Snapshot the task row BEFORE deletion so the published event
 		// carries workflow_id / workspace_id — the kanban WS handler keys
@@ -359,7 +372,8 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		// Tear down runtime resources BEFORE the DB delete so the env / worktree
 		// rows are still queryable for the gather step. The actual destroy work
 		// runs async after this returns. Delete cascade removes the env row.
-		if err := s.tasks.DeleteTask(postDeleteCtx, all[i]); err != nil {
+		vacatedStepID, err := s.deleteTaskWithVacatedStep(postDeleteCtx, all[i])
+		if err != nil {
 			s.cancelCascadeResourceCleanupRange(postDeleteCtx, all[:i+1], cleanupOps)
 			deleteErr := fmt.Errorf("delete %s: %w", all[i], err)
 			if len(out.ArchivedTaskIDs) == 0 {
@@ -377,6 +391,7 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 			s.resourceCleaner.CleanupTaskResources(postDeleteCtx, all[i], true)
 		}
 		out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
+		recordVacatedStep(vacatedStepIDs, vacatedStepID)
 		if s.eventPublisher != nil && snapshot != nil {
 			s.eventPublisher.PublishTaskDeleted(postDeleteCtx, snapshot)
 		}
@@ -389,6 +404,48 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		}
 	}
 	return out, nil
+}
+
+func (s *HandoffService) archiveTaskWithVacatedStep(
+	ctx context.Context,
+	taskID string,
+	cascadeID string,
+) (string, bool, error) {
+	repo, ok := s.tasks.(cascadeArchiveTaskRepository)
+	if !ok {
+		return "", false, errors.New("task repo cannot capture archive vacancy atomically")
+	}
+	return repo.ArchiveTaskIfActiveWithVacatedStep(ctx, taskID, cascadeID)
+}
+
+func (s *HandoffService) deleteTaskWithVacatedStep(ctx context.Context, taskID string) (string, error) {
+	repo, ok := s.tasks.(cascadeDeleteTaskRepository)
+	if !ok {
+		return "", errors.New("task repo cannot capture delete vacancy atomically")
+	}
+	return repo.DeleteTaskWithVacatedStep(ctx, taskID)
+}
+
+func recordVacatedStep(stepIDs map[string]struct{}, stepID string) {
+	if stepID == "" {
+		return
+	}
+	stepIDs[stepID] = struct{}{}
+}
+
+func (s *HandoffService) pullTasksForVacatedSteps(ctx context.Context, stepIDs map[string]struct{}) {
+	if s.vacancyReconciler == nil || len(stepIDs) == 0 {
+		return
+	}
+	orderedStepIDs := make([]string, 0, len(stepIDs))
+	for stepID := range stepIDs {
+		orderedStepIDs = append(orderedStepIDs, stepID)
+	}
+	sort.Strings(orderedStepIDs)
+	pullCtx := context.WithoutCancel(ctx)
+	for _, stepID := range orderedStepIDs {
+		s.vacancyReconciler.ReconcileVacatedStep(pullCtx, stepID)
+	}
 }
 
 // transferSharedWorkspaceEnvironmentOwnership moves a materialized environment
@@ -474,7 +531,9 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 	if newOwner == "" {
 		return nil, fmt.Errorf("preserve workspace group %s: no surviving member can own environment %s", group.ID, env.ID)
 	}
-	if err := environments.TransferTaskEnvironmentToTask(ctx, env.ID, newOwner); err != nil {
+	if err := environments.TransferTaskEnvironmentOwnership(
+		ctx, env.ID, env.TaskID, env.OwnershipGeneration, newOwner,
+	); err != nil {
 		return nil, fmt.Errorf("transfer workspace environment %s to task %s: %w", env.ID, newOwner, err)
 	}
 	s.logf().Info("transferred shared workspace environment before task lifecycle cleanup",
@@ -483,10 +542,11 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 		zap.String("old_owner_task_id", env.TaskID),
 		zap.String("new_owner_task_id", newOwner))
 	return &workspaceEnvironmentOwnershipTransfer{
-		groupID:        group.ID,
-		environmentID:  env.ID,
-		oldOwnerTaskID: env.TaskID,
-		newOwnerTaskID: newOwner,
+		groupID:             group.ID,
+		environmentID:       env.ID,
+		oldOwnerTaskID:      env.TaskID,
+		newOwnerTaskID:      newOwner,
+		resultingGeneration: env.OwnershipGeneration + 1,
 	}, nil
 }
 
@@ -527,8 +587,12 @@ func (s *HandoffService) rollbackWorkspaceEnvironmentOwnershipTransfers(
 				// A concurrent retry already restored this transfer.
 			case env.TaskID != transfer.newOwnerTaskID:
 				err = fmt.Errorf("owner changed from rollback target %s to %s", transfer.newOwnerTaskID, env.TaskID)
+			case env.OwnershipGeneration != transfer.resultingGeneration:
+				err = fmt.Errorf("ownership generation changed from rollback target %d to %d", transfer.resultingGeneration, env.OwnershipGeneration)
 			default:
-				err = environments.TransferTaskEnvironmentToTask(ctx, transfer.environmentID, transfer.oldOwnerTaskID)
+				err = environments.TransferTaskEnvironmentOwnership(
+					ctx, transfer.environmentID, transfer.newOwnerTaskID, transfer.resultingGeneration, transfer.oldOwnerTaskID,
+				)
 			}
 		}
 		mu.Unlock()

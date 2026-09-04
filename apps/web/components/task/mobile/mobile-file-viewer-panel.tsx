@@ -8,7 +8,9 @@ import { FileViewerContent } from "../file-viewer-content";
 import { MarkdownPreviewContent } from "../markdown-preview-content";
 import { FileImageViewer } from "../file-image-viewer";
 import { FileBinaryViewer } from "../file-binary-viewer";
+import { FileViewerDownloadButton } from "../file-viewer-header";
 import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
+import { triggerFileDownload } from "@/lib/utils/file-download";
 import { useAppStore } from "@/components/state-provider";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
@@ -99,6 +101,15 @@ export function MobileFileViewerPanel({
   const fileStatus = useExternalVcsFileStatus(file.path, sessionId, file.repo);
   const viewerKind = useMemo(() => resolveViewerKind(file), [file]);
   const markdownFile = isMarkdownFile(file.path);
+  const onDownload = useMemo(
+    () => () =>
+      triggerFileDownload({
+        fileName: file.path,
+        content: file.content,
+        isBinary: !!file.isBinary,
+      }),
+    [file.path, file.content, file.isBinary],
+  );
 
   const [markdownPreview, setMarkdownPreview] = useState(initialMarkdownPreview);
   const fileIdentity = `${file.repo ?? ""}\u0000${file.path}`;
@@ -129,6 +140,7 @@ export function MobileFileViewerPanel({
               repositoryName={file.repo}
               size="touch"
             />
+            <FileViewerDownloadButton onDownload={onDownload} />
             {markdownFile && !markdownPreview && (
               <Button
                 variant="ghost"

@@ -35,25 +35,10 @@ func (c *Client) MaterializeAttachment(
 	if sizeBytes < 0 || sizeBytes > models.MaxMessageAttachmentBytes {
 		return nil, fmt.Errorf("attachment size exceeds maximum")
 	}
-	pipeReader, pipeWriter := io.Pipe()
-	multipartWriter := multipart.NewWriter(pipeWriter)
-	go func() {
-		if err := writeMaterializedAttachmentMultipart(multipartWriter, sessionID, attachmentID, name, mimeType, sizeBytes, content); err != nil {
-			_ = pipeWriter.CloseWithError(err)
-			return
-		}
-		_ = pipeWriter.Close()
-	}()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/attachments/materialize", pipeReader)
+	resp, err := c.doMultipartRequest(ctx, c.baseURL+"/api/v1/attachments/materialize", func(writer *multipart.Writer) error {
+		return writeMaterializedAttachmentMultipart(writer, sessionID, attachmentID, name, mimeType, sizeBytes, content)
+	})
 	if err != nil {
-		_ = pipeReader.Close()
-		return nil, fmt.Errorf("create attachment materialization request: %w", err)
-	}
-	req.Header.Set("Content-Type", multipartWriter.FormDataContentType())
-	resp, err := c.longRunningHTTPClient.Do(req)
-	if err != nil {
-		_ = pipeReader.Close()
 		return nil, fmt.Errorf("materialize attachment: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()

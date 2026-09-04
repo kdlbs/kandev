@@ -37,7 +37,7 @@ queue](../../tasks/requirements/run-scheduling.md) and
 - **AC-OFFICE-SCHEDULER-001.4:** Office recovery is maintenance, not part of every five-second queue drain. When no workspace has adopted Office, it skips the task scan.
 - **AC-OFFICE-SCHEDULER-001.5:** The shared runs scheduler and cron loop stop and join before database cleanup during graceful shutdown.
 - **AC-OFFICE-SCHEDULER-001.6:** Has a `source` discriminator (see table below) plus a typed payload.
-- **AC-OFFICE-SCHEDULER-001.7:** Carries an `idempotency_key` for source-level dedup within a 24-hour window.
+- **AC-OFFICE-SCHEDULER-001.7:** Carries an `idempotency_key`. The queue uses a 24-hour lookup for recent duplicates and a durable unique key for persisted identities.
 - **AC-OFFICE-SCHEDULER-001.8:** Is coalesced into an in-flight run when one exists for the same agent (claim-time merge).
 
 ## System design

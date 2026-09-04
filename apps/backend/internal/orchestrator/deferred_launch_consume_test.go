@@ -585,7 +585,8 @@ func TestFailedPromotedDeferredLaunchRestoresTokenAndRetries(t *testing.T) {
 	baseRepo := setupTestRepo(t)
 	seedChainStepTask(t, baseRepo, deferredChainTaskID)
 	require.NoError(t, baseRepo.SetTaskMetadataKey(
-		ctx, deferredChainTaskID, models.MetaKeyQueuePromotionPending, true,
+		ctx, deferredChainTaskID, models.MetaKeyQueuePromotionPending,
+		map[string]interface{}{"from_step_id": "step-review"},
 	))
 	task, err := baseRepo.GetTask(ctx, deferredChainTaskID)
 	require.NoError(t, err)
@@ -632,8 +633,11 @@ func TestFailedPromotedDeferredLaunchRestoresTokenAndRetries(t *testing.T) {
 		stored, loadErr := baseRepo.GetTask(ctx, deferredChainTaskID)
 		require.NoError(t, loadErr)
 		_, deferredRestored := stored.Metadata[models.MetaKeyDeferredLaunch]
-		_, promotionRestored := stored.Metadata[models.MetaKeyQueuePromotionPending]
+		promotionToken, promotionRestored := stored.Metadata[models.MetaKeyQueuePromotionPending]
 		if deferredRestored && promotionRestored {
+			descriptor, ok := promotionToken.(map[string]interface{})
+			require.True(t, ok, "restored promotion token = %#v", promotionToken)
+			require.Equal(t, "step-review", descriptor["from_step_id"])
 			break
 		}
 		if time.Now().After(deadline) {

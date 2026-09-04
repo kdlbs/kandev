@@ -141,6 +141,7 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
       preMaximizeLayout: null,
       maximizedGroupId: null,
       isRestoringLayout: false,
+      pendingChatInitialPlacement: null,
     });
   });
 
@@ -155,6 +156,7 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     expect(api.fromJSON).not.toHaveBeenCalled();
     expect(panelPortalManager.releaseByEnv).not.toHaveBeenCalled();
     expect(setEnvLayout).not.toHaveBeenCalled();
+    expect(useDockviewStore.getState().pendingChatInitialPlacement).toBeNull();
   });
 
   it("saves outgoing env + releases its portals when switching to a new env", () => {
@@ -167,6 +169,42 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     expect(setEnvLayoutProfile).toHaveBeenCalledWith("env-old", expect.anything());
     expect(panelPortalManager.releaseByEnv).toHaveBeenCalledWith("env-old");
     expect(useDockviewStore.getState().currentLayoutEnvId).toBe("env-new");
+  });
+
+  it("arms fresh transcript placement for the incoming session without capturing scrollTop", () => {
+    const api = makeMockApi();
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-old",
+      pendingChatScrollTop: null,
+    });
+
+    useDockviewStore.getState().switchEnvLayout("env-old", "env-new", "session-X");
+
+    const state = useDockviewStore.getState();
+    expect(state.pendingChatInitialPlacement).toEqual({
+      sessionId: "session-X",
+      token: expect.any(Number),
+    });
+    expect(state.pendingChatScrollTop).toBeNull();
+  });
+
+  it("ignores completion from a superseded env-switch placement", () => {
+    const api = makeMockApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-a" });
+
+    useDockviewStore.getState().switchEnvLayout("env-a", "env-b", "session-B");
+    const firstRequest = useDockviewStore.getState().pendingChatInitialPlacement;
+    useDockviewStore.getState().switchEnvLayout("env-b", "env-c", "session-C");
+    const secondRequest = useDockviewStore.getState().pendingChatInitialPlacement;
+
+    expect(firstRequest).not.toBeNull();
+    expect(secondRequest).not.toBeNull();
+    useDockviewStore.getState().completePendingChatInitialPlacement(firstRequest?.token ?? -1);
+    expect(useDockviewStore.getState().pendingChatInitialPlacement).toEqual(secondRequest);
+
+    useDockviewStore.getState().completePendingChatInitialPlacement(secondRequest?.token ?? -1);
+    expect(useDockviewStore.getState().pendingChatInitialPlacement).toBeNull();
   });
 
   it("restores the saved env layout profile when switching to a new env", () => {
