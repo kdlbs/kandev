@@ -28,10 +28,29 @@ func TestStore_UpdatePRWatchBranchIfSearching_PostgresDifferentSessionCollision(
 		INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1');`); err != nil {
 		t.Fatalf("create task fixtures: %v", err)
 	}
-	store, err := NewStore(db, db)
-	if err != nil {
-		t.Fatalf("new postgres store: %v", err)
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE github_pr_watches (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT '',
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL,
+			repo TEXT NOT NULL,
+			pr_number INTEGER NOT NULL,
+			branch TEXT NOT NULL,
+			last_checked_at TIMESTAMP,
+			last_comment_at TIMESTAMP,
+			last_check_status TEXT DEFAULT '',
+			last_review_state TEXT DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE UNIQUE INDEX idx_github_pr_watches_searching
+			ON github_pr_watches (task_id, repository_id, branch) WHERE pr_number = 0;`); err != nil {
+		t.Fatalf("create postgres PR-watch fixture: %v", err)
 	}
+	store := &Store{db: db, ro: db}
 	now := time.Now().UTC()
 	source := &PRWatch{
 		ID: "watch-source-pg", WorkspaceID: "ws-1", SessionID: "session-1", TaskID: "task-1",
