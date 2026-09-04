@@ -113,6 +113,34 @@ func TestBranchExists_BoundedWhenCallerHasNoDeadline(t *testing.T) {
 	}
 }
 
+// TestResolveCommit_BoundedWhenCallerHasNoDeadline verifies that commit
+// probes used by locked cleanup cannot leave a repository lock held by a
+// stalled Git process.
+func TestResolveCommit_BoundedWhenCallerHasNoDeadline(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, hangOnRevParseScript)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	mgr.inspectTimeout = 300 * time.Millisecond
+
+	start := time.Now()
+	commit, err := mgr.resolveCommit(context.Background(), t.TempDir(), "refs/heads/main")
+	elapsed := time.Since(start)
+
+	if commit != "" {
+		t.Fatalf("resolveCommit() = %q, want empty on hanging git", commit)
+	}
+	if err == nil {
+		t.Fatal("resolveCommit() err = nil, want timeout error")
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("resolveCommit() took %v, want <2s (inspect timeout not applied)", elapsed)
+	}
+}
+
 // TestCreate_HangingRevParseReleasesRepoLock is the core regression test for
 // the reported symptom: a hung git rev-parse during Create must not keep the
 // per-repo mutex locked indefinitely. Before the fix, branchExists and

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -543,6 +544,42 @@ func TestRecreate_RecoveryHeadWinsOverRefreshedRemoteWhenSyncHandled(t *testing.
 	}
 	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != recoverySHA {
 		t.Fatalf("restored HEAD = %q, want persisted recovery SHA %q (refreshed remote was %q)", got, recoverySHA, refreshedSHA)
+	}
+}
+
+// TestRecreate_CompactedBranchWithUnavailableRecoveryRefRefusesFallback pins
+// the fail-closed boundary: an archived compaction marker cannot fall back to
+// an advanced base or remote branch when its exact recovery object is gone.
+func TestRecreate_CompactedBranchWithUnavailableRecoveryRefRefusesFallback(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	advanceRemoteBranch(t, repoPath, "main")
+	advanceRemoteBranch(t, repoPath, "feature/pr-branch")
+	archiveDeletesLocalBranch(t, repoPath, "feature/pr-branch")
+
+	worktreePath := filepath.Join(t.TempDir(), "task-compacted-missing-recovery", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+	compactedAt := time.Now().UTC()
+	mgr := newRecreateTestManager(t)
+	_, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-compacted-missing-recovery", SessionID: "session-compacted-missing-recovery",
+		TaskID: "task-compacted-missing-recovery", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/pr-branch", BranchOwner: BranchOwnerManaged,
+		RecoveryHeadSHA: strings.Repeat("f", 40), BranchCompactedAt: &compactedAt, Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-compacted-missing-recovery", TaskID: "task-compacted-missing-recovery",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, BaseBranch: "main",
+		FallbackBaseBranch: "main", CheckoutBranch: "feature/pr-branch", PullBeforeWorktree: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "restore compacted worktree branch") {
+		t.Fatalf("recreate() error = %v, want fail-closed recovery error", err)
+	}
+	if _, statErr := os.Stat(worktreePath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("fallback recreated worktree path = %q (%v), want no fallback", worktreePath, statErr)
+	}
+	if got := mgr.BranchRecoveryStatus(context.Background(), repoPath, "feature/pr-branch"); got != BranchStatusRemote {
+		t.Fatalf("recovery status = %q, want remote-only branch after refusal", got)
 	}
 }
 

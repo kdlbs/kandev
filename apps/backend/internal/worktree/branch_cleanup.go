@@ -556,12 +556,11 @@ func (m *Manager) branchCheckedOutInWorktree(ctx context.Context, repoPath, bran
 }
 
 func (m *Manager) resolveCommit(ctx context.Context, repoPath, ref string) (string, error) {
-	cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "rev-parse", "--verify", ref+"^{commit}")
-	output, err := runGitCmdCombinedOutput(ctx, cmd)
+	output, err := m.runBoundedGitInspect(ctx, repoPath, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil {
 		return "", err
 	}
-	sha := strings.TrimSpace(string(output))
+	sha := strings.TrimSpace(output)
 	if !commitSHA.MatchString(sha) {
 		return "", fmt.Errorf("resolved invalid commit object")
 	}
