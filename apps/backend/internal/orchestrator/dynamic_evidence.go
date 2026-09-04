@@ -33,11 +33,15 @@ type promptAttemptEvidence struct {
 	dynamic                bool
 }
 
-// normalizeDiagnosticText collapses internal whitespace so a diagnostic
-// recorded from a coalesced stream chunk can be compared against a terminal
-// failure message that went through independent formatting/sanitisation.
+// normalizeDiagnosticText collapses internal whitespace and trims trailing
+// punctuation, mirroring sanitizeProviderMessage's cosmetic trim so a raw
+// diagnostic chunk and the sanitized terminal failure message it precedes
+// normalize to the same text when their content is otherwise identical.
+// Applied to both sides of the containment check, so it never introduces an
+// asymmetry of its own.
 func normalizeDiagnosticText(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+	s = strings.Join(strings.Fields(s), " ")
+	return strings.TrimSpace(strings.TrimRight(s, ".:;,-"))
 }
 
 func (s *Service) beginPromptAttempt(

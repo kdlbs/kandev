@@ -62,6 +62,36 @@ func TestDynamicAttemptEvidenceContainmentIsCaseSensitive(t *testing.T) {
 	}
 }
 
+// TestDynamicAttemptEvidenceContainmentSurvivesSanitizedTrailingPunctuation
+// pins the flagship "matched" scenario from the system design's input
+// inventory. The diagnostic chunk arrives raw from the ACP stream and keeps
+// its trailing period, but by the time the terminal provider failure reaches
+// this fence its message has already been through sanitizeProviderMessage,
+// which trims trailing punctuation. Containment must still hold for text
+// that is otherwise identical, or the exact scenario the design is built
+// around would never authorize automatic recovery.
+func TestDynamicAttemptEvidenceContainmentSurvivesSanitizedTrailingPunctuation(t *testing.T) {
+	var service Service
+	const rawDiagnostic = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
+	const sanitizedTerminal = "API Error: Repeated 529 Overloaded errors. The API is at capacity"
+
+	service.beginPromptAttempt("session-1", "execution-1", 1, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, rawDiagnostic)
+
+	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 1,
+		ErrorMessage:     sanitizedTerminal,
+	})
+	if got.OutputObserved {
+		t.Fatal("diagnostic differing from the terminal message only by sanitized trailing punctuation was treated as generated output")
+	}
+	if !service.promptAttemptPreResultSafe(got) {
+		t.Fatal("diagnostic differing from the terminal message only by sanitized trailing punctuation was not pre-result safe")
+	}
+}
+
 // TestDynamicAttemptEvidenceContainmentSatisfiedByGatewaySubstring pins the
 // gateway-500 sample from the system design's input inventory: the chunk text
 // is a strict substring of the sanitized terminal message, and containment
