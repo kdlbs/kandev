@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -1332,32 +1333,263 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // this as a targeted update prevents concurrent task edits from being replaced
 // by a stale full-row write.
 func (r *Repository) DetachTask(ctx context.Context, taskID string) (bool, error) {
-	result, err := r.db.ExecContext(
-		ctx,
-		r.db.Rebind(detachTaskQuery(r.db.DriverName())),
-		time.Now().UTC(),
-		taskID,
-	)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
+	defer func() { _ = tx.Rollback() }()
 
+	parentID, groupID, err := r.loadDetachmentState(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if parentID == "" {
+		return false, tx.Commit()
+	}
+	lockedTaskIDs := []string{parentID, taskID}
+	sort.Strings(lockedTaskIDs)
+	for _, lockedTaskID := range lockedTaskIDs {
+		if err := r.taskCleanupBarrierLocked(ctx, tx, lockedTaskID); err != nil {
+			return false, err
+		}
+	}
+	lockedParentID, lockedGroupID, err := r.loadDetachmentState(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if lockedParentID != parentID || lockedGroupID != groupID {
+		return false, fmt.Errorf("detach task %s: hierarchy changed concurrently", taskID)
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(detachTaskQuery(r.db.DriverName())), time.Now().UTC(), taskID)
+	if err != nil {
+		return false, err
+	}
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, err
 	}
-	if rows > 0 {
-		return true, nil
+	if rows != 1 {
+		return false, fmt.Errorf("detach task %s: hierarchy changed concurrently", taskID)
 	}
-
-	var existingID string
-	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT id FROM tasks WHERE id = ?`), taskID).Scan(&existingID); err != nil {
-		if err == sql.ErrNoRows {
-			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	if groupID != "" {
+		if err := r.transferDetachedWorkspaceStewardship(ctx, tx, groupID, taskID); err != nil {
+			if !errors.Is(err, errDetachedWorkspaceTransferNotApplicable) {
+				return false, err
+			}
 		}
-		return false, err
 	}
-	return false, nil
+	return true, tx.Commit()
+}
+
+func (r *Repository) loadDetachmentState(ctx context.Context, tx *sqlx.Tx, taskID string) (string, string, error) {
+	var parentID, rawMetadata string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT parent_id, COALESCE(metadata, '{}') FROM tasks WHERE id = ?`,
+	), taskID).Scan(&parentID, &rawMetadata); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return "", "", err
+	}
+	var metadata map[string]interface{}
+	if trimmed := strings.TrimSpace(rawMetadata); trimmed != "" {
+		if err := json.Unmarshal([]byte(trimmed), &metadata); err != nil {
+			return "", "", fmt.Errorf("decode task workspace metadata: %w", err)
+		}
+	}
+	workspace, _ := metadata["workspace"].(map[string]interface{})
+	groupID, _ := workspace["group_id"].(string)
+	if groupID == "" {
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT workspace_group_id
+			FROM task_workspace_group_members
+			WHERE task_id = ? AND released_at IS NULL
+			ORDER BY created_at DESC, workspace_group_id DESC
+			LIMIT 1
+		`), taskID).Scan(&groupID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			// Minimal legacy task databases may not have the optional office
+			// membership tables. In that case metadata remains the only
+			// available ownership signal; a missing table is not a detach
+			// failure.
+			if !internaldb.IsMissingTableError(err) {
+				return "", "", err
+			}
+		}
+	}
+	return parentID, groupID, nil
+}
+
+func (r *Repository) transferDetachedWorkspaceStewardship(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	groupID, taskID string,
+) error {
+	// Read the prospective owners without locking workspace rows first. The
+	// corresponding task rows must be locked before any group/environment row
+	// locks, otherwise two concurrent detachments can acquire those resources
+	// in opposite order and deadlock on PostgreSQL.
+	state, err := r.loadDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, false)
+	if err != nil {
+		return err
+	}
+	if err := r.lockDetachedWorkspaceTransferTaskRows(ctx, tx, taskID, state); err != nil {
+		return err
+	}
+	lockedState, err := r.loadDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, true)
+	if err != nil {
+		return err
+	}
+	if lockedState.groupOwnerTaskID != state.groupOwnerTaskID ||
+		lockedState.environmentOwnerTaskID != state.environmentOwnerTaskID {
+		// Ownership changed between the unlocked read and the task-row locks.
+		// Acquire any newly-discovered task barriers before applying the final
+		// state; all normal paths already hold their initial barriers.
+		if err := r.lockDetachedWorkspaceTransferTaskRows(ctx, tx, taskID, lockedState); err != nil {
+			return err
+		}
+		lockedState, err = r.loadDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, true)
+		if err != nil {
+			return err
+		}
+	}
+	return r.applyDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, lockedState)
+}
+
+type detachedWorkspaceStewardship struct {
+	groupOwnerTaskID       string
+	environmentID          string
+	environmentOwnerTaskID string
+	environmentGeneration  int64
+}
+
+func (r *Repository) loadDetachedWorkspaceStewardship(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	groupID, taskID string,
+	lockRows bool,
+) (detachedWorkspaceStewardship, error) {
+	query := `
+		SELECT g.owner_task_id, g.materialized_environment_id
+		FROM task_workspace_groups g
+		JOIN task_workspace_group_members m ON m.workspace_group_id = g.id
+		WHERE g.id = ? AND m.task_id = ? AND m.released_at IS NULL
+		  AND g.cleanup_status IN ('active', 'cleanup_failed')
+	`
+	if lockRows && dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE OF g, m`
+	}
+	var state detachedWorkspaceStewardship
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), groupID, taskID).
+		Scan(&state.groupOwnerTaskID, &state.environmentID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return state, fmt.Errorf("%w: detach task %s: active workspace group %s not found", errDetachedWorkspaceTransferNotApplicable, taskID, groupID)
+		}
+		return state, err
+	}
+	if state.environmentID == "" {
+		return state, nil
+	}
+	owner, generation, err := r.loadDetachedEnvironmentOwnership(ctx, tx, state.environmentID, taskID, lockRows)
+	state.environmentOwnerTaskID = owner
+	state.environmentGeneration = generation
+	return state, err
+}
+
+func (r *Repository) loadDetachedEnvironmentOwnership(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID, taskID string,
+	lockRow bool,
+) (string, int64, error) {
+	query := taskEnvironmentOwnershipQuery
+	if lockRow && dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var ownerTaskID string
+	var generation int64
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), environmentID).
+		Scan(&ownerTaskID, &generation); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", 0, fmt.Errorf("detach task %s: materialized environment %s not found", taskID, environmentID)
+		}
+		return "", 0, err
+	}
+	return ownerTaskID, generation, nil
+}
+
+func (r *Repository) lockDetachedWorkspaceTransferTaskRows(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	state detachedWorkspaceStewardship,
+) error {
+	ids := make([]string, 0, 2)
+	if state.groupOwnerTaskID != "" && state.groupOwnerTaskID != taskID {
+		ids = append(ids, state.groupOwnerTaskID)
+	}
+	if state.environmentOwnerTaskID != "" &&
+		state.environmentOwnerTaskID != taskID &&
+		state.environmentOwnerTaskID != state.groupOwnerTaskID {
+		ids = append(ids, state.environmentOwnerTaskID)
+	}
+	sort.Strings(ids)
+	for _, ownerTaskID := range ids {
+		if err := r.taskCleanupBarrierLocked(ctx, tx, ownerTaskID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) applyDetachedWorkspaceStewardship(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	groupID, taskID string,
+	state detachedWorkspaceStewardship,
+) error {
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_group_members SET role = 'member'
+		WHERE workspace_group_id = ? AND released_at IS NULL
+	`), groupID); err != nil {
+		return err
+	}
+	if result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_group_members SET role = 'owner'
+		WHERE workspace_group_id = ? AND task_id = ? AND released_at IS NULL
+	`), groupID, taskID); err != nil {
+		return err
+	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
+		return errors.Join(rowsErr, fmt.Errorf("detach task %s: owner membership changed concurrently", taskID))
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET owner_task_id = ?, ownership_generation = ownership_generation + 1,
+			cleanup_status = 'active', cleanup_error = '', cleaned_at = NULL, updated_at = ?
+		WHERE id = ?
+	`), taskID, now, groupID); err != nil {
+		return err
+	}
+	if state.environmentID == "" {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET task_id = ?, ownership_generation = ownership_generation + 1, updated_at = ?
+		WHERE id = ? AND task_id = ? AND ownership_generation = ?
+	`), taskID, now, state.environmentID, state.environmentOwnerTaskID, state.environmentGeneration)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("detach task %s: materialized environment %s changed concurrently", taskID, state.environmentID)
+	}
+	return nil
 }
 
 func detachTaskQuery(driver string) string {
@@ -1588,9 +1820,16 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 
 // DeleteTask deletes a task by ID
 func (r *Repository) DeleteTask(ctx context.Context, id string) error {
+	_, err := r.DeleteTaskWithVacatedStep(ctx, id)
+	return err
+}
+
+// DeleteTaskWithVacatedStep deletes a task and returns the workflow step read
+// under the same task-row lock as the deletion.
+func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
 	// Serialize with session/worktree creation FIRST (task-row lock), then
@@ -1600,30 +1839,34 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	// row is gone. Capturing before the lock could use a stale set (a session
 	// created mid-flight would never be purged). The session capture must also
 	// precede the task-row DELETE because task_sessions cascades on deletion.
-	if err := r.lockTaskRowInTx(ctx, tx, id); err != nil {
-		return err
+	_, vacatedStepID, found, err := r.readTaskStepInTx(ctx, tx, id)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
-		return err
+		return "", err
 	}
 	if err := tx.Commit(); err != nil {
-		return err
+		return "", err
 	}
 	r.notifyTaskQueuePurged(ctx, id)
-	return nil
+	return vacatedStepID, nil
 }
 
 // ListTasks returns all non-archived, non-ephemeral tasks for a workflow
@@ -2368,35 +2611,53 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 // Pass empty cascadeID to opt out of cascade tracking (single-task
 // manual archive); the column will simply not get set.
 func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID string) (bool, error) {
-	now := time.Now().UTC()
+	_, changed, err := r.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
+	return changed, err
+}
+
+// ArchiveTaskIfActiveWithVacatedStep archives an active task and returns the
+// workflow step read under the same task-row lock as the archive mutation.
+func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
+	ctx context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	_, vacatedStepID, found, err := r.readTaskStepInTx(ctx, tx, id)
+	if err != nil {
+		return "", false, err
+	}
+	if !found {
+		return "", false, tx.Commit()
+	}
+	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET archived_at = ?, archived_by_cascade_id = ?, updated_at = ?
 		WHERE id = ? AND archived_at IS NULL
 	`), now, cascadeID, now, id)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return false, tx.Commit()
+		return "", false, tx.Commit()
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
-		return false, err
+		return "", false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return false, err
+		return "", false, err
 	}
 	r.notifyTaskQueuePurged(ctx, id)
-	return true, nil
+	return vacatedStepID, true, nil
 }
 
 // taskQueueSessionsInTx returns the task's authoritative session set (its

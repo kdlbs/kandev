@@ -24,6 +24,7 @@ type Props = {
   onChange: (next: string[]) => void;
   placeholder?: string;
   searchPlaceholder?: string;
+  className?: string;
 };
 
 export function FilterMultiSelect({
@@ -32,6 +33,7 @@ export function FilterMultiSelect({
   onChange,
   placeholder,
   searchPlaceholder,
+  className,
 }: Props) {
   const { t } = useTranslation();
   const resolvedPlaceholder = placeholder ?? t("task:selectValues");
@@ -54,7 +56,10 @@ export function FilterMultiSelect({
         <button
           type="button"
           data-testid="filter-value-multi"
-          className="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md border border-input bg-transparent px-2 text-xs transition-colors hover:bg-accent/40"
+          className={cn(
+            "flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md border border-input bg-transparent px-2 text-xs transition-colors hover:bg-accent/40",
+            className,
+          )}
         >
           <MultiSelectSummary
             selected={selected}

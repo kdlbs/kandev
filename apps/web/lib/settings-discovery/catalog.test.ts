@@ -7,6 +7,14 @@ import { SETTINGS_DISCOVERY_DEFINITIONS, SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } f
 import { resolveSettingsDiscovery } from "./resolve";
 
 const GITHUB_CONNECTION_ID = "integration-github-connection";
+const STORAGE_DISCOVERY_IDS = [
+  "system-storage-actions",
+  "system-storage-schedule",
+  "system-storage-workspaces",
+  "system-storage-go-cache",
+  "system-storage-docker",
+  "system-storage-quarantine",
+] as const;
 const STABLE_CONTROL_IDS = [
   "appearance-color-theme",
   "appearance-rich-output-motion",
@@ -130,6 +138,28 @@ describe("settings discovery catalog invariants", () => {
     for (const reason of Object.values(SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS)) {
       expect(reason.length).toBeGreaterThan(12);
     }
+  });
+});
+
+describe("system discovery page ownership", () => {
+  it("assigns storage sections to the standalone Storage page", () => {
+    const byId = new Map(SETTINGS_DISCOVERY_DEFINITIONS.map((entry) => [entry.id, entry]));
+
+    expect(byId.get("system-storage")).toMatchObject({
+      kind: "page",
+      labelKey: "system:storageTitle",
+      href: "/settings/system/storage",
+      order: 625,
+    });
+    for (const id of STORAGE_DISCOVERY_IDS) {
+      expect(byId.get(id)).toMatchObject({
+        parentId: "system-storage",
+        href: "/settings/system/storage",
+      });
+    }
+    expect(byId.get("system-database")?.parentId).toBe("system-data-storage");
+    expect(byId.get("system-backups")?.parentId).toBe("system-data-storage");
+    expect(byId.get("system-logs")?.parentId).toBe("system-data-storage");
   });
 });
 

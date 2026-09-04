@@ -8,7 +8,7 @@ owners:
   - kandev
 ---
 
-# Task transcript history visibility system design
+# Transcript history visibility
 
 ## Purpose and boundaries
 

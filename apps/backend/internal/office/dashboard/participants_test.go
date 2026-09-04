@@ -11,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -284,7 +286,7 @@ func newParticipantTestRouter(t *testing.T, caller *models.AgentInstance) *testD
 	// Use the underlying stubAgentReader replaced with caller-aware reader
 	// only when caller is non-nil.
 	deps.svc = newServiceForParticipantsTest(t, deps, caller)
-	dashboard.RegisterRoutes(group, deps.svc, deps.repo, nil, nil, logger.Default())
+	dashboard.RegisterRoutes(group, deps.svc, deps.repo, nil, nil, nil, logger.Default())
 	deps.router = router
 	return deps
 }
@@ -326,6 +328,269 @@ func TestAddTaskReviewer_HappyPath_NoCaller(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAddTaskReviewer_ClaimingAutoSeatCancelsDisplacedRunAndLogsActivity
+// drives ParticipantWriteOutcomeClaimed's side effects
+// (applyParticipantAddOutcome) end to end through the HTTP handler, not
+// just at the repository layer: a manual registration claiming an
+// auto-cast seat must cancel the run step-entry fan-out queued for the
+// displaced agent and record a "task_participant_claimed" activity entry,
+// on top of reassigning the seat itself.
+func TestAddTaskReviewer_ClaimingAutoSeatCancelsDisplacedRunAndLogsActivity(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "claim1", "ws-claim", "C", "todo", 2)
+	stepID := "step-claim1"
+
+	// AddTaskParticipant's identity probe only lets a live agent_profiles
+	// row claim a cast seat (AC-OFFICE-SEAT-PROVENANCE-005.8).
+	if _, err := deps.db.Exec(`
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES ('agent-claiming', '', 'agent-claiming', 'agent-claiming', 'ws-claim', '', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed claiming agent profile: %v", err)
+	}
+
+	if _, err := deps.db.Exec(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES ('auto-seat-claim1', ?, 'claim1', 'reviewer', 'agent-auto', 1, 0, 'auto')
+	`, stepID); err != nil {
+		t.Fatalf("seed auto seat: %v", err)
+	}
+
+	// The run step-entry fan-out queued for the auto-cast agent —
+	// CancelDisplacedParticipantRun should cancel it once the claim lands.
+	run := &models.Run{
+		AgentProfileID: "agent-auto",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"claim1","workflow_step_id":"` + stepID + `"}`,
+		Status:         models.RunStatusQueued,
+		CoalescedCount: 1,
+	}
+	if err := deps.repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("seed displaced run: %v", err)
+	}
+
+	body := `{"agent_profile_id":"agent-claiming"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/office/tasks/claim1/reviewers", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := deps.db.Get(&count,
+		`SELECT COUNT(*) FROM workflow_step_participants WHERE task_id = 'claim1' AND role = 'reviewer'`,
+	); err != nil {
+		t.Fatalf("count seats: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("seats = %d, want 1 (claimed in place, not a second row)", count)
+	}
+	var agentID, provenance string
+	if err := deps.db.QueryRow(
+		`SELECT agent_profile_id, provenance FROM workflow_step_participants WHERE id = 'auto-seat-claim1'`,
+	).Scan(&agentID, &provenance); err != nil {
+		t.Fatalf("read claimed seat: %v", err)
+	}
+	if agentID != "agent-claiming" || provenance != "manual" {
+		t.Fatalf("seat = (agent=%q provenance=%q), want (agent-claiming, manual)", agentID, provenance)
+	}
+
+	gotRun, err := deps.repo.GetRunByID(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get displaced run: %v", err)
+	}
+	if gotRun.Status != "cancelled" {
+		t.Fatalf("displaced run status = %q, want cancelled", gotRun.Status)
+	}
+
+	var activityCount int
+	if err := deps.db.Get(&activityCount, `
+		SELECT COUNT(*) FROM office_activity_log
+		WHERE target_id = 'claim1' AND action = 'task_participant_claimed'
+	`); err != nil {
+		t.Fatalf("count claim activity: %v", err)
+	}
+	if activityCount != 1 {
+		t.Fatalf("claim activity entries = %d, want 1", activityCount)
+	}
+}
+
+// TestAddTaskReviewer_ClaimingAutoSeatTerminatesDisplacedSession is
+// AC-OFFICE-SEAT-PROVENANCE-002.12: a claim that displaces an agent
+// profile holding a live session for that task and role must end that
+// session, as if the agent had been removed from the role.
+func TestAddTaskReviewer_ClaimingAutoSeatTerminatesDisplacedSession(t *testing.T) {
+	deps := newTestDeps(t)
+	rt := &recordingTerminator{}
+	deps.svc.SetSessionTerminator(rt)
+	insertTestTask(t, deps.db, "claim-term1", "ws-claim-term", "C", "todo", 2)
+	stepID := "step-claim-term1"
+
+	if _, err := deps.db.Exec(`
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES ('agent-claiming', '', 'agent-claiming', 'agent-claiming', 'ws-claim-term', '', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed claiming agent profile: %v", err)
+	}
+	if _, err := deps.db.Exec(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES ('auto-seat-claim-term1', ?, 'claim-term1', 'reviewer', 'agent-auto', 1, 0, 'auto')
+	`, stepID); err != nil {
+		t.Fatalf("seed auto seat: %v", err)
+	}
+
+	body := `{"agent_profile_id":"agent-claiming"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/office/tasks/claim-term1/reviewers", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+
+	if len(rt.calls) != 1 {
+		t.Fatalf("terminate calls = %d, want 1: %+v", len(rt.calls), rt.calls)
+	}
+	got := rt.calls[0]
+	if got.taskID != "claim-term1" || got.agentID != "agent-auto" || got.reason != "participant_seat_claimed" {
+		t.Fatalf("term call = %+v, want task=claim-term1 agent=agent-auto reason=participant_seat_claimed", got)
+	}
+}
+
+// TestAddTaskReviewer_PromotingOwnAutoSeatRaisesNoActivityOrNotification is
+// AC-OFFICE-SEAT-PROVENANCE-002.3: naming the agent that already holds the
+// slate's sole undecided auto seat promotes it in place. That is not a
+// claim, so it must raise no activity entry and publish no task-changed
+// notification.
+func TestAddTaskReviewer_PromotingOwnAutoSeatRaisesNoActivityOrNotification(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "promo1", "ws-promo", "P", "todo", 2)
+	stepID := "step-promo1"
+
+	if _, err := deps.db.Exec(`
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES ('agent-auto', '', 'agent-auto', 'agent-auto', 'ws-promo', '', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed agent profile: %v", err)
+	}
+	if _, err := deps.db.Exec(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES ('auto-seat-promo1', ?, 'promo1', 'reviewer', 'agent-auto', 1, 0, 'auto')
+	`, stepID); err != nil {
+		t.Fatalf("seed auto seat: %v", err)
+	}
+
+	eb := bus.NewMemoryEventBus(logger.Default())
+	deps.svc.SetEventBus(eb)
+	published := 0
+	if _, err := eb.Subscribe(events.OfficeTaskUpdated, func(_ context.Context, _ *bus.Event) error {
+		published++
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	body := `{"agent_profile_id":"agent-auto"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/office/tasks/promo1/reviewers", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+
+	var activityCount int
+	if err := deps.db.Get(&activityCount,
+		`SELECT COUNT(*) FROM office_activity_log WHERE target_id = 'promo1'`); err != nil {
+		t.Fatalf("count activity: %v", err)
+	}
+	if activityCount != 0 {
+		t.Errorf("activity entries = %d, want 0 on promotion", activityCount)
+	}
+	if published != 0 {
+		t.Errorf("published OfficeTaskUpdated events = %d, want 0 on promotion", published)
+	}
+}
+
+// TestAddTaskReviewer_ClaimingAutoSeatPublishesTaskUpdatedNamingReviewers is
+// AC-OFFICE-SEAT-PROVENANCE-002.13: a claim publishes the same task-changed
+// notification, naming the same participant field, that writing a new seat
+// in that role publishes. Unlike the promotion case above (not a claim, no
+// notification at all), a genuine claim must publish exactly one
+// OfficeTaskUpdated event naming "reviewers" — the same field an ordinary
+// insert-path registration publishes.
+func TestAddTaskReviewer_ClaimingAutoSeatPublishesTaskUpdatedNamingReviewers(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "claim-pub1", "ws-claim-pub", "C", "todo", 2)
+	stepID := "step-claim-pub1"
+
+	if _, err := deps.db.Exec(`
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES ('agent-claiming', '', 'agent-claiming', 'agent-claiming', 'ws-claim-pub', '', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed claiming agent profile: %v", err)
+	}
+	if _, err := deps.db.Exec(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES ('auto-seat-claim-pub1', ?, 'claim-pub1', 'reviewer', 'agent-auto', 1, 0, 'auto')
+	`, stepID); err != nil {
+		t.Fatalf("seed auto seat: %v", err)
+	}
+
+	eb := bus.NewMemoryEventBus(logger.Default())
+	deps.svc.SetEventBus(eb)
+	var publishedFields [][]any
+	if _, err := eb.Subscribe(events.OfficeTaskUpdated, func(_ context.Context, evt *bus.Event) error {
+		data, ok := evt.Data.(map[string]any)
+		if !ok {
+			t.Fatalf("event data = %T, want map[string]any", evt.Data)
+		}
+		fields, ok := data["fields"].([]string)
+		if !ok {
+			t.Fatalf("event fields = %T, want []string", data["fields"])
+		}
+		asAny := make([]any, len(fields))
+		for i, f := range fields {
+			asAny[i] = f
+		}
+		publishedFields = append(publishedFields, asAny)
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	body := `{"agent_profile_id":"agent-claiming"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/office/tasks/claim-pub1/reviewers", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+
+	if len(publishedFields) != 1 {
+		t.Fatalf("published OfficeTaskUpdated events = %d, want 1 on claim: %+v", len(publishedFields), publishedFields)
+	}
+	got := publishedFields[0]
+	if len(got) != 1 || got[0] != "reviewers" {
+		t.Fatalf("published fields = %+v, want [\"reviewers\"] (the same field a plain insert publishes)", got)
 	}
 }
 

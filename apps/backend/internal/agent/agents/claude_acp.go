@@ -55,7 +55,7 @@ func NewClaudeACP() *ClaudeACP {
 				Supported:             true,
 				Label:                 "CLI Passthrough",
 				Description:           "Show terminal directly instead of chat interface",
-				PassthroughCmd:        NewCommand("npx", "-y", "@anthropic-ai/claude-code", "--verbose"),
+				PassthroughCmd:        NewCommand("npx", "-y", "@anthropic-ai/claude-code"),
 				ModelFlag:             NewParam("--model", "{model}"),
 				IdleTimeout:           3 * time.Second,
 				BufferMaxBytes:        DefaultBufferMaxBytes,

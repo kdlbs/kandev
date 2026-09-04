@@ -79,10 +79,6 @@ type Manager struct {
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
 
-	// mcpHandler is the MCP request dispatcher for handling MCP requests
-	// from agentctl instances through the agent stream.
-	mcpHandler agentctl.MCPHandler
-
 	// sessionAccessCheck enforces per-user workspace scoping on session-scoped
 	// surfaces (opt-in auth). Nil = no scoping. See SetSessionAccessChecker.
 	sessionAccessCheck func(ctx context.Context, sessionID string) error
@@ -421,12 +417,10 @@ func (m *Manager) WorktreeManager() *worktree.Manager {
 // where they are dispatched to this handler. This enables agents to use MCP tools
 // like listing workspaces, boards, tasks, and asking user questions.
 //
-// This must be called before agents start making MCP calls. Typically set during
-// initialization after the MCP handlers are created.
+// Streams resolve the current handler for each request, so recovered streams
+// can connect before startup wiring installs the dispatcher.
 func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
-	m.mcpHandler = handler
-	// Update the stream manager with the handler
-	m.streamManager.mcpHandler = handler
+	m.streamManager.setMCPHandler(handler)
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
@@ -442,14 +436,14 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 // Set once during startup wiring, before agents start making MCP calls. Leave
 // unset to keep dispatch unscoped (single-user instances).
 func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
-	m.streamManager.mcpIdentityScoper = scoper
+	m.streamManager.setMCPIdentityScoper(scoper)
 }
 
 // SetMCPPrincipalScoper installs the trusted in-session MCP principal resolver.
 // The resolver derives automation identity and workspace boundaries from the
 // execution's own task and session, never from the agent request payload.
 func (m *Manager) SetMCPPrincipalScoper(scoper MCPPrincipalScoper) {
-	m.streamManager.mcpPrincipalScoper = scoper
+	m.streamManager.setMCPPrincipalScoper(scoper)
 }
 
 // SetSessionAccessChecker installs the per-user session visibility check used

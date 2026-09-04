@@ -7,7 +7,7 @@ created: 2026-06-18
 owners:
   - tbd
 ---
-# Task PR Automation Controls System Design Part 2
+# Task PR automation (part 2)
 
 ## Purpose and boundaries
 

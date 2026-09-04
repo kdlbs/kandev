@@ -40,7 +40,7 @@ func TestPostgresPermissionClaimIgnoresEmptyMetadataRows(t *testing.T) {
 	// Simulate a legacy database from before the metadata expression indexes.
 	// Current indexes correctly reject malformed metadata before claim lookup,
 	// but the claim still needs to tolerate historical empty rows.
-	for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id"} {
+	for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id", "idx_messages_metadata_pending_id_lookup"} {
 		if _, err := repo.db.Exec("DROP INDEX " + index); err != nil {
 			t.Fatalf("drop metadata index %s: %v", index, err)
 		}

@@ -151,9 +151,10 @@ function SettingsMenuRow({
  * expand/collapse — and every row is a page.
  *
  * How deep it goes is a per-device preference (Settings → Appearance):
- * `flat` is the fixed two-level menu and the default; `accordion` and
- * `persistent` additionally grow the Workspaces, Agents and Executors rows into
- * their records, differing only in whether opening one branch closes the others.
+ * `flat` is the fixed two-level menu; `accordion` and `persistent` additionally
+ * grow the Workspaces, Agents and Executors rows into their records, differing
+ * only in whether opening one branch closes the others. Accordion is the
+ * default for devices without a saved mode.
  * See `settings-menu-branches.ts` for what those branches contain.
  *
  * Rendered both inside the sidebar settings takeover and, on a phone, as the
