@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -66,6 +68,11 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 			zap.Error(err))
 		return
 	}
+	if task.IsFromOffice {
+		s.taskRuntimeStateMu.Unlock()
+		s.markOfficeTaskCompletedForTerminalStep(ctx, task)
+		return
+	}
 	if terminalStepID != "" && task.WorkflowStepID != terminalStepID {
 		s.taskRuntimeStateMu.Unlock()
 		return
@@ -88,6 +95,31 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 	s.publishTaskUpdated(ctx, task)
 	s.publishTaskStateChanged(ctx, task, oldState)
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateCompleted)
+}
+
+// markOfficeTaskCompletedForTerminalStep routes an Office task's terminal
+// step completion through Office's own status pipeline (UpdateTaskStatus)
+// instead of a raw state write, so the approval gate runs (tasks-01.md:76).
+// UpdateTaskStatus persists a redirect to in_review and then returns a
+// typed *dashboard.ApprovalsPendingError when the gate fires — the write
+// has already succeeded, so that return is not a failure and is not
+// logged as one.
+func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, task *models.Task) {
+	if s.officeTaskStatusUpdater == nil {
+		// No seam wired (partial wiring, or a test): skip the write rather
+		// than falling through to the raw path, which would bypass the gate.
+		return
+	}
+	err := s.officeTaskStatusUpdater.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
+		TaskID:    task.ID,
+		NewStatus: "done",
+	})
+	var pending *dashboard.ApprovalsPendingError
+	if err != nil && !errors.As(err, &pending) {
+		s.logger.Warn("terminal step completion: office status update failed",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+	}
 }
 
 func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID string) bool {

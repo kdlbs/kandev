@@ -72,7 +72,10 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 	if _, err := repo.ExecRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS workflow_steps (
 			id TEXT PRIMARY KEY,
-			agent_profile_id TEXT NOT NULL DEFAULT ''
+			agent_profile_id TEXT NOT NULL DEFAULT '',
+			workflow_id TEXT NOT NULL DEFAULT '',
+			position INTEGER NOT NULL DEFAULT 0,
+			name TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		t.Fatalf("create workflow_steps table: %v", err)

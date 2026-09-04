@@ -578,12 +578,12 @@ type TaskStatusUpdateRequest struct {
 // (dependents unblocked, parent children-completed, reopen intent,
 // session interrupt for cancellation, etc.).
 //
-// Approval gate: when the requested status is "done" and the task has
-// approvers without a current approved decision, the persisted state
-// is redirected to in_review and the function returns a typed
-// *ApprovalsPendingError (the handler maps it to HTTP 409). The
-// req.NewStatus is updated in place so downstream side-effects see
-// the redirected status.
+// Approval gate: when the requested status is "done" and either the task
+// is not yet on a terminal workflow step, or it is and has approvers
+// without a current approved decision, the persisted state is redirected
+// to in_review and the function returns a typed *ApprovalsPendingError
+// (the handler maps it to HTTP 409). The req.NewStatus is updated in
+// place so downstream side-effects see the redirected status.
 //
 // Rework / reopen: transitions leaving in_review for todo|in_progress,
 // and transitions leaving done for any non-terminal state, supersede
@@ -660,15 +660,31 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 		fmt.Sprintf(`{"new_status":%q}`, req.NewStatus), runID, "")
 }
 
-// applyApprovalGate redirects a "done" transition to in_review when
-// approvals are pending. Mutates dbState and apiStatus in place so the
-// rest of UpdateTaskStatus persists and emits the redirected status.
-// Returns a *ApprovalsPendingError when the gate fires; nil otherwise.
+// applyApprovalGate redirects a "done" transition to in_review when the
+// task is not yet on a terminal workflow step, or when it is but approvals
+// are pending. Mutates dbState and apiStatus in place so the rest of
+// UpdateTaskStatus persists and emits the redirected status. Returns a
+// *ApprovalsPendingError when the gate fires; nil otherwise.
+//
+// The step-position check fails CLOSED: a read error is treated as
+// not-terminal (redirect), since this gate exists to stop a premature
+// "done" and silently proceeding would defeat that.
 func (s *DashboardService) applyApprovalGate(
 	ctx context.Context, taskID string, dbState, apiStatus *string,
 ) error {
 	if *dbState != stateCompleted {
 		return nil
+	}
+	terminal, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("approval gate: failed to resolve workflow step; redirecting to review",
+			zap.String("task_id", taskID), zap.Error(err))
+		terminal = false
+	}
+	if !terminal {
+		*dbState = stateInReview
+		*apiStatus = statusInReviewLowercase
+		return &ApprovalsPendingError{}
 	}
 	pending, err := s.pendingApprovers(ctx, taskID)
 	if err != nil || len(pending) == 0 {

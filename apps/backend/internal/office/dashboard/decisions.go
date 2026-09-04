@@ -38,12 +38,14 @@ const (
 const userParticipantSentinel = "user"
 
 // ApprovalsPendingError is returned by UpdateTaskStatus when a task is
-// being transitioned to "done" but one or more approvers have no
-// current approved decision recorded. The handler maps it to HTTP 409
-// and surfaces the redirected status in the response body.
+// being transitioned to "done" but either it is not yet on a terminal
+// workflow step, or it is and one or more approvers have no current
+// approved decision recorded. The handler maps it to HTTP 409 and
+// surfaces the redirected status in the response body.
 type ApprovalsPendingError struct {
 	// Pending is the list of approver agent IDs without a current
-	// approved decision.
+	// approved decision. Empty when the gate fired on the step-position
+	// check instead.
 	Pending []string
 }
 
@@ -61,8 +63,12 @@ func (e *InvalidTaskStatusError) Error() string {
 // through the Office runtime boundary.
 func (e *InvalidTaskStatusError) IsTaskStatusValidationError() {}
 
-// Error implements the error interface.
+// Error implements the error interface. An empty Pending means the gate
+// fired on the step-position check rather than on outstanding approvals.
 func (e *ApprovalsPendingError) Error() string {
+	if len(e.Pending) == 0 {
+		return "task is not on a terminal workflow step; redirected to in_review"
+	}
 	return fmt.Sprintf(
 		"approvals pending from %d approver(s): %s",
 		len(e.Pending), strings.Join(e.Pending, ","),
