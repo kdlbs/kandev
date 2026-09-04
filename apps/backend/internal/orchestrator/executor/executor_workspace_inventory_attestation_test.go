@@ -439,9 +439,10 @@ func TestLaunchPreparedSessionAutoRepairsExactStagingPy3IncidentAndLaunchesOnce(
 // TestResumeSessionWithOptionsAutoRepairsExactDevIncidentAndLaunchesOnce
 // reproduces the separate logged incident for task
 // 24cab57c-8e2c-44cc-8214-c0600d559391 / branch "dev" through the production
-// resume entry point. The incident evidence did not include a session ID, so
-// the session identity here is synthetic while the task and branch identities
-// remain exact.
+// resume entry point with the zero-row canonical inventory shape from the
+// independently reproduced lifecycle gap. The incident evidence did not
+// include a session ID, so the session identity here is synthetic while the
+// task and branch identities remain exact.
 func TestResumeSessionWithOptionsAutoRepairsExactDevIncidentAndLaunchesOnce(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	repo := newMockRepository()
@@ -459,19 +460,19 @@ func TestResumeSessionWithOptionsAutoRepairsExactDevIncidentAndLaunchesOnce(t *t
 	repo.taskEnvironments["env-dev"] = &models.TaskEnvironment{
 		ID: "env-dev", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
 		Status: models.TaskEnvironmentStatusReady, WorkspacePath: worktreePath,
-		Repos: []*models.TaskEnvironmentRepo{{
-			ID: "environment-repo-dev", TaskEnvironmentID: "env-dev",
-			RepositoryID: "repo-front", BranchSlug: "stale",
-			WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
-			WorktreeBranch: "feature/recovery", Position: 0, Status: "active",
-		}},
 	}
-	repo.taskEnvironmentRepos["env-dev"] = repo.taskEnvironments["env-dev"].Repos
+	repo.taskEnvironmentRepos["env-dev"] = nil
 	repo.sessions[sessionID] = &models.TaskSession{
 		ID: sessionID, TaskID: taskID, TaskEnvironmentID: "env-dev",
 		RepositoryID: "repo-front", AgentProfileID: "profile-123",
 		ExecutorID: models.ExecutorIDWorktree, State: models.TaskSessionStateFailed,
 		StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repo.executorsRunning[sessionID] = &models.ExecutorRunning{
+		ID: "runtime-dev", SessionID: sessionID, TaskID: taskID,
+		ExecutorID: models.ExecutorIDWorktree, Status: models.ExecutorRunningStatusStopped,
+		WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+		WorktreeBranch: "feature/recovery",
 	}
 
 	manager := &mockAgentManager{}
@@ -495,8 +496,14 @@ func TestResumeSessionWithOptionsAutoRepairsExactDevIncidentAndLaunchesOnce(t *t
 		execution.WorkspaceInventoryRecoveryReceipt.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
 		t.Fatalf("execution receipt = %+v, want a committed repair", execution.WorkspaceInventoryRecoveryReceipt)
 	}
+	preservation := execution.WorkspaceInventoryRecoveryReceipt.Preservation
+	if preservation.ExecutorID != models.ExecutorIDWorktree ||
+		preservation.ExecutorStatus != models.ExecutorRunningStatusStopped {
+		t.Fatalf("receipt omitted authoritative current runtime evidence: %+v", preservation)
+	}
 	rows := repo.taskEnvironmentRepos["env-dev"]
-	if len(rows) != 1 || rows[0].BranchSlug != branch {
+	if len(rows) != 1 || rows[0].BranchSlug != branch ||
+		rows[0].WorktreeID != "worktree-recovery" || rows[0].WorktreePath != worktreePath {
 		t.Fatalf("canonical inventory not repaired in place: %+v", rows)
 	}
 }
