@@ -17,16 +17,16 @@ unchanged.
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
+| Requirement                               | Design section                                                                                                                                                                                       |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-UI-CHANGES-FILE-ACTION-FEEDBACK-001` | [Components and responsibilities](#components-and-responsibilities), [Visibility precedence](#visibility-precedence), [Responsive behavior](#responsive-behavior), and [Verification](#verification) |
 
 ## Components and responsibilities
 
 - `useSessionGit` continues to own `pendingStageFiles`, keyed by repository and
-  path. It starts the per-file pending state before dispatching
-  `worktree.stage` or `worktree.unstage` and clears it through the existing
-  status-refresh and failure paths.
+  path. It records the requested stage or unstage transition before dispatch
+  and clears it when refreshed status reaches that transition or the request
+  fails. A stale same-repository snapshot cannot clear a newer action.
 - `changes-panel-tree.tsx` and `changes-panel-timeline.tsx` continue to derive
   `FileRow.isPending` from that set. No additional local loading state is added.
 - `FileRow` continues to share one implementation across the desktop Changes
@@ -78,9 +78,10 @@ section.
 ## Failure and recovery
 
 The UI does not infer completion from hover or elapsed time. It follows the
-existing `isPending` input. Existing status-refresh and request-failure paths
-clear that state; the slot then restores the idle icon/action presentation.
-Backend and WebSocket errors remain surfaced through their current paths.
+existing `isPending` input. Status refresh clears pending state only when the acted-on file has reached the
+requested staged or unstaged state. Request failures clear it directly. The
+slot then restores the idle icon/action presentation, and backend or WebSocket
+errors remain surfaced through their current paths.
 
 ## Verification
 
@@ -90,6 +91,9 @@ Backend and WebSocket errors remain surfaced through their current paths.
   staged section.
 - The same regression pauses `worktree.unstage`, repeats the pointer-leave
   assertion, and then proves the file returns to the unstaged section.
+- A focused hook regression publishes a stale same-repository snapshot during
+  each paused action and proves pending state survives until status reflects
+  the requested transition.
 - The test intercepts only the selected worktree request at the WebSocket
   transport boundary and forwards every unrelated frame.
 - Existing coarse-pointer component and Pixel 5 Changes tests continue to prove
