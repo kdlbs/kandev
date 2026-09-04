@@ -234,6 +234,34 @@ describe("TaskCreateDependencies", () => {
   });
 });
 
+describe("selected dependency preservation", () => {
+  it("keeps an omitted selected predecessor titled and individually removable", () => {
+    const selectedID = "task-archived";
+    const onChange = vi.fn();
+    render(
+      <TooltipProvider>
+        <TaskCreateDependencies
+          value={[selectedID]}
+          onChange={onChange}
+          candidates={[{ id: "task-other", title: "Other task" }]}
+          selectedTitles={{ [selectedID]: "Archived predecessor" }}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+
+    const selectedOption = within(
+      screen.getByTestId("task-create-dependencies-popover"),
+    ).getByTestId(`task-create-dependency-option-${selectedID}`);
+    expect(selectedOption).toBeTruthy();
+    expect(selectedOption.textContent).toContain("Archived predecessor");
+
+    fireEvent.click(selectedOption);
+    expect(onChange).toHaveBeenCalledWith([]);
+  });
+});
+
 describe("TaskCreateDependencies change-request search", () => {
   it("narrows to the PR-linked task when searching by PR number and shows its badge", () => {
     const prTask = task(ALPHA_ID, ALPHA_TITLE, {

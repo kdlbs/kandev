@@ -24,6 +24,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
+import type { TaskDependencyCandidate } from "@/lib/types/task-dependencies";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskPR } from "@/lib/types/github";
@@ -49,6 +50,17 @@ export type TaskCreateDependenciesProps = {
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
+  /** Optional server-backed candidates for the edit dialog. */
+  candidates?: TaskDependencyCandidate[];
+  /** Titles for selected tasks that are outside the current search page. */
+  selectedTitles?: Record<string, string>;
+  /** True while the server-backed candidate search is running. */
+  candidatesLoading?: boolean;
+  /** Controlled search value for the server-backed candidate search. */
+  searchValue?: string;
+  onSearchValueChange?: (value: string) => void;
+  /** The edited task is never a valid predecessor of itself. */
+  excludeTaskId?: string;
 };
 
 function useBoardTasks(): KanbanState["tasks"] {
@@ -114,7 +126,7 @@ function DependencyOption({
   selected,
   onSelect,
 }: {
-  task: KanbanState["tasks"][number];
+  task: TaskDependencyCandidate;
   numbers: number[];
   selected: boolean;
   onSelect: () => void;
@@ -152,25 +164,33 @@ function DependencyOption({
 }
 
 type DependencyPickerContentProps = {
-  candidates: KanbanState["tasks"];
-  mrsByTaskId: Record<string, TaskMR[]>;
-  prsByTaskId: Record<string, TaskPR[]>;
+  candidates: TaskDependencyCandidate[];
+  numbersByTaskId: ReadonlyMap<string, number[]>;
   value: string[];
   onChange: (next: string[]) => void;
   setOpen: (open: boolean) => void;
   portalContainer: HTMLElement | null;
+  candidatesLoading: boolean;
+  searchValue?: string;
+  onSearchValueChange?: (value: string) => void;
 };
 
 function DependencyPickerContent({
   candidates,
-  mrsByTaskId,
-  prsByTaskId,
+  numbersByTaskId,
   value,
   onChange,
   setOpen,
   portalContainer,
+  candidatesLoading,
+  searchValue,
+  onSearchValueChange,
 }: DependencyPickerContentProps) {
   const { t } = useTranslation();
+  const commandInputProps =
+    searchValue === undefined
+      ? {}
+      : { value: searchValue, onValueChange: onSearchValueChange ?? (() => undefined) };
   return (
     <PopoverContent
       align="start"
@@ -182,7 +202,12 @@ function DependencyPickerContent({
       <Command>
         <div className="flex items-center gap-1">
           <div className="min-w-0 flex-1">
-            <CommandInput placeholder={t("task:searchTasksOrChangeRequest")} />
+            <CommandInput
+              {...commandInputProps}
+              placeholder={t(
+                searchValue === undefined ? "task:searchTasksOrChangeRequest" : "task:searchTasks",
+              )}
+            />
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -203,7 +228,9 @@ function DependencyPickerContent({
           </Tooltip>
         </div>
         <CommandList>
-          <CommandEmpty>{t("task:noTasksFound")}</CommandEmpty>
+          <CommandEmpty>
+            {candidatesLoading ? t("tasks:loadingTasks") : t("task:noTasksFound")}
+          </CommandEmpty>
           <CommandGroup>
             <CommandItem
               value="__no_dependency__"
@@ -227,11 +254,7 @@ function DependencyPickerContent({
               <DependencyOption
                 key={task.id}
                 task={task}
-                numbers={changeRequestNumbers(
-                  task,
-                  mrsByTaskId[task.id] ?? NO_MRS,
-                  prsByTaskId[task.id] ?? NO_PRS,
-                )}
+                numbers={numbersByTaskId.get(task.id) ?? []}
                 selected={value.includes(task.id)}
                 onSelect={() => {
                   onChange(
@@ -249,7 +272,108 @@ function DependencyPickerContent({
   );
 }
 
-export function TaskCreateDependencies({ value, onChange, disabled }: TaskCreateDependenciesProps) {
+type DependencyPickerDataArgs = {
+  boardTasks: KanbanState["tasks"];
+  providedCandidates?: TaskDependencyCandidate[];
+  selectedTitles?: Record<string, string>;
+  value: string[];
+  excludeTaskId?: string;
+  mrsByTaskId: Record<string, TaskMR[]>;
+  prsByTaskId: Record<string, TaskPR[]>;
+};
+
+type DependencyPickerData = {
+  candidates: TaskDependencyCandidate[];
+  numbersByTaskId: ReadonlyMap<string, number[]>;
+  selectedTitle?: string;
+  selectedNumber?: number;
+};
+
+function useDependencyPickerData({
+  boardTasks,
+  providedCandidates,
+  selectedTitles,
+  value,
+  excludeTaskId,
+  mrsByTaskId,
+  prsByTaskId,
+}: DependencyPickerDataArgs): DependencyPickerData {
+  const tasks = useMemo(() => {
+    const byID = new Map<string, TaskDependencyCandidate>();
+    for (const task of providedCandidates ?? boardTasks) byID.set(task.id, task);
+    for (const id of value) {
+      const title = selectedTitles?.[id];
+      if (title !== undefined && !byID.has(id)) {
+        byID.set(id, { id, title, isArchived: true });
+      }
+    }
+    return [...byID.values()];
+  }, [boardTasks, providedCandidates, selectedTitles, value]);
+
+  const boardTasksById = useMemo(
+    () => new Map(boardTasks.map((task) => [task.id, task] as const)),
+    [boardTasks],
+  );
+  const numbersByTaskId = useMemo(
+    () =>
+      new Map(
+        tasks.map((task) => {
+          const boardTask = boardTasksById.get(task.id);
+          return [
+            task.id,
+            boardTask
+              ? changeRequestNumbers(
+                  boardTask,
+                  mrsByTaskId[task.id] ?? NO_MRS,
+                  prsByTaskId[task.id] ?? NO_PRS,
+                )
+              : [],
+          ] as const;
+        }),
+      ),
+    [boardTasksById, mrsByTaskId, prsByTaskId, tasks],
+  );
+
+  const selectedTask = useMemo(() => {
+    if (value.length !== 1) return undefined;
+    return tasks.find((task) => task.id === value[0]);
+  }, [tasks, value]);
+  const selectedTitle = useMemo(() => {
+    if (!selectedTask) return undefined;
+    return selectedTitles?.[selectedTask.id] ?? selectedTask.title;
+  }, [selectedTask, selectedTitles]);
+  const selectedNumber = useMemo(
+    () => (selectedTask ? numbersByTaskId.get(selectedTask.id)?.[0] : undefined),
+    [numbersByTaskId, selectedTask],
+  );
+  const candidates = useMemo(
+    () =>
+      tasks
+        .filter(
+          (task) => task.id !== excludeTaskId && (!task.isArchived || value.includes(task.id)),
+        )
+        .sort((left, right) => {
+          const leftTask = boardTasksById.get(left.id) ?? left;
+          const rightTask = boardTasksById.get(right.id) ?? right;
+          return compareDependencyCandidates(leftTask, rightTask);
+        }),
+    [boardTasksById, excludeTaskId, tasks, value],
+  );
+
+  return { candidates, numbersByTaskId, selectedTitle, selectedNumber };
+}
+
+export function TaskCreateDependencies({
+  value,
+  onChange,
+  disabled,
+  candidates: providedCandidates,
+  selectedTitles,
+  candidatesLoading = false,
+  searchValue,
+  onSearchValueChange,
+  excludeTaskId,
+}: TaskCreateDependenciesProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
@@ -258,30 +382,22 @@ export function TaskCreateDependencies({ value, onChange, disabled }: TaskCreate
   // routes, which normally hydrate these association stores.
   useWorkspacePRs(activeWorkspaceId);
   useWorkspaceMRs(activeWorkspaceId);
-  const tasks = useBoardTasks();
+  const boardTasks = useBoardTasks();
   const mrsByTaskId = useMRsByTaskId();
   const prsByTaskId = usePRsByTaskId();
-
-  const selectedTask = useMemo(() => {
-    if (value.length !== 1) return undefined;
-    return tasks.find((task) => task.id === value[0]);
-  }, [tasks, value]);
-  const selectedNumber = useMemo(() => {
-    if (!selectedTask) return undefined;
-    return changeRequestNumbers(
-      selectedTask,
-      mrsByTaskId[selectedTask.id] ?? NO_MRS,
-      prsByTaskId[selectedTask.id] ?? NO_PRS,
-    )[0];
-  }, [selectedTask, mrsByTaskId, prsByTaskId]);
-  const candidates = useMemo(
-    () => tasks.filter((task) => !task.isArchived).sort(compareDependencyCandidates),
-    [tasks],
-  );
+  const { candidates, numbersByTaskId, selectedTitle, selectedNumber } = useDependencyPickerData({
+    boardTasks,
+    providedCandidates,
+    selectedTitles,
+    value,
+    excludeTaskId,
+    mrsByTaskId,
+    prsByTaskId,
+  });
   const triggerLabel = (
     <DependencyTriggerLabel
       value={value}
-      selectedTitle={selectedTask?.title}
+      selectedTitle={selectedTitle}
       selectedNumber={selectedNumber}
       t={t}
     />
@@ -320,12 +436,14 @@ export function TaskCreateDependencies({ value, onChange, disabled }: TaskCreate
         </PopoverTrigger>
         <DependencyPickerContent
           candidates={candidates}
-          mrsByTaskId={mrsByTaskId}
-          prsByTaskId={prsByTaskId}
+          numbersByTaskId={numbersByTaskId}
           value={value}
           onChange={onChange}
           setOpen={setOpen}
           portalContainer={portalContainer}
+          candidatesLoading={candidatesLoading}
+          searchValue={searchValue}
+          onSearchValueChange={onSearchValueChange}
         />
       </Popover>
     </div>

@@ -20,24 +20,27 @@ export function changeRequestNumbers(
 }
 
 /** cmdk search key: title, id, and both '#N' and bare 'N' for each change-request number. */
-export function dependencyOptionValue(task: Task, numbers: number[]): string {
+export function dependencyOptionValue(task: Pick<Task, "id" | "title">, numbers: number[]): string {
   const parts = [task.title, task.id, ...numbers.map((n) => `#${n} ${n}`)];
   return parts.join(" ");
 }
 
-function timestampMs(task: Task): number | undefined {
+function timestampMs(task: Pick<Task, "updatedAt" | "createdAt">): number | undefined {
   const updated = task.updatedAt ? Date.parse(task.updatedAt) : NaN;
   if (Number.isFinite(updated)) return updated;
   return createdAtMs(task);
 }
 
-function createdAtMs(task: Task): number | undefined {
+function createdAtMs(task: Pick<Task, "createdAt">): number | undefined {
   const created = task.createdAt ? Date.parse(task.createdAt) : NaN;
   return Number.isFinite(created) ? created : undefined;
 }
 
 /** Most-recently-updated first, using createdAt and then title as tie-breakers. */
-export function compareDependencyCandidates(a: Task, b: Task): number {
+export function compareDependencyCandidates(
+  a: Pick<Task, "title" | "updatedAt" | "createdAt">,
+  b: Pick<Task, "title" | "updatedAt" | "createdAt">,
+): number {
   const aTime = timestampMs(a);
   const bTime = timestampMs(b);
   if (aTime !== undefined && bTime !== undefined && aTime !== bTime) return bTime - aTime;
