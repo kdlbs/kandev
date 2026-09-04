@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -94,13 +95,25 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	switch eventType {
 	case "message_streaming":
-		s.observePromptAttempt(
-			payload.SessionID,
-			eventExecutionID,
-			payload.Data.PromptGeneration,
-			strings.TrimSpace(payload.Data.Text) != "",
-			false,
-		)
+		// Claude ACP emits some provider failures as a diagnostic message chunk
+		// immediately before the session/prompt RPC error. Track those chunks
+		// separately so the matching typed failure can still be safely routed.
+		if isHighConfidenceProviderDiagnostic(payload.Data.Text) {
+			s.observeProviderDiagnostic(
+				payload.SessionID,
+				eventExecutionID,
+				payload.Data.PromptGeneration,
+				payload.Data.Text,
+			)
+		} else {
+			s.observePromptAttempt(
+				payload.SessionID,
+				eventExecutionID,
+				payload.Data.PromptGeneration,
+				strings.TrimSpace(payload.Data.Text) != "",
+				false,
+			)
+		}
 	case "thinking_streaming":
 		s.observePromptAttempt(
 			payload.SessionID,
@@ -231,6 +244,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
 	}
+}
+
+func isHighConfidenceProviderDiagnostic(message string) bool {
+	if strings.TrimSpace(message) == "" {
+		return false
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:  routingerr.PhasePromptSend,
+		Stderr: message,
+	})
+	return classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 }
 
 func (s *Service) backgroundCompletionActivityValue(ctx context.Context, sessionID string) interface{} {

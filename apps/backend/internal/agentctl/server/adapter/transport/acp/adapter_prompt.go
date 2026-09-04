@@ -212,6 +212,11 @@ func (a *Adapter) sendPrompt(
 		return nil
 	}
 	if err != nil {
+		// The SDK guarantees that notifications received before this prompt RPC
+		// settles reached enqueueACPUpdate, but our worker processes them
+		// asynchronously. Drain it before returning the error so a diagnostic
+		// agent_message_chunk cannot be overtaken by the terminal failure event.
+		a.syncNotifQueue()
 		return normalizePromptErrorAfterCancel(traceCtx, err)
 	}
 

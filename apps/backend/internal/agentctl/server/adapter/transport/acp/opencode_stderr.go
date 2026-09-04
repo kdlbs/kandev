@@ -50,7 +50,31 @@ func ProviderErrorFromError(err error) *streams.ProviderError {
 		copy := providerErr.ProviderError
 		return &copy
 	}
-	return providerErrorFromACPActionURL(err)
+	if providerErr := providerErrorFromACPActionURL(err); providerErr != nil {
+		return providerErr
+	}
+	return providerErrorFromACPPrompt(err)
+}
+
+// providerErrorFromACPPrompt projects the safe message from a terminal ACP
+// JSON-RPC error. Error data is adapter-defined and can contain credentials,
+// account identifiers, or opaque gateway details, so it never crosses this
+// boundary. Provider-specific extractors may attach richer allowlisted fields
+// before this generic fallback runs.
+func providerErrorFromACPPrompt(err error) *streams.ProviderError {
+	var reqErr *acp.RequestError
+	if !errors.As(err, &reqErr) || reqErr == nil {
+		return nil
+	}
+	message := sanitizeProviderMessage(reqErr.Message)
+	if message == "" {
+		return nil
+	}
+	return &streams.ProviderError{
+		Source:     streams.ProviderErrorSourceACPPrompt,
+		Message:    message,
+		OccurredAt: time.Now(),
+	}
 }
 
 // providerErrorFromACPActionURL projects a future ACP service-failure
@@ -77,7 +101,7 @@ func providerErrorFromACPActionURL(err error) *streams.ProviderError {
 	if remediationURL == "" {
 		return nil
 	}
-	message := sanitizeOpenCodeMessage(reqErr.Message)
+	message := sanitizeProviderMessage(reqErr.Message)
 	if message == "" {
 		return nil
 	}
@@ -146,7 +170,7 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	if remediationURL == "" {
 		remediationURL = extractOpenCodeActionURL(fields["error.error"])
 	}
-	message := sanitizeOpenCodeMessage(fields["error.error"])
+	message := sanitizeProviderMessage(fields["error.error"])
 	if message == "" {
 		return openCodeStderrDiagnostic{}, false
 	}
@@ -233,7 +257,7 @@ func parseOpenCodeFieldValue(line string, start int) (string, int, bool) {
 	return "", len(line), false
 }
 
-func sanitizeOpenCodeMessage(message string) string {
+func sanitizeProviderMessage(message string) string {
 	message = openCodeURLPattern.ReplaceAllString(message, "")
 	message = openCodeIdentifierPattern.ReplaceAllString(message, "[redacted]")
 	message = strings.Join(strings.Fields(message), " ")

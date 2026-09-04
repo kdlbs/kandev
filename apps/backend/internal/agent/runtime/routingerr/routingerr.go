@@ -268,6 +268,11 @@ func httpStatusToCode(status int) Code {
 		return CodeSubscriptionRequired
 	case http.StatusTooManyRequests:
 		return CodeRateLimited
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusGatewayTimeout:
+		// A gateway may expose an upstream 5xx directly instead of translating
+		// it to 503. These are provider-side availability failures, not a task
+		// or agent-runtime failure, so the shared transient policy may recover.
+		return CodeProviderUnavailable
 	case http.StatusServiceUnavailable:
 		return CodeProviderUnavailable
 	case statusOverloaded:

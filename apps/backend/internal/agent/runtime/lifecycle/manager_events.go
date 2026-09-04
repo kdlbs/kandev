@@ -18,6 +18,7 @@ import (
 const (
 	toolStatusComplete = "complete"
 	toolStatusFailed   = "failed"
+	toolStatusError    = "error"
 )
 
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
@@ -193,7 +194,7 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 	stopReason := "end_turn"
 	errorMsg := ""
 	if isError {
-		stopReason = "error"
+		stopReason = toolStatusError
 		errorMsg = extractErrorMessage(event)
 	} else if event.Data != nil {
 		// Read StopReason from the complete event (set by ACP adapter from PromptResponse)
@@ -277,7 +278,7 @@ func completeEventResult(event *agentctl.AgentEvent) (bool, string) {
 		isError, _ = event.Data["is_error"].(bool)
 	}
 	if isError {
-		return true, "error"
+		return true, toolStatusError
 	}
 	if event.Data != nil {
 		if stopReason, ok := event.Data["stop_reason"].(string); ok && stopReason != "" {
@@ -526,7 +527,7 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 		return false
 	}
 	switch event.ToolStatus {
-	case toolStatusComplete, "completed", "success", "error", toolStatusFailed, "cancelled":
+	case toolStatusComplete, "completed", "success", toolStatusError, toolStatusFailed, "cancelled":
 		return true
 	default:
 		return false
@@ -550,9 +551,10 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 // accidentally re-arm a freshly-booted no-prompt session as Running.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	_, isTurnContent := turnContentEventTypes[event.Type]
+	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
-	if isTurnContent {
+	if isTurnContent && !isProviderDiagnostic {
 		execution.agentEventSincePrompt = true
 		execution.promptActivityEpoch++
 	}
@@ -575,7 +577,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	if isTerminalToolUpdate(event) {
 		return
 	}
-	if _, ok := turnContentEventTypes[event.Type]; !ok {
+	if _, ok := turnContentEventTypes[event.Type]; !ok || isProviderDiagnostic {
 		return
 	}
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
@@ -764,7 +766,7 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		m.eventPublisher.PublishAgentStreamEvent(execution, event)
 		return
 	}
-	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != "error") {
+	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != toolStatusError) {
 		m.recordActivity(execution, event)
 	}
 
@@ -793,7 +795,7 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		m.logger.Debug("agent plan update",
 			zap.String("execution_id", execution.ID))
 
-	case "error":
+	case toolStatusError:
 		m.handleErrorEvent(execution, event)
 		return
 

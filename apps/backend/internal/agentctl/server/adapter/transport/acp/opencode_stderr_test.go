@@ -105,33 +105,38 @@ func TestProviderErrorFromACPRequestErrorReadsOnlyStructuredActionURL(t *testing
 		}
 	})
 
-	t.Run("missing or malformed action_url keeps the generic error path", func(t *testing.T) {
+	t.Run("missing or malformed action_url uses the generic ACP projection", func(t *testing.T) {
 		for _, tt := range []struct {
-			name string
-			err  error
+			name         string
+			err          error
+			wantProvider bool
 		}{
-			{name: "no data", err: &sdk.RequestError{Code: -32603, Message: "provider failed"}},
-			{name: "wrong shape", err: &sdk.RequestError{Code: -32603, Message: "provider failed", Data: "action_url"}},
+			{name: "no data", err: &sdk.RequestError{Code: -32603, Message: "provider failed"}, wantProvider: true},
+			{name: "wrong shape", err: &sdk.RequestError{Code: -32603, Message: "provider failed", Data: "action_url"}, wantProvider: true},
 			{name: "wrong host", err: &sdk.RequestError{
 				Code: -32603, Message: "provider failed",
 				Data: map[string]any{"action_url": "https://example.test/workspace/wrk_123/go"},
-			}},
+			}, wantProvider: true},
 			{name: "query", err: &sdk.RequestError{
 				Code: -32603, Message: "provider failed",
 				Data: map[string]any{"action_url": wantURL + "?source=email"},
-			}},
+			}, wantProvider: true},
 			{name: "malformed id", err: &sdk.RequestError{
 				Code: -32603, Message: "provider failed",
 				Data: map[string]any{"action_url": "https://opencode.ai/workspace/../go"},
-			}},
+			}, wantProvider: true},
 			{name: "oversized", err: &sdk.RequestError{
 				Code: -32603, Message: "provider failed",
 				Data: map[string]any{"action_url": "https://opencode.ai/workspace/" + strings.Repeat("w", 300) + "/go"},
-			}},
+			}, wantProvider: true},
 			{name: "wrapped generic error", err: fmt.Errorf("provider failed")},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
-				if got := ProviderErrorFromError(tt.err); got != nil {
+				got := ProviderErrorFromError(tt.err)
+				if tt.wantProvider && (got == nil || got.Source != streams.ProviderErrorSourceACPPrompt) {
+					t.Fatalf("ProviderErrorFromError() = %+v, want generic ACP provider error", got)
+				}
+				if !tt.wantProvider && got != nil {
 					t.Fatalf("ProviderErrorFromError() = %+v, want nil", got)
 				}
 			})
@@ -163,6 +168,28 @@ func TestParseOpenCodeStderrLineWeeklyLimitResetInDays(t *testing.T) {
 			t.Fatalf("reset at = %v, want %s", diagnostic.ProviderError.ResetAt, wantReset)
 		}
 	})
+}
+
+func TestProviderErrorFromACPRequestErrorProjectsGenericPromptFailure(t *testing.T) {
+	err := &sdk.RequestError{
+		Code:    -32603,
+		Message: "Internal error: API Error: Repeated 529 Overloaded errors. See https://gateway.example/private/session",
+		Data:    map[string]any{"errorKind": "server_error", "private_token": "must-not-cross-boundary"},
+	}
+
+	got := ProviderErrorFromError(err)
+	if got == nil {
+		t.Fatal("ProviderErrorFromError() = nil, want a sanitized generic ACP provider error")
+	}
+	if got.Source != "acp_prompt" {
+		t.Fatalf("source = %q, want acp_prompt", got.Source)
+	}
+	if strings.Contains(got.Message, "https://") || strings.Contains(got.Message, "private_token") {
+		t.Fatalf("generic ACP message leaked private detail: %q", got.Message)
+	}
+	if !strings.Contains(got.Message, "529 Overloaded") {
+		t.Fatalf("generic ACP message = %q, want provider diagnostic", got.Message)
+	}
 }
 
 func TestParseOpenCodeStderrLineAcceptsForegroundStreamError(t *testing.T) {

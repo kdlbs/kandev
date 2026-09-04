@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-08-08
-updated: 2026-08-31
+updated: 2026-09-03
 owners:
   - Kandev
 ---
@@ -35,6 +35,7 @@ Agent CLIs and providers report equivalent failures through different ACP frames
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.13:** When Cursor resumes generation before the prompt settles, Kandev shall treat the earlier matching frame as internal retry telemetry. Kandev shall not start a retry from the superseded frame. A later matching terminal frame for the same prompt can become new failure evidence.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.14:** A terminal Cursor `RetriableError` HTTP/2 stream reset shall classify as the existing transient agent transport-loss cause. The bracketed word `canceled` alone shall not classify the failure as an operator or context cancellation.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.15:** Kandev shall automatically recover a terminal Cursor stream reset only when current-turn evidence proves that the attempt had no output or tool activity. Eligible recovery shall retain the selected provider. It shall use the existing same-provider retry owner, attempt limit, and backoff. Missing evidence, output, or tool activity shall stop automatic replay and expose manual recovery.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.16:** When an ACP adapter emits a current-prompt diagnostic message and then returns a matching structured `session/prompt` provider error, Kandev shall retain the diagnostic for the transcript but treat it as pre-result evidence only when both messages classify to the same high-confidence, fallback-eligible semantic code and no later output or tool activity exists. A mismatch, stale generation, low-confidence classification, later output, or tool activity shall keep the diagnostic as ordinary output and stop automatic recovery.
 
 ## System design
 

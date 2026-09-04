@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -633,6 +634,8 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 			}
 		}
 		event.Text = text
+		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, Stderr: text})
+		event.ProviderDiagnosticCandidate = classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}
 

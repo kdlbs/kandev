@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-08-31
+updated: 2026-09-03
 owners:
   - Kandev
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERR
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Matching ACP diagnostic and error projection](#matching-acp-diagnostic-and-error-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
 
 ## Migrated source detail
 
@@ -126,6 +126,34 @@ veto. It lacks `context canceled`, `context deadline exceeded`, or
 `cancel escalated`. The deliberately narrow `transportLostRe` remains
 unchanged.
 
+#### Matching ACP diagnostic and error projection
+
+Some ACP adapters emit a human-readable diagnostic as an
+`agent_message_chunk` before the same `session/prompt` call returns a JSON-RPC
+provider error. For example, an Anthropic route through a gateway can emit
+`API Error: Repeated 529 Overloaded errors` and then return `-32603` with that
+same provider diagnostic. Both frames are valid ACP behavior. The message
+remains visible in the transcript; it is not by itself model output that makes
+the failed attempt effectful.
+
+The ordered streaming observer classifies the diagnostic in the active prompt
+generation and records only its high-confidence, fallback-eligible semantic
+code. When lifecycle later receives the `session/prompt` failure, it preserves
+the actual sanitized error rather than replacing it with a generic initial
+prompt-delivery failure. The dynamic and concrete recovery gates may disregard
+the recorded diagnostic as output only if the terminal failure classifies to
+the identical semantic code and the same generation has no later assistant
+output, thought output, partial utility result, or tool activity.
+
+This is a correlation rule, not broad error-text suppression. A changed code
+(for example, a 529 diagnostic followed by a 500 failure), a stale generation,
+an unclassified or low-confidence signature, or any later progress leaves the
+diagnostic ordinary transcript output and fails recovery closed. The observer
+does not identify TeamClaude, Anthropic, or any other gateway; those providers
+contribute signatures through the shared catalogue. This permits a future ACP
+adapter or gateway to use the same safe projection without a provider-specific
+orchestration branch.
+
 ### Error classes
 
 The policy layer has two configurable classes:
@@ -161,6 +189,9 @@ Classification does not by itself authorize retry or switching.
 - Assistant output, tool activity, partial utility output, ambiguous prompt
   delivery, or stale event ordering fails closed unless a durable continuation
   package makes successor delivery safe under the dynamic-routing contract.
+- A correlated ACP diagnostic that satisfies the matching projection above is
+  not assistant output for this gate. It remains transcript-visible, while any
+  non-diagnostic later progress restores the normal output/effect safety fence.
 - User configuration cannot override this gate. An unsafe transient or hard
   failure stops for manual recovery even when its class policy requests retry
   or skip.
@@ -505,6 +536,12 @@ stored in policy or route state.
 - **GIVEN** a failure follows tool activity, **WHEN** the candidate policy says
   retry or skip, **THEN** effect safety overrides the policy and Kandev stops for
   manual recovery.
+- **GIVEN** a current prompt emits a high-confidence `provider_overloaded`
+  diagnostic and then returns a matching structured provider error before any
+  output or tool activity, **WHEN** the transient policy permits retry or
+  candidate fallback, **THEN** the transcript retains the diagnostic and the
+  policy may proceed. **GIVEN** either error does not match or later progress
+  occurs, **THEN** Kandev stops automatic recovery.
 - **GIVEN** the same dynamic profile is selected by Kanban and Office, **WHEN**
   each sees the same classified, effect-safe error, **THEN** both apply the same
   candidate policy and route transition.

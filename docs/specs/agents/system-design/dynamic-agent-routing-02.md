@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-08-17
+updated: 2026-09-03
 owners:
   - cfl
 ---
@@ -117,6 +117,11 @@ require the current exclusive probe lease.
   state and returns the authoritative route snapshot.
 - If an error is unclassified, stale, conflicting, or effect-unsafe, Kandev
   does not apply its candidate class policy and enters manual recovery.
+- If an ACP diagnostic is followed by a matching high-confidence terminal
+  provider error before any other output or tool activity, the transcript keeps
+  the diagnostic but the shared recovery evidence treats the attempt as
+  pre-result. A mismatch or later progress remains effect-unsafe and enters
+  manual recovery.
 - If a trusted reset is beyond the configured maximum wait, Kandev does not
   wait for or shorten it. It proceeds to retry or the exhausted outcome.
 - If dynamic routing is disabled after a session is persisted, Kandev keeps its
@@ -202,6 +207,12 @@ require the current exclusive probe lease.
   **WHEN** the candidate keeps returning an effect-safe capacity error,
   **THEN** the route persists 5, 10, and 20 second waits before applying its
   configured skip or stop outcome.
+- **GIVEN** the active candidate emits `Repeated 529 Overloaded errors` as an
+  ACP diagnostic and immediately settles with a matching structured provider
+  error, **WHEN** no assistant output or tool activity follows and the
+  transient policy is exhausted with `skip`, **THEN** the same logical dynamic
+  session advances to the next eligible candidate. **GIVEN** later output,
+  tool activity, or a mismatched terminal error, **THEN** it does not switch.
 - **GIVEN** a hard quota error includes a trusted reset in one minute, **WHEN**
   the policy permits reset waits up to five minutes, **THEN** the route waits
   durably and retries the same candidate after the reset.

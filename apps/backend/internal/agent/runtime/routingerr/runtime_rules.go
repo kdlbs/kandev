@@ -75,6 +75,20 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 	{
+		// ACP adapters preserve these upstream gateway 5xx envelopes as text
+		// instead of structured HTTP metadata. Require the ACP "API Error"
+		// prefix and an exact status/reason pair so ordinary model output or a
+		// local process error cannot authorize dynamic recovery.
+		id:      gatewayServerFailureRuleID,
+		pattern: gatewayServerFailureRe,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeProviderUnavailable,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
 		// Cursor emits this exact control prefix as an assistant message chunk
 		// when its upstream HTTP/2 stream resets. Keep the fingerprint anchored
 		// to the control frame and bounded so user-authored prose cannot turn
@@ -132,6 +146,8 @@ const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
 
 const overloadedRuleID = "anthropic.overloaded.529.v1"
 
+const gatewayServerFailureRuleID = "acp.gateway_server_failure.v1"
+
 const cursorRetriableStreamResetRuleID = "cursor.retriable_stream_reset.v1"
 
 const transportLostRuleID = "acp.transport_lost.v1"
@@ -156,6 +172,11 @@ var cursorRetriableStreamResetRe = regexp.MustCompile(
 // one line) so a stray "529" and "overloaded" in unrelated multi-line logs
 // can't bridge into a false positive.
 var overloadedRe = regexp.MustCompile(`(?i)\b529\b[^\n]*overloaded|overloaded[^\n]*\b529\b|\boverloaded_error\b`)
+
+// gatewayServerFailureRe accepts only status/reason pairs emitted by the ACP
+// API-error wrapper. The bounded, one-line expression intentionally excludes
+// bare 5xx numbers and generic "internal error" prose.
+var gatewayServerFailureRe = regexp.MustCompile(`(?i)\bAPI\s+Error:\s*(?:500\s+Internal(?:\s+Server)?\s+Error|502\s+Bad\s+Gateway|504\s+Gateway\s+Timeout)\b`)
 
 // IsTransientProviderError reports whether a provider error is eligible for a
 // short same-provider retry. It is intentionally backed by Classify so new

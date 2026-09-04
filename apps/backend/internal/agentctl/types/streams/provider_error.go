@@ -13,6 +13,9 @@ const (
 	// ProviderErrorSourceCursorACP marks Cursor's bounded HTTP/2 stream-reset
 	// diagnostic reconstructed from its terminal ACP control chunk.
 	ProviderErrorSourceCursorACP = "cursor_acp"
+	// ProviderErrorSourceACPPrompt marks a safe diagnostic projected from a
+	// terminal ACP session/prompt JSON-RPC error.
+	ProviderErrorSourceACPPrompt = "acp_prompt"
 )
 
 // ProviderError is the bounded, sanitized provider diagnostic that may cross

@@ -18,6 +18,7 @@ type usageProviderAdapter struct {
 	svc           *agentusage.UsageService
 	settingsStore settingsstore.Repository
 	agentRegistry *agentregistry.Registry
+	proxyResolver usageProxyResolver
 }
 
 // GetUsage implements officeagents.UsageProvider.
@@ -29,6 +30,12 @@ func (a *usageProviderAdapter) GetUsage(ctx context.Context, profileID string) (
 	ag, ok := a.agentRegistry.Get(profile.AgentID)
 	if !ok {
 		return nil, nil
+	}
+	if a.proxyResolver != nil {
+		if client, cacheKey, ok := a.proxyResolver.Resolve(profile); ok {
+			a.svc.Register(profileID, client, cacheKey)
+			return a.svc.GetUsage(ctx, profileID)
+		}
 	}
 	if ag.BillingType() != agentusage.BillingTypeSubscription {
 		return nil, nil
@@ -79,5 +86,6 @@ func newUsageProviderAdapter(
 		svc:           agentusage.NewUsageService(),
 		settingsStore: settingsStore,
 		agentRegistry: agentRegistry,
+		proxyResolver: defaultUsageProxyResolver(),
 	}
 }

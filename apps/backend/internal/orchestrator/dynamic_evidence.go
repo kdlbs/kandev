@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -18,8 +19,12 @@ type promptAttemptEvidence struct {
 	promptGeneration uint64
 	evidenceKnown    bool
 	output           bool
-	effect           bool
-	dynamic          bool
+	// providerDiagnosticCode records an ACP agent-message diagnostic which is
+	// followed by the matching prompt RPC failure. It is not model output, so it
+	// must not make an otherwise pre-result provider failure unsafe to route.
+	providerDiagnosticCode routingerr.Code
+	effect                 bool
+	dynamic                bool
 }
 
 func (s *Service) beginPromptAttempt(
@@ -137,6 +142,40 @@ func (s *Service) observePromptAttempt(
 	}
 	evidence.output = evidence.output || output
 	evidence.effect = evidence.effect || effect
+	if output {
+		// Any ordinary output makes the turn unsafe to replay. A provider
+		// diagnostic is recorded only by observeProviderDiagnostic below.
+		evidence.providerDiagnosticCode = ""
+	}
+}
+
+func (s *Service) observeProviderDiagnostic(
+	sessionID, executionID string,
+	promptGeneration uint64,
+	message string,
+) {
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:  routingerr.PhasePromptSend,
+		Stderr: message,
+	})
+	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
+		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
+		return
+	}
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if !evidence.promptIdentityMatchesLocked(executionID, promptGeneration) {
+		return
+	}
+	if evidence.output || evidence.effect {
+		return
+	}
+	evidence.output = true
+	evidence.providerDiagnosticCode = classified.Code
 }
 
 func (s *Service) observeDynamicAttempt(sessionID, executionID string, output, effect bool) {
@@ -180,16 +219,38 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	if evidence.dynamic {
 		data.DynamicRouteAttempt = true
 	}
+	outputObserved := evidence.output
+	if evidence.providerDiagnosticCode != "" && matchingProviderFailureCode(data) == evidence.providerDiagnosticCode {
+		// Claude ACP emits a human-readable agent_message_chunk immediately
+		// before returning the same provider error from session/prompt. The chunk
+		// is diagnostic transport, not generated output, and no tool/output
+		// evidence was otherwise observed.
+		outputObserved = false
+	}
 	if lifecycleEvidenceKnown {
 		data.EvidenceKnown = true
-		data.OutputObserved = lifecycleOutputObserved || evidence.output
+		data.OutputObserved = lifecycleOutputObserved || outputObserved
 		data.EffectObserved = lifecycleEffectObserved || evidence.effect
 	} else {
 		data.EvidenceKnown = evidence.evidenceKnown
-		data.OutputObserved = evidence.output
+		data.OutputObserved = outputObserved
 		data.EffectObserved = evidence.effect
 	}
 	return data
+}
+
+func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
+	message := data.ErrorMessage
+	if data.ProviderError != nil && data.ProviderError.Message != "" {
+		message = data.ProviderError.Message
+	}
+	if message == "" {
+		return ""
+	}
+	return routingerr.Classify(routingerr.Input{
+		Phase:  routingerr.PhasePromptSend,
+		Stderr: message,
+	}).Code
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {
