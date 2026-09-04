@@ -84,20 +84,25 @@ func (r *Repository) GetWorkflowStepStageType(ctx context.Context, stepID string
 type ParticipantWriteOutcome string
 
 // IsTaskWorkflowStepTerminal reports whether a task's current workflow step
-// is terminal by the existing board convention: last by position and named
-// done/complete/completed/approved (models.IsTerminalStepName). Mirrors
-// orchestrator.workflowStepIsTerminal, which this package cannot reach
-// directly since it depends on the workflow step store, not this repo.
+// is the last step, by position, in its workflow. Unlike
+// orchestrator.workflowStepIsTerminal, this does not additionally require
+// the step name to match models.IsTerminalStepName: a workflow's final
+// column is terminal regardless of what its author named it, so this gate
+// never locks a task out of completion just because the last step isn't
+// named done/complete/completed/approved.
+// workflowStepIsTerminal keeps the name test because it decides whether a
+// step *move* should auto-complete — a different decision from "may this
+// task be marked done".
 // Returns false, nil when the task has no resolvable step.
 func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (bool, error) {
-	var workflowID, name string
+	var workflowID string
 	var position int
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT ws.workflow_id, ws.position, ws.name
+		SELECT ws.workflow_id, ws.position
 		FROM tasks t
 		JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 		WHERE t.id = ?
-	`), taskID).Scan(&workflowID, &position, &name)
+	`), taskID).Scan(&workflowID, &position)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -112,10 +117,7 @@ func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID stri
 	if err != nil {
 		return false, err
 	}
-	if hasNext {
-		return false, nil
-	}
-	return models.IsTerminalStepName(name), nil
+	return !hasNext, nil
 }
 
 const (
