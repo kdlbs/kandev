@@ -1,0 +1,23 @@
+{
+  "gateway": "claude-direct",
+  "agentId": "claude-acp",
+  "classifying": true,
+  "case": "mismatched",
+  "capture": "reconstructed",
+  "source": "internal/orchestrator/dynamic_evidence_test.go",
+  "identity": {
+    "sessionId": "claude-direct-mismatched",
+    "executionId": "exec-claude-direct-mismatched",
+    "promptGeneration": 7
+  },
+  "frames": [
+    {"kind": "message_chunk", "role": "assistant", "text": "The provider is overloaded right now (529), retrying shortly."},
+    {"kind": "prompt_error", "code": -32603, "message": "The connection closed unexpectedly while waiting for a response."}
+  ],
+  "expect": {
+    "events": ["message_chunk:diagnostic", "error"],
+    "providerError": {"source": "acp_prompt", "rpcCode": -32603, "providerId": "claude-acp"},
+    "diagnosticCode": "agent_transport_lost",
+    "preResultSafe": false
+  }
+}

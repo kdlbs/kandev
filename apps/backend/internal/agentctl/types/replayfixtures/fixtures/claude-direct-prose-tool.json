@@ -1,0 +1,25 @@
+{
+  "gateway": "claude-direct",
+  "agentId": "claude-acp",
+  "classifying": true,
+  "case": "prose-tool",
+  "capture": "reconstructed",
+  "source": "internal/orchestrator/dynamic_evidence_test.go",
+  "identity": {
+    "sessionId": "claude-direct-prose-tool",
+    "executionId": "exec-claude-direct-prose-tool",
+    "promptGeneration": 7
+  },
+  "frames": [
+    {"kind": "message_chunk", "role": "assistant", "text": "Looks like we're hitting a 529 overloaded response from the provider again, I will pause for a bit and retry shortly."},
+    {"kind": "tool_call", "toolCallId": "tool-1", "title": "Check provider status page", "status": "pending"},
+    {"kind": "tool_update", "toolCallId": "tool-1", "status": "completed"},
+    {"kind": "prompt_error", "code": -32603, "message": "API Error: Repeated 529 Overloaded errors. The API is at capacity."}
+  ],
+  "expect": {
+    "events": ["message_chunk:diagnostic", "tool_call", "tool_update", "error"],
+    "providerError": {"source": "acp_prompt", "rpcCode": -32603, "providerId": "claude-acp"},
+    "diagnosticCode": "provider_overloaded",
+    "preResultSafe": false
+  }
+}
