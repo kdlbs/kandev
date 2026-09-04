@@ -52,7 +52,7 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
         isDirty: false,
         isBinary: response.is_binary,
         repo: savedTab.repo,
-        markdownPreview: savedTab.markdownPreview,
+        renderedPreview: savedTab.renderedPreview,
       });
     } catch {
       /* skip failed tabs */

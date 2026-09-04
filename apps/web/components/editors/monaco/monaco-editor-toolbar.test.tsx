@@ -100,6 +100,44 @@ describe("MonacoEditorToolbar external file action", () => {
   });
 });
 
+describe("MonacoEditorToolbar preview action", () => {
+  const baseProps = {
+    path: "reports/index.html",
+    isDirty: false,
+    isSaving: false,
+    diffStats: null,
+    wrapEnabled: false,
+    showDiffIndicators: false,
+    enableComments: false,
+    sessionId: "session-1",
+    commentCount: 0,
+    lspStatus: { state: "disabled" } as const,
+    lspProgress: {
+      initializingSince: null,
+      active: [],
+      completed: null,
+      hasReportedProgress: false,
+    },
+    lspLanguage: null,
+    onToggleLsp: vi.fn(),
+    onToggleWrap: vi.fn(),
+    onToggleDiffIndicators: vi.fn(),
+    onSave: vi.fn(),
+  };
+
+  it("labels and invokes HTML preview", () => {
+    const onTogglePreview = vi.fn();
+    render(
+      <TooltipProvider>
+        <MonacoEditorToolbar {...baseProps} previewKind="html" onTogglePreview={onTogglePreview} />
+      </TooltipProvider>,
+    );
+
+    screen.getByRole("button", { name: "Preview HTML" }).click();
+    expect(onTogglePreview).toHaveBeenCalledOnce();
+  });
+});
+
 describe("MonacoEditorToolbar download action", () => {
   const baseProps = {
     path: "assets/report.pdf",

@@ -207,11 +207,11 @@ function useFileTabOperations({
     [setOpenFileTabs],
   );
 
-  const handleMarkdownPreviewToggle = useCallback(
+  const handleRenderedPreviewToggle = useCallback(
     (fileKey: string) => {
       setOpenFileTabs((prev) =>
         prev.map((tab) =>
-          getFileTabKey(tab) === fileKey ? { ...tab, markdownPreview: !tab.markdownPreview } : tab,
+          getFileTabKey(tab) === fileKey ? { ...tab, renderedPreview: !tab.renderedPreview } : tab,
         ),
       );
     },
@@ -230,7 +230,7 @@ function useFileTabOperations({
     handleOpenFileFromChat,
     handleCloseFileTab,
     handleFileChange,
-    handleMarkdownPreviewToggle,
+    handleRenderedPreviewToggle,
     handleFileSave,
     handleFileDelete,
     addFileTab,
@@ -300,11 +300,11 @@ function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: Op
     if (!activeSessionId) return;
     saveOpenFileTabs(
       activeSessionId,
-      openFileTabs.map(({ path, name, repo, markdownPreview }) => ({
+      openFileTabs.map(({ path, name, repo, renderedPreview }) => ({
         path,
         name,
         repo,
-        markdownPreview,
+        renderedPreview,
       })),
     );
   }, [activeSessionId, openFileTabs]);
@@ -438,7 +438,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
   const {
     handleOpenFileFromChat,
     handleFileChange,
-    handleMarkdownPreviewToggle,
+    handleRenderedPreviewToggle,
     handleFileSave,
     handleFileDelete,
   } = fileTabOps;
@@ -491,7 +491,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileChange={handleFileChange}
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
-            onToggleMarkdownPreview={() => handleMarkdownPreviewToggle(getFileTabKey(tab))}
+            onTogglePreview={() => handleRenderedPreviewToggle(getFileTabKey(tab))}
           />
         ))}
       </SessionTabs>

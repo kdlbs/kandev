@@ -32,7 +32,22 @@ vi.mock("../file-viewer-content", () => ({
   FileViewerContent: () => <span data-testid="file-content" />,
 }));
 vi.mock("../markdown-preview-content", () => ({
-  MarkdownPreviewContent: () => <span data-testid="markdown-preview" />,
+  MarkdownPreviewContent: ({ onTogglePreview }: { onTogglePreview: () => void }) => (
+    <div data-testid="markdown-preview">
+      <button type="button" onClick={onTogglePreview}>
+        Show code
+      </button>
+    </div>
+  ),
+}));
+vi.mock("../html-preview-content", () => ({
+  HtmlPreviewContent: ({ onTogglePreview }: { onTogglePreview: () => void }) => (
+    <div data-testid="html-preview">
+      <button type="button" onClick={onTogglePreview}>
+        Show code
+      </button>
+    </div>
+  ),
 }));
 vi.mock("../file-image-viewer", () => ({ FileImageViewer: () => null }));
 vi.mock("../file-binary-viewer", () => ({
@@ -103,7 +118,9 @@ describe("MobileFileViewerPanel external file action", () => {
       size: "touch",
     });
   });
+});
 
+describe("MobileFileViewerPanel preview mode", () => {
   it("opens a Markdown file directly in preview mode when requested", () => {
     render(
       <TooltipProvider>
@@ -118,7 +135,7 @@ describe("MobileFileViewerPanel external file action", () => {
           }}
           sessionId="session-1"
           onClose={vi.fn()}
-          initialMarkdownPreview
+          initialRenderedPreview
         />
       </TooltipProvider>,
     );
@@ -169,5 +186,32 @@ describe("MobileFileViewerPanel external file action", () => {
 
     expect(screen.getByTestId("file-content")).toBeTruthy();
     expect(screen.queryByTestId("markdown-preview")).toBeNull();
+  });
+
+  it("previews an HTML file and returns to the source viewer", () => {
+    render(
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: "reports/index.html",
+            name: "index.html",
+            content: "<h1>Report</h1>",
+            originalContent: "<h1>Report</h1>",
+            originalHash: "hash",
+            isDirty: false,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const toggle = screen.getByTestId("html-preview-toggle");
+    expect(toggle.className).toContain("h-11");
+    expect(toggle.className).toContain("w-11");
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("html-preview")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show code" }));
+    expect(screen.getByTestId("file-content")).toBeTruthy();
   });
 });
