@@ -45,6 +45,26 @@ func TestClassifyACPWrappedGatewayServerFailuresRejectsUntrustedProse(t *testing
 	}
 }
 
+// TestClassifyACPWrappedGatewayServerFailuresProseQuotingWrapperFormClassifies
+// pins the true, unfixed behaviour of gatewayServerFailureRe (R3-F3):
+// requirements .17 calls the rule "anchored to the exact ACP wrapper form", but
+// it is only word-boundaried, so narrative prose that merely quotes the wrapper
+// form still matches and classifies. The requirement forbids tightening the
+// regex, so this records the false-positive surface rather than asserting a
+// rejection that does not hold.
+func TestClassifyACPWrappedGatewayServerFailuresProseQuotingWrapperFormClassifies(t *testing.T) {
+	resetInjection()
+	for _, msg := range []string{
+		"the agent said: API Error: 500 Internal Server Error, please retry",
+		"summary: encountered API Error: 502 Bad Gateway while building",
+	} {
+		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "claude-acp", Stderr: msg})
+		if got.Code != CodeProviderUnavailable || got.Class != ClassTransient {
+			t.Fatalf("%q classification = %+v, want transient provider_unavailable (unanchored regex still matches prose quoting the wrapper form)", msg, got)
+		}
+	}
+}
+
 func TestClassifyProxyCredentialsRefusedIsHard(t *testing.T) {
 	resetInjection()
 	got := Classify(Input{
