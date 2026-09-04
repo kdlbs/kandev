@@ -122,12 +122,15 @@ type Task struct {
 	WorkflowStepID         string
 	Position               int32
 	AssigneeAgentProfileID string
-	Autopilot              bool
-	WIPAdmitted            bool
-	QueuedForStepID        string
-	QueuedAt               *string
-	ProjectID              string
-	ExternalID             string
+	// Deprecated: provider-specific labels belong in plugin-owned task state
+	// and UI slot data. Retained for API v1 source and wire compatibility.
+	Labels          []string
+	Autopilot       bool
+	WIPAdmitted     bool
+	QueuedForStepID string
+	QueuedAt        *string
+	ProjectID       string
+	ExternalID      string
 }
 
 // TaskPullRequest is one change opened for a task. Provider-neutral by design:
@@ -219,6 +222,7 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		WorkflowStepId:         t.WorkflowStepID,
 		Position:               t.Position,
 		AssigneeAgentProfileId: t.AssigneeAgentProfileID,
+		Labels:                 t.Labels,
 		Autopilot:              t.Autopilot,
 		WipAdmitted:            t.WIPAdmitted,
 		QueuedForStepId:        t.QueuedForStepID,
@@ -289,6 +293,7 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		WorkflowStepID:         p.GetWorkflowStepId(),
 		Position:               p.GetPosition(),
 		AssigneeAgentProfileID: p.GetAssigneeAgentProfileId(),
+		Labels:                 p.GetLabels(),
 		Autopilot:              p.GetAutopilot(),
 		WIPAdmitted:            p.GetWipAdmitted(),
 		QueuedForStepID:        p.GetQueuedForStepId(),

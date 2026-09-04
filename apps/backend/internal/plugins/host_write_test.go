@@ -496,6 +496,29 @@ func TestPluginHost_Tasks_RejectsInvalidPriority(t *testing.T) {
 	}
 }
 
+func TestPluginHost_Tasks_UpdateRejectsWorkflowStepIDBeforeInvalidPriority(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	step := "step-2"
+	badPriority := "urgent"
+
+	_, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{
+		ID:             "task-1",
+		WorkflowStepID: &step,
+		Priority:       &badPriority,
+	})
+
+	if got := status.Code(err); got != codes.InvalidArgument {
+		t.Fatalf("Update() error code = %v, want InvalidArgument", got)
+	}
+	const wantMessage = "workflow_step_id cannot be set via UpdateTask: use MoveTask to transition a task between workflow steps"
+	if got := status.Convert(err).Message(); got != wantMessage {
+		t.Fatalf("Update() error message = %q, want %q", got, wantMessage)
+	}
+	if d.taskWriter.updateCalls != 0 {
+		t.Fatalf("task writer called %d times for a rejected move", d.taskWriter.updateCalls)
+	}
+}
+
 func TestPluginHost_Tasks_UpdateRequiresID(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
 	_, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{})

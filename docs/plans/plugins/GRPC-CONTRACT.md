@@ -213,6 +213,11 @@ duplicated here; this section covers the RPC list (added to `service Host` above
 capability gating, and cross-cutting conventions. See ADR 0043
 (`docs/decisions/0043-plugin-host-data-api.md`) for the design rationale.
 
+API v1 DTO fields are additive-only. `Task.labels` field 23, shipped in v0.93.0,
+remains generated and readable as a deprecated compatibility field. New plugins
+store provider-specific annotations in plugin-owned task state and render them
+through plugin UI slots; CreateTask and UpdateTask do not expose label writes.
+
 **Readable resources.** Each read RPC requires `api_read:<resource>` in the
 plugin's manifest:
 

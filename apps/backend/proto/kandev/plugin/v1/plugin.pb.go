@@ -2403,7 +2403,12 @@ type Task struct {
 	// `runner` row in workflow_step_participants (ADR 0005 Wave F); this is the
 	// same read-time projection kandev's own callers consume.
 	AssigneeAgentProfileId string `protobuf:"bytes,22,opt,name=assignee_agent_profile_id,json=assigneeAgentProfileId,proto3" json:"assignee_agent_profile_id,omitempty"`
-	Autopilot              bool   `protobuf:"varint,24,opt,name=autopilot,proto3" json:"autopilot,omitempty"`
+	// Deprecated compatibility field shipped in API v1. New plugins should keep
+	// provider-specific labels in plugin-owned task state and UI slot data.
+	//
+	// Deprecated: Marked as deprecated in kandev/plugin/v1/plugin.proto.
+	Labels    []string `protobuf:"bytes,23,rep,name=labels,proto3" json:"labels,omitempty"`
+	Autopilot bool     `protobuf:"varint,24,opt,name=autopilot,proto3" json:"autopilot,omitempty"`
 	// Whether the task consumes a slot in its current step's WIP capacity. A
 	// queued task stays visible but admits nothing, so a capacity report that
 	// counted rows rather than this would over-count.
@@ -2600,6 +2605,14 @@ func (x *Task) GetAssigneeAgentProfileId() string {
 		return x.AssigneeAgentProfileId
 	}
 	return ""
+}
+
+// Deprecated: Marked as deprecated in kandev/plugin/v1/plugin.proto.
+func (x *Task) GetLabels() []string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
 }
 
 func (x *Task) GetAutopilot() bool {
@@ -7411,7 +7424,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\bPageInfo\x12\x1f\n" +
 	"\vnext_cursor\x18\x01 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xe6\b\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xf4\b\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
@@ -7443,7 +7456,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\rpull_requests\x18\x13 \x03(\v2!.kandev.plugin.v1.TaskPullRequestR\fpullRequests\x12(\n" +
 	"\x10workflow_step_id\x18\x14 \x01(\tR\x0eworkflowStepId\x12\x1a\n" +
 	"\bposition\x18\x15 \x01(\x05R\bposition\x129\n" +
-	"\x19assignee_agent_profile_id\x18\x16 \x01(\tR\x16assigneeAgentProfileId\x12\x1c\n" +
+	"\x19assignee_agent_profile_id\x18\x16 \x01(\tR\x16assigneeAgentProfileId\x12\x1a\n" +
+	"\x06labels\x18\x17 \x03(\tB\x02\x18\x01R\x06labels\x12\x1c\n" +
 	"\tautopilot\x18\x18 \x01(\bR\tautopilot\x12!\n" +
 	"\fwip_admitted\x18\x19 \x01(\bR\vwipAdmitted\x12+\n" +
 	"\x12queued_for_step_id\x18\x1a \x01(\tR\x0fqueuedForStepId\x12 \n" +
@@ -7458,7 +7472,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"_parent_idB\x0e\n" +
 	"\f_archived_atB\f\n" +
 	"\n" +
-	"_queued_atJ\x04\b\x17\x10\x18R\x06labels\"\xab\x01\n" +
+	"_queued_at\"\xab\x01\n" +
 	"\x0eTaskRepository\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
 	"\rrepository_id\x18\x02 \x01(\tR\frepositoryId\x12\x1f\n" +

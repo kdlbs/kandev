@@ -249,7 +249,7 @@ domain structs. See [ADR 0043](../../../decisions/0043-plugin-host-data-api.md) 
 
 | RPC                     | Capability                   | Returns                                                                                                                                                                                                                                           |
 | ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, workflow-step ID, title, description, state, priority, timestamps, parent, identifier, repositories, metadata)                                                                                         |
+| `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, workflow-step ID, title, description, state, priority, timestamps, parent, identifier, repositories, metadata, and deprecated API v1 labels compatibility)                                             |
 | `ListWorkspaces`        | `api_read:workspaces`        | Workspaces (id, name, owner, defaults, timestamps)                                                                                                                                                                                                |
 | `ListWorkflows`         | `api_read:workflows`         | Workflows for a workspace                                                                                                                                                                                                                         |
 | `ListWorkflowSteps`     | `api_read:workflows`         | Steps for a workflow (id, name, position, stage type)                                                                                                                                                                                             |
@@ -266,6 +266,11 @@ the token business. `SessionCodeStats` is a deliberately computed shape — the
 aggregate the agent-stats plugin previously re-derived by hand from
 `task_session_commits` and `task_session_git_snapshots` — so plugins never touch
 those raw rows.
+
+`Task.labels` field 23 shipped in v0.93.0 and remains generated/readable because
+API v1 DTO evolution is additive-only. It is deprecated: new provider plugins
+keep tracker annotations in plugin-owned task state and UI slot data, and the
+plugin task write contract does not expose label mutation.
 
 **Conversation content (`api_read:messages`, ADR 0047).** `ListMessages` reads
 historical user/agent message content — the data a "summarize yesterday"

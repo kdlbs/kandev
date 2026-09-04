@@ -236,6 +236,11 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
 	}
+	if in.WorkflowStepID != nil {
+		return nil, invalidArgument(
+			"workflow_step_id cannot be set via UpdateTask: use MoveTask to transition a task between workflow steps",
+		)
+	}
 	if in.Priority != nil && taskmodels.ValidateTaskPriority(*in.Priority) != nil {
 		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
 	}

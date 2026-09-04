@@ -2,8 +2,10 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
@@ -127,6 +129,7 @@ func taskModelToDTO(t *taskmodels.Task) pluginsdk.Task {
 		WorkflowStepID:         t.WorkflowStepID,
 		Position:               int32(t.Position),
 		AssigneeAgentProfileID: t.AssigneeAgentProfileID,
+		Labels:                 decodeTaskLabels(t.Labels),
 		Autopilot:              t.Autopilot,
 		WIPAdmitted:            t.WIPAdmitted,
 		QueuedForStepID:        t.QueuedForStepID,
@@ -142,6 +145,18 @@ func timePtrToRFC3339(t *time.Time) *string {
 	}
 	s := t.UTC().Format(time.RFC3339)
 	return &s
+}
+
+func decodeTaskLabels(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" {
+		return nil
+	}
+	var labels []string
+	if err := json.Unmarshal([]byte(raw), &labels); err != nil {
+		return nil
+	}
+	return labels
 }
 
 // taskPRsToDTOs maps kandev's own PR rows onto the plugin contract. Review and

@@ -843,6 +843,13 @@ browser updates occur. Kandev stamps the source as `plugin:<id>` and reserves
 the `metadata.source` key; plugin metadata is stored under that source. `.Update`
 writes title, description, state, and priority: it rejects a workflow step
 change.
+
+The read-side `Task.Labels` field remains available only as deprecated API v1
+compatibility for plugins built against Kandev v0.93.0. New plugins should keep
+provider-specific labels or tracker annotations in plugin-owned task state and
+render them through task UI slots. `.Create` and `.Update` do not write Kandev
+task labels.
+
 Moving a task between workflow steps goes through `.Move` instead, which routes
 through the same path the board's own drag-and-drop move uses (validation, WIP
 admission, `task.moved` publication, auto-start gates, queue reconciliation),

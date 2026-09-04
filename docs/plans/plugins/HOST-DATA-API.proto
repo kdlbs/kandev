@@ -86,6 +86,7 @@ message Task {
   bool is_ephemeral = 15;
   repeated TaskRepository repositories = 16;
   google.protobuf.Struct metadata = 17;  // free-form; plugin-tolerant
+  repeated string labels = 23 [deprecated = true]; // API v1 compatibility only.
 }
 message TaskRepository {
   string id = 1;

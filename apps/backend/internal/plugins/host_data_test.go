@@ -965,6 +965,7 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 		Repositories: []*taskmodels.TaskRepository{
 			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 		},
+		Labels:   `["bug","customer"]`,
 		Metadata: map[string]any{"k": "v"},
 	}
 
@@ -990,6 +991,17 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	}
 	if dto.WorkflowStepID != "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f" {
 		t.Errorf("WorkflowStepID = %q, want %q", dto.WorkflowStepID, "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f")
+	}
+	if got, want := dto.Labels, []string{"bug", "customer"}; !reflect.DeepEqual(got, want) { //nolint:staticcheck // verifies deprecated API v1 compatibility
+		t.Errorf("Labels = %v, want %v", got, want)
+	}
+}
+
+func TestTaskModelToDTO_MalformedLabelsFallbackToEmpty(t *testing.T) {
+	dto := taskModelToDTO(&taskmodels.Task{ID: "task-1", Labels: `not-json`})
+	labels := dto.Labels //nolint:staticcheck // verifies deprecated API v1 compatibility
+	if len(labels) != 0 {
+		t.Errorf("Labels = %#v, want empty fallback for malformed stored JSON", labels)
 	}
 }
 

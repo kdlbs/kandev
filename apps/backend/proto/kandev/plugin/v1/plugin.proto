@@ -394,8 +394,9 @@ message Task {
   // `runner` row in workflow_step_participants (ADR 0005 Wave F); this is the
   // same read-time projection kandev's own callers consume.
   string assignee_agent_profile_id = 22;
-  reserved 23;
-  reserved "labels";
+  // Deprecated compatibility field shipped in API v1. New plugins should keep
+  // provider-specific labels in plugin-owned task state and UI slot data.
+  repeated string labels = 23 [deprecated = true];
   bool autopilot = 24;
   // Whether the task consumes a slot in its current step's WIP capacity. A
   // queued task stays visible but admits nothing, so a capacity report that

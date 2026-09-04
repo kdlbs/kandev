@@ -1,12 +1,19 @@
 package pluginsdk
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func strPtr(s string) *string { return &s }
+
+func TestTaskRetainsReleasedLabelsSourceField(t *testing.T) {
+	field, ok := reflect.TypeOf(Task{}).FieldByName("Labels")
+	require.True(t, ok, "Task.Labels shipped in v0.93.0 and must remain source-compatible in API v1")
+	require.Equal(t, reflect.TypeOf([]string{}), field.Type)
+}
 
 func TestPageProtoRoundTrip(t *testing.T) {
 	p := Page{Limit: 25, Cursor: "cursor-1"}
@@ -61,6 +68,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 			ChecksTotal: 5, ChecksPassing: 5, Additions: 12, Deletions: 3, AuthorLogin: "nova28",
 		}},
 		WorkflowStepID: "step-review", Position: 4, AssigneeAgentProfileID: "agent-1",
+		Labels:    []string{"bug", "customer"},
 		Autopilot: true, WIPAdmitted: true,
 		QueuedForStepID: "step-build", QueuedAt: strPtr("2026-07-16T10:00:00Z"),
 		ProjectID: "project-1", ExternalID: "external-1",
@@ -74,6 +82,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 	require.Equal(t, "feature/fix", proto.GetRepositories()[0].GetCheckoutBranch())
 	require.Empty(t, proto.GetRepositories()[1].GetCheckoutBranch(), "empty checkout branches remain wire-compatible")
 	require.Equal(t, "step-review", proto.GetWorkflowStepId())
+	require.Equal(t, []string{"bug", "customer"}, proto.GetLabels()) //nolint:staticcheck // verifies deprecated API v1 compatibility
 	require.True(t, proto.GetAutopilot())
 	require.Len(t, proto.GetPullRequests(), 1)
 	require.Equal(t, int64(42), proto.GetPullRequests()[0].GetNumber())
