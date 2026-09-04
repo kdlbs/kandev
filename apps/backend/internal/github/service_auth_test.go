@@ -124,7 +124,7 @@ func TestCoordinateLegacyClientGatesIdentityProbe(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		service.coordinateLegacyClient(client, "")
+		service.coordinateLegacyClient(context.Background(), client, "")
 		close(done)
 	}()
 	select {

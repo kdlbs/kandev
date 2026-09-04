@@ -252,7 +252,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 			return newLegacyGitTransportCredential(ctx, secrets, log)
 		})
 	}
-	service.coordinateLegacyClient(client, "")
+	service.coordinateLegacyClient(context.Background(), client, "")
 	return service
 }
 
@@ -302,13 +302,13 @@ func (s *Service) getPromptResolver() PromptResolver {
 // tracker. Centralizing this guards against forgetting the wiring on auth
 // flips (e.g. ConfigureToken), which would otherwise leave PAT calls
 // invisible to the rate-limit UI, health checks, and poller throttling.
-func (s *Service) newPATClient(token string) *PATClient {
+func (s *Service) newPATClient(ctx context.Context, token string) *PATClient {
 	c := NewPATClient(token)
-	s.coordinateLegacyClient(c, "")
+	s.coordinateLegacyClient(ctx, c, "")
 	return c
 }
 
-func (s *Service) coordinateLegacyClient(client Client, login string) {
+func (s *Service) coordinateLegacyClient(ctx context.Context, client Client, login string) {
 	if client == nil {
 		return
 	}
@@ -326,7 +326,7 @@ func (s *Service) coordinateLegacyClient(client Client, login string) {
 	wireRateTracker(client, tracker)
 	wireRateAdmission(client, admission)
 	if strings.TrimSpace(login) == "" {
-		login = resolvedLegacyLogin(client)
+		login = resolvedLegacyLogin(ctx, client)
 		if login != "" {
 			principal.Login = login
 			tracker, admission = s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
@@ -336,7 +336,7 @@ func (s *Service) coordinateLegacyClient(client Client, login string) {
 	}
 }
 
-func resolvedLegacyLogin(client Client) string {
+func resolvedLegacyLogin(ctx context.Context, client Client) string {
 	// Only startup clients with a real authenticated identity should make this
 	// probe. Test/fallback clients may embed nil implementations.
 	switch typedClient := client.(type) {
@@ -344,7 +344,7 @@ func resolvedLegacyLogin(client Client) string {
 		if typedClient == nil {
 			return ""
 		}
-		login, err := typedClient.GetAuthenticatedUser(context.Background())
+		login, err := typedClient.GetAuthenticatedUser(ctx)
 		if err == nil {
 			return strings.TrimSpace(login)
 		}
@@ -352,7 +352,7 @@ func resolvedLegacyLogin(client Client) string {
 		if typedClient == nil {
 			return ""
 		}
-		login, err := typedClient.GetAuthenticatedUser(context.Background())
+		login, err := typedClient.GetAuthenticatedUser(ctx)
 		if err == nil {
 			return strings.TrimSpace(login)
 		}

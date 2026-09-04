@@ -3,11 +3,35 @@ package github
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+type blockingGitHubRoundTripper struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (t *blockingGitHubRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.once.Do(func() { close(t.started) })
+	select {
+	case <-req.Context().Done():
+		return nil, req.Context().Err()
+	case <-t.release:
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"login":"test-user"}`)),
+		Header:     make(http.Header),
+	}, nil
+}
 
 // mockSecretManager implements SecretManager for testing.
 type mockSecretManager struct {
@@ -274,7 +298,7 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 		rateTracker: NewRateTracker(nil, nil),
 	}
 
-	c := svc.newPATClient("ghp_x")
+	c := svc.newPATClient(context.Background(), "ghp_x")
 	if c == nil {
 		t.Fatalf("newPATClient returned nil")
 	}
@@ -283,5 +307,46 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 	}
 	if c.rateAdmission == nil {
 		t.Fatal("expected principal admission to be wired onto the new PAT client")
+	}
+}
+
+func TestConfigureTokenHonorsCancellationDuringLegacyPrincipalResolution(t *testing.T) {
+	previousTransport := http.DefaultTransport
+	transport := &blockingGitHubRoundTripper{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	http.DefaultTransport = transport
+	t.Cleanup(func() {
+		http.DefaultTransport = previousTransport
+		close(transport.release)
+	})
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := newMockSecretManager()
+	svc := &Service{
+		secrets:       &mockSecretProvider{mgr: mgr},
+		secretManager: mgr,
+		logger:        log,
+		rateTracker:   NewRateTracker(nil, nil),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan error, 1)
+	go func() { done <- svc.ConfigureToken(ctx, "ghp_test") }()
+
+	select {
+	case <-done:
+		t.Fatal("ConfigureToken completed before the blocked principal probe was released")
+	case <-transport.started:
+	}
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("ConfigureToken ignored cancellation while resolving the legacy principal")
 	}
 }
