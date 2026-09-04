@@ -2504,6 +2504,15 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	// Recover routes orphaned at "starting" by a launch failure that never
+	// reached a terminal route status. Must run before
+	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former
+	// normalizes every STARTING/RUNNING session to WAITING_FOR_INPUT, which
+	// would make every orphaned route look like a terminal, already-explained
+	// session and hide it from this sweep; the latter can begin dispatching
+	// new launches, which would let a genuinely in-flight claim race this
+	// snapshot of "starting" routes.
+	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
@@ -2574,10 +2583,6 @@ func (s *Service) Start(ctx context.Context) error {
 	// Restore durable dynamic policy waits after the route and lifecycle
 	// services are ready. Only un-dispatched pending states are scheduled.
 	s.startDynamicPolicyRecovery(ctx)
-
-	// Recover routes orphaned at "starting" by a launch failure that never
-	// reached a terminal route status.
-	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 
 	// Start the idle-session reaper last. It depends on s.repo
 	// (already wired), s.agentManager (already wired), and the

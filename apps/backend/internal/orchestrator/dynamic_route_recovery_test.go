@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentruntimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -222,6 +224,72 @@ func TestReconcileOrphanedDynamicStartingRoutes_SweepsInFlightLaunchStates(t *te
 				t.Fatalf("task session route_state = %q, want action_required", session.RouteState)
 			}
 		})
+	}
+}
+
+// TestReconcileOrphanedDynamicStartingRoutes_PrecedesGeneralStartupReconciliation
+// is the regression test for the CodeRabbit finding on Create PR review
+// (service.go#L2580): Service.Start runs reconcileExecutorSessionsOnStartup
+// before reconcileOrphanedDynamicStartingRoutes, and the former flips every
+// STARTING/RUNNING session with an executors_running row to
+// WAITING_FOR_INPUT — a state the orphan sweep treats as an already-explained
+// terminal outcome and skips. Almost every claimed dynamic route has an
+// executors_running row by the time a crash strands it (PrepareSession's
+// background workspace launch creates the row early), so running the two in
+// Start's original order would make the sweep a no-op for the exact scenario
+// it exists to recover. This test drives the two reconcilers in Start's
+// actual order and requires the route to still reach action_required.
+func TestReconcileOrphanedDynamicStartingRoutes_PrecedesGeneralStartupReconciliation(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-orphan-ordering"
+		sessionID   = "session-dynamic-orphan-ordering"
+		executionID = "execution-dynamic-orphan-ordering"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:        sessionID,
+		SessionID: sessionID,
+		TaskID:    taskID,
+		Runtime:   agentruntimekind.RuntimeStandalone,
+		Status:    models.ExecutorRunningStatusRunning,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upsert executor row: %v", err)
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+
+	// Mirror Service.Start's exact ordering: the orphan sweep must run before
+	// the general startup reconciler.
+	svc.reconcileOrphanedDynamicStartingRoutes(ctx)
+	svc.reconcileExecutorSessionsOnStartup(ctx)
+
+	routeState, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if routeState == nil || routeState.Status != "action_required" {
+		t.Fatalf("durable route state = %#v, want action_required", routeState)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.RouteState != "action_required" {
+		t.Fatalf("task session route_state = %q, want action_required", session.RouteState)
+	}
+	// The general reconciler still ran (and ran second): the session itself
+	// settles to WAITING_FOR_INPUT the ordinary way.
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("task session state = %q, want WAITING_FOR_INPUT", session.State)
 	}
 }
 
