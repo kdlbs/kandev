@@ -2,9 +2,14 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/workflow/models"
 )
@@ -190,6 +195,77 @@ func TestListParticipantsForTaskWorkflow_ScopesRowsToActiveWorkflow(t *testing.T
 	}
 }
 
+// TestListParticipantMethods_ReadProvenanceAsATypedValue is
+// AC-OFFICE-SEAT-PROVENANCE-001.5: provenance must be readable as a typed
+// value wherever a seat is read — every in-process reader of the seat
+// store, not just GetStepParticipant and EnsureRoleSeat's own internal
+// query. ListStepParticipantsForTask, ListParticipantsForTaskAnyStep,
+// ListParticipantsForTaskWorkflow and ListStepParticipants previously
+// selected every column except provenance, so every consumer of these four
+// methods silently read the Go zero value instead of "auto" or "manual".
+func TestListParticipantMethods_ReadProvenanceAsATypedValue(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	autoSeat, _, err := repo.EnsureRoleSeat(ctx, "wf-test", step.ID, "task-prov", string(models.ParticipantRoleReviewer), "agent-auto")
+	if err != nil {
+		t.Fatalf("ensure role seat: %v", err)
+	}
+	manualSeat := &models.WorkflowStepParticipant{
+		StepID: step.ID, TaskID: "task-prov", Role: models.ParticipantRoleApprover, AgentProfileID: "agent-manual",
+	}
+	if err := repo.UpsertStepParticipant(ctx, manualSeat); err != nil {
+		t.Fatalf("upsert manual participant: %v", err)
+	}
+
+	assertProvenance := func(t *testing.T, got []*models.WorkflowStepParticipant, id string, want models.ParticipantProvenance) {
+		t.Helper()
+		for _, p := range got {
+			if p.ID == id {
+				if p.Provenance != want {
+					t.Errorf("participant %s provenance = %q, want %q", id, p.Provenance, want)
+				}
+				return
+			}
+		}
+		t.Errorf("participant %s not found in %+v", id, got)
+	}
+
+	forTask, err := repo.ListStepParticipantsForTask(ctx, step.ID, "task-prov")
+	if err != nil {
+		t.Fatalf("ListStepParticipantsForTask: %v", err)
+	}
+	assertProvenance(t, forTask, autoSeat.ID, models.ParticipantProvenanceAuto)
+	assertProvenance(t, forTask, manualSeat.ID, models.ParticipantProvenanceManual)
+
+	anyStep, err := repo.ListParticipantsForTaskAnyStep(ctx, "task-prov")
+	if err != nil {
+		t.Fatalf("ListParticipantsForTaskAnyStep: %v", err)
+	}
+	assertProvenance(t, anyStep, autoSeat.ID, models.ParticipantProvenanceAuto)
+	assertProvenance(t, anyStep, manualSeat.ID, models.ParticipantProvenanceManual)
+
+	forWorkflow, err := repo.ListParticipantsForTaskWorkflow(ctx, "task-prov", "wf-test")
+	if err != nil {
+		t.Fatalf("ListParticipantsForTaskWorkflow: %v", err)
+	}
+	assertProvenance(t, forWorkflow, autoSeat.ID, models.ParticipantProvenanceAuto)
+	assertProvenance(t, forWorkflow, manualSeat.ID, models.ParticipantProvenanceManual)
+
+	templateSeat := &models.WorkflowStepParticipant{
+		StepID: step.ID, Role: models.ParticipantRoleWatcher, AgentProfileID: "agent-template",
+	}
+	if err := repo.UpsertStepParticipant(ctx, templateSeat); err != nil {
+		t.Fatalf("upsert template participant: %v", err)
+	}
+	templateRows, err := repo.ListStepParticipants(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("ListStepParticipants: %v", err)
+	}
+	assertProvenance(t, templateRows, templateSeat.ID, models.ParticipantProvenanceManual)
+}
+
 func TestDeleteStepParticipant_RemovesRow(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
@@ -271,6 +347,106 @@ func TestEnsureRoleSeat_StampsAutoProvenance(t *testing.T) {
 	}
 	if got.Provenance != models.ParticipantProvenanceAuto {
 		t.Fatalf("persisted provenance = %q, want %q", got.Provenance, models.ParticipantProvenanceAuto)
+	}
+}
+
+// TestProvenanceColumn_ReplayMigrationDefaultsExistingRows is
+// AC-OFFICE-SEAT-PROVENANCE-001.4/001.6: a seat that existed before
+// provenance was recorded must read as "manual" after the upgrade, with
+// its agent profile, decision-required flag and position preserved, and
+// the "workflow_step_participants.provenance" ADD COLUMN migration
+// (initPhase2Schema) must be safe to apply more than once — mirroring
+// AGENTS.md's fresh-DB-plus-replay requirement for schema migrations.
+func TestProvenanceColumn_ReplayMigrationDefaultsExistingRows(t *testing.T) {
+	rawDB, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	rawDB.SetMaxOpenConns(1)
+	db := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Legacy shape: every column workflow_step_participants had before this
+	// feature's provenance column, including workflow_steps (the FK target)
+	// and workflows (workflow_steps' own FK target).
+	if _, err := db.Exec(`
+		CREATE TABLE workflows (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
+			workflow_template_id TEXT DEFAULT '', name TEXT NOT NULL,
+			description TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_sessions (id TEXT PRIMARY KEY);
+		CREATE TABLE workflow_steps (
+			id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, name TEXT NOT NULL,
+			position INTEGER NOT NULL, color TEXT, prompt TEXT, events TEXT,
+			allow_manual_move INTEGER DEFAULT 1, is_start_step INTEGER DEFAULT 0,
+			show_in_command_panel INTEGER DEFAULT 1, auto_archive_after_hours INTEGER DEFAULT 0,
+			agent_profile_id TEXT DEFAULT '', stage_type TEXT NOT NULL DEFAULT 'custom',
+			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+		);
+		CREATE TABLE workflow_step_participants (
+			id TEXT PRIMARY KEY,
+			step_id TEXT NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
+			task_id TEXT NOT NULL DEFAULT '',
+			role TEXT NOT NULL CHECK (role IN ('reviewer','approver','watcher','collaborator','runner')),
+			agent_profile_id TEXT NOT NULL,
+			decision_required INTEGER NOT NULL DEFAULT 0,
+			position INTEGER NOT NULL DEFAULT 0
+		);
+		INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
+			VALUES ('wf-replay-provenance', '', 'Replay', datetime('now'), datetime('now'));
+		INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
+			VALUES ('legacy-provenance-step', 'wf-replay-provenance', 'Legacy', 0, datetime('now'), datetime('now'));
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+			VALUES ('legacy-participant', 'legacy-provenance-step', 'legacy-task', 'reviewer', 'agent-legacy', 1, 3);
+	`); err != nil {
+		t.Fatalf("seed legacy database: %v", err)
+	}
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("reopen repo (first migration pass): %v", err)
+	}
+
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('workflow_step_participants') WHERE name = 'provenance'`).Scan(&columnCount); err != nil {
+		t.Fatalf("inspect migrated schema: %v", err)
+	}
+	if columnCount != 1 {
+		t.Fatalf("provenance migration column count = %d, want 1", columnCount)
+	}
+
+	got, err := repo.GetStepParticipant(context.Background(), "legacy-participant")
+	if err != nil {
+		t.Fatalf("get legacy participant: %v", err)
+	}
+	if got.Provenance != models.ParticipantProvenanceManual {
+		t.Fatalf("legacy row provenance = %q, want %q (a pre-existing seat must not become claimable by the upgrade alone)", got.Provenance, models.ParticipantProvenanceManual)
+	}
+	if got.AgentProfileID != "agent-legacy" {
+		t.Fatalf("legacy row agent_profile_id = %q, want unchanged %q", got.AgentProfileID, "agent-legacy")
+	}
+	if !got.DecisionRequired {
+		t.Fatalf("legacy row decision_required = false, want unchanged true")
+	}
+	if got.Position != 3 {
+		t.Fatalf("legacy row position = %d, want unchanged 3", got.Position)
+	}
+
+	// Replay: reopening against the already-migrated database must not
+	// fail and must leave the row exactly as it was.
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("reopen repo (replay migration pass): %v", err)
+	}
+	replayed, err := repo.GetStepParticipant(context.Background(), "legacy-participant")
+	if err != nil {
+		t.Fatalf("get legacy participant after replay: %v", err)
+	}
+	if replayed.Provenance != models.ParticipantProvenanceManual || replayed.AgentProfileID != "agent-legacy" {
+		t.Fatalf("replay changed legacy row: %+v", replayed)
 	}
 }
 
@@ -522,6 +698,81 @@ func TestRecordStepDecision_RejectsBadInput(t *testing.T) {
 		if err := repo.RecordStepDecision(ctx, d); err == nil {
 			t.Fatalf("case %d: expected error", i)
 		}
+	}
+}
+
+// TestRecordStepDecision_RejectsStaleParticipantSeatIdentity protects the
+// decision boundary after a manual registration claims an automatic seat.
+// The caller can resolve the old seat before the claim, so the write path must
+// verify the seat holder again inside its transaction.
+func TestRecordStepDecision_RejectsStaleParticipantSeatIdentity(t *testing.T) {
+	repo, db := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	const (
+		taskID        = "task-stale-seat"
+		participantID = "seat-stale"
+		oldAgentID    = "agent-old"
+		newAgentID    = "agent-new"
+	)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES (?, ?, ?, 'reviewer', ?, 1, 0, 'auto')
+	`, participantID, step.ID, taskID, oldAgentID); err != nil {
+		t.Fatalf("seed automatic seat: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE workflow_step_participants
+		SET agent_profile_id = ?, provenance = 'manual'
+		WHERE id = ?
+	`, newAgentID, participantID); err != nil {
+		t.Fatalf("claim automatic seat: %v", err)
+	}
+
+	err := repo.RecordStepDecision(ctx, &models.WorkflowStepDecision{
+		TaskID:        taskID,
+		StepID:        step.ID,
+		ParticipantID: participantID,
+		Decision:      "approved",
+		DeciderType:   "agent",
+		DeciderID:     oldAgentID,
+		Role:          string(models.ParticipantRoleReviewer),
+	})
+	if !errors.Is(err, ErrParticipantSeatChanged) {
+		t.Fatalf("error = %v, want ErrParticipantSeatChanged", err)
+	}
+}
+
+func TestRecordStepDecision_AcceptsCurrentParticipantSeatIdentity(t *testing.T) {
+	repo, db := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	const (
+		taskID        = "task-current-seat"
+		participantID = "seat-current"
+		agentID       = "agent-current"
+	)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES (?, ?, ?, 'reviewer', ?, 1, 0, 'manual')
+	`, participantID, step.ID, taskID, agentID); err != nil {
+		t.Fatalf("seed participant seat: %v", err)
+	}
+
+	if err := repo.RecordStepDecision(ctx, &models.WorkflowStepDecision{
+		TaskID:        taskID,
+		StepID:        step.ID,
+		ParticipantID: participantID,
+		Decision:      "approved",
+		DeciderType:   agentDeciderType,
+		DeciderID:     agentID,
+		Role:          string(models.ParticipantRoleReviewer),
+	}); err != nil {
+		t.Fatalf("record decision: %v", err)
 	}
 }
 

@@ -56,6 +56,25 @@ export async function waitForSessionDone(
     .toBe(true);
 }
 
+export async function waitForAgentMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  content: string,
+  timeout = 60_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some(
+          (message) => message.author_type === "agent" && message.content.includes(content),
+        );
+      },
+      { timeout, message: `Waiting for agent message containing ${JSON.stringify(content)}` },
+    )
+    .toBe(true);
+}
+
 export async function waitForSessionState(
   apiClient: ApiClient,
   options: {

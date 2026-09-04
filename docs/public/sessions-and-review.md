@@ -71,6 +71,16 @@ Every row has **Send Now** for targeted priority. It sends that row directly whe
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
+## View active conversations in Threads
+
+Use **Threads** to read active task conversations side by side without opening each task. Open it from the workspace view control or navigation, or go to **`/threads`**.
+
+Threads shows one column for each task with an active primary agent session. The column header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
+
+On desktop, use the session tabs in a column to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. The selected conversation keeps its normal reply controls, so you can answer the agent without leaving Threads.
+
+Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+
 <details>
 <summary>Let agents coordinate sessions</summary>
 

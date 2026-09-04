@@ -42,7 +42,8 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
@@ -102,7 +103,8 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if err != nil {
 		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}

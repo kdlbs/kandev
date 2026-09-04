@@ -282,6 +282,7 @@ func buildTaskDTOsWithSessionInfo(
 			si.executorType,
 			si.executorName,
 			si.agentName,
+			si.agentProfileID,
 			si.workingDirectory,
 			si.sessionState,
 			dto.PendingActionPtr(si.sessionID, pendingActionsBySession),
@@ -317,6 +318,7 @@ type sessionInfoFields struct {
 	executorType     *string
 	executorName     *string
 	agentName        *string
+	agentProfileID   *string
 	workingDirectory *string
 }
 
@@ -350,6 +352,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		if name, ok := info.AgentProfileSnapshot["name"].(string); ok && name != "" {
 			si.agentName = &name
 		}
+	}
+	if info.AgentProfileID != "" {
+		id := info.AgentProfileID
+		si.agentProfileID = &id
 	}
 	if info.RepositorySnapshot != nil {
 		if path, ok := info.RepositorySnapshot["path"].(string); ok && path != "" {

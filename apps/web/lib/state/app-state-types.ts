@@ -122,6 +122,7 @@ export type AppState = KanbanSlice & {
   turns: (typeof defaultSessionState)["turns"];
   taskSessions: (typeof defaultSessionState)["taskSessions"];
   taskSessionsByTask: (typeof defaultSessionState)["taskSessionsByTask"];
+  pendingActionProjectionsBySessionId: (typeof defaultSessionState)["pendingActionProjectionsBySessionId"];
   sessionAgentctl: (typeof defaultSessionState)["sessionAgentctl"];
   worktrees: (typeof defaultSessionState)["worktrees"];
   sessionWorktreesBySessionId: (typeof defaultSessionState)["sessionWorktreesBySessionId"];
@@ -226,6 +227,7 @@ export type AppState = KanbanSlice & {
   updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
+  threadViews: (typeof defaultUIState)["threadViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
@@ -459,11 +461,17 @@ export type AppState = KanbanSlice & {
     sessionId: string,
     pendingAction: TaskPendingAction | null,
     revision?: TaskPendingActionRevision,
+    taskId?: string,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
-  setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
+  setTaskSessionsForTask: (
+    taskId: string,
+    sessions: TaskSession[],
+    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+  ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
+  setTaskSessionsError: (taskId: string, error: string | null) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
   setWorktree: (worktree: Worktree) => void;
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
@@ -569,6 +577,16 @@ export type AppState = KanbanSlice & {
   toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
   toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
+  updateThreadViewDraft: UIA["updateThreadViewDraft"];
+  saveThreadViewDraftAs: UIA["saveThreadViewDraftAs"];
+  saveThreadViewDraftOverwrite: UIA["saveThreadViewDraftOverwrite"];
+  discardThreadViewDraft: UIA["discardThreadViewDraft"];
+  deleteThreadView: UIA["deleteThreadView"];
+  renameThreadView: UIA["renameThreadView"];
+  duplicateThreadView: UIA["duplicateThreadView"];
+  reapplyThreadViewSort: UIA["reapplyThreadViewSort"];
+  retryThreadViewSync: UIA["retryThreadViewSync"];
+  clearThreadViewSyncError: UIA["clearThreadViewSyncError"];
   clearSidebarTaskPrefsSyncError: UIA["clearSidebarTaskPrefsSyncError"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];
@@ -594,7 +612,8 @@ export type AppState = KanbanSlice & {
   restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-} & GitHubSliceActions &
+} & Pick<UIA, "setThreadActiveView" | "createThreadView"> &
+  GitHubSliceActions &
   GitLabSliceActions &
   JiraSliceActions &
   LinearSliceActions &

@@ -26,6 +26,12 @@ describe("DeleteSessionDialog", () => {
     expect(dialog.textContent).toContain("permanently delete the conversation history");
     expect(dialog.textContent).toContain("task workspace and its files are kept");
     expect(dialog.textContent).toContain("only session for this task");
+    const description = dialog.querySelector('[data-slot="alert-dialog-description"]');
+    expect(description).not.toBeNull();
+    expect(description?.id).toBe(dialog.getAttribute("aria-describedby"));
+    expect(description?.classList.contains("min-w-0")).toBe(true);
+    expect(description?.classList.contains("text-left")).toBe(true);
+    expect(description?.querySelectorAll("p")).toHaveLength(2);
     // No uncommitted/unpushed warning belongs on session deletion.
     expect(dialog.textContent).not.toContain("uncommitted");
     expect(dialog.textContent).not.toContain("unpushed");
@@ -90,6 +96,43 @@ describe("SessionContextMenuItems", () => {
 
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(onDelete.mock.calls[0]?.[0].defaultPrevented).toBe(true);
+  });
+
+  it("omits Close Others (and its separator) when the action isn't provided", () => {
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button type="button">Session</button>
+        </ContextMenuTrigger>
+        <SessionContextMenuItems
+          sessionState="COMPLETED"
+          isPrimary={false}
+          canShare={false}
+          taskId={null}
+          sessionId={undefined}
+          actions={{
+            handleSetPrimary: vi.fn(),
+            handleStop: vi.fn(),
+            handleResume: vi.fn(),
+          }}
+          onDelete={vi.fn()}
+          onShare={vi.fn()}
+          onHandoffProfile={vi.fn()}
+          onStartRename={vi.fn()}
+        />
+      </ContextMenu>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session" }), {
+      clientX: 100,
+      clientY: 100,
+    });
+
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Close Others" })).toBeNull();
+    // Only the setAsPrimary/stop-or-resume separator renders; no orphan
+    // separator is left behind where Close Others' own separator would go.
+    expect(screen.getAllByRole("separator")).toHaveLength(1);
   });
 });
 

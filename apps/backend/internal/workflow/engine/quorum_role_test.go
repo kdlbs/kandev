@@ -133,3 +133,86 @@ func TestResolveParticipantRole_StoreErrorWrapped(t *testing.T) {
 		t.Fatalf("err = %v, want wrapped store error", err)
 	}
 }
+
+// TestResolveParticipantRole_StepPreferredOverApproverWins is the
+// regression test for the Review re-entry bug: a caller holding both
+// seats at different steps must resolve under the role whose seat sits
+// at the step actually being evaluated, not under approver-wins. The
+// approver seat was cast once the task first reached Approval and
+// persists across the Review re-entry that follows an Approval
+// rejection, so both rows coexist by the time this resolves at "review".
+func TestResolveParticipantRole_StepPreferredOverApproverWins(t *testing.T) {
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-approver", TaskID: "task-1", StepID: "approval", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	eng := quorumEngine(nil, participants)
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "reviewer" || participantID != "seat-reviewer" {
+		t.Errorf("role/participantID = %q/%q, want reviewer/seat-reviewer", role, participantID)
+	}
+}
+
+// TestResolveParticipantRole_StepPreferredTransitionFires proves the
+// second half of the DoD: resolving under the step-preferred role and
+// recording the decision under the resolved seat actually satisfies the
+// reviewer quorum guard and fires Review -> Approval, where it used to
+// park forever because the decision was misfiled against a seat absent
+// from the reviewer slate.
+func TestResolveParticipantRole_StepPreferredTransitionFires(t *testing.T) {
+	store := quorumStore(&TransitionGuard{
+		WaitForQuorum: &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove},
+	})
+	decisions := newFakeDecisionStore()
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-approver", TaskID: "task-1", StepID: "approval", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	eng := New(store, MapRegistry{}, WithDecisionStore(decisions), WithParticipantStore(participants))
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "reviewer" || participantID != "seat-reviewer" {
+		t.Fatalf("role/participantID = %q/%q, want reviewer/seat-reviewer", role, participantID)
+	}
+
+	result, err := eng.RecordParticipantDecision(context.Background(), "sess-1", DecisionInfo{
+		TaskID: "task-1", StepID: "review", ParticipantID: participantID, Decision: DecisionApproved,
+	})
+	if err != nil {
+		t.Fatalf("RecordParticipantDecision: %v", err)
+	}
+	if !result.Transitioned {
+		t.Fatalf("expected the resolved reviewer decision to satisfy quorum and transition: %#v", result)
+	}
+	if result.FromStepID != "review" || result.ToStepID != "approval" {
+		t.Fatalf("unexpected transition endpoints: %#v", result)
+	}
+}
+
+// TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins is AC-4's
+// fallback case: a caller holding both seats, with neither seat's StepID
+// matching the step being queried, still resolves under approver-wins —
+// the step-preference added for the Review re-entry bug only kicks in
+// when the approver seat itself sits at the queried step.
+func TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins(t *testing.T) {
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review-1", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-approver", TaskID: "task-1", StepID: "approval-1", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	eng := quorumEngine(nil, participants)
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review-2", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "approver" || participantID != "seat-approver" {
+		t.Errorf("role/participantID = %q/%q, want approver/seat-approver", role, participantID)
+	}
+}

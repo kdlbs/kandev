@@ -308,6 +308,11 @@ type TaskChatPanelProps = {
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
   /**
+   * Embedded multi-panel hosts do not own the global workbench or shortcuts.
+   * They keep the conversation and composer, but suppress those side effects.
+   */
+  embedded?: boolean;
+  /**
    * Whether this panel is the one actually on screen — gates the
    * Slack-style unread-divider read tracking (see
    * chat/use-session-read-tracking.ts). Dockview-hosted callers must pass
@@ -462,6 +467,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
   hideSessionsDropdown,
+  embedded = false,
   isVisible = true,
   panelId = null,
   pendingScrollToMessageId = null,
@@ -480,6 +486,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const panelState = useChatPanelState({
     sessionId,
     taskId: taskIdHint,
+    disableWorkbenchEffects: embedded,
     onOpenFile,
     onOpenFileAtLine,
   });
@@ -490,6 +497,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     taskId,
     isWorking,
     messagesLoading,
+    historyRefreshPending,
     isInitialMessagesLoading,
     groupedItems,
     allMessages,
@@ -506,7 +514,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     allMessages,
     footerActionMessages,
   );
-  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
+  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef, {
+    enableFocusShortcut: !embedded,
+  });
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -517,6 +527,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     groupedItems,
     isInitialMessagesLoading,
   );
+  // Kanban previews intentionally pass `isVisible=false` so they do not
+  // advance the read cursor, but their transcript is rendered in a visible
+  // non-Dockview host. Keep read visibility separate from scroll geometry.
+  const transcriptIsVisible = panelId === null || isVisible;
   const isDockviewJumpLoading = useScrollTargetConsumption({
     resolvedSessionId,
     isVisible,
@@ -617,6 +631,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       ref={panelRef}
       data-testid="session-chat"
       data-panel-kind="session"
+      data-session-id={resolvedSessionId ?? undefined}
       tabIndex={-1}
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
@@ -641,6 +656,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           taskId={taskId ?? undefined}
           sessionId={resolvedSessionId}
           messagesLoading={messagesLoading}
+          historyRefreshPending={historyRefreshPending}
           isWorking={isWorking}
           sessionState={session?.state}
           worktreePath={getSessionWorkspacePath(session)}
@@ -651,6 +667,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           firstMessageId={firstMessageId}
           onFirstMessageHiddenChange={setIsFirstMessageHidden}
           anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+          isVisible={transcriptIsVisible}
           stickyPromptBar={
             showAnchoredBar && lastPromptMessage ? (
               <AnchoredLastPromptBar
@@ -706,6 +723,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         panelState={panelState}
         isSending={isSending}
         hideSessionsDropdown={hideSessionsDropdown}
+        hidePlanMode={embedded}
         showScrollToLastPrompt={showScrollButton}
         onScrollToLastPrompt={scrollToLastPrompt}
         lastPromptScrollDirection={scrollDirection}
@@ -732,6 +750,7 @@ type ChatFooterProps = {
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
   hideSessionsDropdown?: boolean;
+  hidePlanMode?: boolean;
   showScrollToLastPrompt: boolean;
   onScrollToLastPrompt: () => void;
   lastPromptScrollDirection: "up" | "down";
@@ -759,6 +778,7 @@ function ChatFooter({
   panelState,
   isSending,
   hideSessionsDropdown,
+  hidePlanMode,
   showScrollToLastPrompt,
   onScrollToLastPrompt,
   lastPromptScrollDirection,
@@ -787,6 +807,7 @@ function ChatFooter({
       panelState={panelState}
       isSending={isSending}
       hideSessionsDropdown={hideSessionsDropdown}
+      hidePlanMode={hidePlanMode}
       showScrollToLastPrompt={showScrollToLastPrompt}
       onScrollToLastPrompt={onScrollToLastPrompt}
       lastPromptScrollDirection={lastPromptScrollDirection}

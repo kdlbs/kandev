@@ -64,12 +64,24 @@ export type TurnsState = {
 
 export type TaskSessionsState = {
   items: Record<string, TaskSession>;
+  /** Monotonic client event generation used to order live activity against REST refreshes. */
+  activityEpochBySession?: Record<string, number>;
 };
 
 export type TaskSessionsByTaskState = {
   itemsByTaskId: Record<string, TaskSession[]>;
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
+  errorByTaskId?: Record<string, string | null>;
+};
+
+export type PendingActionProjection = Pick<
+  TaskSession,
+  "pending_action" | "pending_action_revision"
+>;
+
+export type PendingActionOrphanProjection = PendingActionProjection & {
+  task_id: string;
 };
 
 export type SessionAgentctlStatus = {
@@ -205,6 +217,7 @@ export type SessionSliceState = {
   turns: TurnsState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
+  pendingActionProjectionsBySessionId: Record<string, PendingActionOrphanProjection>;
   sessionAgentctl: SessionAgentctlState;
   worktrees: WorktreesState;
   sessionWorktreesBySessionId: SessionWorktreesState;
@@ -324,11 +337,17 @@ export type SessionSliceActions = {
     sessionId: string,
     pendingAction: TaskPendingAction | null,
     revision?: TaskPendingActionRevision,
+    taskId?: string,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
-  setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
+  setTaskSessionsForTask: (
+    taskId: string,
+    sessions: TaskSession[],
+    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+  ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
+  setTaskSessionsError: (taskId: string, error: string | null) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
   setWorktree: (worktree: Worktree) => void;
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;

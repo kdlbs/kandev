@@ -86,6 +86,10 @@ test.describe("mobile: worktree branch resume recovery", () => {
     await fixture.session.recoveryNewBranchButton().tap();
     await expect(fixture.session.branchRecreatedWarning()).toBeVisible({ timeout: 60_000 });
     await fixture.session.waitForChatIdle({ timeout: 30_000 });
+    await expect(fixture.session.agentStatus()).toHaveCount(0);
+    await expect(
+      fixture.session.activeChat().locator('[data-placeholder="Preparing workspace..."]'),
+    ).toHaveCount(0);
 
     let afterEnvironment: Awaited<ReturnType<typeof apiClient.getTaskEnvironment>> = null;
     let newBranch = "";

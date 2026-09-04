@@ -393,10 +393,8 @@ func (d *Dispatcher) resolveActiveSessionID(ctx context.Context, taskID string) 
 // unresolvable active session already gets, rather than rejecting the
 // decision outright.
 //
-// The active-state set mirrors GetActiveTaskSessionByTaskID's own query
-// (internal/task/repository/sqlite/session.go) — there is no shared
-// models-level predicate for that set, so this local copy must be kept in
-// sync with it.
+// The active-state set is taskmodels.IsTaskLookupActiveSessionState, the same
+// predicate GetActiveTaskSessionByTaskID's own query is cross-checked against.
 func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessionID string) (string, error) {
 	session, err := d.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -410,7 +408,7 @@ func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessio
 		d.logSessionUnresolvable(taskID, sessionID, "foreign")
 		return "", nil
 	}
-	if !isActiveSessionState(session.State) {
+	if !taskmodels.IsTaskLookupActiveSessionState(session.State) {
 		d.logSessionUnresolvable(taskID, sessionID, "terminal")
 		return "", nil
 	}
@@ -424,18 +422,6 @@ func (d *Dispatcher) logSessionUnresolvable(taskID, sessionID, reason string) {
 		zap.String("reason", reason))
 }
 
-func isActiveSessionState(state taskmodels.TaskSessionState) bool {
-	switch state {
-	case taskmodels.TaskSessionStateCreated,
-		taskmodels.TaskSessionStateStarting,
-		taskmodels.TaskSessionStateRunning,
-		taskmodels.TaskSessionStateWaitingForInput:
-		return true
-	default:
-		return false
-	}
-}
-
 // resolveLatestSessionID returns the F38 "any session" id (the task's
 // most recent session regardless of state), or "" when the task has never
 // had one. Like resolveActiveSessionID and resolveDeciderSessionID, this is
@@ -443,6 +429,35 @@ func isActiveSessionState(state taskmodels.TaskSessionState) bool {
 // filters by task, so unlike resolveDeciderSessionID (which validates a
 // caller-supplied session id and must check task ownership itself), there
 // is no cross-task session id to smuggle in here.
+//
+// This resolver is deliberately task-scoped, and stays that way after
+// features.officeSessionIdentity gives each participant agent its own
+// session per task. Picking "the newest session" only stays well-defined
+// because EvaluateStepQuorum — its sole caller — evaluates guards off
+// TaskID, CurrentStepID and WorkflowID, all derived from the task row
+// rather than the session (see orchestrator.assembleMachineState).
+//
+// MachineState.SessionID, SessionState, Data and IsPassthrough are the
+// session-derived fields, so with several live sessions per task "newest" no
+// longer names a specific agent's session. That is latent, not live: none of
+// the four is read by the guard-evaluation path today (Data is written by
+// set_workflow_data through SetSessionMetadataKey and read back into
+// MachineState.Data on every state assembly, but never consumed by guard
+// evaluation), so which session is chosen is unobservable today.
+//
+// The first caller that genuinely needs per-session state must session-scope
+// its own call — pass the deciding session explicitly, as RecordDecision now
+// does via resolveDeciderSessionID — rather than adding a defensive check
+// here. Guarding this resolver would make a wrong-scoped read look safe and
+// remove the pressure to fix it properly.
+//
+// The invariant is pinned by
+// TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest
+// (internal/workflow/engine): it evaluates one step through two live
+// sessions carrying different SessionID, SessionState and Data, and requires
+// an identical snapshot — so a guard whose outcome starts depending on any
+// of the three changes that test's result instead of silently resolving
+// another agent's session through this function.
 func (d *Dispatcher) resolveLatestSessionID(ctx context.Context, taskID string) (string, error) {
 	session, err := d.sessions.GetTaskSessionByTaskID(ctx, taskID)
 	if err != nil {

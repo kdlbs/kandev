@@ -5,7 +5,7 @@ created: 2026-07-15
 owners:
   - kandev
 ---
-# ACP Model Configuration Summary Requirements
+# ACP model summary
 
 ## Overview
 
