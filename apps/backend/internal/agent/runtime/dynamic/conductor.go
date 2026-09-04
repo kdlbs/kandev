@@ -426,7 +426,7 @@ func BuildBoundedContinuation(input ContinuationInput) Continuation {
 		TaskDescription:   bounded(input.TaskDescription),
 		WorkflowStep:      bounded(input.WorkflowStep),
 		Conversation:      boundedConversation(input.UserMessages, input.Conversation),
-		ToolSummary:       bounded(routingerr.Sanitize(input.ToolSummary)),
+		ToolSummary:       sanitizedHead(input.ToolSummary),
 		RepositorySummary: bounded(input.RepositorySummary),
 		PlanSummary:       bounded(input.PlanSummary),
 		FailureReason:     bounded(routingerr.Sanitize(input.FailureReason)),
@@ -439,13 +439,50 @@ func BuildBoundedContinuation(input ContinuationInput) Continuation {
 // every user message; splitting the limit guarantees both survive.
 const conversationUserBudget = continuationFieldLimit / 2
 
-// sanitizedTail returns up to `budget` bytes of the newest content in raw,
-// with credentials redacted. Redaction runs over the complete raw input
-// before any cut, so an anchored rule (e.g. "Authorization:") always sees
-// its full literal prefix and value together and cannot be bisected by a
-// budget window; only the already-redacted result is tail-cut to budget.
+// maxRedactionInputBytes bounds how much of a raw field Redact scans
+// directly. A task's message history is unpaginated, so a large session
+// (repeated tool output, long command logs) would otherwise force all
+// redaction rules across an unbounded input to emit a few kept bytes. 64x
+// continuationFieldLimit comfortably covers ordinary sessions while
+// bounding the worst case.
+const maxRedactionInputBytes = 256 * 1024
+
+// sanitizedTail returns up to budget bytes of the newest content in raw,
+// with credentials redacted. For input at or under maxRedactionInputBytes,
+// Redact sees the complete input before any cut, so an anchored rule (e.g.
+// "Authorization:") always sees its full literal prefix and value together
+// and cannot be bisected by a budget window. For larger input, Redact runs
+// only over the newest maxRedactionInputBytes window; a rule bisected at
+// that window's leading edge can only reach the output if the redacted
+// window's trimmed length is at or under budget (boundedTailN otherwise
+// discards everything near the window's leading edge), so that case redacts
+// the complete input instead.
 func sanitizedTail(raw string, budget int) string {
-	return boundedTailN(routingerr.Redact(raw), budget)
+	if len(raw) <= maxRedactionInputBytes {
+		return boundedTailN(routingerr.Redact(raw), budget)
+	}
+	redacted := routingerr.Redact(raw[len(raw)-maxRedactionInputBytes:])
+	if len(strings.TrimSpace(redacted)) <= budget {
+		return boundedTailN(routingerr.Redact(raw), budget)
+	}
+	return boundedTailN(redacted, budget)
+}
+
+// sanitizedHead mirrors sanitizedTail's fast-path/exact-fallback shape for
+// ToolSummary, whose final cut (bounded()) keeps the head instead of the
+// tail. A window taken from the same edge the final cut keeps can still
+// have a rule bisected at its far edge; that fragment only reaches the
+// output if the window's redacted length collapses to at or under
+// continuationFieldLimit, so that case redacts the complete input instead.
+func sanitizedHead(raw string) string {
+	if len(raw) <= maxRedactionInputBytes {
+		return bounded(routingerr.Redact(raw))
+	}
+	redacted := routingerr.Redact(raw[:maxRedactionInputBytes])
+	if len(strings.TrimSpace(redacted)) <= continuationFieldLimit {
+		return bounded(routingerr.Redact(raw))
+	}
+	return bounded(redacted)
 }
 
 // boundedConversation bounds user messages and the agent conversation on
@@ -530,13 +567,15 @@ func bounded(value string) string {
 }
 
 // boundedTailN truncates to limit bytes keeping the tail, on a rune
-// boundary, so a multi-byte character is never split into invalid UTF-8. The
-// result is also run through strings.ToValidUTF8: the rune-boundary cut above
-// only repairs the leading edge it introduces, so a value whose trailing
-// edge was already invalid (e.g. routingerr.Sanitize's own bare-byte-slice
-// truncation once its redactions grow the string past MaxRawExcerptBytes)
-// would otherwise carry that broken tail straight through.
+// boundary, so a multi-byte character is never split into invalid UTF-8. A
+// non-positive limit keeps nothing. The result is also run through
+// strings.ToValidUTF8, because the input is not guaranteed to already be
+// valid UTF-8 (the rune-boundary cut above only repairs the edge this
+// function itself introduces).
 func boundedTailN(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
 	value = strings.TrimSpace(value)
 	if len(value) > limit {
 		cut := len(value) - limit

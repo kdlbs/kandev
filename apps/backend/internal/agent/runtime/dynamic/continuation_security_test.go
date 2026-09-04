@@ -62,11 +62,11 @@ func TestContinuationSanitizesFailureReasonAndFramesItAsUntrusted(t *testing.T) 
 	}
 }
 
-// TestContinuationRedactsConversationSecret is the R1-1 regression: agent-
-// authored provider output lands in Conversation verbatim (dynamic_launch.go
-// addDynamicConversation), so a secret-shaped token there must not survive
-// into the persisted continuation JSON or the rendered successor prompt any
-// more than one in ToolSummary or FailureReason does.
+// TestContinuationRedactsConversationSecret proves that agent-authored
+// provider output landing in Conversation verbatim (dynamic_launch.go
+// addDynamicConversation) is redacted the same way as ToolSummary and
+// FailureReason: a secret-shaped token there must not survive into the
+// persisted continuation JSON or the rendered successor prompt.
 func TestContinuationRedactsConversationSecret(t *testing.T) {
 	continuation := BuildBoundedContinuation(ContinuationInput{
 		Conversation: "agent: I exported API_KEY=" + secretShapedToken + " into the shell",
@@ -90,11 +90,11 @@ func TestContinuationRedactsConversationSecret(t *testing.T) {
 	}
 }
 
-// TestContinuationRedactsUserMessageSecret is the R2-2 regression:
-// boundedConversation only sanitized the agent half (convPart) of
-// Conversation, leaving a secret typed by the user, or forwarded from the
-// launch prompt via UserMessages, to survive verbatim into the persisted
-// continuation JSON and the rendered successor prompt.
+// TestContinuationRedactsUserMessageSecret proves boundedConversation
+// sanitizes the user-message half of Conversation, not just the agent half:
+// a secret typed by the user, or forwarded from the launch prompt via
+// UserMessages, must not survive verbatim into the persisted continuation
+// JSON or the rendered successor prompt.
 func TestContinuationRedactsUserMessageSecret(t *testing.T) {
 	continuation := BuildBoundedContinuation(ContinuationInput{
 		UserMessages: []string{"here is my key API_KEY=" + secretShapedToken},
@@ -118,14 +118,13 @@ func TestContinuationRedactsUserMessageSecret(t *testing.T) {
 	}
 }
 
-// TestContinuationRedactsSecretStraddlingTailCut is the R1-A regression:
-// boundedConversation used to sanitize after truncating to budget, so a
-// credential straddling the tail-cut boundary reached Sanitize as a bare
-// suffix, which matches no redaction rule and survived raw into
-// Conversation. Swept across cut alignments, since the exact alignment where
-// the token straddles the cut depends on the surrounding padding length.
+// TestContinuationRedactsSecretStraddlingTailCut proves boundedConversation
+// redacts before truncating to budget, so a credential straddling the
+// tail-cut boundary is never exposed as a bare, rule-matching suffix. Swept
+// across cut alignments, since the exact alignment where the token straddles
+// the cut depends on the surrounding padding length.
 //
-// F3: a benign marker is placed after the swept tail so every iteration also
+// A benign marker is placed after the swept tail so every iteration also
 // asserts positive retention, not just absence of the secret — a
 // sanitizedTail that degenerated to always returning "" would pass an
 // absence-only check vacuously.
@@ -148,21 +147,19 @@ func TestContinuationRedactsSecretStraddlingTailCut(t *testing.T) {
 	}
 }
 
-// TestContinuationRedactsSecretAtWindowBoundaryWhenAdjacentContentShrinks is
-// the R3-A regression: sanitizedTail's own window cut (boundedTailN(raw,
-// window), distinct from the final budget cut
-// TestContinuationRedactsSecretStraddlingTailCut covers) can itself bisect a
-// credential, leaving an incomplete suffix fragment at the very front of the
-// window. That fragment is normally discarded by the final budget cut, but
-// when other content later in the same window collapses under redaction (a
-// long base64/hash-shaped run matching the generic credential rule), the
-// sanitized result can shrink to below budget and turn that final cut into
-// a no-op, letting the fragment through raw. Swept across every byte
-// alignment where the window boundary lands inside the token.
+// TestContinuationRedactsSecretAtWindowBoundaryWhenAdjacentContentShrinks
+// proves that content shrinking under redaction cannot expose a raw
+// credential suffix: sanitizedTail redacts the complete input before it
+// cuts to budget (distinct from the maxRedactionInputBytes window
+// TestSanitizedTailFallsBackToFullInputWhenWindowCollapses covers), so an
+// adjacent long alnum run collapsing under the generic credential rule
+// changes only how much of the redacted string remains, never whether the
+// secret itself was redacted. Swept across every byte alignment where a
+// naive pre-redaction cut would have landed inside the token.
 //
-// F3: a trailing benign marker asserts positive retention alongside the
-// absence check, so this test cannot pass vacuously against a
-// sanitizedTail that always returns "".
+// A trailing benign marker asserts positive retention alongside the absence
+// check, so this test cannot pass vacuously against a sanitizedTail that
+// always returns "".
 func TestContinuationRedactsSecretAtWindowBoundaryWhenAdjacentContentShrinks(t *testing.T) {
 	const marker = "BENIGN-KEEP-MARKER"
 	for qLen := 2280; qLen <= 2330; qLen++ {
@@ -199,15 +196,13 @@ func rawValueSuffix(value, s string) string {
 	return ""
 }
 
-// TestContinuationRedactsAnchoredCredentialAtWindowCut is the F1 regression:
-// sanitizedTail's window cut (boundedTailN(raw, window)) runs BEFORE
-// routingerr.Sanitize, so a cut landing inside an anchored rule's literal
-// prefix ("Authorization:", "--api-key", "Bearer") removes the anchor while
-// leaving the credential value intact in the window. windowGuard only
-// neutralizes a fragment that continues an alphanumeric run matching the
-// generic 32+ char rule; it does nothing for an anchor-identified value, so
-// the value crossed into Continuation.Conversation, continuation_json, and
-// the rendered prompt verbatim.
+// TestContinuationRedactsAnchoredCredentialAtWindowCut proves that
+// sanitizedTail's tail cut never bisects an anchored rule's literal prefix
+// ("Authorization:", "--api-key", "Bearer") away from its value: for input
+// at or under maxRedactionInputBytes, redaction always runs over the
+// complete raw input before any cut, so an anchored rule always sees its
+// full literal prefix and value together regardless of where the tail cut
+// eventually falls.
 //
 // Each credential lives alone on its own line (realistic: UserMessages join
 // with "\n", and Conversation is turn-per-line), and the sweep walks the cut
@@ -231,8 +226,8 @@ func TestContinuationRedactsAnchoredCredentialAtWindowCut(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Precondition: Sanitize redacts the intact credential line, so
-			// a fix that made sanitizedTail vacuously drop everything (F2's
-			// failure mode) could not make this test pass by accident.
+			// a sanitizedTail that vacuously dropped everything could not
+			// make this test pass by accident.
 			if strings.Contains(routingerr.Sanitize(tc.line), tc.value) {
 				t.Fatalf("precondition failed: routingerr.Sanitize does not redact the intact line %q", tc.line)
 			}
@@ -240,8 +235,9 @@ func TestContinuationRedactsAnchoredCredentialAtWindowCut(t *testing.T) {
 			prefix := strings.Repeat("x", 99) + "\n"
 			line := tc.line
 			// 512 is an arbitrary sweep width (not tied to any production
-			// constant); redaction now runs on the full raw input before any
-			// window cut, so no window size can bisect an anchored rule.
+			// constant). This input stays under maxRedactionInputBytes, so
+			// redaction runs on the complete raw input before sanitizedTail's
+			// tail cut, and no cut position can bisect an anchored rule.
 			window := conversationUserBudget + 512
 
 			for o := -5; o <= len(line)+5; o++ {
@@ -261,6 +257,45 @@ func TestContinuationRedactsAnchoredCredentialAtWindowCut(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSanitizedTailFallsBackToFullInputWhenWindowCollapses proves that once
+// an input exceeds maxRedactionInputBytes, a credential whose anchor
+// ("Authorization: ") sits just outside the newest maxRedactionInputBytes
+// window still gets redacted correctly. The window alone would see the bare
+// value with no anchor and leave it raw (no rule matches an unanchored
+// value under 32 chars), but the rest of the window is a single long alnum
+// run that the generic credential rule collapses to a few bytes, so the
+// window's redacted length falls under budget and sanitizedTail re-derives
+// from the complete input instead, where the anchor and value are together.
+func TestSanitizedTailFallsBackToFullInputWhenWindowCollapses(t *testing.T) {
+	const credential = "hunter2WindowSecret1"
+	const marker = "BENIGN-KEEP-MARKER"
+	const anchor = "Authorization: "
+
+	// tailPart is exactly maxRedactionInputBytes long, so the newest-window
+	// cut starts at its first byte: the credential value, not the anchor
+	// preceding it.
+	fillerLen := maxRedactionInputBytes - len(credential) - 1 - 1 - len(marker)
+	filler := strings.Repeat("q", fillerLen)
+	tailPart := credential + "\n" + filler + " " + marker
+
+	conversation := anchor + tailPart
+	if len(conversation) <= maxRedactionInputBytes {
+		t.Fatalf("test input must exceed maxRedactionInputBytes, got %d bytes", len(conversation))
+	}
+
+	continuation := BuildBoundedContinuation(ContinuationInput{Conversation: conversation})
+
+	if strings.Contains(continuation.Conversation, credential) {
+		t.Fatalf("Conversation retained the raw credential across the window fallback: %q", continuation.Conversation)
+	}
+	if !strings.Contains(continuation.Conversation, marker) {
+		t.Fatalf("Conversation dropped the benign marker (vacuous pass risk): %q", continuation.Conversation)
+	}
+	if len(continuation.Conversation) > continuationFieldLimit {
+		t.Fatalf("Conversation exceeded continuationFieldLimit: %d bytes", len(continuation.Conversation))
 	}
 }
 

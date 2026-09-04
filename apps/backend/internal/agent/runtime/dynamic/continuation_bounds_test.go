@@ -6,6 +6,18 @@ import (
 	"unicode/utf8"
 )
 
+// TestBoundedTailNRejectsNonPositiveLimit proves boundedTailN never indexes
+// past a negative cut: a limit larger than the (trimmed) input length yields
+// a negative cut position, which must be rejected rather than sliced.
+func TestBoundedTailNRejectsNonPositiveLimit(t *testing.T) {
+	if got := boundedTailN("x", -1); got != "" {
+		t.Fatalf("boundedTailN with a negative limit: got %q, want empty", got)
+	}
+	if got := boundedTailN("x", 0); got != "" {
+		t.Fatalf("boundedTailN with a zero limit: got %q, want empty", got)
+	}
+}
+
 // TestBoundedTruncatesOnRuneBoundary proves bounded() never splits a
 // multi-byte rune. Vietnamese (3-byte) and CJK (3-byte) runes are repeated at
 // every byte alignment relative to continuationFieldLimit by padding the
@@ -59,14 +71,14 @@ func TestBoundedConversationRetainsNewestContent(t *testing.T) {
 	}
 }
 
-// TestBoundedConversationRetainsUserMessagesWhenConversationOverflows is the
-// R1-2 regression: once the agent conversation alone reaches the field
-// limit, user messages must still survive on their own budget rather than
-// being crowded out by a single tail cut over the concatenated string. The
-// newest-agent-turn marker proves the independent tail budget, not just a
-// head-truncating cut that happens to keep both user messages: a plain
-// head-cut over the concatenated string would keep the user messages (they
-// sort first) but drop the newest agent content, which this also checks.
+// TestBoundedConversationRetainsUserMessagesWhenConversationOverflows proves
+// that once the agent conversation alone reaches the field limit, user
+// messages still survive on their own budget rather than being crowded out
+// by a single tail cut over the concatenated string. The newest-agent-turn
+// marker proves the independent tail budget, not just a head-truncating cut
+// that happens to keep both user messages: a plain head-cut over the
+// concatenated string would keep the user messages (they sort first) but
+// drop the newest agent content, which this also checks.
 func TestBoundedConversationRetainsUserMessagesWhenConversationOverflows(t *testing.T) {
 	overflowingConversation := strings.Repeat("agent: working on it. ", 500) + "NEWEST-AGENT-MARKER" // well over continuationFieldLimit
 
@@ -89,16 +101,15 @@ func TestBoundedConversationRetainsUserMessagesWhenConversationOverflows(t *test
 	}
 }
 
-// TestBoundedConversationValidUTF8WhenSanitizeGrowsPastRawLimit is the R2-1
-// regression: routingerr.Sanitize can grow its input past MaxRawExcerptBytes
-// (redacting "/Users/henry/" to the longer "/Users/<redacted>/") and then
-// truncates with a bare byte slice, which can split a multi-byte rune at the
-// tail. boundedTailN only repairs the leading cut, so that broken tail must
-// otherwise survive into Continuation.Conversation. Swept across byte
-// alignments the way TestBoundedTruncatesOnRuneBoundary sweeps bounded(): the
-// redaction-dense unit is repeated well past continuationFieldLimit so the
-// budget's internal tail-cut still lands in a redaction-growing, multi-byte
-// region regardless of the alignment prefix.
+// TestBoundedConversationValidUTF8WhenSanitizeGrowsPastRawLimit proves
+// boundedConversation always produces valid UTF-8 even when redaction grows
+// the input (routingerr.Redact expands "/Users/henry/" to the longer
+// "/Users/<redacted>/", which can shift a multi-byte rune across the tail
+// cut boundary). Swept across byte alignments the way
+// TestBoundedTruncatesOnRuneBoundary sweeps bounded(): the redaction-dense
+// unit is repeated well past continuationFieldLimit so the budget's internal
+// tail-cut still lands in a redaction-growing, multi-byte region regardless
+// of the alignment prefix.
 func TestBoundedConversationValidUTF8WhenSanitizeGrowsPastRawLimit(t *testing.T) {
 	unit := "/Users/henry/p à"
 
@@ -113,14 +124,12 @@ func TestBoundedConversationValidUTF8WhenSanitizeGrowsPastRawLimit(t *testing.T)
 	}
 }
 
-// TestSanitizedTailRetainsNewestContentWhenRedactionsGrowPastRawLimit is the
-// R2-A regression: routingerr.Sanitize can grow its input past
-// routingerr.MaxRawExcerptBytes (each "/Users/henry/" redaction to the longer
-// "/Users/<redacted>/" adds bytes) and then head-truncates its own result,
-// which chopped the newest turns before sanitizedTail's own tail cut ever
-// ran. sanitizedTail must retry with a smaller window until Sanitize stops
-// truncating, so the newest content always survives regardless of how many
-// growing redactions the window contains.
+// TestSanitizedTailRetainsNewestContentWhenRedactionsGrowPastRawLimit proves
+// sanitizedTail keeps the newest content regardless of how many redactions
+// inflate the input (each "/Users/henry/" redaction to the longer
+// "/Users/<redacted>/" adds bytes): the tail cut always runs after
+// redaction, so a growing redacted string cannot push the newest turns out
+// of the kept window.
 func TestSanitizedTailRetainsNewestContentWhenRedactionsGrowPastRawLimit(t *testing.T) {
 	for _, homePaths := range []int{0, 1, 5, 20, 100} {
 		conversation := strings.Repeat("agent: thinking about the change. ", 200) +
@@ -135,14 +144,11 @@ func TestSanitizedTailRetainsNewestContentWhenRedactionsGrowPastRawLimit(t *test
 	}
 }
 
-// TestBoundedConversationSurvivesLargeLeadingWhitespace is the F2 regression:
-// sanitizedTail computed truncatedWindow from len(raw) while boundedTailN
-// trims the value first, so whitespace padding alone (never itself
-// truncated) could make truncatedWindow spuriously true. windowGuard was
-// then prepended to content that was never actually cut by the window, the
-// generic redaction rule swallowed guard+content into a single match, and
-// stripping the guard prefix from that match discarded the user's only
-// message entirely.
+// TestBoundedConversationSurvivesLargeLeadingWhitespace proves that large
+// leading whitespace alone does not cause truncation logic to discard the
+// content that follows it: boundedTailN trims whitespace before comparing
+// length against its limit, so whitespace padding must never be mistaken
+// for content that needs truncating.
 func TestBoundedConversationSurvivesLargeLeadingWhitespace(t *testing.T) {
 	message := strings.Repeat(" ", 2513) + "hello"
 
@@ -170,11 +176,9 @@ func TestBoundedTaskDescriptionKeepsHead(t *testing.T) {
 	}
 }
 
-// TestBoundedConversationRetainsBudgetVolumeRegardlessOfNewlinePlacement is
-// the Review-round-1 regression: dropLeadingPartialLine used to discard a
-// truncated window's front up to its first newline with no bound on how
-// much, so a conversation whose only newline sits near the very start of the
-// kept window threw away nearly the whole budget. Content is built from
+// TestBoundedConversationRetainsBudgetVolumeRegardlessOfNewlinePlacement
+// proves truncation retains close to the full budget's worth of bytes no
+// matter where newlines fall in the input. Content is built from
 // space-separated tokens (never a run of 32+ non-space characters) so the
 // generic credential-shaped redaction rule never fires here — this test is
 // about retained volume under truncation, not about redaction, and a
