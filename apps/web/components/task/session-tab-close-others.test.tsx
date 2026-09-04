@@ -10,20 +10,6 @@ vi.mock("@kandev/ui/context-menu", () => ({
   ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      tasks: { activeTaskId: "task-A", activeSessionId: "current" },
-      kanban: { tasks: [] },
-      taskSessions: { items: { current: { id: "current", state: "COMPLETED", name: "Current" } } },
-      sessionModels: { bySessionId: {} },
-      activeModel: { bySessionId: {} },
-      agentProfiles: { items: [] },
-      taskSessionsByTask: { itemsByTaskId: { "task-A": [] } },
-    }),
-  useAppStoreApi: () => ({ getState: () => ({ taskSessions: { items: {} } }) }),
-}));
-
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
@@ -60,6 +46,9 @@ vi.mock("@/components/task/share/share-button", () => ({
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 import { SessionTab } from "./session-tab";
+import { StateProvider } from "@/components/state-provider";
+import { defaultState } from "@/lib/state/default-state";
+import type { TaskId, TaskSession } from "@/lib/types/http";
 
 afterEach(() => cleanup());
 
@@ -88,13 +77,37 @@ describe("SessionTab Close Others", () => {
       onDidRemovePanel: () => ({ dispose: vi.fn() }),
     };
 
+    const currentSession = {
+      id: "current",
+      state: "COMPLETED",
+      name: "Current",
+      task_id: "task-A",
+    } as TaskSession;
+    const siblingSession = {
+      id: "sibling",
+      state: "COMPLETED",
+      name: "Sibling",
+      task_id: "task-A",
+    } as TaskSession;
     render(
-      <SessionTab
-        api={api as never}
-        containerApi={containerApi as never}
-        params={{}}
-        tabLocation="header"
-      />,
+      <StateProvider
+        initialState={{
+          ...defaultState,
+          tasks: { ...defaultState.tasks, activeTaskId: "task-A" as TaskId },
+          taskSessions: { ...defaultState.taskSessions, items: { current: currentSession } },
+          taskSessionsByTask: {
+            ...defaultState.taskSessionsByTask,
+            itemsByTaskId: { "task-A": [currentSession, siblingSession] },
+          },
+        }}
+      >
+        <SessionTab
+          api={api as never}
+          containerApi={containerApi as never}
+          params={{}}
+          tabLocation="header"
+        />
+      </StateProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Close Others" }));
 

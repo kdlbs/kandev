@@ -183,7 +183,7 @@ surface.
   touch flows.
 - **Renaming a `data-testid`:** use `data-legacy-testid` for the old id while
   migrating specs; JSX and Playwright only support one `data-testid` attribute.
-- **Dockview session activation:** audit pointer/keyboard tabs, shortcuts, reopen/menu actions, and close controls; combine store state with `api.isActive` and clear same-session intent. A session tab X is the confirmed delete action for a deletable session; explicit **Hide** closes only the Dockview panel. Permanent **Delete** remains available from the context menu and mobile Sessions picker.
+- **Dockview session activation:** audit pointer/keyboard tabs, shortcuts, reopen/menu actions, and close controls; combine store state with `api.isActive` and clear same-session intent. A session tab X hides only the Dockview panel; explicit **Delete** remains the confirmed destructive action in the context menu and mobile Sessions picker.
 - **Conditional review panels:** show `pr-detail` only for active tasks with a
   linked PR/MR; default layouts only provide preferred placement. Hydrated review
   loss removes canonical panels, while restoration/maximized and offered/dismissed

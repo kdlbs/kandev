@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
+import { useShallow } from "zustand/react/shallow";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -132,8 +133,10 @@ function useSessionTabActions(
   api: IDockviewPanelHeaderProps["api"],
   containerApi: IDockviewPanelHeaderProps["containerApi"],
 ) {
-  const taskSessionIds = useAppStore((state) =>
-    taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []).map((s) => s.id) : [],
+  const taskSessionIds = useAppStore(
+    useShallow((state) =>
+      taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []).map((s) => s.id) : [],
+    ),
   );
   const taskSessionIdSet = new Set(taskSessionIds);
   const [visibleSessionCount, setVisibleSessionCount] = useState(() =>
