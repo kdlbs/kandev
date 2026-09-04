@@ -446,32 +446,62 @@ const conversationUserBudget = continuationFieldLimit / 2
 // credential token Sanitize's rules match.
 const sanitizeSlack = 512
 
-// windowGuard is prepended to a truncated window before sanitizing.
-// boundedTailN(raw, window) is itself a cut into raw and can bisect a
-// credential the same way the final budget cut can, leaving an incomplete
-// suffix fragment at the very front of the window — too short on its own to
-// match any redaction rule. Unlike the straddle at the budget boundary,
-// nothing later in sanitizedTail gives this fragment more context, because
-// its missing prefix was excluded from the window entirely. windowGuard is
-// 32+ characters from the same class the generic credential rule matches,
-// placed directly adjacent (no separator) to the window, so any alphanumeric
-// run starting the window extends into one the rule always matches: the
-// fragment is redacted together with the guard instead of surviving raw.
+// windowGuard is prepended to a truncated window before sanitizing, as a
+// fallback for the case where the window's front has no newline to cut on
+// (see the dropLeadingPartialLine doc comment). It is 32+ characters from
+// the same class the generic credential rule matches, placed directly
+// adjacent (no separator) to the window, so any alphanumeric run starting
+// the window extends into one the rule always matches: the fragment is
+// redacted together with the guard instead of surviving raw.
 var (
 	windowGuard          = strings.Repeat("Z", 40)
 	windowGuardSanitized = routingerr.Sanitize(windowGuard)
 )
+
+// dropLeadingPartialLine removes the front of a truncated window up to and
+// including its first newline, so that no line — and therefore no anchored
+// redaction rule, which identifies a credential by a literal line-scoped
+// prefix such as "Authorization:" or "Bearer " rather than by the value's
+// shape — is ever bisected by the window cut. A rule whose anchor is cut
+// away leaves its value with no anchor to redact by; the generic shape rule
+// does not reliably catch it either, since a short or unusually-shaped value
+// (e.g. a plain word) does not match it.
+//
+// This runs unconditionally on a truncated window, even when the front
+// happens to land exactly on a line boundary already, trading a small amount
+// of always-safe-to-drop content for not having to detect the bisection
+// case. When the window's front carries no newline at all (single-line
+// content), there is no line to drop and windowGuard is used instead: it
+// only neutralizes a fragment that continues an alphanumeric run matching
+// the generic rule, not an anchored one, so a single-line window is not
+// protected against an anchor being bisected. This is a smaller gap in
+// practice since the field's UserMessages and Conversation content are
+// joined/authored one line per message or turn.
+func dropLeadingPartialLine(part string) (rest string, usedGuard bool) {
+	if idx := strings.IndexByte(part, '\n'); idx >= 0 {
+		return part[idx+1:], false
+	}
+	return windowGuard + part, true
+}
 
 // sanitizedTail returns up to `budget` bytes of the newest content in raw,
 // with credentials redacted. It first takes a window that overshoots budget
 // by sanitizeSlack so a credential straddling the eventual budget cut is
 // complete when Sanitize runs, instead of arriving as a bare suffix that
 // matches no redaction rule; if the window itself is a truncation of raw,
-// windowGuard neutralizes the fragment that cut can leave at the window's
-// own front. That guard runs unconditionally rather than only when the
+// dropLeadingPartialLine removes whatever cut fragment that leaves at the
+// window's own front. That runs unconditionally rather than only when the
 // budget cut would otherwise be a no-op, because a redaction elsewhere in
 // the window (e.g. a long token collapsing to a few bytes) can shrink the
 // sanitized result below budget and make that cut a no-op on any call.
+//
+// truncatedWindow is computed against the trimmed length, matching
+// boundedTailN's own trim, so that padding whitespace alone (never itself
+// cut by the window) cannot make the window look truncated when it is not:
+// that mismatch used to run windowGuard against untruncated content, which
+// the generic redaction rule then swallowed together with the guard,
+// discarding the caller's only content when the prefix stripped below
+// returned empty.
 //
 // Sanitize can also grow its input (e.g. "/Users/henry/" ->
 // "/Users/<redacted>/") and then truncates its OWN result from the head once
@@ -488,18 +518,20 @@ func sanitizedTail(raw string, budget int) string {
 	if capped := routingerr.MaxRawExcerptBytes - len(windowGuard); window > capped {
 		window = capped
 	}
+	trimmedLen := len(strings.TrimSpace(raw))
 	for window > 0 {
 		part := boundedTailN(raw, window)
-		truncatedWindow := len(raw) > window
+		truncatedWindow := trimmedLen > window
 
 		guarded := part
+		usedGuard := false
 		if truncatedWindow {
-			guarded = windowGuard + part
+			guarded, usedGuard = dropLeadingPartialLine(part)
 		}
 
 		sanitized := routingerr.Sanitize(guarded)
 		if len(sanitized) < routingerr.MaxRawExcerptBytes {
-			if truncatedWindow {
+			if usedGuard {
 				if !strings.HasPrefix(sanitized, windowGuardSanitized) {
 					// windowGuard's own redaction should always lead the
 					// result verbatim; if it doesn't, this window doesn't

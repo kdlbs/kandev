@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
 const secretShapedToken = "sk-abcdEFGH12345678ijklMNOPqrstUVWX"
@@ -122,9 +124,15 @@ func TestContinuationRedactsUserMessageSecret(t *testing.T) {
 // suffix, which matches no redaction rule and survived raw into
 // Conversation. Swept across cut alignments, since the exact alignment where
 // the token straddles the cut depends on the surrounding padding length.
+//
+// F3: a benign marker is placed after the swept tail so every iteration also
+// asserts positive retention, not just absence of the secret — a
+// sanitizedTail that degenerated to always returning "" would pass an
+// absence-only check vacuously.
 func TestContinuationRedactsSecretStraddlingTailCut(t *testing.T) {
+	const marker = "BENIGN-KEEP-MARKER"
 	for tailLen := 1960; tailLen <= 2005; tailLen++ {
-		tail := strings.Repeat("z", tailLen)
+		tail := strings.Repeat("z", tailLen) + " " + marker
 		userMessage := strings.Repeat("ab ", 800) + secretShapedToken + " " + tail
 
 		continuation := BuildBoundedContinuation(ContinuationInput{
@@ -133,6 +141,9 @@ func TestContinuationRedactsSecretStraddlingTailCut(t *testing.T) {
 
 		if leaked := rawSecretSuffix(continuation.Conversation); leaked != "" {
 			t.Fatalf("tailLen=%d: Conversation retained a raw secret suffix %q: %q", tailLen, leaked, continuation.Conversation)
+		}
+		if !strings.Contains(continuation.Conversation, marker) {
+			t.Fatalf("tailLen=%d: Conversation dropped the benign marker (vacuous pass risk): %q", tailLen, continuation.Conversation)
 		}
 	}
 }
@@ -148,9 +159,14 @@ func TestContinuationRedactsSecretStraddlingTailCut(t *testing.T) {
 // sanitized result can shrink to below budget and turn that final cut into
 // a no-op, letting the fragment through raw. Swept across every byte
 // alignment where the window boundary lands inside the token.
+//
+// F3: a trailing benign marker asserts positive retention alongside the
+// absence check, so this test cannot pass vacuously against a
+// sanitizedTail that always returns "".
 func TestContinuationRedactsSecretAtWindowBoundaryWhenAdjacentContentShrinks(t *testing.T) {
+	const marker = "BENIGN-KEEP-MARKER"
 	for qLen := 2280; qLen <= 2330; qLen++ {
-		userMessage := secretShapedToken + " " + strings.Repeat("Q", qLen) + " done. " + strings.Repeat("ab ", 60)
+		userMessage := secretShapedToken + " " + strings.Repeat("Q", qLen) + " done. " + strings.Repeat("ab ", 60) + marker
 
 		continuation := BuildBoundedContinuation(ContinuationInput{
 			UserMessages: []string{userMessage},
@@ -159,19 +175,90 @@ func TestContinuationRedactsSecretAtWindowBoundaryWhenAdjacentContentShrinks(t *
 		if leaked := rawSecretSuffix(continuation.Conversation); leaked != "" {
 			t.Fatalf("qLen=%d: Conversation retained a raw secret suffix %q: %q", qLen, leaked, continuation.Conversation)
 		}
+		if !strings.Contains(continuation.Conversation, marker) {
+			t.Fatalf("qLen=%d: Conversation dropped the benign marker (vacuous pass risk): %q", qLen, continuation.Conversation)
+		}
 	}
 }
 
 // rawSecretSuffix returns the longest (>= 8 char) trailing substring of
 // secretShapedToken found verbatim in s, or "" if none is present.
 func rawSecretSuffix(s string) string {
-	for n := len(secretShapedToken); n >= 8; n-- {
-		suffix := secretShapedToken[len(secretShapedToken)-n:]
+	return rawValueSuffix(secretShapedToken, s)
+}
+
+// rawValueSuffix returns the longest (>= 8 char) trailing substring of value
+// found verbatim in s, or "" if none is present.
+func rawValueSuffix(value, s string) string {
+	for n := len(value); n >= 8; n-- {
+		suffix := value[len(value)-n:]
 		if strings.Contains(s, suffix) {
 			return suffix
 		}
 	}
 	return ""
+}
+
+// TestContinuationRedactsAnchoredCredentialAtWindowCut is the F1 regression:
+// sanitizedTail's window cut (boundedTailN(raw, window)) runs BEFORE
+// routingerr.Sanitize, so a cut landing inside an anchored rule's literal
+// prefix ("Authorization:", "--api-key", "Bearer") removes the anchor while
+// leaving the credential value intact in the window. windowGuard only
+// neutralizes a fragment that continues an alphanumeric run matching the
+// generic 32+ char rule; it does nothing for an anchor-identified value, so
+// the value crossed into Continuation.Conversation, continuation_json, and
+// the rendered prompt verbatim.
+//
+// Each credential lives alone on its own line (realistic: UserMessages join
+// with "\n", and Conversation is turn-per-line), and the sweep walks the cut
+// position across every byte offset from just before the line to just after
+// it, so every possible bisection of the anchor and the value is covered.
+func TestContinuationRedactsAnchoredCredentialAtWindowCut(t *testing.T) {
+	const credential = "hunter2SecretValue"
+	fakeJWT := strings.Repeat("A", 20) + "." + strings.Repeat("B", 20) + "." + strings.Repeat("C", 20)
+	const marker = "BENIGN-KEEP-MARKER"
+
+	cases := []struct {
+		name  string
+		line  string
+		value string // the credential substring that must never leak raw
+	}{
+		{"authorization_header", "Authorization: " + credential, credential},
+		{"api_key_flag", "--api-key " + credential, credential},
+		{"bearer_jwt", "Bearer " + fakeJWT, fakeJWT},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Precondition: Sanitize redacts the intact credential line, so
+			// a fix that made sanitizedTail vacuously drop everything (F2's
+			// failure mode) could not make this test pass by accident.
+			if strings.Contains(routingerr.Sanitize(tc.line), tc.value) {
+				t.Fatalf("precondition failed: routingerr.Sanitize does not redact the intact line %q", tc.line)
+			}
+
+			prefix := strings.Repeat("x", 99) + "\n"
+			line := tc.line
+			window := conversationUserBudget + sanitizeSlack
+
+			for o := -5; o <= len(line)+5; o++ {
+				tailLen := window - len(line) - 2 + o - len(marker)
+				tail := strings.Repeat("z", tailLen) + " " + marker
+				message := prefix + line + "\n" + tail
+
+				continuation := BuildBoundedContinuation(ContinuationInput{
+					UserMessages: []string{message},
+				})
+
+				if leaked := rawValueSuffix(tc.value, continuation.Conversation); leaked != "" {
+					t.Fatalf("o=%d: Conversation retained a raw credential suffix %q: %q", o, leaked, continuation.Conversation)
+				}
+				if !strings.Contains(continuation.Conversation, marker) {
+					t.Fatalf("o=%d: Conversation dropped the benign marker (vacuous pass risk): %q", o, continuation.Conversation)
+				}
+			}
+		})
+	}
 }
 
 // TestContinuationWithFailureSanitizesFallbackReason covers the fallback-loop

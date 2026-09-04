@@ -131,6 +131,26 @@ func TestSanitizedTailRetainsNewestContentWhenRedactionsGrowPastRawLimit(t *test
 	}
 }
 
+// TestBoundedConversationSurvivesLargeLeadingWhitespace is the F2 regression:
+// sanitizedTail computed truncatedWindow from len(raw) while boundedTailN
+// trims the value first, so whitespace padding alone (never itself
+// truncated) could make truncatedWindow spuriously true. windowGuard was
+// then prepended to content that was never actually cut by the window, the
+// generic redaction rule swallowed guard+content into a single match, and
+// stripping the guard prefix from that match discarded the user's only
+// message entirely.
+func TestBoundedConversationSurvivesLargeLeadingWhitespace(t *testing.T) {
+	message := strings.Repeat(" ", 2513) + "hello"
+
+	continuation := BuildBoundedContinuation(ContinuationInput{
+		UserMessages: []string{message},
+	})
+
+	if !strings.Contains(continuation.Conversation, "hello") {
+		t.Fatalf("Conversation dropped the only user message: %q", continuation.Conversation)
+	}
+}
+
 // TestBoundedTaskDescriptionKeepsHead pins the unchanged head-keep contract
 // for every field other than Conversation (PlanSummary is separately pinned
 // by TestBoundedIsNoOpOnReducedPlanOutput).
