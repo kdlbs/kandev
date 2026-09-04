@@ -173,7 +173,7 @@ func FailureKindOf(err error) FailureKind {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return FailureTransient
 	}
-	if isConnectivityError(err) {
+	if IsConnectivityError(err) {
 		return FailureTransient
 	}
 	return FailureUnknown
