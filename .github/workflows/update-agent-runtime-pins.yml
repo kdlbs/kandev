@@ -7,11 +7,11 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
-# The job mints a narrower GitHub App token only after checkout. The default
-# workflow token is never used to create the generated PR, so its events retain
-# the repository's normal CI behavior.
+# The job uses the repository-scoped workflow token for the branch and PR
+# mutations. Generated pull-request checks can require maintainer approval.
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: managed-runtime-pin-update
@@ -21,8 +21,6 @@ jobs:
   update:
     name: Open managed runtime pin PR
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     env:
       BOT_BRANCH: automation/update-managed-runtime-pins
 
@@ -42,18 +40,9 @@ jobs:
       - name: Test pin updater
         run: node --test scripts/update-agent-runtime-pins.test.mjs
 
-      - name: Create managed runtime pin App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.MANAGED_RUNTIME_PIN_APP_CLIENT_ID }}
-          private-key: ${{ secrets.MANAGED_RUNTIME_PIN_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
       - name: Configure git authentication
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: gh auth setup-git
 
       - name: Prepare stable bot branch
@@ -74,7 +63,7 @@ jobs:
       - name: Commit and push one grouped change
         if: steps.update.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "kandev-runtime-updater[bot]"
@@ -89,7 +78,7 @@ jobs:
       - name: Create or refresh the single grouped PR
         if: steps.update.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cat > /tmp/managed-runtime-pin-pr-body.md <<'EOF'

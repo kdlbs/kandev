@@ -136,8 +136,9 @@ opens reviewable pin-update PRs without changing runtimes automatically.
   logic independently testable with fixture metadata and no network.
 - Add `.github/workflows/update-agent-runtime-pins.yml` with weekly and manual
   triggers, least-privilege permissions, pinned action SHAs, a stable bot
-  branch, and one grouped Conventional Commit PR. Use a repository-approved
-  bot/App token so the generated PR receives normal CI events. Do not auto-merge.
+  branch, and one grouped Conventional Commit PR. Use the repository-scoped
+  `GITHUB_TOKEN` with only contents and pull-request write permissions. Generated
+  PR checks can require maintainer approval. Do not auto-merge.
 - Run the updater tests, targeted managed-runtime Go tests, action-pinning lint,
   and workflow contract test before opening a PR. When no pin changes, exit
   without a branch or PR mutation.
@@ -220,8 +221,10 @@ The follow-up review pass updates terminal `current_version` from the
 successful capability probe, makes the UI prefer terminal `effective_version`
 and retain the complete backend version projection, derives managed-runtime
 test expectations from the catalogue, and validates those commands before the
-weekly workflow commits or pushes. It also keeps the App token on the push
-step and refreshes existing updater PRs by number.
+weekly workflow commits or pushes. It also keeps the repository token on the push
+step and refreshes existing updater PRs by number. The authentication follow-up
+replaces the unconfigured App token with the repository-scoped `GITHUB_TOKEN`
+and records the approval-required PR-check consequence.
 
 Follow-up verification passes 2,594 focused backend tests, 32 focused web
 tests, full web lint/typecheck/i18n, 7 pin updater tests, 8 workflow-contract
@@ -279,6 +282,6 @@ Task 06 owns E2E fixtures and specs.
 - Registry checks must not delay application boot or agent launches. They are
   page-triggered, read-only, cached, and separate from the agent catalogue boot
   payload.
-- A bot-created PR must trigger the repository's normal required checks. The
-  workflow must not silently fall back to `GITHUB_TOKEN` behavior that suppresses
-  those PR events.
+- A bot-created PR can require maintainer approval for its checks when the
+  repository-scoped `GITHUB_TOKEN` creates it. Unattended PR checks require a
+  separately managed GitHub App or personal access token.

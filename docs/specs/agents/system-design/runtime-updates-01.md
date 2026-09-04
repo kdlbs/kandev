@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
 created: 2026-07-26
-updated: 2026-08-24
+updated: 2026-09-04
 owners:
   - Kandev
 ---
@@ -476,6 +476,34 @@ authoritative for launch-time stale metadata recovery.
   preview without requiring hover.
 - Managed npm runtime recovery scenarios follow the authoritative
   [recovery requirement](requirements/managed-npm-runtime-recovery.md).
+
+## Scheduled pin-update workflow
+
+The weekly and manual pin-maintenance path satisfies
+`AC-AGENTS-RUNTIME-UPDATES-001.9` and
+`AC-AGENTS-RUNTIME-UPDATES-001.10`. The trusted catalogue is updated by
+[`scripts/update-agent-runtime-pins.mjs`](../../../scripts/update-agent-runtime-pins.mjs)
+and orchestrated by
+[`update-agent-runtime-pins.yml`](../../../.github/workflows/update-agent-runtime-pins.yml).
+
+The workflow checks out `main`, runs the updater and managed-runtime validation
+before any branch mutation, and then pushes the stable
+`automation/update-managed-runtime-pins` branch only when the catalogue
+changed. It creates or refreshes one grouped review pull request and never
+merges it or activates a runtime.
+
+The workflow uses the repository-scoped built-in `GITHUB_TOKEN`. Its effective
+permissions are limited to `contents: write` and `pull-requests: write`, and
+`gh auth setup-git` configures the token after the trusted checkout. No
+GitHub-App variable, private-key secret, or personal access token is required.
+The workflow keeps `persist-credentials: false` on checkout and does not run
+pull-request-controlled code.
+
+GitHub may place checks for a pull request created by `GITHUB_TOKEN` into an
+approval-required state. This is an accepted operational consequence of the
+built-in-token boundary. An unattended PR-check requirement would require the
+separate GitHub App or personal-token boundary described in
+[ADR-2026-09-04](../../../decisions/2026-09-04-use-repository-token-for-runtime-pin-prs.md).
 
 ## Out of scope
 

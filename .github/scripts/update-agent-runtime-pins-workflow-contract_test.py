@@ -21,16 +21,15 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         self.assertRegex(self.workflow, r"cron:\s*[\"']?[0-9]+ [0-9]+ \* \* [0-6][\"']?")
         self.assertIn("workflow_dispatch:", self.workflow)
 
-    def test_workflow_uses_least_privilege_and_dedicated_app_token(self) -> None:
-        self.assertIn("permissions:\n  contents: read", self.workflow)
-        self.assertIn("permission-contents: write", self.workflow)
-        self.assertIn("permission-pull-requests: write", self.workflow)
-        self.assertNotIn("permissions:\n      contents: write", self.workflow)
-        self.assertNotIn("permissions:\n      pull-requests: write", self.workflow)
-        self.assertIn("MANAGED_RUNTIME_PIN_APP_PRIVATE_KEY", self.workflow)
-        self.assertIn("MANAGED_RUNTIME_PIN_APP_CLIENT_ID", self.workflow)
+    def test_workflow_uses_least_privilege_and_builtin_token(self) -> None:
+        self.assertIn(
+            "permissions:\n  contents: write\n  pull-requests: write", self.workflow
+        )
+        self.assertIn("GH_TOKEN: ${{ github.token }}", self.workflow)
+        self.assertNotIn("actions/create-github-app-token@", self.workflow)
+        self.assertNotIn("MANAGED_RUNTIME_PIN_APP_PRIVATE_KEY", self.workflow)
+        self.assertNotIn("MANAGED_RUNTIME_PIN_APP_CLIENT_ID", self.workflow)
         self.assertNotIn("secrets.GITHUB_TOKEN", self.workflow)
-        self.assertNotIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", self.workflow)
 
     def test_workflow_groups_one_conventional_commit_pr_on_stable_branch(self) -> None:
         self.assertIn("update-managed-runtime-pins", self.workflow)
@@ -47,7 +46,7 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         push_start = self.workflow.index("- name: Commit and push one grouped change")
         pr_start = self.workflow.index("- name: Create or refresh the single grouped PR")
         push_step = self.workflow[push_start:pr_start]
-        self.assertIn("GH_TOKEN: ${{ steps.app-token.outputs.token }}", push_step)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", push_step)
 
     def test_workflow_validates_before_any_commit_or_push(self) -> None:
         update_pos = self.workflow.index("node scripts/update-agent-runtime-pins.mjs")

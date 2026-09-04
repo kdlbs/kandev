@@ -16,7 +16,8 @@ spec: "../../specs/agents/requirements/runtime-updates.md"
   npm `latest` versions and handles no-change, prerelease, malformed, and lookup
   failure cases without partial writes.
 - A weekly/manual least-privilege workflow runs validation and opens at most one
-  grouped Conventional Commit PR through a token that permits normal PR CI.
+  grouped Conventional Commit PR through the repository-scoped `GITHUB_TOKEN`.
+  Generated PR checks can require maintainer approval.
 - The workflow uses pinned actions, never auto-merges, and has a contract test
   wired into the repository's action-pinning workflow.
 
@@ -59,16 +60,17 @@ local tests), risks, and synchronized task/plan status.
 
 Complete. The updater changes only existing trusted catalogue entries, rejects
 missing, malformed, and prerelease values before its atomic write, and the
-weekly/manual workflow uses a pinned GitHub App token, a stable bot branch, one
-grouped PR, and no auto-merge or `GITHUB_TOKEN` fallback.
+weekly/manual workflow uses the repository-scoped `GITHUB_TOKEN`, a stable bot
+branch, one grouped PR, and no auto-merge.
 
 Verification: updater tests passed 7/7; workflow contract tests passed 8/8;
 action-pinning tests passed 9/9 and the linter accepted all 19 workflow files;
 `zizmor .github/workflows/update-agent-runtime-pins.yml` reported no findings.
 Local checks caused no external workflow or PR side effects.
 
-Follow-up review verification keeps the App token in the push step, edits an
-existing updater PR by its number, and runs the focused managed-runtime Go
-suite after the catalogue update and before any commit or push. The workflow
-contract now asserts that validation boundary; the contract passed 8/8 and
-the action-pinning checks remained green.
+Follow-up review verification configures the repository token for Git and the
+push/PR steps, edits an existing updater PR by its number, and runs the focused
+managed-runtime Go suite after the catalogue update and before any commit or
+push. The workflow contract now asserts that validation and token boundary; the
+contract passed 8/8 and the action-pinning checks remained green. Generated PR
+checks may require maintainer approval under GitHub's built-in token policy.
