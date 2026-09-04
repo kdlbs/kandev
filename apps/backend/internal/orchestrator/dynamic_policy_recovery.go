@@ -157,6 +157,15 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	if !ok {
 		return
 	}
+	// Hold the same per-session guard ApplyRouteAction holds across resolve
+	// and launch, so a concurrent manual retry cannot interleave with this
+	// timer path before either reaches the durable claim.
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	lock.Lock()
+	defer func() {
+		lock.Unlock()
+		release()
+	}()
 	state, ok := loadDueDynamicPolicyState(ctx, loader, sessionID, generation)
 	if !ok {
 		return

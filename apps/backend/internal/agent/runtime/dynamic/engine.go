@@ -17,6 +17,7 @@ const (
 	routeStatusStarting       = "starting"
 	routeStatusActive         = "active"
 	routeStatusActionRequired = "action_required"
+	routeStatusRetrying       = "retrying"
 )
 
 func WithClock(now func() time.Time) EngineOption {
@@ -576,6 +577,30 @@ func (e *Engine) persistInitialGeneration(
 	return true, nil
 }
 
+// persistExpectedStatus fences a same-generation status transition so exactly
+// one concurrent caller can claim it. It type-asserts the narrower
+// GenerationStatusClaimer seam and fails closed when the persistence layer
+// does not implement it: silently degrading to persistSameGeneration's
+// generation-only fencing would let two concurrent callers both win the same
+// transition, which is exactly the double-launch this seam exists to prevent.
+func (e *Engine) persistExpectedStatus(ctx context.Context, expectedGeneration int64, expectedStatus string, state RouteState) error {
+	if e.persistence == nil {
+		return nil
+	}
+	claimer, ok := e.persistence.(GenerationStatusClaimer)
+	if !ok {
+		return ErrStatusClaimUnsupported
+	}
+	claimed, err := claimer.ClaimRouteStateFrom(ctx, expectedGeneration, expectedStatus, state)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return ErrStaleGeneration
+	}
+	return nil
+}
+
 func mustJSON(value PolicyState) []byte {
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -741,12 +766,13 @@ func (e *Engine) resumePending(
 	if state.Generation != expectedGeneration {
 		return RouteDecision{}, ErrStaleGeneration
 	}
-	if force && state.Status == "retrying" {
+	if force && state.Status == routeStatusRetrying {
 		return RouteDecision{}, ErrRecoveryPending
 	}
 	if !force && state.Status != string(routingpolicy.DecisionRetry) && state.Status != string(routingpolicy.DecisionWaitForReset) {
 		return RouteDecision{}, ErrRecoveryPending
 	}
+	observedStatus := state.Status
 	var policyState PolicyState
 	if state.PolicyStateJSON != "" {
 		if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); err != nil {
@@ -757,10 +783,9 @@ func (e *Engine) resumePending(
 	if !force && policyState.Deadline != nil && now.Before(*policyState.Deadline) {
 		return RouteDecision{}, ErrRecoveryNotDue
 	}
-	expectedStatus := state.Status
-	state.Status = "retrying"
+	state.Status = routeStatusRetrying
 	state.UpdatedAt = now
-	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
+	if err := e.persistExpectedStatus(ctx, expectedGeneration, observedStatus, state); err != nil {
 		return RouteDecision{}, err
 	}
 	e.mu.Lock()
