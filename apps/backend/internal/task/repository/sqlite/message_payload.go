@@ -107,11 +107,10 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 	if message == nil || message.PayloadDigest == "" {
 		return nil
 	}
-	var compressed []byte
-	var uncompressedSize int64
+	var uncompressedSize, compressedSize, actualCompressedSize int64
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT compressed_content, uncompressed_size FROM task_message_payloads WHERE digest = ?
-	`), message.PayloadDigest).Scan(&compressed, &uncompressedSize)
+		SELECT uncompressed_size, compressed_size, length(compressed_content) FROM task_message_payloads WHERE digest = ?
+	`), message.PayloadDigest).Scan(&uncompressedSize, &compressedSize, &actualCompressedSize)
 	if err != nil {
 		return fmt.Errorf("failed to load message payload %s: %w", message.PayloadDigest, err)
 	}
@@ -122,6 +121,26 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 	if uncompressedSize > maxMessagePayloadRehydrateBytes {
 		return fmt.Errorf("message payload %s exceeds maximum rehydrate size: %d > %d",
 			message.PayloadDigest, uncompressedSize, maxMessagePayloadRehydrateBytes)
+	}
+	if compressedSize < 0 {
+		return fmt.Errorf("message payload %s has invalid compressed size: %d",
+			message.PayloadDigest, compressedSize)
+	}
+	if compressedSize > maxMessagePayloadRehydrateBytes {
+		return fmt.Errorf("message payload %s exceeds maximum compressed size: %d > %d",
+			message.PayloadDigest, compressedSize, maxMessagePayloadRehydrateBytes)
+	}
+	if actualCompressedSize != compressedSize {
+		return fmt.Errorf("message payload %s compressed size mismatch: %d != %d",
+			message.PayloadDigest, actualCompressedSize, compressedSize)
+	}
+
+	var compressed []byte
+	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT compressed_content FROM task_message_payloads WHERE digest = ?
+	`), message.PayloadDigest).Scan(&compressed)
+	if err != nil {
+		return fmt.Errorf("failed to load message payload %s: %w", message.PayloadDigest, err)
 	}
 	payloadBytes, err := gzipDecompress(compressed, maxMessagePayloadRehydrateBytes)
 	if err != nil {

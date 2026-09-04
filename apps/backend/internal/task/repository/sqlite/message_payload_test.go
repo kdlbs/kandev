@@ -258,6 +258,33 @@ func TestRehydrateMessagePayloadRejectsMismatchedStoredPayloadSize(t *testing.T)
 	}
 }
 
+func TestRehydrateMessagePayloadRejectsMismatchedCompressedPayloadSize(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-payload-compressed-size-mismatch", "sess-payload-compressed-size-mismatch", "turn-1")
+
+	largeStdout := strings.Repeat("c", largeMessagePayloadThresholdBytes+1)
+	msg := newShellMessage("msg-compressed-size-mismatch", "sess-payload-compressed-size-mismatch", largeStdout, "")
+	msg.TurnID = "turn-1"
+	if err := repo.CreateMessage(ctx, msg); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE task_message_payloads SET compressed_size = ? WHERE digest = ?`),
+		1, msg.PayloadDigest); err != nil {
+		t.Fatalf("corrupt stored compressed payload size: %v", err)
+	}
+
+	got, err := repo.GetMessage(ctx, "msg-compressed-size-mismatch")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if err := repo.RehydrateMessagePayload(ctx, got); err == nil {
+		t.Fatal("RehydrateMessagePayload accepted mismatched compressed payload size metadata")
+	}
+}
+
 func TestGzipDecompressRejectsActualOversize(t *testing.T) {
 	compressed, err := gzipCompress([]byte("123456789"))
 	if err != nil {

@@ -2201,7 +2201,7 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 	var probe int
 	err = tx.QueryRowContext(ctx,
 		`SELECT 1 FROM github_pr_watches
-		 WHERE task_id = ? AND repository_id = ? AND branch = ? AND pr_number = 0 AND id <> ?`,
+		 WHERE task_id = ? AND repository_id = ? AND branch = ? AND id <> ?`,
 		taskID, repositoryID, branch, id).Scan(&probe)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
