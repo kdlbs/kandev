@@ -166,6 +166,7 @@ export const test = backendFixture.extend<
   {
     testPage: Page;
     tabletTestPage: Page;
+    coarseDesktopTestPage: Page;
     prCapture: PrAssetCapture;
     /**
      * Auto fixture that resets integration mock state and any persisted
@@ -417,6 +418,20 @@ export const test = backendFixture.extend<
     await context.close();
   },
 
+  coarseDesktopTestPage: async ({ browser, backend, testPage }, use) => {
+    void testPage;
+    const context = await browser.newContext({
+      baseURL: backend.frontendUrl,
+      viewport: { width: 1280, height: 900 },
+      hasTouch: true,
+      isMobile: false,
+    });
+    const page = await context.newPage();
+    await setupPage(page, backend);
+    await use(page);
+    await context.close();
+  },
+
   // PR asset capture — gated behind CAPTURE_PR_ASSETS env var.
   // When enabled, provides screenshot/recording helpers for PR descriptions.
   // Destructure in tests that need it: { testPage, prCapture }
@@ -515,7 +530,7 @@ export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) 
   });
 }
 
-/** Points the seed repository at an empty remote whose HEAD cannot resolve. */
+/** Points the seed repository at a non-empty remote whose HEAD cannot resolve. */
 export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir: string) {
   const remoteDir = path.join(
     tmpDir,
@@ -527,6 +542,11 @@ export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir
     env: makeGitEnv(tmpDir),
     stdio: "ignore",
   });
+  execFileSync(
+    "git",
+    ["-C", seedData.repositoryPath, "push", "--no-verify", remoteDir, "main:refs/heads/unrelated"],
+    { env: makeGitEnv(tmpDir), stdio: "ignore" },
+  );
   try {
     execFileSync(
       "git",

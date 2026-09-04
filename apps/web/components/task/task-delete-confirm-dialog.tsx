@@ -16,9 +16,13 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import { TaskCleanupConsequences } from "./task-cleanup-consequences";
 import { StillWorkingWarning } from "./task-still-working-warning";
 import {
+  TASK_CONFIRM_ACTION_CLASS,
+  TASK_CONFIRM_BODY_CLASS,
   TASK_CONFIRM_CLASS,
+  TASK_CONFIRM_FOOTER_CLASS,
   TASK_CONFIRM_HEADER_CLASS,
   stopDialogPropagation,
 } from "./task-confirm-dialog-shared";
@@ -83,43 +87,42 @@ export function TaskDeleteConfirmDialog({
       <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
-          <AlertDialogDescription asChild className="text-sm leading-6">
-            <div>
-              <p>{description}</p>
-              {cleanup.lines.map((line, i) => (
-                <p key={i} className="mt-2" data-testid="cleanup-line">
-                  {line}
-                </p>
-              ))}
+        </AlertDialogHeader>
+        <div data-testid="task-confirmation-body" className={TASK_CONFIRM_BODY_CLASS}>
+          <AlertDialogDescription asChild className="text-left text-sm leading-6">
+            <div className="space-y-3">
+              <p data-testid="task-confirmation-outcome">{description}</p>
+              <TaskCleanupConsequences summary={cleanup} />
             </div>
           </AlertDialogDescription>
-        </AlertDialogHeader>
-        {(isInFlight || storeInFlight) && (
-          <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
-        )}
-        {subtaskCount > 0 && (
-          <label className="flex items-start gap-2 text-sm cursor-pointer">
-            <Checkbox
-              checked={cascade}
-              onCheckedChange={(v) => setCascade(v === true)}
-              disabled={isDeleting}
-              data-testid="delete-cascade-checkbox"
-            />
-            <span>
-              {t("task:alsoDeleteSubtasks", { count: subtaskCount })}
-              <span className="block text-sm text-muted-foreground">
-                {t("task:subtasksBecomeRootTasksUnlessYou")}
+          {(isInFlight || storeInFlight) && (
+            <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
+          )}
+          {subtaskCount > 0 && (
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <Checkbox
+                checked={cascade}
+                onCheckedChange={(v) => setCascade(v === true)}
+                disabled={isDeleting}
+                data-testid="delete-cascade-checkbox"
+              />
+              <span>
+                {t("task:alsoDeleteSubtasks", { count: subtaskCount })}
+                <span className="block text-sm text-muted-foreground">
+                  {t("task:subtasksBecomeRootTasksUnlessYou")}
+                </span>
               </span>
-            </span>
-          </label>
-        )}
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer !text-sm">
+            </label>
+          )}
+        </div>
+        <AlertDialogFooter className={TASK_CONFIRM_FOOTER_CLASS}>
+          <AlertDialogCancel className={TASK_CONFIRM_ACTION_CLASS}>
             {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
+            variant="destructive"
             disabled={isDeleting}
-            className="cursor-pointer bg-destructive !text-sm text-destructive-foreground hover:bg-destructive/90"
+            className={TASK_CONFIRM_ACTION_CLASS}
             data-testid={confirmTestId}
             onClick={() => {
               if (isDeleting) return;

@@ -162,6 +162,14 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		installViaNpm:      false,
 		sessionDirTemplate: "{home}/.hermes",
 	}},
+	{func() Agent { return NewGooseACP() }, acpAgentSpec{
+		id: "goose-acp", displayName: "Goose", detectBinaries: []string{"goose"},
+		expectedArgv:       []string{"goose", "acp"},
+		inferenceArgv:      []string{"goose", "acp"},
+		passthroughArgv:    []string{"goose"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.local/share/goose",
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {
@@ -223,6 +231,29 @@ func TestNewACPAgents_AllCommandSurfaces(t *testing.T) {
 				t.Fatalf("%s does not implement PassthroughAgent", tc.spec.id)
 			}
 			assertArgvEqual(t, "PassthroughCmd", pa.PassthroughConfig().PassthroughCmd.Args(), tc.spec.passthroughArgv)
+		})
+	}
+}
+
+// TestAuggieRuntime_DeclaresServerNamespacedMCPTools covers
+// AC-TASKS-MCP-TOOL-NAMES-001.1 and .2.
+func TestAuggieRuntime_DeclaresServerNamespacedMCPTools(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func() Agent
+		want bool
+	}{
+		{name: "auggie", new: func() Agent { return NewAuggie() }, want: true},
+		{name: "cursor", new: func() Agent { return NewCursorACP() }, want: false},
+		{name: "codex", new: func() Agent { return NewCodexACP() }, want: false},
+		{name: "claude", new: func() Agent { return NewClaudeACP() }, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.new().Runtime().NamespacesMCPToolsByServer
+			if got != tt.want {
+				t.Errorf("NamespacesMCPToolsByServer = %t, want %t", got, tt.want)
+			}
 		})
 	}
 }

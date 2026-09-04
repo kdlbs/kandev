@@ -20,6 +20,14 @@ This page is the startup-configuration reference. Executor-specific fields are c
 3. Use environment variables for deployment-specific overrides and secrets.
 4. Use the web UI for persistent product settings, agents, executors, and workflows.
 
+![Configuration precedence showing embedded defaults, the first existing config.yaml, environment variables, and separate persistent web settings.](../screenshots/configuration.svg)
+
+[Open full-size SVG diagram][configuration-diagram]
+
+[configuration-diagram]: ../../docs/screenshots/configuration.svg
+
+Startup sources are read once and later sources override earlier ones. Web settings are stored separately and do not join the YAML and environment-variable precedence chain.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:
@@ -473,6 +481,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
+| `features.officeSessionIdentity` | `KANDEV_FEATURES_OFFICE_SESSION_IDENTITY` | off | Experimental Office participant sessions. Enable only after the `(task_id, agent_profile_id)` unique index is available. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected

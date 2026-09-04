@@ -175,6 +175,21 @@ func handleE2EReset(
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: "workflow sync config cleanup failed"})
 			return
 		}
+		// Office config sync's poller reads office_config_sync_configs the
+		// same way the workflow-sync poller reads workflow_sync_configs
+		// above; office_config_sync_manifest has no FK/cascade onto it
+		// either, so both are deleted here before task/workspace deletion
+		// for the same reason.
+		for _, q := range []string{
+			`DELETE FROM office_config_sync_manifest WHERE workspace_id = ?`,
+			`DELETE FROM office_config_sync_configs WHERE workspace_id = ?`,
+		} {
+			if _, err := repo.DB().ExecContext(ctx, q, workspaceID); err != nil {
+				log.Error("e2e reset: office config sync cleanup failed", zap.String("sql", q), zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: "office config sync cleanup failed"})
+				return
+			}
+		}
 
 		// Reset every agent's routing override to the inherit-markers
 		// shape onboarding writes. Without this, an agent-override test

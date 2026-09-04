@@ -9,7 +9,8 @@ import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-a
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useSubtaskCountState, type SubtaskCountResult } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
-import { getCleanupSummary } from "./task-cleanup-summary";
+import { getCleanupSummary, type CleanupSummary } from "./task-cleanup-summary";
+import { TaskCleanupConsequences } from "./task-cleanup-consequences";
 import { StillWorkingWarning } from "./task-still-working-warning";
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 
@@ -42,22 +43,20 @@ export type TaskArchiveConfirmationProps = {
 
 function ArchiveDescription({
   taskTitle,
-  cleanupLines,
+  cleanup,
   taskIsInFlight,
 }: {
   taskTitle?: string;
-  cleanupLines: string[];
+  cleanup: CleanupSummary;
   taskIsInFlight: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <span className="block space-y-2">
-      <span className="block">{t("task:archiveTaskConfirm", { taskTitle })}</span>
-      {cleanupLines.map((line) => (
-        <span key={line} className="block">
-          {line}
-        </span>
-      ))}
+      <span data-testid="task-confirmation-outcome" className="block">
+        {t("task:archiveTaskConfirm", { taskTitle })}
+      </span>
+      <TaskCleanupConsequences summary={cleanup} compact />
       {taskIsInFlight && <StillWorkingWarning />}
     </span>
   );
@@ -83,12 +82,9 @@ function ArchiveConfirmCopy({
   confirmTestId: string;
 }) {
   const { t } = useTranslation();
+  const cleanup = getCleanupSummary(executorType);
   const description = (
-    <ArchiveDescription
-      taskTitle={taskTitle}
-      cleanupLines={getCleanupSummary(executorType).lines}
-      taskIsInFlight={isInFlight}
-    />
+    <ArchiveDescription taskTitle={taskTitle} cleanup={cleanup} taskIsInFlight={isInFlight} />
   );
   return (
     <InlineConfirmActions
@@ -134,6 +130,7 @@ function ArchiveConfirmPopover({
   confirmTestId: string;
 }) {
   const { t } = useTranslation();
+  const cleanup = getCleanupSummary(executorType);
   return (
     <ActionConfirmPopover
       open={open}
@@ -144,11 +141,7 @@ function ArchiveConfirmPopover({
       focusBoundaryRef={focusBoundaryRef ?? anchorRef}
       title={t("task:archiveTaskTitle")}
       description={
-        <ArchiveDescription
-          taskTitle={taskTitle}
-          cleanupLines={getCleanupSummary(executorType).lines}
-          taskIsInFlight={isInFlight}
-        />
+        <ArchiveDescription taskTitle={taskTitle} cleanup={cleanup} taskIsInFlight={isInFlight} />
       }
       cancelLabel={t("common:cancel")}
       confirmLabel={t(ARCHIVE_LABEL_KEY)}

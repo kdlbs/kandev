@@ -119,3 +119,99 @@ describe("FileBrowserToolbar workspace actions", () => {
     drawer.remove();
   });
 });
+
+const CREATE_MENU_TESTID = "files-create-menu";
+
+describe("FileBrowserToolbar create menu", () => {
+  const baseProps = {
+    displayPath: "workspace",
+    fullPath: "/workspace",
+    copied: false,
+    expandedPathsSize: 0,
+    onCopyPath: vi.fn(),
+    onOpenFolder: vi.fn(),
+    onStartSearch: vi.fn(),
+    onCollapseAll: vi.fn(),
+  };
+
+  it("keeps one-click New File when upload is unavailable", () => {
+    const onStartCreate = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileBrowserToolbar {...baseProps} showCreateButton onStartCreate={onStartCreate} />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "New file" }));
+    expect(onStartCreate).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId(CREATE_MENU_TESTID)).toBeNull();
+  });
+
+  it("offers New File, Upload files, and Upload folder when upload is available", async () => {
+    const onStartCreate = vi.fn();
+    const onUploadFiles = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileBrowserToolbar
+          {...baseProps}
+          showCreateButton
+          onStartCreate={onStartCreate}
+          onUploadFiles={onUploadFiles}
+        />
+      </TooltipProvider>,
+    );
+
+    const menuTrigger = screen.getByTestId(CREATE_MENU_TESTID);
+    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
+    fireEvent.click(menuTrigger);
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "New file" })).toBeTruthy());
+    expect(screen.getByRole("menuitem", { name: "Upload files" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Upload folder" })).toBeTruthy();
+  });
+
+  it("still begins inline creation from the menu, unchanged", async () => {
+    const onStartCreate = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileBrowserToolbar
+          {...baseProps}
+          showCreateButton
+          onStartCreate={onStartCreate}
+          onUploadFiles={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const menuTrigger = screen.getByTestId(CREATE_MENU_TESTID);
+    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
+    fireEvent.click(menuTrigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New file" }));
+    await waitFor(() => expect(onStartCreate).toHaveBeenCalledTimes(1));
+  });
+
+  it("requests the right picker for each upload item", async () => {
+    const onUploadFiles = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileBrowserToolbar
+          {...baseProps}
+          showCreateButton
+          onStartCreate={vi.fn()}
+          onUploadFiles={onUploadFiles}
+        />
+      </TooltipProvider>,
+    );
+
+    const menuTrigger = screen.getByTestId(CREATE_MENU_TESTID);
+    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
+    fireEvent.click(menuTrigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Upload folder" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledWith("folder"));
+
+    onUploadFiles.mockClear();
+    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false });
+    fireEvent.click(menuTrigger);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Upload files" }));
+    await waitFor(() => expect(onUploadFiles).toHaveBeenCalledWith("files"));
+  });
+});

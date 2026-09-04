@@ -523,14 +523,13 @@ message WorkflowStep {
   // The on_enter action TYPES configured on this step, as authored
   // (e.g. "auto_start_agent", "queue_run"), so a plugin can describe this
   // step's intent instead of guessing from the step name or stage_type.
-  // This lists what is configured, not a guarantee that every listed type
-  // executes on every transition path: an ordinary task move currently runs
-  // only a subset (auto_start_agent, configure_session, enable_plan_mode,
-  // set_session_mode, reset_agent_context); queue_run,
-  // queue_run_for_each_participant, clear_decisions, and run_code_review
-  // currently execute only via engine-driven triggers (e.g. Office). Action
-  // config is deliberately not exposed: it carries target task ids, payloads
-  // and profile ids. Plugins must ignore action types they do not recognize.
+  // A type appearing here means it is configured, not a guarantee of when
+  // or whether it fires. Session-independent actions use step-entry dispatch,
+  // while session-shaped actions use route-specific session handling. Some
+  // auto_start_agent paths create the required session instead of requiring
+  // one to already exist. Action config is deliberately not exposed: it
+  // carries target task ids, payloads and profile ids. Plugins must ignore
+  // action types they do not recognize.
   repeated string on_enter_action_types = 10;
 }
 message ListWorkflowStepsRequest {

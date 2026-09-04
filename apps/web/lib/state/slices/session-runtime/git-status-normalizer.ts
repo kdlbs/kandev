@@ -47,6 +47,6 @@ export function normalizeGitStatusFiles(
 /** Normalize the file contract before a Git-status entry enters the store. */
 export function normalizeGitStatusEntry(gitStatus: GitStatusEntry): GitStatusEntry {
   const files = normalizeGitStatusFiles(gitStatus.files);
-  if (files === gitStatus.files) return gitStatus;
+  if (files === gitStatus.files && files !== undefined) return gitStatus;
   return { ...gitStatus, files: files ?? {} };
 }

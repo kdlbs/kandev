@@ -287,6 +287,77 @@ func TestEnsureSessionForAgent_RebindsExecutionProfileAfterCreateRace(t *testing
 	}
 }
 
+// TestEnsureSessionForAgent_RefusalThenRecoveryFlipsIdleWinnerAndClearsMetadata
+// covers the full refusal-then-recovery shape end to end (AC-001.9): this
+// caller's own create attempt loses the race and is refused with
+// ErrOfficeSessionRaceConflict, the bounded-recovery re-read then observes
+// the winning row — which by the time it's read has already gone IDLE, not
+// RUNNING — on a different execution profile with stale provider metadata
+// still attached. Unlike TestEnsureSessionForAgent_RebindsExecutionProfileAfterCreateRace
+// (which only asserts the rebound ExecutionProfileID) and
+// TestEnsureSessionForAgent_RebindsExecutionProfileOnReuse (which asserts the
+// metadata clear but reaches rebind via a direct initial lookup, never
+// through a forced refusal), this test proves rebindOfficeSessionExecutionProfile's
+// metadata clear AND tryFlipIdleSessionToRunning's CAS flip to RUNNING both
+// happen together on the specific row recovered after a refusal.
+func TestEnsureSessionForAgent_RefusalThenRecoveryFlipsIdleWinnerAndClearsMetadata(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	winner := &models.TaskSession{
+		ID:                 "sess-refusal-recovery-winner",
+		TaskID:             "task-office",
+		AgentProfileID:     "agent-1",
+		ExecutionProfileID: "codex-profile",
+		State:              models.TaskSessionStateIdle,
+		StartedAt:          time.Now().UTC(),
+		Metadata: map[string]interface{}{
+			"acp_session_id":                 "codex-session",
+			models.SessionMetaKeySessionMode: "default",
+		},
+	}
+	repo.createTaskSessionFunc = func(_ context.Context, _ *models.TaskSession) error {
+		// Simulate a concurrent creator: this caller's own create attempt is
+		// refused, but the row it lost the race to is written here, as the
+		// AC-003.7 tests in office_session_race_guard_test.go already do.
+		repo.mu.Lock()
+		repo.sessions[winner.ID] = winner
+		repo.mu.Unlock()
+		return fmt.Errorf("%w: concurrent insert", taskrepo.ErrOfficeSessionRaceConflict)
+	}
+
+	got, wasCreated, err := exec.EnsureSessionForAgentWithCreation(
+		context.Background(), officeTestTask(), "agent-1", "claude-profile", "exec-1", "",
+	)
+	if err != nil {
+		t.Fatalf("EnsureSessionForAgentWithCreation: %v", err)
+	}
+	if wasCreated {
+		t.Fatal("wasCreated = true, want false (this caller reused the recovered winner, it did not create)")
+	}
+	if got == nil || got.ID != winner.ID {
+		t.Fatalf("session = %#v, want the recovered winner row %q", got, winner.ID)
+	}
+	if got.State != models.TaskSessionStateRunning {
+		t.Fatalf("state = %q, want RUNNING (the recovery-reused row must still flip IDLE->RUNNING)", got.State)
+	}
+	if got.ExecutionProfileID != "claude-profile" {
+		t.Fatalf("execution profile = %q, want claude-profile", got.ExecutionProfileID)
+	}
+	if _, exists := got.Metadata["acp_session_id"]; exists {
+		t.Error("acp_session_id metadata survived the execution profile rebind on the recovered row")
+	}
+	if _, exists := got.Metadata[models.SessionMetaKeySessionMode]; exists {
+		t.Error("session mode metadata survived the execution profile rebind on the recovered row")
+	}
+	stored := repo.sessions[winner.ID]
+	if stored.State != models.TaskSessionStateRunning {
+		t.Fatalf("stored session state = %q, want RUNNING", stored.State)
+	}
+	if _, exists := stored.Metadata["acp_session_id"]; exists {
+		t.Error("stored session metadata still carries acp_session_id after the rebind+flip")
+	}
+}
+
 // TestEnsureSessionForAgent_ReusesIdleAndFlipsRunning covers the canonical
 // reuse path: the second run for the same (task, agent) reuses the existing
 // row and flips IDLE → RUNNING. No new row is inserted.

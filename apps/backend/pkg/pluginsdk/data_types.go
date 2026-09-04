@@ -511,11 +511,8 @@ type WorkflowStep struct {
 	WIPLimit       int32 // 0 means unlimited
 	AgentProfileID string
 	// OnEnterActionTypes lists the on_enter action types configured on this
-	// step, as authored. This lists what is configured, not a guarantee that
-	// every listed type executes on every transition path. The ordinary move
-	// path handles auto_start_agent, configure_session, enable_plan_mode,
-	// set_session_mode and reset_agent_context. Other action types can run only
-	// on applicable workflow-engine paths. Config maps are deliberately not
+	// step, as authored. A type appearing here means it is configured, not a
+	// guarantee of when or whether it fires. Config maps are deliberately not
 	// exposed. Nil when the step has no on_enter actions, never an empty
 	// non-nil slice. Callers must ignore action types they do not recognize.
 	OnEnterActionTypes []string
@@ -1203,7 +1200,7 @@ func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *Plug
 // UpdateTaskInput is the Go-native mirror of
 // kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
 // pointer leaves that field untouched, a non-nil pointer overwrites it. The
-// conservative field surface (title/description/state) is the documented
+// conservative field surface (title/description/state/priority) is the documented
 // plugin-writable mask. WorkflowStepID is rejected when non-nil — it exists
 // on this struct only for wire-shape symmetry with UpdateTaskRequest; use
 // TaskReader.Move (see host.go) to transition a task between workflow steps,

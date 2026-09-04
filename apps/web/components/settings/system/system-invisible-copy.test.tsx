@@ -8,6 +8,7 @@ import { SETTINGS_MENU_SECTIONS } from "@/components/app-sidebar/sections/settin
 
 const SYSTEM_MENU_ITEMS =
   SETTINGS_MENU_SECTIONS.find((section) => section.id === "system")?.items ?? [];
+const PSEUDO_ACCENTED = /[À-ɏ]/;
 
 afterEach(cleanup);
 
@@ -118,8 +119,24 @@ describe("System menu labels", () => {
   it("renders every System row label through the catalog", () => {
     const labels = SYSTEM_MENU_ITEMS.map((item) => t(item.labelKey));
     expect(labels).toEqual(
-      expect.arrayContaining(["Status", "Data & Logs", "Feature Toggles", "Updates", "About"]),
+      expect.arrayContaining([
+        "Status",
+        "Data & Logs",
+        "Storage",
+        "Feature Toggles",
+        "Updates",
+        "About",
+      ]),
     );
+  });
+
+  it("looks up the Storage title through the pseudo-locale", async () => {
+    await activateLocale("pseudo");
+    try {
+      expect(t("system:storageTitle")).toMatch(PSEUDO_ACCENTED);
+    } finally {
+      await activateLocale("en");
+    }
   });
 });
 
@@ -131,8 +148,6 @@ describe("System menu labels", () => {
  * clean by lint, so this is the check that keeps them migrated.
  */
 describe("copy the guard cannot see, under the pseudo-locale", () => {
-  const ACCENTED = /[À-ɏ]/;
-
   beforeAll(async () => {
     await activateLocale("pseudo");
   });
@@ -146,7 +161,7 @@ describe("copy the guard cannot see, under the pseudo-locale", () => {
         { id: "j1", kind: "vacuum", state, started_at: "2026-08-03T10:00:00Z", message: "" },
       ];
       render(<JobProgressIndicator kind="vacuum" />);
-      expect(screen.getByTestId("system-job-vacuum").textContent).toMatch(ACCENTED);
+      expect(screen.getByTestId("system-job-vacuum").textContent).toMatch(PSEUDO_ACCENTED);
       cleanup();
     }
   });
@@ -167,13 +182,13 @@ describe("copy the guard cannot see, under the pseudo-locale", () => {
     expect(description).toContain("VACUUM INTO");
     expect(description).toContain(path);
     // The surrounding sentence is still translated.
-    expect(description).toMatch(ACCENTED);
+    expect(description).toMatch(PSEUDO_ACCENTED);
   });
 
   it("accents every System menu label", () => {
     expect(SYSTEM_MENU_ITEMS.length).toBeGreaterThan(0);
     for (const item of SYSTEM_MENU_ITEMS) {
-      expect(t(item.labelKey)).toMatch(ACCENTED);
+      expect(t(item.labelKey)).toMatch(PSEUDO_ACCENTED);
     }
   });
 });

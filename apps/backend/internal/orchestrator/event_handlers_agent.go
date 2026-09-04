@@ -453,6 +453,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		}
 		s.executeQueuedMessageWithReservation(data.SessionID, deferredLifecycleDispatch, deferredLifecycleReservation)
 	}()
+	var deferredPassthroughRunning func()
+	defer func() {
+		if deferredPassthroughRunning != nil {
+			deferredPassthroughRunning()
+		}
+	}()
 
 	if s.isSessionResetInProgress(data.SessionID) {
 		s.logger.Debug("ignoring agent.ready while session reset is in progress",
@@ -491,6 +497,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
 	lock.Lock()
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, data.SessionID, "")
 	guardLocked := true
 	defer func() {
 		if guardLocked {
@@ -665,8 +672,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// avoid racing on_enter against the running turn. Apply it now: the move
 	// is the explicit transition the agent requested, so skip the regular
 	// on_turn_complete evaluation against the (still old) step.
-	if pendingMove, exists := s.messageQueue.TakePendingMove(ctx, data.SessionID); exists {
-		s.applyPendingMove(ctx, data.TaskID, data.SessionID, session, pendingMove)
+	//
+	// A move that has been armed longer than the TTL is not applied: the board
+	// state it was authored against is long gone, and applying it would
+	// relocate the card behind the user's back. discardStalePendingMove drops
+	// it (and its hand-off prompt), so this turn falls through to the normal
+	// on_turn_complete handling below, exactly as if no move had been armed.
+	// Fresh moves are claimed with an exact-row comparison before application.
+	// See pending_move_reaper.go.
+	if s.handlePendingMoveAtAgentReady(ctx, data.TaskID, data.SessionID, session) {
 		return
 	}
 
@@ -717,7 +731,20 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			return
 		}
 		if queuedMsg.Content != "" {
-			if err := s.deliverPassthroughPrompt(ctx, data.SessionID, queuedMsg.Content); err != nil {
+			var err error
+			if preparer, ok := s.agentManager.(passthroughRunningPreparer); ok {
+				deferredPassthroughRunning, err = preparer.PreparePassthroughRunning(data.SessionID)
+				if err != nil {
+					s.logger.Warn("failed to prepare passthrough as running before queued prompt",
+						zap.String("session_id", data.SessionID),
+						zap.Error(err))
+					return
+				}
+				err = s.writePassthroughPrompt(ctx, data.SessionID, queuedMsg.Content)
+			} else {
+				err = s.deliverPassthroughPrompt(ctx, data.SessionID, queuedMsg.Content)
+			}
+			if err != nil {
 				s.logger.Warn("failed to deliver queued message to passthrough",
 					zap.String("session_id", data.SessionID),
 					zap.Error(err))
@@ -1148,9 +1175,22 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	// the event waited, the guarded state reload below observes CANCELLED and
 	// suppresses all workflow/on_enter side effects.
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	if !lock.TryLock() {
+		go func() {
+			defer release()
+			lock.Lock()
+			defer lock.Unlock()
+			s.handleAgentCompletedAfterGuard(context.WithoutCancel(ctx), data)
+		}()
+		return
+	}
 	defer release()
-	lock.Lock()
 	defer lock.Unlock()
+	s.handleAgentCompletedAfterGuard(ctx, data)
+}
+
+func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watcher.AgentEventData) {
+	ctx = withWorkflowProfileSwitchGuardHeld(ctx, data.SessionID, data.AgentExecutionID)
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("deferring agent.completed while cancellation is in progress",
 			zap.String("task_id", data.TaskID),
@@ -1182,6 +1222,25 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		return
+	}
+	parkedSwitchStop := s.consumeParkedProfileSwitchStopIntent(ctx, data, session)
+	if !parkedSwitchStop && s.hasGracefulExecutionTeardownOwner(data.SessionID, data.AgentExecutionID) {
+		// The park claim is the exact-execution ownership boundary. The durable
+		// intent is normally present as well, but the owner still wins if a
+		// metadata read or a delayed cleanup left that marker unavailable.
+		parkedSwitchStop = true
+		s.logger.Debug("ignoring agent.completed for explicitly owned teardown",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+	}
+	if parkedSwitchStop {
+		s.logger.Debug("ignoring agent.completed caused by parked workflow profile switch",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}
@@ -1330,7 +1389,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 }
 
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) {
-	data = s.withDynamicAttemptEvidence(data)
+	data = s.withPromptAttemptEvidence(data)
+	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -1494,6 +1554,27 @@ func (s *Service) claimExecutionTeardown(
 	}
 }
 
+// releaseExecutionTeardownClaim rolls back an exact execution claim made by a
+// lifecycle operation that failed before its durable state transition. The
+// caller must still hold the session guard, so another session-scoped teardown
+// cannot replace the claim between the load and compare-and-delete.
+func (s *Service) releaseExecutionTeardownClaim(sessionID, executionID string) {
+	if sessionID == "" || executionID == "" {
+		return
+	}
+	key := terminalExecutionKey(sessionID, executionID)
+	value, ok := s.executionTeardownClaims.Load(key)
+	if !ok {
+		return
+	}
+	claim, ok := value.(executionTeardownClaim)
+	if !ok {
+		s.executionTeardownClaims.Delete(key)
+		return
+	}
+	s.executionTeardownClaims.CompareAndDelete(key, claim)
+}
+
 // claimForcedExecutionCleanup serializes exact-execution cleanup arbitration
 // with coordinator cancellation. The caller performs blocking cleanup only
 // after this method releases the per-session guard.
@@ -1593,15 +1674,25 @@ func (s *Service) deleteExecutionTeardownClaimIfExpired(key string, expiresAt ti
 }
 
 func (s *Service) hasExecutionTeardownOwner(sessionID, executionID string) bool {
+	_, ok := s.executionTeardownClaimFor(sessionID, executionID)
+	return ok
+}
+
+func (s *Service) hasGracefulExecutionTeardownOwner(sessionID, executionID string) bool {
+	claim, ok := s.executionTeardownClaimFor(sessionID, executionID)
+	return ok && claim.intent == executionTeardownIntentGraceful
+}
+
+func (s *Service) executionTeardownClaimFor(sessionID, executionID string) (executionTeardownClaim, bool) {
 	if sessionID == "" || executionID == "" {
-		return false
+		return executionTeardownClaim{}, false
 	}
 	value, ok := s.executionTeardownClaims.Load(terminalExecutionKey(sessionID, executionID))
 	if !ok {
-		return false
+		return executionTeardownClaim{}, false
 	}
 	claim, ok := value.(executionTeardownClaim)
-	return ok && time.Now().Before(claim.expiresAt)
+	return claim, ok && time.Now().Before(claim.expiresAt)
 }
 
 // wasResumeAttempt checks whether the session's last execution used a resume token.
@@ -2175,6 +2266,30 @@ func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError,
 
 // handleAgentStopped handles agent stopped events (manual stop or cancellation)
 func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.handleAgentStoppedLocked(ctx, data)
+		return
+	}
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	if !lock.TryLock() {
+		go func() {
+			defer release()
+			lock.Lock()
+			defer lock.Unlock()
+			s.handleAgentStoppedLocked(context.WithoutCancel(ctx), data)
+		}()
+		return
+	}
+	defer release()
+	defer lock.Unlock()
+	s.handleAgentStoppedLocked(ctx, data)
+}
+
+// handleAgentStoppedLocked performs stopped-event reconciliation while the
+// source session's cancel-in-flight guard is held. This ordering is shared
+// with profile-switch parking so a natural stop cannot consume a park intent
+// that was written for a later teardown.
+func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent stopped",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -2190,6 +2305,13 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	s.retireExecutionActivityAndPublish(
 		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 	)
+	if s.consumeParkedProfileSwitchStopIntent(ctx, data, nil) {
+		s.logger.Debug("ignoring agent.stopped caused by parked workflow profile switch",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
 
 	// NOTE: we deliberately do NOT resetTransientRetry here — the transient
 	// retry tears down the failed execution via StopExecution as part of its

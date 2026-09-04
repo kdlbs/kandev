@@ -263,7 +263,9 @@ export function useSubmitHandler(
 export function useChatPanelHandlers(
   resolvedSessionId: string | null,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
+  options: { enableFocusShortcut?: boolean } = {},
 ) {
+  const enableFocusShortcut = options.enableFocusShortcut ?? true;
   const handleCancelTurn = useCallback(async () => {
     if (!resolvedSessionId) return;
     const client = getWebSocketClient();
@@ -294,7 +296,7 @@ export function useChatPanelHandlers(
       },
       [chatInputRef],
     ),
-    { enabled: true, preventDefault: false },
+    { enabled: enableFocusShortcut, preventDefault: false },
   );
 
   return { handleCancelTurn };

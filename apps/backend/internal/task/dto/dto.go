@@ -194,6 +194,7 @@ type TaskDTO struct {
 	PrimaryExecutorType         *string                  `json:"primary_executor_type,omitempty"`
 	PrimaryExecutorName         *string                  `json:"primary_executor_name,omitempty"`
 	PrimaryAgentName            *string                  `json:"primary_agent_name,omitempty"`
+	PrimaryAgentProfileID       *string                  `json:"primary_agent_profile_id,omitempty"`
 	PrimaryWorkingDirectory     *string                  `json:"primary_working_directory,omitempty"`
 	PrimarySessionState         *string                  `json:"primary_session_state,omitempty"`
 	PrimarySessionPendingAction *string                  `json:"primary_session_pending_action"`
@@ -801,7 +802,7 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
@@ -814,6 +815,7 @@ func FromTaskWithSessionInfo(
 	primaryExecutorType *string,
 	primaryExecutorName *string,
 	primaryAgentName *string,
+	primaryAgentProfileID *string,
 	primaryWorkingDirectory *string,
 	primarySessionState *string,
 	primarySessionPendingAction *string,
@@ -873,6 +875,7 @@ func FromTaskWithSessionInfo(
 		PrimaryExecutorType:         primaryExecutorType,
 		PrimaryExecutorName:         primaryExecutorName,
 		PrimaryAgentName:            primaryAgentName,
+		PrimaryAgentProfileID:       primaryAgentProfileID,
 		PrimaryWorkingDirectory:     primaryWorkingDirectory,
 		PrimarySessionState:         primarySessionState,
 		PrimarySessionPendingAction: primarySessionPendingAction,
@@ -1061,20 +1064,22 @@ func steerEligible(sessionID string, state models.TaskSessionState, provider For
 
 // WorkflowStepDTO represents a workflow step for API responses
 type WorkflowStepDTO struct {
-	ID                    string         `json:"id"`
-	WorkflowID            string         `json:"workflow_id"`
-	Name                  string         `json:"name"`
-	Position              int            `json:"position"`
-	Color                 string         `json:"color"`
-	Prompt                string         `json:"prompt,omitempty"`
-	Events                *StepEventsDTO `json:"events,omitempty"`
-	AllowManualMove       bool           `json:"allow_manual_move"`
-	IsStartStep           bool           `json:"is_start_step"`
-	ShowInCommandPanel    bool           `json:"show_in_command_panel"`
-	AutoArchiveAfterHours int            `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID        string         `json:"agent_profile_id,omitempty"`
-	WIPLimit              int            `json:"wip_limit"`
-	PullFromStepID        string         `json:"pull_from_step_id,omitempty"`
+	ID                        string                                   `json:"id"`
+	WorkflowID                string                                   `json:"workflow_id"`
+	Name                      string                                   `json:"name"`
+	Position                  int                                      `json:"position"`
+	Color                     string                                   `json:"color"`
+	Prompt                    string                                   `json:"prompt,omitempty"`
+	Events                    *StepEventsDTO                           `json:"events,omitempty"`
+	AllowManualMove           bool                                     `json:"allow_manual_move"`
+	IsStartStep               bool                                     `json:"is_start_step"`
+	ShowInCommandPanel        bool                                     `json:"show_in_command_panel"`
+	AutoArchiveAfterHours     int                                      `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID            string                                   `json:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
+	ProfileSessionEndPolicy   models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
+	WIPLimit                  int                                      `json:"wip_limit"`
+	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
 	StageType                  string    `json:"stage_type,omitempty"`
@@ -1161,14 +1166,21 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 // TaskPlanRevisionDTO represents a plan revision for API responses.
 // Content is optional so list responses can omit it (fetched on demand).
 type TaskPlanRevisionDTO struct {
-	ID                 string    `json:"id"`
-	TaskID             string    `json:"task_id"`
-	RevisionNumber     int       `json:"revision_number"`
-	Title              string    `json:"title"`
-	Content            string    `json:"content,omitempty"`
+	ID             string `json:"id"`
+	TaskID         string `json:"task_id"`
+	RevisionNumber int    `json:"revision_number"`
+	Title          string `json:"title"`
+	Content        string `json:"content,omitempty"`
+	// ContentLength is the character (rune) count of Content, computed here
+	// before TaskPlanRevisionMetaFromModel blanks Content for list/WS payloads
+	// — so list rows can show a size without fetching full content.
+	ContentLength      int       `json:"content_length"`
 	AuthorKind         string    `json:"author_kind"`
 	AuthorName         string    `json:"author_name"`
 	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
+	WorkflowStepID     string    `json:"workflow_step_id,omitempty"`
+	WorkflowStepName   string    `json:"workflow_step_name,omitempty"`
+	WorkflowStepColor  string    `json:"workflow_step_color,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -1184,9 +1196,13 @@ func TaskPlanRevisionFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisionDT
 		RevisionNumber:     rev.RevisionNumber,
 		Title:              rev.Title,
 		Content:            rev.Content,
+		ContentLength:      models.PlanContentLength(rev.Content),
 		AuthorKind:         rev.AuthorKind,
 		AuthorName:         rev.AuthorName,
 		RevertOfRevisionID: rev.RevertOfRevisionID,
+		WorkflowStepID:     rev.WorkflowStepID,
+		WorkflowStepName:   rev.WorkflowStepName,
+		WorkflowStepColor:  rev.WorkflowStepColor,
 		CreatedAt:          rev.CreatedAt,
 		UpdatedAt:          rev.UpdatedAt,
 	}

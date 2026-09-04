@@ -75,6 +75,23 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 	{
+		// Cursor emits this exact control prefix as an assistant message chunk
+		// when its upstream HTTP/2 stream resets. Keep the fingerprint anchored
+		// to the control frame and bounded so user-authored prose cannot turn
+		// into an automatic retry.
+		id:      cursorRetriableStreamResetRuleID,
+		pattern: cursorRetriableStreamResetRe,
+		build: func(text string) *Error {
+			if cancellationOrDeadlineRe.MatchString(text) {
+				return nil
+			}
+			return &Error{
+				Code:       CodeAgentTransportLost,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
 		// The ACP transport pipe died mid-turn: the upstream provider service
 		// dropped the connection before a response arrived. This is
 		// provider-agnostic wire-level transport death, not a model or
@@ -115,6 +132,8 @@ const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
 
 const overloadedRuleID = "anthropic.overloaded.529.v1"
 
+const cursorRetriableStreamResetRuleID = "cursor.retriable_stream_reset.v1"
+
 const transportLostRuleID = "acp.transport_lost.v1"
 
 // transportLostRe matches the narrow ACP wire-level transport-death
@@ -123,6 +142,13 @@ const transportLostRuleID = "acp.transport_lost.v1"
 // substrings) so it never matches context-cancellation or shutdown-teardown
 // error strings, which must keep falling through to manual recovery.
 var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection closed`)
+
+// cursorRetriableStreamResetRe matches Cursor's complete control diagnostic.
+// Requiring the whole normalized message prevents ordinary provider prose from
+// combining the control prefix with an unrelated transport fragment.
+var cursorRetriableStreamResetRe = regexp.MustCompile(
+	`(?i)^\s*Error:\s*RetriableError:\s*HTTP/2 stream closed with error code CANCEL \(0x8\)(?:\s+\[canceled\])?\s*$`,
+)
 
 // overloadedRe matches the transient 529 Overloaded signature: either the
 // numeric code adjacent to "overloaded" on a single line (in either order), or

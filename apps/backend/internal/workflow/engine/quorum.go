@@ -902,8 +902,10 @@ func (e *Engine) evaluateGuardStateReadOnly(
 // slate construction the quorum evaluator itself uses — so role
 // resolution and slate membership can never disagree about who
 // participates, per AC-57's "exactly once, in the engine" mandate.
-// Approver is checked before reviewer, matching the existing
-// approver-wins precedence in office/dashboard/decisions.go's
+// When the caller holds both seats, the seat whose StepID equals stepID
+// wins, since that is the seat the current step's guard actually reads
+// decisions against. If both seats sit at stepID, or neither does,
+// approver wins, matching the precedence in office/dashboard/decisions.go's
 // resolveDeciderRole (AC-4). Returns ErrParticipantNotFound when the
 // agent occupies neither seat.
 func (e *Engine) ResolveParticipantRole(
@@ -916,28 +918,48 @@ func (e *Engine) ResolveParticipantRole(
 	if state, stateErr := e.store.LoadState(ctx, taskID, ""); stateErr == nil {
 		workflowID = state.WorkflowID
 	}
+
+	var matches []roleSeat
+	var firstSeatsErr error
 	for _, r := range []wfmodels.ParticipantRole{
 		wfmodels.ParticipantRoleApprover,
 		wfmodels.ParticipantRoleReviewer,
 	} {
 		seats, seatsErr := e.requiredSeatsForWorkflow(ctx, stepID, taskID, workflowID, string(r))
 		if seatsErr != nil {
-			return "", "", fmt.Errorf("resolve participant role: %w", seatsErr)
+			if firstSeatsErr == nil {
+				firstSeatsErr = seatsErr
+			}
+			continue
 		}
-		if id, ok := seatIDFor(seats, agentProfileID); ok {
-			return string(r), id, nil
+		if seat, ok := seatFor(seats, agentProfileID); ok {
+			if seat.StepID == stepID {
+				return string(r), seat.ID, nil
+			}
+			matches = append(matches, roleSeat{role: string(r), seat: seat})
 		}
 	}
-	return "", "", ErrParticipantNotFound
+	if firstSeatsErr != nil {
+		return "", "", fmt.Errorf("resolve participant role: %w", firstSeatsErr)
+	}
+	if len(matches) == 0 {
+		return "", "", ErrParticipantNotFound
+	}
+	return matches[0].role, matches[0].seat.ID, nil
 }
 
-// seatIDFor scans seats for one occupied by agentProfileID, returning its
-// AC-50 canonical seat id.
-func seatIDFor(seats []ParticipantInfo, agentProfileID string) (string, bool) {
+// roleSeat pairs a resolved role with the seat matched under it.
+type roleSeat struct {
+	role string
+	seat ParticipantInfo
+}
+
+// seatFor scans seats for one occupied by agentProfileID.
+func seatFor(seats []ParticipantInfo, agentProfileID string) (ParticipantInfo, bool) {
 	for _, s := range seats {
 		if s.AgentProfileID == agentProfileID {
-			return s.ID, true
+			return s, true
 		}
 	}
-	return "", false
+	return ParticipantInfo{}, false
 }

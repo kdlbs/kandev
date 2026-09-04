@@ -92,7 +92,7 @@ kandevTest.describe("Prompt history auto-load", () => {
       });
       for (let attempt = 0; attempt < 10 && (await firstRow.count()) === 0; attempt++) {
         const rowsBefore = await panel.locator('[data-testid^="prompt-history-row-"]').count();
-        await panel.evaluate((el) => {
+        await scroller.evaluate((el) => {
           el.scrollTop = el.scrollHeight;
         });
         await expect

@@ -5,7 +5,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/dra
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
-import { IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
+import { IconColumns, IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import {
@@ -33,11 +33,12 @@ import {
   mobileSectionClass,
   mobileSectionTitleClass,
 } from "./mobile-menu-styles";
+import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 export type MobileMenuSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId?: string;
-  currentPage?: "kanban" | "tasks";
+  currentPage?: TaskListingPage;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
@@ -58,6 +59,8 @@ export type MobileDisplayOptionsProps = {
   onToggleTasksListShowDetails: (checked: boolean) => void;
   showTaskDetails: boolean;
   showWorkflow: boolean;
+  showRepository: boolean;
+  showPreviewPanel: boolean;
   tasksListOptions?: TasksListDisplayOptions;
   /**
    * Column visibility for the workflow the phone board is focused on. Null off
@@ -85,6 +88,7 @@ function MobileDisplaySelects({
   repositoriesLoading,
   onRepositoryChange,
   showWorkflow,
+  showRepository,
 }: Omit<
   MobileDisplayOptionsProps,
   | "enablePreviewOnClick"
@@ -92,6 +96,7 @@ function MobileDisplaySelects({
   | "tasksListShowDetails"
   | "onToggleTasksListShowDetails"
   | "showTaskDetails"
+  | "showPreviewPanel"
   | "tasksListOptions"
   | "columnsSection"
 >) {
@@ -120,30 +125,32 @@ function MobileDisplaySelects({
         </div>
       )}
 
-      <div className={mobileFieldClass}>
-        <label className={mobileFieldLabelClass}>{t("kanban:repository")}</label>
-        <Select
-          value={repositoryValue}
-          onValueChange={(value) => onRepositoryChange(value as string | "all")}
-          disabled={repositories.length === 0}
-        >
-          <SelectTrigger className={mobileControlClass}>
-            <SelectValue
-              placeholder={t(
-                getRepositoryPlaceholderKey(repositoriesLoading, repositories.length === 0),
-              )}
-            />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t("kanban:allRepositories")}</SelectItem>
-            {repositories.map((repo: Repository) => (
-              <SelectItem key={repo.id} value={repo.id}>
-                {repo.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {showRepository && (
+        <div className={mobileFieldClass}>
+          <label className={mobileFieldLabelClass}>{t("kanban:repository")}</label>
+          <Select
+            value={repositoryValue}
+            onValueChange={(value) => onRepositoryChange(value as string | "all")}
+            disabled={repositories.length === 0}
+          >
+            <SelectTrigger className={mobileControlClass}>
+              <SelectValue
+                placeholder={t(
+                  getRepositoryPlaceholderKey(repositoriesLoading, repositories.length === 0),
+                )}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("kanban:allRepositories")}</SelectItem>
+              {repositories.map((repo: Repository) => (
+                <SelectItem key={repo.id} value={repo.id}>
+                  {repo.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </>
   );
 }
@@ -156,6 +163,7 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
     tasksListShowDetails,
     onToggleTasksListShowDetails,
     showTaskDetails,
+    showPreviewPanel,
     tasksListOptions,
     columnsSection,
     ...selectProps
@@ -170,18 +178,20 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
           <ColumnsMenu {...columnsSection} touchTargets />
         </div>
       )}
-      <div className={mobileFieldClass}>
-        <label className={mobileFieldLabelClass}>{t("kanban:previewPanel")}</label>
-        <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
-          <Checkbox
-            checked={enablePreviewOnClick ?? false}
-            onCheckedChange={(checked) => {
-              onTogglePreviewOnClick?.(!!checked);
-            }}
-          />
-          <span className="text-sm">{t("kanban:openPreviewOnClick")}</span>
-        </label>
-      </div>
+      {showPreviewPanel && (
+        <div className={mobileFieldClass}>
+          <label className={mobileFieldLabelClass}>{t("kanban:previewPanel")}</label>
+          <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
+            <Checkbox
+              checked={enablePreviewOnClick ?? false}
+              onCheckedChange={(checked) => {
+                onTogglePreviewOnClick?.(!!checked);
+              }}
+            />
+            <span className="text-sm">{t("kanban:openPreviewOnClick")}</span>
+          </label>
+        </div>
+      )}
       {showTaskDetails && (
         <div className={mobileFieldClass}>
           <label className={mobileFieldLabelClass}>{t("kanban:listRows")}</label>
@@ -282,6 +292,13 @@ function MobileViewSection({
             {t("kanban:pipeline")}
           </ToggleGroupItem>
         )}
+        <ToggleGroupItem
+          value="threads"
+          className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
+        >
+          <IconColumns className={mobileControlIconClass} />
+          {t("kanban:threads")}
+        </ToggleGroupItem>
         <ToggleGroupItem
           value="list"
           className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"

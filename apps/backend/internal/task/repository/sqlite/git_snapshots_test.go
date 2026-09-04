@@ -12,15 +12,25 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// seedSessionForGit creates the task + session rows that the git snapshot and
-// commit tables reference via ON DELETE CASCADE foreign keys.
+// seedSessionForGit creates the task, environment, and session rows that the
+// git snapshot and commit tables reference.
 func seedSessionForGit(t *testing.T, repo *Repository, taskID, sessionID string) {
 	t.Helper()
 	ctx := context.Background()
 	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: taskID}); err != nil {
 		t.Fatalf("CreateTask(%s): %v", taskID, err)
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
+	environmentID := "env-" + taskID
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment(%s): %v", environmentID, err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID,
+	}); err != nil {
 		t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
 	}
 }
@@ -81,6 +91,9 @@ func assertGitSnapshotEqual(t *testing.T, got, want *models.GitSnapshot) {
 	t.Helper()
 	if got.ID != want.ID {
 		t.Errorf("ID = %q, want %q", got.ID, want.ID)
+	}
+	if got.TaskEnvironmentID != want.TaskEnvironmentID {
+		t.Errorf("TaskEnvironmentID = %q, want %q", got.TaskEnvironmentID, want.TaskEnvironmentID)
 	}
 	if got.SessionID != want.SessionID {
 		t.Errorf("SessionID = %q, want %q", got.SessionID, want.SessionID)
@@ -508,6 +521,55 @@ func TestUpsertLatestLiveGitSnapshotKeepsOneLiveRowPerSession(t *testing.T) {
 	assertJSONMapEqual(t, "Files", all[0].Files, map[string]interface{}{"a.go": "modified"})
 }
 
+func TestUpsertLatestLiveGitSnapshotKeepsOneLiveRowPerRepository(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForGit(t, repo, "task-snap-multi-repo", "session-snap-multi-repo")
+	base := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+
+	for _, snapshot := range []*models.GitSnapshot{
+		{
+			ID: "live-root-1", SessionID: "session-snap-multi-repo", HeadCommit: "root-1",
+			Metadata: map[string]interface{}{"repository_name": "", "timestamp": "2026-06-01T09:01:00Z"}, CreatedAt: base.Add(time.Minute),
+		},
+		{
+			ID: "live-frontend-1", SessionID: "session-snap-multi-repo", HeadCommit: "frontend-1",
+			Metadata: map[string]interface{}{"repository_name": "frontend", "timestamp": "2026-06-01T09:01:00Z"}, CreatedAt: base.Add(time.Minute),
+		},
+		{
+			ID: "live-root-2", SessionID: "session-snap-multi-repo", HeadCommit: "root-2",
+			Metadata: map[string]interface{}{"repository_name": "", "timestamp": "2026-06-01T09:02:00Z"}, CreatedAt: base.Add(2 * time.Minute),
+		},
+	} {
+		if err := repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("UpsertLatestLiveGitSnapshot(%s): %v", snapshot.ID, err)
+		}
+	}
+
+	liveRows := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ? AND triggered_by = ?`,
+		"session-snap-multi-repo", TriggeredByLiveMonitor)
+	if liveRows != 2 {
+		t.Fatalf("live_monitor rows = %d, want one row per repository", liveRows)
+	}
+
+	all, err := repo.GetGitSnapshotsBySession(ctx, "session-snap-multi-repo", 0)
+	if err != nil {
+		t.Fatalf("GetGitSnapshotsBySession: %v", err)
+	}
+	byRepository := make(map[string]string, len(all))
+	for _, snapshot := range all {
+		repositoryName, _ := snapshot.Metadata["repository_name"].(string)
+		byRepository[repositoryName] = snapshot.HeadCommit
+	}
+	if got := byRepository[""]; got != "root-2" {
+		t.Errorf("root live snapshot = %q, want root-2", got)
+	}
+	if got := byRepository["frontend"]; got != "frontend-1" {
+		t.Errorf("frontend live snapshot = %q, want frontend-1", got)
+	}
+}
+
 func TestUpsertLatestLiveGitSnapshotGeneratesIDAndRejectsNil(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -690,8 +752,12 @@ func TestGitSnapshotsAndCommitsCascadeOnSessionDelete(t *testing.T) {
 	}
 
 	if got := countRows(t, repo,
-		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ?`, "session-cascade"); got != 0 {
-		t.Errorf("git snapshot rows after session delete = %d, want 0 (FK cascade)", got)
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE task_environment_id = ?`, "env-task-cascade"); got != 1 {
+		t.Errorf("git snapshot rows after session delete = %d, want 1 (environment ownership)", got)
+	}
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id IS NULL`); got != 1 {
+		t.Errorf("session provenance rows after session delete = %d, want 1", got)
 	}
 	if got := countRows(t, repo,
 		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ?`, "session-cascade"); got != 0 {

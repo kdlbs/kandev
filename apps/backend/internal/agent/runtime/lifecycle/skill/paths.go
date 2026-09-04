@@ -2,17 +2,15 @@ package skill
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/skillslug"
 )
 
-// validSlugRe matches slugs that are safe for use in shell commands
-// and on-disk paths. Anything outside this set is dropped during
+// isValidSlug reports whether the given slug is safe for use in shell
+// commands and on-disk paths. Anything outside this set is dropped during
 // delivery to avoid path-traversal or shell-quoting hazards.
-var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-
-// isValidSlug reports whether the given slug is safe.
-func isValidSlug(s string) bool { return s != "" && validSlugRe.MatchString(s) }
+func isValidSlug(s string) bool { return skillslug.WellFormed(s) }
 
 // isValidPathComponent reports whether the given filename is a single
 // safe path component (no separators, no traversal). Used when writing
@@ -45,10 +43,15 @@ func cleanRelativeSkillFilePath(p string) (string, bool) {
 	return cleaned, true
 }
 
-// SpritesRuntimeBase is the on-sprite path where runtime instruction
-// files are uploaded. Skills no longer live under this tree; they go
-// directly into the sprite's worktree (/workspace/<projectSkillDir>).
-const SpritesRuntimeBase = "/root/.kandev/runtime"
+const (
+	// SpritesRuntimeBase is the on-sprite path where runtime instruction
+	// files are uploaded. Skills no longer live under this tree; they go
+	// directly into the sprite's worktree (/workspace/<projectSkillDir>).
+	SpritesRuntimeBase = "/root/.kandev/runtime"
+	// KubernetesRuntimeBase is inside the reserved Pod runtime volume.
+	// The Kubernetes lifecycle uploads the serialized manifest there.
+	KubernetesRuntimeBase = "/opt/kandev/runtime"
+)
 
 // instructionsDirHost returns the on-host directory where a manifest's
 // instruction files are written.
@@ -60,4 +63,8 @@ func instructionsDirHost(kandevBase, workspaceSlug, agentID string) string {
 // manifest's instruction files are uploaded.
 func spritesInstructionsDir(workspaceSlug, agentID string) string {
 	return SpritesRuntimeBase + "/" + workspaceSlug + "/instructions/" + agentID
+}
+
+func kubernetesInstructionsDir(workspaceSlug, agentID string) string {
+	return KubernetesRuntimeBase + "/" + workspaceSlug + "/instructions/" + agentID
 }

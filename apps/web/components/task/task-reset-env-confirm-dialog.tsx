@@ -49,7 +49,7 @@ export function TaskResetEnvConfirmDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{t("task:resetEnvironment")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2 text-left">
               <p>{t("task:thisTearsDownTheCurrentContainer")}</p>
               <p className="text-destructive">{t("task:anyUncommittedOrUnpushedChangesIn")}</p>
             </div>

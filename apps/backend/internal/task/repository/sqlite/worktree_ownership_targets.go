@@ -64,6 +64,16 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 	return nil
 }
 
+// activeTargetForWorktree returns a target that can still own a physical
+// worktree during cutover. Deleted targets remain history, not ownership.
+func (t *taskWorktreeTargets) activeTargetForWorktree(worktreeID string) *envRepoTarget {
+	target := t.targetForWorktree(worktreeID)
+	if target == nil || target.status == worktreeRepoStatusDeleted || target.deletedAt != nil {
+		return nil
+	}
+	return target
+}
+
 // mergeLegacyEnvRepo merges a pre-existing environment-repository row. These
 // rows are the canonical source and win field conflicts (except for the
 // physical-worktree identity, which must agree everywhere).
@@ -121,6 +131,15 @@ func (t *taskWorktreeTargets) mergeSessionWorktree(wt legacySessionWorktree, his
 			return nil
 		}
 		return existing.verifyWorktree(wt.worktreeID, wt.worktreePath, wt.worktreeBranch)
+	}
+	// A superseded row is historical evidence, never an ownership source, so
+	// it must not open a repository slot of its own: the legacy worktree
+	// inventory already excludes it, and claiming an unowned slot would add a
+	// live worktree the inventory check then reports as extra. A deleted row
+	// is the exception, because its claim carries the deleted status and stays
+	// out of both inventories.
+	if historical && !isLegacyDeletedWorktree(wt) {
+		return nil
 	}
 	target := t.rowForKey(wt.repositoryID, wt.branchSlug)
 	if historical && target.worktreeID != "" {
@@ -466,9 +485,11 @@ func (r *Repository) tableColumns(tx *sqlx.Tx, table string) (map[string]bool, e
 // cutoverSwap drops the legacy schema and renames the shadow tables into
 // place. The environment-repository table is dropped before the environment
 // table because PostgreSQL refuses to drop a table referenced by a foreign
-// key; SQLite has FK enforcement disabled for the swap. Postgres constraint
-// names are restored to their canonical form afterwards.
-func (r *Repository) cutoverSwap(tx *sqlx.Tx) error {
+// key; the environment-owned snapshot FK is rebound to the environment
+// shadow before the parent is dropped. SQLite has FK enforcement disabled for
+// the swap. Postgres constraint names are restored to their canonical form
+// afterwards.
+func (r *Repository) cutoverSwap(c *worktreeCutover, tx *sqlx.Tx) error {
 	if _, err := tx.Exec(`DROP TABLE task_session_worktrees`); err != nil {
 		return fmt.Errorf("cutover: drop task_session_worktrees: %w", err)
 	}
@@ -482,6 +503,9 @@ func (r *Repository) cutoverSwap(tx *sqlx.Tx) error {
 	}
 	if _, err := tx.Exec(`DROP TABLE task_environment_repos`); err != nil {
 		return fmt.Errorf("cutover: drop legacy task_environment_repos: %w", err)
+	}
+	if err := r.rebindGitSnapshotEnvironmentForeignKey(c, tx); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(`DROP TABLE task_environments`); err != nil {
 		return fmt.Errorf("cutover: drop legacy task_environments: %w", err)

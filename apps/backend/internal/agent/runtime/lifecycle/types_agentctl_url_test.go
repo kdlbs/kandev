@@ -38,3 +38,25 @@ func TestAgentExecution_AgentctlURL_WithClient(t *testing.T) {
 		t.Errorf("AgentctlURL() = %q, want %q", got, want)
 	}
 }
+
+func TestAgentExecution_AcquireAgentCtlClientPinsReplacement(t *testing.T) {
+	t.Parallel()
+	client := agentctl.NewClient("127.0.0.1", 12345, newNopLogger(t))
+	exec := &AgentExecution{ID: "exec-lease", agentctl: client}
+
+	acquired, release := exec.AcquireAgentCtlClient()
+	if acquired != client {
+		t.Fatalf("AcquireAgentCtlClient() = %p, want %p", acquired, client)
+	}
+	if exec.agentctlLifecycleMu.TryLock() {
+		exec.agentctlLifecycleMu.Unlock()
+		release()
+		t.Fatal("replacement lock acquired while client lease was active")
+	}
+
+	release()
+	if !exec.agentctlLifecycleMu.TryLock() {
+		t.Fatal("replacement lock remained blocked after client lease release")
+	}
+	exec.agentctlLifecycleMu.Unlock()
+}

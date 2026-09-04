@@ -41,6 +41,8 @@ systems.
   stale per-context revisions.
 - Shared option-ordering logic applies a context history after existing
   eligibility filtering and before the combobox prioritizes its selected value.
+- The new-session selector resolves one initial selection from handoff intent,
+  compatible recent use, the current session, and source order.
 - Operational launchers report only the final successful profile for their
   declared context.
 
@@ -139,24 +141,39 @@ Operational consumers pass one context:
 - configuration chat: `config_chat`
 
 The existing eligibility filter runs first. Remembered eligible profiles are
-ordered by history; unseen eligible profiles retain source order. The existing
-combobox selected-first pass runs last. Search continues to operate on the same
-eligible option set. Unknown or stale IDs never create placeholder options.
+ordered by history. Unseen eligible profiles retain source order. The combobox
+selected-first pass runs last. Search uses the same eligible option set.
+Unknown or stale IDs never create placeholder options.
+
+An ordinary add-agent or new-session dialog resolves its initial profile after
+executor compatibility filtering. The resolver uses this priority:
+
+1. a valid handoff target
+2. the first compatible profile in `task_session` history
+3. the current session profile when it remains compatible
+4. the first compatible profile in source order
+
+A recent-use selection is selector-backed launch intent. The frontend sends it
+with `profile_explicit: true`, so workflow-step resolution cannot replace the
+profile that the dialog shows. The current-session and source-order fallbacks
+retain `profile_explicit: false`. A manual profile choice remains explicit and
+cannot be replaced by later compatibility or recent-use updates.
 
 Selectors for settings, defaults, automations, and Office assignments omit a
 context and retain source order.
 
-This change is state/data normalization inside existing selector compositions.
-Desktop and mobile reuse the same store, filtering, ordering, search, selection,
-and launch handlers. It does not change overlay type, navigation, scroll owner,
-safe-area behavior, touch targets, or responsive breakpoints. Existing mobile
-combobox and quick-chat surfaces therefore remain the mobile exemplar, and
-focused unit/component coverage satisfies the mobile-parity exception.
+Desktop and mobile reuse the same store, filtering, ordering, search,
+selection, and launch handlers. The change does not alter the dialog, overlay,
+navigation, scroll owner, safe-area behavior, touch targets, or breakpoints.
+The existing mobile new-session dialog remains the mobile exemplar. Focused
+desktop and mobile browser flows prove the shared selection outcome.
 
 ## Failure and recovery
 
-- Missing recent-use state falls back to source order without blocking a
-  selector.
+- Missing recent-use state preserves the existing current-session then
+  source-order fallback without blocking a selector.
+- An empty or fully ineligible `task_session` history preserves the existing
+  current-session or source-order default.
 - Invalid stored JSON fails that context read and is logged; other contexts and
   the app boot remain usable.
 - A stale boot or WebSocket record cannot replace a newer per-context revision.

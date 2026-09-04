@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback } from "react";
 import { t } from "@/lib/i18n";
 import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
+import { getLocalizedGitOperationError } from "@/hooks/use-git-operations";
 import type { useToast } from "@/components/toast-provider";
 import type { SessionGit, PerRepoOperationResult } from "@/hooks/domains/session/use-session-git";
 
@@ -30,6 +31,7 @@ type GitOperationResultLike = {
   success: boolean;
   output: string;
   error?: string;
+  error_code?: string;
   per_repo?: PerRepoOperationResult[];
 };
 type GitOperationFn = (op: () => Promise<GitOperationResultLike>, name: string) => Promise<void>;
@@ -50,7 +52,7 @@ export function describePerRepo(
     .map((r) =>
       t("common:gitOperationRepoFailure", {
         repo: r.repository_name,
-        error: r.error || t("common:unknownError"),
+        error: getLocalizedGitOperationError(r.error_code, r.error) || t("common:unknownError"),
       }),
     )
     .join("; ");
@@ -116,7 +118,8 @@ export function useChangesGitHandlers(
         const description = result.success
           ? result.output.slice(0, 200) ||
             t("common:gitOperationCompleted", { operation: operationName })
-          : result.error || t("common:anErrorOccurred");
+          : getLocalizedGitOperationError(result.error_code, result.error) ||
+            t("common:anErrorOccurred");
         toast({ title, description, variant });
       } catch (e) {
         toast({

@@ -81,13 +81,7 @@ test.describe("Office agent launch context", () => {
       // 5. The bundled SKILL.md landed at the agent-type-specific
       //    skill dir. mock-agent doesn't declare a custom
       //    ProjectSkillDir, so the default ".agents/skills" applies.
-      const skillFile = path.join(
-        worktreePath,
-        ".agents",
-        "skills",
-        "kandev-kandev-protocol",
-        "SKILL.md",
-      );
+      const skillFile = path.join(worktreePath, ".agents", "skills", "kandev-protocol", "SKILL.md");
       await expect
         .poll(() => fs.existsSync(skillFile), {
           timeout: 15_000,
