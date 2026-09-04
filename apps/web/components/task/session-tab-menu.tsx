@@ -172,7 +172,7 @@ export function SessionContextMenuItems({
           {t("task:resume")}
         </ContextMenuItem>
       )}
-      {actions.hideSessionPanel && (
+      {typeof actions.hideSessionPanel === "function" && (
         <ContextMenuItem className="cursor-pointer" onSelect={actions.hideSessionPanel}>
           {t("task:hide")}
         </ContextMenuItem>
