@@ -9,7 +9,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
+import { getFileCategory, getFilePreviewKind } from "@/lib/utils/file-types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
 import { calculateHash } from "@/lib/utils/file-diff";
@@ -108,14 +108,14 @@ function useFileEditorPanelActions({
   path,
   repo,
   fileKey,
-  markdownPreview,
+  renderedPreview,
   updateFileState,
   actions,
 }: {
   path: string;
   repo: string | undefined;
   fileKey: string;
-  markdownPreview: boolean;
+  renderedPreview: boolean;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
   actions: FileEditorPanelActions;
 }) {
@@ -130,11 +130,11 @@ function useFileEditorPanelActions({
     [applyRemoteUpdate, path, repo],
   );
   const onDelete = useCallback(() => deleteFile(path, repo), [deleteFile, path, repo]);
-  const onToggleMarkdownPreview = useCallback(
-    () => updateFileState(fileKey, { markdownPreview: !markdownPreview }),
-    [updateFileState, fileKey, markdownPreview],
+  const onTogglePreview = useCallback(
+    () => updateFileState(fileKey, { renderedPreview: !renderedPreview }),
+    [updateFileState, fileKey, renderedPreview],
   );
-  return { onChange, onSave, onReloadFromAgent, onDelete, onToggleMarkdownPreview };
+  return { onChange, onSave, onReloadFromAgent, onDelete, onTogglePreview };
 }
 
 function StaticFilePanel({
@@ -327,8 +327,8 @@ function useFileEditorBuffer(fileKey: string) {
   const isBinary = useDockviewStore((s) => s.openFiles.get(fileKey)?.isBinary ?? false);
   const originalContent = useDockviewStore((s) => s.openFiles.get(fileKey)?.originalContent ?? "");
   const originalHash = useDockviewStore((s) => s.openFiles.get(fileKey)?.originalHash ?? "");
-  const markdownPreview = useDockviewStore(
-    (s) => s.openFiles.get(fileKey)?.markdownPreview ?? false,
+  const renderedPreview = useDockviewStore(
+    (s) => s.openFiles.get(fileKey)?.renderedPreview ?? false,
   );
   return {
     hasFile,
@@ -338,7 +338,7 @@ function useFileEditorBuffer(fileKey: string) {
     isBinary,
     originalContent,
     originalHash,
-    markdownPreview,
+    renderedPreview,
   };
 }
 
@@ -419,7 +419,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
     isBinary,
     originalContent,
     originalHash,
-    markdownPreview,
+    renderedPreview,
   } = useFileEditorBuffer(fileKey);
   const setFileState = useDockviewStore((s) => s.setFileState);
   const updateFileState = useDockviewStore((s) => s.updateFileState);
@@ -444,12 +444,12 @@ export const FileEditorPanel = memo(function FileEditorPanel({
     updateFileState,
   });
 
-  const { onChange, onSave, onReloadFromAgent, onDelete, onToggleMarkdownPreview } =
+  const { onChange, onSave, onReloadFromAgent, onDelete, onTogglePreview } =
     useFileEditorPanelActions({
       path,
       repo,
       fileKey,
-      markdownPreview,
+      renderedPreview,
       updateFileState,
       actions: {
         handleFileChange,
@@ -467,7 +467,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   const worktreePath = getSessionWorkspacePath(activeSession);
   const repositoryId = activeSession?.repository_id ?? undefined;
   const category = resolveFileCategory(isBinary, path);
-  const isMarkdown = isMarkdownFile(path);
+  const previewKind = getFilePreviewKind(path, isBinary);
 
   return (
     <LoadedFilePanel
@@ -493,8 +493,9 @@ export const FileEditorPanel = memo(function FileEditorPanel({
         worktreePath,
         repo,
         enableComments: !!activeSessionId,
-        markdownPreview: isMarkdown ? markdownPreview : false,
-        onToggleMarkdownPreview: isMarkdown ? onToggleMarkdownPreview : undefined,
+        previewKind,
+        renderedPreview: previewKind !== "none" && renderedPreview,
+        onTogglePreview: previewKind !== "none" ? onTogglePreview : undefined,
         onChange,
         onSave,
         onReloadFromAgent,

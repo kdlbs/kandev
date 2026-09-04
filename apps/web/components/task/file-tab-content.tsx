@@ -5,7 +5,7 @@ import { FileEditorContent } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
 import { FileBinaryViewer } from "./file-binary-viewer";
 import type { OpenFileTab } from "@/lib/types/backend";
-import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
+import { getFileCategory, getFilePreviewKind } from "@/lib/utils/file-types";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { FileViewerExternalLink } from "./file-viewer-header";
 import { getFileTabKey } from "./task-center-panel-file-tabs";
@@ -24,7 +24,7 @@ export function FileTabContent({
   onFileChange,
   onFileSave,
   onFileDelete,
-  onToggleMarkdownPreview,
+  onTogglePreview,
 }: {
   tab: OpenFileTab;
   activeSession: {
@@ -38,9 +38,10 @@ export function FileTabContent({
   onFileChange: (path: string, content: string, repo?: string) => void;
   onFileSave: (path: string, repo?: string) => void;
   onFileDelete: (path: string, repo?: string) => void;
-  onToggleMarkdownPreview?: () => void;
+  onTogglePreview?: () => void;
 }) {
   const category = resolveTabCategory(tab);
+  const previewKind = getFilePreviewKind(tab.path, !!tab.isBinary);
   const workspacePath = getSessionWorkspacePath(activeSession);
   const externalLink = (
     <FileViewerExternalLink
@@ -82,8 +83,9 @@ export function FileTabContent({
           worktreePath={workspacePath}
           repo={tab.repo}
           enableComments={!!activeSessionId}
-          markdownPreview={isMarkdownFile(tab.path) ? tab.markdownPreview : false}
-          onToggleMarkdownPreview={onToggleMarkdownPreview}
+          previewKind={previewKind}
+          renderedPreview={previewKind !== "none" && !!tab.renderedPreview}
+          onTogglePreview={onTogglePreview}
           onChange={(newContent) => onFileChange(tab.path, newContent, tab.repo)}
           onSave={() => onFileSave(tab.path, tab.repo)}
           onDelete={() => onFileDelete(tab.path, tab.repo)}

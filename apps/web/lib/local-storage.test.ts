@@ -257,34 +257,68 @@ describe("task-scoped artifact notification storage", () => {
 });
 
 describe("open file tabs storage", () => {
+  const sourcePath = "src/foo.ts";
+
   beforeEach(() => {
     window.sessionStorage.clear();
   });
 
-  it("round-trips the multi-repo repo subpath so a restored tab refetches under the right repo", () => {
+  it("round-trips generic rendered preview state with the multi-repo repo subpath", () => {
     setOpenFileTabs("sess-1", [
       {
-        path: "src/foo.ts",
+        path: sourcePath,
         name: "foo.ts",
         repo: "enrichment-commons",
-        markdownPreview: true,
+        renderedPreview: true,
         pinned: true,
       },
     ]);
 
+    expect(JSON.parse(window.sessionStorage.getItem("kandev.openFiles.sess-1") ?? "null")).toEqual([
+      {
+        path: sourcePath,
+        name: "foo.ts",
+        repo: "enrichment-commons",
+        renderedPreview: true,
+        pinned: true,
+      },
+    ]);
     const tabs = getOpenFileTabs("sess-1");
     expect(tabs).toHaveLength(1);
     expect(tabs[0]).toEqual({
-      path: "src/foo.ts",
+      path: sourcePath,
       name: "foo.ts",
       repo: "enrichment-commons",
-      markdownPreview: true,
+      renderedPreview: true,
       pinned: true,
     });
   });
 
+  it("normalizes legacy Markdown preview state when reading session storage", () => {
+    window.sessionStorage.setItem(
+      "kandev.openFiles.sess-1",
+      JSON.stringify([
+        {
+          path: "README.md",
+          name: "README.md",
+          markdownPreview: true,
+          pinned: true,
+        },
+      ]),
+    );
+
+    expect(getOpenFileTabs("sess-1")).toEqual([
+      {
+        path: "README.md",
+        name: "README.md",
+        renderedPreview: true,
+        pinned: true,
+      },
+    ]);
+  });
+
   it("leaves repo undefined for single-repo tabs", () => {
-    setOpenFileTabs("sess-1", [{ path: "src/foo.ts", name: "foo.ts", pinned: true }]);
+    setOpenFileTabs("sess-1", [{ path: sourcePath, name: "foo.ts", pinned: true }]);
     expect(getOpenFileTabs("sess-1")[0].repo).toBeUndefined();
   });
 });

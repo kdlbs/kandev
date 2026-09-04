@@ -96,7 +96,7 @@ function buildPersistedTabs(
   const previewParams = preview?.params as Record<string, unknown> | undefined;
   const previewItemId = (previewParams?.previewItemId ?? null) as string | null;
   const isPromoted = previewParams?.promoted === true;
-  return Array.from(openFiles.values()).flatMap(({ path, name, repo, markdownPreview }) => {
+  return Array.from(openFiles.values()).flatMap(({ path, name, repo, renderedPreview }) => {
     const itemId = buildRepoScopedItemId(path, repo);
     const isPinned = !!api?.getPanel(`file:${itemId}`);
     const isPreview = !isPinned && itemId === previewItemId;
@@ -108,7 +108,7 @@ function buildPersistedTabs(
         path,
         name,
         ...(repo ? { repo } : {}),
-        ...(markdownPreview ? { markdownPreview } : {}),
+        ...(renderedPreview ? { renderedPreview } : {}),
         pinned: persistAsPinned,
       },
     ];
@@ -122,7 +122,7 @@ type RestoreTabsParams = {
     path: string;
     name: string;
     repo?: string;
-    markdownPreview?: boolean;
+    renderedPreview?: boolean;
     pinned?: boolean;
   }>;
   savedActiveTab: string;
@@ -169,11 +169,11 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       repo: savedTab.repo,
     });
     // Seed a placeholder file state synchronously, carrying the restored
-    // `markdownPreview` flag. This makes `openFiles.has(path)` true the moment
+    // `renderedPreview` flag. This makes `openFiles.has(path)` true the moment
     // FileEditorPanel mounts, which suppresses its own `useFileLoader` fetch.
     // Without this seed, useFileLoader races the per-tab fetch below: both call
     // setFileState (a wholesale replace), and useFileLoader's state has no
-    // markdownPreview — so when it wins the race (common under CPU load) the
+    // renderedPreview, so when it wins the race (common under CPU load) the
     // restored preview flag is clobbered and the tab reopens in code view.
     setFileState(itemId, {
       path: savedTab.path,
@@ -183,7 +183,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       originalContent: "",
       originalHash: "",
       isDirty: false,
-      markdownPreview: savedTab.markdownPreview,
+      renderedPreview: savedTab.renderedPreview,
     });
   }
   for (const savedTab of savedTabs) {
@@ -209,7 +209,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         originalHash: hash,
         isDirty: false,
         isBinary: response.is_binary,
-        markdownPreview: savedTab.markdownPreview,
+        renderedPreview: savedTab.renderedPreview,
       });
     } catch {
       /* useFileLoader will retry when executor is ready */
@@ -457,7 +457,7 @@ function useMarkdownPreviewAction({
       const fileKey = buildRepoScopedItemId(filePath, repo);
       const files = getOpenFiles();
       if (files.has(fileKey)) {
-        updateFileState(fileKey, { markdownPreview: true });
+        updateFileState(fileKey, { renderedPreview: true });
         const name = filePath.split("/").pop() || filePath;
         addFileEditorPanelWithPreviewCleanup(
           filePath,
@@ -487,7 +487,7 @@ function useMarkdownPreviewAction({
           addFileEditorPanel,
           removeFileState,
         );
-        setFileState(fileKey, { ...state, markdownPreview: true });
+        setFileState(fileKey, { ...state, renderedPreview: true });
       } catch (error) {
         toast({
           title: t("task:failedToOpenFile"),

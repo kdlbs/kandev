@@ -4,6 +4,8 @@ import { memo } from "react";
 import { useEditorProvider } from "@/hooks/use-editor-resolver";
 import { MonacoCodeEditor } from "@/components/editors/monaco/monaco-code-editor";
 import { CodeMirrorCodeEditor } from "@/components/editors/codemirror/codemirror-code-editor";
+import type { FilePreviewKind } from "@/lib/utils/file-types";
+import { HtmlPreviewContent } from "./html-preview-content";
 import { MarkdownPreviewContent } from "./markdown-preview-content";
 
 export type FileEditorContentProps = {
@@ -20,8 +22,9 @@ export type FileEditorContentProps = {
   worktreePath?: string;
   repo?: string;
   enableComments?: boolean;
-  markdownPreview?: boolean;
-  onToggleMarkdownPreview?: () => void;
+  previewKind?: FilePreviewKind;
+  renderedPreview?: boolean;
+  onTogglePreview?: () => void;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -32,21 +35,38 @@ export type FileEditorContentProps = {
 export const FileEditorContent = memo(function FileEditorContent(props: FileEditorContentProps) {
   const provider = useEditorProvider("code-editor");
 
-  if (props.markdownPreview && props.onToggleMarkdownPreview) {
-    return (
-      <MarkdownPreviewContent
-        path={props.path}
-        content={props.content}
-        worktreePath={props.worktreePath}
-        sessionId={props.sessionId}
-        taskId={props.taskId}
-        repositoryId={props.repositoryId}
-        repositoryName={props.repo}
-        enableComments={props.enableComments}
-        onDownload={props.onDownload}
-        onTogglePreview={props.onToggleMarkdownPreview}
-      />
-    );
+  if (props.renderedPreview && props.onTogglePreview) {
+    if (props.previewKind === "html") {
+      return (
+        <HtmlPreviewContent
+          path={props.path}
+          content={props.content}
+          worktreePath={props.worktreePath}
+          sessionId={props.sessionId}
+          taskId={props.taskId}
+          repositoryId={props.repositoryId}
+          repositoryName={props.repo}
+          onDownload={props.onDownload}
+          onTogglePreview={props.onTogglePreview}
+        />
+      );
+    }
+    if (props.previewKind === "markdown") {
+      return (
+        <MarkdownPreviewContent
+          path={props.path}
+          content={props.content}
+          worktreePath={props.worktreePath}
+          sessionId={props.sessionId}
+          taskId={props.taskId}
+          repositoryId={props.repositoryId}
+          repositoryName={props.repo}
+          enableComments={props.enableComments}
+          onDownload={props.onDownload}
+          onTogglePreview={props.onTogglePreview}
+        />
+      );
+    }
   }
 
   return provider === "monaco" ? (

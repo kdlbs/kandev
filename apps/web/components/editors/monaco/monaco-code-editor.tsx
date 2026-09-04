@@ -18,6 +18,7 @@ import { useMonacoWalkthroughRange } from "./use-monaco-walkthrough-range";
 import { useMonacoCursorNavigation } from "./use-monaco-cursor-navigation";
 import { initMonacoThemes } from "./monaco-init";
 import { useTranslation } from "react-i18next";
+import type { FilePreviewKind } from "@/lib/utils/file-types";
 
 initMonacoThemes();
 
@@ -33,7 +34,8 @@ type MonacoCodeEditorProps = {
   worktreePath?: string;
   repo?: string;
   enableComments?: boolean;
-  onToggleMarkdownPreview?: () => void;
+  previewKind?: FilePreviewKind;
+  onTogglePreview?: () => void;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -243,7 +245,8 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         onReloadFromAgent={props.onReloadFromAgent}
         onDelete={props.onDelete}
         onDownload={props.onDownload}
-        onToggleMarkdownPreview={props.onToggleMarkdownPreview}
+        previewKind={props.previewKind}
+        onTogglePreview={props.onTogglePreview}
       />
       <div className="flex-1 overflow-hidden relative" ref={editorAreaRef}>
         <Editor

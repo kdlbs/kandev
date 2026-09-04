@@ -252,7 +252,7 @@ export function MobilePanelArea({
               key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
               file={selectedFile}
               sessionId={effectiveSessionId}
-              initialMarkdownPreview={selectedFilePreview}
+              initialRenderedPreview={selectedFilePreview}
               onClose={() => handlePanelChangeAndClearSheet("files")}
             />
           ) : (
