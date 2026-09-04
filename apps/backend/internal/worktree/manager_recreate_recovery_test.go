@@ -12,9 +12,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// archiveDeletesLocalBranch simulates what task archive does to a worktree's
-// branch: the local ref is deleted (`git branch -D`), while origin and the
-// remote-tracking ref are left alone.
+// archiveDeletesLocalBranch simulates a compacted archived worktree branch: the
+// local ref is absent while origin and the remote-tracking ref are left alone.
 func archiveDeletesLocalBranch(t *testing.T, repoPath, branch string) {
 	t.Helper()
 	runGit(t, repoPath, "branch", "-D", branch)

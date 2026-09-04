@@ -1930,11 +1930,11 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		return nil, err
 	}
 
-	// Archive deletes the local branch (removeWorktree runs `git branch -D`),
-	// so a recreate after unarchive must restore it first. fetchBranchToLocal
-	// fetches origin <branch>:<branch> — or pull/<N>/head for fork PRs, whose
-	// head branch never exists on origin by name — and only errors when the
-	// branch exists neither locally nor on the remote.
+	// Archive may safely compact an integrated managed local branch, so a
+	// recreate after unarchive must restore its persisted exact head first.
+	// fetchBranchToLocal fetches origin <branch>:<branch> — or pull/<N>/head
+	// for fork PRs, whose head branch never exists on origin by name — and only
+	// errors when the branch exists neither locally nor on the remote.
 	// Probe the managed local ref explicitly. A short branch name can resolve
 	// through Git's DWIM rules to a remote-tracking ref, which must not preempt
 	// exact persisted recovery.
