@@ -587,6 +587,9 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return errors.New("dynamic route action launch is not configured")
 	}
+	if !s.profileExecutionResolver.Enabled() {
+		return agentruntime.ErrDynamicRoutingDisabled
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		if err != nil {
