@@ -9,6 +9,24 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTranslation } from "react-i18next";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
+import { compareStepOrder } from "@/lib/kanban/task-order";
+
+/**
+ * Pipeline row order: each step's contiguous run of rows in step-list order,
+ * then within one step the full AC.1 total order
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001.2, .38) — position is not by itself a
+ * total order, and ties are the ship-time norm for tasks that arrived
+ * together.
+ */
+export function sortGraph2Tasks(displayTasks: Task[], displaySteps: WorkflowStep[]): Task[] {
+  const stepIndex = new Map(displaySteps.map((step, index) => [step.id, index]));
+  return [...displayTasks].sort((a, b) => {
+    const aStepIdx = stepIndex.get(a.workflowStepId) ?? -1;
+    const bStepIdx = stepIndex.get(b.workflowStepId) ?? -1;
+    if (aStepIdx !== bStepIdx) return aStepIdx - bStepIdx;
+    return compareStepOrder(a, b);
+  });
+}
 
 export function getGraph2DisplayState(
   tasks: Task[],
@@ -54,13 +72,7 @@ export function SwimlaneGraph2Content({
   }, [displaySteps, moveTargetSteps]);
 
   const sortedTasks = useMemo(
-    () =>
-      [...displayTasks].sort((a, b) => {
-        const aStepIdx = displaySteps.findIndex((c) => c.id === a.workflowStepId);
-        const bStepIdx = displaySteps.findIndex((c) => c.id === b.workflowStepId);
-        if (aStepIdx !== bStepIdx) return aStepIdx - bStepIdx;
-        return (a.position ?? 0) - (b.position ?? 0);
-      }),
+    () => sortGraph2Tasks(displayTasks, displaySteps),
     [displayTasks, displaySteps],
   );
 

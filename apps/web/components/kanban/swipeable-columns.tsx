@@ -4,7 +4,7 @@ import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task, type KanbanPresentation } from "../kanban-card";
-import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { compareStepOrder } from "@/lib/kanban/task-order";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
 
 type SwipeableColumnsProps = {
@@ -108,7 +108,7 @@ export function SwipeableColumns({
       return tasks
         .filter((task) => task.workflowStepId === stepId)
         .map((task) => (task.position == null ? { ...task, position: 0 } : task))
-        .sort(compareTasksByCreatedDesc);
+        .sort(compareStepOrder);
     },
     [tasks],
   );

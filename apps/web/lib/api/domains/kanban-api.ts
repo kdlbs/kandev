@@ -10,6 +10,8 @@ import type {
   Task,
   TaskPriority,
   MoveTaskResponse,
+  ReorderBand,
+  ReorderStepTasksResponse,
 } from "@/lib/types/http";
 
 // Workflow operations
@@ -310,6 +312,28 @@ export async function moveTask(
     ...options,
     init: { method: "POST", body: JSON.stringify(requestPayload), ...(options?.init ?? {}) },
   });
+}
+
+/**
+ * Reorders one workflow step's band. The only request surface for a reorder
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001) — a WebSocket action was cut in the
+ * design. On a 409 `step_changed` conflict the thrown ApiError's `body`
+ * carries this same ReorderStepTasksResponse shape (the authoritative order
+ * to reconcile to silently); on a 400 `invalid_reorder` it carries only
+ * `{code}`.
+ */
+export async function reorderStepTasks(
+  workflowStepId: string,
+  payload: { band: ReorderBand; ordered_task_ids: string[] },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<ReorderStepTasksResponse>(
+    `/api/v1/workflow-steps/${workflowStepId}/tasks/reorder`,
+    {
+      ...options,
+      init: { method: "PUT", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
 }
 
 export async function bulkMoveSelectedTasks(

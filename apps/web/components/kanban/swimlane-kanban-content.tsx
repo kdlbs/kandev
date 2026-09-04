@@ -32,7 +32,7 @@ import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import { resolveMobileColumnIndex } from "@/lib/kanban/mobile-column-index";
-import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { compareStepOrder } from "@/lib/kanban/task-order";
 import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
@@ -236,8 +236,7 @@ function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: 
 
 function useTasksByStep(tasks: Task[]) {
   return useCallback(
-    (stepId: string) =>
-      tasks.filter((t) => t.workflowStepId === stepId).sort(compareTasksByCreatedDesc),
+    (stepId: string) => tasks.filter((t) => t.workflowStepId === stepId).sort(compareStepOrder),
     [tasks],
   );
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compareTasksByCreatedDesc, sortIdsByCreatedDesc } from "./task-order";
+import {
+  compareStepOrder,
+  compareTasksByCreatedDesc,
+  sortIdsByCreatedDesc,
+  type StepOrderTask,
+} from "./task-order";
 
 describe("compareTasksByCreatedDesc", () => {
   it("sorts newer created tasks first", () => {
@@ -75,5 +80,63 @@ describe("sortIdsByCreatedDesc", () => {
   it("stays transitive when only some ids are missing", () => {
     // c (newest present) < a (older present) < missing → deterministic order.
     expect(sortIdsByCreatedDesc(["a", "missing", "c"], taskById)).toEqual(["c", "a", "missing"]);
+  });
+});
+
+function stepOrderTask(overrides: Partial<StepOrderTask> = {}): StepOrderTask {
+  return {
+    id: "task",
+    position: 0,
+    priority: "medium",
+    queuedAt: "2026-08-12T10:00:00Z",
+    createdAt: "2026-08-12T09:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("compareStepOrder", () => {
+  it("orders by position first", () => {
+    const tasks = [
+      stepOrderTask({ id: "b", position: 2 }),
+      stepOrderTask({ id: "a", position: 1 }),
+    ];
+    expect([...tasks].sort(compareStepOrder).map((t) => t.id)).toEqual(["a", "b"]);
+  });
+
+  it("breaks a position tie by priority rank, highest first", () => {
+    const tasks = [
+      stepOrderTask({ id: "low", position: 1, priority: "low" }),
+      stepOrderTask({ id: "critical", position: 1, priority: "critical" }),
+    ];
+    expect([...tasks].sort(compareStepOrder).map((t) => t.id)).toEqual(["critical", "low"]);
+  });
+
+  it("breaks a priority tie by queuedAt ascending, falling back to createdAt when absent", () => {
+    const neverQueued = stepOrderTask({
+      id: "never-queued",
+      queuedAt: null,
+      createdAt: "2026-08-12T07:00:00Z",
+    });
+    const queuedLater = stepOrderTask({ id: "queued-later", queuedAt: "2026-08-12T09:00:00Z" });
+    expect([queuedLater, neverQueued].sort(compareStepOrder).map((t) => t.id)).toEqual([
+      "never-queued",
+      "queued-later",
+    ]);
+  });
+
+  it("breaks a queuedAt tie by createdAt ascending, then id ascending", () => {
+    const tasks = [
+      stepOrderTask({ id: "z", createdAt: "2026-08-12T08:00:00Z" }),
+      stepOrderTask({ id: "a", createdAt: "2026-08-12T08:00:00Z" }),
+    ];
+    expect([...tasks].sort(compareStepOrder).map((t) => t.id)).toEqual(["a", "z"]);
+  });
+
+  it("treats an absent priority as ranking after every named priority", () => {
+    const tasks = [
+      stepOrderTask({ id: "absent", position: 1, priority: undefined }),
+      stepOrderTask({ id: "low", position: 1, priority: "low" }),
+    ];
+    expect([...tasks].sort(compareStepOrder).map((t) => t.id)).toEqual(["low", "absent"]);
   });
 });

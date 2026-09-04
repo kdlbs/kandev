@@ -557,6 +557,32 @@ export type MoveTaskResponse = {
   };
 };
 
+/** Band discriminator for a within-step reorder request. */
+export type ReorderBand = "admitted" | "queued";
+
+/** One task's new position, as carried by every reorder response/event. */
+export type ReorderedTaskPosition = {
+  id: string;
+  position: number;
+};
+
+/**
+ * Success (200) and step_changed conflict (409) bodies for
+ * `PUT /api/v1/workflow-steps/:id/tasks/reorder` share this shape: the
+ * step's full non-hidden task list in both bands, and the revision it was
+ * written at.
+ */
+export type ReorderStepTasksResponse = {
+  workflow_step_id: string;
+  revision: number;
+  tasks: ReorderedTaskPosition[];
+};
+
+/** Body of a rejected reorder request: `step_changed` (409) or `invalid_reorder` (400). */
+export type ReorderStepTasksErrorBody = Partial<ReorderStepTasksResponse> & {
+  code: "step_changed" | "invalid_reorder";
+};
+
 /** A worktree associated with a task session (one per repo on multi-repo tasks). */
 export type TaskSessionWorktree = {
   /** Session-worktree association ID. */
