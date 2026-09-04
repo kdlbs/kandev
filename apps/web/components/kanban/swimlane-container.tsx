@@ -26,6 +26,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
 import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collapse";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { buildTaskVcsSearchIndex } from "@/lib/kanban/task-search-index";
 import { selectVisibleWorkflows } from "@/lib/kanban/workflow-swimlanes";
 import { reorderWorkflows } from "@/lib/api";
 import { SwimlaneSection } from "./swimlane-section";
@@ -107,11 +108,14 @@ function renderEmptyState(emptyMessage: string) {
 const EMPTY_SELECTED_REPOSITORY_IDS: string[] = [];
 const EMPTY_WORKFLOW_STEPS: WorkflowSnapshotData["steps"] = [];
 const WORKFLOW_POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 8 } };
+/** Stable identity so a workspace with no GitLab MRs does not re-trigger downstream memos. */
+const EMPTY_TASK_MRS_BY_TASK_ID: Record<string, never[]> = {};
 
 type WorkflowItemProps = {
   wf: { id: string; name: string };
   repoFilter: Set<string>;
   searchQuery: string;
+  vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   ViewComponent: ComponentType<ViewContentProps>;
   hideHeader: boolean;
@@ -187,6 +191,7 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
   wf,
   repoFilter,
   searchQuery,
+  vcsSearchTextByTaskId,
   matchesPluginTaskFilters,
   ViewComponent,
   hideHeader,
@@ -200,7 +205,13 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
   ...viewProps
 }: WorkflowItemContentProps) {
   const { snapshot, tasks, occupancyTasks, hiddenStepIds, hiddenSet, autoHideEmpty } =
-    useWorkflowSwimlaneData(wf.id, repoFilter, searchQuery, matchesPluginTaskFilters);
+    useWorkflowSwimlaneData(
+      wf.id,
+      repoFilter,
+      searchQuery,
+      matchesPluginTaskFilters,
+      vcsSearchTextByTaskId,
+    );
   const snapshotSteps = snapshot?.steps ?? EMPTY_WORKFLOW_STEPS;
   const derivedAutoHiddenSet = useMemo(
     () => deriveAutoHiddenStepIds(snapshotSteps, occupancyTasks, autoHideEmpty, hiddenStepIds),
@@ -291,6 +302,21 @@ function useWorkflowReorder(
   return { sensors, canSort, handleDragEnd };
 }
 
+/** One lowercase `#<number>` haystack per task, built from its linked PRs/MRs in the active workspace. */
+function useVcsSearchIndex() {
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
+  const taskMRsByTaskId = useAppStore(
+    (state) =>
+      (activeWorkspaceId && state.taskMRs.byWorkspaceId[activeWorkspaceId]) ||
+      EMPTY_TASK_MRS_BY_TASK_ID,
+  );
+  return useMemo(
+    () => buildTaskVcsSearchIndex(taskPRsByTaskId, taskMRsByTaskId),
+    [taskPRsByTaskId, taskMRsByTaskId],
+  );
+}
+
 function getRenderedWorkflows(
   isMobileKanban: boolean,
   focusedWorkflowId: string | null,
@@ -319,6 +345,7 @@ type WorkflowItemsProps = {
   workflows: { id: string; name: string }[];
   repoFilter: Set<string>;
   searchQuery: string;
+  vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   ViewComponent: ComponentType<ViewContentProps>;
   hideHeaders: boolean;
@@ -337,6 +364,7 @@ function WorkflowItems({
   workflows,
   repoFilter,
   searchQuery,
+  vcsSearchTextByTaskId,
   matchesPluginTaskFilters,
   ViewComponent,
   hideHeaders,
@@ -358,6 +386,7 @@ function WorkflowItems({
         wf={workflow}
         repoFilter={repoFilter}
         searchQuery={searchQuery}
+        vcsSearchTextByTaskId={vcsSearchTextByTaskId}
         matchesPluginTaskFilters={matchesPluginTaskFilters}
         ViewComponent={ViewComponent}
         hideHeader={hideHeaders}
@@ -426,6 +455,7 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const { onToggleStepVisibility, onToggleAutoHideEmpty } = useKanbanDisplaySettings();
   const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
+  const vcsSearchTextByTaskId = useVcsSearchIndex();
   const {
     snapshots,
     isLoading,
@@ -439,6 +469,7 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
     selectedRepositoryIds,
     searchQuery ?? "",
     containerProps.matchesPluginTaskFilters,
+    vcsSearchTextByTaskId,
   );
   const {
     sensors: workflowSensors,
@@ -502,6 +533,7 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
             workflows={renderedWorkflows}
             repoFilter={repoFilter}
             searchQuery={searchQuery ?? ""}
+            vcsSearchTextByTaskId={vcsSearchTextByTaskId}
             matchesPluginTaskFilters={containerProps.matchesPluginTaskFilters}
             ViewComponent={view.component}
             hideHeaders={hideHeaders}

@@ -19,6 +19,7 @@ type TaskProjectionCacheEntry = {
   hiddenStepIds: string[] | undefined;
   repoFilter: Set<string>;
   searchQuery: string;
+  vcsSearchTextByTaskId: Record<string, string> | undefined;
   matchesPluginTaskFilters: ((taskId: string) => boolean) | undefined;
   visibleTasks: Task[];
 };
@@ -90,6 +91,7 @@ export function useSwimlaneRenderData(
   selectedRepositoryIds: string[],
   searchQuery: string,
   matchesPluginTaskFilters?: (taskId: string) => boolean,
+  vcsSearchTextByTaskId?: Record<string, string>,
 ) {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
@@ -130,12 +132,14 @@ export function useSwimlaneRenderData(
         cached.hiddenStepIds === hiddenStepIds &&
         cached.repoFilter === repoFilter &&
         cached.searchQuery === searchQuery &&
+        cached.vcsSearchTextByTaskId === vcsSearchTextByTaskId &&
         cached.matchesPluginTaskFilters === matchesPluginTaskFilters
       ) {
         return cached.visibleTasks;
       }
       const visibleTasks = projectWorkflowTasks(snapshots, workflowId, repoFilter, {
         searchQuery,
+        vcsSearchTextByTaskId,
         matchesPluginTaskFilters,
         hiddenStepIds: hiddenStepIds?.length ? new Set(hiddenStepIds) : undefined,
       }).visibleTasks;
@@ -144,12 +148,20 @@ export function useSwimlaneRenderData(
         hiddenStepIds,
         repoFilter,
         searchQuery,
+        vcsSearchTextByTaskId,
         matchesPluginTaskFilters,
         visibleTasks,
       });
       return visibleTasks;
     },
-    [hiddenWorkflowStepIds, matchesPluginTaskFilters, repoFilter, searchQuery, snapshots],
+    [
+      hiddenWorkflowStepIds,
+      matchesPluginTaskFilters,
+      repoFilter,
+      searchQuery,
+      vcsSearchTextByTaskId,
+      snapshots,
+    ],
   );
 
   const hasLiveHiddenSteps = useCallback(
@@ -196,6 +208,7 @@ export function useWorkflowSwimlaneData(
   repoFilter: Set<string>,
   searchQuery: string,
   matchesPluginTaskFilters?: (taskId: string) => boolean,
+  vcsSearchTextByTaskId?: Record<string, string>,
 ): {
   snapshot: WorkflowSnapshotData | undefined;
   tasks: Task[];
@@ -221,10 +234,19 @@ export function useWorkflowSwimlaneData(
     if (!snapshot) return { visibleTasks: [], occupancyTasks: [] };
     return projectWorkflowTasks({ [workflowId]: snapshot }, workflowId, repoFilter, {
       searchQuery,
+      vcsSearchTextByTaskId,
       matchesPluginTaskFilters,
       hiddenStepIds: hiddenSet,
     });
-  }, [hiddenSet, matchesPluginTaskFilters, repoFilter, searchQuery, snapshot, workflowId]);
+  }, [
+    hiddenSet,
+    matchesPluginTaskFilters,
+    repoFilter,
+    searchQuery,
+    vcsSearchTextByTaskId,
+    snapshot,
+    workflowId,
+  ]);
 
   return {
     snapshot,
