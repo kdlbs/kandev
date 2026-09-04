@@ -316,9 +316,17 @@ export function renderTaskStatusIcon(
   const needsMe = showQuestionIcon || showPermissionIcon;
   const showInterrupted = !!task.interrupted;
   const showAutoStartFailed = !!task.autoStartFailed;
+  const parkedOnBackgroundWork = !!task.parkedOnBackgroundWork;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted && !showAutoStartFailed) {
+  if (
+    !showRunningSpinner &&
+    !needsMe &&
+    !hasActivity &&
+    !showInterrupted &&
+    !showAutoStartFailed &&
+    !parkedOnBackgroundWork
+  ) {
     return null;
   }
   // A "needs me" prompt (pending clarification / permission) must not be masked
@@ -328,11 +336,13 @@ export function renderTaskStatusIcon(
   // sets the task to SCHEDULING before the launch, so a launch failure before
   // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
   // reads as showRunningSpinner=true — the exact shape the failure marker exists
-  // to surface.
+  // to surface. The parked affordance (AC-58) is likewise never masked by the
+  // generic spinner — it renders through getTaskStateIcon below.
   const foregroundActivity =
     showRunningSpinner &&
     !needsMe &&
     !showAutoStartFailed &&
+    !parkedOnBackgroundWork &&
     task.foregroundActivity !== "background"
       ? "generating"
       : task.foregroundActivity;
@@ -342,6 +352,7 @@ export function renderTaskStatusIcon(
     hasPendingPermission,
     interrupted: showInterrupted,
     autoStartFailed: showAutoStartFailed,
+    parkedOnBackgroundWork,
   });
 }
 

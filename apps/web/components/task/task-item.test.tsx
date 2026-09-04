@@ -499,6 +499,67 @@ describe("TaskItem background-running indicator", () => {
   });
 });
 
+describe("TaskItem parked-on-background-work indicator", () => {
+  // AC-23: a settled task whose only remaining life is a positively-sampled
+  // background process renders the same tooltip-carrying affordance as a live
+  // foregroundActivity=background aggregate.
+  it("shows the background-running affordance when parked on background work", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "COMPLETED",
+      foregroundActivity: null,
+      parkedOnBackgroundWork: true,
+    });
+
+    const icon = screen.getByTestId(BACKGROUND_ICON_TEST_ID);
+    expect(icon.classList.contains(VIOLET_SPINNER_CLASS)).toBe(true);
+    expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
+    expect(screen.getByLabelText("Background work is running")).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
+  });
+
+  // AC-34: pending-input (clarification/permission) and any live
+  // foregroundActivity outrank the parked affordance; it never overrides them.
+  it("shows pending clarification instead of parked-on-background-work", () => {
+    renderTaskItem({
+      state: "WAITING_FOR_INPUT",
+      sessionState: "WAITING_FOR_INPUT",
+      parkedOnBackgroundWork: true,
+      hasPendingClarification: true,
+    });
+
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("shows pending permission instead of parked-on-background-work", () => {
+    renderTaskItem({
+      state: "WAITING_FOR_INPUT",
+      sessionState: "RUNNING",
+      parkedOnBackgroundWork: true,
+      hasPendingPermission: true,
+    });
+
+    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("shows the generating spinner instead of parked-on-background-work when both are reported", () => {
+    // Stale/racing signals: a live generating aggregate must still win over a
+    // parked flag that has not cleared yet.
+    renderTaskItem({
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+      foregroundActivity: "generating",
+      parkedOnBackgroundWork: true,
+    });
+
+    const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
+    expect(icon.getAttribute(DATA_LOADING_PHASE)).toBe(RUNNING_PHASE);
+    expect(icon.classList.contains(YELLOW_SPINNER_CLASS)).toBe(true);
+  });
+});
+
 describe("TaskItem background-running lifecycle", () => {
   it("reflects the full generating → background → done sequence from the aggregate", () => {
     // A single-session task driven through all three states reads each on the sidebar

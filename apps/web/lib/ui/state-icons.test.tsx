@@ -370,6 +370,72 @@ describe("getTaskStateIcon — status markers", () => {
   });
 });
 
+describe("getTaskStateIcon — parked on background work", () => {
+  // AC-23/AC-59: parkedOnBackgroundWork renders the same tooltip-carrying
+  // affordance as a live foregroundActivity=background aggregate, and
+  // defaults to false so every pre-existing call site is unaffected.
+  it("renders the accessible background-running icon with the tooltip label", () => {
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("REVIEW", undefined, { parkedOnBackgroundWork: true })}
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector('[data-testid="task-state-background-running"]');
+    expect(icon).not.toBeNull();
+    expect(container.querySelector('[aria-label="Background work is running"]')).not.toBeNull();
+  });
+
+  it("defaults to false: omitting the option does not render the parked affordance", () => {
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined))).toBe(IconCheck);
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, {}))).toBe(IconCheck);
+  });
+
+  // AC-34: pending-input and any live foregroundActivity outrank parked.
+  it("keeps pending clarification and permission over the parked marker", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          hasPendingClarification: true,
+          parkedOnBackgroundWork: true,
+        }),
+      ),
+    ).toBe(IconMessageQuestion);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          hasPendingPermission: true,
+          parkedOnBackgroundWork: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
+  });
+
+  it("keeps a live generating or background aggregate over the parked marker", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "generating",
+          parkedOnBackgroundWork: true,
+        }),
+      ),
+    ).toBe(IconLoader2);
+    const bg = getTaskStateIcon("REVIEW", undefined, {
+      foregroundActivity: "background",
+      parkedOnBackgroundWork: true,
+    });
+    expect(iconType(bg)).toBe(IconLoader);
+  });
+
+  it("outranks a stale WAITING_FOR_INPUT coarse task state (no explicit pending flag)", () => {
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("WAITING_FOR_INPUT", undefined, { parkedOnBackgroundWork: true })}
+      </TooltipProvider>,
+    );
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).not.toBeNull();
+  });
+});
+
 describe("getSessionStateIcon — fine-grained busy tri-state", () => {
   // ADR-0049. Three distinguishable conditions:
   //  (a) RUNNING + generating  → the established static "running" dot (unchanged)

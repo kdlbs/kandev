@@ -26,6 +26,14 @@ export type TaskStateIconProps = {
   hasPendingPermission?: boolean;
   isOnLastWorkflowStep?: boolean;
   interrupted?: boolean;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input (permission/clarification) and by an active
+   * foregroundActivity (AC-34).
+   */
+  parkedOnBackgroundWork?: boolean;
   accessibleLabel?: string;
   showBackgroundTooltip?: boolean;
 };
@@ -131,6 +139,7 @@ export function TaskStateIcon({
   hasPendingPermission,
   isOnLastWorkflowStep,
   interrupted,
+  parkedOnBackgroundWork,
   accessibleLabel,
   showBackgroundTooltip = false,
 }: TaskStateIconProps) {
@@ -161,6 +170,14 @@ export function TaskStateIcon({
     );
   }
   if (foregroundActivity === "background") {
+    return withAccessibleLabel(
+      <BackgroundWorkTaskIcon showTooltip={showBackgroundTooltip} />,
+      showBackgroundTooltip ? undefined : accessibleLabel,
+    );
+  }
+  // Parked-on-background-work (AC-23): a settled session whose only
+  // remaining life is a positively-sampled background process.
+  if (parkedOnBackgroundWork) {
     return withAccessibleLabel(
       <BackgroundWorkTaskIcon showTooltip={showBackgroundTooltip} />,
       showBackgroundTooltip ? undefined : accessibleLabel,
@@ -230,12 +247,14 @@ export function getTaskStateIconLabelKey({
   hasPendingPermission,
   isOnLastWorkflowStep,
   interrupted,
+  parkedOnBackgroundWork,
 }: TaskStateIconProps) {
   if (shouldUsePermissionTaskIcon(hasPendingPermission) || hasPendingClarification) {
     return "common:taskStateWaitingForInput";
   }
   if (foregroundActivity === "generating") return "common:taskStateInProgress";
   if (foregroundActivity === "background") return "task:backgroundWorkIsRunning";
+  if (parkedOnBackgroundWork) return "task:backgroundWorkIsRunning";
   if (shouldUseQuestionTaskIcon(state)) return "common:taskStateWaitingForInput";
   if (computeIsPreparing(state, sessionState)) return "common:taskStateScheduling";
   if (computeIsInProgress(state, sessionState)) {

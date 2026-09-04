@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactNode } from "react";
+import { render } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import {
   IconCheck,
   IconLoader,
@@ -12,6 +14,8 @@ import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { renderSubagentCountChip, renderTaskStatusIcon } from "./kanban-card-content";
 import { AutoStartFailedTaskIcon } from "@/lib/ui/state-icons";
 import type { Task } from "./kanban-card";
+
+const BACKGROUND_ICON_TEST_ID = "task-state-background-running";
 
 function task(overrides: Partial<Task>): Task {
   return {
@@ -62,6 +66,72 @@ describe("renderTaskStatusIcon — task-level activity aggregate", () => {
     const node = renderTaskStatusIcon(
       task({ state: "IN_PROGRESS", primarySessionState: "RUNNING" }),
       true,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(IconLoader2);
+  });
+});
+
+// AC-58: the board card mirrors the same parked-on-background-work affordance
+// as the sidebar (task-item.tsx) and Resolver B (state-icons.tsx).
+describe("renderTaskStatusIcon — parked on background work", () => {
+  it("surfaces the affordance even though the first early return would otherwise skip a resting task", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "REVIEW", parkedOnBackgroundWork: true }),
+      false,
+      false,
+      false,
+    );
+    const { container } = render(<TooltipProvider>{node}</TooltipProvider>);
+    expect(container.querySelector(`[data-testid="${BACKGROUND_ICON_TEST_ID}"]`)).not.toBeNull();
+  });
+
+  it("is not masked by the generic launch spinner when both are reported", () => {
+    // showRunningSpinner true (stale/coincident) must not short-circuit past
+    // the parked affordance into the plain blue spinner.
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", parkedOnBackgroundWork: true }),
+      true,
+      false,
+      false,
+    );
+    const { container } = render(<TooltipProvider>{node}</TooltipProvider>);
+    expect(container.querySelector(`[data-testid="${BACKGROUND_ICON_TEST_ID}"]`)).not.toBeNull();
+  });
+
+  it("renders nothing when explicitly false, same as the no-activity resting task", () => {
+    expect(
+      renderTaskStatusIcon(
+        task({ state: "COMPLETED", parkedOnBackgroundWork: false }),
+        false,
+        false,
+        false,
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps pending clarification and permission over the parked marker", () => {
+    const clarification = renderTaskStatusIcon(
+      task({ state: "REVIEW", parkedOnBackgroundWork: true }),
+      false,
+      true,
+      false,
+    );
+    expect(iconType(clarification)).toBe(IconMessageQuestion);
+    const permission = renderTaskStatusIcon(
+      task({ state: "WAITING_FOR_INPUT", parkedOnBackgroundWork: true }),
+      false,
+      false,
+      true,
+    );
+    expect(iconType(permission)).toBe(IconShieldQuestion);
+  });
+
+  it("keeps a live generating aggregate over the parked marker", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "REVIEW", foregroundActivity: "generating", parkedOnBackgroundWork: true }),
+      false,
       false,
       false,
     );
