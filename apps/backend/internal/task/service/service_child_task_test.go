@@ -6,8 +6,89 @@ import (
 	"strings"
 	"testing"
 
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+type failingWorkspacePolicyAttacher struct {
+	err error
+}
+
+func (f failingWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, WorkspacePolicy) error {
+	return f.err
+}
+
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-002.1
+func TestCreateChildTaskAttachesInheritedWorkspaceBeforeReturning(t *testing.T) {
+	svc, database := createOfficeIntegrationServiceWithDB(t)
+	ctx := context.Background()
+	officeRepo, err := officesqlite.NewWithDB(database, database, nil)
+	if err != nil {
+		t.Fatalf("office repository: %v", err)
+	}
+	taskRepo, ok := svc.tasks.(*sqliterepo.Repository)
+	if !ok {
+		t.Fatalf("task repository type = %T", svc.tasks)
+	}
+	handoff := NewHandoffService(taskRepo, nil, nil, officeRepo, officeRepo, nil)
+	svc.SetWorkspacePolicyAttacher(handoff)
+
+	if err := svc.workspaces.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-child-attachment", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := svc.workflows.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-child-attachment", WorkspaceID: "workspace-child-attachment", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	parentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "workspace-child-attachment",
+		WorkflowID:  "workflow-child-attachment",
+		Title:       "Parent",
+	})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	childID, err := svc.CreateChildTask(ctx, parentResult.Task, ChildTaskSpec{Title: "Child"})
+	if err != nil {
+		t.Fatalf("CreateChildTask: %v", err)
+	}
+	parentGroup, err := officeRepo.GetWorkspaceGroupForTask(ctx, parentResult.Task.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspaceGroupForTask(parent): %v", err)
+	}
+	childGroup, err := officeRepo.GetWorkspaceGroupForTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetWorkspaceGroupForTask(child): %v", err)
+	}
+	if parentGroup == nil || childGroup == nil || parentGroup.ID != childGroup.ID {
+		t.Fatalf("workspace groups = parent %#v, child %#v; want one shared group", parentGroup, childGroup)
+	}
+}
+
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-002.2
+func TestCreateChildTaskRollsBackWhenWorkspaceAttachmentFails(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	parentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "Parent", ProjectID: "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	svc.SetWorkspacePolicyAttacher(failingWorkspacePolicyAttacher{err: errors.New("attachment unavailable")})
+
+	if _, err := svc.CreateChildTask(ctx, parentResult.Task, ChildTaskSpec{Title: "Child"}); err == nil {
+		t.Fatal("CreateChildTask succeeded after required workspace attachment failed")
+	}
+	children, err := repo.ListChildren(ctx, parentResult.Task.ID)
+	if err != nil {
+		t.Fatalf("ListChildren: %v", err)
+	}
+	if len(children) != 0 {
+		t.Fatalf("children after rollback = %#v, want none", children)
+	}
+}
 
 func TestCreateChildTask_HappyPath_InheritsWorkflow(t *testing.T) {
 	svc, repo := setupOfficeTest(t)

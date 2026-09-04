@@ -25,6 +25,7 @@ func (r *Repository) createWorkspaceGroupTables() error {
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
 		owner_task_id TEXT NOT NULL,
+		ownership_generation INTEGER NOT NULL DEFAULT 1,
 		materialized_path TEXT NOT NULL DEFAULT '',
 		materialized_environment_id TEXT NOT NULL DEFAULT '',
 		materialized_kind TEXT NOT NULL,
@@ -80,6 +81,9 @@ func (r *Repository) CreateWorkspaceGroup(ctx context.Context, g *models.Workspa
 	if g.CreatedAt.IsZero() {
 		g.CreatedAt = now
 	}
+	if g.OwnershipGeneration == 0 {
+		g.OwnershipGeneration = 1
+	}
 	g.UpdatedAt = now
 	if g.CleanupPolicy == "" {
 		g.CleanupPolicy = models.WorkspaceCleanupPolicyNeverDelete
@@ -92,13 +96,13 @@ func (r *Repository) CreateWorkspaceGroup(ctx context.Context, g *models.Workspa
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_workspace_groups (
-			id, workspace_id, owner_task_id, materialized_path,
+			id, workspace_id, owner_task_id, ownership_generation, materialized_path,
 			materialized_environment_id, materialized_kind, owned_by_kandev,
 			cleanup_policy, cleanup_status, cleaned_at, cleanup_error,
 			restore_status, restore_error, restore_config_json,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), g.ID, g.WorkspaceID, g.OwnerTaskID, g.MaterializedPath,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), g.ID, g.WorkspaceID, g.OwnerTaskID, g.OwnershipGeneration, g.MaterializedPath,
 		g.MaterializedEnvironmentID, g.MaterializedKind, g.OwnedByKandev,
 		g.CleanupPolicy, g.CleanupStatus, g.CleanedAt, g.CleanupError,
 		g.RestoreStatus, g.RestoreError, g.RestoreConfigJSON,
@@ -110,7 +114,7 @@ func (r *Repository) CreateWorkspaceGroup(ctx context.Context, g *models.Workspa
 func (r *Repository) GetWorkspaceGroup(ctx context.Context, id string) (*models.WorkspaceGroup, error) {
 	var g models.WorkspaceGroup
 	err := r.ro.GetContext(ctx, &g, r.ro.Rebind(`
-		SELECT id, workspace_id, owner_task_id, materialized_path,
+		SELECT id, workspace_id, owner_task_id, ownership_generation, materialized_path,
 			materialized_environment_id, materialized_kind, owned_by_kandev,
 			cleanup_policy, cleanup_status, cleaned_at, cleanup_error,
 			restore_status, restore_error, restore_config_json,
@@ -131,7 +135,7 @@ func (r *Repository) GetWorkspaceGroup(ctx context.Context, id string) (*models.
 func (r *Repository) ListWorkspaceGroupsByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceGroup, error) {
 	var groups []*models.WorkspaceGroup
 	err := r.ro.SelectContext(ctx, &groups, r.ro.Rebind(`
-		SELECT id, workspace_id, owner_task_id, materialized_path,
+		SELECT id, workspace_id, owner_task_id, ownership_generation, materialized_path,
 			materialized_environment_id, materialized_kind, owned_by_kandev,
 			cleanup_policy, cleanup_status, cleaned_at, cleanup_error,
 			restore_status, restore_error, restore_config_json,
@@ -216,6 +220,57 @@ func (r *Repository) UpdateWorkspaceGroupCleanupStatus(ctx context.Context, id, 
 		WHERE id = ?
 	`), status, errStr, cleanedAt, time.Now().UTC(), id)
 	return err
+}
+
+// ClaimWorkspaceGroupCleanup reserves destructive cleanup for one ownership
+// generation. The active-member predicate is part of the same write so a
+// caller cannot race a membership admission between its read and this claim.
+func (r *Repository) ClaimWorkspaceGroupCleanup(ctx context.Context, id string, generation int64) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET cleanup_status = ?, cleanup_error = '', cleaned_at = NULL, updated_at = ?
+		WHERE id = ?
+		  AND ownership_generation = ?
+		  AND owned_by_kandev = ?
+		  AND cleanup_policy = ?
+		  AND cleanup_status IN (?, ?)
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_workspace_group_members member
+			JOIN tasks task ON task.id = member.task_id
+			WHERE member.workspace_group_id = task_workspace_groups.id
+			  AND member.released_at IS NULL
+			  AND task.archived_at IS NULL
+		  )
+	`), models.WorkspaceCleanupStatusPending, time.Now().UTC(), id, generation, true,
+		models.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		models.WorkspaceCleanupStatusActive, models.WorkspaceCleanupStatusFailed)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+// CompleteWorkspaceGroupCleanup records a result only while the claimed
+// ownership generation is still current.
+func (r *Repository) CompleteWorkspaceGroupCleanup(
+	ctx context.Context,
+	id string,
+	generation int64,
+	status, errStr string,
+	cleanedAt *time.Time,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET cleanup_status = ?, cleanup_error = ?, cleaned_at = ?, updated_at = ?
+		WHERE id = ? AND ownership_generation = ? AND cleanup_status = ?
+	`), status, errStr, cleanedAt, time.Now().UTC(), id, generation, models.WorkspaceCleanupStatusPending)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
 }
 
 // UpdateWorkspaceGroupRestoreStatus updates the restore_status (+ optional
@@ -328,7 +383,7 @@ func (r *Repository) ListActiveWorkspaceGroupMembers(ctx context.Context, groupI
 func (r *Repository) GetWorkspaceGroupForTask(ctx context.Context, taskID string) (*models.WorkspaceGroup, error) {
 	var g models.WorkspaceGroup
 	err := r.ro.GetContext(ctx, &g, r.ro.Rebind(`
-		SELECT g.id, g.workspace_id, g.owner_task_id, g.materialized_path,
+		SELECT g.id, g.workspace_id, g.owner_task_id, g.ownership_generation, g.materialized_path,
 			g.materialized_environment_id, g.materialized_kind, g.owned_by_kandev,
 			g.cleanup_policy, g.cleanup_status, g.cleaned_at, g.cleanup_error,
 			g.restore_status, g.restore_error, g.restore_config_json,

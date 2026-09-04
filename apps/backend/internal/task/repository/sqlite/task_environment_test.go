@@ -102,6 +102,55 @@ func TestGetTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.4
+func TestTransferTaskEnvironmentAdvancesGenerationAndHonorsCleanupBarrier(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-environment-transfer")
+	for _, taskID := range []string{"owner-a", "owner-b", "owner-c"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "workspace-environment-transfer", Title: taskID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "environment-transfer", TaskID: "owner-a", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-transfer", "owner-a", 1, "owner-b"); err != nil {
+		t.Fatalf("TransferTaskEnvironmentOwnership: %v", err)
+	}
+	transferred, err := repo.GetTaskEnvironment(ctx, "environment-transfer")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if transferred.TaskID != "owner-b" || transferred.OwnershipGeneration != 2 {
+		t.Fatalf("transferred environment = owner %q generation %d; want owner-b, 2", transferred.TaskID, transferred.OwnershipGeneration)
+	}
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-transfer", "owner-a", 1, "owner-c"); err == nil {
+		t.Fatal("stale ownership retry transferred the current generation")
+	}
+
+	if err := repo.CreateTaskResourceCleanupJob(ctx, &models.TaskResourceCleanupJob{
+		ID: "cleanup-owner-b", OperationID: "delete:owner-b", TaskID: "owner-b",
+		Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePending,
+	}); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-transfer", "owner-b", 2, "owner-c"); err == nil {
+		t.Fatal("TransferTaskEnvironmentOwnership succeeded through active cleanup barrier")
+	}
+	current, err := repo.GetTaskEnvironment(ctx, "environment-transfer")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after rejected transfer: %v", err)
+	}
+	if current.TaskID != "owner-b" || current.OwnershipGeneration != 2 {
+		t.Fatalf("environment after rejected transfer = owner %q generation %d; want owner-b, 2", current.TaskID, current.OwnershipGeneration)
+	}
+}
+
 func TestTaskEnvironment_PersistsDockerBootstrapNonceReference(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
@@ -564,10 +613,10 @@ func TestUpdateTaskEnvironmentAllowsFailedMaterializationWithoutWorkspacePath(t 
 func TestTransferTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	repo := newRepoForHealTests(t)
 
-	err := repo.TransferTaskEnvironmentToTask(context.Background(), "missing-environment", "task-1")
+	err := repo.TransferTaskEnvironmentOwnership(context.Background(), "missing-environment", "task-1", 1, "task-2")
 
 	if !errors.Is(err, ErrTaskEnvironmentNotFound) {
-		t.Fatalf("TransferTaskEnvironmentToTask error = %v, want ErrTaskEnvironmentNotFound", err)
+		t.Fatalf("TransferTaskEnvironmentOwnership error = %v, want ErrTaskEnvironmentNotFound", err)
 	}
 }
 

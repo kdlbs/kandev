@@ -341,6 +341,7 @@ type Service struct {
 	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
+	workspacePolicyAttacher         WorkspacePolicyAttacher
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
@@ -427,6 +428,12 @@ type Service struct {
 	lastPendingActionProjections    map[string]pendingActionProjectionState
 }
 
+// WorkspacePolicyAttacher persists the workspace-group relationship that is
+// required before a newly created child can be returned or launched.
+type WorkspacePolicyAttacher interface {
+	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
+}
+
 // SetAttachmentService wires the file-backed prompt attachment owner into the
 // task service. It is optional for focused unit-test harnesses that never send
 // file-backed descriptors.
@@ -457,6 +464,12 @@ func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
 // deletion. The callback runs only after the repository cascade succeeds.
 func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
 	s.workspaceSecretDeleter = deleter
+}
+
+// SetWorkspacePolicyAttacher installs the canonical child-workspace
+// coordinator used by every CreateTask caller.
+func (s *Service) SetWorkspacePolicyAttacher(attacher WorkspacePolicyAttacher) {
+	s.workspacePolicyAttacher = attacher
 }
 
 // NewService creates a new task service

@@ -962,6 +962,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		ProjectID:                   body.ProjectID,
 		Labels:                      labels,
 		ExternalID:                  body.ExternalID,
+		WorkspacePolicy:             &wsPolicy,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -997,21 +998,6 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to claim task attachments"})
 		}
 		return
-	}
-
-	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
-		if attachErr := h.handoffSvc.AttachWorkspacePolicy(c.Request.Context(), task.ID, body.ParentID, wsPolicy); attachErr != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(attachErr))
-			if delErr := h.service.DeleteTask(c.Request.Context(), task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "failed to attach workspace policy: " + attachErr.Error(),
-			})
-			return
-		}
 	}
 
 	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {

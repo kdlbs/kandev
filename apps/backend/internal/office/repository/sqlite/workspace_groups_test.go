@@ -108,6 +108,47 @@ func TestWorkspaceGroup_RawInsertDefaultsAreSafe(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.4
+func TestWorkspaceGroupCleanupCompletionRejectsStaleGeneration(t *testing.T) {
+	repo := newWorkspaceGroupTestRepo(t)
+	ctx := context.Background()
+	group := &models.WorkspaceGroup{
+		ID: "generation-fenced-cleanup", WorkspaceID: "ws-1", OwnerTaskID: "owner-task",
+		MaterializedKind: models.WorkspaceGroupKindPlainFolder,
+		OwnedByKandev:    true, CleanupPolicy: models.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+	}
+	if err := repo.CreateWorkspaceGroup(ctx, group); err != nil {
+		t.Fatalf("CreateWorkspaceGroup: %v", err)
+	}
+	claimed, err := repo.ClaimWorkspaceGroupCleanup(ctx, group.ID, 1)
+	if err != nil || !claimed {
+		t.Fatalf("ClaimWorkspaceGroupCleanup = %v, %v; want true", claimed, err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE task_workspace_groups
+		SET ownership_generation = 2, cleanup_status = 'active'
+		WHERE id = ?
+	`, group.ID); err != nil {
+		t.Fatalf("simulate stewardship transfer: %v", err)
+	}
+	completed, err := repo.CompleteWorkspaceGroupCleanup(
+		ctx, group.ID, 1, models.WorkspaceCleanupStatusCleaned, "", nil,
+	)
+	if err != nil {
+		t.Fatalf("CompleteWorkspaceGroupCleanup: %v", err)
+	}
+	if completed {
+		t.Fatal("stale cleanup completion changed the replacement generation")
+	}
+	current, err := repo.GetWorkspaceGroup(ctx, group.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspaceGroup: %v", err)
+	}
+	if current.OwnershipGeneration != 2 || current.CleanupStatus != models.WorkspaceCleanupStatusActive {
+		t.Fatalf("current group = generation %d status %q; want 2, active", current.OwnershipGeneration, current.CleanupStatus)
+	}
+}
+
 func TestWorkspaceGroup_ListByWorkspace(t *testing.T) {
 	repo := newWorkspaceGroupTestRepo(t)
 	ctx := context.Background()

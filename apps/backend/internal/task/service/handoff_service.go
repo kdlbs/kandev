@@ -21,6 +21,7 @@ import (
 // in sync with internal/mcp/handlers/workspace_policy.go.
 const (
 	workspaceModeInheritParent = "inherit_parent"
+	workspaceModeNewWorkspace  = "new_workspace"
 	workspaceModeSharedGroup   = "shared_group"
 	orderingSequential         = "sequential"
 )
@@ -49,6 +50,47 @@ type WorkspaceGroupRepo interface {
 	// produces a worktree on disk.
 	MarkWorkspaceMaterialized(ctx context.Context, id string, m orchmodels.MaterializedWorkspace) error
 	UpdateWorkspaceGroupRestoreStatus(ctx context.Context, id, status, errStr string) error
+}
+
+type workspaceGroupCleanupGenerationRepository interface {
+	ClaimWorkspaceGroupCleanup(ctx context.Context, id string, generation int64) (bool, error)
+	CompleteWorkspaceGroupCleanup(
+		ctx context.Context,
+		id string,
+		generation int64,
+		status, errStr string,
+		cleanedAt *time.Time,
+	) (bool, error)
+}
+
+func claimWorkspaceGroupCleanup(
+	ctx context.Context,
+	repo WorkspaceGroupRepo,
+	group *orchmodels.WorkspaceGroup,
+) (bool, error) {
+	if guarded, ok := repo.(workspaceGroupCleanupGenerationRepository); ok {
+		return guarded.ClaimWorkspaceGroupCleanup(ctx, group.ID, group.OwnershipGeneration)
+	}
+	err := repo.UpdateWorkspaceGroupCleanupStatus(
+		ctx, group.ID, orchmodels.WorkspaceCleanupStatusPending, "", nil,
+	)
+	return err == nil, err
+}
+
+func completeWorkspaceGroupCleanup(
+	ctx context.Context,
+	repo WorkspaceGroupRepo,
+	group *orchmodels.WorkspaceGroup,
+	status, errStr string,
+	cleanedAt *time.Time,
+) error {
+	if guarded, ok := repo.(workspaceGroupCleanupGenerationRepository); ok {
+		_, err := guarded.CompleteWorkspaceGroupCleanup(
+			ctx, group.ID, group.OwnershipGeneration, status, errStr, cleanedAt,
+		)
+		return err
+	}
+	return repo.UpdateWorkspaceGroupCleanupStatus(ctx, group.ID, status, errStr, cleanedAt)
 }
 
 // SessionWorktreeReader is the slim repository surface HandoffService
@@ -385,15 +427,12 @@ func (s *HandoffService) AttachWorkspacePolicy(ctx context.Context, taskID, pare
 	if !pol.NeedsAttachment() {
 		return nil
 	}
-	if err := s.attachWorkspaceGroup(ctx, taskID, parentID, pol); err != nil {
-		return err
-	}
 	if pol.ParentOrdering == orderingSequential && parentID != "" {
 		if err := s.attachSequentialBlocker(ctx, taskID, parentID); err != nil {
 			return err
 		}
 	}
-	return nil
+	return s.attachWorkspaceGroup(ctx, taskID, parentID, pol)
 }
 
 func (s *HandoffService) attachWorkspaceGroup(ctx context.Context, taskID, parentID string, pol WorkspacePolicy) error {

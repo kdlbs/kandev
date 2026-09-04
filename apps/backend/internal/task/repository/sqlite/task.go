@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -1234,32 +1235,213 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // this as a targeted update prevents concurrent task edits from being replaced
 // by a stale full-row write.
 func (r *Repository) DetachTask(ctx context.Context, taskID string) (bool, error) {
-	result, err := r.db.ExecContext(
-		ctx,
-		r.db.Rebind(detachTaskQuery(r.db.DriverName())),
-		time.Now().UTC(),
-		taskID,
-	)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
+	defer func() { _ = tx.Rollback() }()
 
+	parentID, groupID, err := r.loadDetachmentState(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if parentID == "" {
+		return false, tx.Commit()
+	}
+	lockedTaskIDs := []string{parentID, taskID}
+	sort.Strings(lockedTaskIDs)
+	for _, lockedTaskID := range lockedTaskIDs {
+		if err := r.taskCleanupBarrierLocked(ctx, tx, lockedTaskID); err != nil {
+			return false, err
+		}
+	}
+	lockedParentID, lockedGroupID, err := r.loadDetachmentState(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if lockedParentID != parentID || lockedGroupID != groupID {
+		return false, fmt.Errorf("detach task %s: hierarchy changed concurrently", taskID)
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(detachTaskQuery(r.db.DriverName())), time.Now().UTC(), taskID)
+	if err != nil {
+		return false, err
+	}
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, err
 	}
-	if rows > 0 {
-		return true, nil
+	if rows != 1 {
+		return false, fmt.Errorf("detach task %s: hierarchy changed concurrently", taskID)
 	}
-
-	var existingID string
-	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT id FROM tasks WHERE id = ?`), taskID).Scan(&existingID); err != nil {
-		if err == sql.ErrNoRows {
-			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	if groupID != "" {
+		if err := r.transferDetachedWorkspaceStewardship(ctx, tx, groupID, taskID); err != nil {
+			return false, err
 		}
-		return false, err
 	}
-	return false, nil
+	return true, tx.Commit()
+}
+
+func (r *Repository) loadDetachmentState(ctx context.Context, tx *sqlx.Tx, taskID string) (string, string, error) {
+	var parentID, rawMetadata string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT parent_id, COALESCE(metadata, '{}') FROM tasks WHERE id = ?`,
+	), taskID).Scan(&parentID, &rawMetadata); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return "", "", err
+	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
+		return "", "", fmt.Errorf("decode task workspace metadata: %w", err)
+	}
+	workspace, _ := metadata["workspace"].(map[string]interface{})
+	groupID, _ := workspace["group_id"].(string)
+	return parentID, groupID, nil
+}
+
+func (r *Repository) transferDetachedWorkspaceStewardship(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	groupID, taskID string,
+) error {
+	state, err := r.loadDetachedWorkspaceStewardship(ctx, tx, groupID, taskID)
+	if err != nil {
+		return err
+	}
+	if err := r.checkDetachedWorkspaceTransferBarriers(ctx, tx, taskID, state); err != nil {
+		return err
+	}
+	return r.applyDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, state)
+}
+
+type detachedWorkspaceStewardship struct {
+	groupOwnerTaskID       string
+	environmentID          string
+	environmentOwnerTaskID string
+	environmentGeneration  int64
+}
+
+func (r *Repository) loadDetachedWorkspaceStewardship(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	groupID, taskID string,
+) (detachedWorkspaceStewardship, error) {
+	query := `
+		SELECT g.owner_task_id, g.materialized_environment_id
+		FROM task_workspace_groups g
+		JOIN task_workspace_group_members m ON m.workspace_group_id = g.id
+		WHERE g.id = ? AND m.task_id = ? AND m.released_at IS NULL
+		  AND g.cleanup_status IN ('active', 'cleanup_failed')
+	`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE OF g, m`
+	}
+	var state detachedWorkspaceStewardship
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), groupID, taskID).
+		Scan(&state.groupOwnerTaskID, &state.environmentID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return state, fmt.Errorf("detach task %s: active workspace group %s not found", taskID, groupID)
+		}
+		return state, err
+	}
+	if state.environmentID == "" {
+		return state, nil
+	}
+	owner, generation, err := r.loadDetachedEnvironmentOwnership(ctx, tx, state.environmentID, taskID)
+	state.environmentOwnerTaskID = owner
+	state.environmentGeneration = generation
+	return state, err
+}
+
+func (r *Repository) loadDetachedEnvironmentOwnership(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID, taskID string,
+) (string, int64, error) {
+	query := `SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var ownerTaskID string
+	var generation int64
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), environmentID).
+		Scan(&ownerTaskID, &generation); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", 0, fmt.Errorf("detach task %s: materialized environment %s not found", taskID, environmentID)
+		}
+		return "", 0, err
+	}
+	return ownerTaskID, generation, nil
+}
+
+func (r *Repository) checkDetachedWorkspaceTransferBarriers(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	state detachedWorkspaceStewardship,
+) error {
+	if state.groupOwnerTaskID != "" && state.groupOwnerTaskID != taskID {
+		if err := r.taskCleanupBarrierLocked(ctx, tx, state.groupOwnerTaskID); err != nil {
+			return err
+		}
+	}
+	if state.environmentOwnerTaskID != "" && state.environmentOwnerTaskID != taskID &&
+		state.environmentOwnerTaskID != state.groupOwnerTaskID {
+		return r.taskCleanupBarrierLocked(ctx, tx, state.environmentOwnerTaskID)
+	}
+	return nil
+}
+
+func (r *Repository) applyDetachedWorkspaceStewardship(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	groupID, taskID string,
+	state detachedWorkspaceStewardship,
+) error {
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_group_members SET role = 'member'
+		WHERE workspace_group_id = ? AND released_at IS NULL
+	`), groupID); err != nil {
+		return err
+	}
+	if result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_group_members SET role = 'owner'
+		WHERE workspace_group_id = ? AND task_id = ? AND released_at IS NULL
+	`), groupID, taskID); err != nil {
+		return err
+	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
+		return errors.Join(rowsErr, fmt.Errorf("detach task %s: owner membership changed concurrently", taskID))
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET owner_task_id = ?, ownership_generation = ownership_generation + 1,
+			cleanup_status = 'active', cleanup_error = '', cleaned_at = NULL, updated_at = ?
+		WHERE id = ?
+	`), taskID, now, groupID); err != nil {
+		return err
+	}
+	if state.environmentID == "" {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET task_id = ?, ownership_generation = ownership_generation + 1, updated_at = ?
+		WHERE id = ? AND task_id = ? AND ownership_generation = ?
+	`), taskID, now, state.environmentID, state.environmentOwnerTaskID, state.environmentGeneration)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("detach task %s: materialized environment %s changed concurrently", taskID, state.environmentID)
+	}
+	return nil
 }
 
 func detachTaskQuery(driver string) string {
