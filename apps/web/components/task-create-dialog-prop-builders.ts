@@ -81,7 +81,9 @@ export function buildDialogFormBodyProps(
     // applying a set writes fs.repositories just as they would.
     repositorySets: repoLocked ? undefined : setup.repositorySets,
     isLocalExecutor: computed.isLocalExecutor,
-    noCompatibleAgent: computed.noCompatibleAgent,
+    agentCompatState: computed.agentCompatState,
+    selectedAgentProfileName: computed.selectedAgentProfileName,
+    effectiveWorkflowName: resolveWorkflowName(setup.workflows, computed.effectiveWorkflowId),
     executorProfileName: computed.selectedExecutorProfileName,
     extraFormSlot: props.extraFormSlot,
     aboveDescriptionSlot: props.aboveDescriptionSlot,
@@ -89,6 +91,15 @@ export function buildDialogFormBodyProps(
     descriptionPlaceholder: props.descriptionPlaceholder,
     workflowLocked: props.lockedFields?.workflow,
   };
+}
+
+/** Name of the effective workflow, for copy that has to name it. */
+export function resolveWorkflowName(
+  workflows: ReadonlyArray<{ id: string; name: string }>,
+  effectiveWorkflowId: string | null | undefined,
+): string | null {
+  if (!effectiveWorkflowId) return null;
+  return workflows.find((workflow) => workflow.id === effectiveWorkflowId)?.name ?? null;
 }
 
 export function buildDialogFooterProps(
@@ -114,6 +125,8 @@ export function buildDialogFooterProps(
     effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
     executorHint: computed.executorHint,
     noCompatibleAgent: computed.noCompatibleAgent,
+    agentCompatState: computed.agentCompatState,
+    selectedAgentProfileName: computed.selectedAgentProfileName,
     executorProfileName: computed.selectedExecutorProfileName,
     onCancel: submitHandlers.handleCancel,
     onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,

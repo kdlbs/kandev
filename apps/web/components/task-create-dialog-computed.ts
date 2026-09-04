@@ -6,6 +6,7 @@ import type {
   DialogComputedArgs,
   DialogComputedValues,
   DialogFormState,
+  AgentCompatState,
 } from "@/components/task-create-dialog-types";
 import {
   useRepositoryOptions,
@@ -142,6 +143,24 @@ export function filterCompatibleAgentProfiles(
   );
 }
 
+/**
+ * Three-way compatibility of the effective agent selection with the selected
+ * executor profile. Pure so the dialog's empty state, note, and footer reason
+ * can be tested without rendering.
+ */
+export function computeAgentCompatState(
+  selectedExecutorProfile: ExecutorProfile | null,
+  compatibleAgentProfiles: AgentProfileOption[],
+  selectedAgentProfileId: string,
+): AgentCompatState {
+  if (!selectedExecutorProfile) return "compatible";
+  if (compatibleAgentProfiles.length === 0) return "none-compatible";
+  if (!selectedAgentProfileId) return "compatible";
+  return compatibleAgentProfiles.some((ap) => ap.id === selectedAgentProfileId)
+    ? "compatible"
+    : "selected-incompatible";
+}
+
 function useExecutorProfileCompat(
   allExecutorProfiles: ExecutorProfile[],
   selectedProfileId: string,
@@ -167,24 +186,31 @@ function useExecutorProfileCompat(
       dynamicRoutingEnabled,
     );
   }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded, dynamicRoutingEnabled]);
-  // `noCompatibleAgent` gates the submit button. It must catch BOTH cases:
-  //   1. The selected executor has no compatible agents at all.
-  //   2. The user picked an agent that isn't compatible with the executor
-  //      (e.g. switched executor after the agent was chosen).
-  // Previously this only checked case 1, so case 2 silently let the user
-  // submit with a known-incompatible combination.
-  const noCompatibleAgent = useMemo(() => {
-    if (!selectedExecutorProfile) return false;
-    if (compatibleAgentProfiles.length === 0) return true;
-    if (!selectedAgentProfileId) return false;
-    return !compatibleAgentProfiles.some((ap) => ap.id === selectedAgentProfileId);
-  }, [selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId]);
+  // The agent column renders per state and the submit gate reads the derived
+  // boolean, so both "no compatible agent at all" and "selected agent is not
+  // compatible" block submission while only the former hides the selector.
+  const agentCompatState = useMemo(
+    () =>
+      computeAgentCompatState(
+        selectedExecutorProfile,
+        compatibleAgentProfiles,
+        selectedAgentProfileId,
+      ),
+    [selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId],
+  );
+  const noCompatibleAgent = agentCompatState !== "compatible";
+  const selectedAgentProfileName = useMemo(
+    () => agentProfiles.find((ap) => ap.id === selectedAgentProfileId)?.label ?? null,
+    [agentProfiles, selectedAgentProfileId],
+  );
   return {
     selectedExecutorProfile,
     compatibleAgentProfiles,
     authLoaded,
     executorProfileOptions,
     noCompatibleAgent,
+    agentCompatState,
+    selectedAgentProfileName,
   };
 }
 
@@ -302,5 +328,7 @@ export function useDialogComputed({
     compatibleAgentProfiles: exec.compatibleAgentProfiles,
     authLoaded: exec.authLoaded,
     noCompatibleAgent: exec.noCompatibleAgent,
+    agentCompatState: exec.agentCompatState,
+    selectedAgentProfileName: exec.selectedAgentProfileName,
   };
 }

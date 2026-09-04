@@ -222,6 +222,17 @@ export type StoreSelections = {
   effectiveWorkflowId?: string | null;
 };
 
+/**
+ * Agent-profile compatibility with the selected executor profile.
+ *   compatible:            no executor selected, nothing selected yet, or the
+ *                          selection passes the executor's credential check.
+ *   selected-incompatible: a compatible profile exists but the selected one
+ *                          fails the check (e.g. executor switched after the
+ *                          agent was chosen, or a workflow pins it).
+ *   none-compatible:       an executor is selected and no profile passes.
+ */
+export type AgentCompatState = "compatible" | "selected-incompatible" | "none-compatible";
+
 export type DialogComputedValues = {
   isPassthroughProfile: boolean;
   effectiveWorkflowId: string | null;
@@ -244,8 +255,12 @@ export type DialogComputedValues = {
   effectiveAgentProfileId: string;
   /** Display name of the currently selected executor profile (null if none). */
   selectedExecutorProfileName: string | null;
-  /** True when an executor profile is selected and no agent profile is compatible with it. */
+  /** True whenever `agentCompatState` is not `compatible`; gates submission. */
   noCompatibleAgent: boolean;
+  /** Three-way compatibility of the effective agent profile with the selected executor profile. */
+  agentCompatState: AgentCompatState;
+  /** Label of the effective agent profile (null when none is selected or it is unknown). */
+  selectedAgentProfileName: string | null;
   /** Subset of agent profiles that pass the executor's auth-credential check. See `StoreSelections.compatibleAgentProfiles`. */
   compatibleAgentProfiles: AgentProfileOption[];
   /** True once the remote-auth catalog has been fetched. See `StoreSelections.authLoaded`. */
@@ -613,7 +628,11 @@ export type DialogFormBodyProps = {
    * branch for local execution; fresh-branch mode unlocks it).
    */
   isLocalExecutor: boolean;
-  noCompatibleAgent: boolean;
+  agentCompatState: AgentCompatState;
+  /** Label of the effective agent profile, for the incompatible-agent note. */
+  selectedAgentProfileName: string | null;
+  /** Name of the effective workflow, for the workflow-locked incompatible note. */
+  effectiveWorkflowName: string | null;
   executorProfileName: string | null;
   /** Optional render slot above the description editor. */
   aboveDescriptionSlot?: React.ReactNode;

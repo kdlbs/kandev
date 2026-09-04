@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExecutorProfile } from "@/lib/types/http";
 import {
+  computeAgentCompatState,
   computeHasRepositorySelection,
   computeSelectedRepoCount,
   filterCompatibleAgentProfiles,
@@ -225,5 +226,42 @@ describe("filterCompatibleAgentProfiles", () => {
         [],
       ).map((p) => p.id),
     ).toEqual(["enabled"]);
+  });
+});
+
+describe("computeAgentCompatState", () => {
+  const sprites = {
+    id: "exec-sprites",
+    executor_type: "sprites",
+    config: {},
+  } as unknown as ExecutorProfile;
+  function profile(id: string): AgentProfileOption {
+    return { id, label: id, agent_id: `agent-${id}`, agent_name: id, cli_passthrough: false };
+  }
+  const claude = profile("claude");
+  const cursor = profile("cursor");
+
+  it("is compatible while no executor profile is selected", () => {
+    expect(computeAgentCompatState(null, [], claude.id)).toBe("compatible");
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.4
+  it("is none-compatible when the compatible list is empty", () => {
+    expect(computeAgentCompatState(sprites, [], claude.id)).toBe("none-compatible");
+    expect(computeAgentCompatState(sprites, [], "")).toBe("none-compatible");
+  });
+
+  it("is compatible while nothing is selected and a compatible profile exists", () => {
+    expect(computeAgentCompatState(sprites, [cursor], "")).toBe("compatible");
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  it("is selected-incompatible, never none-compatible, when the selection is absent from a non-empty list", () => {
+    expect(computeAgentCompatState(sprites, [cursor], claude.id)).toBe("selected-incompatible");
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.3
+  it("is compatible when the selection is in the list", () => {
+    expect(computeAgentCompatState(sprites, [claude, cursor], claude.id)).toBe("compatible");
   });
 });
