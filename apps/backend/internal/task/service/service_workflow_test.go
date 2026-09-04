@@ -695,12 +695,16 @@ func TestService_MoveTaskAllowsSameStepReorderWhenStepAlreadyOverLimit(t *testin
 	createMoveTask(t, ctx, repo, "task-moving", "wf-source", "step-full", nil)
 	createMoveTask(t, ctx, repo, "task-occupant", "wf-source", "step-full", nil)
 
+	// A same-step move is not an arrival (REQ-TASKS-KANBAN-TASK-REORDERING-001.28):
+	// the caller-supplied position (5) is ignored and the task keeps the
+	// position it already held. Reordering within a step is now the
+	// dedicated ReorderStepTasks endpoint's job, not MoveTask's.
 	moved, err := svc.MoveTask(ctx, "task-moving", "wf-source", "step-full", 5)
 	if err != nil {
 		t.Fatalf("same-step reorder should be exempt from WIP limit: %v", err)
 	}
-	if moved.Task.Position != 5 {
-		t.Fatalf("position = %d, want 5", moved.Task.Position)
+	if moved.Task.Position != 0 {
+		t.Fatalf("position = %d, want 0 (unchanged, caller-supplied position ignored)", moved.Task.Position)
 	}
 }
 
