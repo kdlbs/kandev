@@ -1,7 +1,7 @@
 // i18n-exempt: CSP directives are browser security policy values, not user-facing copy.
 export const HTML_PREVIEW_CSP = [
   "default-src 'none'",
-  "script-src 'unsafe-inline'",
+  "script-src 'none'",
   "style-src 'unsafe-inline'",
   "img-src data: blob:",
   "media-src data: blob:",
@@ -14,7 +14,6 @@ export const HTML_PREVIEW_CSP = [
   "manifest-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
-  "navigate-to 'none'",
 ].join("; ");
 
 export function buildHtmlPreviewDocument(content: string): string {

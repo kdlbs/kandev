@@ -21,7 +21,7 @@ function renderPreview(onTogglePreview = vi.fn()) {
       <TooltipProvider>
         <HtmlPreviewContent
           path="reports/index.html"
-          content="<h1>Report</h1><script>document.body.dataset.ready = 'yes';</script>"
+          content="<h1>Report</h1><style>h1 { color: red; }</style>"
           showExternalVcsLink={false}
           onTogglePreview={onTogglePreview}
         />
@@ -36,11 +36,12 @@ describe("HtmlPreviewContent", () => {
     const frame = screen.getByTestId("html-preview-frame");
 
     expect(frame.getAttribute("title")).toBe("HTML preview");
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.hasAttribute("allow-same-origin")).toBe(false);
     expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(frame.getAttribute("srcdoc")).toContain("<h1>Report</h1>");
     expect(frame.getAttribute("srcdoc")).toContain("default-src 'none'");
+    expect(frame.getAttribute("srcdoc")).toContain("script-src 'none'");
 
     screen.getByRole("button", { name: "Show code" }).click();
     expect(onTogglePreview).toHaveBeenCalledOnce();

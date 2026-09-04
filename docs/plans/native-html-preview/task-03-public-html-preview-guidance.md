@@ -82,9 +82,9 @@ git diff --check -- docs/public
 
 ## Results
 
-Added the self-contained HTML preview workflow and its sandbox and asset
-limitations to the public developer-tools guide. Public documentation
-validation passed:
+Added the self-contained static HTML preview workflow and its sandbox, inert
+script, and asset limitations to the public developer-tools guide. Public
+documentation validation passed:
 
 ```text
 node --test scripts/validate-public-docs.test.mjs

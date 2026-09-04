@@ -79,7 +79,7 @@ serialization, it prepends a restrictive Content Security Policy meta element
 to the document head. The policy permits only the capabilities in the
 self-contained contract:
 
-- inline scripts and inline styles.
+- inline styles. Script elements and inline event handlers remain inert.
 - `data:` and `blob:` image or media resources.
 - `data:` fonts.
 - no default, object, frame, worker, manifest, connection, form, or remote
@@ -100,18 +100,18 @@ replaces a clean buffer supplies a new `srcDoc` on the next preview render.
 
 ## Security boundary
 
-Workspace HTML is untrusted active content. The iframe uses
-`sandbox="allow-scripts"` and deliberately omits `allow-same-origin`,
+Workspace HTML is untrusted active content. The iframe uses an empty
+`sandbox` attribute and deliberately omits `allow-same-origin`, `allow-scripts`,
 `allow-forms`, `allow-popups`, `allow-modals`, `allow-downloads`, and every
 top-navigation capability. The result is an opaque origin even though the
 `srcDoc` is created by the Kandev page.
 
-The injected CSP is defense in depth. It blocks network APIs, remote resources,
-nested frames, objects, workers, forms, and base-URL changes.
-The sandbox remains the authority for parent-document, storage, navigation,
-popup, and download isolation. Tests assert both allowed inline execution and
-blocked parent access. Neither the HTML document nor its scripts receive task,
-session, repository, or credential values.
+The injected CSP is defense in depth. It blocks scripts, network APIs, remote
+resources, nested frames, objects, workers, forms, and base-URL changes.
+The sandbox remains the authority for script, parent-document, storage,
+navigation, popup, and download isolation. Tests assert blocked script
+execution and navigation. Neither the HTML document nor its inert scripts
+receive task, session, repository, or credential values.
 
 This applies the untrusted-content origin rule in
 [ADR-2026-07-24-operator-owned-agent-launcher-settings](../../../decisions/2026-07-24-operator-owned-agent-launcher-settings.md).
@@ -189,13 +189,13 @@ selection.
 ## Verification strategy
 
 - Unit tests cover `.html`/`.htm` eligibility, binary exclusion, generic preview
-  state, and legacy restoration. They also cover CSP injection, sandbox
-  attributes, inline scripts, and provider-specific toolbar copy.
+  state, and legacy restoration. They also cover CSP injection, the empty
+  sandbox attribute, blocked scripts, and provider-specific toolbar copy.
 - Component tests cover source/HTML/Markdown renderer selection, dirty-buffer
   preservation, failure recovery, and mobile file-identity reset.
-- Desktop E2E opens an unsaved HTML buffer and previews its markup and inline
-  script result. It verifies parent isolation, returns to code, and reloads a
-  persisted preview.
+- Desktop E2E opens an unsaved HTML buffer and previews its markup while
+  attempting script and meta-refresh navigation. It verifies that neither
+  navigation makes a request, returns to code, and reloads a persisted preview.
 - Mobile Chrome E2E opens the focused file viewer and uses the preview action.
   It validates the output and returns to source. It verifies the touch target
   and document-level horizontal containment.

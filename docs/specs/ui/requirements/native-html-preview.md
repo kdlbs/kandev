@@ -15,17 +15,18 @@ system owns a native HTML preview because this is a reusable file-viewer
 interaction. The preview does not introduce workspace state, an executor
 lifecycle, or a backend serving contract.
 
-The first supported slice is intentionally limited to self-contained HTML. It
-renders the current in-memory file buffer and isolates active content from the
-Kandev application.
+The first supported slice is intentionally limited to self-contained static
+HTML. It renders the current in-memory file buffer and isolates active content
+from the Kandev application.
 
 ## Terminology
 
 - **Rendered preview:** A view of the current file buffer that replaces the
   source editor inside the same file surface.
 - **Self-contained HTML:** An `.html` or `.htm` document that uses its own
-  markup, inline styles, and inline scripts. Its resources use embedded `data:`
-  or `blob:` values.
+  markup and inline styles. Fonts use embedded `data:` values, while images and
+  media use embedded `data:` or `blob:` values. Script elements and inline event
+  handlers remain inert.
 - **Preview sandbox:** The opaque-origin browser frame in which HTML content is
   rendered without Kandev application authority.
 
@@ -49,12 +50,13 @@ truth.
   it. Activating `Show code` shall restore the source editor with its content
   and dirty state unchanged.
 - **AC-UI-NATIVE-HTML-PREVIEW-001.3:** The rendered preview shall support HTML
-  markup, inline CSS, inline JavaScript, and embedded `data:` or `blob:`
-  resources from the current document.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.4:** Previewed HTML shall execute in an
-  opaque-origin sandbox. It shall not access Kandev's document, browser
-  storage, application credentials, top-level navigation, forms, popups,
-  downloads, or network APIs.
+  markup, inline CSS, `data:` fonts, and `data:` or `blob:` images and media
+  from the current document. Script elements and inline event handlers shall
+  not execute.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.4:** Previewed HTML shall render in an
+  opaque-origin sandbox with no script capability. It shall not access Kandev's
+  document, browser storage, application credentials, top-level navigation,
+  forms, popups, downloads, or network APIs.
 - **AC-UI-NATIVE-HTML-PREVIEW-001.5:** When the document references a blocked
   network or workspace-relative resource, the preview shall remain available.
   The resource shall not load, and the user shall still be able to return to
