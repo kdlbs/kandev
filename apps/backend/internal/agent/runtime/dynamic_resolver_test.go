@@ -38,6 +38,27 @@ func TestResolveRouteActionRejectsSkipAfterRecoveryClaim(t *testing.T) {
 	}
 }
 
+func TestMarkRouteActionRequiredUnblocksRetryAndSkipAfterFailedLaunch(t *testing.T) {
+	ctx := context.Background()
+	resolver, engine, generation := newRetryingRouteActionResolver(t)
+
+	// Simulate the launch-failure handler's sync (dynamic_policy_recovery.go
+	// and dynamic_routing.go both call this after a resumed launch fails).
+	if err := resolver.MarkRouteActionRequired(ctx, "session-retry", generation); err != nil {
+		t.Fatalf("MarkRouteActionRequired: %v", err)
+	}
+	state, ok := engine.State("session-retry")
+	if !ok || state.Status != "action_required" {
+		t.Fatalf("route state after sync = %#v, ok=%v, want action_required", state, ok)
+	}
+
+	if _, err := resolver.ResolveRouteAction(
+		ctx, "session-retry", "dynamic-profile", "concrete-profile", generation, "retry",
+	); err != nil {
+		t.Fatalf("ResolveRouteAction retry after sync = %v, want success", err)
+	}
+}
+
 func newRetryingRouteActionResolver(t *testing.T) (*ProfileExecutionResolver, *dynamic.Engine, int64) {
 	t.Helper()
 	ctx := context.Background()

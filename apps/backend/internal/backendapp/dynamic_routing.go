@@ -57,7 +57,7 @@ func applyDynamicRouteAction(
 	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {
 		return routeActionResult(ctx, repo, session), nil
 	}
-	return finishDynamicRouteAction(ctx, repo, session.ID, launchSuccessor)
+	return finishDynamicRouteAction(ctx, repo, resolver, session.ID, decision.Generation, launchSuccessor)
 }
 
 func loadDynamicRouteActionSession(
@@ -155,7 +155,9 @@ func persistDynamicRouteSelection(
 func finishDynamicRouteAction(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
+	resolver *agentruntime.ProfileExecutionResolver,
 	sessionID string,
+	expectedGeneration int64,
 	launchSuccessor func(context.Context, string) error,
 ) (*orchestrator.RouteActionResult, error) {
 	if launchSuccessor == nil {
@@ -166,7 +168,7 @@ func finishDynamicRouteAction(
 		return routeActionResult(ctx, repo, session), nil
 	}
 	if err := launchSuccessor(ctx, sessionID); err != nil {
-		return recoverDynamicRouteAction(ctx, repo, sessionID, err)
+		return recoverDynamicRouteAction(ctx, repo, resolver, sessionID, expectedGeneration, err)
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -178,9 +180,18 @@ func finishDynamicRouteAction(
 func recoverDynamicRouteAction(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
+	resolver *agentruntime.ProfileExecutionResolver,
 	sessionID string,
+	expectedGeneration int64,
 	launchErr error,
 ) (*orchestrator.RouteActionResult, error) {
+	// Best effort: sync the durable route state so a subsequent manual
+	// retry/skip/stop is not permanently rejected by a "retrying" status this
+	// failed launch never advanced past. The session projection below is the
+	// state the UI reads, so a sync failure here does not block recovery.
+	if resolver != nil {
+		_ = resolver.MarkRouteActionRequired(ctx, sessionID, expectedGeneration)
+	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, err

@@ -187,7 +187,7 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	release()
 	locked = false
 	if err := s.LaunchDynamicRouteAction(ctx, sessionID); err != nil {
-		s.markDynamicPolicyRecoveryActionRequired(ctx, sessionID, err)
+		s.markDynamicPolicyRecoveryActionRequired(ctx, sessionID, generation, err)
 	}
 }
 
@@ -280,7 +280,15 @@ func dynamicPolicyDeadline(rawPolicyState string) *time.Time {
 	return &deadline
 }
 
-func (s *Service) markDynamicPolicyRecoveryActionRequired(ctx context.Context, sessionID string, launchErr error) {
+func (s *Service) markDynamicPolicyRecoveryActionRequired(
+	ctx context.Context, sessionID string, generation int64, launchErr error,
+) {
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.MarkRouteActionRequired(ctx, sessionID, generation); err != nil {
+			s.logger.Warn("failed to sync durable route state to action_required after launch failure",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return

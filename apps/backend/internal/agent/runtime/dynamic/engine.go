@@ -750,6 +750,32 @@ func (e *Engine) MarkActionRequired(
 	}, nil
 }
 
+// MarkRecoveryActionRequired transitions a claimed "retrying" state to
+// "action_required" after its resumed launch failed. Without this, the
+// durable state stays at "retrying" forever, and every manual recovery path
+// (retry, skip, stop) rejects that status — the user is locked out with no
+// way back. No-op if the generation is stale or the state already moved on,
+// since this runs as a best-effort cleanup after a launch failure the caller
+// cannot retry synchronously.
+func (e *Engine) MarkRecoveryActionRequired(ctx context.Context, sessionID string, expectedGeneration int64) error {
+	state, exists, err := e.stateForFailure(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !exists || state.Generation != expectedGeneration || state.Status != routeStatusRetrying {
+		return nil
+	}
+	state.Status = routeStatusActionRequired
+	state.UpdatedAt = e.now()
+	if err := e.persistExpectedStatus(ctx, expectedGeneration, routeStatusRetrying, state); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	e.states[sessionID] = state
+	e.mu.Unlock()
+	return nil
+}
+
 func (e *Engine) resumePending(
 	ctx context.Context,
 	sessionID string,

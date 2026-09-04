@@ -447,6 +447,21 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 	return r.executionFromDecision(ctx, state.LogicalProfileID, sessionID, decision)
 }
 
+// MarkRouteActionRequired syncs the durable route state to "action_required"
+// after a resumed launch failed, so a subsequent manual retry/skip/stop is
+// not permanently rejected by a status the failed launch never advanced
+// past. Best-effort: callers log but do not fail their own path on error.
+func (r *ProfileExecutionResolver) MarkRouteActionRequired(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+) error {
+	if r.engine == nil {
+		return nil
+	}
+	return r.engine.MarkRecoveryActionRequired(ctx, sessionID, expectedGeneration)
+}
+
 func (r *ProfileExecutionResolver) resolve(
 	ctx context.Context,
 	sessionID, profileID string,
