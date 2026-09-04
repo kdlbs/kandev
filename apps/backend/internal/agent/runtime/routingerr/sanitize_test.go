@@ -197,6 +197,30 @@ func TestSanitizeCredentials_RedactsCredentialPatterns(t *testing.T) {
 			mustNotHave: []string{"abc123def456"},
 			mustHave:    []string{"api_key: ***"},
 		},
+		{
+			name:        "non-http scheme userinfo credential",
+			in:          "repro via postgres://admin:hunter2@db.internal:5432/app",
+			mustNotHave: []string{"hunter2", "admin:hunter2@"},
+			mustHave:    []string{"postgres://***@db.internal:5432/app"},
+		},
+		{
+			name:        "quoted JSON password field",
+			in:          `{"password": "hunter2-rocks"}`,
+			mustNotHave: []string{"hunter2-rocks"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "secret=value",
+			in:          "secret=hunter2-rocks",
+			mustNotHave: []string{"hunter2-rocks"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
+			name:        "token=value",
+			in:          "token=hunter2-rocks",
+			mustNotHave: []string{"hunter2-rocks"},
+			mustHave:    []string{"token: ***"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -249,6 +273,8 @@ func TestSanitizeCredentials_Idempotent(t *testing.T) {
 		"--api-key=ABCDEFGHIJKLMNOPQRSTUV --rest",
 		"password: hunter2 token: foobar secret=abc",
 		"commit 94e7b02458b6c1a2d3e4f5061728394a5b6c7d8",
+		"https://user:pass@host/path",
+		`{"password": "hunter2-rocks"}`,
 	}
 	for _, in := range inputs {
 		first := SanitizeCredentials(in)

@@ -28,11 +28,15 @@ var credentialRedactions = []redaction{
 	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]{20,}`), "Bearer " + redactionMask},
 	{regexp.MustCompile(`(?i)Authorization:\s*[^\r\n]+`), "Authorization: " + redactionMask},
 	{regexp.MustCompile(`--api-key[= ]\S+`), "--api-key " + redactionMask},
-	{regexp.MustCompile(`(?i)(password|secret|token|api[_-]?key)\s*[:=]\s*\S+`), "$1: " + redactionMask},
+	// Tolerates an optional quote around the key and the value, so a JSON
+	// field ("password": "...") is caught along with a bare assignment.
+	{regexp.MustCompile(`(?i)["']?(password|secret|token|api[_-]?key)["']?\s*[:=]\s*["']?[^\s"']+`), "$1: " + redactionMask},
 	// URL userinfo (user:pass@host) carries a live credential even though the
 	// rest of the URL does not. Unlike the full Sanitize tier's URL rewrite,
-	// this masks only the userinfo and keeps the path and query intact.
-	{regexp.MustCompile(`(https?://)[^@\s/]+@`), "$1" + redactionMask + "@"},
+	// this masks only the userinfo and keeps the path and query intact. The
+	// scheme is not restricted to http(s): any scheme://user:pass@ form
+	// (postgres, mysql, redis, ...) carries the same live credential.
+	{regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^@\s/]+@`), "$1" + redactionMask + "@"},
 }
 
 var redactions = append(append([]redaction{

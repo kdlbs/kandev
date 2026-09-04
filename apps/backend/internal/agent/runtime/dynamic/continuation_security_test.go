@@ -183,6 +183,8 @@ func TestContinuationRedactsUserAuthoredFieldSecrets(t *testing.T) {
 				input.PlanSummary = carrier
 			case "RepositorySummary":
 				input.RepositorySummary = carrier
+			default:
+				t.Fatalf("unhandled field %q: add a case wiring it into ContinuationInput", name)
 			}
 
 			continuation := BuildBoundedContinuation(input)
