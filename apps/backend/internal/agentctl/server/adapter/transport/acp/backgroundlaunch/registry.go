@@ -57,6 +57,17 @@ func Lookup(agentID string) (Recognizer, bool) {
 	return r, ok
 }
 
+// Unregister removes the recognizer registered for agentID, if any. It is a
+// no-op for an agent ID with nothing registered. Production recognisers
+// register once via init() and are never unregistered; this exists so tests
+// that register a throwaway recognizer can undo it via t.Cleanup instead of
+// leaking a package-global registration across the test binary.
+func Unregister(agentID string) {
+	mu.Lock()
+	defer mu.Unlock()
+	delete(registry, agentID)
+}
+
 // RecognizesDetachedLaunch reports whether payload is a detached
 // background-shell launch for agentID. An unregistered agent ID reports
 // false, and a recognizer whose RecognizesDetachedLaunch panics is treated

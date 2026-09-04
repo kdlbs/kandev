@@ -58,6 +58,13 @@ func probeWithReader(reader processTableReader, agentPID int, turnStart time.Tim
 	if err != nil {
 		return ResultUnknown, err
 	}
+	if !agentProcessPresent(table, agentPID) {
+		// D9: "agent process exited | unknown, never settled". An absent
+		// root also means its PPID-linked children are indistinguishable
+		// from an unrelated process tree rooted elsewhere on the host (a
+		// zero or stale pid is not just a "no children" case).
+		return ResultUnknown, nil
+	}
 
 	truncatedTurnStart := turnStart.Truncate(reader.Resolution())
 	for _, descendant := range transitiveDescendants(table, agentPID) {
@@ -69,6 +76,22 @@ func probeWithReader(reader processTableReader, agentPID int, turnStart time.Tim
 		}
 	}
 	return ResultSettled, nil
+}
+
+// agentProcessPresent reports whether agentPID names a real entry in this
+// snapshot. A pid of zero or below is never valid — treated the same as
+// absent rather than walked, since it would otherwise match the kernel's
+// PPID-0-rooted process tree instead of no tree at all.
+func agentProcessPresent(table []processInfo, agentPID int) bool {
+	if agentPID <= 0 {
+		return false
+	}
+	for _, p := range table {
+		if p.PID == agentPID {
+			return true
+		}
+	}
+	return false
 }
 
 // transitiveDescendants returns every process whose ancestor chain reaches

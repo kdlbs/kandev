@@ -167,7 +167,7 @@ func lastParkedEvent(b *recordingEventBus) (parked bool, revision uint64, ok boo
 
 // AC-21: attested + live + WAITING_FOR_INPUT parks.
 func TestSettleParkedProjectionSync_AttestedAndLive_Parks(t *testing.T) {
-	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, bus, probe := newParkedTestService(t, repo)
 	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
 	svc.setObservedDetachedLaunch("sess-1")
@@ -202,7 +202,7 @@ func TestSettleParkedProjectionSync_NoAttestation_NeverProbes(t *testing.T) {
 
 // AC-25: attested but probe reports settled -> not parked.
 func TestSettleParkedProjectionSync_AttestedButSettled_NotParked(t *testing.T) {
-	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, _, probe := newParkedTestService(t, repo)
 	probe.results = []executor.ProbeResult{executor.ProbeResultSettled}
 	svc.setObservedDetachedLaunch("sess-1")
@@ -216,7 +216,7 @@ func TestSettleParkedProjectionSync_AttestedButSettled_NotParked(t *testing.T) {
 
 // AC-26/AC-27: attested but probe reports unknown -> not parked.
 func TestSettleParkedProjectionSync_AttestedButUnknown_NotParked(t *testing.T) {
-	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, _, probe := newParkedTestService(t, repo)
 	probe.results = []executor.ProbeResult{executor.ProbeResultUnknown}
 	svc.setObservedDetachedLaunch("sess-1")
@@ -230,7 +230,7 @@ func TestSettleParkedProjectionSync_AttestedButUnknown_NotParked(t *testing.T) {
 
 // AC-40/AC-46: a probe error is treated as unknown; never parked, no panic.
 func TestSettleParkedProjectionSync_ProbeErrors_TreatedAsUnknown(t *testing.T) {
-	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, _, probe := newParkedTestService(t, repo)
 	probe.results = []executor.ProbeResult{executor.ProbeResultUnknown}
 	probe.errs = []error{context.DeadlineExceeded}
@@ -243,11 +243,44 @@ func TestSettleParkedProjectionSync_ProbeErrors_TreatedAsUnknown(t *testing.T) {
 	}
 }
 
+// F9: a concurrent D8 transition that lands while the synchronous D2 settle
+// probe is still in flight must not be clobbered by the late-arriving
+// sample. The session leaves WAITING_FOR_INPUT
+// for real (the repo row is updated, mirroring what a genuine self-resume
+// does) and clears the projection; the stale `live` sample that resolves
+// afterward must not re-park it.
+func TestSettleParkedProjectionSync_ConcurrentTransitionDuringProbe_NotReParked(t *testing.T) {
+	session := &models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput}
+	repo := newParkedTestRepo(session)
+	svc, bus, probe := newParkedTestService(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.setObservedDetachedLaunch("sess-1")
+
+	probe.onProbe = func() {
+		repo.mu.Lock()
+		session.State = models.TaskSessionStateRunning
+		repo.mu.Unlock()
+		svc.clearParkedOnSessionStateLeft(context.Background(), "task-1", "sess-1", models.TaskSessionStateRunning)
+	}
+
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+
+	if parked, revision := svc.ParkedSnapshot("sess-1"); parked {
+		t.Fatalf("ParkedSnapshot = (%v, %d), want parked=false — the session left WAITING_FOR_INPUT before the late probe sample was applied", parked, revision)
+	}
+	if len(bus.events) != 0 {
+		t.Fatalf("published %d parked-projection events, want 0 (the no-op clear and the stale sample must both be discarded)", len(bus.events))
+	}
+	if n := probe.callCount(); n != 1 {
+		t.Fatalf("probe called %d times, want exactly 1", n)
+	}
+}
+
 // AC-68/D8: leaving WAITING_FOR_INPUT clears the projection immediately
 // without a new probe sample; last_sample is never re-read for this
 // transition.
 func TestClearParkedOnSessionStateLeft_ClearsWithoutNewSample(t *testing.T) {
-	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, bus, probe := newParkedTestService(t, repo)
 	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
 	svc.setObservedDetachedLaunch("sess-1")
@@ -512,7 +545,7 @@ func TestTaskParkedSnapshot_NoTransitions_DefaultsFalseZero(t *testing.T) {
 // the same task-level value must not be possible via this path since every
 // call here is a genuine session-level change.
 func TestTaskParkedSnapshot_SingleSessionToggle_RevisionMonotonicallyIncreases(t *testing.T) {
-	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, _, probe, publisher := newParkedTestServiceWithTaskEvents(t, repo)
 	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
 	svc.setObservedDetachedLaunch("sess-1")
@@ -541,8 +574,8 @@ func TestTaskParkedSnapshot_SingleSessionToggle_RevisionMonotonicallyIncreases(t
 // revision counter.
 func TestTaskParkedSnapshot_TwoSessions_RevisionIsOwnCounterNotMaxOfSessions(t *testing.T) {
 	repo := newParkedTestRepo(
-		&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning},
-		&models.TaskSession{ID: "sess-2", TaskID: "task-1", State: models.TaskSessionStateRunning},
+		&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput},
+		&models.TaskSession{ID: "sess-2", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput},
 	)
 	svc, _, probe, _ := newParkedTestServiceWithTaskEvents(t, repo)
 	svc.setObservedDetachedLaunch("sess-1")
@@ -582,8 +615,8 @@ func TestTaskParkedSnapshot_TwoSessions_RevisionIsOwnCounterNotMaxOfSessions(t *
 // task.updated is published and the task's parked_revision is unchanged.
 func TestPublishTaskParkedTransition_ORAlreadyTrue_NoTaskUpdatedPublished(t *testing.T) {
 	repo := newParkedTestRepo(
-		&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning},
-		&models.TaskSession{ID: "sess-2", TaskID: "task-1", State: models.TaskSessionStateRunning},
+		&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput},
+		&models.TaskSession{ID: "sess-2", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput},
 	)
 	svc, bus, probe, publisher := newParkedTestServiceWithTaskEvents(t, repo)
 	svc.setObservedDetachedLaunch("sess-1")
@@ -622,7 +655,7 @@ func TestPublishTaskParkedTransition_ORAlreadyTrue_NoTaskUpdatedPublished(t *tes
 // prior process instance had recorded — there is no persisted state to carry
 // forward.
 func TestTaskParkedSnapshot_FreshService_ReadsFalseZero(t *testing.T) {
-	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, _, probe, _ := newParkedTestServiceWithTaskEvents(t, repo)
 	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
 	svc.setObservedDetachedLaunch("sess-1")
@@ -643,7 +676,7 @@ func TestTaskParkedSnapshot_FreshService_ReadsFalseZero(t *testing.T) {
 // TaskEventPublisher is wired, mirroring publishTaskUpdated's own no-op
 // contract for an unwired publisher.
 func TestPublishTaskParkedTransition_NoPublisherWired_NoOp(t *testing.T) {
-	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
 	svc, _, probe := newParkedTestService(t, repo) // no taskEvents wired
 	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
 	svc.setObservedDetachedLaunch("sess-1")

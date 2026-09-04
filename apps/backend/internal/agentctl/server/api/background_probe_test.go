@@ -59,25 +59,19 @@ func TestHandleWSBackgroundProbe_NoRecordedTurnStart_Unknown(t *testing.T) {
 // AC-45: the request carries only session_id (no timestamp — the turn start
 // was already recorded adapter-side, per D3); the response is always
 // exactly one of the three valid result literals.
-func TestHandleWSBackgroundProbe_RecordedTurnStart_RespondsWithAValidLiteral(t *testing.T) {
+//
+// newTestServer's procMgr has no real agent process running, so AgentPID()
+// returns 0 — D9's "agent process exited" case. This exercises the exact
+// production path a live server takes between adapter recovery and process
+// launch, and must resolve to unknown rather than any tri-state-tolerant
+// answer: a pid-0 root must never be walked into a false "live".
+func TestHandleWSBackgroundProbe_RecordedTurnStart_NoRunningProcess_Unknown(t *testing.T) {
 	s := newTestServer(t)
 	s.procMgr.SetAdapterForTest(turnStartRecordingAdapter{turnStart: time.Now(), recorded: true})
 	msg, _ := ws.NewRequest("req-1", "agent.background.probe", map[string]string{"session_id": "sess-1"})
 
 	resp := s.handleWSBackgroundProbe(context.Background(), msg)
-	if resp.Type != ws.MessageTypeResponse {
-		t.Fatalf("expected a response, got %q", resp.Type)
-	}
-
-	var payload BackgroundProbeResponse
-	if err := resp.ParsePayload(&payload); err != nil {
-		t.Fatalf("parse response: %v", err)
-	}
-	switch payload.Result {
-	case "live", "settled", "unknown":
-	default:
-		t.Fatalf("unexpected result literal %q", payload.Result)
-	}
+	assertBackgroundProbeResult(t, resp, "unknown")
 }
 
 func assertBackgroundProbeResult(t *testing.T, resp *ws.Message, want string) {

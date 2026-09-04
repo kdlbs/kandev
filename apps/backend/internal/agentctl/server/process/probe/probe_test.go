@@ -23,12 +23,19 @@ func (f fakeProcessTableReader) ReadProcessTable() ([]processInfo, error) {
 
 const testAgentPID = 100
 
+// rootEntry is the agent process's own snapshot entry, included in every
+// table below since a real process-table read always contains the root's
+// entry while it is alive — only its absence (simulated separately) means
+// "exited".
+var rootEntry = processInfo{PID: testAgentPID, PPID: 1, StartTime: time.Unix(0, 0)}
+
 // AC-70: every descendant started strictly before the recorded turn start.
 func TestProbeWithReader_AllDescendantsPreTurn_Settled(t *testing.T) {
 	turnStart := time.Unix(1000, 0)
 	reader := fakeProcessTableReader{
 		resolution: time.Millisecond,
 		table: []processInfo{
+			rootEntry,
 			{PID: 200, PPID: testAgentPID, StartTime: turnStart.Add(-time.Hour)},
 		},
 	}
@@ -48,6 +55,7 @@ func TestProbeWithReader_DescendantAtOrAfterTurnStart_Live(t *testing.T) {
 	reader := fakeProcessTableReader{
 		resolution: time.Millisecond,
 		table: []processInfo{
+			rootEntry,
 			{PID: 200, PPID: testAgentPID, StartTime: turnStart},
 		},
 	}
@@ -70,6 +78,7 @@ func TestProbeWithReader_TransitiveGrandchildStillCounted(t *testing.T) {
 	reader := fakeProcessTableReader{
 		resolution: time.Millisecond,
 		table: []processInfo{
+			rootEntry,
 			{PID: 200, PPID: testAgentPID, StartTime: turnStart.Add(-time.Hour)},
 			{PID: 300, PPID: 200, StartTime: turnStart}, // grandchild, own pgrp in reality
 		},
@@ -89,6 +98,7 @@ func TestProbeWithReader_TransitiveGrandchildStillCounted(t *testing.T) {
 func TestProbeWithReader_PreTurnThenPostTurnDescendant(t *testing.T) {
 	turnStart := time.Unix(1000, 0)
 	preTurnOnly := []processInfo{
+		rootEntry,
 		{PID: 200, PPID: testAgentPID, StartTime: turnStart.Add(-time.Minute)},
 	}
 
@@ -125,6 +135,7 @@ func TestProbeWithReader_TruncationBoundary(t *testing.T) {
 	reader := fakeProcessTableReader{
 		resolution: resolution,
 		table: []processInfo{
+			rootEntry,
 			{PID: 200, PPID: testAgentPID, StartTime: turnStart.Truncate(resolution)},
 		},
 	}
@@ -145,6 +156,7 @@ func TestProbeWithReader_ZombieDescendantYieldsSettled(t *testing.T) {
 	reader := fakeProcessTableReader{
 		resolution: time.Millisecond,
 		table: []processInfo{
+			rootEntry,
 			{PID: 200, PPID: testAgentPID, StartTime: turnStart.Add(time.Second), Zombie: true},
 		},
 	}
@@ -172,8 +184,11 @@ func TestProbeWithReader_ReadErrorYieldsUnknown(t *testing.T) {
 	}
 }
 
+// The root process is alive and present in the snapshot, but has no
+// descendants at all — the true "no descendants" case, distinct from the
+// root being absent (see TestProbeWithReader_RootAbsentYieldsUnknown below).
 func TestProbeWithReader_NoDescendantsYieldsSettled(t *testing.T) {
-	reader := fakeProcessTableReader{resolution: time.Millisecond}
+	reader := fakeProcessTableReader{resolution: time.Millisecond, table: []processInfo{rootEntry}}
 
 	got, err := probeWithReader(reader, testAgentPID, time.Unix(1000, 0))
 	if err != nil {
@@ -181,6 +196,42 @@ func TestProbeWithReader_NoDescendantsYieldsSettled(t *testing.T) {
 	}
 	if got != ResultSettled {
 		t.Errorf("got %q, want %q", got, ResultSettled)
+	}
+}
+
+// D9: "agent process exited | unknown, never settled". A snapshot that does
+// not contain the root pid at all — because the agent process has exited —
+// must not be conflated with "root alive, zero descendants".
+func TestProbeWithReader_RootAbsentYieldsUnknown(t *testing.T) {
+	reader := fakeProcessTableReader{resolution: time.Millisecond}
+
+	got, err := probeWithReader(reader, testAgentPID, time.Unix(1000, 0))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != ResultUnknown {
+		t.Errorf("got %q, want %q", got, ResultUnknown)
+	}
+}
+
+// A zero or negative agent pid must never be walked — it would otherwise
+// match the kernel's PPID-0-rooted process tree (init/launchd and every
+// reparented descendant) instead of naming no process at all.
+func TestProbeWithReader_NonPositiveAgentPIDYieldsUnknown(t *testing.T) {
+	reader := fakeProcessTableReader{
+		resolution: time.Millisecond,
+		table: []processInfo{
+			{PID: 1, PPID: 0, StartTime: time.Unix(0, 0)},
+			{PID: 2, PPID: 1, StartTime: time.Now()},
+		},
+	}
+
+	got, err := probeWithReader(reader, 0, time.Unix(1000, 0))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != ResultUnknown {
+		t.Errorf("got %q, want %q — a pid-0 root must not walk the kernel's process tree", got, ResultUnknown)
 	}
 }
 

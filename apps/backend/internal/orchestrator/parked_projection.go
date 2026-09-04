@@ -178,6 +178,14 @@ func recomputeParkedLocked(
 // context.WithTimeout (task-04). Must be called only after this turn's
 // session.turn_finished has already been published (F7) — see the call site
 // in updateTaskSessionStateWithHook, which runs after completeTurnForTaskSession.
+//
+// F9: a concurrent D8 transition (self-resume, cancel, stop, delete) can
+// land while this synchronous probe is still in flight. The dispatch
+// revision is captured before the probe call
+// and re-checked after under the same lock discipline sampleParkedSessionTick
+// already uses, and the session's state is re-read fresh at apply time rather
+// than trusted from the moment this settle began — a session that left
+// WAITING_FOR_INPUT during the probe must not be re-parked by a late result.
 func (s *Service) settleParkedProjectionSync(ctx context.Context, taskID, sessionID string) {
 	if sessionID == "" {
 		return
@@ -191,6 +199,11 @@ func (s *Service) settleParkedProjectionSync(ctx context.Context, taskID, sessio
 	if probe == nil {
 		return
 	}
+
+	s.parkedMu.Lock()
+	dispatchRevision := s.parkedStateLocked(sessionID).revision
+	s.parkedMu.Unlock()
+
 	result, err := probe.Probe(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("background probe failed during turn-settle",
@@ -198,7 +211,40 @@ func (s *Service) settleParkedProjectionSync(ctx context.Context, taskID, sessio
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-	s.applyParkedTransition(ctx, taskID, sessionID, true, result, true, models.TaskSessionStateWaitingForInput)
+
+	session, sessErr := s.repo.GetTaskSession(ctx, sessionID)
+	if sessErr != nil || session == nil {
+		// The session is gone or unreadable by the time the probe returned;
+		// there is nothing current to apply this sample against.
+		return
+	}
+
+	s.parkedMu.Lock()
+	st, ok := s.parkedStates[sessionID]
+	if !ok || st.revision != dispatchRevision {
+		s.parkedMu.Unlock()
+		return
+	}
+	parked, revision, changed := recomputeParkedLocked(st, attested, result, true, session.State)
+	var taskParked, taskChanged bool
+	var taskRevision uint64
+	if changed {
+		taskParked, taskRevision, taskChanged = s.recomputeTaskParkedLocked(taskID, sessionID, parked)
+	}
+	s.parkedMu.Unlock()
+
+	if !changed {
+		return
+	}
+	s.publishParkedTransition(ctx, taskID, sessionID, parked, revision)
+	if taskChanged {
+		s.publishTaskParkedTransition(ctx, taskID, taskParked, taskRevision)
+	}
+	if parked {
+		s.maybeStartParkedSamplingLoop(taskID, sessionID)
+	} else {
+		s.stopParkedSamplingLoopFor(sessionID)
+	}
 }
 
 // clearParkedOnSessionStateLeft is D8's session-state term: when a session

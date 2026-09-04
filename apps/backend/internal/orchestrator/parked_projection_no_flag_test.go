@@ -40,4 +40,9 @@ func TestParkedProjectionDoesNotReferenceBackgroundPromptHandoffFlag(t *testing.
 // docs/plans/disambiguate-waiting/plan.md.
 var parkedProjectionSourceFiles = []string{
 	"parked_projection.go",
+	"background_probe.go",
+	"background_probe_config.go",
+	"background_work_attestation.go",
+	"../task/dto/parked_projection.go",
+	"../task/service/parked_projection.go",
 }

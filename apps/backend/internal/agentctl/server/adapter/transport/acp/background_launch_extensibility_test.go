@@ -25,6 +25,7 @@ func (f fakeVendorLaunchRecognizer) RecognizesDetachedLaunch(payload *streams.No
 func TestStampBackgroundShellWork_RecognizesASecondRegisteredAgent(t *testing.T) {
 	const fakeAgentID = "acp-extensibility-test-agent"
 	backgroundlaunch.Register(fakeVendorLaunchRecognizer{agentID: fakeAgentID})
+	t.Cleanup(func() { backgroundlaunch.Unregister(fakeAgentID) })
 
 	payload := streams.NewShellExec("sleep 300", "", "", 0, true)
 	stampBackgroundShellWork(fakeAgentID, payload)
