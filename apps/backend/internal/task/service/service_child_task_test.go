@@ -90,6 +90,29 @@ func TestCreateChildTaskRollsBackWhenWorkspaceAttachmentFails(t *testing.T) {
 	}
 }
 
+func TestCreateChildTaskRollsBackWhenWorkspaceAttachmentIsUnavailable(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	parentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "Parent", ProjectID: "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	svc.SetWorkspacePolicyAttacher(nil)
+
+	if _, err := svc.CreateChildTask(ctx, parentResult.Task, ChildTaskSpec{Title: "Child"}); err == nil {
+		t.Fatal("CreateChildTask succeeded without the required workspace attachment service")
+	}
+	children, err := repo.ListChildren(ctx, parentResult.Task.ID)
+	if err != nil {
+		t.Fatalf("ListChildren: %v", err)
+	}
+	if len(children) != 0 {
+		t.Fatalf("children after unavailable attachment rollback = %#v, want none", children)
+	}
+}
+
 func TestCreateChildTask_HappyPath_InheritsWorkflow(t *testing.T) {
 	svc, repo := setupOfficeTest(t)
 	ctx := context.Background()

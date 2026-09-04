@@ -398,7 +398,11 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 	if err := s.persistTaskRepositoryRows(ctx, task.ID, prepared.repositories); err != nil {
 		return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, err)
 	}
-	if req.WorkspacePolicy != nil && req.WorkspacePolicy.NeedsAttachment() && s.workspacePolicyAttacher != nil {
+	if req.WorkspacePolicy != nil && req.WorkspacePolicy.NeedsAttachment() {
+		if s.workspacePolicyAttacher == nil {
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID,
+				errors.New("workspace policy attachment is unavailable"))
+		}
 		if err := s.workspacePolicyAttacher.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, *req.WorkspacePolicy); err != nil {
 			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("attach workspace policy: %w", err))
 		}
