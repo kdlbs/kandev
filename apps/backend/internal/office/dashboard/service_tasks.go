@@ -600,6 +600,10 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	}
 
 	gateErr := s.applyApprovalGate(ctx, req.TaskID, &dbState, &req.NewStatus)
+	var pendingErr *ApprovalsPendingError
+	if gateErr != nil && !errors.As(gateErr, &pendingErr) {
+		return gateErr
+	}
 
 	if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
 		return fmt.Errorf("update task state: %w", err)
@@ -666,9 +670,12 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 // UpdateTaskStatus persists and emits the redirected status. Returns a
 // *ApprovalsPendingError when the gate fires; nil otherwise.
 //
-// The step-position check fails CLOSED: a read error is treated as
-// not-terminal (redirect), since this gate exists to stop a premature
-// "done" and silently proceeding would defeat that.
+// The step-position check fails CLOSED, but a lookup error is not the same
+// as a confirmed non-terminal step: it aborts the whole update (a plain,
+// non-ApprovalsPendingError error, leaving dbState/apiStatus untouched) so
+// the caller persists nothing rather than writing a redirect it cannot
+// justify. Only a successful read reporting "not terminal" persists the
+// in_review redirect.
 func (s *DashboardService) applyApprovalGate(
 	ctx context.Context, taskID string, dbState, apiStatus *string,
 ) error {
@@ -677,9 +684,7 @@ func (s *DashboardService) applyApprovalGate(
 	}
 	terminal, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
 	if err != nil {
-		s.logger.Warn("approval gate: failed to resolve workflow step; redirecting to review",
-			zap.String("task_id", taskID), zap.Error(err))
-		terminal = false
+		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
 	}
 	if !terminal {
 		*dbState = stateInReview

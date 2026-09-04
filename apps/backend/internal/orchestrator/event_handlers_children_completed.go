@@ -77,8 +77,9 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 		return
 	}
 	if task.IsFromOffice {
+		oldState := task.State
 		s.taskRuntimeStateMu.Unlock()
-		s.markOfficeTaskCompletedForTerminalStep(ctx, task)
+		s.markOfficeTaskCompletedForTerminalStep(ctx, task, oldState)
 		return
 	}
 	oldState := task.State
@@ -103,8 +104,16 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 // UpdateTaskStatus persists a redirect to in_review and then returns a
 // typed *dashboard.ApprovalsPendingError when the gate fires — the write
 // has already succeeded, so that return is not a failure and is not
-// logged as one.
-func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, task *models.Task) {
+// logged as one, and no completion side-effects fire below: the redirect
+// is not a completion.
+//
+// A nil error means the gate did not redirect, so the seam persisted
+// "done" (state = COMPLETED). That path must still carry the same
+// side-effects the raw completion write does — publishing task.updated /
+// task.state_changed and driving the parent's on_children_completed
+// trigger — or dependency resolution, the parent workflow transition, and
+// every task.updated subscriber silently stop seeing Office completions.
+func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, task *models.Task, oldState v1.TaskState) {
 	if s.officeTaskStatusUpdater == nil {
 		// No seam wired (partial wiring, or a test): skip the write rather
 		// than falling through to the raw path, which would bypass the gate.
@@ -115,11 +124,19 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 		NewStatus: "done",
 	})
 	var pending *dashboard.ApprovalsPendingError
-	if err != nil && !errors.As(err, &pending) {
-		s.logger.Warn("terminal step completion: office status update failed",
-			zap.String("task_id", task.ID),
-			zap.Error(err))
+	if err != nil {
+		if !errors.As(err, &pending) {
+			s.logger.Warn("terminal step completion: office status update failed",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+		}
+		return
 	}
+	task.State = v1.TaskStateCompleted
+	task.UpdatedAt = time.Now().UTC()
+	s.publishTaskUpdated(ctx, task)
+	s.publishTaskStateChanged(ctx, task, oldState)
+	s.processParentChildrenCompletedForTaskState(ctx, task.ID, v1.TaskStateCompleted)
 }
 
 func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID string) bool {
