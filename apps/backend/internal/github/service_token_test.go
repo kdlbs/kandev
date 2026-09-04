@@ -3,12 +3,34 @@ package github
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+type blockingPrincipalRoundTripper struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (t *blockingPrincipalRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	close(t.started)
+	select {
+	case <-req.Context().Done():
+		return nil, req.Context().Err()
+	case <-t.release:
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"login":"test-user"}`)),
+			Header:     make(http.Header),
+		}, nil
+	}
+}
 
 // mockSecretManager implements SecretManager for testing.
 type mockSecretManager struct {
@@ -287,31 +309,45 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 	}
 }
 
-func TestConfigureTokenHonorsCancellationDuringLegacyPrincipalResolution(t *testing.T) {
+func TestCoordinateLegacyClientHonorsCancellationDuringPrincipalResolution(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mgr := newMockSecretManager()
-	svc := &Service{
-		secrets:       &mockSecretProvider{mgr: mgr},
-		secretManager: mgr,
-		logger:        log,
-		rateTracker:   NewRateTracker(nil, nil),
+	transport := &blockingPrincipalRoundTripper{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
 	}
-	svc.rateTracker.ObserveSecondary(
-		ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "fixture",
-	)
-	t.Cleanup(func() { svc.rateTracker.ObserveSuccess(ResourceCore) })
+	client := NewTokenClient("ghp_test", TokenPrincipal{Kind: TokenCredentialPAT})
+	client.httpClient.Transport = transport
+	svc := &Service{
+		logger:      log,
+		rateTracker: NewRateTracker(nil, nil),
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	done := make(chan error, 1)
-	go func() { done <- svc.ConfigureToken(ctx, "ghp_test") }()
+	done := make(chan struct{})
+	go func() {
+		svc.coordinateLegacyClient(ctx, client, "")
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("coordinateLegacyClient goroutine did not terminate during cleanup")
+		}
+	})
 
 	select {
+	case <-transport.started:
+	case <-time.After(time.Second):
+		t.Fatal("principal resolution did not start")
+	}
+	cancel()
+	select {
 	case <-done:
-		// Expected: cancellation interrupts the admission wait.
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("ConfigureToken ignored cancellation during throttled principal resolution")
+	case <-time.After(time.Second):
+		t.Fatal("coordinateLegacyClient ignored cancellation during principal resolution")
 	}
 }
