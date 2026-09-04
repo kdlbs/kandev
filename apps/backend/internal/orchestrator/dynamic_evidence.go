@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -23,8 +24,20 @@ type promptAttemptEvidence struct {
 	// followed by the matching prompt RPC failure. It is not model output, so it
 	// must not make an otherwise pre-result provider failure unsafe to route.
 	providerDiagnosticCode routingerr.Code
+	// providerDiagnosticText is the normalized text of the recorded diagnostic.
+	// It is written and cleared together with providerDiagnosticCode: a code
+	// match alone is not sufficient evidence that the terminal failure IS the
+	// diagnostic, since prose narrating the same failure classifies identically.
+	providerDiagnosticText string
 	effect                 bool
 	dynamic                bool
+}
+
+// normalizeDiagnosticText collapses internal whitespace so a diagnostic
+// recorded from a coalesced stream chunk can be compared against a terminal
+// failure message that went through independent formatting/sanitisation.
+func normalizeDiagnosticText(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func (s *Service) beginPromptAttempt(
@@ -146,6 +159,7 @@ func (s *Service) observePromptAttempt(
 		// Any ordinary output makes the turn unsafe to replay. A provider
 		// diagnostic is recorded only by observeProviderDiagnostic below.
 		evidence.providerDiagnosticCode = ""
+		evidence.providerDiagnosticText = ""
 	}
 }
 
@@ -176,6 +190,7 @@ func (s *Service) observeProviderDiagnostic(
 	}
 	evidence.output = true
 	evidence.providerDiagnosticCode = classified.Code
+	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
 }
 
 func (s *Service) observeDynamicAttempt(sessionID, executionID string, output, effect bool) {
@@ -219,14 +234,7 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	if evidence.dynamic {
 		data.DynamicRouteAttempt = true
 	}
-	outputObserved := evidence.output
-	if evidence.providerDiagnosticCode != "" && matchingProviderFailureCode(data) == evidence.providerDiagnosticCode {
-		// Claude ACP emits a human-readable agent_message_chunk immediately
-		// before returning the same provider error from session/prompt. The chunk
-		// is diagnostic transport, not generated output, and no tool/output
-		// evidence was otherwise observed.
-		outputObserved = false
-	}
+	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
 		data.EvidenceKnown = true
 		data.OutputObserved = lifecycleOutputObserved || outputObserved
@@ -239,11 +247,36 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	return data
 }
 
-func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
+// outputObservedLocked reports whether evidence.output should be treated as
+// generated model output for data's terminal failure. A recorded provider
+// diagnostic clears the fence only when its code matches AND its normalized
+// text is contained in the terminal failure's normalized message: a matching
+// classification code alone is not enough, since assistant prose narrating a
+// failure can classify identically without being the transport diagnostic
+// itself (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.23). Callers must hold
+// e.mu.
+func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
+	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
+		matchingProviderFailureCode(data) == e.providerDiagnosticCode &&
+		strings.Contains(normalizeDiagnosticText(matchingProviderFailureMessage(data)), e.providerDiagnosticText) {
+		// Claude ACP emits a human-readable agent_message_chunk immediately
+		// before returning the same provider error from session/prompt. The
+		// chunk is diagnostic transport, not generated output.
+		return false
+	}
+	return e.output
+}
+
+func matchingProviderFailureMessage(data watcher.AgentEventData) string {
 	message := data.ErrorMessage
 	if data.ProviderError != nil && data.ProviderError.Message != "" {
 		message = data.ProviderError.Message
 	}
+	return message
+}
+
+func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
+	message := matchingProviderFailureMessage(data)
 	if message == "" {
 		return ""
 	}
@@ -273,7 +306,7 @@ func (s *Service) promptAttemptPreResultSafe(data watcher.AgentEventData) bool {
 	return !evidence.dynamic && evidence.evidenceKnown &&
 		evidence.executionID == data.AgentExecutionID &&
 		evidence.promptGeneration == data.PromptGeneration &&
-		!evidence.output && !evidence.effect
+		!evidence.outputObservedLocked(data) && !evidence.effect
 }
 
 func (s *Service) clearPromptAttemptEvidence(sessionID, executionID string, promptGeneration uint64) {
