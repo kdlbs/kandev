@@ -162,6 +162,11 @@ func TestSQLiteRepository_ReadPendingMoveCensusAuthorizationIsNonLeaking(t *test
 				t.Fatalf("stop execution: %v", err)
 			}
 		},
+		"caller session execution mismatched": func(f *exactCancelFixture) {
+			if _, err := f.sql.Exec(`UPDATE task_sessions SET agent_execution_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' WHERE id = ?`, exactCallerSessionID); err != nil {
+				t.Fatalf("replace caller session execution: %v", err)
+			}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
