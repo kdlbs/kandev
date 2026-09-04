@@ -1049,9 +1049,13 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	if route.Route == webapp.RouteTaskDetail && routeData == nil && canLoadTaskDetailFallback(req, p.authSvc) {
 		bootStateBuilder{p: p}.addHomeKanbanRouteState(ctx, req, initialState)
 	}
+	runtime := webRuntimeConfig(p.devMode, p.webTitlePrefix, req)
+	if p.systemSvc != nil && p.systemSvc.Info != nil {
+		runtime.BootID = p.systemSvc.Info.Info().BootID
+	}
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode, p.webTitlePrefix, req),
+		runtime,
 		initialState,
 	)
 	payload.RouteData = routeData

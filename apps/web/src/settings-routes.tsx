@@ -41,12 +41,13 @@ import { AboutSettings } from "@/components/settings/system/about-settings";
 import { ApiTokens } from "@/components/settings/account/api-tokens";
 import { SecuritySettings } from "@/components/settings/account/security-settings";
 import { UsersTable } from "@/components/settings/system/users-table";
-import { DataStorageSettings } from "@/components/settings/system/data-storage-settings";
+import { DataLogsSettings } from "@/components/settings/system/data-logs-settings";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
 import { FeatureTogglesRoute } from "@/components/settings/system/feature-toggles-route";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
+import { StorageMaintenanceSettings } from "@/components/settings/system/storage/storage-maintenance-settings";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -200,7 +201,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       titleKey="system:navDataStorage"
       descriptionKey="system:dataStoragePageDescription"
     >
-      <DataStorageSettings />
+      <DataLogsSettings />
     </SystemRouteShell>
   ),
   "/settings/system/backups": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
@@ -226,7 +227,11 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UIStateCard />
     </SystemRouteShell>
   ),
-  "/settings/system/storage": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/storage": () => (
+    <SystemRouteShell titleKey="system:storageTitle" descriptionKey="system:storageDescription">
+      <StorageMaintenanceSettings />
+    </SystemRouteShell>
+  ),
   "/settings/system/updates": renderUpdatesRoute,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };

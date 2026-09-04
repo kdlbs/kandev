@@ -24,17 +24,23 @@ import { useTranslation } from "react-i18next";
 type UpdateButtonProps = {
   isCreatingTask: boolean;
   hasTitle: boolean;
+  editDependenciesReady?: boolean;
   onUpdate: () => void;
 };
 
-function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps) {
+function UpdateButton({
+  isCreatingTask,
+  hasTitle,
+  editDependenciesReady,
+  onUpdate,
+}: UpdateButtonProps) {
   const { t } = useTranslation();
   return (
     <Button
       type="button"
       variant="default"
       className="w-full h-11 cursor-pointer sm:w-auto sm:h-7 gap-1.5"
-      disabled={isCreatingTask || !hasTitle}
+      disabled={isCreatingTask || !hasTitle || editDependenciesReady === false}
       onClick={onUpdate}
     >
       {isCreatingTask ? (
@@ -242,6 +248,8 @@ export type TaskCreateDialogFooterProps = {
    * of the usual missing-field reason.
    */
   submitBlockedReason?: string | null;
+  /** Edit-mode dependency projection and candidate list have loaded. */
+  editDependenciesReady?: boolean;
 };
 
 function isMissingWorkflowCtx(
@@ -265,7 +273,8 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
     !props.hasRepositorySelection ||
     !props.hasAllBranches ||
     missingCtx ||
-    props.noCompatibleAgent
+    props.noCompatibleAgent ||
+    (props.isEditMode && props.editDependenciesReady === false)
   );
 }
 
@@ -285,6 +294,7 @@ export const REASON_AGENT = "task:reasonSelectAgent";
 export const REASON_DESCRIPTION = "task:reasonAddSessionDescription";
 export const REASON_NO_COMPATIBLE_AGENT = "task:noCompatibleAgentProfileFor";
 export const REASON_SELECTED_AGENT_INCOMPATIBLE = "task:selectedAgentNotConfiguredFor";
+export const REASON_LOADING_DEPENDENCIES = "task:loadingDependencies";
 
 /**
  * Resolve what `computeDisabledReason` returned. Reasons this component owns are
@@ -321,7 +331,12 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
   if (!props.hasAllBranches) return REASON_BRANCH;
   if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;
   if (props.isCreateMode && !props.effectiveWorkflowId) return REASON_WORKFLOW;
-  return compatReason(props);
+  const compat = compatReason(props);
+  if (compat) return compat;
+  if (props.isEditMode && props.editDependenciesReady === false) {
+    return REASON_LOADING_DEPENDENCIES;
+  }
+  return null;
 }
 
 function sessionDefaultReason(props: TaskCreateDialogFooterProps): string | null {
@@ -338,7 +353,12 @@ export function computeDisabledReason(
 ): string | null {
   if (props.isCreatingTask) return null;
   if (props.submitBlockedReason) return props.submitBlockedReason;
-  if (kind === "update") return props.hasTitle ? null : REASON_TITLE;
+  if (kind === "update") {
+    if (props.isEditMode && props.editDependenciesReady === false) {
+      return REASON_LOADING_DEPENDENCIES;
+    }
+    return props.hasTitle ? null : REASON_TITLE;
+  }
   if (kind === "default" && props.isSessionMode) return sessionDefaultReason(props);
   const base = baseReason(props);
   if (base) return base;
@@ -374,7 +394,13 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
 
 export function isNativeSubmitDisabled(props: TaskCreateDialogFooterProps): boolean {
   const { showStartTask, splitDisabled, defaultDisabled } = computeFooterState(props);
-  if (props.isTaskStarted) return props.isCreatingTask || !props.hasTitle;
+  if (props.isTaskStarted) {
+    return (
+      props.isCreatingTask ||
+      !props.hasTitle ||
+      (props.isEditMode && props.editDependenciesReady === false)
+    );
+  }
   return showStartTask ? splitDisabled : defaultDisabled;
 }
 
@@ -434,6 +460,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
                 <UpdateButton
                   isCreatingTask={isCreatingTask}
                   hasTitle={hasTitle}
+                  editDependenciesReady={props.editDependenciesReady}
                   onUpdate={onUpdateWithoutAgent}
                 />
               );

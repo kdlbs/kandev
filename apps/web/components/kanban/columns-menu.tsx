@@ -13,7 +13,7 @@ import {
 import { IconColumns3 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTranslation } from "react-i18next";
-import { sortWorkflowStepsByPosition } from "@/lib/kanban/auto-hide-empty-columns";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 
 export type ColumnsMenuStep = { id: string; title: string; position: number };
 

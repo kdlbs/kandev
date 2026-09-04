@@ -2342,6 +2342,23 @@ export class ApiClient {
     });
   }
 
+  /** Replace the complete predecessor set, including an empty set. */
+  async replaceTaskDependencies(
+    taskId: string,
+    dependsOnTaskIds: string[],
+  ): Promise<TaskDependencyProjection> {
+    return this.request("PUT", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_ids: dependsOnTaskIds,
+    });
+  }
+
+  /** Raw replacement helper for asserting structured validation failures. */
+  async rawReplaceTaskDependencies(taskId: string, dependsOnTaskIds: string[]): Promise<Response> {
+    return this.rawRequest("PUT", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_ids: dependsOnTaskIds,
+    });
+  }
+
   /**
    * Raw add, for asserting the rejection path. A cycle answers 409 with a
    * `cycle` array; the typed helper above would throw the body away.

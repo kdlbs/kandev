@@ -5471,6 +5471,8 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		historyTrigger = wfmodels.StepTransitionTriggerTurnStart
 	case engine.TriggerOnChildrenCompleted:
 		historyTrigger = wfmodels.StepTransitionTriggerChildrenCompleted
+	case engine.TriggerOnAgentError:
+		historyTrigger = wfmodels.StepTransitionTriggerAgentError
 	}
 	s.recordAutoStepTransition(ctx, session.ID, result.FromStepID, result.ToStepID, consumedSignal, historyTrigger)
 

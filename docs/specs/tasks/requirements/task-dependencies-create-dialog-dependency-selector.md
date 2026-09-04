@@ -65,8 +65,9 @@ set of tasks.
   unchanged. Selecting several predecessors keeps the existing AND semantics.
 - The dependency selector is disabled while the create flow is creating a
   session, matching the current dependency control behavior.
-- The selector is available only for an unstarted task in create mode. It does
-  not add an edge editor to task detail or edit mode.
+- This create-flow selector is available only for an unstarted task in create
+  mode. Edit-mode behavior is owned by
+  [`task-dependency-detail-editing.md`](task-dependency-detail-editing.md).
 - All new trigger labels, search copy, empty states, count labels, and help
   copy use the task translation namespace. No new user-facing literal is
   hardcoded in a component.
@@ -133,6 +134,6 @@ set of tasks.
 - Changing the dependency graph, auto-start semantics, or backend/API payload.
 - Limiting a task to one predecessor. Multiple predecessors and AND semantics
   remain supported.
-- Adding dependency editing to task detail, Kanban card menus, or MCP.
+- Adding dependency editing as part of this create-dialog refinement.
 - Adding a new mobile navigation surface or replacing the task-create dialog.
 - Changing workflow, agent, executor, repository, or branch selector behavior.

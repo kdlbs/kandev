@@ -51,10 +51,12 @@ export function buildDialogFormBodyProps(
     agentProfilesLoading: computed.agentProfilesLoading,
     executorsLoading: computed.executorsLoading,
     isCreatingSession: fs.isCreatingSession,
+    isCreatingTask: fs.isCreatingTask,
     workflows: setup.workflows,
     snapshots: setup.snapshots,
     effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
     fs,
+    editDependencies: setup.editDependencies,
     handleKeyDown: setup.handleKeyDown,
     onAgentProfileChange: handlers.handleAgentProfileChange,
     onExecutorProfileChange: handlers.handleExecutorProfileChange,
@@ -133,5 +135,6 @@ export function buildDialogFooterProps(
     onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
     onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
     submitBlockedReason: props.submitBlockedReason ?? pendingAttachmentUploadReason,
+    editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

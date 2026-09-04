@@ -25,7 +25,12 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isEditableKeydownTarget } from "@/lib/keyboard/utils";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { FileBrowserHeader } from "./file-browser-header";
-import { insertNodeInTree, removeNodeFromTree, FileBrowserContentArea } from "./file-browser-parts";
+import {
+  insertNodeInTree,
+  removeNodeFromTree,
+  FileBrowserContentArea,
+  shouldShowFileTreeTouchActions,
+} from "./file-browser-parts";
 import {
   useFileBrowserSearch,
   useFileBrowserTree,
@@ -477,7 +482,15 @@ function FileBrowserTreeContent({
 }) {
   const { search, isSessionFailed, sessionError, treeState, fileStatuses } = data;
   return (
-    <ScrollArea className="flex-1" ref={scrollAreaRef}>
+    <ScrollArea
+      className="flex-1 min-w-0"
+      ref={scrollAreaRef}
+      viewportProps={{
+        // Keep the file-tree content constrained to the viewport so row labels
+        // can shrink and apply their own truncation rules.
+        className: "[&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full",
+      }}
+    >
       <FileBrowserContentArea
         isSearchActive={search.isSearchActive}
         searchResults={search.searchResults}
@@ -535,7 +548,7 @@ export function FileBrowser({
   addSourcesDisabledReason,
 }: FileBrowserProps) {
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
-  const showTouchActions = isMobile || !isFinePointer;
+  const showTouchActions = shouldShowFileTreeTouchActions(isMobile, isFinePointer);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { data, handlers, multiSelect, dnd, handleClickOutside } = useFileBrowserViewModel({

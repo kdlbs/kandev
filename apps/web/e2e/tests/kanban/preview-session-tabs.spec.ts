@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { waitForSessionDone } from "../../helpers/session";
+import { watchWs } from "../../helpers/causal-waits";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -16,9 +17,10 @@ const CREATE_PLAN_SCRIPT = [
  * Tests the session tabs on the kanban right-side preview panel:
  * - Every session of the task shows up as a tab
  * - Clicking a tab switches the rendered session body and updates the URL
+ * - Right-clicking a tab opens the same lifecycle menu as the full-page view
  *
- * Session creation and deletion are deliberately NOT exposed in the preview
- * panel — those live on the full-page task view.
+ * Session creation is deliberately NOT exposed in the preview panel — that
+ * still lives on the full-page task view.
  */
 test.describe("Preview session tabs", () => {
   test("shows all sessions as tabs and switches between them", async ({
@@ -299,6 +301,89 @@ test.describe("Preview auto-prepare", () => {
     await apiClient
       .updateWorkflowStep(seedData.startStepId, { agent_profile_id: "" })
       .catch(() => undefined);
+  });
+});
+
+/**
+ * Right-clicking a preview session tab must open the same lifecycle menu as
+ * the full-page task view (rename, set primary, stop/resume, delete, share,
+ * handoff) — minus Close Others, which has no meaning in a tab bar that's
+ * just a session switcher. Mirrors `e2e/tests/session/session-tab-rename.spec.ts`.
+ */
+test.describe("Preview session tab context menu", () => {
+  test("opens the lifecycle menu on right-click and renames through it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Preview Tab Menu Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return DONE_STATES.includes(sessions[0]?.state);
+        },
+        { timeout: 30_000, message: "Waiting for session to finish" },
+      )
+      .toBe(true);
+
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const sessionId = sessions[0].id;
+
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(testPage);
+    const wsWatcher = watchWs(testPage);
+    await kanban.goto();
+
+    const previewCard = kanban.taskCardByTitle("Preview Tab Menu Task");
+    await expect(previewCard).toBeVisible({ timeout: 10_000 });
+    await previewCard.click();
+
+    const previewPanel = testPage.getByTestId("task-preview-panel");
+    await expect(previewPanel).toBeVisible({ timeout: 10_000 });
+
+    const tab = testPage.getByTestId(`preview-session-tab-${sessionId}`);
+    await expect(tab).toBeVisible({ timeout: 10_000 });
+
+    // Sole session of the task is primary by default — the menu must reflect
+    // that (Set as Primary disabled) and offer the full lifecycle set, minus
+    // Close Others.
+    await tab.click({ button: "right" });
+    await expect(testPage.getByRole("menuitem", { name: "Rename…" })).toBeVisible();
+    const setPrimary = testPage.getByRole("menuitem", { name: "Set as Primary" });
+    await expect(setPrimary).toBeVisible();
+    await expect(setPrimary).toHaveAttribute("aria-disabled", "true");
+    await expect(testPage.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+    await expect(testPage.getByRole("menuitem", { name: "Share" })).toBeVisible();
+    await expect(testPage.getByTestId("session-handoff-submenu")).toBeVisible();
+    await expect(testPage.getByRole("menuitem", { name: "Close Others" })).toHaveCount(0);
+
+    // Drive rename end-to-end: the input opens, and committing it persists
+    // through the same WS action ("session.rename") the full-page tab uses.
+    await testPage.getByRole("menuitem", { name: "Rename…" }).click();
+    const input = testPage.getByTestId("preview-session-tab-rename-input");
+    await input.click();
+    await expect(input).toBeFocused();
+    await input.fill("Renamed Preview Session");
+
+    const renamed = wsWatcher.waitForResponse("session.rename");
+    await input.press("Enter");
+    await renamed;
+
+    await expect(tab).toContainText("Renamed Preview Session");
   });
 });
 

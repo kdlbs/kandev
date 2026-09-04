@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -177,11 +178,17 @@ func joinPath(path []string) string {
 // of any length. On cycle detection returns a *BlockerCycleError whose
 // Path lists the cycle for the caller to surface.
 func (s *DashboardService) AddTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error {
-	if err := s.validateBlockerPair(ctx, taskID, blockerTaskID); err != nil {
-		return err
-	}
-	blocker := &models.TaskBlocker{TaskID: taskID, BlockerTaskID: blockerTaskID}
-	if err := s.repo.CreateTaskBlocker(ctx, blocker); err != nil {
+	var err error
+	func() {
+		unlock := taskdependencies.AcquireMutationLock()
+		defer unlock()
+		if err = s.validateBlockerPair(ctx, taskID, blockerTaskID); err != nil {
+			return
+		}
+		blocker := &models.TaskBlocker{TaskID: taskID, BlockerTaskID: blockerTaskID}
+		err = s.repo.CreateTaskBlocker(ctx, blocker)
+	}()
+	if err != nil {
 		return err
 	}
 	s.publishTaskUpdated(ctx, taskID, []string{fieldBlockers})
@@ -193,7 +200,13 @@ func (s *DashboardService) AddTaskBlocker(ctx context.Context, taskID, blockerTa
 // row is a no-op at the DB level; the event/activity entry are still
 // emitted so the UI re-fetches.
 func (s *DashboardService) RemoveTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error {
-	if err := s.repo.DeleteTaskBlocker(ctx, taskID, blockerTaskID); err != nil {
+	var err error
+	func() {
+		unlock := taskdependencies.AcquireMutationLock()
+		defer unlock()
+		err = s.repo.DeleteTaskBlocker(ctx, taskID, blockerTaskID)
+	}()
+	if err != nil {
 		return err
 	}
 	s.publishTaskUpdated(ctx, taskID, []string{fieldBlockers})

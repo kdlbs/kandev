@@ -18,6 +18,7 @@ import {
   createAgentProfileAction,
   updateAgentProfileAction,
 } from "@/app/actions/agents";
+import { isHandledApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile, AvailableAgent, CLIFlag } from "@/lib/types/http";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import {
@@ -171,6 +172,9 @@ export function CliProfileEditor({
           ? await saveExistingProfile(profile.id, form)
           : await saveNewProfile(form, settingsAgents);
       onSaved(saved);
+    } catch (error) {
+      if (isHandledApiError(error)) return;
+      throw error;
     } finally {
       setSaving(false);
     }
