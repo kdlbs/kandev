@@ -22,7 +22,7 @@ type dynamicRouteStateLister interface {
 // recovery because a process restart cannot prove whether its launch crossed
 // the provider boundary.
 func (s *Service) startDynamicPolicyRecovery(ctx context.Context) {
-	if s.profileExecutionResolver == nil {
+	if s.profileExecutionResolver == nil || !s.profileExecutionResolver.Enabled() {
 		return
 	}
 	lister, ok := s.repo.(dynamicRouteStateLister)
@@ -120,7 +120,8 @@ func (s *Service) removeDynamicPolicyRecoveryTimer(sessionID string) {
 }
 
 func (s *Service) dynamicPolicyRecoveryActive(ctx context.Context) bool {
-	return ctx != nil && ctx.Err() == nil && s.profileExecutionResolver != nil
+	return ctx != nil && ctx.Err() == nil &&
+		s.profileExecutionResolver != nil && s.profileExecutionResolver.Enabled()
 }
 
 func loadDueDynamicPolicyState(

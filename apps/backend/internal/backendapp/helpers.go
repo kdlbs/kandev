@@ -782,6 +782,7 @@ func registerRoutes(p routeParams) {
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	handoffSvc.SetVacatedStepReconciler(p.taskSvc)
 	// Per-user scoping for the cascade is installed by
 	// TaskHandlers.SetHandoffService, which is the call that makes the archive /
 	// delete routes prefer the cascade over the guarded Service methods.
@@ -862,7 +863,7 @@ func registerRoutes(p routeParams) {
 	registerTaskRoutes(p, planService, handoffSvc)
 	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {
-		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
+		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.services.SessionHostnameResolver, p.log)
 	}
 
 	// /health is a liveness probe: it answers 200 unconditionally, matching

@@ -250,6 +250,7 @@ type HandoffService struct {
 	cleaner            WorkspaceCleaner
 	runCanceller       RunCanceller
 	eventPublisher     TaskEventPublisher
+	vacancyReconciler  VacatedStepReconciler
 	resourceCleaner    TaskResourceCleaner
 	taskAccessCheck    func(ctx context.Context, taskID string) error
 	comments           CommentReader
@@ -272,6 +273,20 @@ type HandoffService struct {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskDeleted(ctx context.Context, task *models.Task)
+}
+
+// VacatedStepReconciler backfills capacity in a workflow step after admitted
+// work leaves it.
+type VacatedStepReconciler interface {
+	ReconcileVacatedStep(ctx context.Context, vacatedStepID string)
+}
+
+type cascadeArchiveTaskRepository interface {
+	ArchiveTaskIfActiveWithVacatedStep(ctx context.Context, id, cascadeID string) (string, bool, error)
+}
+
+type cascadeDeleteTaskRepository interface {
+	DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error)
 }
 
 // taskSessionCancellationPublisher is the optional event side effect paired
@@ -303,6 +318,12 @@ func (s *HandoffService) SetWorkspaceCleaner(c WorkspaceCleaner) {
 // (legacy and test wiring).
 func (s *HandoffService) SetTaskEventPublisher(p TaskEventPublisher) {
 	s.eventPublisher = p
+}
+
+// SetVacatedStepReconciler wires post-mutation WIP capacity reconciliation.
+// Archive and delete remain committed if reconciliation cannot fill a slot.
+func (s *HandoffService) SetVacatedStepReconciler(r VacatedStepReconciler) {
+	s.vacancyReconciler = r
 }
 
 // TaskResourceCleaner tears down a task's runtime resources (container,

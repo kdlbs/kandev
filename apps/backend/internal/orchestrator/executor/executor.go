@@ -119,6 +119,13 @@ type taskEnvironmentMaterializationFinalizer interface {
 	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
 }
 
+// taskEnvironmentTransitionPersister commits an existing environment rebind
+// and its repository inventory as one durable operation. Legacy adapters may
+// omit it and use the compatibility persistence path in executor_execute.go.
+type taskEnvironmentTransitionPersister interface {
+	PersistTaskEnvironmentTransition(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, bool) error
+}
+
 // workspaceBindingTaskSessionCreator elects the single materializing session
 // and inserts its creating environment in the same transaction as the session.
 // It is optional for lightweight test/legacy stores; production repositories

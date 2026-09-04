@@ -50,3 +50,39 @@ func TestAppStatusBarVisibilityDTOResponseAndPatchSemantics(t *testing.T) {
 		}
 	})
 }
+func TestResolveSessionHostnamesDTOResponseAndPatchSemantics(t *testing.T) {
+	t.Run("response defaults to false", func(t *testing.T) {
+		encoded, err := json.Marshal(FromUserSettings(&models.UserSettings{}))
+		if err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(encoded, &payload); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if got, ok := payload["resolve_session_hostnames"].(bool); !ok || got {
+			t.Fatalf("resolve_session_hostnames = %#v, want false", payload["resolve_session_hostnames"])
+		}
+	})
+
+	t.Run("patch distinguishes omission from explicit false", func(t *testing.T) {
+		var omitted, disabled UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+			t.Fatalf("decode omitted patch: %v", err)
+		}
+		if err := json.Unmarshal([]byte(`{"resolve_session_hostnames":false}`), &disabled); err != nil {
+			t.Fatalf("decode explicit patch: %v", err)
+		}
+		omittedField := reflect.ValueOf(omitted).FieldByName("ResolveSessionHostnames")
+		disabledField := reflect.ValueOf(disabled).FieldByName("ResolveSessionHostnames")
+		if !omittedField.IsValid() || !disabledField.IsValid() {
+			t.Fatal("ResolveSessionHostnames patch field is missing")
+		}
+		if !omittedField.IsNil() {
+			t.Fatalf("omitted ResolveSessionHostnames = %#v, want nil", omittedField.Interface())
+		}
+		if disabledField.IsNil() || disabledField.Elem().Bool() {
+			t.Fatalf("explicit ResolveSessionHostnames = %#v, want pointer to false", disabledField.Interface())
+		}
+	})
+}

@@ -59,6 +59,12 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
 
+// Enabled reports the effective dynamic-agent-routing flag value this
+// resolver was constructed or last set with. Callers outside this package
+// use it to gate durable recovery and manual route-action launch paths that
+// do not otherwise pass through a selection method.
+func (r *ProfileExecutionResolver) Enabled() bool { return r.enabled.Load() }
+
 // SetCredentialBindingResolver supplies the installation-scoped fingerprint
 // used to share provider health between concrete profiles that prove the same
 // credential binding. A missing or incomplete descriptor remains isolated to
@@ -393,6 +399,9 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 ) (ProfileExecution, error) {
 	if r.engine == nil || r.profiles == nil {
 		return ProfileExecution{}, errors.New("dynamic profile execution is not configured")
+	}
+	if !r.enabled.Load() {
+		return ProfileExecution{}, ErrDynamicRoutingDisabled
 	}
 	state, exists, err := r.engine.LoadState(ctx, sessionID)
 	if err != nil {

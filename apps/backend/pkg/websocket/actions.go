@@ -367,6 +367,7 @@ const (
 	ActionUserSettingsUpdate               = "user.settings.update"
 	ActionUserSettingsUpdated              = "user.settings.updated"
 	ActionUserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
+	ActionSessionHostnameResolved          = "auth.session.hostname.resolved"
 
 	// ActionPluginUserStateUpdated notifies the writing user's other WS
 	// connections that one of their per-user plugin storage keys changed
