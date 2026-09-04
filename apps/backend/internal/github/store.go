@@ -1993,8 +1993,9 @@ func (s *Store) GetPRWatchBySessionRepoAndBranch(ctx context.Context, sessionID,
 func (s *Store) GetPRWatchByTaskRepoBranch(ctx context.Context, taskID, repositoryID, branch string) (*PRWatch, error) {
 	var w PRWatch
 	err := s.ro.GetContext(ctx, &w,
-		`SELECT * FROM github_pr_watches
+		s.ro.Rebind(`SELECT * FROM github_pr_watches
 		 WHERE task_id = ? AND repository_id = ? AND branch = ? AND pr_number = 0 LIMIT 1`,
+		),
 		taskID, repositoryID, branch)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -2008,8 +2009,9 @@ func (s *Store) GetPRWatchByTaskRepoBranch(ctx context.Context, taskID, reposito
 func (s *Store) GetPRWatchByTaskRepoPRNumber(ctx context.Context, taskID, repositoryID string, prNumber int) (*PRWatch, error) {
 	var w PRWatch
 	err := s.ro.GetContext(ctx, &w,
-		`SELECT * FROM github_pr_watches
+		s.ro.Rebind(`SELECT * FROM github_pr_watches
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? LIMIT 1`,
+		),
 		taskID, repositoryID, prNumber)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -2112,7 +2114,7 @@ func (s *Store) DeletePRWatchesByTaskID(ctx context.Context, taskID string) (int
 func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error {
 	if prNumber == 0 {
 		_, err := s.db.ExecContext(ctx,
-			`UPDATE github_pr_watches SET pr_number = 0, updated_at = ? WHERE id = ?`,
+			s.db.Rebind(`UPDATE github_pr_watches SET pr_number = 0, updated_at = ? WHERE id = ?`),
 			time.Now().UTC(), id)
 		return err
 	}
@@ -2125,7 +2127,7 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 
 	var taskID, repositoryID string
 	err = tx.QueryRowContext(ctx,
-		`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`, id).
+		s.db.Rebind(`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`), id).
 		Scan(&taskID, &repositoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return tx.Commit()
@@ -2136,28 +2138,29 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 
 	var probe int // existence probe only; value unused
 	err = tx.QueryRowContext(ctx,
-		`SELECT 1 FROM github_pr_watches
+		s.db.Rebind(`SELECT 1 FROM github_pr_watches
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? AND id <> ?`,
+		),
 		taskID, repositoryID, prNumber, id).Scan(&probe)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
 			return err
 		}
 		return tx.Commit()
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE github_pr_watches SET pr_number = ?, updated_at = ? WHERE id = ?`,
+		s.db.Rebind(`UPDATE github_pr_watches SET pr_number = ?, updated_at = ? WHERE id = ?`),
 		prNumber, time.Now().UTC(), id); err != nil {
 		// Same belt-and-suspenders as UpdatePRWatchBranchIfSearching: an
 		// external writer could still race between the probe and this
 		// UPDATE. Treat a UNIQUE violation identically to the probe-found
 		// path.
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			if _, delErr := tx.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ?`, id); delErr != nil {
+			if _, delErr := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); delErr != nil {
 				return delErr
 			}
 			return tx.Commit()

@@ -80,6 +80,73 @@ func TestStore_UpdatePRWatchBranchIfSearching_PostgresDifferentSessionCollision(
 	}
 }
 
+func TestStore_UpdatePRWatchPRNumber_PostgresDifferentSessionCollision(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at TIMESTAMP);
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		INSERT INTO workspaces (id) VALUES ('ws-1');
+		INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1');`); err != nil {
+		t.Fatalf("create task fixtures: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE github_pr_watches (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT '',
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL,
+			repo TEXT NOT NULL,
+			pr_number INTEGER NOT NULL,
+			branch TEXT NOT NULL,
+			last_checked_at TIMESTAMP,
+			last_comment_at TIMESTAMP,
+			last_check_status TEXT DEFAULT '',
+			last_review_state TEXT DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE UNIQUE INDEX idx_github_pr_watches_discovered
+			ON github_pr_watches (task_id, repository_id, pr_number) WHERE pr_number <> 0;`); err != nil {
+		t.Fatalf("create postgres PR-watch fixture: %v", err)
+	}
+	store := &Store{db: db, ro: db}
+	now := time.Now().UTC()
+	watches := []*PRWatch{
+		{ID: "watch-source-pg", WorkspaceID: "ws-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "owner", Repo: "repo", Branch: "feature/A", CreatedAt: now, UpdatedAt: now},
+		{ID: "watch-sibling-pg", WorkspaceID: "ws-1", SessionID: "session-2", TaskID: "task-1", RepositoryID: "repo-1", Owner: "owner", Repo: "repo", Branch: "feature/B", CreatedAt: now, UpdatedAt: now},
+	}
+	for _, watch := range watches {
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create watch %s: %v", watch.ID, err)
+		}
+	}
+
+	if err := store.UpdatePRWatchPRNumber(ctx, watches[1].ID, 99); err != nil {
+		t.Fatalf("promote sibling watch: %v", err)
+	}
+	if err := store.UpdatePRWatchPRNumber(ctx, watches[0].ID, 99); err != nil {
+		t.Fatalf("different-session discovered-watch collision must coalesce: %v", err)
+	}
+
+	got, err := store.GetPRWatchByTaskRepoPRNumber(ctx, "task-1", "repo-1", 99)
+	if err != nil {
+		t.Fatalf("get discovered watch: %v", err)
+	}
+	if got == nil || got.ID != watches[1].ID {
+		t.Fatalf("expected sibling to survive as discovered watch, got %+v", got)
+	}
+	searching, err := store.GetPRWatchByTaskRepoBranch(ctx, "task-1", "repo-1", "feature/A")
+	if err != nil {
+		t.Fatalf("get source searching watch: %v", err)
+	}
+	if searching != nil {
+		t.Fatalf("expected source watch to be dropped, got %+v", searching)
+	}
+}
+
 // TestStore_ReviewWatch_ListTaskIDsAndReset pins the contract used by the
 // review watch reset flow: every dedup row's task_id (including empty
 // reservations) is enumerable, and ResetReviewWatchState wipes those rows
