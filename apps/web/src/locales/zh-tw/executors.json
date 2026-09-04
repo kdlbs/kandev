@@ -157,6 +157,7 @@
   "profileSaved": "設定已儲存",
   "profiles": "設定",
   "provideSecret": "提供金鑰",
+  "provideSecretForEnvVar": "為 {{envVar}} 提供金鑰",
   "quickPresets": "快速預設",
   "refresh": "重新整理",
   "relatedDockerContainersRemoved_one": "還將移除 {{count}} 個相關 Docker 容器。",

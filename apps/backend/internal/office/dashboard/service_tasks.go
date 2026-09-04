@@ -134,6 +134,10 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 // constant per CLAUDE.md ≥3-occurrence rule.
 const fieldBlockers = "blockers"
 
+// roleLogKey is the "role" log-field / activity-detail key name, factored
+// out because it recurs across the participant claim/removal log lines.
+const roleLogKey = "role"
+
 // blockerCycleWalkLimit caps the BFS in detectBlockerCycle as a safety
 // bound. Real workspaces are nowhere near this; if we hit it we have
 // other problems.
@@ -365,8 +369,8 @@ func (s *DashboardService) RemoveTaskApprover(ctx context.Context, callerAgentID
 
 // addOrRemoveParticipant is the shared body of the four reviewer/approver
 // mutators. It enforces the can_approve permission gate (when a caller
-// agent is supplied), writes to the DB, and publishes the matching
-// OfficeTaskUpdated + activity entry.
+// agent is supplied), writes to the DB, and drives the matching
+// OfficeTaskUpdated + activity entry off what the write actually did.
 func (s *DashboardService) addOrRemoveParticipant(
 	ctx context.Context,
 	callerAgentID, taskID, agentID, role string,
@@ -379,21 +383,22 @@ func (s *DashboardService) addOrRemoveParticipant(
 	if !ok {
 		return fmt.Errorf("invalid participant role: %q", role)
 	}
-	var dbErr error
-	action := "task_participant_removed"
 	if add {
-		dbErr = s.repo.AddTaskParticipant(ctx, taskID, agentID, role)
-		action = "task_participant_added"
-	} else {
-		dbErr = s.repo.RemoveTaskParticipant(ctx, taskID, agentID, role)
+		result, err := s.repo.AddTaskParticipant(ctx, taskID, agentID, role)
+		if err != nil {
+			return err
+		}
+		s.applyParticipantAddOutcome(ctx, taskID, agentID, role, field, result)
+		return nil
 	}
-	if dbErr != nil {
-		return dbErr
+
+	if err := s.repo.RemoveTaskParticipant(ctx, taskID, agentID, role); err != nil {
+		return err
 	}
-	// On removal, flip the participant's office session row to COMPLETED so
-	// it leaves the live indicators and the next add would create a fresh
-	// row (preserving historical conversation separation).
-	if !add && s.sessionTerm != nil {
+	// Flip the participant's office session row to COMPLETED so it leaves
+	// the live indicators and the next add would create a fresh row
+	// (preserving historical conversation separation).
+	if s.sessionTerm != nil {
 		if err := s.sessionTerm.TerminateOfficeSession(ctx, taskID, agentID, sessionTermReasonRoleRemoved); err != nil {
 			s.logger.Warn("terminate office session on participant removal failed",
 				zap.String("task_id", taskID),
@@ -403,8 +408,92 @@ func (s *DashboardService) addOrRemoveParticipant(
 		}
 	}
 	s.publishTaskUpdated(ctx, taskID, []string{field})
-	s.logParticipantActivity(ctx, taskID, agentID, role, action)
+	s.logParticipantActivity(ctx, taskID, agentID, role, "task_participant_removed")
 	return nil
+}
+
+// applyParticipantAddOutcome drives the post-commit side effects an add
+// outcome earns. Unchanged earns none — an identity-probe hit, promotion
+// included, raises no activity entry and publishes no notification.
+// Claimed additionally records the takeover,
+// ends the displaced agent's live session, and cancels the run already
+// queued for it. Inserted is the plain-registration path, unchanged from
+// before this write reported an outcome. No order among these effects is
+// contracted.
+func (s *DashboardService) applyParticipantAddOutcome(
+	ctx context.Context, taskID, agentID, role, field string, result sqlite.ParticipantWriteResult,
+) {
+	switch result.Outcome {
+	case sqlite.ParticipantWriteOutcomeUnchanged:
+		return
+	case sqlite.ParticipantWriteOutcomeClaimed:
+		s.logParticipantClaimActivity(ctx, taskID, result.StepID, role, result.DisplacedAgentProfileID, agentID)
+		// Detached from ctx: these run after the claim has already
+		// committed, so a caller (HTTP request, WS handler) that cancels
+		// after that point must not also cancel the cleanup it earned.
+		detachedCtx := context.WithoutCancel(ctx)
+		s.terminateDisplacedSession(detachedCtx, taskID, result.DisplacedAgentProfileID, role)
+		s.cancelDisplacedRun(detachedCtx, taskID, result.StepID, result.DisplacedAgentProfileID)
+	case sqlite.ParticipantWriteOutcomeInserted:
+		s.logParticipantActivity(ctx, taskID, agentID, role, "task_participant_added")
+	}
+	s.publishTaskUpdated(ctx, taskID, []string{field})
+}
+
+// terminateDisplacedSession ends the displaced agent's live office session
+// for the role a claim just took the seat away from. Best-effort,
+// mirroring the removal branch's own termination call: a failure is
+// logged, not surfaced.
+func (s *DashboardService) terminateDisplacedSession(ctx context.Context, taskID, displacedAgentID, role string) {
+	if s.sessionTerm == nil || displacedAgentID == "" {
+		return
+	}
+	if err := s.sessionTerm.TerminateOfficeSession(ctx, taskID, displacedAgentID, sessionTermReasonSeatClaimed); err != nil {
+		s.logger.Warn("terminate office session on seat claim failed",
+			zap.String("task_id", taskID),
+			zap.String("agent_profile_id", displacedAgentID),
+			zap.String(roleLogKey, role),
+			zap.Error(err))
+	}
+}
+
+// cancelDisplacedRun cancels the run the step-entry fan-out queued for the
+// displaced agent profile, which the claim's seat reassignment does not
+// itself redirect. Best-effort: logged and swallowed on failure — the
+// registration has already committed and must still return success,
+// leaving at most one run runnable for an agent no longer seated in the
+// role.
+func (s *DashboardService) cancelDisplacedRun(ctx context.Context, taskID, stepID, displacedAgentID string) {
+	if displacedAgentID == "" {
+		return
+	}
+	if _, err := s.repo.CancelDisplacedParticipantRun(ctx, taskID, stepID, displacedAgentID); err != nil {
+		s.logger.Warn("cancel displaced participant run failed",
+			zap.String("task_id", taskID),
+			zap.String("step_id", stepID),
+			zap.String("agent_profile_id", displacedAgentID),
+			zap.Error(err))
+	}
+}
+
+// logParticipantClaimActivity records a claim as an activity entry
+// distinct from a plain registration's, naming the task, step, role, the
+// displaced agent profile and the claiming agent profile. Best-effort.
+func (s *DashboardService) logParticipantClaimActivity(
+	ctx context.Context, taskID, stepID, role, displacedAgentID, claimingAgentID string,
+) {
+	if s.activity == nil {
+		return
+	}
+	wsID, _ := s.repo.GetTaskWorkspaceID(ctx, taskID)
+	details, _ := json.Marshal(map[string]string{
+		"task_id":                    taskID,
+		"step_id":                    stepID,
+		roleLogKey:                   role,
+		"displaced_agent_profile_id": displacedAgentID,
+		"claiming_agent_profile_id":  claimingAgentID,
+	})
+	s.activity.LogActivity(ctx, wsID, userSentinel, "", "task_participant_claimed", "task", taskID, string(details))
 }
 
 // requireApprovePermission returns ErrForbidden when the caller agent
@@ -810,6 +899,7 @@ const (
 	sessionTermReasonReassigned   = "task_reassigned"
 	sessionTermReasonRoleRemoved  = "participant_removed"
 	sessionTermReasonAgentDeleted = "agent_instance_deleted"
+	sessionTermReasonSeatClaimed  = "participant_seat_claimed"
 )
 
 // publishTaskUpdated emits an OfficeTaskUpdated event listing the fields

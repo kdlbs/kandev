@@ -257,7 +257,8 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 		}
 	})
 
-	t.Run("dead remote pid fails the resume", func(t *testing.T) {
+	// @covers AC-EXECUTORS-SSH-EXECUTOR-001.9
+	t.Run("dead remote pid falls back to fresh create", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
 			if strings.Contains(command, "kill -0") {
 				return sshFail("no such process")
@@ -270,18 +271,85 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 		metadata[MetadataKeySSHRemoteAgentctlPort] = "41234"
 		metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
 		metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+		metadata[MetadataKeySSHLocalForwardPort] = "5000"
+		metadata[MetadataKeySSHRemoteAgentctlURL] = "http://127.0.0.1:5000"
 
-		err := exec.ResumeRemoteInstance(context.Background(), &ExecutorCreateRequest{
-			InstanceID: "instance-1",
-			AuthToken:  "persisted-token",
-			Metadata:   metadata,
-		})
-		if err == nil || !strings.Contains(err.Error(), "not alive on remote") {
-			t.Fatalf("error = %v, want a dead-pid resume failure", err)
+		req := &ExecutorCreateRequest{
+			InstanceID:          "instance-1",
+			PreviousExecutionID: "previous-execution",
+			AuthToken:           "persisted-token",
+			Metadata:            metadata,
+		}
+		if err := exec.ResumeRemoteInstance(context.Background(), req); err != nil {
+			t.Fatalf("ResumeRemoteInstance = %v, want nil so a fresh create proceeds", err)
 		}
 		if len(exec.sessions) != 0 {
-			t.Fatal("a failed resume must not track state")
+			t.Fatal("a fresh-create fallback must not track resumed state")
 		}
+		for _, key := range []string{
+			MetadataKeySSHRemoteSessionDir,
+			MetadataKeySSHRemoteAgentctlPort,
+			MetadataKeySSHRemoteAgentctlPID,
+			MetadataKeySSHLocalForwardPort,
+			MetadataKeySSHRemoteAgentctlURL,
+		} {
+			if _, present := req.Metadata[key]; present {
+				t.Fatalf("stale runtime metadata key %q must be cleared", key)
+			}
+		}
+		if req.Metadata[MetadataKeySSHRemoteTaskDir] != "/remote/task" {
+			t.Fatalf("remote task directory = %v, want preserved", req.Metadata[MetadataKeySSHRemoteTaskDir])
+		}
+		if req.PreviousExecutionID != "previous-execution" {
+			t.Fatalf("previous execution ID = %q, want preserved resume intent", req.PreviousExecutionID)
+		}
+	})
+
+	// @covers AC-EXECUTORS-SSH-EXECUTOR-001.10
+	t.Run("SSH connection failure remains fail closed", func(t *testing.T) {
+		server := newFakeSSHServer(t, nil)
+		metadata := sshConnectionMetadata(t, server)
+		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+		metadata[MetadataKeySSHRemoteAgentctlPort] = "41234"
+		metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+		metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+		server.Close()
+
+		err := execSSHResumeWithMetadata(metadata)
+		if err == nil || !strings.Contains(err.Error(), "ssh resume: connect") {
+			t.Fatalf("error = %v, want SSH connection failure", err)
+		}
+		if metadata[MetadataKeySSHRemoteAgentctlPID] != "4242" {
+			t.Fatal("indeterminate liveness must not clear runtime metadata")
+		}
+	})
+
+	t.Run("malformed remote pid remains fail closed", func(t *testing.T) {
+		server := newFakeSSHServer(t, func(string, string) sshExecResult {
+			return sshOut(t.TempDir())
+		})
+		metadata := sshConnectionMetadata(t, server)
+		metadata[MetadataKeySSHRemoteAgentctlPID] = "not-a-pid"
+		metadata[MetadataKeySSHRemoteAgentctlPort] = "41234"
+		metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+		metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+
+		err := execSSHResumeWithMetadata(metadata)
+		if err == nil || !strings.Contains(err.Error(), "invalid remote agentctl pid") {
+			t.Fatalf("error = %v, want invalid-pid failure", err)
+		}
+		if metadata[MetadataKeySSHRemoteAgentctlPID] != "not-a-pid" {
+			t.Fatal("invalid runtime identity must not clear runtime metadata")
+		}
+	})
+}
+
+func execSSHResumeWithMetadata(metadata map[string]interface{}) error {
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	return exec.ResumeRemoteInstance(context.Background(), &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		AuthToken:  "persisted-token",
+		Metadata:   metadata,
 	})
 }
 

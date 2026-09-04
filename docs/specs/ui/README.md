@@ -7,14 +7,10 @@ owners:
   - kandev
 ---
 # UI
-
 ## Scope
-
 UI owns responsive behavior; other systems own behavior/state.
 ## Map
-
 ### Requirements
-
 - [ACP model summary](requirements/acp-model-configuration-summary.md)
 - [ACP Shell Command Output](requirements/acp-shell-command-output.md)
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
@@ -28,7 +24,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Column visibility](requirements/board-step-visibility-filter.md)
 - [Inspect annotation submission](requirements/browser-inspect-annotations-save.md)
 - [Cancel-turn progress](requirements/cancel-turn-progress.md)
-- [File-action feedback](requirements/changes-file-action-feedback.md)
+- [Action feedback](requirements/changes-file-action-feedback.md)
 - [File-row containment](requirements/changes-file-row-containment.md)
 - [Changes walkthrough](requirements/changes-walkthrough-toolbar-width.md)
 - [Task PR Automation Controls](requirements/ci-pr-automation.md)
@@ -137,26 +133,26 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 ### Design
-
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Growing Dialog Content Containment](system-design/dialog-content-containment.md)
 - [Surface text](system-design/surface-text-hierarchy.md)
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
-- [File-action feedback](system-design/changes-file-action-feedback.md)
+- [Action feedback](system-design/changes-file-action-feedback.md)
 - [File-row containment](system-design/changes-file-row-containment.md)
 - [Mention recency](system-design/composer-mention-recency.md)
 - [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
 - [Compact step navigation](system-design/compact-workflow-step-navigation.md)
 - [Workflow column visibility (Part 1)](system-design/board-step-visibility-filter-01.md)
 - [Workflow column visibility (Part 2)](system-design/board-step-visibility-filter-02.md)
-- [Task PR automation (part 1)](system-design/ci-pr-automation-01.md)
-- [Task PR automation (part 2)](system-design/ci-pr-automation-02.md)
-- [Task PR automation (part 3)](system-design/ci-pr-automation-03.md)
+- [Task PR auto 1](system-design/ci-pr-automation-01.md)
+- [Task PR auto 2](system-design/ci-pr-automation-02.md)
+- [Task PR auto 3](system-design/ci-pr-automation-03.md)
 - [Merge Queue Recovery Controls](system-design/ci-pr-merge-queue-recovery-controls.md)
 - [Entity Reference Composer](system-design/entity-reference-composer.md)
 - [File Tree Keyboard Scope](system-design/file-tree-keyboard-scope.md)
-- [MCP tool results](system-design/kandev-mcp-tool-results.md)
+- [File Tree Chat](system-design/file-tree-chat-context.md)
+- [MCP results](system-design/kandev-mcp-tool-results.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
@@ -183,5 +179,4 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Transcript history visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 ## Related
-
 - [Platform](../platform/README.md)

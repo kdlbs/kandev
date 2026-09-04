@@ -546,7 +546,7 @@ func TestInbox_TaskReviewRequest_IgnoresRunnerOnlyTask(t *testing.T) {
 // mustAddParticipant inserts a participant row directly via the repo.
 func mustAddParticipant(t *testing.T, deps *testDeps, taskID, agentID, role string) {
 	t.Helper()
-	if err := deps.repo.AddTaskParticipant(context.Background(), taskID, agentID, role); err != nil {
+	if _, err := deps.repo.AddTaskParticipant(context.Background(), taskID, agentID, role); err != nil {
 		t.Fatalf("AddTaskParticipant: %v", err)
 	}
 }

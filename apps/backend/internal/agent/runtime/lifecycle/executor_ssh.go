@@ -635,8 +635,8 @@ func (r *SSHExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, 
 // port forward to the recorded remote agentctl port, verifies /health, and
 // updates the request's metadata so CreateInstance-style state is consistent.
 //
-// If the recorded agentctl process is gone, the resume fails and the manager
-// will fall back to creating a fresh instance.
+// If the recorded agentctl process is confirmed gone, stale runtime metadata
+// is cleared so the manager's normal create step starts a fresh instance.
 func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCreateRequest) error {
 	pidStr := getMetadataString(req.Metadata, MetadataKeySSHRemoteAgentctlPID)
 	portStr := getMetadataString(req.Metadata, MetadataKeySSHRemoteAgentctlPort)
@@ -686,10 +686,20 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	// os.FindProcess. The runtime-aware row predicate (RowProcessLiveness in
 	// liveness.go) deliberately returns Unknown for SSH rows so nothing applies a
 	// host-local check here (#1597 runtime-aware liveness).
-	pid, _ := strconv.Atoi(pidStr)
-	if !isRemoteAgentctlAlive(ctx, client, pid) {
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 0 {
 		_ = client.Close()
-		return fmt.Errorf("ssh resume: agentctl pid %d not alive on remote", pid)
+		return fmt.Errorf("ssh resume: invalid remote agentctl pid %q", pidStr)
+	}
+	alive, err := probeRemoteAgentctlLiveness(ctx, client, pid)
+	if err != nil {
+		_ = client.Close()
+		return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
+	}
+	if !alive {
+		_ = client.Close()
+		clearSSHResumeRuntimeMetadata(req.Metadata)
+		return nil
 	}
 
 	remotePort, _ := strconv.Atoi(portStr)
