@@ -112,8 +112,8 @@ port / recogniser registry, per the spec's own "Notes for implementation"
 guidance (land the transport before the projection; build the projection
 against the port, not the real probe).
 
-- [ ] [Task 01: `turn_started` stream event and `observed_detached` clearing](task-01-turn-started-event.md)
-- [ ] [Task 02: Launch-recogniser registry seam](task-02-recogniser-registry.md)
+- [x] [Task 01: `turn_started` stream event and `observed_detached` clearing](task-01-turn-started-event.md) — commit `0c2253717`. Implemented as agentctl `EventTypeTurnStarted` (emitted from `beginPromptTurn`, covers both human and synthetic-wakeup dispatch) plus a backend `observedDetached` map on `orchestrator.Service`, set from the existing `normalizedIsDetachedLaunch` shell-kind branch in `trackBackgroundToolUpdate` and cleared on the new event in `handleAgentStreamEvent`. All new/updated tests green; `go build ./...`, `go vet ./...`, `golangci-lint run --new-from-rev=bf62f39b1` clean.
+- [x] [Task 02: Launch-recogniser registry seam](task-02-recogniser-registry.md) — commit pending. Added `backgroundlaunch` (new leaf package: `Recognizer` interface, `Register`/`Lookup`/`RecognizesDetachedLaunch`, panic-on-nil/empty/duplicate registration, fail-closed on a panicking recognizer). Registered Claude's recognizer via `init()` in `background_launch_recognizer.go`; rewrote `stampBackgroundShellWork` to delegate to the registry. AC-69(a) (behavioural: a second registered agent attests through the unmodified `stampBackgroundShellWork`) and AC-69(b) (import-direction: registry package imports nothing from orchestrator/task/probe/apps-web) both covered. `go build ./...`, `go vet`, full `acp`+`orchestrator` suites, `golangci-lint run --new-from-rev=bf62f39b1` all clean.
 - [ ] [Task 03: Background-workload liveness probe (agentctl, cross-platform)](task-03-liveness-probe.md)
 - [ ] [Task 04: Probe transport (`agent.background.probe` WS action) and config](task-04-probe-transport.md)
 - [ ] [Task 05: Parked projection (backend, session-level, `BackgroundProbe` port)](task-05-parked-projection.md)
