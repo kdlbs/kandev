@@ -103,6 +103,29 @@ func TestChannelBackendClientDisconnectOnlyFailsRequestsOwnedByThatStream(t *tes
 	require.NoError(t, <-newErrCh)
 }
 
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.7
+func TestChannelBackendClientTerminalFailureLogIncludesConfiguredSession(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	client := NewChannelBackendClient(log)
+	t.Cleanup(client.Close)
+	_ = New(client, "session-log", "task-log", 0, log, "", false, ModeTask)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, nil)
+	}()
+	request := <-client.GetRequestChannel()
+	client.BindRequestToStream(request.ID, "failed-stream")
+	client.FailStreamRequests("failed-stream", errors.New("agent stream disconnected"))
+	require.EqualError(t, <-errCh, "agent stream disconnected")
+
+	entries := observed.FilterMessage("MCP request failed after publication").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, "session-log", entries[0].ContextMap()["session_id"])
+}
+
 func TestChannelBackendClientRedactsPluginInvocationPayload(t *testing.T) {
 	core, observed := observer.New(zap.DebugLevel)
 	log, err := logger.NewFromZap(zap.New(core))

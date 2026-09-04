@@ -81,10 +81,10 @@ Do not cancel requests owned by an overlapping replacement stream.
 
 ## Verification results
 
-- `go test ./internal/mcp/server ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -count=1`
-  passed 3,559 tests in four packages.
-- `go test -race ./internal/mcp/server ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -run 'MCP|ChannelBackendClient|StreamUpdates' -count=1`
-  passed 108 tests in four packages.
+- `cd apps/backend && go test ./internal/mcp/server ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -count=1`
+  passed 3,560 tests in four packages.
+- `cd apps/backend && go test -race ./internal/mcp/server ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -run 'MCP|ChannelBackendClient|StreamUpdates' -count=1`
+  passed 109 tests in four packages.
 
 ## Risks
 

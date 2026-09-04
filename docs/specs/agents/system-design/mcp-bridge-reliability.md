@@ -86,7 +86,9 @@ limit therefore detects the absence of a consumer.
 
 Each pending request stores a result channel and an optional backend-stream
 identifier. The stream writer binds the request to its identifier after a
-successful WebSocket write.
+successful WebSocket write. The stream handler waits for the writer goroutine
+before it starts disconnect cleanup. Therefore, binding happens before cleanup
+can inspect the pending requests.
 
 If the write fails, the writer completes that request with a delivery error.
 When the stream ends, the API server completes only requests bound to that
@@ -131,9 +133,9 @@ The backend records one request-received event at `Info`. The event includes
 the action, request ID, session ID, and pending ID.
 
 Unavailable dispatch, empty response, write failure, send timeout, and stream
-disconnect events use `Warn` or `Error`. Each event includes the action and
-request ID when those values exist. The bridge does not record request payloads
-or tool arguments at these levels.
+disconnect events use `Warn` or `Error`. Accepted requests and terminal bridge
+errors include the action, request ID, and server-configured session ID. The
+bridge does not record request payloads or tool arguments at these levels.
 
 Existing trace spans continue to measure dispatcher duration and response
 outcome.

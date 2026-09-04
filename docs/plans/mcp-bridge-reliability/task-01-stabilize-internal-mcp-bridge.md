@@ -55,8 +55,8 @@ Then make every bridge request receive a result or a transport error.
 ## Verification
 
 ```bash
-go test ./internal/mcp/server ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -count=1
-go test -race ./internal/mcp/server ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -run 'MCP|ChannelBackendClient|StreamUpdates' -count=1
+cd apps/backend && go test ./internal/mcp/server ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -count=1
+cd apps/backend && go test -race ./internal/mcp/server ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -run 'MCP|ChannelBackendClient|StreamUpdates' -count=1
 ```
 
 ## Files likely touched
@@ -97,7 +97,8 @@ Implemented synchronized request-time dispatcher resolution, correlated error
 responses, unbuffered request publication, and per-stream pending-request
 ownership. Added regression tests for startup wiring, absent consumers,
 unavailable or empty dispatch, write failure, disconnect, and replacement
-stream isolation.
+stream isolation. Terminal agentctl failures now preserve the configured
+session correlation without recording request payloads.
 
-The targeted suite passed 3,559 tests in four packages. The race-focused suite
-passed 108 tests in the same packages.
+The targeted suite passed 3,560 tests in four packages. The race-focused suite
+passed 109 tests in the same packages.

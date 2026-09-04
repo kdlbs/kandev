@@ -28,13 +28,15 @@ type MCPResponse struct {
 }
 
 type backendResponse struct {
-	message *ws.Message
-	err     error
+	message   *ws.Message
+	err       error
+	sessionID string
 }
 
 type pendingRequest struct {
-	result   chan backendResponse
-	streamID string
+	result    chan backendResponse
+	streamID  string
+	sessionID string
 }
 
 // ChannelBackendClient implements BackendClient using channels.
@@ -44,6 +46,7 @@ type ChannelBackendClient struct {
 	requestCh chan *ws.Message
 	pending   map[string]*pendingRequest
 	pendingMu sync.Mutex
+	sessionID string
 	done      chan struct{}
 	closeOnce sync.Once
 	closeMu   sync.Mutex
@@ -71,6 +74,13 @@ func NewChannelBackendClient(log *logger.Logger) *ChannelBackendClient {
 // The agent stream handler should read from this channel and forward to the backend.
 func (c *ChannelBackendClient) GetRequestChannel() <-chan *ws.Message {
 	return c.requestCh
+}
+
+// SetSessionID sets the server-owned session correlation used in bridge logs.
+func (c *ChannelBackendClient) SetSessionID(sessionID string) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	c.sessionID = sessionID
 }
 
 // HandleResponse handles an incoming MCP response from the backend.
@@ -112,7 +122,7 @@ func (c *ChannelBackendClient) FailStreamRequests(streamID string, err error) {
 	c.pendingMu.Unlock()
 
 	for _, pending := range failed {
-		pending.result <- backendResponse{err: err}
+		pending.result <- backendResponse{err: err, sessionID: pending.sessionID}
 	}
 }
 
@@ -124,6 +134,9 @@ func (c *ChannelBackendClient) completeRequest(requestID string, response backen
 	}
 	c.pendingMu.Unlock()
 	if ok {
+		if response.sessionID == "" {
+			response.sessionID = pending.sessionID
+		}
 		pending.result <- response
 	}
 	return ok
@@ -153,12 +166,14 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	// Create response channel
 	respChan := make(chan backendResponse, 1)
 	c.pendingMu.Lock()
-	c.pending[id] = &pendingRequest{result: respChan}
+	sessionID := c.sessionID
+	c.pending[id] = &pendingRequest{result: respChan, sessionID: sessionID}
 	c.pendingMu.Unlock()
 
 	c.logger.Debug("sending MCP request through agent stream",
 		zap.String("request_id", id),
 		zap.String("action", action),
+		zap.String("session_id", sessionID),
 		zap.Any("payload", backendPayloadForLog(action, payload)))
 
 	// Ensure cleanup on exit
@@ -178,6 +193,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		c.logger.Debug("MCP request cancelled before send",
 			zap.String("request_id", id),
 			zap.String("action", action),
+			zap.String("session_id", sessionID),
 			zap.Duration("duration", time.Since(start)),
 			zap.Error(ctx.Err()))
 		return ctx.Err()
@@ -185,6 +201,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		c.logger.Warn("timed out sending MCP request to agent stream",
 			zap.String("request_id", id),
 			zap.String("action", action),
+			zap.String("session_id", sessionID),
 			zap.Duration("duration", time.Since(start)))
 		return fmt.Errorf("timeout sending request to agent stream")
 	}
@@ -198,6 +215,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			c.logger.Warn("MCP request failed after publication",
 				zap.String("request_id", id),
 				zap.String("action", action),
+				zap.String("session_id", response.sessionID),
 				zap.Duration("duration", time.Since(start)),
 				zap.Error(response.err))
 			return response.err
@@ -276,7 +294,10 @@ func (c *ChannelBackendClient) Reset() {
 	c.pendingMu.Unlock()
 
 	for _, request := range pending {
-		request.result <- backendResponse{err: fmt.Errorf("MCP request cancelled: session reset")}
+		request.result <- backendResponse{
+			err:       fmt.Errorf("MCP request cancelled: session reset"),
+			sessionID: request.sessionID,
+		}
 	}
 }
 
