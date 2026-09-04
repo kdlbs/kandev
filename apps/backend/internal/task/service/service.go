@@ -434,6 +434,14 @@ type WorkspacePolicyAttacher interface {
 	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
 }
 
+// WorkspacePolicyMembershipReleaser removes a task's workspace-group
+// membership after a post-create rollback. It is an optional companion to
+// WorkspacePolicyAttacher because lightweight task-service test harnesses may
+// not persist workspace groups.
+type WorkspacePolicyMembershipReleaser interface {
+	ReleaseWorkspacePolicy(ctx context.Context, taskID, reason string) error
+}
+
 // SetAttachmentService wires the file-backed prompt attachment owner into the
 // task service. It is optional for focused unit-test harnesses that never send
 // file-backed descriptors.

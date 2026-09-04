@@ -22,10 +22,11 @@ type workspaceEnvironmentRepository interface {
 }
 
 type workspaceEnvironmentOwnershipTransfer struct {
-	groupID        string
-	environmentID  string
-	oldOwnerTaskID string
-	newOwnerTaskID string
+	groupID             string
+	environmentID       string
+	oldOwnerTaskID      string
+	newOwnerTaskID      string
+	resultingGeneration int64
 }
 
 // publishUpdatedTask re-reads the task row and forwards it to the event
@@ -488,10 +489,11 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 		zap.String("old_owner_task_id", env.TaskID),
 		zap.String("new_owner_task_id", newOwner))
 	return &workspaceEnvironmentOwnershipTransfer{
-		groupID:        group.ID,
-		environmentID:  env.ID,
-		oldOwnerTaskID: env.TaskID,
-		newOwnerTaskID: newOwner,
+		groupID:             group.ID,
+		environmentID:       env.ID,
+		oldOwnerTaskID:      env.TaskID,
+		newOwnerTaskID:      newOwner,
+		resultingGeneration: env.OwnershipGeneration + 1,
 	}, nil
 }
 
@@ -532,9 +534,11 @@ func (s *HandoffService) rollbackWorkspaceEnvironmentOwnershipTransfers(
 				// A concurrent retry already restored this transfer.
 			case env.TaskID != transfer.newOwnerTaskID:
 				err = fmt.Errorf("owner changed from rollback target %s to %s", transfer.newOwnerTaskID, env.TaskID)
+			case env.OwnershipGeneration != transfer.resultingGeneration:
+				err = fmt.Errorf("ownership generation changed from rollback target %d to %d", transfer.resultingGeneration, env.OwnershipGeneration)
 			default:
 				err = environments.TransferTaskEnvironmentOwnership(
-					ctx, transfer.environmentID, env.TaskID, env.OwnershipGeneration, transfer.oldOwnerTaskID,
+					ctx, transfer.environmentID, transfer.newOwnerTaskID, transfer.resultingGeneration, transfer.oldOwnerTaskID,
 				)
 			}
 		}

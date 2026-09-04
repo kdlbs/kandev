@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const taskEnvironmentOwnershipQuery = `SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`
+
 // CreateTaskEnvironment creates a new task environment record.
 // If env.Repos is non-empty, the per-repo rows are inserted in the same transaction.
 func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
@@ -359,7 +361,7 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	query := `SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`
+	query := taskEnvironmentOwnershipQuery
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE`
 	}
@@ -396,6 +398,73 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, envID)
 	}
 	return tx.Commit()
+}
+
+// ClaimTaskEnvironmentReset reserves destructive environment reset behind the
+// same task cleanup barrier used by lifecycle cleanup. The prepared barrier
+// remains in place while external resources are torn down, so ownership
+// transfers cannot race the reset's snapshot.
+func (r *Repository) ClaimTaskEnvironmentReset(
+	ctx context.Context,
+	taskID, environmentID string,
+	expectedGeneration int64,
+	operationID string,
+) (string, error) {
+	if taskID == "" || environmentID == "" || operationID == "" {
+		return "", errors.New("task environment reset claim: task, environment, and operation ids are required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+		return "", err
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	jobID := uuid.NewString()
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_resource_cleanup_jobs (
+			id, operation_id, task_id, trigger, state, resource_snapshot, attempts,
+			next_attempt_at, last_error, created_at, updated_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), jobID, operationID, taskID, models.TaskResourceCleanupTriggerReconcile,
+		models.TaskResourceCleanupStatePrepared, `{}`, 0, nil, "", now, now, nil); err != nil {
+		return "", err
+	}
+	query := taskEnvironmentOwnershipQuery
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var ownerTaskID string
+	var generation int64
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), environmentID).Scan(&ownerTaskID, &generation); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, environmentID)
+		}
+		return "", err
+	}
+	if ownerTaskID != taskID || generation != expectedGeneration {
+		return "", fmt.Errorf("%w: environment %s is owned by %s at generation %d",
+			ErrTaskEnvironmentOwnershipChanged, environmentID, ownerTaskID, generation)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return jobID, nil
+}
+
+// ReleaseTaskEnvironmentReset removes a reset's durable cleanup barrier.
+func (r *Repository) ReleaseTaskEnvironmentReset(
+	ctx context.Context,
+	jobID string,
+	state models.TaskResourceCleanupState,
+	errStr string,
+) error {
+	return r.CompleteTaskResourceCleanupJob(ctx, jobID, state, errStr, nil)
 }
 
 // DeleteTaskEnvironment deletes a task environment by ID.

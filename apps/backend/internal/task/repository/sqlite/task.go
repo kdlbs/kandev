@@ -1276,7 +1276,9 @@ func (r *Repository) DetachTask(ctx context.Context, taskID string) (bool, error
 	}
 	if groupID != "" {
 		if err := r.transferDetachedWorkspaceStewardship(ctx, tx, groupID, taskID); err != nil {
-			return false, err
+			if !errors.Is(err, errDetachedWorkspaceTransferNotApplicable) {
+				return false, err
+			}
 		}
 	}
 	return true, tx.Commit()
@@ -1293,11 +1295,30 @@ func (r *Repository) loadDetachmentState(ctx context.Context, tx *sqlx.Tx, taskI
 		return "", "", err
 	}
 	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
-		return "", "", fmt.Errorf("decode task workspace metadata: %w", err)
+	if trimmed := strings.TrimSpace(rawMetadata); trimmed != "" {
+		if err := json.Unmarshal([]byte(trimmed), &metadata); err != nil {
+			return "", "", fmt.Errorf("decode task workspace metadata: %w", err)
+		}
 	}
 	workspace, _ := metadata["workspace"].(map[string]interface{})
 	groupID, _ := workspace["group_id"].(string)
+	if groupID == "" {
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT workspace_group_id
+			FROM task_workspace_group_members
+			WHERE task_id = ? AND released_at IS NULL
+			ORDER BY created_at DESC, workspace_group_id DESC
+			LIMIT 1
+		`), taskID).Scan(&groupID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			// Minimal legacy task databases may not have the optional office
+			// membership tables. In that case metadata remains the only
+			// available ownership signal; a missing table is not a detach
+			// failure.
+			if !internaldb.IsMissingTableError(err) {
+				return "", "", err
+			}
+		}
+	}
 	return parentID, groupID, nil
 }
 
@@ -1306,14 +1327,35 @@ func (r *Repository) transferDetachedWorkspaceStewardship(
 	tx *sqlx.Tx,
 	groupID, taskID string,
 ) error {
-	state, err := r.loadDetachedWorkspaceStewardship(ctx, tx, groupID, taskID)
+	// Read the prospective owners without locking workspace rows first. The
+	// corresponding task rows must be locked before any group/environment row
+	// locks, otherwise two concurrent detachments can acquire those resources
+	// in opposite order and deadlock on PostgreSQL.
+	state, err := r.loadDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, false)
 	if err != nil {
 		return err
 	}
-	if err := r.checkDetachedWorkspaceTransferBarriers(ctx, tx, taskID, state); err != nil {
+	if err := r.lockDetachedWorkspaceTransferTaskRows(ctx, tx, taskID, state); err != nil {
 		return err
 	}
-	return r.applyDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, state)
+	lockedState, err := r.loadDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, true)
+	if err != nil {
+		return err
+	}
+	if lockedState.groupOwnerTaskID != state.groupOwnerTaskID ||
+		lockedState.environmentOwnerTaskID != state.environmentOwnerTaskID {
+		// Ownership changed between the unlocked read and the task-row locks.
+		// Acquire any newly-discovered task barriers before applying the final
+		// state; all normal paths already hold their initial barriers.
+		if err := r.lockDetachedWorkspaceTransferTaskRows(ctx, tx, taskID, lockedState); err != nil {
+			return err
+		}
+		lockedState, err = r.loadDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, true)
+		if err != nil {
+			return err
+		}
+	}
+	return r.applyDetachedWorkspaceStewardship(ctx, tx, groupID, taskID, lockedState)
 }
 
 type detachedWorkspaceStewardship struct {
@@ -1327,6 +1369,7 @@ func (r *Repository) loadDetachedWorkspaceStewardship(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	groupID, taskID string,
+	lockRows bool,
 ) (detachedWorkspaceStewardship, error) {
 	query := `
 		SELECT g.owner_task_id, g.materialized_environment_id
@@ -1335,21 +1378,21 @@ func (r *Repository) loadDetachedWorkspaceStewardship(
 		WHERE g.id = ? AND m.task_id = ? AND m.released_at IS NULL
 		  AND g.cleanup_status IN ('active', 'cleanup_failed')
 	`
-	if dialect.IsPostgres(r.db.DriverName()) {
+	if lockRows && dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE OF g, m`
 	}
 	var state detachedWorkspaceStewardship
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), groupID, taskID).
 		Scan(&state.groupOwnerTaskID, &state.environmentID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return state, fmt.Errorf("detach task %s: active workspace group %s not found", taskID, groupID)
+			return state, fmt.Errorf("%w: detach task %s: active workspace group %s not found", errDetachedWorkspaceTransferNotApplicable, taskID, groupID)
 		}
 		return state, err
 	}
 	if state.environmentID == "" {
 		return state, nil
 	}
-	owner, generation, err := r.loadDetachedEnvironmentOwnership(ctx, tx, state.environmentID, taskID)
+	owner, generation, err := r.loadDetachedEnvironmentOwnership(ctx, tx, state.environmentID, taskID, lockRows)
 	state.environmentOwnerTaskID = owner
 	state.environmentGeneration = generation
 	return state, err
@@ -1359,9 +1402,10 @@ func (r *Repository) loadDetachedEnvironmentOwnership(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	environmentID, taskID string,
+	lockRow bool,
 ) (string, int64, error) {
-	query := `SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`
-	if dialect.IsPostgres(r.db.DriverName()) {
+	query := taskEnvironmentOwnershipQuery
+	if lockRow && dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE`
 	}
 	var ownerTaskID string
@@ -1376,20 +1420,26 @@ func (r *Repository) loadDetachedEnvironmentOwnership(
 	return ownerTaskID, generation, nil
 }
 
-func (r *Repository) checkDetachedWorkspaceTransferBarriers(
+func (r *Repository) lockDetachedWorkspaceTransferTaskRows(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	taskID string,
 	state detachedWorkspaceStewardship,
 ) error {
+	ids := make([]string, 0, 2)
 	if state.groupOwnerTaskID != "" && state.groupOwnerTaskID != taskID {
-		if err := r.taskCleanupBarrierLocked(ctx, tx, state.groupOwnerTaskID); err != nil {
+		ids = append(ids, state.groupOwnerTaskID)
+	}
+	if state.environmentOwnerTaskID != "" &&
+		state.environmentOwnerTaskID != taskID &&
+		state.environmentOwnerTaskID != state.groupOwnerTaskID {
+		ids = append(ids, state.environmentOwnerTaskID)
+	}
+	sort.Strings(ids)
+	for _, ownerTaskID := range ids {
+		if err := r.taskCleanupBarrierLocked(ctx, tx, ownerTaskID); err != nil {
 			return err
 		}
-	}
-	if state.environmentOwnerTaskID != "" && state.environmentOwnerTaskID != taskID &&
-		state.environmentOwnerTaskID != state.groupOwnerTaskID {
-		return r.taskCleanupBarrierLocked(ctx, tx, state.environmentOwnerTaskID)
 	}
 	return nil
 }

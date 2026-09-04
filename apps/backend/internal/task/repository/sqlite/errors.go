@@ -32,6 +32,8 @@ var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 // expected owner or generation is stale.
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 
+var errDetachedWorkspaceTransferNotApplicable = errors.New("detached workspace stewardship transfer not applicable")
+
 // ErrNoPrimarySession is returned by GetPrimarySessionByTaskID when the task
 // has no primary session row. Callers should use errors.Is to distinguish this
 // "not found" case from genuine backend/DB errors.

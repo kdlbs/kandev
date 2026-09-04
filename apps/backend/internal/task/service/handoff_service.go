@@ -435,6 +435,27 @@ func (s *HandoffService) AttachWorkspacePolicy(ctx context.Context, taskID, pare
 	return s.attachWorkspaceGroup(ctx, taskID, parentID, pol)
 }
 
+// ReleaseWorkspacePolicy removes the task's active workspace-group
+// membership after a create rollback. The membership audit row is retained,
+// and normal group cleanup evaluation runs so a group created solely for the
+// failed task cannot remain active forever.
+func (s *HandoffService) ReleaseWorkspacePolicy(ctx context.Context, taskID, reason string) error {
+	if s.wsGroups == nil || taskID == "" {
+		return nil
+	}
+	group, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if group == nil {
+		return nil
+	}
+	if err := s.wsGroups.ReleaseWorkspaceGroupMember(ctx, group.ID, taskID, reason, ""); err != nil {
+		return err
+	}
+	return s.evaluateWorkspaceGroupCleanup(ctx, group.ID)
+}
+
 func (s *HandoffService) attachWorkspaceGroup(ctx context.Context, taskID, parentID string, pol WorkspacePolicy) error {
 	if s.wsGroups == nil {
 		return nil

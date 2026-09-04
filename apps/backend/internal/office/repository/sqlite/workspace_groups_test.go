@@ -126,7 +126,7 @@ func TestWorkspaceGroupCleanupCompletionRejectsStaleGeneration(t *testing.T) {
 	}
 	if _, err := repo.ExecRaw(ctx, `
 		UPDATE task_workspace_groups
-		SET ownership_generation = 2, cleanup_status = 'active'
+		SET ownership_generation = 2
 		WHERE id = ?
 	`, group.ID); err != nil {
 		t.Fatalf("simulate stewardship transfer: %v", err)
@@ -144,8 +144,8 @@ func TestWorkspaceGroupCleanupCompletionRejectsStaleGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWorkspaceGroup: %v", err)
 	}
-	if current.OwnershipGeneration != 2 || current.CleanupStatus != models.WorkspaceCleanupStatusActive {
-		t.Fatalf("current group = generation %d status %q; want 2, active", current.OwnershipGeneration, current.CleanupStatus)
+	if current.OwnershipGeneration != 2 || current.CleanupStatus != models.WorkspaceCleanupStatusPending {
+		t.Fatalf("current group = generation %d status %q; want 2, cleanup_pending", current.OwnershipGeneration, current.CleanupStatus)
 	}
 }
 

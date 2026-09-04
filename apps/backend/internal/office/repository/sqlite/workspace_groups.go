@@ -293,12 +293,35 @@ func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskI
 	if role == "" {
 		role = models.WorkspaceMemberRoleMember
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT OR IGNORE INTO task_workspace_group_members (
 			workspace_group_id, task_id, role, created_at
-		) VALUES (?, ?, ?, ?)
-	`), groupID, taskID, role, time.Now().UTC())
-	return err
+		)
+		SELECT id, ?, ?, ?
+		FROM task_workspace_groups
+		WHERE id = ? AND cleanup_status IN ('active', 'cleanup_failed')
+	`), taskID, role, time.Now().UTC(), groupID)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return err
+	} else if rows == 0 {
+		var exists bool
+		if err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT EXISTS (
+				SELECT 1 FROM task_workspace_group_members
+				WHERE workspace_group_id = ? AND task_id = ?
+			)
+		`), groupID, taskID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return nil
+		}
+		return fmt.Errorf("workspace group %s is not accepting members", groupID)
+	}
+	return nil
 }
 
 // ReleaseWorkspaceGroupMember stamps released_at + release_reason and

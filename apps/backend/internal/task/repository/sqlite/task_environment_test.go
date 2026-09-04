@@ -151,6 +151,37 @@ func TestTransferTaskEnvironmentAdvancesGenerationAndHonorsCleanupBarrier(t *tes
 	}
 }
 
+func TestClaimTaskEnvironmentResetBlocksOwnershipTransferUntilReleased(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-environment-reset-claim")
+	for _, taskID := range []string{"reset-owner", "reset-borrower"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "workspace-environment-reset-claim", Title: taskID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "environment-reset-claim", TaskID: "reset-owner", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	jobID, err := repo.ClaimTaskEnvironmentReset(ctx, "reset-owner", "environment-reset-claim", 1, "reset:operation")
+	if err != nil {
+		t.Fatalf("ClaimTaskEnvironmentReset: %v", err)
+	}
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-reset-claim", "reset-owner", 1, "reset-borrower"); err == nil {
+		t.Fatal("TransferTaskEnvironmentOwnership succeeded while reset claim was active")
+	}
+	if err := repo.ReleaseTaskEnvironmentReset(ctx, jobID, models.TaskResourceCleanupStateSucceeded, ""); err != nil {
+		t.Fatalf("ReleaseTaskEnvironmentReset: %v", err)
+	}
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-reset-claim", "reset-owner", 1, "reset-borrower"); err != nil {
+		t.Fatalf("TransferTaskEnvironmentOwnership after release: %v", err)
+	}
+}
+
 func TestTaskEnvironment_PersistsDockerBootstrapNonceReference(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

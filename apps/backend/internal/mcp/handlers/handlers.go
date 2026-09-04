@@ -321,6 +321,16 @@ type Handlers struct {
 	agentPermissionSvc AgentPermissionService
 }
 
+func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
+	if h.handoffSvc == nil || taskID == "" {
+		return
+	}
+	if err := h.handoffSvc.ReleaseWorkspacePolicy(context.WithoutCancel(ctx), taskID, "create_rollback"); err != nil {
+		h.logger.Warn("rollback workspace membership cleanup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
 // NewHandlers creates new MCP handlers.
 func NewHandlers(
 	taskSvc *service.Service,
@@ -928,6 +938,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				h.logger.Error("rollback delete failed after missing task repository",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
+			h.releaseWorkspacePolicyAfterCreateRollback(ctx, task.ID)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
 		}
 		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].RepositoryID, resolution); err != nil {
@@ -937,6 +948,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				h.logger.Error("rollback delete failed after contribution association error",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
+			h.releaseWorkspacePolicyAfterCreateRollback(ctx, task.ID)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: "+err.Error(), nil)
 		}
 	}

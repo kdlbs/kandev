@@ -472,9 +472,6 @@ func (s *Service) applyParentWorkspacePolicyDefaults(
 		return nil
 	}
 	policy.Mode, _ = parentWorkspace["default_child_workspace"].(string)
-	if policy.Mode == "" {
-		policy.Mode = workspaceModeInheritParent
-	}
 	return nil
 }
 
@@ -3709,15 +3706,15 @@ func (s *Service) cleanupTaskEnvironment(
 	if cleanup.env == nil {
 		return nil
 	}
+	if cause := context.Cause(ctx); cause != nil {
+		return []error{cause}
+	}
 	current, err := s.taskEnvironmentCleanupOwnershipIsCurrent(ctx, cleanup.env)
 	if err != nil {
 		return []error{fmt.Errorf("verify task environment ownership %s: %w", cleanup.env.ID, err)}
 	}
 	if !current {
 		return nil
-	}
-	if cause := context.Cause(ctx); cause != nil {
-		return []error{cause}
 	}
 	if err := s.teardownEnvironmentResources(ctx, cleanup.env); err != nil {
 		s.logger.Warn("failed to teardown task environment during task cleanup",
@@ -3754,15 +3751,16 @@ func (s *Service) taskEnvironmentCleanupOwnershipIsCurrent(
 	}
 	current, err := s.taskEnvironments.GetTaskEnvironment(ctx, snapshot.ID)
 	if errors.Is(err, taskrepo.ErrTaskEnvironmentNotFound) {
-		return true, nil
+		return s.taskEnvironmentSnapshotOwnerDeleted(ctx, snapshot)
 	}
 	if err != nil {
 		return false, err
 	}
 	if current == nil {
-		return true, nil
+		return s.taskEnvironmentSnapshotOwnerDeleted(ctx, snapshot)
 	}
-	if current.TaskID == snapshot.TaskID && current.OwnershipGeneration == snapshot.OwnershipGeneration {
+	if current.TaskID == snapshot.TaskID &&
+		(snapshot.OwnershipGeneration == 0 || current.OwnershipGeneration == snapshot.OwnershipGeneration) {
 		return true, nil
 	}
 	s.logger.Info("skipping stale task environment cleanup",
@@ -3771,6 +3769,30 @@ func (s *Service) taskEnvironmentCleanupOwnershipIsCurrent(
 		zap.Int64("expected_ownership_generation", snapshot.OwnershipGeneration),
 		zap.String("current_owner_task_id", current.TaskID),
 		zap.Int64("current_ownership_generation", current.OwnershipGeneration))
+	return false, nil
+}
+
+// taskEnvironmentSnapshotOwnerDeleted proves that a missing environment row
+// is the result of the owning task being deleted, rather than treating a
+// missing authority row as permission to use an arbitrary stale snapshot.
+func (s *Service) taskEnvironmentSnapshotOwnerDeleted(
+	ctx context.Context,
+	snapshot *models.TaskEnvironment,
+) (bool, error) {
+	if snapshot == nil || snapshot.TaskID == "" || s.tasks == nil {
+		if snapshot != nil && snapshot.TaskID == "" &&
+			snapshot.ContainerID == "" && snapshot.SandboxID == "" {
+			return true, nil
+		}
+		return false, nil
+	}
+	task, err := s.tasks.GetTask(ctx, snapshot.TaskID)
+	if errors.Is(err, taskrepo.ErrTaskNotFound) || task == nil {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	return false, nil
 }
 
