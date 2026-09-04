@@ -450,18 +450,30 @@ const sanitizeSlack = 512
 // redacted. It first takes a window that overshoots budget by sanitizeSlack
 // so a credential straddling the tail-cut boundary is complete when Sanitize
 // runs, instead of arriving as a bare suffix that matches no redaction rule.
-// The window is capped at routingerr.MaxRawExcerptBytes so Sanitize's own
-// truncation, which is head-first, never engages on it: engaging would
-// silently drop the newest bytes this function exists to keep, the same
-// direction of loss a straight cut-then-sanitize order produces for
-// credentials.
+//
+// Sanitize can grow its input (e.g. "/Users/henry/" -> "/Users/<redacted>/")
+// and then truncates its OWN result from the head once it exceeds
+// routingerr.MaxRawExcerptBytes, which would chop the newest bytes this
+// function exists to keep. So the window is capped at MaxRawExcerptBytes to
+// bound the growth, and if Sanitize's result still hits that cap (redactions
+// grew it enough to trigger the head truncation anyway), the window is
+// shrunk and retried until Sanitize returns an untruncated result — at which
+// point its output is known to be the true, un-clipped tail, and the
+// caller's own budget cut below is safe to apply.
 func sanitizedTail(raw string, budget int) string {
 	window := budget + sanitizeSlack
 	if window > routingerr.MaxRawExcerptBytes {
 		window = routingerr.MaxRawExcerptBytes
 	}
-	part := boundedTailN(raw, window)
-	return boundedTailN(routingerr.Sanitize(part), budget)
+	for window > 0 {
+		part := boundedTailN(raw, window)
+		sanitized := routingerr.Sanitize(part)
+		if len(sanitized) < routingerr.MaxRawExcerptBytes {
+			return boundedTailN(sanitized, budget)
+		}
+		window -= sanitizeSlack
+	}
+	return ""
 }
 
 // boundedConversation bounds user messages and the agent conversation on
@@ -543,13 +555,6 @@ func bounded(value string) string {
 		value = value[:cut]
 	}
 	return strings.ToValidUTF8(value, "")
-}
-
-// boundedTail truncates to continuationFieldLimit bytes keeping the tail, on
-// a rune boundary. Used for Conversation, whose most recent content lives at
-// the end of the composed string.
-func boundedTail(value string) string {
-	return boundedTailN(value, continuationFieldLimit)
 }
 
 // boundedTailN truncates to limit bytes keeping the tail, on a rune
