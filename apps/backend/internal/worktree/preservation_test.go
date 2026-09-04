@@ -42,6 +42,46 @@ func TestInspectPreservedCheckoutHashesDirtyAndUntrackedState(t *testing.T) {
 }
 
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+func TestInspectPreservedCheckoutHashesTrackedDeletion(t *testing.T) {
+	repositoryPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "preserved")
+	runGit(t, repositoryPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	readmePath := filepath.Join(worktreePath, "README.md")
+	if err := os.Remove(readmePath); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
+		RepositoryPath: repositoryPath,
+		WorktreePath:   worktreePath,
+		ExpectedBranch: "feature/pr-branch",
+		WorktreeID:     "synthetic-worktree",
+	})
+	if err != nil {
+		t.Fatalf("InspectPreservedCheckout(deleted): %v", err)
+	}
+	if deleted.DirtyCount != 1 {
+		t.Fatalf("tracked deletion dirty count = %d, want 1", deleted.DirtyCount)
+	}
+
+	if err := os.WriteFile(readmePath, []byte("restored with different content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := InspectPreservedCheckout(context.Background(), PreservationRequest{
+		RepositoryPath: repositoryPath,
+		WorktreePath:   worktreePath,
+		ExpectedBranch: "feature/pr-branch",
+		WorktreeID:     "synthetic-worktree",
+	})
+	if err != nil {
+		t.Fatalf("InspectPreservedCheckout(restored): %v", err)
+	}
+	if deleted.ContentHash == restored.ContentHash {
+		t.Fatalf("tracked deletion and restored file produced the same content hash: %s", deleted.ContentHash)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
 func TestInspectPreservedCheckoutHashesIgnoredState(t *testing.T) {
 	repositoryPath := initGitRepoForWorktreeTest(t)
 	if err := os.WriteFile(filepath.Join(repositoryPath, ".gitignore"), []byte("ignored.txt\n"), 0o644); err != nil {

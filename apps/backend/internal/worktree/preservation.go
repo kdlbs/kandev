@@ -207,27 +207,38 @@ func checkoutContentHash(ctx context.Context, worktreePath string) (string, erro
 		}
 		path := filepath.Join(worktreePath, filepath.FromSlash(string(rawPath)))
 		info, statErr := os.Lstat(path)
-		if statErr != nil || info.IsDir() {
+		if statErr != nil && !os.IsNotExist(statErr) {
 			return "", fmt.Errorf("%w: checkout content", ErrPreservedCheckoutUnproven)
 		}
 		var contents []byte
-		if info.Mode()&os.ModeSymlink != 0 {
+		var mode os.FileMode
+		switch {
+		case statErr != nil:
+			// A cached path can be absent from the working tree when the user
+			// has an unstaged deletion. Mode zero is the typed missing-entry
+			// marker; no existing filesystem entry has that mode.
+			mode = 0
+		case info.IsDir():
+			return "", fmt.Errorf("%w: checkout content", ErrPreservedCheckoutUnproven)
+		case info.Mode()&os.ModeSymlink != 0:
+			mode = info.Mode()
 			target, readErr := os.Readlink(path)
 			if readErr != nil {
 				return "", readErr
 			}
 			contents = []byte(target)
-		} else {
+		default:
 			if !info.Mode().IsRegular() {
 				return "", fmt.Errorf("%w: unsupported checkout entry", ErrPreservedCheckoutUnproven)
 			}
+			mode = info.Mode()
 			contents, err = os.ReadFile(path)
 			if err != nil {
 				return "", err
 			}
 		}
 		var frame [20]byte
-		binary.BigEndian.PutUint32(frame[0:4], uint32(info.Mode()))
+		binary.BigEndian.PutUint32(frame[0:4], uint32(mode))
 		binary.BigEndian.PutUint64(frame[4:12], uint64(len(rawPath)))
 		binary.BigEndian.PutUint64(frame[12:20], uint64(len(contents)))
 		_, _ = hash.Write(frame[:])

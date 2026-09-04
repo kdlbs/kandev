@@ -25,6 +25,56 @@ type workspaceInventoryRepairRepository interface {
 	RecordWorkspaceInventoryPostRepairAttestation(ctx context.Context, taskID, idempotencyKey string, evidence *models.WorkspaceInventoryPreservation, matched bool, verifiedAt time.Time) error
 }
 
+func (e *Executor) admitLaunchWorkspaceInventory(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	env *models.TaskEnvironment,
+	repositories []*repoInfo,
+) error {
+	if err := e.validateReuseEnvironmentInventory(ctx, req, env); err != nil {
+		// Fresh and additional-session launches have no caller-facing repair
+		// option, so attempt the guarded repair automatically while preserving
+		// the original fail-closed error when the checkout cannot be proven.
+		if !req.WorkspaceReuseRequired || !req.UseWorktree {
+			return err
+		}
+		receipt, repairErr := e.repairReuseEnvironmentInventory(
+			ctx, task, session, req, env, repositories,
+			workspaceInventoryLaunchIdempotencyKey(session.ID),
+		)
+		if repairErr != nil {
+			if e.logger != nil {
+				e.logger.Info("automatic workspace inventory repair did not resolve launch mismatch, falling back to fail-closed admission error",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", session.ID),
+					zap.Error(repairErr))
+			}
+			return err
+		}
+		req.WorkspaceInventoryRecoveryReceipt = receipt
+		return e.validateReuseEnvironmentInventory(ctx, req, env)
+	}
+	if !req.WorkspaceReuseRequired || !req.UseWorktree {
+		return nil
+	}
+	receipt, repairErr := e.attestedWorkspaceInventoryRowsReceipt(
+		ctx, task, session, req, env, repositories,
+	)
+	if repairErr != nil {
+		if e.logger != nil {
+			e.logger.Info("automatic workspace inventory repair receipt is not launchable",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID),
+				zap.Error(repairErr))
+		}
+		return fmt.Errorf("%w: workspace inventory repair receipt is not durably attested", models.ErrWorkspaceReuseUnsafe)
+	}
+	req.WorkspaceInventoryRecoveryReceipt = receipt
+	return nil
+}
+
 func (e *Executor) repairReuseEnvironmentInventory(
 	ctx context.Context,
 	task *v1.Task,

@@ -151,6 +151,145 @@ func TestLaunchPreparedSessionAutoRepairsRecoverableInventoryMismatchAndLaunches
 	}
 }
 
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.1
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+func TestLaunchPreparedSessionRepairsInventoryBeforePreparedWorkspaceFastPath(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	repo := newMockRepository()
+	const taskID = "task-prepared-fast-path-repair"
+	const sessionID = "session-prepared-fast-path-repair"
+	seedWorktreeExecutor(repo)
+	repo.repositories["repo-front"] = &models.Repository{
+		ID: "repo-front", Name: "frontend", Provider: "github", LocalPath: repositoryPath,
+	}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: taskID, RepositoryID: "repo-front", Position: 0, BaseBranch: "main",
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Prepared Fast Path"}
+	repo.taskEnvironments["env-prepared-fast-path"] = &models.TaskEnvironment{
+		ID: "env-prepared-fast-path", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: worktreePath,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-prepared-fast-path", TaskEnvironmentID: "env-prepared-fast-path",
+			RepositoryID: "repo-front", BranchSlug: "stale",
+			WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+			WorktreeBranch: "feature/recovery", Position: 0, Status: "active",
+		}},
+	}
+	repo.taskEnvironmentRepos["env-prepared-fast-path"] = repo.taskEnvironments["env-prepared-fast-path"].Repos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: "env-prepared-fast-path",
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repo.executorsRunning[sessionID] = &models.ExecutorRunning{
+		ID: "runtime-prepared-fast-path", SessionID: sessionID, TaskID: taskID,
+		AgentExecutionID: "execution-prepared-fast-path", ExecutorID: models.ExecutorIDWorktree,
+		Status: models.ExecutorRunningStatusPrepared, WorktreeID: "worktree-recovery",
+		WorktreePath: worktreePath, WorktreeBranch: "feature/recovery",
+	}
+
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-prepared-fast-path", nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	execution, err := exec.LaunchPreparedSession(
+		context.Background(),
+		&v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Prepared Fast Path"},
+		sessionID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree, StartAgent: true},
+	)
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+	if execution.WorkspaceInventoryRecoveryReceipt == nil ||
+		execution.WorkspaceInventoryRecoveryReceipt.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
+		t.Fatalf("prepared fast-path receipt = %+v, want committed repair", execution.WorkspaceInventoryRecoveryReceipt)
+	}
+	rows := repo.taskEnvironmentRepos["env-prepared-fast-path"]
+	if len(rows) != 1 || rows[0].BranchSlug != "main" {
+		t.Fatalf("prepared fast path bypassed canonical inventory repair: %+v", rows)
+	}
+	if manager.launchAgentCallCount != 0 {
+		t.Fatalf("prepared fast path invoked full LaunchAgent %d times", manager.launchAgentCallCount)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+func TestLaunchPreparedSessionPreparedWorkspaceFastPathBlocksUnattestedRepair(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	repo := newMockRepository()
+	const taskID = "task-prepared-fast-path-attestation"
+	const sessionAID = "session-prepared-fast-path-attestation-a"
+	const sessionBID = "session-prepared-fast-path-attestation-b"
+	seedWorktreeExecutor(repo)
+	repo.repositories["repo-front"] = &models.Repository{
+		ID: "repo-front", Name: "frontend", Provider: "github", LocalPath: repositoryPath,
+	}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: taskID, RepositoryID: "repo-front", Position: 0, BaseBranch: "main",
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Prepared Attestation"}
+	repo.taskEnvironments["env-prepared-attestation"] = &models.TaskEnvironment{
+		ID: "env-prepared-attestation", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: worktreePath,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-prepared-attestation", TaskEnvironmentID: "env-prepared-attestation",
+			RepositoryID: "repo-front", BranchSlug: "stale",
+			WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+			WorktreeBranch: "feature/recovery", Position: 0, Status: "active",
+		}},
+	}
+	repo.taskEnvironmentRepos["env-prepared-attestation"] = repo.taskEnvironments["env-prepared-attestation"].Repos
+	repo.sessions[sessionAID] = &models.TaskSession{
+		ID: sessionAID, TaskID: taskID, TaskEnvironmentID: "env-prepared-attestation",
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repo.sessions[sessionBID] = &models.TaskSession{
+		ID: sessionBID, TaskID: taskID, TaskEnvironmentID: "env-prepared-attestation",
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repo.recordWorkspaceInventoryPostRepairAttestationFunc = func(
+		context.Context, string, string, *models.WorkspaceInventoryPreservation, bool, time.Time,
+	) error {
+		return errors.New("attestation store unavailable")
+	}
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := repo.tasks[taskID].ToAPI()
+	if _, err := exec.LaunchPreparedSession(context.Background(), task, sessionAID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree, StartAgent: true},
+	); !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("session A repair error = %v, want fail-closed reuse error", err)
+	}
+	repo.executorsRunning[sessionBID] = &models.ExecutorRunning{
+		ID: "runtime-prepared-attestation", SessionID: sessionBID, TaskID: taskID,
+		AgentExecutionID: "execution-prepared-attestation", ExecutorID: models.ExecutorIDWorktree,
+		Status: models.ExecutorRunningStatusPrepared, WorktreeID: "worktree-recovery",
+		WorktreePath: worktreePath, WorktreeBranch: "feature/recovery",
+	}
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-prepared-attestation", nil
+		},
+	}
+	exec = newTestExecutor(t, manager, repo)
+
+	if _, err := exec.LaunchPreparedSession(context.Background(), task, sessionBID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree, StartAgent: true},
+	); !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("prepared fast path against unattested row error = %v, want fail-closed reuse error", err)
+	}
+	if manager.launchAgentCallCount != 0 {
+		t.Fatalf("prepared fast path against unattested row invoked LaunchAgent %d times", manager.launchAgentCallCount)
+	}
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
 //

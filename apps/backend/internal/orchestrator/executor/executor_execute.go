@@ -1212,6 +1212,23 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, err
 	}
+	assignLaunchTaskEnvironmentID(session, existingEnv)
+
+	// A sibling can be prepared while the elected materializer is still
+	// creating the environment (for example, an inherit_parent autopilot child
+	// starts immediately after its parent). Wait for that durable owner to
+	// publish READY before either the prepared-workspace fast path or a full
+	// launch can attach.
+	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID != session.ID {
+		readyEnv, waitErr := e.waitForTaskEnvironmentReady(ctx, existingEnv.ID)
+		if waitErr != nil {
+			return nil, waitErr
+		}
+		existingEnv = readyEnv
+	}
+	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
+		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
 
 	// Fast path: workspace already launched (executors_running row exists).
 	// Only start the agent subprocess if requested; otherwise return early.
@@ -1224,8 +1241,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
 	}
 	if hasRunning {
+		inventoryReq := e.preparedWorkspaceInventoryRequest(ctx, task, session, executorID, allRepos, existingEnv)
+		if err := e.admitLaunchWorkspaceInventory(ctx, task, session, inventoryReq, existingEnv, allRepos); err != nil {
+			return nil, err
+		}
 		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
 		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
+			if result != nil {
+				result.WorkspaceInventoryRecoveryReceipt = inventoryReq.WorkspaceInventoryRecoveryReceipt
+			}
 			return result, err
 		}
 		e.logger.Info("falling through to full LaunchAgent for existing workspace",
@@ -1244,24 +1268,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		primaryRepo = &repoInfo{}
 	}
 
-	assignLaunchTaskEnvironmentID(session, existingEnv)
-
-	// A sibling can be prepared while the elected materializer is still
-	// creating the environment (for example, an inherit_parent autopilot child
-	// starts immediately after its parent). Wait for that durable owner to
-	// publish READY instead of turning a recoverable race into a terminal
-	// session failure.
-	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID != session.ID {
-		readyEnv, waitErr := e.waitForTaskEnvironmentReady(ctx, existingEnv.ID)
-		if waitErr != nil {
-			return nil, waitErr
-		}
-		existingEnv = readyEnv
-	}
 	workspaceReuseRequired := existingEnv != nil && existingEnv.MaterializationSessionID != session.ID
-	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
-		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
-	}
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired, existingEnv)
 	if err != nil {
 		return nil, err
@@ -1316,58 +1323,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 				zap.String("acp_session_id", token))
 		}
 	}
-	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
-		// A fresh or additional-session launch has no caller-facing knob to
-		// request repair (unlike RecoverSession's explicit
-		// repair_workspace_inventory action for resume), so guarded repair is
-		// attempted automatically here whenever the mismatch is plausibly
-		// recoverable. This is safe to attempt unconditionally because
-		// repairReuseEnvironmentInventory only ever mutates the canonical row
-		// when it can prove exactly one reciprocal identity; every other case
-		// returns a typed, non-mutating error. The idempotency key is derived
-		// solely from the session id so a caller can never influence which
-		// prior repair a retry of this same session dedupes against.
-		//
-		// A failed repair attempt (not applicable, ambiguous, or conflicting)
-		// falls back to the original ErrWorkspaceReuseUnsafe admission error
-		// rather than surfacing the repair-specific error: existing callers of
-		// this widely used launch path only understand the pre-existing
-		// fail-closed contract, and the silent self-heal attempt must never
-		// change what a caller observes when it does not help.
-		if !req.WorkspaceReuseRequired || !req.UseWorktree {
-			return nil, err
-		}
-		receipt, repairErr := e.repairReuseEnvironmentInventory(
-			ctx, task, session, req, existingEnv, allRepos,
-			workspaceInventoryLaunchIdempotencyKey(session.ID),
-		)
-		if repairErr != nil {
-			if e.logger != nil {
-				e.logger.Info("automatic workspace inventory repair did not resolve launch mismatch, falling back to fail-closed admission error",
-					zap.String("task_id", task.ID),
-					zap.String("session_id", sessionID),
-					zap.Error(repairErr))
-			}
-			return nil, err
-		}
-		req.WorkspaceInventoryRecoveryReceipt = receipt
-		if validateErr := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); validateErr != nil {
-			return nil, validateErr
-		}
-	} else if req.WorkspaceReuseRequired && req.UseWorktree {
-		receipt, repairErr := e.attestedWorkspaceInventoryRowsReceipt(
-			ctx, task, session, req, existingEnv, allRepos,
-		)
-		if repairErr != nil {
-			if e.logger != nil {
-				e.logger.Info("automatic workspace inventory repair receipt is not launchable",
-					zap.String("task_id", task.ID),
-					zap.String("session_id", sessionID),
-					zap.Error(repairErr))
-			}
-			return nil, fmt.Errorf("%w: workspace inventory repair receipt is not durably attested", models.ErrWorkspaceReuseUnsafe)
-		}
-		req.WorkspaceInventoryRecoveryReceipt = receipt
+	if err := e.admitLaunchWorkspaceInventory(ctx, task, session, req, existingEnv, allRepos); err != nil {
+		return nil, err
 	}
 
 	// Pass attachments for the initial prompt
@@ -1702,6 +1659,32 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		zap.String("agent_execution_id", resp.AgentExecutionID))
 
 	return execution, nil
+}
+
+func (e *Executor) preparedWorkspaceInventoryRequest(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	executorID string,
+	repositories []*repoInfo,
+	env *models.TaskEnvironment,
+) *LaunchAgentRequest {
+	metadata := cloneMetadata(task.Metadata)
+	if session.ExecutorProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata["executor_profile_id"] = session.ExecutorProfileID
+	}
+	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	reuseRequired := env != nil && env.MaterializationSessionID != session.ID
+	reuseRequired = workspaceReuseAllowed(env, execConfig.ExecutorType, reuseRequired, e.taskIsRepoBacked(ctx, task.ID))
+	return &LaunchAgentRequest{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		TaskEnvironmentID: session.TaskEnvironmentID, ExecutorType: execConfig.ExecutorType,
+		UseWorktree: shouldUseWorktree(execConfig.ExecutorType), WorkspaceReuseRequired: reuseRequired,
+		Repositories: buildRepoSpecs(repositories),
+	}
 }
 
 func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskEnvironment) {
