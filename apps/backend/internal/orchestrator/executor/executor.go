@@ -312,6 +312,13 @@ type AgentManagerClient interface {
 	// Used to detect stale AgentExecutionID values in the database after restart.
 	GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error)
 
+	// ListSessionIDsForTask returns the session IDs of executions registered
+	// in-memory for taskID, independent of any session's persisted database
+	// state. Used by StopByTaskID to recover a registered execution whose
+	// session row is already terminal in the database (e.g. FAILED after a
+	// never-started stall whose teardown attempt failed).
+	ListSessionIDsForTask(taskID string) []string
+
 	// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
 	// If targetBranch is provided, uses dynamic merge-base calculation for accurate filtering.
 	// Used for archive snapshot capture. Returns nil, nil if no execution exists.

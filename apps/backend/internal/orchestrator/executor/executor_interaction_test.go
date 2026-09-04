@@ -206,6 +206,169 @@ func TestStopSessionSynchronouslyStopsLateExecutionAfterSessionDeletion(t *testi
 	}
 }
 
+// TestStopByTaskID_StopsFailedSessionWithRegisteredExecution covers
+// @covers AC-TASKS-TASK-STOP-REACHABILITY-001.1-.2: a task whose only session
+// is FAILED in the database but still holds a registered execution (an
+// orphan left by a failed teardown attempt) must be stopped, and the
+// session's terminal state must survive — no CANCELLED transition.
+func TestStopByTaskID_StopsFailedSessionWithRegisteredExecution(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-1"] = &models.TaskSession{
+		ID:           "session-1",
+		TaskID:       "task-1",
+		State:        models.TaskSessionStateFailed,
+		ErrorMessage: "agent produced no output since start",
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		listSessionIDsForTaskFunc: func(taskID string) []string {
+			if taskID != "task-1" {
+				return nil
+			}
+			return []string{"session-1"}
+		},
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-orphan", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, force bool) error {
+			if !force {
+				t.Errorf("registry-recovered stop was not forced")
+			}
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if err := exec.StopByTaskID(context.Background(), "task-1", "cleanup", true); err != nil {
+		t.Fatalf("StopByTaskID: %v", err)
+	}
+	select {
+	case executionID := <-stopCalls:
+		if executionID != "execution-orphan" {
+			t.Fatalf("stopped execution = %q, want execution-orphan", executionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("registry-recovered execution was not stopped")
+	}
+	after, err := repo.GetTaskSession(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("get session after stop: %v", err)
+	}
+	if after.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %q, want unchanged FAILED", after.State)
+	}
+	if after.ErrorMessage != "agent produced no output since start" {
+		t.Fatalf("session error message = %q, want preserved launch-failure message", after.ErrorMessage)
+	}
+}
+
+// TestStopByTaskID_ActiveSessionKeepsCancellationTransition pins the
+// unchanged path: a task with an active session behaves exactly as before —
+// the session transitions to CANCELLED and its execution is stopped.
+func TestStopByTaskID_ActiveSessionKeepsCancellationTransition(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-1"] = &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateRunning,
+	}
+	repo.listActiveTaskSessionsByTaskIDFunc = func(_ context.Context, taskID string) ([]*models.TaskSession, error) {
+		if taskID != "task-1" {
+			return nil, nil
+		}
+		return []*models.TaskSession{repo.sessions["session-1"]}, nil
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-active", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	if err := exec.StopByTaskID(context.Background(), "task-1", "cleanup", true); err != nil {
+		t.Fatalf("StopByTaskID: %v", err)
+	}
+	select {
+	case executionID := <-stopCalls:
+		if executionID != "execution-active" {
+			t.Fatalf("stopped execution = %q, want execution-active", executionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("active session's execution was not stopped")
+	}
+	after, err := repo.GetTaskSession(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("get session after stop: %v", err)
+	}
+	if after.State != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED", after.State)
+	}
+}
+
+// TestStopByTaskID_NoActiveSessionAndNoRegisteredExecutionReportsNotFound
+// pins the unchanged path: a task with neither an active session nor a
+// registered execution still returns ErrExecutionNotFound and changes
+// nothing; a repeated stop after the executions are gone creates no
+// duplicate transition.
+func TestStopByTaskID_NoActiveSessionAndNoRegisteredExecutionReportsNotFound(t *testing.T) {
+	repo := newMockRepository()
+	manager := &mockAgentManager{}
+	exec := newTestExecutor(t, manager, repo)
+
+	err := exec.StopByTaskID(context.Background(), "task-empty", "cleanup", true)
+	if !errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("error = %v, want ErrExecutionNotFound", err)
+	}
+
+	// Repeated stop after the (nonexistent) executions are gone must behave
+	// identically — no duplicate transition to create.
+	err = exec.StopByTaskID(context.Background(), "task-empty", "cleanup", true)
+	if !errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("repeated stop error = %v, want ErrExecutionNotFound", err)
+	}
+}
+
+// TestStopByTaskID_RegistryRecoveryLoadFailureIsNotReportedAsNotFound covers
+// the registry-recovery path's own failure mode: a session is registered in
+// the execution registry (so a real orphan exists) but its database row
+// fails to load (e.g. a transient "database is locked"). The active-session
+// query legitimately returns nothing, so if the load failure were silently
+// swallowed the same way a missing row is, StopByTaskID would report
+// ErrExecutionNotFound — indistinguishable from "there is nothing to stop" —
+// which is exactly the reachability defect this recovery path exists to
+// eliminate. It must surface the load failure instead.
+func TestStopByTaskID_RegistryRecoveryLoadFailureIsNotReportedAsNotFound(t *testing.T) {
+	repo := newMockRepository()
+	loadFailure := errors.New("database is locked")
+	repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+		return nil, loadFailure
+	}
+	manager := &mockAgentManager{
+		listSessionIDsForTaskFunc: func(taskID string) []string {
+			if taskID != "task-1" {
+				return nil
+			}
+			return []string{"session-1"}
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	err := exec.StopByTaskID(context.Background(), "task-1", "cleanup", true)
+	if err == nil {
+		t.Fatal("StopByTaskID: want an error, got nil")
+	}
+	if errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("error = %v, want the load failure surfaced instead of ErrExecutionNotFound", err)
+	}
+	if !errors.Is(err, loadFailure) {
+		t.Fatalf("error = %v, want it to wrap %v", err, loadFailure)
+	}
+}
+
 func TestStopSessionDetailed_RejectsInvalidSession(t *testing.T) {
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 

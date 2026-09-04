@@ -702,6 +702,10 @@ func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, session
 	return a.mgr.GetExecutionIDForSession(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) ListSessionIDsForTask(taskID string) []string {
+	return a.mgr.ListSessionIDsForTask(taskID)
+}
+
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	status, ok := a.mgr.GetRemoteStatusBySessionID(ctx, sessionID)
 	if !ok || status == nil {

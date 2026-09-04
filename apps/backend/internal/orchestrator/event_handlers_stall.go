@@ -118,7 +118,33 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 	}
 	if payload.NeverStarted {
 		s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, errAgentNeverStarted, session)
+		s.stopNeverStartedExecution(ctx, payload)
 	}
+}
+
+// stopNeverStartedExecution tears down the process behind a never-started
+// stall. It runs after the session and task have already been recorded
+// FAILED, so a teardown failure never changes that recorded state: FAILED and
+// its launch-failure message stay authoritative either way. The stop uses a
+// context detached from the caller's via context.WithoutCancel so a cancelled
+// request cannot abandon the teardown midway. lifecycle.ErrExecutionNotFound
+// means nothing is running and is treated as success; any other failure is
+// logged and left for a later stop to retry against the still-registered
+// execution.
+func (s *Service) stopNeverStartedExecution(ctx context.Context, payload lifecycle.AgentStalledPayload) {
+	if payload.AgentExecutionID == "" || s.agentManager == nil {
+		return
+	}
+	stopCtx := context.WithoutCancel(ctx)
+	err := s.agentManager.StopAgentWithReason(stopCtx, payload.AgentExecutionID, "agent never started before stall", true)
+	if err == nil || errors.Is(err, lifecycle.ErrExecutionNotFound) {
+		return
+	}
+	s.logger.Warn("failed to tear down never-started execution after stall",
+		zap.String("task_id", payload.TaskID),
+		zap.String("session_id", payload.SessionID),
+		zap.String("execution_id", payload.AgentExecutionID),
+		zap.Error(err))
 }
 
 func stallNoticeContent(payload lifecycle.AgentStalledPayload) string {

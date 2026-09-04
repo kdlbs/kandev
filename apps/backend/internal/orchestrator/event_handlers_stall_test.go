@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -216,6 +217,157 @@ func TestHandleAgentStalled_RejectsSettledOrStalePrompt(t *testing.T) {
 	svc.handleAgentStalled(ctx, payload)
 	if len(messages.sessionMessages) != 0 {
 		t.Fatalf("stale generation messages = %d, want 0", len(messages.sessionMessages))
+	}
+}
+
+// TestHandleAgentStalled_NeverStartedStopsExecution covers
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.10: after the never-started
+// branch records the session and task FAILED, it must also tear down the
+// execution named by the payload, forced, exactly once.
+func TestHandleAgentStalled_NeverStartedStopsExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	agentMgr.mu.Lock()
+	stopCalls := agentMgr.stopAgentWithReasonArgs
+	agentMgr.mu.Unlock()
+	if len(stopCalls) != 1 {
+		t.Fatalf("StopAgentWithReason calls = %d, want 1", len(stopCalls))
+	}
+	if stopCalls[0].ExecutionID != "execution-1" {
+		t.Fatalf("stopped execution = %q, want execution-1", stopCalls[0].ExecutionID)
+	}
+	if !stopCalls[0].Force {
+		t.Fatal("teardown stop was not forced")
+	}
+
+	after, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session after handling stall: %v", err)
+	}
+	if after.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %q, want FAILED", after.State)
+	}
+}
+
+// TestHandleAgentStalled_NeverStartedKeepsFailedStateWhenStopFails covers
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.11: a teardown failure must not
+// overwrite the recorded FAILED state or its launch-failure message.
+func TestHandleAgentStalled_NeverStartedKeepsFailedStateWhenStopFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+		stopAgentWithReasonErr:   errors.New("agentctl unreachable"),
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	after, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session after handling stall: %v", err)
+	}
+	if after.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %q, want FAILED despite teardown failure", after.State)
+	}
+	if after.ErrorMessage != errAgentNeverStarted.Error() {
+		t.Fatalf("session error message = %q, want %q", after.ErrorMessage, errAgentNeverStarted.Error())
+	}
+}
+
+// TestHandleAgentStalled_AdvisoryStallStopsNothing covers
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.7: an advisory stall (agent
+// produced output before stalling) must not tear down the execution.
+func TestHandleAgentStalled_AdvisoryStallStopsNothing(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		ToolName:         "shell",
+		ToolTitle:        "Start dev server",
+	})
+
+	agentMgr.mu.Lock()
+	stopCalls := len(agentMgr.stopAgentWithReasonArgs)
+	agentMgr.mu.Unlock()
+	if stopCalls != 0 {
+		t.Fatalf("StopAgentWithReason calls = %d, want 0 for an advisory stall", stopCalls)
 	}
 }
 

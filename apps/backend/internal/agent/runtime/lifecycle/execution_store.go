@@ -221,6 +221,28 @@ func (s *ExecutionStore) ActivePromptGeneration(executionID string) uint64 {
 	return gen
 }
 
+// ListSessionIDsForTask returns the session IDs of executions registered
+// in-memory under taskID. Read-only snapshot of the execution registry,
+// independent of any session's persisted database state — it is how a
+// task-scoped stop recovers a session whose row is already terminal (e.g.
+// FAILED) but whose execution is still registered because a prior teardown
+// attempt failed.
+func (s *ExecutionStore) ListSessionIDsForTask(taskID string) []string {
+	if taskID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var sessionIDs []string
+	for _, execution := range s.executions {
+		if execution.TaskID == taskID && execution.SessionID != "" {
+			sessionIDs = append(sessionIDs, execution.SessionID)
+		}
+	}
+	return sessionIDs
+}
+
 // GetByTaskEnvironmentID returns any execution associated with a task environment ID.
 func (s *ExecutionStore) GetByTaskEnvironmentID(taskEnvironmentID string) (*AgentExecution, bool) {
 	s.mu.RLock()

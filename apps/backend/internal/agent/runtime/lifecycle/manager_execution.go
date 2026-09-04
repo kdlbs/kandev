@@ -406,6 +406,15 @@ func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) 
 	return "", fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 }
 
+// ListSessionIDsForTask returns the session IDs of in-memory registered
+// executions for taskID, independent of any session's persisted database
+// state. Executor.StopByTaskID uses this to recover an execution left
+// orphaned by a session row that is already terminal (see the never-started
+// stall teardown path in event_handlers_stall.go).
+func (m *Manager) ListSessionIDsForTask(taskID string) []string {
+	return m.executionStore.ListSessionIDsForTask(taskID)
+}
+
 // GetACPSessionIDForSession returns the ACP conversation currently owned by a
 // live execution. The orchestrator uses this optional accessor after a context
 // reset to persist the new conversation immediately, instead of depending on
