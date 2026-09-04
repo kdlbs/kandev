@@ -458,8 +458,7 @@ func TestPluginHost_Tasks_UpdateSucceedsWithMask(t *testing.T) {
 	title := "Renamed"
 	state := "IN_PROGRESS"
 	priority := "high"
-	labels := []string{}
-	task, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title, State: &state, Priority: &priority, Labels: &labels})
+	task, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title, State: &state, Priority: &priority})
 	if err != nil {
 		t.Fatalf("Update() unexpected error: %v", err)
 	}
@@ -474,9 +473,6 @@ func TestPluginHost_Tasks_UpdateSucceedsWithMask(t *testing.T) {
 	}
 	if d.taskWriter.lastUpdate.Priority == nil || *d.taskWriter.lastUpdate.Priority != "high" {
 		t.Fatalf("priority = %v, want high", d.taskWriter.lastUpdate.Priority)
-	}
-	if d.taskWriter.lastUpdate.Labels == nil || len(*d.taskWriter.lastUpdate.Labels) != 0 {
-		t.Fatalf("labels = %v, want non-nil empty slice to clear", d.taskWriter.lastUpdate.Labels)
 	}
 	if task.Priority != "high" {
 		t.Fatalf("Update() priority = %q, want high", task.Priority)

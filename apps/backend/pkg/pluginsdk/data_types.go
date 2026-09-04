@@ -122,7 +122,6 @@ type Task struct {
 	WorkflowStepID         string
 	Position               int32
 	AssigneeAgentProfileID string
-	Labels                 []string
 	Autopilot              bool
 	WIPAdmitted            bool
 	QueuedForStepID        string
@@ -220,7 +219,6 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		WorkflowStepId:         t.WorkflowStepID,
 		Position:               t.Position,
 		AssigneeAgentProfileId: t.AssigneeAgentProfileID,
-		Labels:                 t.Labels,
 		Autopilot:              t.Autopilot,
 		WipAdmitted:            t.WIPAdmitted,
 		QueuedForStepId:        t.QueuedForStepID,
@@ -291,7 +289,6 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		WorkflowStepID:         p.GetWorkflowStepId(),
 		Position:               p.GetPosition(),
 		AssigneeAgentProfileID: p.GetAssigneeAgentProfileId(),
-		Labels:                 p.GetLabels(),
 		Autopilot:              p.GetAutopilot(),
 		WIPAdmitted:            p.GetWipAdmitted(),
 		QueuedForStepID:        p.GetQueuedForStepId(),
@@ -1046,7 +1043,6 @@ type CreateTaskInput struct {
 	// launch failure does not fail task creation.
 	StartAgent   bool
 	Priority     string
-	Labels       []string
 	Repositories []PluginTaskRepository
 	Launch       *PluginTaskLaunchOptions
 	Metadata     map[string]any
@@ -1069,7 +1065,6 @@ func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
 		Launch:         in.Launch.toProto(),
 		Metadata:       metadata,
 		Priority:       in.Priority,
-		Labels:         in.Labels,
 	}, nil
 }
 
@@ -1093,7 +1088,6 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, e
 		Launch:         pluginTaskLaunchOptionsFromProto(p.GetLaunch()),
 		Metadata:       metadata,
 		Priority:       p.GetPriority(),
-		Labels:         p.GetLabels(),
 	}, nil
 }
 
@@ -1218,7 +1212,6 @@ type UpdateTaskInput struct {
 	State          *string
 	WorkflowStepID *string
 	Priority       *string
-	Labels         *[]string
 }
 
 func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
@@ -1229,7 +1222,6 @@ func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
 		State:          in.State,
 		WorkflowStepId: in.WorkflowStepID,
 		Priority:       in.Priority,
-		Labels:         taskLabelsToProto(in.Labels),
 	}
 }
 
@@ -1244,26 +1236,7 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 		State:          p.State,
 		WorkflowStepID: p.WorkflowStepId,
 		Priority:       p.Priority,
-		Labels:         taskLabelsFromProto(p.Labels),
 	}
-}
-
-func taskLabelsToProto(labels *[]string) *pluginv1.TaskLabels {
-	if labels == nil {
-		return nil
-	}
-	return &pluginv1.TaskLabels{Values: *labels}
-}
-
-func taskLabelsFromProto(labels *pluginv1.TaskLabels) *[]string {
-	if labels == nil {
-		return nil
-	}
-	values := labels.GetValues()
-	if values == nil {
-		values = []string{}
-	}
-	return &values
 }
 
 // MoveTaskInput is the Go-native mirror of kandev.plugin.v1.MoveTaskRequest.

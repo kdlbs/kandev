@@ -790,8 +790,28 @@ var allowedAttachmentTypes = map[string]struct{}{
 	"resource": {},
 }
 
-func encodeTaskLabels(labels []string) string {
-	return service.EncodeTaskLabels(labels)
+func encodeTaskLabels(labels []string) (string, error) {
+	normalized := make([]string, 0, len(labels))
+	seen := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		normalized = append(normalized, label)
+	}
+	if len(normalized) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func validateAttachments(items []v1.MessageAttachment) error {
@@ -848,7 +868,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	labels := encodeTaskLabels(body.Labels)
+	labels, err := encodeTaskLabels(body.Labels)
+	if err != nil {
+		h.logger.Error("failed to encode task labels", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode task labels"})
+		return
+	}
 	if err := validateAttachments(body.Attachments); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

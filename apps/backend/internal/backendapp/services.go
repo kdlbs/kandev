@@ -1184,7 +1184,6 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		Repositories:   repositories,
 		PlanMode:       in.PlanMode,
 		Priority:       in.Priority,
-		Labels:         taskservice.EncodeTaskLabels(in.Labels),
 		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
@@ -1308,10 +1307,6 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		Title:       in.Title,
 		Description: in.Description,
 		Priority:    in.Priority,
-	}
-	if in.Labels != nil {
-		labels := taskservice.EncodeTaskLabelsForUpdate(*in.Labels)
-		req.Labels = &labels
 	}
 	if in.State != nil {
 		// v1.TaskState is a string type, so the cast can't fail — validate the

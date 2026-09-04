@@ -127,7 +127,6 @@ func taskModelToDTO(t *taskmodels.Task) pluginsdk.Task {
 		WorkflowStepID:         t.WorkflowStepID,
 		Position:               int32(t.Position),
 		AssigneeAgentProfileID: t.AssigneeAgentProfileID,
-		Labels:                 taskmodels.DecodeTaskLabels(t.Labels),
 		Autopilot:              t.Autopilot,
 		WIPAdmitted:            t.WIPAdmitted,
 		QueuedForStepID:        t.QueuedForStepID,

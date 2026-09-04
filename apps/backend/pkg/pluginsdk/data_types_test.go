@@ -61,7 +61,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 			ChecksTotal: 5, ChecksPassing: 5, Additions: 12, Deletions: 3, AuthorLogin: "nova28",
 		}},
 		WorkflowStepID: "step-review", Position: 4, AssigneeAgentProfileID: "agent-1",
-		Labels: []string{"plugin", "ready"}, Autopilot: true, WIPAdmitted: true,
+		Autopilot: true, WIPAdmitted: true,
 		QueuedForStepID: "step-build", QueuedAt: strPtr("2026-07-16T10:00:00Z"),
 		ProjectID: "project-1", ExternalID: "external-1",
 	}
@@ -219,7 +219,6 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 		WorkflowID:  "wf-1",
 		Title:       "Plugin-created task",
 		Priority:    "high",
-		Labels:      []string{"bug", "plugin"},
 		Repositories: []PluginTaskRepository{{
 			Remote: &RemoteRepositoryDescriptor{
 				ProviderID: "example", ProviderHost: "code.example.test", OwnerOrProject: "team",
@@ -239,37 +238,27 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 	require.Equal(t, input, back)
 }
 
-func TestCreateTaskInputProtoRoundTripPreservesPriorityAndLabels(t *testing.T) {
+func TestCreateTaskInputProtoRoundTripPreservesPriority(t *testing.T) {
 	input := CreateTaskInput{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "plugin task",
 		Priority:    "critical",
-		Labels:      []string{"security", "urgent"},
 	}
 	proto, err := input.toProto()
 	require.NoError(t, err)
 	require.Equal(t, "critical", proto.GetPriority())
-	require.Equal(t, []string{"security", "urgent"}, proto.GetLabels())
 
 	back, err := createTaskInputFromProto(proto)
 	require.NoError(t, err)
 	require.Equal(t, input, back)
 }
 
-func TestUpdateTaskInputProtoRoundTripPreservesLabelsPresence(t *testing.T) {
+func TestUpdateTaskInputProtoRoundTripPreservesPriority(t *testing.T) {
 	priority := "low"
-	labels := []string{}
-	input := UpdateTaskInput{ID: "task-1", Priority: &priority, Labels: &labels}
+	input := UpdateTaskInput{ID: "task-1", Priority: &priority}
 
 	proto := input.toProto()
-	require.NotNil(t, proto.Labels, "an empty non-nil label slice must clear labels")
-	require.Empty(t, proto.Labels.Values)
-	require.Equal(t, input, updateTaskInputFromProto(proto))
-
-	input.Labels = nil
-	proto = input.toProto()
-	require.Nil(t, proto.Labels, "nil labels must leave labels unchanged")
 	require.Equal(t, input, updateTaskInputFromProto(proto))
 }
 

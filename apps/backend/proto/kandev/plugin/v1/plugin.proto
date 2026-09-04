@@ -394,9 +394,6 @@ message Task {
   // `runner` row in workflow_step_participants (ADR 0005 Wave F); this is the
   // same read-time projection kandev's own callers consume.
   string assignee_agent_profile_id = 22;
-  // Task labels. Stored as a JSON array string on the model; carried here as a
-  // real repeated field so a plugin does not have to re-parse it.
-  repeated string labels = 23;
   bool autopilot = 24;
   // Whether the task consumes a slot in its current step's WIP capacity. A
   // queued task stays visible but admits nothing, so a capacity report that
@@ -824,7 +821,6 @@ message CreateTaskRequest {
   optional PluginTaskLaunchOptions launch = 9;
   google.protobuf.Struct metadata = 10; // plugin namespace only; host reserves source.
   string priority = 11; // empty defaults to medium
-  repeated string labels = 12;
 }
 message PluginTaskRepository {
   string repository_id = 1; // existing Kandev repository, or empty with remote below
@@ -857,9 +853,6 @@ message PluginTaskLaunchOptions {
 message CreateTaskResponse {
   Task task = 1;
 }
-message TaskLabels {
-  repeated string values = 1;
-}
 message UpdateTaskRequest {
   string id = 1;
   optional string title = 2;
@@ -867,7 +860,6 @@ message UpdateTaskRequest {
   optional string state = 4;
   optional string workflow_step_id = 5;
   optional string priority = 6;
-  optional TaskLabels labels = 7;
 }
 message UpdateTaskResponse {
   Task task = 1;

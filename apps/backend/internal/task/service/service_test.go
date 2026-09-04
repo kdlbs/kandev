@@ -638,49 +638,6 @@ func TestService_CreateTask_DefaultsPriorityWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestService_UpdateTaskLabelsPreservesOmittedVersusClear(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	ctx := context.Background()
-	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-labels", Name: "Workspace"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-labels", WorkspaceID: "ws-labels", Name: "Workflow"}); err != nil {
-		t.Fatalf("CreateWorkflow: %v", err)
-	}
-	if err := repo.CreateTask(ctx, &models.Task{ID: "task-labels", WorkspaceID: "ws-labels", WorkflowID: "wf-labels", Title: "Labels", Priority: "medium", Labels: `["bug"]`}); err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-
-	updated, err := svc.UpdateTask(ctx, "task-labels", &UpdateTaskRequest{Description: strptr("unchanged labels")})
-	if err != nil {
-		t.Fatalf("UpdateTask omit labels: %v", err)
-	}
-	if updated.Labels != `["bug"]` {
-		t.Errorf("labels after omit = %q, want [\"bug\"]", updated.Labels)
-	}
-
-	empty := ""
-	if _, err := svc.UpdateTask(ctx, "task-labels", &UpdateTaskRequest{Labels: &empty}); err == nil {
-		t.Fatal("UpdateTask accepted an empty serialized labels value")
-	}
-	unchanged, err := repo.GetTask(ctx, "task-labels")
-	if err != nil {
-		t.Fatalf("GetTask after rejected label update: %v", err)
-	}
-	if unchanged.Labels != `["bug"]` {
-		t.Errorf("labels after rejected empty update = %q, want [\"bug\"]", unchanged.Labels)
-	}
-
-	clear := `[]`
-	updated, err = svc.UpdateTask(ctx, "task-labels", &UpdateTaskRequest{Labels: &clear})
-	if err != nil {
-		t.Fatalf("UpdateTask clear labels: %v", err)
-	}
-	if updated.Labels != `[]` {
-		t.Errorf("labels after clear = %q, want []", updated.Labels)
-	}
-}
-
 func TestService_TaskPriorityRejectsUnknownValues(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

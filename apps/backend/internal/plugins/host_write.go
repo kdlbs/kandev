@@ -49,7 +49,6 @@ type TaskCreateInput struct {
 	Metadata       map[string]any
 	PlanMode       bool
 	Priority       string
-	Labels         []string
 	// StartAgent reports that the caller will launch an agent for this task
 	// right after creation. The adapter maps it onto CreateTaskRequest so step
 	// resolution sends the task to the first step that runs agents rather than
@@ -77,7 +76,6 @@ type TaskUpdateInput struct {
 	State          *string
 	WorkflowStepID *string
 	Priority       *string
-	Labels         *[]string
 }
 
 // TaskMoveInput is the plugins-local task-move request a taskWriter adapter
@@ -216,7 +214,6 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		Metadata:       metadata,
 		PlanMode:       launch.PlanMode,
 		Priority:       in.Priority,
-		Labels:         in.Labels,
 		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
@@ -249,7 +246,6 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 		State:          in.State,
 		WorkflowStepID: in.WorkflowStepID,
 		Priority:       in.Priority,
-		Labels:         in.Labels,
 	})
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {

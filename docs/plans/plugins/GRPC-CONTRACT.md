@@ -245,10 +245,9 @@ created task's metadata — a plugin cannot set it itself. `CreateTask` resolves
 sane placement defaults when the plugin omits them: an empty `workspace_id`
 resolves to the single workspace (ambiguous otherwise → `InvalidArgument`), an
 empty `workflow_id` to that workspace's first workflow. `UpdateTask` accepts a
-conservative field mask — `title`, `description`, `state`, `priority`, and
-`labels` (each optional/leave-unset). `workflow_step_id` remains present for
+conservative field mask — `title`, `description`, `state`, and `priority` (each
+optional/leave-unset). `workflow_step_id` remains present for
 wire compatibility but is rejected; plugins use `MoveTask` for transitions.
-Labels distinguish omission from an explicit empty slice, which clears labels.
 `start_agent` best-effort auto-launches an agent
 through the orchestrator; a launch failure does not fail the create.
 

@@ -617,11 +617,6 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 			return err
 		}
 	}
-	if req.Labels != "" {
-		if err := ValidateTaskLabels(req.Labels); err != nil {
-			return err
-		}
-	}
 	isOffice := isOfficeRequest(req)
 	// Automation runs never land on a board, so they need no workflow — the
 	// trigger is the start signal, not a column. They are still ordinary,
@@ -1649,11 +1644,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			return nil, err
 		}
 	}
-	if req.Labels != nil {
-		if err := ValidateTaskLabels(*req.Labels); err != nil {
-			return nil, err
-		}
-	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1672,9 +1662,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 	if req.Priority != nil {
 		task.Priority = *req.Priority
-	}
-	if req.Labels != nil {
-		task.Labels = *req.Labels
 	}
 	if req.State != nil && task.State != *req.State {
 		current := task.State
