@@ -69,6 +69,16 @@ func TestConfigContext_ContainsSections(t *testing.T) {
 	assert.Contains(t, ConfigContext(), "EXAMPLE REQUESTS")
 }
 
+func TestConfigContext_ExplainsDispatchBoundary(t *testing.T) {
+	context := ConfigContext()
+
+	assert.Contains(t, context, "repository-less ephemeral task")
+	assert.Contains(t, context, "create_task_kandev")
+	assert.Contains(t, context, `parent_id="self"`)
+	assert.Contains(t, context, "Do not retry those tools from Configuration Chat")
+}
+
+
 func TestConfigContext_HasExactlyOneSessionIDPlaceholder(t *testing.T) {
 	count := strings.Count(ConfigContext(), "{session_id}")
 	assert.Equal(t, 1, count, "ConfigContext should have exactly 1 {session_id} placeholder")

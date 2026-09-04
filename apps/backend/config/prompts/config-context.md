@@ -53,6 +53,11 @@ TASK TOOLS:
 - archive_task_kandev: Archive a task. Required: task_id.
 - update_task_state_kandev: Update task state. Required: task_id, state (TODO, CREATED, SCHEDULING, IN_PROGRESS, REVIEW, BLOCKED, WAITING_FOR_INPUT, COMPLETED, FAILED, CANCELLED).
 
+DISPATCH BOUNDARY:
+- Configuration Chat is a repository-less ephemeral task. It cannot create persistent subtasks or sessions; `create_task_kandev`, `spawn_session_kandev`, and `message_task_kandev` are unavailable here.
+- For persistent subtask dispatch, continue from a normal Kandev task session and use `create_task_kandev` with `parent_id="self"`. Do not retry those tools from Configuration Chat.
+- The external `/mcp` endpoint can create top-level tasks, but an ephemeral Configuration Chat task cannot be their parent.
+
 INTERACTION:
 - ask_user_question_kandev: Ask the user one or more clarifying questions in a single tool call. Required: questions (array of 1-4 question objects; each has prompt and options (2-6 {label, description})). Optional: context.
 
