@@ -58,7 +58,7 @@
   "databaseOptimize": "優化",
   "databaseOptimizeHelp": "讓數據庫刷新內部索引，使常見查詢保持快速。大量刪除數據後或應用感覺變慢時執行。快速且安全；不更改任何數據。",
   "databasePageDescription": "數據庫驅動、大小與可用維護控制項。",
-  "dataStoragePageDescription": "數據庫統計、備份、磁碟清理和伺服器日誌。",
+  "dataStoragePageDescription": "數據庫統計、備份和伺服器日誌。",
   "databasePath": "路徑",
   "databaseRunOptimize": "執行優化",
   "databaseRunVacuum": "執行 vacuum",

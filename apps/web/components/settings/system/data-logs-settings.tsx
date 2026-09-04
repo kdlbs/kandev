@@ -7,7 +7,6 @@ import { SettingsTarget } from "@/components/settings/settings-target";
 import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { LogViewer } from "@/components/settings/system/log-viewer";
-import { StorageMaintenanceSettings } from "@/components/settings/system/storage/storage-maintenance-settings";
 import { BACKUP_SQL_COMMAND } from "@/components/settings/system/system-route-shell";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
 
@@ -22,8 +21,8 @@ function SectionHeading({ title, description }: { title: string; description?: s
   );
 }
 
-/** Data & storage: the former Database, Backups, Storage and Logs pages as one page. */
-export function DataStorageSettings() {
+/** Data & Logs contains database status, backups, and diagnostic logs. */
+export function DataLogsSettings() {
   const { t } = useTranslation();
   const backupDirectory = useAppStore((s) => s.system.database?.backup_directory);
   return (
@@ -50,14 +49,6 @@ export function DataStorageSettings() {
         />
         <BackupsTable />
       </SettingsTarget>
-      <Separator />
-      <div className="space-y-4">
-        <SectionHeading
-          title={t("system:storageTitle")}
-          description={t("system:storageDescription")}
-        />
-        <StorageMaintenanceSettings />
-      </div>
       <Separator />
       <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.logs} className="space-y-4">
         <SectionHeading
