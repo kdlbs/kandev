@@ -3,6 +3,7 @@ package dynamic
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,18 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
+
+// pendingKeys reads r.pending directly; the test lives in package dynamic so
+// it needs no exported accessor for a field production code never consumes.
+func pendingKeys(r *CircuitRegistry) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	keys := make([]string, 0, len(r.pending))
+	for key := range r.pending {
+		keys = append(keys, key)
+	}
+	return keys
+}
 
 // stubCircuitPersistence is an in-memory CircuitPersistence whose SaveCircuit
 // can be made to fail on demand, to exercise the persistence-failure paths.
@@ -77,9 +90,9 @@ func TestPersistSnapshotFailureIsSurfacedOnOpen(t *testing.T) {
 
 	registry.Open("credential:acme", time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
 
-	pending := registry.PendingPersists()
+	pending := pendingKeys(registry)
 	if len(pending) != 1 || pending[0] != "credential:acme" {
-		t.Fatalf("PendingPersists = %v, want [credential:acme]", pending)
+		t.Fatalf("pending keys = %v, want [credential:acme]", pending)
 	}
 	entries := observed.FilterMessageSnippet("persist circuit").All()
 	if len(entries) != 1 {
@@ -104,9 +117,9 @@ func TestPersistSnapshotFailureIsSurfacedOnAcquireProbe(t *testing.T) {
 		t.Fatalf("AcquireProbe: expected success, lease=%#v", lease)
 	}
 
-	pending := registry.PendingPersists()
+	pending := pendingKeys(registry)
 	if len(pending) != 1 || pending[0] != "credential:acme" {
-		t.Fatalf("PendingPersists = %v, want [credential:acme]", pending)
+		t.Fatalf("pending keys = %v, want [credential:acme]", pending)
 	}
 	entries := observed.FilterMessageSnippet("persist circuit").All()
 	if len(entries) != 1 {
@@ -132,9 +145,9 @@ func TestPersistSnapshotFailureIsSurfacedOnReleaseProbe(t *testing.T) {
 	persist.setFailing(true)
 	registry.ReleaseProbe(lease, true, time.Minute)
 
-	pending := registry.PendingPersists()
+	pending := pendingKeys(registry)
 	if len(pending) != 1 || pending[0] != "credential:acme" {
-		t.Fatalf("PendingPersists = %v, want [credential:acme]", pending)
+		t.Fatalf("pending keys = %v, want [credential:acme]", pending)
 	}
 	entries := observed.FilterMessageSnippet("persist circuit").All()
 	if len(entries) != 1 {
@@ -173,8 +186,8 @@ func TestFailedPersistDoesNotSurviveRestart(t *testing.T) {
 	persist.setFailing(false)
 	registry.Open("credential:other", time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
 
-	if len(registry.PendingPersists()) != 0 {
-		t.Fatalf("PendingPersists should be empty after a successful flush, got %v", registry.PendingPersists())
+	if len(pendingKeys(registry)) != 0 {
+		t.Fatalf("pending keys should be empty after a successful flush, got %v", pendingKeys(registry))
 	}
 	if _, ok := persist.row("credential:acme"); !ok {
 		t.Fatalf("durable row for credential:acme should have been backfilled")
@@ -191,7 +204,10 @@ func TestFailedPersistDoesNotSurviveRestart(t *testing.T) {
 
 // TestFlushWritesCurrentSnapshotNotStale ensures the pending-flush re-reads
 // the circuit's current in-memory state rather than replaying the stale
-// snapshot captured at the time of the original failed write.
+// snapshot captured at the time of the original failed write. It observes the
+// flush write in isolation by triggering it through a mutation of a
+// DIFFERENT key, so credential:acme's own write never runs in that call and
+// the persisted row can only have come from the flush.
 func TestFlushWritesCurrentSnapshotNotStale(t *testing.T) {
 	persist := newStubCircuitPersistence()
 	persist.setFailing(true)
@@ -200,6 +216,9 @@ func TestFlushWritesCurrentSnapshotNotStale(t *testing.T) {
 		WithCircuitClock(func() time.Time { return time.Unix(1000, 0) }),
 	)
 
+	// credential:acme fails to persist while opening, then advances to
+	// half-open via AcquireProbe -- still while persistence is failing, so
+	// the durable store never observes either state directly.
 	registry.Open("credential:acme", time.Unix(900, 0), routingerr.CodeProviderUnavailable)
 	lease, ok := registry.AcquireProbe("credential:acme", time.Minute)
 	if !ok {
@@ -207,17 +226,52 @@ func TestFlushWritesCurrentSnapshotNotStale(t *testing.T) {
 	}
 
 	persist.setFailing(false)
-	registry.ReleaseProbe(lease, true, time.Minute)
+	registry.Open("credential:other", time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
 
-	if len(registry.PendingPersists()) != 0 {
-		t.Fatalf("PendingPersists should be empty, got %v", registry.PendingPersists())
-	}
 	row, ok := persist.row("credential:acme")
 	if !ok {
-		t.Fatalf("durable row for credential:acme should exist")
+		t.Fatalf("durable row for credential:acme should have been backfilled by the flush")
 	}
-	if row.State != CircuitClosed {
-		t.Fatalf("durable row state = %v, want %v (current snapshot, not stale open)", row.State, CircuitClosed)
+	if row.State != CircuitHalfOpen {
+		t.Fatalf("durable row state = %v, want %v (current snapshot, not the stale open snapshot from the original failure)", row.State, CircuitHalfOpen)
+	}
+	if !row.ProbeUntil.Equal(lease.ExpiresAt) {
+		t.Fatalf("durable row probeUntil = %v, want %v (current snapshot, not stale)", row.ProbeUntil, lease.ExpiresAt)
+	}
+	if pending := pendingKeys(registry); len(pending) != 0 {
+		t.Fatalf("pending keys should be empty after the flush, got %v", pending)
+	}
+
+	// The original mutation path still ends up durable too, via its own write.
+	registry.ReleaseProbe(lease, true, time.Minute)
+	row, ok = persist.row("credential:acme")
+	if !ok || row.State != CircuitClosed {
+		t.Fatalf("durable row after ReleaseProbe = %+v, ok=%v, want closed", row, ok)
+	}
+}
+
+// TestFlushDuringOutageIsLinearNotQuadratic pins the Finding-2 fix: opening N
+// circuits during a sustained persistence outage must cost O(N) SaveCircuit
+// calls (bounded fan-out per mutation), not O(N^2) from retrying every
+// pending key on every mutation.
+func TestFlushDuringOutageIsLinearNotQuadratic(t *testing.T) {
+	persist := newStubCircuitPersistence()
+	persist.setFailing(true)
+	registry := NewCircuitRegistry(WithCircuitPersistence(persist))
+
+	const n = 50
+	for i := 0; i < n; i++ {
+		registry.Open(fmt.Sprintf("credential:c%d", i), time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
+	}
+
+	// Quadratic behavior (retry every pending key on every mutation) would
+	// cost n + n(n-1)/2 = 1,275 calls for n=50. Bounded fan-out costs at most
+	// n own writes plus pendingFlushBudget flush attempts per mutation.
+	if want := n * (pendingFlushBudget + 1); persist.saves > want {
+		t.Fatalf("SaveCircuit calls = %d, want <= %d (linear in N, bounded flush fan-out)", persist.saves, want)
+	}
+	if len(pendingKeys(registry)) != n {
+		t.Fatalf("pending keys = %d, want %d (persistence is still down)", len(pendingKeys(registry)), n)
 	}
 }
 
@@ -228,8 +282,8 @@ func TestCleanPathLeavesNoPendingAndLogsNothing(t *testing.T) {
 
 	registry.Open("credential:acme", time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
 
-	if pending := registry.PendingPersists(); len(pending) != 0 {
-		t.Fatalf("PendingPersists = %v, want empty", pending)
+	if pending := pendingKeys(registry); len(pending) != 0 {
+		t.Fatalf("pending keys = %v, want empty", pending)
 	}
 	if observed.Len() != 0 {
 		t.Fatalf("expected no log entries on the clean path, got %d", observed.Len())

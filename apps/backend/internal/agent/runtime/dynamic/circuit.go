@@ -100,18 +100,6 @@ func NewCircuitRegistry(options ...CircuitRegistryOption) *CircuitRegistry {
 	return registry
 }
 
-// PendingPersists reports the keys whose durable state failed to persist and
-// has not yet been successfully flushed.
-func (r *CircuitRegistry) PendingPersists() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	keys := make([]string, 0, len(r.pending))
-	for key := range r.pending {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
 // Restore loads durable circuit state before routing workers start.
 func (r *CircuitRegistry) Restore(ctx context.Context) error {
 	if r.persist == nil {
@@ -170,12 +158,12 @@ func (r *CircuitRegistry) AcquireProbe(key string, duration time.Duration) (Prob
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.flushPendingLocked()
 	now := r.now()
 	entry, ok := r.circuits[key]
 	if !ok || entry.state == CircuitClosed || now.Before(entry.until) || now.Before(entry.probeUntil) {
 		return ProbeLease{}, false
 	}
+	r.flushPendingLocked()
 	lease := ProbeLease{Key: key, ExpiresAt: now.Add(duration)}
 	entry.state = CircuitHalfOpen
 	entry.probeUntil = lease.ExpiresAt
@@ -190,11 +178,11 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.flushPendingLocked()
 	entry, ok := r.circuits[lease.Key]
 	if !ok || entry.state != CircuitHalfOpen || !entry.probeUntil.Equal(lease.ExpiresAt) {
 		return
 	}
+	r.flushPendingLocked()
 	entry.probeUntil = time.Time{}
 	if success {
 		entry.state = CircuitClosed
@@ -208,23 +196,37 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 	_ = r.persistSnapshotLocked(lease.Key)
 }
 
-// flushPendingLocked retries the durable write for every key whose previous
-// SaveCircuit failed, using each key's current in-memory snapshot. Called at
-// the start of every mutator so a transient persistence failure self-heals
-// on the next circuit event instead of leaving the durable row permanently
-// behind memory.
+// pendingFlushBudget bounds how many other pending keys a single mutation
+// retries. r.mu also gates IsOpen on the routing hot path, so a mutation
+// during a sustained persistence outage must cost O(1) extra writes, not
+// O(len(pending)): unbounded fan-out means N circuits opening during an
+// outage cost O(N^2) SaveCircuit calls and stall concurrent routing
+// decisions behind them.
+const pendingFlushBudget = 8
+
+// flushPendingLocked retries the durable write for up to pendingFlushBudget
+// keys whose previous SaveCircuit failed, using each key's current in-memory
+// snapshot. Called from every mutator so a transient persistence failure
+// self-heals across subsequent circuit events instead of leaving the durable
+// row permanently behind memory.
 func (r *CircuitRegistry) flushPendingLocked() {
+	flushed := 0
 	for key := range r.pending {
+		if flushed >= pendingFlushBudget {
+			return
+		}
 		_ = r.persistSnapshotLocked(key)
+		flushed++
 	}
 }
 
 // persistSnapshotLocked writes key's current snapshot and returns the
-// persistence error, if any. A failure is logged at WARN and the key is
-// recorded in pending so a later mutation retries the write; a caller-visible
-// error here would either fail routing decisions that must still complete
-// (Open) or make every candidate unselectable while the store is down
-// (AcquireProbe), so callers do not act on the return value directly.
+// persistence error, if any. A failure is logged at WARN once per failure
+// streak (not once per retry) and the key is recorded in pending so a later
+// mutation retries the write; a caller-visible error here would either fail
+// routing decisions that must still complete (Open) or make every candidate
+// unselectable while the store is down (AcquireProbe), so callers do not act
+// on the return value directly.
 func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 	if r.persist == nil {
 		return nil
@@ -238,13 +240,16 @@ func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 		Code: entry.code, ProbeUntil: entry.probeUntil,
 	})
 	if err != nil {
+		_, alreadyPending := r.pending[key]
 		r.pending[key] = struct{}{}
-		r.logger.Warn("failed to persist circuit snapshot",
-			zap.String("key", key),
-			zap.String("state", string(entry.state)),
-			zap.Time("until", entry.until),
-			zap.Error(err),
-		)
+		if !alreadyPending {
+			r.logger.Warn("failed to persist circuit snapshot",
+				zap.String("key", key),
+				zap.String("state", string(entry.state)),
+				zap.Time("until", entry.until),
+				zap.Error(err),
+			)
+		}
 		return err
 	}
 	delete(r.pending, key)
