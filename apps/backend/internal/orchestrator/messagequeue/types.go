@@ -78,6 +78,11 @@ const MetadataSenderTaskID = "sender_task_id"
 // prompts after a replay.
 const MetadataDeferredMoveID = "deferred_move_id"
 
+// MetadataMovePromptID identifies an immediate move hand-off prompt. Its
+// unique value prevents admission-time auto-merge from replacing the new row
+// with an older compatible prompt, so a failed move can roll back by entry ID.
+const MetadataMovePromptID = "move_prompt_id"
+
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
 // insert would exceed the per-session cap. Shared between the user-side WS
 // handlers and the inter-task MCP handler so the wire contract stays in sync.

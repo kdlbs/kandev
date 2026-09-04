@@ -230,6 +230,10 @@ type MessageQueuer interface {
 	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
 }
 
+type exactQueuedEntryTaker interface {
+	TakeQueuedEntry(ctx context.Context, sessionID, entryID string) (*messagequeue.QueuedMessage, bool, error)
+}
+
 // messageMetadataQueuer is an optional extension implemented by the
 // production queue service. Keeping metadata out of MessageQueuer preserves
 // compatibility with lightweight test and alternate queue implementations.
