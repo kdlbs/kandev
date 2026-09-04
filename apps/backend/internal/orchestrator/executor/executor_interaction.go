@@ -349,8 +349,13 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 
 	// A registry-only orphan whose row failed to load must not be masked by
 	// other sessions stopping cleanly — a caller retrying against a load
-	// failure needs to see it, not a false all-clear.
+	// failure needs to see it, not a false all-clear. But when at least one
+	// session did stop, the failure is distinguishable from a total loss so a
+	// caller that already accepted the stop can log it instead of aborting.
 	if recoverErr != nil {
+		if stoppedCount > 0 {
+			return fmt.Errorf("%w: task %q: %w", ErrOrphanRecoveryIncomplete, taskID, recoverErr)
+		}
 		return fmt.Errorf("task %q has a registered execution but its session could not be loaded: %w", taskID, recoverErr)
 	}
 

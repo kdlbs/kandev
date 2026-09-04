@@ -279,6 +279,54 @@ func TestHandleAgentStalled_NeverStartedStopsExecution(t *testing.T) {
 	}
 }
 
+// TestHandleAgentStalled_NeverStartedClaimsTeardownOwnershipBeforeStop covers
+// Review round 2 Finding 2: stopNeverStartedExecution must claim execution
+// teardown ownership before stopping the agent, so the synchronously
+// published agent.stopped event is recognized by handleAgentStopped's
+// hasExecutionTeardownOwner check as already-owned instead of running that
+// handler's full state-decision path.
+func TestHandleAgentStalled_NeverStartedClaimsTeardownOwnershipBeforeStop(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	if svc.hasExecutionTeardownOwner("session-1", "execution-1") {
+		t.Fatal("teardown ownership claimed before the stall was handled")
+	}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	if !svc.hasExecutionTeardownOwner("session-1", "execution-1") {
+		t.Fatal("stopNeverStartedExecution did not claim teardown ownership before stopping")
+	}
+}
+
 // TestHandleAgentStalled_NeverStartedKeepsFailedStateWhenStopFails covers
 // @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.11: a teardown failure must not
 // overwrite the recorded FAILED state or its launch-failure message.

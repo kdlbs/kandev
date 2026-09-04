@@ -169,6 +169,13 @@ var (
 	// must not start the process and must arbitrate exact-execution teardown
 	// ownership before deciding whether to force-stop the registered runtime.
 	ErrSessionStateSuperseded = errors.New("session state superseded by terminal transition")
+	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
+	// found but could not load at least one registry-only orphan's row, so the
+	// task-scoped stop is not fully confirmed. Callers that already observed a
+	// successful stop should log this rather than treat it as a hard failure;
+	// it stays distinguishable from ErrExecutionNotFound so a retry keeps
+	// happening instead of being reported as a false all-clear.
+	ErrOrphanRecoveryIncomplete = errors.New("orphaned execution recovery incomplete")
 )
 
 // SessionStateSupersededError records the terminal state that rejected a

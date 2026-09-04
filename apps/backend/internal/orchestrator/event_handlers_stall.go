@@ -131,10 +131,18 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 // means nothing is running and is treated as success; any other failure is
 // logged and left for a later stop to retry against the still-registered
 // execution.
+//
+// It claims teardown ownership directly via claimExecutionTeardown rather
+// than through Executor's RegisterExecutionStopOwner callback: that callback
+// TryLocks the same per-session cancelInFlight guard handleAgentStalled
+// already holds for this whole call, so it would always fail to reentrantly
+// acquire it and silently no-op. claimExecutionTeardown's own contract is to
+// be called while already holding that guard.
 func (s *Service) stopNeverStartedExecution(ctx context.Context, payload lifecycle.AgentStalledPayload) {
 	if payload.AgentExecutionID == "" || s.agentManager == nil {
 		return
 	}
+	s.claimExecutionTeardown(payload.SessionID, payload.AgentExecutionID, executionTeardownIntentForce)
 	stopCtx := context.WithoutCancel(ctx)
 	err := s.agentManager.StopAgentWithReason(stopCtx, payload.AgentExecutionID, "agent never started before stall", true)
 	if err == nil || errors.Is(err, lifecycle.ErrExecutionNotFound) {
