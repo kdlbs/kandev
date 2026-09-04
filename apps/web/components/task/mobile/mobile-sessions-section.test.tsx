@@ -56,6 +56,7 @@ vi.mock("@/hooks/domains/session/use-session-actions", () => ({
 const PILL_TESTID = "mobile-sessions-pill";
 const ICON_CIRCLE_CHECK = "tabler-icon-circle-check";
 const SESSION_ACTIONS_LABEL = "Session actions";
+const SESSION_BG_STATE_TESTID = "mobile-session-state-session-bg";
 const SESSION_A = "session-a";
 const SESSION_BG = "session-bg";
 const TASK_ID = "task-1";
@@ -219,7 +220,7 @@ describe("MobileSessionsPicker activity precedence", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
-    const bg = screen.getByTestId("mobile-session-state-session-bg");
+    const bg = screen.getByTestId(SESSION_BG_STATE_TESTID);
     const gen = screen.getByTestId("mobile-session-state-session-gen");
     const done = screen.getByTestId("mobile-session-state-session-done");
     const svgClass = (el: HTMLElement) => el.querySelector("svg")?.getAttribute("class") ?? "";
@@ -260,7 +261,7 @@ describe("MobileSessionsPicker activity precedence", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
-    const state = screen.getByTestId("mobile-session-state-session-bg");
+    const state = screen.getByTestId(SESSION_BG_STATE_TESTID);
     expect(state.textContent).toMatch(/waiting for input/i);
     expect(state.querySelector("svg")?.getAttribute("class")).toContain(
       "tabler-icon-message-question",
@@ -290,6 +291,53 @@ describe("MobileSessionsPicker activity precedence", () => {
     expect(state.textContent).toMatch(/permission requested/i);
     expect(state.querySelector("svg")?.getAttribute("class")).toContain(
       "tabler-icon-shield-question",
+    );
+    mocks.messagesBySession = {};
+  });
+});
+
+const BACKGROUND_SPINNER_CLASS = "tabler-icon-loader-2";
+
+describe("MobileSessionsPicker parked-on-background-work (AC-51/52)", () => {
+  it("renders parked-on-background-work identically to a live background substate", () => {
+    // A settled session with no live foreground_activity but a positively-sampled
+    // background process must read the same as a live RUNNING+background session
+    // — same spinner shape, same label — not the plain waiting-for-input reading.
+    mocks.activeSessionId = SESSION_BG;
+    mocks.sessions = [
+      session(SESSION_BG, "profile-a", START_TIME, {
+        state: "WAITING_FOR_INPUT",
+        parked_on_background_work: true,
+      } as Partial<TaskSession>),
+    ];
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+
+    const state = screen.getByTestId(SESSION_BG_STATE_TESTID);
+    expect(state.querySelector("svg")?.getAttribute("class")).toContain(BACKGROUND_SPINNER_CLASS);
+    expect(state.querySelector("svg")?.getAttribute("class")).toContain("animate-spin");
+    expect(state.textContent).toMatch(/background/i);
+  });
+
+  it("lets pending clarification win over the parked reading", () => {
+    mocks.activeSessionId = SESSION_BG;
+    mocks.sessions = [
+      session(SESSION_BG, "profile-a", START_TIME, {
+        state: "RUNNING",
+        parked_on_background_work: true,
+      } as Partial<TaskSession>),
+    ];
+    mocks.messagesBySession = {
+      [SESSION_BG]: [{ type: "clarification_request", metadata: { status: "pending" } }],
+    };
+
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+
+    const state = screen.getByTestId(SESSION_BG_STATE_TESTID);
+    expect(state.textContent).toMatch(/waiting for input/i);
+    expect(state.querySelector("svg")?.getAttribute("class")).toContain(
+      "tabler-icon-message-question",
     );
     mocks.messagesBySession = {};
   });

@@ -91,6 +91,10 @@ export type TaskSessionActivityChangedPayload = {
   active_subagent_count: number;
   /** True when a send right now would steer the running turn; see http.ts. */
   supports_steering?: boolean;
+  /** Session-level parked-on-background-work projection; see http.ts's TaskSession. */
+  parked_on_background_work?: boolean;
+  revision?: number;
+  parked_epoch?: number;
 };
 
 export type TaskSessionCancellationChangedPayload = {

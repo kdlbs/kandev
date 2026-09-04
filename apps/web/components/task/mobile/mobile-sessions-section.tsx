@@ -41,6 +41,10 @@ type SessionRow = {
   repositoryLabel: string | null;
   state: TaskSessionState | null;
   foregroundActivity: ForegroundActivity | null;
+  /** True when the session is waiting on the operator to notice, not to act —
+   *  a settled session with a positively-sampled background process still
+   *  live (spec: docs/specs/disambiguate-waiting/spec.md). */
+  parkedOnBackgroundWork: boolean;
   isPrimary: boolean;
   index: number;
   startedAt: string;
@@ -67,6 +71,7 @@ function buildSessionRows(
       repositoryLabel: s.repository_id ? (repositoryLabelsById.get(s.repository_id) ?? null) : null,
       state: (s.state as TaskSessionState | undefined) ?? null,
       foregroundActivity: s.foreground_activity ?? null,
+      parkedOnBackgroundWork: !!s.parked_on_background_work,
       isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
       index: idx + 1,
       startedAt: s.started_at,
@@ -89,6 +94,7 @@ function sessionStateLabel(
   state: TaskSessionState,
   foregroundActivity: ForegroundActivity | null,
   pending: PendingInput,
+  parkedOnBackgroundWork: boolean,
 ): string {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && pending.permission) return t("task:permissionRequested");
@@ -98,6 +104,9 @@ function sessionStateLabel(
   if (canRequestInput && foregroundActivity === "background") {
     return t(BACKGROUND_RUNNING_LABEL_KEY);
   }
+  if (canRequestInput && parkedOnBackgroundWork) {
+    return t(BACKGROUND_RUNNING_LABEL_KEY);
+  }
   return formatTaskSessionStateLabel(state);
 }
 
@@ -105,29 +114,30 @@ function StateBadge({
   sessionId,
   state,
   foregroundActivity,
+  parkedOnBackgroundWork,
   testId,
 }: {
   sessionId: string;
   state: TaskSessionState | null;
   foregroundActivity: ForegroundActivity | null;
+  parkedOnBackgroundWork: boolean;
   testId?: string;
 }) {
   const pending = useSessionPendingInput(sessionId);
   if (!state) return null;
-  const label = sessionStateLabel(state, foregroundActivity, pending);
+  const label = sessionStateLabel(state, foregroundActivity, pending, parkedOnBackgroundWork);
   return (
     <span
       data-testid={testId}
       title={label}
       className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground shrink-0"
     >
-      {getSessionStateIcon(
-        state,
-        "h-3 w-3 shrink-0",
+      {getSessionStateIcon(state, "h-3 w-3 shrink-0", {
         foregroundActivity,
-        pending.clarification,
-        pending.permission,
-      )}
+        hasPendingClarification: pending.clarification,
+        hasPendingPermission: pending.permission,
+        parkedOnBackgroundWork,
+      })}
       {label}
     </span>
   );
@@ -316,6 +326,7 @@ function SessionRowItem({
           sessionId={row.id}
           state={row.state}
           foregroundActivity={row.foregroundActivity}
+          parkedOnBackgroundWork={row.parkedOnBackgroundWork}
           testId={`mobile-session-state-${row.id}`}
         />
         {isConfirming ? (

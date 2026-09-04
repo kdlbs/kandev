@@ -425,6 +425,17 @@ export type Task = ActiveSubagentCountFields & {
    * corresponding sum of live subagents.
    */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input and any live foreground_activity.
+   */
+  parked_on_background_work?: boolean;
+  /** Process-local transition generation for parked_on_background_work; used to reject stale snapshots. */
+  parked_revision?: number;
+  /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+  parked_epoch?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -560,6 +571,22 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the session is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input and any live foreground_activity.
+   */
+  parked_on_background_work?: boolean;
+  /**
+   * Process-local transition generation for parked_on_background_work; used
+   * to reject stale snapshots. Deliberately named `revision`, not
+   * `parked_revision` — an accepted naming inconsistency with the task-level
+   * carrier (spec round-5 F20).
+   */
+  revision?: number;
+  /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+  parked_epoch?: number;
   /**
    * True when a send right now would be delivered into the still-generating turn
    * (mid-turn steering) rather than blocked/queued. Live, derived from the

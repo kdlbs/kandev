@@ -54,4 +54,20 @@ describe("shouldShowReopenStateIcon", () => {
     expect(shouldShowReopenStateIcon("CANCELLED", null)).toBe(true);
     expect(shouldShowReopenStateIcon("CREATED", null)).toBe(true);
   });
+
+  it("surfaces the icon for a parked-on-background-work session (AC-51/52)", () => {
+    // Without this, a parked session with no live foregroundActivity would
+    // render no icon at all: canRequestInput is true but every earlier
+    // condition falls through to the WAITING_FOR_INPUT-no-pending silence rule.
+    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null, false, false, true)).toBe(true);
+    expect(shouldShowReopenStateIcon("RUNNING", null, false, false, true)).toBe(true);
+  });
+
+  it("lets a pending prompt outrank the parked reading", () => {
+    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null, true, false, true)).toBe(true);
+  });
+
+  it("ignores a parked reading while a session is still STARTING", () => {
+    expect(shouldShowReopenStateIcon("STARTING", null, false, false, true)).toBe(false);
+  });
 });

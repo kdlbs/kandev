@@ -119,11 +119,13 @@ export type KanbanState = {
      * operator to act — a settled session with a positively-sampled
      * background process still live (spec:
      * docs/specs/disambiguate-waiting/spec.md). Outranked by pending-input
-     * and any live foregroundActivity. Pulled forward from task-08's TS-type
-     * scope because the board (kanban-card-content.tsx) needs it to compile;
-     * revision/epoch fields and wire hydration remain task-08's scope.
+     * and any live foregroundActivity.
      */
     parkedOnBackgroundWork?: boolean;
+    /** Process-local transition generation for parkedOnBackgroundWork; used to discard a stale event. */
+    parkedRevision?: number;
+    /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+    parkedEpoch?: number;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;

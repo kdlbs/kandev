@@ -85,9 +85,10 @@ export interface Task {
    * operator to act — a settled session with a positively-sampled
    * background process still live (spec:
    * docs/specs/disambiguate-waiting/spec.md). Outranked by pending-input
-   * and any live foregroundActivity. Pulled forward from task-08's TS-type
-   * scope because the board (kanban-card-content.tsx) needs it to compile;
-   * revision/epoch fields and wire hydration remain task-08's scope.
+   * and any live foregroundActivity. The revision/epoch fields backing the
+   * stale-update discard rule live on the store's KanbanState Task shape
+   * (kanban/types.ts) and the wire payload, not here — this board-rendering
+   * type only needs the resolved boolean.
    */
   parkedOnBackgroundWork?: boolean;
   /** Live subagents summed across this task's sessions; drives the count chip. */
