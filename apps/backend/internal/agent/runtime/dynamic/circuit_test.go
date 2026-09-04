@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -270,8 +271,79 @@ func TestFlushDuringOutageIsLinearNotQuadratic(t *testing.T) {
 	if want := n * (pendingFlushBudget + 1); persist.saves > want {
 		t.Fatalf("SaveCircuit calls = %d, want <= %d (linear in N, bounded flush fan-out)", persist.saves, want)
 	}
+	// Lower bound: this must also prove flushing actually happens, not just
+	// that it stays bounded. n own writes alone (flush disabled) would leave
+	// saves == n; each mutation after the first also retries a pending key.
+	if persist.saves <= n {
+		t.Fatalf("SaveCircuit calls = %d, want > %d (flush must retry pending keys, not just perform each mutation's own write)", persist.saves, n)
+	}
 	if len(pendingKeys(registry)) != n {
 		t.Fatalf("pending keys = %d, want %d (persistence is still down)", len(pendingKeys(registry)), n)
+	}
+}
+
+// slowFailingCircuitPersistence simulates a persistence backend whose writes
+// are both slow and always failing, to exercise the lock-hold bound during a
+// sustained outage. writeStarted signals each SaveCircuit entry so a test can
+// observe that r.mu is held without racing on wall-clock timing.
+type slowFailingCircuitPersistence struct {
+	delay        time.Duration
+	saves        atomic.Int64
+	writeStarted chan struct{}
+}
+
+func newSlowFailingCircuitPersistence(delay time.Duration) *slowFailingCircuitPersistence {
+	return &slowFailingCircuitPersistence{delay: delay, writeStarted: make(chan struct{}, 64)}
+}
+
+func (s *slowFailingCircuitPersistence) SaveCircuit(_ context.Context, _ CircuitSnapshot) error {
+	s.saves.Add(1)
+	select {
+	case s.writeStarted <- struct{}{}:
+	default:
+	}
+	time.Sleep(s.delay)
+	return errors.New("db is locked")
+}
+
+func (s *slowFailingCircuitPersistence) LoadCircuits(_ context.Context) ([]CircuitSnapshot, error) {
+	return nil, nil
+}
+
+// TestFlushDuringOutageDoesNotStallRoutingHotPath pins Review Round 2's
+// blocker: a mutation's pending-key flush must not hold r.mu long enough to
+// stall a concurrent IsOpen call (the routing hot path) for the sum of every
+// pending write's duration. With pendingFlushBudget bounded to 1, one
+// mutation holds the lock for at most its own write plus a single flush
+// attempt, regardless of how many keys are pending.
+func TestFlushDuringOutageDoesNotStallRoutingHotPath(t *testing.T) {
+	const delay = 50 * time.Millisecond
+	persist := newSlowFailingCircuitPersistence(delay)
+	registry := NewCircuitRegistry(WithCircuitPersistence(persist))
+
+	const n = 8
+	for i := 0; i < n; i++ {
+		registry.Open(fmt.Sprintf("credential:c%d", i), time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
+	}
+	if got := len(pendingKeys(registry)); got != n {
+		t.Fatalf("pending keys = %d, want %d", got, n)
+	}
+	for len(persist.writeStarted) > 0 {
+		<-persist.writeStarted
+	}
+
+	go registry.Open("credential:new", time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
+	<-persist.writeStarted // the mutation above now holds r.mu inside a blocking SaveCircuit call
+
+	start := time.Now()
+	registry.IsOpen("credential:c0", time.Now())
+	blocked := time.Since(start)
+
+	// Budget-1 fan-out holds the lock for at most two writes (one flush
+	// attempt, one own write): well under the n+1 writes an unbounded flush
+	// of n=8 pending keys would have held it for.
+	if max := 3 * delay; blocked > max {
+		t.Fatalf("IsOpen blocked for %v while a mutation flushed pending writes, want <= %v", blocked, max)
 	}
 }
 

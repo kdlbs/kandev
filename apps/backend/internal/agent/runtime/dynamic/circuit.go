@@ -197,12 +197,13 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 }
 
 // pendingFlushBudget bounds how many other pending keys a single mutation
-// retries. r.mu also gates IsOpen on the routing hot path, so a mutation
-// during a sustained persistence outage must cost O(1) extra writes, not
-// O(len(pending)): unbounded fan-out means N circuits opening during an
-// outage cost O(N^2) SaveCircuit calls and stall concurrent routing
-// decisions behind them.
-const pendingFlushBudget = 8
+// retries. r.mu also gates IsOpen on the routing hot path, and each retry is
+// a blocking SaveCircuit call, so a mutation during a sustained persistence
+// outage must hold the lock for at most one extra write, not one per pending
+// key: unbounded fan-out both grows total SaveCircuit calls quadratically
+// across mutations and holds the routing mutex for the sum of every pending
+// write's duration.
+const pendingFlushBudget = 1
 
 // flushPendingLocked retries the durable write for up to pendingFlushBudget
 // keys whose previous SaveCircuit failed, using each key's current in-memory
