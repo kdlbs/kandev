@@ -2575,6 +2575,10 @@ func (s *Service) Start(ctx context.Context) error {
 	// services are ready. Only un-dispatched pending states are scheduled.
 	s.startDynamicPolicyRecovery(ctx)
 
+	// Recover routes orphaned at "starting" by a launch failure that never
+	// reached a terminal route status.
+	s.reconcileOrphanedDynamicStartingRoutes(ctx)
+
 	// Start the idle-session reaper last. It depends on s.repo
 	// (already wired), s.agentManager (already wired), and the
 	// turnService-cleared reconciler so a turnService == nil error

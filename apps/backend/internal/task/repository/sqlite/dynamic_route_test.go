@@ -139,6 +139,37 @@ func TestListPendingRouteStatesExcludesAmbiguousRetryingStates(t *testing.T) {
 	}
 }
 
+func TestListStartingRouteStatesReturnsOnlyStartingRows(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, sessionID := range []string{"starting-orphan", "active-session", "retrying-session"} {
+		taskID := "task-" + sessionID
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: sessionID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateWaitingForInput}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
+		}
+	}
+	for _, state := range []dynamicruntime.RouteState{
+		{SessionID: "starting-orphan", LogicalProfileID: "dynamic", Generation: 1, Status: "starting", UpdatedAt: now},
+		{SessionID: "active-session", LogicalProfileID: "dynamic", Generation: 1, Status: "active", UpdatedAt: now.Add(time.Second)},
+		{SessionID: "retrying-session", LogicalProfileID: "dynamic", Generation: 1, Status: "retrying", UpdatedAt: now.Add(2 * time.Second)},
+	} {
+		if err := repo.SaveRouteState(ctx, state); err != nil {
+			t.Fatalf("SaveRouteState(%s): %v", state.SessionID, err)
+		}
+	}
+	states, err := repo.ListStartingRouteStates(ctx)
+	if err != nil {
+		t.Fatalf("ListStartingRouteStates: %v", err)
+	}
+	if len(states) != 1 || states[0].SessionID != "starting-orphan" {
+		t.Fatalf("starting states = %#v", states)
+	}
+}
+
 func TestClaimRouteStateAdvancesGenerationWithFence(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

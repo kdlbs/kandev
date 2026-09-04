@@ -220,6 +220,40 @@ func (r *Repository) ListPendingRouteStates(ctx context.Context) ([]dynamicrunti
 	return states, nil
 }
 
+// ListStartingRouteStates returns every route whose durable status is still
+// "starting". Startup reconciliation is the only caller: a healthy route also
+// passes through "starting" en route to "active", so listing this status is
+// only a safe orphan signal once the caller has confirmed there is no live
+// session backing the row (see Service.reconcileOrphanedDynamicStartingRoutes).
+func (r *Repository) ListStartingRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
+		FROM dynamic_route_states
+		WHERE state = ? ORDER BY updated_at ASC
+	`), "starting")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	states := make([]dynamicruntime.RouteState, 0)
+	for rows.Next() {
+		var state dynamicruntime.RouteState
+		if err := rows.Scan(
+			&state.SessionID, &state.LogicalProfileID, &state.ExecutionProfileID,
+			&state.Generation, &state.ProfileVersion, &state.Status,
+			&state.ContinuationJSON, &state.PolicyStateJSON, &state.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return states, nil
+}
+
 func (r *Repository) SaveRouteContinuation(ctx context.Context, record dynamicruntime.ContinuationRecord) error {
 	if isTransientRouteSession(record.SessionID) {
 		return nil

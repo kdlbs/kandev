@@ -20,6 +20,7 @@ import (
 )
 
 const dynamicRouteStatusWaiting = "waiting"
+const dynamicRouteStatusActive = "active"
 
 // dynamicTaskDownstream adapts the task executor to the provider-neutral
 // conductor. The callback updates the task-session attribution before every
@@ -65,6 +66,7 @@ func (d *dynamicTaskDownstream) Launch(
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
 	d.service.bindPromptAttemptToExecution(ctx, d.sessionID, execution.AgentExecutionID)
 	d.execution = execution
+	d.service.markDynamicRouteActive(ctx, d.sessionID, launch.Decision.Generation)
 	acpSessionID := ""
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
 		acpSessionID = session.DownstreamACPSessionID
@@ -165,6 +167,62 @@ func (s *Service) persistDynamicACPSession(
 	}
 	session.DownstreamACPSessionID = acpSessionID
 	return s.repo.UpdateTaskSession(ctx, session)
+}
+
+// markDynamicRouteActive completes the durable "starting" -> "active"
+// transition after a concrete launch has actually succeeded, and mirrors the
+// status onto the task-session projection so both durable stores agree.
+// Best-effort: a launch that already succeeded is not undone by a failure to
+// record this side transition.
+func (s *Service) markDynamicRouteActive(ctx context.Context, sessionID string, generation int64) {
+	if s.profileExecutionResolver == nil || sessionID == "" || generation <= 0 {
+		return
+	}
+	if err := s.profileExecutionResolver.MarkRouteActive(ctx, sessionID, generation); err != nil {
+		if !errors.Is(err, dynamicruntime.ErrStaleGeneration) && !errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
+			s.logger.Warn("failed to mark dynamic route active",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration != generation || session.RouteState == dynamicRouteStatusActive {
+		return
+	}
+	session.RouteState = dynamicRouteStatusActive
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.logger.Warn("failed to mirror dynamic route active state to task session",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+// markDynamicRouteActionRequired transitions a claimed dynamic route to
+// durable action_required and mirrors the status onto the task-session
+// projection. It is the catch-all recovery marker every declined or failed
+// dynamic launch path falls back to, so a claimed route is never left
+// silently stuck at "starting" with no recovery affordance.
+func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID string, generation int64, reason string) {
+	if s.profileExecutionResolver == nil || sessionID == "" || generation <= 0 {
+		return
+	}
+	decision, err := s.profileExecutionResolver.MarkRouteActionRequired(ctx, sessionID, generation, reason)
+	if err != nil {
+		if !errors.Is(err, dynamicruntime.ErrStaleGeneration) && !errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
+			s.logger.Warn("failed to mark dynamic route action_required",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration != generation {
+		return
+	}
+	session.RouteState = decision.Status
+	session.RouteReason = reason
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.logger.Warn("failed to mirror dynamic route action_required to task session",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
 }
 
 func applyDynamicRouteDecisionProjection(
@@ -475,12 +533,30 @@ func (s *Service) routeDynamicAgentFailure(
 	data watcher.AgentEventData,
 	classified *routingerr.Error,
 ) bool {
-	if classified == nil || !classified.FallbackAllowed {
-		return false
-	}
 	data = s.withDynamicAttemptEvidence(data)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
+		return false
+	}
+	reason := "dynamic_recovery_declined"
+	if classified != nil {
+		reason = classified.Error()
+	}
+	// The route already holds a claimed generation the moment
+	// dynamicFailureSession succeeds. Every return below is a decline, so the
+	// deferred guard covers every early return uniformly (including any added
+	// later) instead of relying on each branch to remember its own
+	// transition. `generation` is updated in place once RouteAfterFailure
+	// claims a new one so the guard marks the generation actually holding the
+	// failed attempt, not the one this call started from.
+	generation := session.RouteGeneration
+	handled := false
+	defer func() {
+		if !handled {
+			s.markDynamicRouteActionRequired(ctx, session.ID, generation, reason)
+		}
+	}()
+	if classified == nil || !classified.FallbackAllowed {
 		return false
 	}
 	if !dynamicPreResultSafe(data) {
@@ -505,9 +581,12 @@ func (s *Service) routeDynamicAgentFailure(
 		session.RouteGeneration, classified,
 	)
 	if err != nil {
-		return s.persistPendingDynamicRecovery(ctx, session, decision, err)
+		handled = s.persistPendingDynamicRecovery(ctx, session, decision, err)
+		return handled
 	}
-	return s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
+	generation = decision.Generation
+	handled = s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
+	return handled
 }
 
 func (s *Service) persistPendingDynamicRecovery(
@@ -594,6 +673,15 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 		}
 		return errors.New("dynamic route action session not found")
 	}
+	// The backend route-action handler has already claimed session.RouteGeneration
+	// as "starting" before calling this. Every error return below leaves that
+	// claim without an owner unless the deferred guard marks it action_required.
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "manual dynamic route action failed")
+		}
+	}()
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err
@@ -628,6 +716,7 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 	if !s.relaunchDynamicTaskAfterFailure(ctx, data, session.ExecutionProfileID) {
 		return errors.New("dynamic route action successor launch failed")
 	}
+	succeeded = true
 	return nil
 }
 

@@ -17,6 +17,10 @@ type dynamicRouteStateLister interface {
 	ListPendingRouteStates(context.Context) ([]dynamicruntime.RouteState, error)
 }
 
+type dynamicStartingRouteLister interface {
+	ListStartingRouteStates(context.Context) ([]dynamicruntime.RouteState, error)
+}
+
 // startDynamicPolicyRecovery restores only durable waits whose dispatch has
 // not started. A persisted retrying state is intentionally left for manual
 // recovery because a process restart cannot prove whether its launch crossed
@@ -46,6 +50,44 @@ func (s *Service) startDynamicPolicyRecovery(ctx context.Context) {
 	for _, state := range states {
 		s.scheduleDynamicPolicyRecovery(state.SessionID, state.Generation, state.PolicyStateJSON)
 	}
+}
+
+// reconcileOrphanedDynamicStartingRoutes recovers routes left at "starting"
+// with no launch owner: a launch that failed after claiming a generation but
+// before reaching a terminal route status (see routeDynamicAgentFailure and
+// LaunchDynamicRouteAction) can strand a route this way, and no timer or
+// event fires for a durable status that is not a pending wait. A route that
+// reached MarkActive is no longer "starting", so this sweep cannot demote a
+// healthy idling dynamic session; only a session whose current state is not
+// RUNNING is treated as orphaned, so a launch already back in flight when
+// this runs is left alone.
+func (s *Service) reconcileOrphanedDynamicStartingRoutes(ctx context.Context) {
+	if s.profileExecutionResolver == nil {
+		return
+	}
+	lister, ok := s.repo.(dynamicStartingRouteLister)
+	if !ok {
+		return
+	}
+	states, err := lister.ListStartingRouteStates(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list starting dynamic route states", zap.Error(err))
+		return
+	}
+	for _, state := range states {
+		s.reconcileOrphanedDynamicStartingRoute(ctx, state)
+	}
+}
+
+func (s *Service) reconcileOrphanedDynamicStartingRoute(ctx context.Context, state dynamicruntime.RouteState) {
+	session, err := s.repo.GetTaskSession(ctx, state.SessionID)
+	if err != nil || session == nil || session.RouteGeneration != state.Generation {
+		return
+	}
+	if session.State == models.TaskSessionStateRunning {
+		return
+	}
+	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
 }
 
 func (s *Service) stopDynamicPolicyRecovery() {
