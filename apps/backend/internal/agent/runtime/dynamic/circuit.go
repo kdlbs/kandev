@@ -126,7 +126,7 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.flushPendingLocked()
+	r.flushPendingLocked(key)
 	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code}
 	_ = r.persistSnapshotLocked(key)
 }
@@ -163,7 +163,7 @@ func (r *CircuitRegistry) AcquireProbe(key string, duration time.Duration) (Prob
 	if !ok || entry.state == CircuitClosed || now.Before(entry.until) || now.Before(entry.probeUntil) {
 		return ProbeLease{}, false
 	}
-	r.flushPendingLocked()
+	r.flushPendingLocked(key)
 	lease := ProbeLease{Key: key, ExpiresAt: now.Add(duration)}
 	entry.state = CircuitHalfOpen
 	entry.probeUntil = lease.ExpiresAt
@@ -182,7 +182,7 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 	if !ok || entry.state != CircuitHalfOpen || !entry.probeUntil.Equal(lease.ExpiresAt) {
 		return
 	}
-	r.flushPendingLocked()
+	r.flushPendingLocked(lease.Key)
 	entry.probeUntil = time.Time{}
 	if success {
 		entry.state = CircuitClosed
@@ -210,9 +210,12 @@ const pendingFlushBudget = 1
 // snapshot. Called from every mutator so a transient persistence failure
 // self-heals across subsequent circuit events instead of leaving the durable
 // row permanently behind memory.
-func (r *CircuitRegistry) flushPendingLocked() {
+func (r *CircuitRegistry) flushPendingLocked(skipKey string) {
 	flushed := 0
 	for key := range r.pending {
+		if key == skipKey {
+			continue
+		}
 		if flushed >= pendingFlushBudget {
 			return
 		}

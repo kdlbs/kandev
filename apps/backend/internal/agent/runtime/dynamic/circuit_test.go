@@ -78,6 +78,12 @@ func (s *stubCircuitPersistence) row(key string) (CircuitSnapshot, bool) {
 	return row, ok
 }
 
+func (s *stubCircuitPersistence) saveCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saves
+}
+
 func newObservedLogger() (*zap.Logger, *observer.ObservedLogs) {
 	core, observed := observer.New(zapcore.WarnLevel)
 	return zap.New(core), observed
@@ -153,6 +159,23 @@ func TestPersistSnapshotFailureIsSurfacedOnReleaseProbe(t *testing.T) {
 	entries := observed.FilterMessageSnippet("persist circuit").All()
 	if len(entries) != 1 {
 		t.Fatalf("warn log entries = %d, want 1", len(entries))
+	}
+}
+
+func TestMutationDoesNotFlushItsOwnPendingKey(t *testing.T) {
+	persist := newStubCircuitPersistence()
+	persist.setFailing(true)
+	registry := NewCircuitRegistry(WithCircuitPersistence(persist))
+
+	registry.Open("credential:acme", time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
+	persist.setFailing(false)
+	registry.Open("credential:acme", time.Now().Add(2*time.Hour), routingerr.CodeProviderUnavailable)
+
+	if got := persist.saveCount(); got != 2 {
+		t.Fatalf("SaveCircuit calls = %d, want 2 (one failed write and one current mutation write)", got)
+	}
+	if pending := pendingKeys(registry); len(pending) != 0 {
+		t.Fatalf("pending keys = %v, want empty", pending)
 	}
 }
 
@@ -282,31 +305,30 @@ func TestFlushDuringOutageIsLinearNotQuadratic(t *testing.T) {
 	}
 }
 
-// slowFailingCircuitPersistence simulates a persistence backend whose writes
-// are both slow and always failing, to exercise the lock-hold bound during a
-// sustained outage. writeStarted signals each SaveCircuit entry so a test can
-// observe that r.mu is held without racing on wall-clock timing.
-type slowFailingCircuitPersistence struct {
-	delay        time.Duration
-	saves        atomic.Int64
-	writeStarted chan struct{}
+// gatedFailingCircuitPersistence blocks writes after setup and releases each
+// write through a channel, so the lock-hold bound is tested without sleeps.
+type gatedFailingCircuitPersistence struct {
+	blocking     atomic.Bool
+	writeStarted chan string
+	releaseWrite chan struct{}
 }
 
-func newSlowFailingCircuitPersistence(delay time.Duration) *slowFailingCircuitPersistence {
-	return &slowFailingCircuitPersistence{delay: delay, writeStarted: make(chan struct{}, 64)}
-}
-
-func (s *slowFailingCircuitPersistence) SaveCircuit(_ context.Context, _ CircuitSnapshot) error {
-	s.saves.Add(1)
-	select {
-	case s.writeStarted <- struct{}{}:
-	default:
+func newGatedFailingCircuitPersistence() *gatedFailingCircuitPersistence {
+	return &gatedFailingCircuitPersistence{
+		writeStarted: make(chan string),
+		releaseWrite: make(chan struct{}),
 	}
-	time.Sleep(s.delay)
+}
+
+func (s *gatedFailingCircuitPersistence) SaveCircuit(_ context.Context, snapshot CircuitSnapshot) error {
+	if s.blocking.Load() {
+		s.writeStarted <- snapshot.Key
+		<-s.releaseWrite
+	}
 	return errors.New("db is locked")
 }
 
-func (s *slowFailingCircuitPersistence) LoadCircuits(_ context.Context) ([]CircuitSnapshot, error) {
+func (s *gatedFailingCircuitPersistence) LoadCircuits(_ context.Context) ([]CircuitSnapshot, error) {
 	return nil, nil
 }
 
@@ -317,8 +339,7 @@ func (s *slowFailingCircuitPersistence) LoadCircuits(_ context.Context) ([]Circu
 // mutation holds the lock for at most its own write plus a single flush
 // attempt, regardless of how many keys are pending.
 func TestFlushDuringOutageDoesNotStallRoutingHotPath(t *testing.T) {
-	const delay = 50 * time.Millisecond
-	persist := newSlowFailingCircuitPersistence(delay)
+	persist := newGatedFailingCircuitPersistence()
 	registry := NewCircuitRegistry(WithCircuitPersistence(persist))
 
 	const n = 8
@@ -328,22 +349,39 @@ func TestFlushDuringOutageDoesNotStallRoutingHotPath(t *testing.T) {
 	if got := len(pendingKeys(registry)); got != n {
 		t.Fatalf("pending keys = %d, want %d", got, n)
 	}
-	for len(persist.writeStarted) > 0 {
-		<-persist.writeStarted
-	}
+	persist.blocking.Store(true)
 
-	go registry.Open("credential:new", time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
-	<-persist.writeStarted // the mutation above now holds r.mu inside a blocking SaveCircuit call
+	mutationDone := make(chan struct{})
+	go func() {
+		defer close(mutationDone)
+		registry.Open("credential:new", time.Now().Add(time.Hour), routingerr.CodeProviderUnavailable)
+	}()
+	<-persist.writeStarted
 
-	start := time.Now()
-	registry.IsOpen("credential:c0", time.Now())
-	blocked := time.Since(start)
+	isOpenDone := make(chan struct{})
+	go func() {
+		registry.IsOpen("credential:c0", time.Now())
+		close(isOpenDone)
+	}()
+	persist.releaseWrite <- struct{}{}
 
-	// Budget-1 fan-out holds the lock for at most two writes (one flush
-	// attempt, one own write): well under the n+1 writes an unbounded flush
-	// of n=8 pending keys would have held it for.
-	if max := 3 * delay; blocked > max {
-		t.Fatalf("IsOpen blocked for %v while a mutation flushed pending writes, want <= %v", blocked, max)
+	writes := 1
+	for {
+		select {
+		case <-persist.writeStarted:
+			writes++
+			persist.releaseWrite <- struct{}{}
+		case <-mutationDone:
+			if writes != 2 {
+				t.Fatalf("blocked mutation used %d writes, want 2", writes)
+			}
+			select {
+			case <-isOpenDone:
+			case <-time.After(100 * time.Millisecond):
+				t.Fatal("IsOpen did not complete after the bounded mutation finished")
+			}
+			return
+		}
 	}
 }
 
