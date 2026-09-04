@@ -309,6 +309,36 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 	}
 }
 
+func TestNewService_DoesNotProbeLegacyIdentity(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &countingPrincipalRoundTripper{}
+	client := NewTokenClient("ghp_test", TokenPrincipal{Kind: TokenCredentialPAT})
+	client.httpClient.Transport = transport
+
+	_ = NewService(client, AuthMethodPAT, nil, nil, nil, log)
+
+	if got := transport.requests; got != 0 {
+		t.Fatalf("service construction made %d identity requests, want 0", got)
+	}
+}
+
+type countingPrincipalRoundTripper struct {
+	requests int
+}
+
+func (t *countingPrincipalRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests++
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"login":"octocat"}`)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
 func TestCoordinateLegacyClientHonorsCancellationDuringPrincipalResolution(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	if err != nil {

@@ -252,8 +252,22 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 			return newLegacyGitTransportCredential(ctx, secrets, log)
 		})
 	}
-	service.coordinateLegacyClient(context.Background(), client, "")
+	// Construction must not perform provider I/O. Reuse an already-cached token
+	// login when available; explicit credential setup resolves unknown logins
+	// with a request context.
+	service.coordinateLegacyClientAtConstruction(client)
 	return service
+}
+
+func (s *Service) coordinateLegacyClientAtConstruction(client Client) {
+	login := "legacy"
+	if tokenClient, ok := client.(*TokenClient); ok && tokenClient != nil {
+		login = strings.TrimSpace(tokenClient.username)
+		if login == "" {
+			login = "legacy"
+		}
+	}
+	s.coordinateLegacyClient(context.Background(), client, login)
 }
 
 // ListGHAccounts returns the configured account source. Production uses the
