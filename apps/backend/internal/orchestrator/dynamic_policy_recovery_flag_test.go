@@ -89,16 +89,32 @@ func TestStartDynamicPolicyRecovery_EnabledFlagArmsTimer(t *testing.T) {
 	}
 }
 
+// recordingRouteStateLoader wraps the real repository to count calls to
+// LoadRouteState made through the orchestrator's own dynamicRouteStateLoader
+// seam. That call happens before the resolver's ResumePendingRoute is ever
+// invoked, so it observes the orchestrator's own gate independently of
+// ResumePendingRoute's separate, later refusal.
+type recordingRouteStateLoader struct {
+	*sqliterepo.Repository
+	loadRouteStateCalls int
+}
+
+func (r *recordingRouteStateLoader) LoadRouteState(ctx context.Context, sessionID string) (*dynamicruntime.RouteState, error) {
+	r.loadRouteStateCalls++
+	return r.Repository.LoadRouteState(ctx, sessionID)
+}
+
 func TestRunDynamicPolicyRecovery_FlagFlippedOffAfterArmSkipsLaunch(t *testing.T) {
 	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "task-flip-off", "session-flip-off", "")
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "task-flip-off", "session-flip-off", "")
 	// Deadline already elapsed: firing the timer must reach the resume call,
 	// not just reschedule for a later due time.
-	seedPendingRouteState(t, repo, "session-flip-off", time.Now().Add(-time.Minute))
+	seedPendingRouteState(t, baseRepo, "session-flip-off", time.Now().Add(-time.Minute))
 
-	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo), dynamicruntime.WithStateLoader(repo))
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(baseRepo), dynamicruntime.WithStateLoader(baseRepo))
 	resolver := agentruntime.NewProfileExecutionResolver(&fakeSettingsRepo{}, engine, true)
+	repo := &recordingRouteStateLoader{Repository: baseRepo}
 	svc := &Service{
 		logger: testLogger(), repo: repo, profileExecutionResolver: resolver,
 		dynamicRecoveryTimers: make(map[string]*time.Timer),
@@ -112,7 +128,12 @@ func TestRunDynamicPolicyRecovery_FlagFlippedOffAfterArmSkipsLaunch(t *testing.T
 	resolver.SetEnabled(false)
 	svc.runDynamicPolicyRecovery(recoveryCtx, "session-flip-off", 1)
 
-	state, err := repo.LoadRouteState(ctx, "session-flip-off")
+	if repo.loadRouteStateCalls != 0 {
+		t.Fatalf("LoadRouteState calls = %d, want 0: the disabled-flag gate must return before "+
+			"reading route state, not rely on ResumePendingRoute's own refusal", repo.loadRouteStateCalls)
+	}
+
+	state, err := baseRepo.LoadRouteState(ctx, "session-flip-off")
 	if err != nil {
 		t.Fatalf("LoadRouteState after flipped-off recovery run: %v", err)
 	}
