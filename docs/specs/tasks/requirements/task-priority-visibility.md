@@ -230,8 +230,9 @@ leaving my current task.
 
 - **AC-TASKS-PRIORITY-VISIBILITY-005.1:** When a live task in the desktop sidebar
   or phone or tablet task switcher has priority `critical`, `high` or `low`, the
-  system shall show the same priority indicator at the leading side of its task
-  row, after the task-state indicator and before the title.
+  system shall show the same priority indicator immediately after the task title
+  in its inline badge area. Task titles shall start at the same horizontal
+  position whether or not an indicator is present.
 - **AC-TASKS-PRIORITY-VISIBILITY-005.2:** When the task priority is `medium`,
   absent, empty or not one of the four priority tokens, the task switcher shall
   show no priority indicator and shall not show the raw value.

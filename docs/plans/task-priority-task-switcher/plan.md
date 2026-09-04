@@ -25,7 +25,7 @@ that value for its current marker and prove live updates end to end.
 ### In scope
 
 - Carry task priority through the desktop sidebar and phone or tablet task-switcher projections.
-- Show the existing non-medium priority indicator between task state and title.
+- Show the existing non-medium priority indicator after the title in its inline badge area.
 - Move shared priority display metadata out of the kanban-only component boundary.
 - Add a flag-labelled Priority submenu to the single-task task-switcher menu.
 - Reuse the existing field-scoped update request, failure toast and task event convergence.
@@ -52,8 +52,9 @@ that value for its current marker and prove live updates end to end.
   nothing. Update the kanban card to consume the generic component.
 - Add `priority` to `TaskSwitcherItem`. Project it in
   `buildSidebarItem` and `toSheetItem`, then pass it through `TaskRow` to
-  `TaskItem`. Render the indicator after `TaskStateIcon` and before the title
-  content so color bars, state, nesting and title alignment stay unchanged.
+  `TaskItem`. Render the indicator through the existing inline badge area after
+  `TaskItemTitle`. Keep `TaskStateIcon` as the only fixed leading icon so every
+  title starts at the same horizontal position.
 
 ### Task-switcher priority action
 
@@ -74,8 +75,9 @@ that value for its current marker and prove live updates end to end.
 
 ### Responsive contract
 
-- Desktop outcome: priority is visible at the leading side of each live row,
-  and the right-click menu changes it without navigation.
+- Desktop outcome: priority is visible immediately after the title of each live
+  row, and the right-click menu changes it without navigation. Rows without an
+  indicator retain the same title alignment.
 - Mobile entry point: the existing **Task actions** ellipsis in the task-switcher
   drawer or sheet. No required action depends on hover, right-click or long press.
 - Nearest shipped exemplar: `SessionTaskSwitcherSheet` and its existing Edit and
@@ -136,8 +138,8 @@ Pending.
 - Renaming the kanban-owned helper can leave a stale import in create, card or
   tests. An `rg` audit and focused typecheck must cover all consumers.
 - Task rows already contain state, plugin, repository and change-request
-  metadata. The priority indicator must not squeeze the title or displace the
-  visible mobile action trigger.
+  metadata. The priority indicator must remain in the inline badge cluster,
+  preserve title alignment and not displace the visible mobile action trigger.
 
 ## Open questions
 

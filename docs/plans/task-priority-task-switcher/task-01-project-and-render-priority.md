@@ -31,7 +31,7 @@ projection adapters must retain the same stored value.
 - Move priority tokens and display metadata to a task-owned shared module.
 - Replace the kanban-only indicator with a reusable task priority indicator.
 - Project priority into desktop sidebar and mobile task-switcher items.
-- Render the indicator between task state and task title at every breakpoint.
+- Render the indicator after the title in its inline badge area at every breakpoint.
 - Add focused projection, rendering, fallback and accessibility tests.
 
 ## Out of scope
@@ -41,7 +41,8 @@ projection adapters must retain the same stored value.
 
 ## Acceptance
 
-- Critical, high and low tasks show distinct leading indicators in board and task-switcher rows.
+- Critical, high and low tasks show distinct indicators after the task title,
+  while every task title keeps the same starting position.
 - Medium, absent and invalid values show no indicator or raw token.
 - Desktop and mobile task-switcher projections retain the stored priority and localized accessible name.
 
@@ -75,7 +76,7 @@ None.
 ## Risks
 
 - A stale import can leave one existing priority surface on a second metadata map.
-- Extra leading content can reduce title width on dense nested rows.
+- Inline priority and existing badges can reduce title width on dense nested rows.
 
 ## Parallelism
 

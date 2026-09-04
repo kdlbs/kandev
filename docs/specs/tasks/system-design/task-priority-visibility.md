@@ -49,9 +49,11 @@ Office task surface remains a separate consumer with its own vocabulary.
 - The desktop sidebar and the phone or tablet task-navigation surface render the
   shared `TaskSwitcher`. Its task projection carries priority, its row uses the
   same task-owned indicator presentation as the kanban card, and its single-task
-  context menu uses the existing priority update hook. The shared task priority
-  metadata owns token order, localized label keys, indicator shapes and colors;
-  no sidebar-specific priority vocabulary is added.
+  context menu uses the existing priority update hook. The row renders priority
+  in its existing inline badge area after the title, outside the fixed leading
+  state-icon column, so priority presence does not change title alignment. The
+  shared task priority metadata owns token order, localized label keys,
+  indicator shapes and colors; no sidebar-specific priority vocabulary is added.
 - The task creation dialog sends the selected priority token and uses the same
   four-token picker inside the Advanced settings section, which is collapsed by
   default, at every supported breakpoint. On wide layouts, the dependency picker
