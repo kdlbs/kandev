@@ -339,6 +339,10 @@ const (
 	// StepTransitionTriggerPluginMove identifies a transition caused by a
 	// plugin's MoveTask RPC call.
 	StepTransitionTriggerPluginMove StepTransitionTrigger = "plugin_move"
+	// StepTransitionTriggerAgentError identifies an automatic transition
+	// caused by the on_agent_error workflow event, distinguishing a recovery
+	// move from a routine auto_complete one.
+	StepTransitionTriggerAgentError StepTransitionTrigger = "on_agent_error"
 )
 
 // StepTransitionActor identifies the source of a move. Human identity is
