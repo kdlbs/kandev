@@ -147,6 +147,19 @@ test.describe("mobile: task-owned plan comments", () => {
       ),
     ).toBe(false);
     await session.waitForChatIdle({ timeout: 45_000 });
+    // A completed seed turn can auto-promote the secondary. Pin the intended
+    // primary so this flow isolates selected-session Send from primary Run.
+    await apiClient.setPrimarySession(primary.id);
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).primary_session_id, {
+        timeout: 15_000,
+      })
+      .toBe(primary.id);
+    await pill.tap();
+    await expect(
+      testPage.getByTestId(`mobile-session-row-${primary.id}`).locator(".tabler-icon-star"),
+    ).toBeVisible({ timeout: 15_000 });
+    await testPage.getByTestId(`mobile-session-row-${secondary.id}`).tap();
 
     await session.togglePlanMode();
     await testPage.getByRole("button", { name: "Plan", exact: true }).tap();

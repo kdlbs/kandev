@@ -28,6 +28,11 @@ const mockSetTaskSession = vi.fn((next: Record<string, unknown>) => {
   const index = list.findIndex((candidate) => candidate.id === next.id);
   if (index >= 0) list[index] = next as never;
 });
+const mockSetState = vi.fn(
+  (updater: (state: Record<string, unknown>) => Record<string, unknown>) => {
+    mockStoreState = { ...mockStoreState, ...updater(mockStoreState) };
+  },
+);
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 let mockStoreState: Record<string, unknown> = {};
 
@@ -49,7 +54,7 @@ vi.mock("@/hooks/use-message-handler", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStoreApi: () => ({ getState: () => mockStoreState }),
+  useAppStoreApi: () => ({ getState: () => mockStoreState, setState: mockSetState }),
 }));
 
 vi.mock("@/lib/state/slices/comments", () => ({
@@ -102,6 +107,10 @@ function makeStoreState(sessionState: string, planMode = false, foregroundActivi
   };
   const itemsByTaskId: Record<string, MockSession[]> = { "task-1": [primary, selected] };
   return {
+    kanban: {
+      tasks: [{ id: "task-1", primarySessionId: "primary-session" as string | null }],
+    },
+    kanbanMulti: { snapshots: {} },
     taskSessions: {
       items,
     },
@@ -429,6 +438,26 @@ describe("useRunComment — plan routing", () => {
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
   });
 
+  it("uses the task primary while per-session flags lag behind", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    state.taskSessions.items["new-primary"] = {
+      id: "new-primary",
+      task_id: "task-1",
+      state: "WAITING_FOR_INPUT",
+      is_primary: false,
+    };
+    state.taskSessionsByTask.itemsByTaskId["task-1"].push(state.taskSessions.items["new-primary"]);
+    state.kanban.tasks[0].primarySessionId = "new-primary";
+    mockStoreState = state;
+    const { result } = renderCommentHook();
+
+    await result.current.runComment(makePlanComment());
+
+    expect(mockSendMessageRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ resolvedSessionId: "new-primary" }),
+    );
+  });
+
   it("rejects Run until legacy plan comments finish migrating", async () => {
     const state = makeStoreState("WAITING_FOR_INPUT");
     state.taskPlans.commentsMigrationStatusByTaskId["task-1"] = "failed";
@@ -504,6 +533,7 @@ describe("useRunComment — plan routing", () => {
     >;
     sessions["new-primary"] = replacement;
     changed.taskSessionsByTask.itemsByTaskId["task-1"] = [replacement];
+    changed.kanban.tasks[0].primarySessionId = "new-primary";
     mockStoreState = changed;
 
     await act(async () => {
@@ -524,6 +554,7 @@ describe("useRunComment — plan routing", () => {
       state: "WAITING_FOR_INPUT",
       is_primary: true,
     } as never;
+    state.kanban.tasks[0].primarySessionId = "new-primary";
     mockStoreState = state;
     const { result } = renderCommentHook();
 
@@ -542,6 +573,7 @@ describe("useRunComment — plan availability failures", () => {
     const state = makeStoreState("WAITING_FOR_INPUT");
     state.taskSessions.items["primary-session"].is_primary = false;
     state.taskSessionsByTask.itemsByTaskId["task-1"] = [];
+    state.kanban.tasks[0].primarySessionId = null;
     mockStoreState = state;
     const { result } = renderCommentHook();
 

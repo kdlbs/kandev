@@ -27,6 +27,7 @@ import { sendMessageRequest } from "@/hooks/use-message-handler";
 import { t } from "@/lib/i18n";
 import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
 import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 
 /**
  * Format a single comment into markdown suitable for sending to the agent.
@@ -96,7 +97,26 @@ export type PlanCommentRunAvailability =
   | { session: TaskSession; inputMode: "direct" | "queue"; reason: null }
   | { session: null; inputMode: "unavailable"; reason: PlanCommentRunUnavailableReason };
 
+function primarySessionFromTask(
+  state: AppState,
+  taskId: string,
+): { known: boolean; session?: TaskSession } {
+  const task =
+    state.kanban.tasks.find((candidate) => candidate.id === taskId) ??
+    findTaskInSnapshots(taskId, state.kanbanMulti.snapshots);
+  if (!task || task.primarySessionId === undefined) return { known: false };
+  if (task.primarySessionId === null) return { known: true };
+  const session =
+    state.taskSessions.items[task.primarySessionId] ??
+    state.taskSessionsByTask.itemsByTaskId[taskId]?.find(
+      (candidate) => candidate.id === task.primarySessionId,
+    );
+  return { known: true, session: session?.task_id === taskId ? session : undefined };
+}
+
 function listedPrimarySession(state: AppState, taskId: string): TaskSession | undefined {
+  const projected = primarySessionFromTask(state, taskId);
+  if (projected.known) return projected.session;
   const taskSessions = state.taskSessionsByTask?.itemsByTaskId[taskId] ?? [];
   const listed = taskSessions.find((candidate) => candidate.is_primary);
   if (listed) {
@@ -106,6 +126,38 @@ function listedPrimarySession(state: AppState, taskId: string): TaskSession | un
   return Object.values(state.taskSessions.items).find(
     (candidate) => candidate.task_id === taskId && candidate.is_primary,
   );
+}
+
+function applyTaskPrimaryProjection(
+  taskId: string,
+  primarySessionId: string,
+  primarySessionState: TaskSession["state"] | undefined,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  storeApi.setState((state) => {
+    const updateTasks = (tasks: typeof state.kanban.tasks) =>
+      tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              primarySessionId,
+              ...(primarySessionState ? { primarySessionState } : {}),
+            }
+          : task,
+      );
+    return {
+      kanban: { ...state.kanban, tasks: updateTasks(state.kanban.tasks) },
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: Object.fromEntries(
+          Object.entries(state.kanbanMulti.snapshots).map(([workflowId, snapshot]) => [
+            workflowId,
+            { ...snapshot, tasks: updateTasks(snapshot.tasks) },
+          ]),
+        ),
+      },
+    };
+  });
 }
 
 /** Resolve the live primary and its admission mode from one store snapshot. */
@@ -254,6 +306,12 @@ function applyPrimarySessionChange(
   storeApi: ReturnType<typeof useAppStoreApi>,
 ) {
   if (!conflict.primarySessionId) return;
+  applyTaskPrimaryProjection(
+    taskId,
+    conflict.primarySessionId,
+    conflict.primarySessionState,
+    storeApi,
+  );
   const state = storeApi.getState();
   for (const candidate of Object.values(state.taskSessions.items)) {
     if (candidate.task_id !== taskId) continue;

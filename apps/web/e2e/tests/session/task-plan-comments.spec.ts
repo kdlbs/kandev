@@ -76,7 +76,11 @@ test.describe("task-owned plan comments", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const { session, primary, secondary } = await seedTwoSessionTask(testPage, apiClient, seedData);
+    const { task, session, primary, secondary } = await seedTwoSessionTask(
+      testPage,
+      apiClient,
+      seedData,
+    );
 
     await session.togglePlanMode();
     await expect(
@@ -122,6 +126,17 @@ test.describe("task-owned plan comments", () => {
       timeout: 15_000,
     });
     await session.waitForChatIdle({ timeout: 45_000 });
+    // A completed seed turn can auto-promote the secondary. Pin the intended
+    // primary so this flow isolates selected-session Send from primary Run.
+    await apiClient.setPrimarySession(primary.id);
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).primary_session_id, {
+        timeout: 15_000,
+      })
+      .toBe(primary.id);
+    await expect(session.primaryStarInSessionTab(primary.id)).toBeVisible({ timeout: 15_000 });
+    await session.sessionTabBySessionId(secondary.id).click();
+    await waitForStableActiveSession(testPage, secondary.id);
 
     const runTextarea = await openPlanCommentComposer(testPage, session);
     const runComment = "Run this feedback in the primary session";
