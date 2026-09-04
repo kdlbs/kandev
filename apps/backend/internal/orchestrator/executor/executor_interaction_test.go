@@ -369,6 +369,70 @@ func TestStopByTaskID_RegistryRecoveryLoadFailureIsNotReportedAsNotFound(t *test
 	}
 }
 
+// TestStopByTaskID_MixedActiveAndUnloadableOrphanSurfacesLoadError covers
+// Finding 2 from Review Round 1: a task with one active session (which stops
+// cleanly) plus one registry-only orphan whose row fails to load must not
+// return a clean nil. The retry contract on the never-started teardown's
+// failed-attempt path depends on StopByTaskID surfacing that load failure so
+// a later stop keeps retrying instead of reporting a false all-clear.
+func TestStopByTaskID_MixedActiveAndUnloadableOrphanSurfacesLoadError(t *testing.T) {
+	repo := newMockRepository()
+	loadFailure := errors.New("database is locked")
+	activeSession := &models.TaskSession{
+		ID: "session-active", TaskID: "task-1", State: models.TaskSessionStateRunning,
+	}
+	repo.sessions[activeSession.ID] = activeSession
+	repo.listActiveTaskSessionsByTaskIDFunc = func(_ context.Context, taskID string) ([]*models.TaskSession, error) {
+		if taskID != "task-1" {
+			return nil, nil
+		}
+		return []*models.TaskSession{activeSession}, nil
+	}
+	repo.getTaskSessionFunc = func(_ context.Context, id string) (*models.TaskSession, error) {
+		if id == "session-orphan" {
+			return nil, loadFailure
+		}
+		if s, ok := repo.sessions[id]; ok {
+			return s, nil
+		}
+		return nil, nil
+	}
+	stopCalls := make(chan string, 1)
+	manager := &mockAgentManager{
+		listSessionIDsForTaskFunc: func(taskID string) []string {
+			if taskID != "task-1" {
+				return nil
+			}
+			return []string{"session-active", "session-orphan"}
+		},
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-active", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+
+	err := exec.StopByTaskID(context.Background(), "task-1", "cleanup", true)
+	if err == nil {
+		t.Fatal("StopByTaskID: want an error, got nil")
+	}
+	if !errors.Is(err, loadFailure) {
+		t.Fatalf("error = %v, want it to wrap %v", err, loadFailure)
+	}
+
+	select {
+	case executionID := <-stopCalls:
+		if executionID != "execution-active" {
+			t.Fatalf("stopped execution = %q, want execution-active", executionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("active session's execution was not stopped despite the orphan load failure")
+	}
+}
+
 func TestStopSessionDetailed_RejectsInvalidSession(t *testing.T) {
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 
@@ -600,6 +664,52 @@ func TestStopWithSession_ClaimSuppressesLateCancelledLaunchCleanup(t *testing.T)
 	case force := <-stopCalls:
 		t.Fatalf("duplicate teardown reached runtime (force=%v)", force)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestStopWithSession_RegistersStopOwnerBeforeCancelledWrite is a regression
+// test for Finding 1 from Review Round 1: a concurrent StartAgentProcess
+// failure claims forced cleanup for itself only when no stop owner is
+// registered yet, and it classifies CANCELLED as terminal as soon as the row
+// is visible. If the CANCELLED write happened before stop-owner registration,
+// that window would let the concurrent failure win the claim and issue its
+// own teardown alongside this one's. The owner must be registered first.
+func TestStopWithSession_RegistersStopOwnerBeforeCancelledWrite(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID: "session-order", TaskID: "task-order", State: models.TaskSessionStateRunning,
+	}
+	repo.sessions[session.ID] = session
+
+	var order []string
+	repo.updateTaskSessionStateFunc = func(_ context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error {
+		order = append(order, "cancelled-write")
+		if s, ok := repo.sessions[sessionID]; ok {
+			s.State = state
+			s.ErrorMessage = errorMessage
+		}
+		return nil
+	}
+
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-order", nil
+		},
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	exec.SetOnExecutionStopOwnerRegistration(func(string, string, bool) {
+		order = append(order, "register-owner")
+	})
+
+	if err := exec.stopWithSession(context.Background(), session, "test stop", false); err != nil {
+		t.Fatalf("stopWithSession: %v", err)
+	}
+
+	if len(order) != 2 || order[0] != "register-owner" || order[1] != "cancelled-write" {
+		t.Fatalf("operation order = %v, want [register-owner cancelled-write]", order)
 	}
 }
 

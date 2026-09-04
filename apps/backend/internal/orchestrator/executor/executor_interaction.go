@@ -124,6 +124,12 @@ func (e *Executor) StopSessionDetailed(
 // stopWithSession preserves the legacy error-only contract. It intentionally
 // keeps session persistence best-effort and schedules teardown whenever a live
 // execution was found; existing UI and cleanup callers rely on that behavior.
+//
+// Stop ownership is registered before the CANCELLED write, not after: a
+// concurrent StartAgentProcess failure classifies CANCELLED as terminal and
+// claims forced cleanup for itself only when no owner is registered yet. If
+// the state write were visible first, that failure could win the claim and
+// issue its own teardown while this call also schedules one.
 func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
 	executionID, err := e.resolveExecutionIDForStop(ctx, session)
 	if err != nil {
@@ -131,12 +137,13 @@ func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSess
 	}
 
 	e.logStop(session, executionID, reason, force)
+	e.registerStopOwner(session.ID, executionID, force)
 	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
 		e.logger.Error("failed to update agent session status",
 			zap.String("session_id", session.ID),
 			zap.Error(dbErr))
 	}
-	e.registerAndScheduleStop(ctx, session.ID, executionID, reason, force)
+	e.scheduleStop(ctx, session.ID, executionID, reason, force)
 	return nil
 }
 
@@ -157,15 +164,21 @@ func (e *Executor) resolveExecutionIDForStop(ctx context.Context, session *model
 	return executionID, nil
 }
 
-// registerAndScheduleStop records advisory stop ownership and schedules the
-// detached runtime teardown. Shared by stopWithSession (which transitions the
-// session to CANCELLED first) and stopRegistryRecoveredSession (which must
-// not — the session's terminal state and error message are already
-// authoritative).
-func (e *Executor) registerAndScheduleStop(ctx context.Context, sessionID, executionID, reason string, force bool) {
+// registerStopOwner records advisory stop ownership ahead of a terminal
+// session mutation this call is about to make. Callers with no interleaved
+// mutation (stopRegistryRecoveredSession) may register and schedule together
+// via registerAndScheduleStop instead.
+func (e *Executor) registerStopOwner(sessionID, executionID string, force bool) {
 	if e.onExecutionStopOwnerRegistration != nil {
 		e.onExecutionStopOwnerRegistration(sessionID, executionID, force)
 	}
+}
+
+// registerAndScheduleStop records advisory stop ownership and schedules the
+// detached runtime teardown. Used by stopRegistryRecoveredSession, whose call
+// site performs no terminal-state write for the registration to race.
+func (e *Executor) registerAndScheduleStop(ctx context.Context, sessionID, executionID, reason string, force bool) {
+	e.registerStopOwner(sessionID, executionID, force)
 	e.scheduleStop(ctx, sessionID, executionID, reason, force)
 }
 
@@ -332,6 +345,13 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 		} else {
 			stoppedCount++
 		}
+	}
+
+	// A registry-only orphan whose row failed to load must not be masked by
+	// other sessions stopping cleanly — a caller retrying against a load
+	// failure needs to see it, not a false all-clear.
+	if recoverErr != nil {
+		return fmt.Errorf("task %q has a registered execution but its session could not be loaded: %w", taskID, recoverErr)
 	}
 
 	if stoppedCount == 0 && lastErr != nil {
