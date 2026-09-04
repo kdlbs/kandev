@@ -129,7 +129,8 @@ it appears on the board.
   other field of the creation request, and shall not block, gate or reorder any
   other step of task creation.
 - **AC-TASKS-PRIORITY-VISIBILITY-002.6:** On wide layouts, the dialog shall show
-  the dependency selector before the priority selector. The priority label shall
+  the dependency selector before the priority selector. The priority selector
+  shall start at the leading edge of the second column. The priority label shall
   provide contextual help on hover or focus, with an equivalent touch-friendly
   disclosure for coarse pointers.
 

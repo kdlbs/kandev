@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { IconFlag } from "@tabler/icons-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import {
@@ -347,6 +348,15 @@ describe("buildKanbanCardMenuEntries — priority action", () => {
     expect(
       children.map((child) => renderNodeText(child.kind === "item" ? child.label : undefined)),
     ).toEqual(["Critical", "High", "Medium", "Low"]);
+  });
+
+  it("includes the priority icon on the card menu setting", () => {
+    const entries = buildKanbanCardMenuEntries({ ...baseArgs, onSelectPriority: vi.fn() });
+    const priorityEntry = entries.find((entry) => entry.key === "priority");
+
+    expect(priorityEntry?.kind).toBe("submenu");
+    if (priorityEntry?.kind !== "submenu") return;
+    expect((priorityEntry.icon as { type?: unknown })?.type).toBe(IconFlag);
   });
 
   it("marks the task's current priority and leaves all four selectable", () => {

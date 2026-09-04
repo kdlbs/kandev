@@ -99,7 +99,10 @@ export function TaskCreateAdvancedSettings({
               />
             </div>
           </div>
-          <div className="md:justify-self-end" data-testid="task-create-priority-setting-row">
+          <div
+            className="md:col-start-2 md:justify-self-start"
+            data-testid="task-create-priority-setting-row"
+          >
             <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
           </div>
         </div>

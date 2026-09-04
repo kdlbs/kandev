@@ -103,7 +103,9 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(row.parentElement).toBe(grid);
     expect(grid.firstElementChild).toBe(row);
     expect(grid.lastElementChild).toBe(priorityRow);
-    expect(priorityRow.className).toContain("md:justify-self-end");
+    expect(priorityRow.className).toContain("md:col-start-2");
+    expect(priorityRow.className).toContain("md:justify-self-start");
+    expect(priorityRow.className).not.toContain("md:justify-self-end");
     expect(selectorContainer.parentElement).toBe(row);
     const info = screen.getByTestId("task-create-dependency-setting-info");
     expect(info.getAttribute("aria-label")).toBe("About task dependencies");

@@ -106,6 +106,9 @@ test.describe("Task creation — priority control", () => {
     expect(dependencyBox).not.toBeNull();
     expect(priorityBox).not.toBeNull();
     expect(priorityBox!.x).toBeGreaterThan(dependencyBox!.x);
+    await expect(priorityRow).toHaveClass(/md:col-start-2/);
+    await expect(priorityRow).toHaveClass(/md:justify-self-start/);
+    await expect(priorityRow).not.toHaveClass(/md:justify-self-end/);
     await expect(select).toHaveClass(/bg-muted\/30/);
 
     const priorityInfo = dialog.getByTestId("task-create-priority-setting-info");
@@ -173,6 +176,7 @@ test.describe("Kanban card menu — priority action", () => {
     // all four remain selectable, medium renders no indicator on the card.
     await kanban.openTaskContextMenu(task.id);
     await expect(kanban.contextPriority()).toBeVisible();
+    await expect(kanban.contextPriority().locator("svg").first()).toBeVisible();
     await kanban.openPrioritySubmenu();
     await expect(kanban.contextPriorityCurrent("medium")).toBeVisible();
     await expect(kanban.contextPriorityOption("critical")).toBeEnabled();

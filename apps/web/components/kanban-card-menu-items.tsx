@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import {
   IconArchive,
   IconArrowRight,
+  IconFlag,
   IconLoader,
   IconLogicBuffer,
   IconTrash,
@@ -233,6 +234,7 @@ function buildPriorityMenuEntry({
     kind: "submenu",
     key: "priority",
     testId: "task-context-priority",
+    icon: <IconFlag className="mr-2 h-4 w-4" />,
     label: t("kanban:priority"),
     disabled,
     className: "w-40",
