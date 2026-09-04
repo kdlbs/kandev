@@ -117,6 +117,17 @@ export function getStepAdjacencyForStep(
   return getStepAdjacency(moveTargetSteps, index);
 }
 
+/**
+ * Excludes the synthetic orphan step from the steps handed to the shared task
+ * menu. The step-pill chevrons need the orphan present so the current step's
+ * own adjacency can be computed against it, but the shared menu's move-to-step
+ * submenu turns every entry it receives into a selectable destination, and the
+ * orphan is display-only: it has no backing workflow step to move into.
+ */
+export function excludeOrphanFromMoveMenu(moveTargetSteps: WorkflowStep[]): WorkflowStep[] {
+  return moveTargetSteps.filter((step) => !isOrphanMoveTarget(step.id));
+}
+
 export function getStepMoveTargets(
   moveTargetSteps: WorkflowStep[],
   stepId: string,
@@ -129,6 +140,22 @@ export function getStepMoveTargets(
     prevStepTitle: prevStep?.title,
     nextStepTitle: nextStep?.title,
   };
+}
+
+type HorizontalRect = { left: number; right: number };
+
+/**
+ * The scrollLeft adjustment that brings `nodeRect` fully within `containerRect`
+ * horizontally, without moving it further than necessary. Zero when the node
+ * is already within bounds.
+ */
+export function computeAnchorScrollDelta(
+  nodeRect: HorizontalRect,
+  containerRect: HorizontalRect,
+): number {
+  if (nodeRect.left < containerRect.left) return nodeRect.left - containerRect.left;
+  if (nodeRect.right > containerRect.right) return nodeRect.right - containerRect.right;
+  return 0;
 }
 
 function PipelineStepNodes({
@@ -157,10 +184,27 @@ function PipelineStepNodes({
 
   // Every step keeps its own labelled pill (no dot-collapsing), so a
   // many-step run routinely overflows its lane. When it does, the current
-  // step must stay the anchor: scroll it to the lane's leading edge so past
-  // steps are what falls off-screen, never the step the task is actually on.
+  // step must stay the anchor: scroll it into the lane's visible bounds so
+  // past steps are what falls off-screen, never the step the task is
+  // actually on. This walks scrollLeft on the lane's own scroll container
+  // directly rather than calling scrollIntoView, which also nudges every
+  // vertically scrollable ancestor (the task list, the page) toward whichever
+  // row's effect happens to run last.
   useEffect(() => {
-    currentNodeRef.current?.scrollIntoView({ inline: "start", block: "nearest" });
+    const node = currentNodeRef.current;
+    const scrollRoot = node?.closest<HTMLElement>('[data-testid="pipeline-row-overflow-region"]');
+    if (!node || !scrollRoot) return;
+    let container: HTMLElement | null = node.parentElement;
+    while (container && container !== scrollRoot.parentElement) {
+      if (container.scrollWidth > container.clientWidth) break;
+      container = container.parentElement;
+    }
+    if (!container) return;
+    const delta = computeAnchorScrollDelta(
+      node.getBoundingClientRect(),
+      container.getBoundingClientRect(),
+    );
+    if (delta !== 0) container.scrollLeft += delta;
   }, [task.id, currentStepIndex, steps]);
 
   return (
@@ -214,7 +258,7 @@ function PipelineStepNodes({
   );
 }
 
-/** The row's task-menu trigger, sourced from the shared menu module (AC-UI-PIPELINE-ROW-002.1/002.4). */
+/** The row's task-menu trigger, sourced from the shared menu module. */
 function RowMenuTrigger({
   taskId,
   entries,
@@ -285,7 +329,7 @@ function RowInfoColumn({
       </div>
       {/* Height is reserved whether or not the task has a repository, so a
           row with no repository is the same height as one with, and the
-          board keeps a constant row pitch (AC-UI-PIPELINE-ROW-003.9). */}
+          board keeps a constant row pitch. */}
       <div className="h-4" data-testid="pipeline-row-repo-line">
         <RepoChipRow chips={repositoryChips} />
       </div>
@@ -480,7 +524,7 @@ function PipelineRow({
   );
 }
 
-/** The row's dialogs/confirmations, sourced from the shared menu module (AC-UI-PIPELINE-ROW-002.4). */
+/** The row's dialogs/confirmations, sourced from the shared menu module. */
 function PipelineDialogs({
   task,
   workspaceId,
@@ -563,12 +607,16 @@ export function Graph2TaskPipeline({
     () => resolveTaskRepositoryChips(task, repositories),
     [task, repositories],
   );
+  const menuMoveTargetSteps = useMemo(
+    () => excludeOrphanFromMoveMenu(moveTargetSteps),
+    [moveTargetSteps],
+  );
 
   const menu = useKanbanCardMenus({
     task,
     workspaceId,
     externalLinkAvailability,
-    steps: moveTargetSteps,
+    steps: menuMoveTargetSteps,
     isDeleting,
     isArchiving,
     isMoving,

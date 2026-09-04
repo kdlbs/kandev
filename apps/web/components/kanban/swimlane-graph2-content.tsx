@@ -28,9 +28,9 @@ export function getGraph2DisplayState(
 }
 
 /**
- * AC-UI-PIPELINE-ROW-005.1: displayed-step-index ascending (a task with no
- * resolvable current step sorts after every task that has one), then
- * `position` ascending (absent treated as 0), then task id ascending.
+ * Sorts by displayed-step-index ascending (a task with no resolvable current
+ * step sorts after every task that has one), then `position` ascending
+ * (absent treated as 0), then task id ascending.
  */
 export function sortGraph2Tasks(tasks: Task[], displaySteps: WorkflowStep[]): Task[] {
   // A finite sentinel, not Number.POSITIVE_INFINITY: two no-resolvable-step
@@ -135,6 +135,7 @@ export function SwimlaneGraph2Content({
             isDeleting={deletingTaskId === task.id}
             isArchiving={archivingTaskId === task.id}
             isSelected={selectedIds?.has(task.id)}
+            selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
             onRangeSelect={
               onSelectRange ? (taskId) => onSelectRange(taskId, orderedTaskIds) : undefined

@@ -8,7 +8,12 @@ import { t } from "@/lib/i18n";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
-import { Graph2TaskPipeline } from "./graph2-task-pipeline";
+import { ORPHAN_STEP_ID } from "./swimlane-orphan-display";
+import {
+  computeAnchorScrollDelta,
+  excludeOrphanFromMoveMenu,
+  Graph2TaskPipeline,
+} from "./graph2-task-pipeline";
 
 const routerPush = vi.fn();
 vi.mock("@/lib/routing/client-router", async (importOriginal) => {
@@ -540,5 +545,54 @@ describe("Graph2TaskPipeline — multi-select mode hides the actions cluster (AC
     renderPipeline(makeTask("step-2"), STEPS);
 
     expect(screen.getByRole("button", { name: moreOptionsLabel() })).not.toBeNull();
+  });
+});
+
+describe("excludeOrphanFromMoveMenu", () => {
+  it("drops the synthetic orphan step so it cannot appear as a move-to-step destination", () => {
+    const real = [...STEPS];
+    const withOrphan = [
+      ...real,
+      { id: ORPHAN_STEP_ID, title: "Needs Reassignment", color: "#f59e0b" },
+    ];
+
+    expect(excludeOrphanFromMoveMenu(withOrphan)).toEqual(real);
+  });
+
+  it("is a no-op when no orphan step is present", () => {
+    expect(excludeOrphanFromMoveMenu(STEPS)).toEqual(STEPS);
+  });
+});
+
+describe("Graph2TaskPipeline — current-step anchoring keeps the scroll horizontal", () => {
+  it("never calls scrollIntoView, which also scrolls vertical ancestors like the task list and the page", () => {
+    const scrollIntoViewSpy = vi.fn();
+    // jsdom does not implement scrollIntoView; stub it so a regression back to
+    // calling it is caught instead of throwing "not a function".
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewSpy;
+
+    renderPipeline(makeTask("step-2"), STEPS);
+
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("computeAnchorScrollDelta", () => {
+  const container = { left: 0, right: 200 };
+
+  it("returns zero when the node is fully within the container's bounds", () => {
+    expect(computeAnchorScrollDelta({ left: 20, right: 180 }, container)).toBe(0);
+  });
+
+  it("returns a positive delta (scroll right) when the node overflows the right edge", () => {
+    expect(computeAnchorScrollDelta({ left: 300, right: 430 }, container)).toBe(230);
+  });
+
+  it("returns a negative delta (scroll left) when the node overflows the left edge", () => {
+    expect(computeAnchorScrollDelta({ left: -50, right: 80 }, container)).toBe(-50);
+  });
+
+  it("prefers correcting the left edge when a node is wider than the container and overflows both", () => {
+    expect(computeAnchorScrollDelta({ left: -20, right: 250 }, container)).toBe(-20);
   });
 });

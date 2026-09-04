@@ -32,7 +32,7 @@ export interface TaskCardMenuParams {
   steps?: WorkflowStep[];
   isDeleting?: boolean;
   isArchiving?: boolean;
-  /** Row-local in-flight move guard (AC-UI-PIPELINE-ROW-005.2): disables move/send-to-workflow entries. */
+  /** Row-local in-flight move guard: disables move/send-to-workflow entries. */
   isMoving?: boolean;
   isSelected?: boolean;
   selectedIds?: Set<string>;

@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { t } from "@/lib/i18n";
 import { ORPHAN_STEP_ID } from "./swimlane-kanban-content";
 import {
   getGraph2DisplayState,
@@ -209,5 +210,52 @@ describe("SwimlaneGraph2Content — row order follows the deterministic sort", (
       "pipeline-task-on-done",
       "pipeline-task-unassigned",
     ]);
+  });
+});
+
+describe("SwimlaneGraph2Content — forwards selectedIds to the row's shared task menu", () => {
+  function renderWithSelection(tasks: Task[], selectedIds: Set<string>) {
+    return render(
+      createElement(
+        ToastProvider,
+        null,
+        createElement(
+          StateProvider,
+          null,
+          createElement(TooltipProvider, {
+            delayDuration: 0,
+            children: createElement(SwimlaneGraph2Content, {
+              workflowId: "wf-1",
+              steps,
+              moveTargetSteps: steps,
+              tasks,
+              onPreviewTask: () => undefined,
+              onOpenTask: () => undefined,
+              onEditTask: () => undefined,
+              onDeleteTask: () => undefined,
+              selectedIds,
+              onToggleSelect: () => undefined,
+            }),
+          }),
+        ),
+      ),
+    );
+  }
+
+  it("suppresses the detach entry while acting on a multi-task selection, matching the Kanban card", async () => {
+    const child = { ...makeTask("child", "todo"), parentTaskId: "parent-1" } as Task;
+    const sibling = makeTask("sibling", "todo");
+    renderWithSelection([child, sibling], new Set(["child", "sibling"]));
+
+    const row = screen.getByTestId("pipeline-task-child");
+    const trigger = within(row).getByRole("button", { name: t("kanban:moreOptions") });
+    fireEvent.pointerDown(trigger, { button: 0, pointerId: 1 });
+    fireEvent.click(trigger);
+
+    await waitFor(() => expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0));
+    // Without selectedIds reaching the row, the shared menu never learns more
+    // than one task is selected and offers "Detach from parent" as if this
+    // were a single-task action — an accidental bulk detach.
+    expect(screen.queryByTestId("task-context-detach")).toBeNull();
   });
 });

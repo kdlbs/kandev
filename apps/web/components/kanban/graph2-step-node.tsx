@@ -78,10 +78,9 @@ function FutureNode({ step }: { step: WorkflowStep }) {
 
 /**
  * The synthetic labelled marker rendered when a task has no resolvable
- * current step (AC-UI-PIPELINE-ROW-005.6): `workflowStepId` is empty, so it
- * matches no displayed step. It carries fixed unassigned-step copy rather
- * than a step title, and no move controls, there being no current step for
- * either direction.
+ * current step: `workflowStepId` is empty, so it matches no displayed step.
+ * It carries fixed unassigned-step copy rather than a step title, and no move
+ * controls, there being no current step for either direction.
  */
 export function Graph2UnassignedStepMarker() {
   const { t } = useTranslation();
@@ -130,11 +129,16 @@ function MoveButton({
       <Icon className="h-3 w-3" />
     </button>
   );
-  // AC-UI-PIPELINE-ROW-001.7: the tooltip always names the destination step,
-  // not only when that step is otherwise hidden from the run.
+  // The tooltip always names the destination step, not only when that step is
+  // otherwise hidden from the run. Disabled buttons receive no pointer/focus
+  // events, so the trigger is a span that is focusable only while disabled.
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        <span tabIndex={isMoving ? 0 : -1} className="inline-flex">
+          {button}
+        </span>
+      </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
