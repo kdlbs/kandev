@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 func TestManagedNPMRuntimeContracts(t *testing.T) {
@@ -64,8 +66,9 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 
 func TestManagedNPMRuntimeExecutionCacheKeyMatchesNPM(t *testing.T) {
 	spec := ManagedNPMRuntimeSpec{Package: "opencode-ai"}
-	if got := spec.ExecutionCacheKey(); got != "305cdb391114ad88" {
-		t.Fatalf("ExecutionCacheKey = %q, want npm key 305cdb391114ad88", got)
+	want := managedruntime.NpxExecutionCacheKey(spec.PackageSpec(""))
+	if got := spec.ExecutionCacheKey(); got != want {
+		t.Fatalf("ExecutionCacheKey = %q, want npm key %q", got, want)
 	}
 }
 

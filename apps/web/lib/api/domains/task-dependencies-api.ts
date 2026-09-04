@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "@/lib/api/client";
+import { ApiError, fetchJson, type ApiRequestOptions } from "@/lib/api/client";
 
 const BASE = "/api/v1";
 
@@ -7,6 +7,15 @@ export type TaskDependencyRefResponse = {
   title?: string;
   state?: string;
   status?: "resolved" | "failed" | "pending";
+};
+
+export type TaskDependencyProjectionResponse = {
+  task_id?: string;
+  id?: string;
+  blocked?: boolean;
+  blocked_reason?: string;
+  depends_on?: TaskDependencyRefResponse[];
+  blocks?: TaskDependencyRefResponse[];
 };
 
 /**
@@ -19,11 +28,29 @@ export type TaskDependencyRefResponse = {
  * fetch-your-own-data shape `PRStatusChip` already uses via `useTaskPR`.
  */
 export function getTaskDependencies(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<{
-    id: string;
-    blocked?: boolean;
-    blocked_reason?: string;
-    depends_on?: TaskDependencyRefResponse[];
-    blocks?: TaskDependencyRefResponse[];
-  }>(`${BASE}/tasks/${taskId}`, options);
+  return fetchJson<TaskDependencyProjectionResponse>(`${BASE}/tasks/${taskId}`, options);
+}
+
+export function replaceTaskDependencies(
+  taskId: string,
+  dependsOnTaskIDs: string[],
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskDependencyProjectionResponse>(`${BASE}/tasks/${taskId}/dependencies`, {
+    ...options,
+    init: {
+      ...options?.init,
+      method: "PUT",
+      body: JSON.stringify({ depends_on_task_ids: dependsOnTaskIDs }),
+    },
+  });
+}
+
+export function getTaskDependencyCycle(error: unknown): string[] | null {
+  if (!(error instanceof ApiError) || !error.body || typeof error.body !== "object") return null;
+  const cycle = (error.body as { cycle?: unknown }).cycle;
+  if (!Array.isArray(cycle) || !cycle.every((id): id is string => typeof id === "string")) {
+    return null;
+  }
+  return cycle;
 }

@@ -38,7 +38,7 @@ For remote access, protect the whole origin, including:
 - Streamable HTTP MCP at `/mcp`; and
 - SSE compatibility at `/mcp/sse` and `/mcp/message`.
 
-Use an authenticated reverse proxy that supports WebSockets and long-lived streaming, or keep the service on a private VPN. Block direct access to the backend so a client cannot bypass the proxy. See [Run Kandev as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for deployment-specific constraints.
+Use an authenticated reverse proxy that supports WebSockets and long-lived streaming, or keep the service on a private VPN. Block direct access to the backend so a client cannot bypass the proxy. See [Mobile Remote Access](mobile-remote-access.md), [Run Kandev as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for deployment-specific constraints.
 
 ## Understand executor access
 

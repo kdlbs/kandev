@@ -15,6 +15,10 @@ import (
 // authentication credential.
 const InterimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock"
 
+// InterimSettingsInterlockErrorCode identifies a stale browser document
+// without requiring clients to match the human-readable error message.
+const InterimSettingsInterlockErrorCode = "interim_settings_interlock_required"
+
 // NewInterimSettingsInterlockToken returns a random token for one backend
 // boot. Callers must fail closed when token generation fails.
 func NewInterimSettingsInterlockToken() (string, error) {
@@ -33,7 +37,10 @@ func InterimSettingsInterlock(token string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if strings.TrimSpace(token) == "" || hasBearerAuthorization(c.GetHeader("Authorization")) ||
 			!constantTimeEqual(c.GetHeader(InterimSettingsInterlockHeader), token) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "interim settings interlock required"})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":      "interim settings interlock required",
+				"error_code": InterimSettingsInterlockErrorCode,
+			})
 			return
 		}
 		c.Next()

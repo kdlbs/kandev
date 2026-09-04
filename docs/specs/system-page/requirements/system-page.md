@@ -9,6 +9,11 @@ owners:
 
 ## Overview
 
+> **Route allocation update (2026-09-03):**
+> [System Data and Storage Pages](system-data-storage-pages.md) supersedes the
+> Database, Backups, Logs, and Storage route allocation in this migrated source.
+> The operational behavior in this document remains authoritative.
+
 Today, settings-style operational concerns (health, disk usage, current version, OSS attribution, log access, database maintenance) have no home in kandev's UI. The existing settings sidebar is product-configuration only (executors, agents, integrations); the only system-shaped entry — Changelog — sits awkwardly inside it. When something goes wrong, users have no path inside the app to see "where is my database, how big is it, what version am I on, is there an update, where are the logs." This forces them into the filesystem and into GitHub, and it makes recoverable problems (bloated SQLite, corrupt state) look unrecoverable.
 
 Radarr and Sonarr solve this with a dedicated **System** area: a group of read-only diagnostic pages plus a small number of gated maintenance actions. This spec brings the same shape to kandev, scoped to the kandev-specific surface (database diagnostics, SQLite backups/maintenance, worktrees, GitHub releases, and daily backend log files).

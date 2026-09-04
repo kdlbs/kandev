@@ -96,6 +96,10 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
   RepoChipsRow: () => null,
 }));
 
+vi.mock("./task-edit-dialog-dependencies", () => ({
+  TaskEditDialogDependencies: () => null,
+}));
+
 vi.mock("@/hooks/use-task-create-dialog-popover-container", () => ({
   useTaskCreateDialogPopoverContainer: () => null,
   TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => (

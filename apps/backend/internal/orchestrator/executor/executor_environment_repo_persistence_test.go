@@ -48,3 +48,39 @@ func TestPersistTaskEnvironmentRepos_PreservesPhysicalWorktreeOnInventoryOnlyRef
 		t.Fatalf("inventory-only refresh did not update inventory metadata: position=%d error=%q", row.Position, row.ErrorMessage)
 	}
 }
+
+func TestPersistTaskEnvironmentRepos_ReplacesAndDeletesOmittedRows(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	const envID = "env-transition-replace"
+	repo.taskEnvironmentRepos[envID] = []*models.TaskEnvironmentRepo{
+		{ID: "keep", TaskEnvironmentID: envID, RepositoryID: "repo-1", BranchSlug: "main", WorktreeID: "wt-main", Status: "active"},
+		{ID: "remove", TaskEnvironmentID: envID, RepositoryID: "repo-2", BranchSlug: "old", WorktreeID: "wt-old", Status: "active"},
+	}
+
+	if err := exec.persistTaskEnvironmentReposForTransition(context.Background(), envID, []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "main", WorktreeID: "wt-new", WorktreePath: "/new", WorktreeBranch: "main"},
+	}, true); err != nil {
+		t.Fatalf("persistTaskEnvironmentReposForTransition: %v", err)
+	}
+
+	rows := repo.taskEnvironmentRepos[envID]
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want retained rows including tombstone", len(rows))
+	}
+	var kept, removed *models.TaskEnvironmentRepo
+	for _, row := range rows {
+		switch row.ID {
+		case "keep":
+			kept = row
+		case "remove":
+			removed = row
+		}
+	}
+	if kept == nil || kept.WorktreeID != "wt-new" {
+		t.Fatalf("kept row = %#v, want refreshed physical identity", kept)
+	}
+	if removed == nil || removed.Status != taskEnvironmentRepoStatusDeleted || removed.DeletedAt == nil {
+		t.Fatalf("removed row = %#v, want deleted tombstone", removed)
+	}
+}

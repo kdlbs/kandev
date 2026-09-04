@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IconDeviceFloppy,
   IconLoader2,
+  IconDownload,
   IconTrash,
   IconTextWrap,
   IconTextWrapDisabled,
@@ -209,6 +210,28 @@ function DeleteButton({ onDelete }: { onDelete?: () => void }) {
   );
 }
 
+function DownloadButton({ onDownload }: { onDownload?: () => void }) {
+  const { t } = useTranslation();
+  if (!onDownload) return null;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onDownload}
+          aria-label={t("editors:downloadFile")}
+          className="h-11 w-11 p-0 cursor-pointer sm:h-8 sm:w-8"
+        >
+          <IconDownload className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("editors:downloadFile")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function MarkdownPreviewButton({ onTogglePreview }: { onTogglePreview: () => void }) {
   const { t } = useTranslation();
   return (
@@ -253,6 +276,7 @@ interface MonacoEditorToolbarProps {
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onDownload?: () => void;
   onToggleMarkdownPreview?: () => void;
 }
 
@@ -280,6 +304,7 @@ export function MonacoEditorToolbar({
   onSave,
   onReloadFromAgent,
   onDelete,
+  onDownload,
   onToggleMarkdownPreview,
 }: MonacoEditorToolbarProps) {
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
@@ -331,6 +356,7 @@ export function MonacoEditorToolbar({
             size="sm"
           />
           <FileActionsDropdown filePath={path} sessionId={sessionId} size="sm" />
+          <DownloadButton onDownload={onDownload} />
           <DeleteButton onDelete={onDelete} />
           <SaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />
         </div>

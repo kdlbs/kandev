@@ -1391,7 +1391,9 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 // handleAgentFailed handles agent failure events
 func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEventData) {
 	if data.SessionID == "" {
-		s.handleAgentFailedLocked(ctx, data)
+		if dispatch := s.handleAgentFailedLocked(ctx, data); dispatch != nil {
+			dispatch()
+		}
 		return
 	}
 
@@ -1401,21 +1403,26 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	// recovery must not create messages, arm retries, or force-clean the
 	// execution that graceful teardown now owns.
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
-	defer release()
 	lock.Lock()
-	defer lock.Unlock()
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("deferring agent.failed while cancellation is in progress",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
+		lock.Unlock()
+		release()
 		return
 	}
 
-	s.handleAgentFailedLocked(ctx, data)
+	dispatch := s.handleAgentFailedLocked(ctx, data)
+	lock.Unlock()
+	release()
+	if dispatch != nil {
+		dispatch()
+	}
 }
 
-func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) {
+func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) func() {
 	data = s.withPromptAttemptEvidence(data)
 	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
@@ -1432,7 +1439,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		s.retireExecutionActivityAndPublish(
 			context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 		)
-		return
+		return nil
 	}
 
 	// Short transient provider errors get a paced, visible retry-with-backoff
@@ -1443,10 +1450,10 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// handleTransientFailure returns false (falling through) for non-transient
 	// errors, office tasks, or an exhausted budget.
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
-		return
+		return nil
 	}
 	if data.SessionID != "" && s.routeDynamicAgentFailure(ctx, data, classifyKanbanFailure(data)) {
-		return
+		return nil
 	}
 
 	// All paths below are terminal for this execution (resume recovery included).
@@ -1462,14 +1469,13 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// failure path.
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
-		errMsg = "agent failed"
+		errMsg = defaultAgentFailedMessage
 	}
 	s.finalizeAutomationRun(ctx, data.TaskID, false, errMsg)
 
 	// Make all agent CLI failures recoverable — let the user choose to resume or start fresh.
 	if data.SessionID != "" {
-		s.handleRecoverableFailureLocked(ctx, data)
-		return
+		return s.handleRecoverableFailureLockedState(ctx, data)
 	}
 
 	// No session — fall back to scheduler retry + task to REVIEW unless another
@@ -1479,6 +1485,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+	return nil
 }
 
 func (s *Service) shouldDropSessionFailure(
@@ -1759,20 +1766,22 @@ func (s *Service) clearResumeToken(ctx context.Context, sessionID string) error 
 // resume the agent session or start fresh.
 func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.AgentEventData) {
 	if data.SessionID == "" {
-		s.handleRecoverableFailureLocked(ctx, data)
+		if dispatch := s.handleRecoverableFailureLockedState(ctx, data); dispatch != nil {
+			dispatch()
+		}
 		return
 	}
 
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
-	defer release()
 	lock.Lock()
-	defer lock.Unlock()
 
 	if _, err := s.repo.GetTaskSession(ctx, data.SessionID); err != nil {
 		if errors.Is(err, models.ErrTaskSessionNotFound) {
 			s.logger.Debug("skipping recoverable failure for deleted session",
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.SessionID))
+			lock.Unlock()
+			release()
 			return
 		}
 		s.logger.Warn("failed to reload session before recoverable failure; continuing",
@@ -1780,13 +1789,29 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
 	}
-	s.handleRecoverableFailureLocked(ctx, data)
+	dispatch := s.handleRecoverableFailureLockedState(ctx, data)
+	lock.Unlock()
+	release()
+	if dispatch != nil {
+		dispatch()
+	}
 }
 
-// handleRecoverableFailureLocked performs recovery side effects while the
-// session's cancelInFlight guard is held. Deletion uses the same guard, so an
-// active error event cannot publish after the deleted-session inactive event.
+// handleRecoverableFailureLocked performs recovery side effects and dispatches
+// the workflow trigger synchronously. Production callers that already hold the
+// session guard must use handleRecoverableFailureLockedState and invoke the
+// returned dispatch after releasing that guard.
 func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watcher.AgentEventData) {
+	if dispatch := s.handleRecoverableFailureLockedState(ctx, data); dispatch != nil {
+		dispatch()
+	}
+}
+
+// handleRecoverableFailureLockedState performs recovery side effects while the
+// session's cancelInFlight guard is held and returns the workflow dispatch to
+// run after the guard is released. Deletion uses the same guard, so an active
+// error event cannot publish after the deleted-session inactive event.
+func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data watcher.AgentEventData) func() {
 	s.logger.Warn("handling recoverable agent failure",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -1848,12 +1873,21 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+
+	// The caller runs this after releasing cancelInFlight. A direct
+	// auto_start_agent callback can start the same session and reacquire that
+	// guard, so dispatching while it is held would deadlock. Panic recovery is
+	// the recovered wrapper's job, not this one's — routes R2-R5 reach this
+	// closure with no recover above them on the stack.
+	return func() {
+		s.dispatchKanbanAgentErrorTriggerRecovered(context.WithoutCancel(ctx), data)
+	}
 }
 
 func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) {
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
-		errMsg = "agent failed"
+		errMsg = defaultAgentFailedMessage
 	}
 	details := routingerr.Sanitize(data.FailureDetails)
 	// Keep this metadata until the user dismisses the UI notice locally or a
@@ -2148,11 +2182,23 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		failureData.FailureCode = string(routingerr.CodeManagedRuntimeNpmResolution)
 		failureData.FailureDetails = classified.RawExcerpt
 	}
+	var unlockGuard func()
+	var releaseGuard func()
+	var dispatch func()
+	defer func() {
+		if unlockGuard != nil {
+			unlockGuard()
+			releaseGuard()
+		}
+		if dispatch != nil {
+			dispatch()
+		}
+	}()
 	if sessionID != "" {
 		lock, release := s.acquireCancelInFlightGuard(sessionID)
-		defer release()
 		lock.Lock()
-		defer lock.Unlock()
+		unlockGuard = lock.Unlock
+		releaseGuard = release
 		if s.isCancelInFlight(sessionID) {
 			s.logger.Debug("deferring agent start failure while cancellation is in progress",
 				zap.String("task_id", taskID),
@@ -2176,7 +2222,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", agentExecutionID))
-		s.handleRecoverableFailureLocked(ctx, failureData)
+		dispatch = s.handleRecoverableFailureLockedState(ctx, failureData)
 		return true
 	}
 
@@ -2193,7 +2239,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	s.logger.Info("agent start failure is auth error, treating as recoverable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
-	s.handleRecoverableFailureLocked(ctx, failureData)
+	dispatch = s.handleRecoverableFailureLockedState(ctx, failureData)
 	return true
 }
 

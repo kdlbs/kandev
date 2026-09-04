@@ -88,6 +88,7 @@
   "taskList": "Lista de tarefas",
   "tasksOverWipLimit": "Tarefas em {{label}}, acima do limite de WIP",
   "theseOptionsAffectThisTaskList": "Estas opções afetam apenas esta lista de tarefas.",
+  "threads": "Tópicos",
   "utilities": "Utilitários",
   "view": "Vista",
   "whenEnabledClickingATaskOpens": "Quando ativado, clicar numa tarefa abre o painel de pré-visualização. Quando desativado, clicar navega diretamente para a sessão.",

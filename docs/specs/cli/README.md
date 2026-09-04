@@ -32,12 +32,13 @@ and CLI-specific compatibility behavior.
 
 - [CLI-Mode Task Parity (Kanban)](requirements/cli-mode-parity.md)
 - [Native Kandev CLI](requirements/native-kandev-cli.md)
+- [Passthrough Launch Defaults](requirements/passthrough-launch-defaults.md)
 
 ### System design
 
 
 
-- None.
+- [Passthrough Launch Defaults](system-design/passthrough-launch-defaults.md)
 
 ## Migration record
 

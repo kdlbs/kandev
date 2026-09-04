@@ -9,6 +9,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	authservice "github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
@@ -120,7 +121,8 @@ type Services struct {
 	// Auth is the opt-in authentication service (mode state machine, sessions,
 	// PATs, invites). Always non-nil; in disabled mode it only answers
 	// Mode() == ModeDisabled and the middleware injects the synthetic identity.
-	Auth *authservice.Service
+	Auth                    *authservice.Service
+	SessionHostnameResolver *hostnames.Resolver
 }
 
 type schedulerStopper interface {

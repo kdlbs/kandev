@@ -1151,19 +1151,26 @@ type McpConfigProvider interface {
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
-	TaskID                string
-	SessionID             string // Task session ID (from task_sessions table)
-	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
-	WorkspacePath         string // Path to the workspace/repository
-	WorkspaceFolders      []WorkspaceFolderSpec
-	WorkspaceRepositories []WorkspaceRepositorySpec
-	TaskDirName           string
-	WorkspaceID           string
-	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID    string // Concrete CLI profile selected for this execution
-	ExecutorProfileID     string // Concrete executor profile selected for this execution
-	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
+	TaskID            string
+	SessionID         string // Task session ID (from task_sessions table)
+	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	// ValidatedTaskEnvironmentID and ValidatedExecutorType identify the
+	// environment and executor ownership used during workspace admission. They
+	// are populated from the durable task environment, not from a session path.
+	// Host execution creation rejects a repo-backed workspace when either value
+	// is missing or no longer matches the selected environment.
+	ValidatedTaskEnvironmentID string
+	ValidatedExecutorType      string
+	WorkspacePath              string // Path to the workspace/repository
+	WorkspaceFolders           []WorkspaceFolderSpec
+	WorkspaceRepositories      []WorkspaceRepositorySpec
+	TaskDirName                string
+	WorkspaceID                string
+	AgentProfileID             string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID         string // Concrete CLI profile selected for this execution
+	ExecutorProfileID          string // Concrete executor profile selected for this execution
+	AgentID                    string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID               string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh

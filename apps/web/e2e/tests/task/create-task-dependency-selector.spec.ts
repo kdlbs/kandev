@@ -1,4 +1,6 @@
+import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { GITLAB_HOST, GITLAB_PROJECT, gitLabMR } from "../../helpers/gitlab";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
@@ -6,11 +8,22 @@ useRegularMode();
 
 const DEPENDENCY_TRIGGER = "task-create-dependencies-trigger";
 const DEPENDENCY_OPTION_PREFIX = "task-create-dependency-option-";
+const SEARCH_PLACEHOLDER = "Search tasks or #PR/MR number...";
 
 function taskIdFromUrl(url: string): string {
   const match = url.match(/\/t\/([^/?]+)/);
   if (!match) throw new Error(`Task route missing from ${url}`);
   return match[1];
+}
+
+async function openDependencyPicker(
+  dialog: Locator,
+): Promise<{ dependency: Locator; picker: Locator }> {
+  const dependency = dialog.getByTestId(DEPENDENCY_TRIGGER);
+  await dependency.click();
+  const picker = dialog.getByTestId("task-create-dependencies-popover");
+  await expect(picker).toBeVisible();
+  return { dependency, picker };
 }
 
 test.describe("Task-create dependency selector", () => {
@@ -114,7 +127,7 @@ test.describe("Task-create dependency selector", () => {
         "This task waits until every selected task completes successfully.",
       );
 
-      const search = picker.getByPlaceholder("Search tasks...");
+      const search = picker.getByPlaceholder(SEARCH_PLACEHOLDER);
       await search.fill("Dependency Alpha");
       const alphaOption = picker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${alpha.id}`);
       await expect(alphaOption).toBeVisible();
@@ -159,5 +172,197 @@ test.describe("Task-create dependency selector", () => {
     } finally {
       await apiClient.deleteWorkflow(extraWorkflow.id).catch(() => {});
     }
+  });
+
+  test("edits a started task's predecessor set and keeps cancel draft-only", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    };
+    const alpha = await apiClient.createTask(
+      seedData.workspaceId,
+      "Edit dependency Alpha",
+      taskOptions,
+    );
+    const beta = await apiClient.createTask(
+      seedData.workspaceId,
+      "Edit dependency Beta",
+      taskOptions,
+    );
+    const archived = await apiClient.createTask(
+      seedData.workspaceId,
+      "Edit archived dependency",
+      taskOptions,
+    );
+    await apiClient.archiveTask(archived.id);
+    const target = await apiClient.createTask(seedData.workspaceId, "Edit dependency target", {
+      ...taskOptions,
+      description: "The started task prompt remains unchanged.",
+      blocked_by: [alpha.id],
+    });
+    await apiClient.updateTaskState(target.id, "IN_PROGRESS");
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.openTaskActionsMenu(target.id);
+    await testPage.getByRole("menuitem", { name: "Edit", exact: true }).click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog.getByTestId("task-edit-dependencies")).toBeVisible();
+    await prCapture.screenshot("desktop-task-dependency-edit-dialog", {
+      caption: "Desktop task edit dialog with predecessor dependencies",
+    });
+    const dependency = dialog.getByTestId(DEPENDENCY_TRIGGER);
+    await expect(dependency).toContainText("Edit dependency Alpha");
+    await dependency.click();
+    const picker = dialog.getByTestId("task-create-dependencies-popover");
+    const search = picker.getByPlaceholder("Search tasks...");
+    await search.fill("Edit dependency Beta");
+    await expect(picker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${beta.id}`)).toBeVisible();
+    await picker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${beta.id}`).click();
+    await expect(dependency).toContainText("2 dependencies");
+
+    await testPage.keyboard.press("Escape");
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(
+      (await apiClient.getTaskDependencies(target.id)).depends_on?.map((ref) => ref.id),
+    ).toEqual([alpha.id]);
+
+    await kanban.openTaskActionsMenu(target.id);
+    await testPage.getByRole("menuitem", { name: "Edit", exact: true }).click();
+    const reopened = testPage.getByTestId("create-task-dialog");
+    await expect(reopened.getByTestId("task-edit-dependencies")).toBeVisible();
+    const reopenedDependency = reopened.getByTestId(DEPENDENCY_TRIGGER);
+    await reopenedDependency.click();
+    const reopenedPicker = reopened.getByTestId("task-create-dependencies-popover");
+    await reopenedPicker.getByPlaceholder("Search tasks...").fill("");
+    await expect(
+      reopenedPicker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${archived.id}`),
+    ).toHaveCount(0);
+    await reopenedPicker.getByPlaceholder("Search tasks...").fill("Edit dependency Beta");
+    await reopenedPicker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${beta.id}`).click();
+    await testPage.keyboard.press("Escape");
+    await reopened.getByRole("button", { name: "Update", exact: true }).click();
+    await expect(reopened).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        (await apiClient.getTaskDependencies(target.id)).depends_on?.map((ref) => ref.id),
+      )
+      .toEqual(expect.arrayContaining([alpha.id, beta.id]));
+  });
+
+  test("finds a candidate by its linked GitHub PR number and shows the badge", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const taskOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    };
+    const withPR = await apiClient.createTask(
+      seedData.workspaceId,
+      "Task with a linked PR",
+      taskOptions,
+    );
+    await apiClient.createTask(seedData.workspaceId, "Task without a linked PR", taskOptions);
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      task_id: withPR.id,
+      owner: "kandev-e2e",
+      repo: "dependency-fixtures",
+      pr_number: 188,
+      pr_url: "https://github.test/kandev-e2e/dependency-fixtures/pull/188",
+      pr_title: "Dependency fixture PR",
+      head_branch: "feature/dependency-fixture",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+    const { dependency, picker } = await openDependencyPicker(dialog);
+
+    const option = picker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${withPR.id}`);
+    const search = picker.getByPlaceholder(SEARCH_PLACEHOLDER);
+
+    // Search by bare number.
+    await search.fill("188");
+    await expect(option).toBeVisible({ timeout: 15_000 });
+    await expect(option.locator('[aria-label="Linked pull or merge request #188"]')).toHaveText(
+      "#188",
+    );
+
+    // Search with a leading '#' matches the same candidate.
+    await search.fill("#188");
+    await expect(option).toBeVisible();
+
+    await option.click();
+    await expect(dependency).toContainText("#188 · Task with a linked PR");
+  });
+
+  test("finds a candidate by its linked GitLab MR number and shows the badge", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.configureGitLab(seedData.workspaceId, GITLAB_HOST);
+    const iid = 4321;
+    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
+      gitLabMR(iid, "Dependency fixture MR"),
+    ]);
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "gitlab",
+      provider_host: GITLAB_HOST,
+      provider_owner: "platform",
+      provider_name: "kandev",
+    });
+
+    const taskOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    };
+    const withMR = await apiClient.createTask(
+      seedData.workspaceId,
+      "Task with a linked MR",
+      taskOptions,
+    );
+    await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
+      task_id: withMR.id,
+      repository_id: seedData.repositoryId,
+      mr_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${iid}`,
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+    const { dependency, picker } = await openDependencyPicker(dialog);
+
+    const option = picker.getByTestId(`${DEPENDENCY_OPTION_PREFIX}${withMR.id}`);
+    const search = picker.getByPlaceholder(SEARCH_PLACEHOLDER);
+    await search.fill(String(iid));
+    await expect(option).toBeVisible({ timeout: 15_000 });
+    await expect(option.locator(`[aria-label="Linked pull or merge request #${iid}"]`)).toHaveText(
+      `#${iid}`,
+    );
+    await option.click();
+    await expect(dependency).toContainText(`#${iid} · Task with a linked MR`);
   });
 });

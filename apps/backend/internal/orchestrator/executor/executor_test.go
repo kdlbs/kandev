@@ -2416,6 +2416,67 @@ func TestStartAgentProcessAsync_MarksStartingSessionRunning(t *testing.T) {
 	}
 }
 
+func TestStartAgentProcessAsyncNotifiesAfterProcessStart(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+	exec := newTestExecutor(t, &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error { return nil },
+	}, repo)
+	started := make(chan struct{})
+	exec.SetOnAgentProcessStarted(func(_ context.Context, taskID, sessionID, executionID string) {
+		if taskID != "task-123" || sessionID != "session-123" || executionID != "exec-456" {
+			t.Errorf("process-start callback args = (%q, %q, %q)", taskID, sessionID, executionID)
+		}
+		close(started)
+	})
+
+	exec.startAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456")
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for process start")
+	}
+}
+
+func TestStartAgentProcessAsyncNotifiesAfterProcessStartFailure(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+	startErr := errors.New("process bootstrap failed")
+	stopped := make(chan struct{})
+	exec := newTestExecutor(t, &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error { return startErr },
+		stopAgentFunc:         func(context.Context, string, bool) error { close(stopped); return nil },
+	}, repo)
+	failed := make(chan error, 1)
+	exec.SetOnAgentProcessStartFailed(func(_ context.Context, taskID, sessionID, executionID string, err error) {
+		if taskID != "task-123" || sessionID != "session-123" || executionID != "exec-456" {
+			t.Errorf("process-start failure callback args = (%q, %q, %q)", taskID, sessionID, executionID)
+		}
+		failed <- err
+	})
+
+	exec.startAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456")
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for failed process cleanup")
+	}
+	select {
+	case err := <-failed:
+		if !errors.Is(err, startErr) {
+			t.Fatalf("process-start callback error = %v, want %v", err, startErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for process-start failure callback")
+	}
+}
+
 func TestStartAgentProcessAsync_StopWinningStartRacePreservesReview(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{

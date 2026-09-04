@@ -467,10 +467,10 @@ func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspac
 	}
 	handle, err := storageworkspaces.OpenDirectoryNoFollow(filepath.Dir(cleanPath), cleanPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("unsafe worktree path: %w", err)
+		return nil, fmt.Errorf("unsafe worktree path %s: %w", cleanPath, err)
 	}
 	if err := handle.VerifyPath(cleanPath); err != nil {
 		_ = handle.Close()

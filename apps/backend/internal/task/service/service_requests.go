@@ -94,6 +94,9 @@ type CreateTaskRequest struct {
 	ParentID      string `json:"parent_id,omitempty"`
 	Autopilot     bool   `json:"autopilot,omitempty"`
 	WorkspacePath string `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+	// WorkspacePolicy carries the effective policy resolved by an API adapter.
+	// When omitted, CreateTask derives child defaults from the persisted parent.
+	WorkspacePolicy *WorkspacePolicy `json:"-"`
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
