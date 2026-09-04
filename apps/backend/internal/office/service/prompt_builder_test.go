@@ -524,3 +524,34 @@ func TestBuildPrompt_WorkNoFeedback(t *testing.T) {
 		t.Errorf("no-feedback work prompt should not mention reviewers:\n%s", prompt)
 	}
 }
+
+func TestBuildPrompt_AppendsOneTimeMoveInstructions(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:              service.RunReasonTaskAssigned,
+		TaskIdentifier:      "KAN-9",
+		TaskTitle:           "Ship it",
+		OneTimeInstructions: "only touch the migration file",
+	}
+	prompt := service.BuildPrompt(pc)
+
+	if !strings.Contains(prompt, "One-time workflow move instructions") {
+		t.Errorf("prompt missing one-time instructions heading:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "only touch the migration file") {
+		t.Errorf("prompt missing one-time instructions body:\n%s", prompt)
+	}
+}
+
+func TestBuildPrompt_OmitsEmptyOneTimeInstructions(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:              service.RunReasonTaskAssigned,
+		TaskIdentifier:      "KAN-9",
+		TaskTitle:           "Ship it",
+		OneTimeInstructions: "   ",
+	}
+	prompt := service.BuildPrompt(pc)
+
+	if strings.Contains(prompt, "One-time workflow move instructions") {
+		t.Errorf("whitespace-only instructions must not add a section:\n%s", prompt)
+	}
+}

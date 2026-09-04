@@ -37,6 +37,11 @@ import (
 // options. It must match the writer in task/service (workflowMoveOptionsKey).
 const workflowMoveMarkerOptionsKey = "options"
 
+// workflowMoveMarkerPersistAttempts bounds the retries setWorkflowMovePendingMarker
+// makes when persisting the sole surviving record of a consumed move's one-shot
+// options, so brief DB contention does not silently drop them.
+const workflowMoveMarkerPersistAttempts = 3
+
 type turnCompletionCause string
 
 var (
@@ -861,8 +866,21 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	}
 	s.processParentChildrenCompletedForTerminalStepMove(ctx, task.ID, targetStep.ID)
 	if session != nil {
+		// A WIP-queued optioned move persists its one-shot options on the
+		// transient marker (setWorkflowMovePendingMarker) for consumption here,
+		// once admission clears. Overlay them onto a copy of the durable step so
+		// the on_enter path applies the reset, profile, and appended
+		// instructions; the durable step is never mutated. Clear the marker so
+		// the options are applied exactly once and cannot strand and block a
+		// later optioned move (task/service rejects a new optioned move while a
+		// marker is present).
+		entryStep := targetStep
+		if moveOptions := s.workflowMovePendingOptions(task); moveOptions != nil {
+			entryStep = workflowmove.OverlayStep(targetStep, moveOptions)
+			s.clearWorkflowMovePending(ctx, task.ID)
+		}
 		go func() {
-			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), sourceStep); err != nil {
+			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, entryStep, task.Description, entryStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), sourceStep); err != nil {
 				s.restoreTaskLifecycleToken(context.WithoutCancel(ctx), task.ID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.queue_promoted")
 				return
 			}
@@ -1447,8 +1465,31 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		return
 	}
 
+	// A direct no-session move (and the WIP-promotion path) can carry one-shot
+	// entry options on the transient marker. Consume it once here — before the
+	// office branch below — so an office task also applies (or suppresses) the
+	// options and the marker is never stranded (a stranded marker rejects a
+	// later optioned move). The profile override and appended instructions are
+	// threaded through the launch because the auto-start prompt is rebuilt from
+	// the durable step by ID; reset_context is a no-op for a brand-new session.
+	moveOptions := s.workflowMovePendingOptions(task)
+	if moveOptions != nil {
+		s.clearWorkflowMovePending(ctx, task.ID)
+	}
+	if moveOptions != nil && moveOptions.SkipStepPrompt && moveOptions.Instructions == "" {
+		// skip_step_prompt with no instructions suppresses the turn entirely.
+		// For a task with no session that means preparing nothing: leave it idle
+		// exactly as a step without auto_start_agent would, so the user starts
+		// the agent manually. This covers the office path too, which is why the
+		// suppression check precedes the office branch.
+		s.logger.Info(eventName+": skip_step_prompt with no instructions; leaving task idle without auto-start",
+			zap.String("task_id", task.ID),
+			zap.String("to_step_id", step.ID))
+		return
+	}
+
 	if s.isOfficeTask(ctx, task.ID) {
-		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion, stepTransitionID)
+		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion, stepTransitionID, moveOptions)
 		return
 	}
 
@@ -1461,27 +1502,6 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 	executorProfileID, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 	queuePromotionToken := queuePromotionLifecycleToken(task)
-
-	// A direct no-session move (and the WIP-promotion path) can carry one-shot
-	// entry options on the transient marker. The profile override and appended
-	// instructions are threaded through startTask because the auto-start prompt
-	// is rebuilt from the durable step by ID; reset_context is a no-op for a
-	// brand-new session. Consume the marker now: the options are captured in the
-	// closure below and applied exactly once.
-	moveOptions := s.workflowMovePendingOptions(task)
-	if moveOptions != nil {
-		s.clearWorkflowMovePending(ctx, task.ID)
-	}
-	if moveOptions != nil && moveOptions.SkipStepPrompt && moveOptions.Instructions == "" {
-		// skip_step_prompt with no instructions suppresses the turn entirely.
-		// For a task with no session that means preparing nothing: leave it idle
-		// exactly as a step without auto_start_agent would, so the user starts
-		// the agent manually.
-		s.logger.Info(eventName+": skip_step_prompt with no instructions; leaving task idle without auto-start",
-			zap.String("task_id", task.ID),
-			zap.String("to_step_id", step.ID))
-		return
-	}
 
 	s.logger.Info(eventName+": starting task (no session, auto-start step)",
 		zap.String("task_id", task.ID),
@@ -1532,7 +1552,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 // a run through the engine's Office adapters instead, the same mechanism the
 // scheduler's recovery sweep and the "assign task" flow already use to start
 // Office work (internal/office/service/scheduler_recovery.go).
-func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64) {
+func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64, moveOptions *workflowmove.EntryOptions) {
 	queuePromotionToken := queuePromotionLifecycleToken(task)
 	// Async for the same reason as the kanban path above: the event bus
 	// delivers synchronously and blocking here would stall the HTTP handler
@@ -1549,7 +1569,7 @@ func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *mo
 			}
 		}
 
-		outcome, err := s.queueOfficeAutoStartRun(asyncCtx, task, step, stepTransitionID)
+		outcome, err := s.queueOfficeAutoStartRun(asyncCtx, task, step, stepTransitionID, moveOptions)
 		if err != nil {
 			s.logger.Error(eventName+": failed to queue office auto-start run",
 				zap.String("task_id", task.ID),
@@ -1584,11 +1604,19 @@ func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *mo
 // shared reason string is duplicated rather than pulled across the boundary.
 const officeAutoStartRunReason = "task_assigned"
 
+// officeRunPayloadOneTimeInstructionsKey names the run-payload field carrying a
+// move's one-shot instructions into an office run. It must match the reader in
+// office/service (officeservice.RunPayloadOneTimeInstructionsKey); the two
+// packages intentionally avoid importing each other, so the key is duplicated
+// as a literal rather than shared across the boundary (same rationale as
+// officeAutoStartRunReason above).
+const officeRunPayloadOneTimeInstructionsKey = "one_time_instructions"
+
 // queueOfficeAutoStartRun makes auto_start_agent Office-aware: instead of
 // StartTask (kanban-only), it resolves an agent the same way a "primary"
 // queue_run target would — preferring the task's current runner participant,
 // falling back to its assignee — and queues a run through engineRunQueue.
-func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, stepTransitionID int64) (engine.QueueOutcome, error) {
+func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, stepTransitionID int64, moveOptions *workflowmove.EntryOptions) (engine.QueueOutcome, error) {
 	if s.engineRunQueue == nil {
 		return "", fmt.Errorf("office run queue is not wired")
 	}
@@ -1605,13 +1633,23 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 	if agentProfileID == "" {
 		return "", fmt.Errorf("no agent profile resolved for office auto-start on task %s", task.ID)
 	}
+	payload := map[string]any{metaKeyTaskID: task.ID}
+	// An office run builds its prompt from a per-reason template, not the
+	// durable step prompt, so a move's one-shot instructions ride on the run
+	// payload and are appended by the office prompt builder (BuildPrompt reads
+	// officeRunPayloadOneTimeInstructionsKey). reset_context is a no-op for a
+	// fresh office run, and skip_step_prompt with no instructions was already
+	// suppressed by the caller before this path was reached.
+	if moveOptions != nil && moveOptions.Instructions != "" {
+		payload[officeRunPayloadOneTimeInstructionsKey] = moveOptions.Instructions
+	}
 	return s.engineRunQueue.QueueRun(ctx, engine.QueueRunRequest{
 		AgentProfileID: agentProfileID,
 		TaskID:         task.ID,
 		WorkflowStepID: step.ID,
 		Reason:         officeAutoStartRunReason,
 		IdempotencyKey: officeAutoStartIdempotencyKey(task, agentProfileID, step.ID, stepTransitionID),
-		Payload:        map[string]any{"task_id": task.ID},
+		Payload:        payload,
 	})
 }
 
@@ -3497,7 +3535,12 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		// PendingMove was already consumed by TakePendingMove, so persist any
 		// one-shot options on the transient marker for the promotion path to
 		// apply once after admission (spec: options survive WIP wait).
-		s.setWorkflowMovePendingMarker(ctx, taskID, fromStepID, move.MoveID, move.EntryOptions)
+		if err := s.setWorkflowMovePendingMarker(ctx, taskID, fromStepID, move.MoveID, move.EntryOptions); err != nil {
+			s.logger.Error("pending move: failed to persist one-shot options for queued promotion; task will enter with durable step defaults",
+				zap.String("task_id", taskID),
+				zap.String("move_id", move.MoveID),
+				zap.Error(err))
+		}
 		go s.processStepExit(context.WithoutCancel(ctx), taskID, session, fromStepID)
 		return
 	}
@@ -3533,33 +3576,46 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 
 // setWorkflowMovePendingMarker persists one-shot move options on the transient
 // workflow_move_pending marker so a WIP-queued destination applies them once at
-// promotion. A nil options value is a no-op.
-func (s *Service) setWorkflowMovePendingMarker(ctx context.Context, taskID, fromStepID, moveID string, options *workflowmove.EntryOptions) {
+// promotion. A nil options value is a no-op. It returns an error when the
+// options cannot be persisted: the caller has already consumed the source
+// PendingMove (TakePendingMove), so this marker is the sole surviving record of
+// the one-shot behavior across the WIP wait, and a lost write silently
+// downgrades the move to durable step defaults. A transient write failure is
+// retried a bounded number of times before giving up.
+func (s *Service) setWorkflowMovePendingMarker(ctx context.Context, taskID, fromStepID, moveID string, options *workflowmove.EntryOptions) error {
 	if options == nil {
-		return
+		return nil
 	}
 	encoded, err := workflowmove.EncodeEntryOptionsJSON(options)
 	if err != nil {
-		s.logger.Warn("failed to encode workflow move options for queued promotion",
-			zap.String("task_id", taskID), zap.Error(err))
-		return
+		return fmt.Errorf("encode workflow move options for task %s: %w", taskID, err)
 	}
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil {
-		return
-	}
-	if task.Metadata == nil {
-		task.Metadata = map[string]interface{}{}
-	}
-	task.Metadata[models.MetaKeyWorkflowMovePending] = map[string]interface{}{
+	marker := map[string]interface{}{
 		"from_step_id":               fromStepID,
 		"move_id":                    moveID,
 		workflowMoveMarkerOptionsKey: string(encoded),
 	}
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
-		s.logger.Warn("failed to persist workflow move options for queued promotion",
-			zap.String("task_id", taskID), zap.Error(err))
+	var lastErr error
+	for attempt := 0; attempt < workflowMoveMarkerPersistAttempts; attempt++ {
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err != nil || task == nil {
+			lastErr = err
+			if lastErr == nil {
+				lastErr = fmt.Errorf("task %s not found", taskID)
+			}
+			continue
+		}
+		if task.Metadata == nil {
+			task.Metadata = map[string]interface{}{}
+		}
+		task.Metadata[models.MetaKeyWorkflowMovePending] = marker
+		if updateErr := s.repo.UpdateTask(ctx, task); updateErr != nil {
+			lastErr = updateErr
+			continue
+		}
+		return nil
 	}
+	return fmt.Errorf("persist workflow move options for task %s: %w", taskID, lastErr)
 }
 
 func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) string {
