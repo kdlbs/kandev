@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { dwell } from "../../helpers/causal-waits";
 import {
+  expectMoveInstructionsDelivered,
   fillMoveOverrides,
   MOVE_INSTRUCTIONS,
   seedMoveOverrideFixture,
@@ -68,7 +69,7 @@ test("short-taps the existing mobile next-step button for a direct move", async 
     "Mobile Direct Move",
   );
   const nextStepButton = testPage.getByTestId("proceed-next-step");
-  await expect(nextStepButton).toBeVisible();
+  await expect(nextStepButton).toBeVisible({ timeout: 15_000 });
 
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
   await nextStepButton.tap();
@@ -96,7 +97,7 @@ test("long-presses the existing mobile next-step button for move options", async
     "Mobile Long Press Move",
   );
   const nextStepButton = testPage.getByTestId("proceed-next-step");
-  await expect(nextStepButton).toBeVisible();
+  await expect(nextStepButton).toBeVisible({ timeout: 15_000 });
   await longPress(testPage, nextStepButton);
 
   await expectMoveOptionsDrawer(testPage);
@@ -114,9 +115,7 @@ test("long-presses the existing mobile next-step button for move options", async
     },
   });
   await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
-  await expect(
-    fixture.session.chat.getByText(MOVE_INSTRUCTIONS, { exact: false }).first(),
-  ).toBeVisible({ timeout: 30_000 });
+  await expectMoveInstructionsDelivered(fixture.session);
 });
 
 test("opens move options from the mobile task-switcher context menu", async ({
@@ -170,7 +169,11 @@ test("opens move options from the mobile task-switcher context menu", async ({
     },
   });
   await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
-  await expect(
-    fixture.session.chat.getByText(MOVE_INSTRUCTIONS, { exact: false }).first(),
-  ).toBeVisible({ timeout: 30_000 });
+  // Submitting a move from the task-switcher clears the move-options request but
+  // leaves the switcher drawer itself open on top of the chat, so it intercepts
+  // pointer events on the delivered instruction message. Dismiss it before
+  // asserting the chat received the one-shot instructions.
+  await testPage.keyboard.press("Escape");
+  await expect(taskSheet).toBeHidden();
+  await expectMoveInstructionsDelivered(fixture.session);
 });

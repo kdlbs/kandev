@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import {
+  expectMoveInstructionsDelivered,
   fillMoveOverrides,
   MOVE_INSTRUCTIONS,
   seedMoveOverrideFixture,
@@ -10,14 +11,21 @@ import {
 
 type SpecApiClient = Parameters<typeof seedMoveOverrideFixture>[1];
 
-/** Count messages in a session whose content includes the given needle. */
+/**
+ * Count messages the session received as input (author_type "user") whose
+ * content includes the given needle. Filtering to user-authored messages counts
+ * what the backend actually delivered and excludes the mock agent's reply, which
+ * echoes a plain-text prompt back and would otherwise double the count.
+ */
 async function countSessionMessages(
   apiClient: SpecApiClient,
   sessionId: string,
   needle: string,
 ): Promise<number> {
   const { messages } = await apiClient.listSessionMessages(sessionId);
-  return messages.filter((message) => message.content.includes(needle)).length;
+  return messages.filter(
+    (message) => message.author_type === "user" && message.content.includes(needle),
+  ).length;
 }
 
 async function sessionState(
@@ -87,9 +95,7 @@ test("moves in place with one-shot options from the desktop stepper", async ({
   await expect(fixture.session.stepperStep("Verify")).toHaveAttribute("aria-current", "step", {
     timeout: 15_000,
   });
-  await expect(
-    fixture.session.chat.getByText(MOVE_INSTRUCTIONS, { exact: false }).first(),
-  ).toBeVisible({ timeout: 30_000 });
+  await expectMoveInstructionsDelivered(fixture.session);
 
   // The move applies in place: the task keeps its single primary session.
   expect((await apiClient.getTask(fixture.taskId)).primary_session_id).toBe(
@@ -178,9 +184,7 @@ test("skip step prompt with instructions delivers only the instructions", async 
   await expect(fixture.session.stepperStep("Verify")).toHaveAttribute("aria-current", "step", {
     timeout: 15_000,
   });
-  await expect(
-    fixture.session.chat.getByText(MOVE_INSTRUCTIONS, { exact: false }).first(),
-  ).toBeVisible({ timeout: 30_000 });
+  await expectMoveInstructionsDelivered(fixture.session);
   await expect
     .poll(() => countSessionMessages(apiClient, fixture.primarySessionId, MOVE_INSTRUCTIONS), {
       timeout: 30_000,

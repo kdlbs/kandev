@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
@@ -97,4 +98,24 @@ export function waitForMoveRequest(page: Page, taskId: string) {
       request.method() === "POST" &&
       new URL(request.url()).pathname === `/api/v1/tasks/${taskId}/move`,
   );
+}
+
+/**
+ * Verify the one-shot move instructions reached the session and rendered.
+ *
+ * Chat collapses the move-instructions block behind a labeled toggle
+ * (`workflow-move-instructions-toggle`), so the raw instruction text is hidden
+ * until the toggle is expanded. Wait for the toggle on the delivered user
+ * message, expand it, and assert the instruction text is then visible.
+ *
+ * Scope to the visible chat panel via `activeChat()`: dockview keeps background
+ * session-chat panels mounted, so the unscoped `session.chat` locator can match
+ * a hidden panel's toggle whose click never resolves (visible-but-not-stable).
+ */
+export async function expectMoveInstructionsDelivered(session: SessionPage): Promise<void> {
+  const chat = session.activeChat();
+  const toggle = chat.getByTestId("workflow-move-instructions-toggle").first();
+  await expect(toggle).toBeVisible({ timeout: 30_000 });
+  await toggle.click();
+  await expect(chat.getByText(MOVE_INSTRUCTIONS, { exact: false }).first()).toBeVisible();
 }
