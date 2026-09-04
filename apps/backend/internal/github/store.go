@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/persistence"
 )
 
@@ -2181,18 +2182,47 @@ func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo str
 // for a PR on the new branch without leaving an inconsistent intermediate
 // state.
 func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	// SQLite's deferred transactions let two sessions both probe an empty
+	// destination before either writer acquires the lock. BEGIN IMMEDIATE
+	// serializes the probe and the coalescing update as one operation.
+	var tx prWatchTx
+	var commit func() error
+	var rollback func()
+	if dialect.IsPostgres(s.db.DriverName()) {
+		pgTx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		tx = pgTx
+		commit = pgTx.Commit
+		rollback = func() { _ = pgTx.Rollback() }
+	} else {
+		conn, err := s.db.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+			_ = conn.Close()
+			return err
+		}
+		tx = conn
+		commit = func() error {
+			_, err := conn.ExecContext(ctx, "COMMIT")
+			return err
+		}
+		rollback = func() {
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+			_ = conn.Close()
+		}
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollback()
 
 	var taskID, repositoryID string
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`, id).
 		Scan(&taskID, &repositoryID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return tx.Commit()
+		return commit()
 	}
 	if err != nil {
 		return err
@@ -2207,18 +2237,24 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 		return err
 	}
 	if err == nil {
-		return dropSourceAndCommit(ctx, tx, id)
+		if _, err := tx.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`, id); err != nil {
+			return err
+		}
+		return commit()
 	}
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ?`,
 		branch, time.Now().UTC(), id); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return dropSourceAndCommit(ctx, tx, id)
+			if _, delErr := tx.ExecContext(ctx, `DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`, id); delErr != nil {
+				return delErr
+			}
+			return commit()
 		}
 		return err
 	}
-	return tx.Commit()
+	return commit()
 }
 
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0,
@@ -2279,6 +2315,11 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 		return err
 	}
 	return tx.Commit()
+}
+
+type prWatchTx interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 // dropSourceAndCommit removes a still-searching source watch (pr_number=0)

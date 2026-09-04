@@ -142,7 +142,7 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 	if err != nil {
 		return fmt.Errorf("failed to load message payload %s: %w", message.PayloadDigest, err)
 	}
-	payloadBytes, err := gzipDecompress(compressed, maxMessagePayloadRehydrateBytes)
+	payloadBytes, err := gzipDecompressExpectedSize(compressed, maxMessagePayloadRehydrateBytes, uncompressedSize)
 	if err != nil {
 		return fmt.Errorf("failed to decompress message payload %s: %w", message.PayloadDigest, err)
 	}
@@ -213,17 +213,31 @@ func gzipCompress(data []byte) ([]byte, error) {
 }
 
 func gzipDecompress(data []byte, maxBytes int64) ([]byte, error) {
+	return gzipDecompressExpectedSize(data, maxBytes, -1)
+}
+
+func gzipDecompressExpectedSize(data []byte, maxBytes, expectedSize int64) ([]byte, error) {
+	if maxBytes < 0 || expectedSize < -1 {
+		return nil, fmt.Errorf("gzip decompress: invalid size limit")
+	}
 	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("gzip decompress: %w", err)
 	}
 	defer func() { _ = gr.Close() }()
-	out, err := io.ReadAll(io.LimitReader(gr, maxBytes+1))
+	readLimit := maxBytes + 1
+	if expectedSize >= 0 && expectedSize < readLimit {
+		readLimit = expectedSize + 1
+	}
+	out, err := io.ReadAll(io.LimitReader(gr, readLimit))
 	if err != nil {
 		return nil, fmt.Errorf("gzip decompress: read: %w", err)
 	}
 	if int64(len(out)) > maxBytes {
 		return nil, fmt.Errorf("gzip decompress: payload exceeds maximum size %d", maxBytes)
+	}
+	if expectedSize >= 0 && int64(len(out)) != expectedSize {
+		return nil, fmt.Errorf("gzip decompress: payload size mismatch: %d != %d", len(out), expectedSize)
 	}
 	return out, nil
 }

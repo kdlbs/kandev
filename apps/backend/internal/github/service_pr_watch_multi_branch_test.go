@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -282,6 +283,52 @@ func TestResetPRWatch_CollidesWithDiscoveredSibling_DropsSource(t *testing.T) {
 	}
 	if all[0].Branch != "feature/B" || all[0].PRNumber != 99 {
 		t.Fatalf("discovered sibling watch changed unexpectedly: %+v", all[0])
+	}
+}
+
+func TestResetPRWatch_ConcurrentSessionsCoalesceDestination(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	first, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-A", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	if err != nil {
+		t.Fatalf("create session A watch: %v", err)
+	}
+	second, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-B", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	if err != nil {
+		t.Fatalf("create session B watch: %v", err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, id := range []string{first.ID, second.ID} {
+		wg.Add(1)
+		go func(watchID string) {
+			defer wg.Done()
+			<-start
+			errs <- svc.ResetPRWatch(ctx, watchID, "feature/B")
+		}(id)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent ResetPRWatch: %v", err)
+		}
+	}
+
+	watches, err := store.ListPRWatchesByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(watches) != 1 {
+		t.Fatalf("expected one coalesced destination watch, got %d", len(watches))
+	}
+	if watches[0].Branch != "feature/B" || watches[0].PRNumber != 0 {
+		t.Fatalf("unexpected coalesced watch: %+v", watches[0])
 	}
 }
 
