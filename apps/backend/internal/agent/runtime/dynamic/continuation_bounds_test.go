@@ -58,9 +58,13 @@ func TestBoundedConversationRetainsNewestContent(t *testing.T) {
 // TestBoundedConversationRetainsUserMessagesWhenConversationOverflows is the
 // R1-2 regression: once the agent conversation alone reaches the field
 // limit, user messages must still survive on their own budget rather than
-// being crowded out by a single tail cut over the concatenated string.
+// being crowded out by a single tail cut over the concatenated string. The
+// newest-agent-turn marker proves the independent tail budget, not just a
+// head-truncating cut that happens to keep both user messages: a plain
+// head-cut over the concatenated string would keep the user messages (they
+// sort first) but drop the newest agent content, which this also checks.
 func TestBoundedConversationRetainsUserMessagesWhenConversationOverflows(t *testing.T) {
-	overflowingConversation := strings.Repeat("agent: working on it. ", 500) // well over continuationFieldLimit
+	overflowingConversation := strings.Repeat("agent: working on it. ", 500) + "NEWEST-AGENT-MARKER" // well over continuationFieldLimit
 
 	continuation := BuildBoundedContinuation(ContinuationInput{
 		UserMessages: []string{"USERMSG-1: please fix the bug", "USERMSG-2: also add a test"},
@@ -72,6 +76,9 @@ func TestBoundedConversationRetainsUserMessagesWhenConversationOverflows(t *test
 	}
 	if !strings.Contains(continuation.Conversation, "USERMSG-2") {
 		t.Fatalf("Conversation dropped USERMSG-2: %q", continuation.Conversation)
+	}
+	if !strings.Contains(continuation.Conversation, "NEWEST-AGENT-MARKER") {
+		t.Fatalf("Conversation dropped the newest agent turn: %q", continuation.Conversation)
 	}
 	if len(continuation.Conversation) > continuationFieldLimit {
 		t.Fatalf("Conversation exceeded continuationFieldLimit: %d bytes", len(continuation.Conversation))

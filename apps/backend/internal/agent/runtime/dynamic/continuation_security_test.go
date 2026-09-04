@@ -116,6 +116,39 @@ func TestContinuationRedactsUserMessageSecret(t *testing.T) {
 	}
 }
 
+// TestContinuationRedactsSecretStraddlingTailCut is the R1-A regression:
+// boundedConversation used to sanitize after truncating to budget, so a
+// credential straddling the tail-cut boundary reached Sanitize as a bare
+// suffix, which matches no redaction rule and survived raw into
+// Conversation. Swept across cut alignments, since the exact alignment where
+// the token straddles the cut depends on the surrounding padding length.
+func TestContinuationRedactsSecretStraddlingTailCut(t *testing.T) {
+	for tailLen := 1960; tailLen <= 2005; tailLen++ {
+		tail := strings.Repeat("z", tailLen)
+		userMessage := strings.Repeat("ab ", 800) + secretShapedToken + " " + tail
+
+		continuation := BuildBoundedContinuation(ContinuationInput{
+			UserMessages: []string{userMessage},
+		})
+
+		if leaked := rawSecretSuffix(continuation.Conversation); leaked != "" {
+			t.Fatalf("tailLen=%d: Conversation retained a raw secret suffix %q: %q", tailLen, leaked, continuation.Conversation)
+		}
+	}
+}
+
+// rawSecretSuffix returns the longest (>= 8 char) trailing substring of
+// secretShapedToken found verbatim in s, or "" if none is present.
+func rawSecretSuffix(s string) string {
+	for n := len(secretShapedToken); n >= 8; n-- {
+		suffix := secretShapedToken[len(secretShapedToken)-n:]
+		if strings.Contains(s, suffix) {
+			return suffix
+		}
+	}
+	return ""
+}
+
 // TestContinuationWithFailureSanitizesFallbackReason covers the fallback-loop
 // path (conductor.go's continuationWithFailure), which sets FailureReason
 // directly from a classified launch error rather than through
