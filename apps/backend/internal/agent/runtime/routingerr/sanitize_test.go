@@ -80,6 +80,78 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 			mustNotHave: []string{"/home/bob/"},
 			mustHave:    []string{"/home/<redacted>/"},
 		},
+		{
+			name:        "quoted value with unescaped trailing quote leaks tail",
+			in:          `token: "a"LEAKED"`,
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"token: ***"},
+		},
+		{
+			name:        "quoted value with embedded at-sign then trailing quote",
+			in:          `password="p@ss"LEAKED"`,
+			mustNotHave: []string{"LEAKED", "p@ss"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "single-quoted value with trailing quote",
+			in:          `secret='x'LEAKED'`,
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
+			name:        "JSON-escaped quote inside quoted value",
+			in:          `{"password":"abc\"LEAKED_SUFFIX"}`,
+			mustNotHave: []string{"LEAKED_SUFFIX"},
+			mustHave:    []string{"{password: ***}"},
+		},
+		{
+			name:        "bare value starting with comma delimiter",
+			in:          "password=,LEAKED",
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "bare value starting with close brace",
+			in:          "secret=}LEAKED",
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
+			name:        "bare value starting with semicolon",
+			in:          "token=;LEAKED",
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"token: ***"},
+		},
+		{
+			name:        "bare value starting with close paren",
+			in:          "password=)LEAKED",
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "nested JSON quoted token value stops at closing brace",
+			in:          `{"a": {"token": "hunter2"}, "b": 1}`,
+			mustNotHave: []string{"hunter2"},
+			mustHave:    []string{`{"a": {token: ***}, "b": 1}`},
+		},
+		{
+			name:        "quoted value containing spaces",
+			in:          `secret: "multi word secret"`,
+			mustNotHave: []string{"multi word secret"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
+			name:        "quoted JSON password value stops at closing brace",
+			in:          `{"password": "hunter2"}`,
+			mustNotHave: []string{"hunter2"},
+			mustHave:    []string{"{password: ***}"},
+		},
+		{
+			name:        "bare token value stops at trailing brace",
+			in:          "token=hunter2}",
+			mustNotHave: []string{"hunter2"},
+			mustHave:    []string{"token: ***}"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -109,6 +181,19 @@ func TestSanitize_Idempotent(t *testing.T) {
 		"/Users/me/projects/x /home/me/x",
 		"password=p@ss'word-tail",
 		"secret=abc'def'ghi",
+		`token: "a"LEAKED"`,
+		`password="p@ss"LEAKED"`,
+		`secret='x'LEAKED'`,
+		`{"password":"abc\"LEAKED_SUFFIX"}`,
+		"password=,LEAKED",
+		"secret=}LEAKED",
+		"token=;LEAKED",
+		"password=)LEAKED",
+		"postgres://alice:prefix@LEAKED_SUFFIX@db.internal/app",
+		`{"a": {"token": "hunter2"}, "b": 1}`,
+		`secret: "multi word secret"`,
+		`{"password": "hunter2"}`,
+		"token=hunter2}",
 	}
 	for _, in := range inputs {
 		first := Sanitize(in)
@@ -259,6 +344,84 @@ func TestSanitizeCredentials_RedactsCredentialPatterns(t *testing.T) {
 			mustNotHave: []string{"django-insecure-abc123def456ghi789"},
 			mustHave:    []string{"***"},
 		},
+		{
+			name:        "quoted value with unescaped trailing quote leaks tail",
+			in:          `token: "a"LEAKED"`,
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"token: ***"},
+		},
+		{
+			name:        "quoted value with embedded at-sign then trailing quote",
+			in:          `password="p@ss"LEAKED"`,
+			mustNotHave: []string{"LEAKED", "p@ss"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "single-quoted value with trailing quote",
+			in:          `secret='x'LEAKED'`,
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
+			name:        "JSON-escaped quote inside quoted value",
+			in:          `{"password":"abc\"LEAKED_SUFFIX"}`,
+			mustNotHave: []string{"LEAKED_SUFFIX"},
+			mustHave:    []string{"{password: ***}"},
+		},
+		{
+			name:        "bare value starting with comma delimiter",
+			in:          "password=,LEAKED",
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "bare value starting with close brace",
+			in:          "secret=}LEAKED",
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
+			name:        "bare value starting with semicolon",
+			in:          "token=;LEAKED",
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"token: ***"},
+		},
+		{
+			name:        "bare value starting with close paren",
+			in:          "password=)LEAKED",
+			mustNotHave: []string{"LEAKED"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "url userinfo with multiple at-signs leaks tail past first",
+			in:          "postgres://alice:prefix@LEAKED_SUFFIX@db.internal/app",
+			mustNotHave: []string{"LEAKED_SUFFIX", "alice:prefix"},
+			mustHave:    []string{"postgres://***@db.internal/app"},
+		},
+		{
+			name:        "nested JSON quoted token value stops at closing brace",
+			in:          `{"a": {"token": "hunter2"}, "b": 1}`,
+			mustNotHave: []string{"hunter2"},
+			mustHave:    []string{`{"a": {token: ***}, "b": 1}`},
+		},
+		{
+			name:        "quoted value containing spaces",
+			in:          `secret: "multi word secret"`,
+			mustNotHave: []string{"multi word secret"},
+			mustHave:    []string{"secret: ***"},
+		},
+		{
+			name:        "quoted JSON password value stops at closing brace",
+			in:          `{"password": "hunter2"}`,
+			mustNotHave: []string{"hunter2"},
+			mustHave:    []string{"{password: ***}"},
+		},
+		{
+			name:        "bare token value stops at trailing brace",
+			in:          "token=hunter2}",
+			mustNotHave: []string{"hunter2"},
+			mustHave:    []string{"token: ***}"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -317,6 +480,19 @@ func TestSanitizeCredentials_Idempotent(t *testing.T) {
 		"secret=abc'def'ghi",
 		"AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
 		"SECRET_KEY=django-insecure-abc123def456ghi789",
+		`token: "a"LEAKED"`,
+		`password="p@ss"LEAKED"`,
+		`secret='x'LEAKED'`,
+		`{"password":"abc\"LEAKED_SUFFIX"}`,
+		"password=,LEAKED",
+		"secret=}LEAKED",
+		"token=;LEAKED",
+		"password=)LEAKED",
+		"postgres://alice:prefix@LEAKED_SUFFIX@db.internal/app",
+		`{"a": {"token": "hunter2"}, "b": 1}`,
+		`secret: "multi word secret"`,
+		`{"password": "hunter2"}`,
+		"token=hunter2}",
 	}
 	for _, in := range inputs {
 		first := SanitizeCredentials(in)
