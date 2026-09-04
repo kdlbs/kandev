@@ -77,9 +77,8 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 		return
 	}
 	if task.IsFromOffice {
-		oldState := task.State
 		s.taskRuntimeStateMu.Unlock()
-		s.markOfficeTaskCompletedForTerminalStep(ctx, task, oldState)
+		s.markOfficeTaskCompletedForTerminalStep(ctx, taskID)
 		return
 	}
 	oldState := task.State
@@ -113,13 +112,39 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 // task.state_changed and driving the parent's on_children_completed
 // trigger — or dependency resolution, the parent workflow transition, and
 // every task.updated subscriber silently stop seeing Office completions.
-func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, task *models.Task, oldState v1.TaskState) {
+//
+// The caller's taskRuntimeStateMu check-then-act is not atomic across this
+// call (the seam runs Office's reactivity pipeline and publishes, so
+// holding that global lock across it risks lock inversion). Two
+// deliveries for the same task can therefore both pass the caller's check
+// before either has written. lockOfficeTerminalCompletion serializes by
+// task ID instead, and the task is re-read and re-checked once inside
+// that lock: whichever delivery gets there first does the write and fires
+// the side effects below; a second, now-redundant delivery finds the task
+// already terminal and returns without calling the seam a second time.
+func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, taskID string) {
 	if s.officeTaskStatusUpdater == nil {
 		// No seam wired (partial wiring, or a test): skip the write rather
 		// than falling through to the raw path, which would bypass the gate.
 		return
 	}
-	err := s.officeTaskStatusUpdater.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
+
+	unlock := s.lockOfficeTerminalCompletion(taskID)
+	defer unlock()
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("terminal step completion: failed to reload office task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if models.IsTerminalTaskState(task.State) {
+		return
+	}
+	oldState := task.State
+
+	err = s.officeTaskStatusUpdater.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
 		TaskID:    task.ID,
 		NewStatus: "done",
 	})
@@ -137,6 +162,33 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 	s.publishTaskUpdated(ctx, task)
 	s.publishTaskStateChanged(ctx, task, oldState)
 	s.processParentChildrenCompletedForTaskState(ctx, task.ID, v1.TaskStateCompleted)
+}
+
+// lockOfficeTerminalCompletion serializes markOfficeTaskCompletedForTerminalStep
+// calls for the same task ID, mirroring lockChildCompletionOperation.
+func (s *Service) lockOfficeTerminalCompletion(taskID string) func() {
+	s.officeTerminalCompletionLocksMu.Lock()
+	if s.officeTerminalCompletionLocks == nil {
+		s.officeTerminalCompletionLocks = make(map[string]*childCompletionOperationLock)
+	}
+	entry := s.officeTerminalCompletionLocks[taskID]
+	if entry == nil {
+		entry = &childCompletionOperationLock{}
+		s.officeTerminalCompletionLocks[taskID] = entry
+	}
+	entry.refs++
+	s.officeTerminalCompletionLocksMu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		s.officeTerminalCompletionLocksMu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(s.officeTerminalCompletionLocks, taskID)
+		}
+		s.officeTerminalCompletionLocksMu.Unlock()
+		entry.mu.Unlock()
+	}
 }
 
 func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID string) bool {

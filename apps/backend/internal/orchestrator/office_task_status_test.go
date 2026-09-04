@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -440,5 +441,152 @@ func TestMarkOfficeTaskCompleted_ApproversPending_DoesNotFireCompletionSideEffec
 	if parentAfter.WorkflowStepID != "step-wait" {
 		t.Fatalf("parent.WorkflowStepID = %q, want unchanged step-wait: a redirect must not drive on_children_completed",
 			parentAfter.WorkflowStepID)
+	}
+}
+
+// blockingOfficeStatusUpdater wraps recordingOfficeStatusUpdater so a test
+// can hold the FIRST UpdateTaskStatus call open (simulating a slow seam
+// call) while a second, concurrent delivery races in. Only the first call
+// blocks: if the fix under test fails to serialize duplicate deliveries, a
+// second call must still return promptly (recorded, not blocked) so the
+// test fails on an assertion instead of hanging.
+type blockingOfficeStatusUpdater struct {
+	inner   *recordingOfficeStatusUpdater
+	started chan struct{}
+	proceed chan struct{}
+	calls   atomic.Int32
+}
+
+func (u *blockingOfficeStatusUpdater) UpdateTaskStatus(ctx context.Context, req dashboard.TaskStatusUpdateRequest) error {
+	if u.calls.Add(1) == 1 {
+		close(u.started)
+		<-u.proceed
+	}
+	return u.inner.UpdateTaskStatus(ctx, req)
+}
+
+// waitForOfficeTerminalCompletionLockRefs polls
+// officeTerminalCompletionLocks until the named task's ref count reaches
+// want, mirroring waitForChildCompletionLockRefs in
+// event_handlers_children_completed_test.go for the twin lock.
+func waitForOfficeTerminalCompletionLockRefs(t *testing.T, svc *Service, taskID string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.officeTerminalCompletionLocksMu.Lock()
+		got := 0
+		if entry := svc.officeTerminalCompletionLocks[taskID]; entry != nil {
+			got = entry.refs
+		}
+		svc.officeTerminalCompletionLocksMu.Unlock()
+		if got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for office terminal completion lock refs = %d", want)
+}
+
+// TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce is
+// the review-round-3 MAJOR-2 regression test: two deliveries for the same
+// Office task's terminal-step completion (e.g. a duplicate event) can both
+// pass markTaskCompletedForTerminalStep's non-terminal check before either
+// has written, since that check-then-act is not atomic across the Office
+// seam call. Only one delivery may reach the seam and fire the completion
+// side effects; the other must find the task already terminal and no-op.
+func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	stepGetter := waitStepWithChildrenCompletedTrigger()
+	seedSession(t, repo, "parent-office", "parent-office-session", "step-wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, repo, &models.Task{
+		ID: "office-concurrent", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Office task", State: v1.TaskStateInProgress, ParentID: "parent-office",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+	updater := &blockingOfficeStatusUpdater{
+		inner:   &recordingOfficeStatusUpdater{repo: repo},
+		started: make(chan struct{}),
+		proceed: make(chan struct{}),
+	}
+	svc.SetOfficeTaskStatusUpdater(updater)
+	events := &recordingTaskEventPublisher{}
+	svc.SetTaskEventPublisher(events)
+
+	// Delivery A: reaches the seam first and blocks inside it, holding the
+	// per-task completion lock with the task row still IN_PROGRESS.
+	doneA := make(chan struct{})
+	go func() {
+		defer close(doneA)
+		svc.markTaskCompletedForTerminalStep(ctx, "office-concurrent", "child_done")
+	}()
+	select {
+	case <-updater.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for delivery A to reach the seam")
+	}
+
+	// Delivery B: a duplicate delivery for the same task. Its own
+	// non-terminal check (under taskRuntimeStateMu) races in while the row
+	// is still IN_PROGRESS, then it blocks behind A on the per-task lock.
+	doneB := make(chan struct{})
+	go func() {
+		defer close(doneB)
+		svc.markTaskCompletedForTerminalStep(ctx, "office-concurrent", "child_done")
+	}()
+	waitForOfficeTerminalCompletionLockRefs(t, svc, "office-concurrent", 2)
+
+	close(updater.proceed)
+
+	waitOrFatal := func(ch <-chan struct{}, who string) {
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s to finish", who)
+		}
+	}
+	waitOrFatal(doneA, "delivery A")
+	waitOrFatal(doneB, "delivery B")
+
+	if got := updater.calls.Load(); got != 1 {
+		t.Fatalf("seam calls = %d, want exactly 1: a duplicate delivery must not re-run the status pipeline", got)
+	}
+
+	childUpdates := 0
+	for _, id := range events.updated {
+		if id == "office-concurrent" {
+			childUpdates++
+		}
+	}
+	if childUpdates != 1 {
+		t.Fatalf("PublishTaskUpdated calls for office-concurrent = %d, want exactly 1 (both deliveries fired side effects)", childUpdates)
+	}
+	var childChanges []recordedStateChange
+	for _, c := range events.stateChanges {
+		if c.taskID == "office-concurrent" {
+			childChanges = append(childChanges, c)
+		}
+	}
+	if len(childChanges) != 1 {
+		t.Fatalf("PublishTaskStateChanged calls for office-concurrent = %+v, want exactly 1", childChanges)
+	}
+
+	task, err := repo.GetTask(ctx, "office-concurrent")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("state = %q, want COMPLETED", task.State)
+	}
+
+	svc.officeTerminalCompletionLocksMu.Lock()
+	_, exists := svc.officeTerminalCompletionLocks["office-concurrent"]
+	svc.officeTerminalCompletionLocksMu.Unlock()
+	if exists {
+		t.Fatal("expected office terminal completion lock entry to be deleted after both deliveries exit")
 	}
 }

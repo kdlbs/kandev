@@ -30,12 +30,13 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 	seedStep(t, repo, ctx, "step-approval", "wf-office", 3, "Approval")
 	seedStep(t, repo, ctx, "step-done", "wf-office", 4, "Done")
 
-	// A single-step workflow whose one step is misleadingly named "Done"
-	// but is not last-by-position relative to a later step in the SAME
-	// workflow — exercises the position half of the check independent of
-	// the name half.
+	// A workflow whose last step is misleadingly named "Done" but is not
+	// last-by-position — exercises that position, not name, decides
+	// terminality. step-mixed-last carries a name that would fail
+	// models.IsTerminalStepName (e.g. "PR", matching improve-kandev.yml's
+	// real last step) to prove the name is no longer consulted at all.
 	seedStep(t, repo, ctx, "step-early-done", "wf-mixed", 0, "Done")
-	seedStep(t, repo, ctx, "step-mixed-last", "wf-mixed", 1, "Custom")
+	seedStep(t, repo, ctx, "step-mixed-last", "wf-mixed", 1, "PR")
 
 	seedParticipantTask(t, repo, "task-backlog", "step-backlog")
 	seedParticipantTask(t, repo, "task-work", "step-work")
@@ -57,7 +58,7 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 		{"approval: not last position", "task-approval", false},
 		{"done: last position and terminal name", "task-done", true},
 		{"named Done but not last position", "task-early-done", false},
-		{"last position but non-terminal name", "task-mixed-last", false},
+		{"last position with non-terminal name is still terminal", "task-mixed-last", true},
 		{"no workflow_step_id", "task-no-step", false},
 		{"missing task", "task-missing", false},
 	}
