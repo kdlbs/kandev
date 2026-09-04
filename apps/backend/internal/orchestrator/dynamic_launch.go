@@ -853,7 +853,29 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	executionProfileID string,
-) bool {
+) (succeeded bool) {
+	defer func() {
+		if succeeded || s.profileExecutionResolver == nil || data.SessionID == "" {
+			return
+		}
+		// This helper is used by both the synchronous route-failure path and
+		// the detached successor worker. The caller's deferred guard covers
+		// the former, but the detached path reports handled=true before the
+		// worker completes, so this helper must settle the claimed generation
+		// when the relaunch fails.
+		markCtx := context.WithoutCancel(ctx)
+		session, err := s.repo.GetTaskSession(markCtx, data.SessionID)
+		if err != nil || session == nil || session.RouteGeneration <= 0 {
+			return
+		}
+		s.markDynamicRouteActionRequired(
+			markCtx,
+			data.SessionID,
+			session.RouteGeneration,
+			"dynamic_successor_launch_failed",
+		)
+	}()
+
 	prompt, ok := s.dynamicRelaunchPrompt(ctx, data.SessionID)
 	if !ok {
 		return false

@@ -677,17 +677,25 @@ func TestRouteDynamicAgentFailureMarksSuccessorGenerationActionRequiredWhenLaunc
 		Code: routingerr.CodeProviderOverloaded, Class: routingerr.ClassTransient,
 		FallbackAllowed: true,
 	})
-	if handled {
-		t.Fatal("routeDynamicAgentFailure succeeded despite successor launch failure")
+	// The successor launch can complete in this call or on a detached worker.
+	// Both paths must settle the claimed generation before this recovery can
+	// be presented to the user.
+	deadline := time.Now().Add(2 * time.Second)
+	var state *dynamicruntime.RouteState
+	for {
+		state, err = repo.LoadRouteState(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("LoadRouteState while waiting for successor failure: %v", err)
+		}
+		if state != nil && state.Generation == 2 && state.Status == dynamicRouteStatusActionRequired {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("successor launch result not settled (handled=%v): %#v", handled, state)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
-	state, err := repo.LoadRouteState(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("LoadRouteState: %v", err)
-	}
-	if state == nil || state.Generation != 2 || state.Status != dynamicRouteStatusActionRequired {
-		t.Fatalf("route state after successor failure = %#v, want action_required generation 2", state)
-	}
 	updated, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("GetTaskSession after successor failure: %v", err)
