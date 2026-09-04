@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/taskdependencies"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -487,6 +488,8 @@ func (s *HandoffService) attachSequentialBlocker(ctx context.Context, taskID, pa
 	mu := s.parentLock.lockFor(parentID)
 	mu.Lock()
 	defer mu.Unlock()
+	edgesUnlock := taskdependencies.AcquireMutationLock()
+	defer edgesUnlock()
 
 	siblings, err := s.tasks.ListChildren(ctx, parentID)
 	if err != nil {

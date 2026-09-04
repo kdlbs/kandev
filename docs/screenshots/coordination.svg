@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1100 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="coordination-title coordination-desc" width="1100" height="600">
+      <title id="coordination-title">Choose the smallest coordination boundary</title>
+      <desc id="coordination-desc">A decision tree branches from one coordination question into same-session messaging, an inherited task subtask, an isolated new workspace, or one task with multiple repositories.</desc>
+      <defs><style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');</style>
+        <marker id="coordination-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#a1a1a1"/></marker>
+        <marker id="coordination-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6468f0"/></marker>
+      </defs>
+      <rect width="1100" height="600" fill="#0d0d10"/>
+
+      <!-- Shared tree bus: one parent drop, one sibling bus, four child drops. -->
+      <line x1="550" y1="160" x2="550" y2="220" stroke="#6468f0" stroke-width="1.4"/>
+      <line x1="148" y1="220" x2="952" y2="220" stroke="#a1a1a1" stroke-width="1.2"/>
+      <line x1="148" y1="220" x2="148" y2="300" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#coordination-arrow)"/>
+      <line x1="416" y1="220" x2="416" y2="300" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#coordination-arrow)"/>
+      <line x1="684" y1="220" x2="684" y2="300" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#coordination-arrow)"/>
+      <line x1="952" y1="220" x2="952" y2="300" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#coordination-arrow)"/>
+
+      <g role="group" aria-label="Coordination boundary question">
+        <rect x="430" y="96" width="240" height="64" rx="8" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1.2"/>
+        <rect x="438" y="104" width="64" height="12" rx="2" fill="transparent" stroke="rgba(100,104,240,0.60)" stroke-width="0.8"/>
+        <text x="470" y="113" text-anchor="middle" fill="#6468f0" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">DECIDE</text>
+        <text x="550" y="130" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree','Geist',sans-serif">Where should it live?</text>
+        <text x="550" y="148" text-anchor="middle" fill="#a1a1a1" font-size="9" font-family="'Geist Mono',monospace">context · ownership · data</text>
+      </g>
+
+      <g role="group" aria-label="Same session coordination">
+        <rect x="48" y="300" width="200" height="84" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="56" y="308" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="80" y="317" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">LOCAL</text>
+        <text x="148" y="342" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Same session</text>
+        <text x="148" y="362" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">share context · message</text>
+      </g>
+      <g role="group" aria-label="Inherited task subtask">
+        <rect x="316" y="300" width="200" height="84" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="324" y="308" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="348" y="317" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">TASK</text>
+        <text x="416" y="342" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Task subtask</text>
+        <text x="416" y="362" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">parent_id=self · inherited</text>
+      </g>
+      <g role="group" aria-label="New isolated workspace">
+        <rect x="584" y="300" width="200" height="84" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="592" y="308" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="616" y="317" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">SCOPE</text>
+        <text x="684" y="342" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">New workspace</text>
+        <text x="684" y="362" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">isolated repo + data</text>
+      </g>
+      <g role="group" aria-label="Multi-repository task">
+        <rect x="852" y="300" width="200" height="84" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="860" y="308" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="884" y="317" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">REPOS</text>
+        <text x="952" y="342" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">One task, many repos</text>
+        <text x="952" y="362" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">shared outcome · separate worktrees</text>
+      </g>
+
+      <line x1="48" y1="444" x2="1052" y2="444" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <text x="48" y="474" fill="#737373" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.08em">BOUNDARY SIZE</text>
+      <text x="48" y="498" fill="#a1a1a1" font-size="13" font-family="'Figtree','Geist',sans-serif">Session → task → workspace</text>
+      <text x="1052" y="498" text-anchor="end" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">choose the smallest boundary that preserves clarity</text>
+      <line x1="868" y1="526" x2="900" y2="526" stroke="#6468f0" stroke-width="1.4" marker-end="url(#coordination-arrow-accent)"/>
+      <text x="916" y="530" fill="#6468f0" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.06em">FOCAL DECISION</text>
+    </svg>

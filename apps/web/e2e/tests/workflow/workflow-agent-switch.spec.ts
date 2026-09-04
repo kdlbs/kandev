@@ -233,6 +233,7 @@ async function runProfileSessionLifecycleScenario(
       workflow_step_id: inbox.id,
       agent_profile_id: profileA.id,
       repository_ids: [seedData.repositoryId],
+      description: "Run the workflow lifecycle scenario",
     },
   );
   await apiClient.moveTask(task.id, workflow.id, stepA.id);

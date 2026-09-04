@@ -75,6 +75,7 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   secrets: "settings:secrets",
   security: "settings:security",
   status: "common:status",
+  storage: "system:storageTitle",
   system: "common:system",
   "task-behavior": "settings:taskBehavior",
   "terminal-editors": "settings:terminalAndEditors",

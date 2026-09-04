@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -10,6 +10,7 @@ import {
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
 import { doFetchMessages } from "./use-session-message-fetch";
+import { useMessageFetchState } from "./use-message-fetch-state";
 import { reconcileLatestMessageWindow } from "./message-window-reconciliation";
 import { t } from "@/lib/i18n";
 
@@ -130,6 +131,7 @@ function summarizeMessages(messages: Message[]): {
 interface UseSessionMessagesReturn {
   isLoading: boolean;
   isInitialMessagesLoading: boolean;
+  historyRefreshPending: boolean;
   messages: Message[];
   historyInitialized: boolean;
   hasMore: boolean;
@@ -252,7 +254,6 @@ async function fetchAndStoreMessages(
     cachedAtResponse: store.getState().messages.bySession[sessionId] ?? [],
     fetched,
   });
-
   // Stale-fetch guard: if a newer fetch for this session already merged while
   // this one was in flight, skip the merge so the older snapshot can't drop
   // newer messages. The newer state is already in the store.
@@ -260,7 +261,6 @@ async function fetchAndStoreMessages(
     debug("message.list stale fetch skipped", { sessionId, seq });
     return store.getState().messages.bySession[sessionId] ?? merged;
   }
-
   // Idempotent merge: the store reconciles this snapshot against current state,
   // preserving object/array identity for unchanged messages so the periodic
   // refetch doesn't re-render the whole chat (see reconcileMessages).
@@ -273,7 +273,6 @@ async function fetchAndStoreMessages(
   // and message content from the return, so `merged` is equivalent.
   return merged;
 }
-
 /**
  * When the initial fetch window contains no user/agent message rows (common
  * when the latest turn produced hundreds of tool calls), the chat would render
@@ -297,18 +296,14 @@ function useTerminalStateFetch(
 ) {
   const lastFetchStateKeyRef = useRef<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
-
   useEffect(() => {
     if (!taskSessionId || connectionStatus !== "connected") return;
     if (!taskSessionState || hasAgentMessage) return;
-
     const terminalStates = new Set<TaskSessionState>(["WAITING_FOR_INPUT", "COMPLETED", "FAILED"]);
     if (!terminalStates.has(taskSessionState)) return;
-
     const key = `${taskSessionId}:${taskSessionState}`;
     if (lastFetchStateKeyRef.current === key) return;
     lastFetchStateKeyRef.current = key;
-
     void doFetchMessages({
       taskSessionId,
       ...refs,
@@ -472,31 +467,6 @@ function useRunningMessageBackfill(
   }, [taskSessionId, shouldBackfill, store]);
 }
 
-function useMessageFetchState(store: ReturnType<typeof useAppStoreApi>) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [isWaitingForInitialMessages, setIsWaitingForInitialMessages] = useState(false);
-  const initialFetchStartRef = useRef<number | null>(null);
-  const lastFetchedSessionIdRef = useRef<string | null>(null);
-  const refs = useMemo(
-    () => ({
-      store,
-      setIsLoading,
-      setIsWaitingForInitialMessages,
-      initialFetchStartRef,
-      lastFetchedSessionIdRef,
-    }),
-    [store],
-  );
-  return {
-    isLoading,
-    isWaitingForInitialMessages,
-    setIsWaitingForInitialMessages,
-    initialFetchStartRef,
-    lastFetchedSessionIdRef,
-    refs,
-  };
-}
-
 function useSessionMessageInputs(taskSessionId: string | null) {
   const messages = useAppStore((state) =>
     taskSessionId ? (state.messages.bySession[taskSessionId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
@@ -513,7 +483,6 @@ function useSessionMessageInputs(taskSessionId: string | null) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   return { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus };
 }
-
 function useSessionLifecycleSubscriptions(params: {
   taskSessionId: string | null;
   taskSessionState: TaskSessionState | null;
@@ -534,7 +503,6 @@ function useSessionLifecycleSubscriptions(params: {
     taskSessionState,
     connectionStatus,
   });
-
   useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
   useUnknownSessionSubscriptionRetryEffect({
     taskSessionId,
@@ -553,39 +521,31 @@ function useSessionLifecycleSubscriptions(params: {
     store,
   );
 }
-
-export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
-  const store = useAppStoreApi();
-  const { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus } =
-    useSessionMessageInputs(taskSessionId);
-  const prevSessionIdRef = useRef<string | null>(null);
-  const hasAgentMessage = messages.some((message: Message) => message.author_type === "agent");
+type SessionEntryFetchParams = {
+  taskSessionId: string | null;
+  connectionStatus: string;
+  messagesLength: number;
+  store: ReturnType<typeof useAppStoreApi>;
+  prevSessionIdRef: MutableRefObject<string | null>;
+  fetchState: ReturnType<typeof useMessageFetchState>;
+};
+function useInitialMessagesWait(params: SessionEntryFetchParams): void {
+  const { taskSessionId, messagesLength, fetchState } = params;
   const {
-    isLoading,
-    isWaitingForInitialMessages,
-    setIsWaitingForInitialMessages,
     initialFetchStartRef,
     lastFetchedSessionIdRef,
-    refs: fetchRefs,
-  } = useMessageFetchState(store);
-
-  useSessionLifecycleSubscriptions({
-    taskSessionId,
-    taskSessionState,
-    connectionStatus,
-    activeTurnId,
-    messages,
-    store,
-  });
-
+    setIsWaitingForInitialMessages,
+    setIsCachedHistoryRefreshPending,
+  } = fetchState;
   useEffect(() => {
     if (!taskSessionId) {
       initialFetchStartRef.current = null;
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
+      setIsCachedHistoryRefreshPending(false);
       return;
     }
-    if (messages.length > 0) {
+    if (messagesLength > 0) {
       setIsWaitingForInitialMessages(false);
       return;
     }
@@ -593,45 +553,60 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
       initialFetchStartRef.current = Date.now();
       setIsWaitingForInitialMessages(true);
     }
-  }, [taskSessionId, messages.length, initialFetchStartRef, setIsWaitingForInitialMessages]);
-
+  }, [
+    taskSessionId,
+    messagesLength,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+    setIsWaitingForInitialMessages,
+    setIsCachedHistoryRefreshPending,
+  ]);
+}
+function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
+  const { taskSessionId, connectionStatus, messagesLength, store, prevSessionIdRef, fetchState } =
+    params;
+  const {
+    lastFetchedSessionIdRef,
+    setIsWaitingForInitialMessages,
+    setIsCachedHistoryRefreshPending,
+    cachedRefreshGenerationRef,
+    refs: fetchRefs,
+  } = fetchState;
   useEffect(() => {
     let active = true;
     const deactivate = () => {
       active = false;
     };
-    if (!taskSessionId || connectionStatus !== "connected") {
-      return deactivate;
-    }
-
+    if (!taskSessionId || connectionStatus !== "connected") return deactivate;
     const isFreshMount = prevSessionIdRef.current === null;
     const sessionChanged =
       prevSessionIdRef.current !== null && prevSessionIdRef.current !== taskSessionId;
     prevSessionIdRef.current = taskSessionId;
-
     if (sessionChanged) {
       lastFetchedSessionIdRef.current = null;
+      cachedRefreshGenerationRef.current += 1;
+      setIsCachedHistoryRefreshPending(false);
     }
-
-    // Normal re-render with cached messages — skip fetch
-    if (messages.length > 0 && !sessionChanged && !isFreshMount) {
+    if (messagesLength > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
       return deactivate;
     }
-
-    // Fresh mount with cached messages — show cached instantly, fetch in background
-    if (isFreshMount && messages.length > 0) {
+    if (isFreshMount && messagesLength > 0) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
-      fetchAndStoreMessages(taskSessionId, store, () => active).catch(() => {});
+      setIsCachedHistoryRefreshPending(true);
+      const refreshGeneration = ++cachedRefreshGenerationRef.current;
+      void fetchAndStoreMessages(taskSessionId, store, () => active)
+        .catch(() => {})
+        .finally(() => {
+          if (cachedRefreshGenerationRef.current === refreshGeneration) {
+            setIsCachedHistoryRefreshPending(false);
+          }
+        });
       return deactivate;
     }
-
-    if (lastFetchedSessionIdRef.current === taskSessionId) {
-      return deactivate;
-    }
-
+    if (lastFetchedSessionIdRef.current === taskSessionId) return deactivate;
     void doFetchMessages({
       taskSessionId,
       ...fetchRefs,
@@ -642,20 +617,62 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   }, [
     taskSessionId,
     connectionStatus,
-    messages.length,
+    messagesLength,
     store,
+    prevSessionIdRef,
     lastFetchedSessionIdRef,
     setIsWaitingForInitialMessages,
+    setIsCachedHistoryRefreshPending,
     fetchRefs,
   ]);
-
+}
+export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
+  const store = useAppStoreApi();
+  const { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus } =
+    useSessionMessageInputs(taskSessionId);
+  const prevSessionIdRef = useRef<string | null>(null);
+  const isSessionEntryRefreshPending =
+    taskSessionId !== null &&
+    connectionStatus === "connected" &&
+    prevSessionIdRef.current !== taskSessionId;
+  const hasAgentMessage = messages.some((message: Message) => message.author_type === "agent");
+  const fetchState = useMessageFetchState(store);
+  const {
+    isLoading,
+    isWaitingForInitialMessages,
+    isCachedHistoryRefreshPending,
+    refs: fetchRefs,
+  } = fetchState;
+  useSessionLifecycleSubscriptions({
+    taskSessionId,
+    taskSessionState,
+    connectionStatus,
+    activeTurnId,
+    messages,
+    store,
+  });
+  const entryFetchParams = {
+    taskSessionId,
+    connectionStatus,
+    messagesLength: messages.length,
+    store,
+    prevSessionIdRef,
+    fetchState,
+  };
+  useInitialMessagesWait(entryFetchParams);
+  useSessionEntryMessageFetch(entryFetchParams);
   useVisibilityBackfill(taskSessionId, store);
-
   useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, fetchRefs);
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,
     isInitialMessagesLoading: isWaitingForInitialMessages,
+    historyRefreshPending:
+      isLoading ||
+      isWaitingForInitialMessages ||
+      messagesMeta.isLoading ||
+      isCachedHistoryRefreshPending ||
+      isSessionEntryRefreshPending,
     messages,
     historyInitialized: messagesMeta.historyInitialized,
     hasMore: messagesMeta.hasMore,

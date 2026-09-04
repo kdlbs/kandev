@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  areAllEmptyStepsAutoHidden,
-  deriveAutoHiddenStepIds,
-  sortWorkflowStepsByPosition,
-} from "./auto-hide-empty-columns";
+import { areAllEmptyStepsAutoHidden, deriveAutoHiddenStepIds } from "./auto-hide-empty-columns";
 
 const steps = [{ id: "backlog" }, { id: "doing" }, { id: "done" }];
 
@@ -28,22 +24,5 @@ describe("areAllEmptyStepsAutoHidden", () => {
     expect(areAllEmptyStepsAutoHidden([], [{ id: "todo" }])).toBe(true);
     expect(areAllEmptyStepsAutoHidden([], [])).toBe(false);
     expect(areAllEmptyStepsAutoHidden([{ id: "todo" }], [{ id: "todo" }])).toBe(false);
-  });
-});
-
-describe("sortWorkflowStepsByPosition", () => {
-  it("orders workflow steps deterministically without mutating the snapshot", () => {
-    const unordered = [
-      { id: "step-b", position: 1 },
-      { id: "step-c", position: 0 },
-      { id: "step-a", position: 1 },
-    ];
-
-    expect(sortWorkflowStepsByPosition(unordered).map((step) => step.id)).toEqual([
-      "step-c",
-      "step-a",
-      "step-b",
-    ]);
-    expect(unordered.map((step) => step.id)).toEqual(["step-b", "step-c", "step-a"]);
   });
 });

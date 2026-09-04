@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- User-settings notification cases share one handler contract file. */
+
 import { describe, expect, it } from "vitest";
 import { createStore } from "zustand/vanilla";
 import { registerUsersHandlers } from "./users";
@@ -9,6 +11,8 @@ import type { BackendMessageMap } from "@/lib/types/backend";
 function makeStore() {
   return createStore<AppState>(() => structuredClone(defaultState) as AppState);
 }
+
+const LOCAL_VIEW_ID = "view-local";
 
 /** Builds a `user.settings.updated` notification frame merging the given payload over default values. */
 function userSettingsMessage(
@@ -199,7 +203,96 @@ describe("last seen display websocket sync", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- The handler contract cases share one store fixture and revision setup.
 describe("user settings websocket handler", () => {
+  it("hydrates Threads views independently from sidebar views", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      sidebarViews: {
+        ...state.sidebarViews,
+        activeViewId: "view-all-tasks",
+      },
+    }));
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        thread_views: [
+          {
+            id: "thread-view",
+            name: "Thread view",
+            task_scope: { mode: "all", task_ids: [] },
+            filters: [],
+            sort: { key: "attention", direction: "asc" },
+            max_columns: 3,
+          },
+        ],
+        thread_active_view_id: "thread-view",
+        thread_view_draft: null,
+      }),
+    );
+
+    expect(store.getState().threadViews.activeViewId).toBe("thread-view");
+    expect(store.getState().threadViews.views).toHaveLength(1);
+    expect(store.getState().threadViews.draft).toBeNull();
+    expect(store.getState().sidebarViews.activeViewId).toBe("view-all-tasks");
+  });
+
+  it("does not replace optimistic Threads views while a local write is pending", () => {
+    const store = makeStore();
+    const draft = {
+      baseViewId: LOCAL_VIEW_ID,
+      taskScope: { mode: "all" as const, taskIds: [] as [] },
+      filters: [],
+      sort: { key: "attention" as const, direction: "asc" as const },
+      maxColumns: 1,
+    };
+    store.setState((state) => ({
+      ...state,
+      threadViews: {
+        ...state.threadViews,
+        views: [
+          {
+            id: LOCAL_VIEW_ID,
+            name: "Local",
+            taskScope: { mode: "all", taskIds: [] },
+            filters: [],
+            sort: { key: "attention", direction: "asc" },
+            maxColumns: null,
+          },
+        ],
+        activeViewId: LOCAL_VIEW_ID,
+        draft,
+        syncPending: true,
+      },
+    }));
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        revision: 1,
+        thread_views: [
+          {
+            id: "view-server",
+            name: "Server",
+            task_scope: { mode: "all", task_ids: [] },
+            filters: [],
+            sort: { key: "attention", direction: "asc" },
+            max_columns: null,
+          },
+        ],
+        thread_active_view_id: "view-server",
+        thread_view_draft: null,
+      }),
+    );
+
+    expect(store.getState().threadViews).toMatchObject({
+      activeViewId: LOCAL_VIEW_ID,
+      draft,
+      syncPending: true,
+    });
+    expect(store.getState().threadViews.views[0].id).toBe(LOCAL_VIEW_ID);
+  });
+
   it("updates LSP status location, normalizes unknown values, and preserves omissions", () => {
     const store = makeStore();
 

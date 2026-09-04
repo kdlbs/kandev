@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- User-settings hydration cases share one contract test file. */
+
 import { describe, it, expect } from "vitest";
 import {
   buildCoreFields,
@@ -71,6 +73,48 @@ describe("startup page user settings", () => {
     });
 
     expect(result.startupPage).toBe("last_task");
+  });
+});
+
+describe("Threads saved-view hydration", () => {
+  it("provides the canonical view when the backend omits Threads settings", () => {
+    const settings = createDefaultUserSettings();
+    expect(settings.threadViews).toHaveLength(1);
+    expect(settings.threadViews[0]).toMatchObject({
+      id: "view-all-threads",
+      name: "All threads",
+      taskScope: { mode: "all", taskIds: [] },
+      sort: { key: "attention", direction: "asc" },
+      maxColumns: 5,
+    });
+    expect(settings.threadActiveViewId).toBe("view-all-threads");
+  });
+
+  it("maps Threads views and preserves independent current state for omitted fields", () => {
+    const current = createDefaultUserSettings();
+    current.threadActiveViewId = "current";
+    const result = buildCoreFields(
+      {
+        thread_views: [
+          {
+            id: "saved",
+            name: "Saved",
+            task_scope: { mode: "selected", task_ids: ["task-a"] },
+            filters: [],
+            sort: { key: "priority", direction: "desc" },
+            max_columns: 3,
+          },
+        ],
+      },
+      current,
+    );
+    expect(result.threadViews[0]).toMatchObject({
+      id: "saved",
+      taskScope: { mode: "selected", taskIds: ["task-a"] },
+      sort: { key: "priority", direction: "desc" },
+      maxColumns: 3,
+    });
+    expect(result.threadActiveViewId).toBe("current");
   });
 });
 
@@ -227,6 +271,18 @@ describe("buildCoreFields", () => {
 
     const result = buildCoreFields(settings);
     expect(result.terminalFontFamily).toBeNull();
+  });
+
+  it("maps default_utility_agent_profile_id to defaultUtilityAgentProfileId", () => {
+    const settings = {
+      workspace_id: toWorkspaceId(""),
+      repository_ids: [],
+      default_utility_agent_profile_id: "profile-1",
+      updated_at: UPDATED_AT,
+    } as unknown as Parameters<typeof buildCoreFields>[0];
+
+    const result = buildCoreFields(settings);
+    expect(result.defaultUtilityAgentProfileId).toBe("profile-1");
   });
 });
 

@@ -6,21 +6,12 @@ migration: in_progress
 owners:
   - kandev
 ---
-
-# UI system
-
-## Ownership
-
-UI owns reusable presentation and responsive interaction.
-[Tasks](../tasks/README.md), [Agents](../agents/README.md),
-[Plugins](../plugins/README.md), and [Integrations](../integrations/README.md) own
-feature behavior and state.
-
-## Specification map
-
+# UI
+## Scope
+UI owns responsive behavior; other systems own behavior/state.
+## Map
 ### Requirements
-
-- [ACP Model Configuration Summary](requirements/acp-model-configuration-summary.md)
+- [ACP model summary](requirements/acp-model-configuration-summary.md)
 - [ACP Shell Command Output](requirements/acp-shell-command-output.md)
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
 - [Task Add-Panel PR Submenu](requirements/add-panel-pr-submenu.md)
@@ -33,7 +24,8 @@ feature behavior and state.
 - [Column visibility](requirements/board-step-visibility-filter.md)
 - [Inspect annotation submission](requirements/browser-inspect-annotations-save.md)
 - [Cancel-turn progress](requirements/cancel-turn-progress.md)
-- [Changes File Row Containment](requirements/changes-file-row-containment.md)
+- [Action feedback](requirements/changes-file-action-feedback.md)
+- [File-row containment](requirements/changes-file-row-containment.md)
 - [Changes walkthrough](requirements/changes-walkthrough-toolbar-width.md)
 - [Task PR Automation Controls](requirements/ci-pr-automation.md)
 - [Merge Queue Recovery Controls](requirements/ci-pr-merge-queue-recovery-controls.md)
@@ -42,6 +34,7 @@ feature behavior and state.
 - [Command-panel task reveal](requirements/command-panel-sidebar-task-reveal.md)
 - [Task activity icons](requirements/command-panel-task-activity-icons.md)
 - [Workflow step navigation](requirements/compact-workflow-step-navigation.md)
+- [Preview panel step navigation](requirements/kanban-preview-workflow-step-navigation.md)
 - [Comment Markdown Rendering](requirements/comment-markdown.md)
 - [Mention recency](requirements/composer-mention-recency.md)
 - [Composer Suggestion Overlays](requirements/composer-suggestion-overlays.md)
@@ -49,7 +42,7 @@ feature behavior and state.
 - [Context Window Reset Freshness](requirements/context-window-reset-freshness.md)
 - [Context Window Unmeasured State](requirements/context-window-unmeasured-state.md)
 - [Embedded VS Code Executor Availability](requirements/embedded-vscode-executor-availability.md)
-- [Embedded VS Code Windows Availability](requirements/embedded-vscode-windows-availability.md)
+- [VS Code windows](requirements/embedded-vscode-windows-availability.md)
 - [Empty-Turn Notice and Slash-Command Hint](requirements/empty-turn-notice.md)
 - [Entity Reference Composer](requirements/entity-reference-composer.md)
 - [Executor settings card spacing](requirements/executor-settings-card-spacing.md)
@@ -65,13 +58,13 @@ feature behavior and state.
 - [Repair merge commit details](requirements/merge-commit-details.md)
 - [Mermaid Rendering](requirements/mermaid-rendering.md)
 - [Message favorite star mobile sizing](requirements/message-favorite-star-mobile-size.md)
-- [Message metadata dialog scroll containment](requirements/message-metadata-overflow.md)
+- [Metadata dialog](requirements/message-metadata-overflow.md)
 - [Queue auto-merge](requirements/message-queue-auto-merge.md)
 - [Message queue management](requirements/message-queue-management.md)
-- [Merge Enqueued Messages Individually](requirements/message-queue-merge.md)
+- [Merge queued](requirements/message-queue-merge.md)
 - [Pin the Message Queue Panel](requirements/message-queue-pin.md)
 - [Reorder Queued Messages](requirements/message-queue-reorder.md)
-- [Control Pending Message Auto-run](requirements/message-queue-run.md)
+- [Pending auto-run](requirements/message-queue-run.md)
 - [Send Queued Messages Now](requirements/message-queue-send-now.md)
 - [Mobile topbar actions](requirements/mobile-quick-chat-topbar.md)
 - [Mobile Task Chrome](requirements/mobile-task-chrome.md)
@@ -82,18 +75,18 @@ feature behavior and state.
 - [Responsive PR Detail Header](requirements/pr-detail-header-width.md)
 - [Repair PR-only commit details](requirements/pr-only-commit-details.md)
 - [PR Task Status Summary](requirements/pr-task-status-summary.md)
-- [Pull Request Walkthrough Generation](requirements/pr-walkthrough.md)
+- [PR walkthrough](requirements/pr-walkthrough.md)
 - [Preview Sprites Transient Retry](requirements/preview-sprites-transient-retry.md)
 - [Persistent status motion](requirements/persistent-status-motion.md)
 - [Prompt History Panel](requirements/prompt-history-panel.md)
 - [Prompt paste: Nerd Font glyphs](requirements/prompt-paste-nerd-font-glyphs.md)
 - [Prompt turn duration](requirements/prompt-turn-duration.md)
-- [Published Docs Preview Reliability](requirements/published-docs-preview-reliability.md)
+- [Docs preview](requirements/published-docs-preview-reliability.md)
 - [Quick Chat elevation](requirements/quick-chat-elevation.md)
 - [Quick Chat viewport layout](requirements/quick-chat-viewport-layout.md)
 - [Quick Chat Idle Dot](requirements/quick-chat-idle-dot.md)
 - [Quick Chat and Terminal Tabs](requirements/quick-terminal.md)
-- [Relative Last Seen in Account Security](requirements/relative-last-seen.md)
+- [Relative last seen](requirements/relative-last-seen.md)
 - [Responsive Plan Formatting](requirements/responsive-plan-formatting.md)
 - [Resizable Markdown Table Columns](requirements/resizable-markdown-tables.md)
 - [Review File Status Cues](requirements/review-file-status.md)
@@ -122,43 +115,46 @@ feature behavior and state.
 - [Confirmations](requirements/confirmation-warning-hierarchy.md)
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](requirements/task-agent-tab-reconciliation.md)
-- [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
+- [Threads Deck](requirements/threads-conversation-deck.md)
+- [Task listing](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
 - [Task surface refresh and mobile create](requirements/task-surface-refresh.md)
 - [Task Workspace Content Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
 - [Terminal Rendering](requirements/terminal-rendering.md)
+- [Terminal Touch Scrolling](requirements/terminal-touch-scrolling.md)
 - [Thinking Message Preview](requirements/thinking-message-preview.md)
 - [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
 - [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
 - [Voice Mode In Task Behavior](requirements/voice-mode-task-behavior.md)
 - [Walkthrough Feedback Controls](requirements/walkthrough-feedback-controls.md)
-- [Stable Walkthrough Navigation](requirements/walkthrough-navigation-layout.md)
+- [Walkthrough nav](requirements/walkthrough-navigation-layout.md)
 - [WebKit Task Dialog Rendering](requirements/webkit-task-dialog-rendering.md)
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
-
-### System design
-
+### Design
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
-- [Growing Dialog Content Containment](system-design/dialog-content-containment.md)
+- [Dialog containment](system-design/dialog-content-containment.md)
 - [Surface text](system-design/surface-text-hierarchy.md)
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
-- [Changes File Row Containment](system-design/changes-file-row-containment.md)
+- [Action feedback](system-design/changes-file-action-feedback.md)
+- [File-row containment](system-design/changes-file-row-containment.md)
 - [Mention recency](system-design/composer-mention-recency.md)
 - [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
-- [Compact Workflow Step Navigation](system-design/compact-workflow-step-navigation.md)
+- [Compact step navigation](system-design/compact-workflow-step-navigation.md)
+- [Kanban preview navigation](system-design/kanban-preview-workflow-step-navigation.md)
 - [Workflow column visibility (Part 1)](system-design/board-step-visibility-filter-01.md)
 - [Workflow column visibility (Part 2)](system-design/board-step-visibility-filter-02.md)
-- [Task PR Automation Controls System Design Part 1](system-design/ci-pr-automation-01.md)
-- [Task PR Automation Controls System Design Part 2](system-design/ci-pr-automation-02.md)
-- [Task PR Automation Controls System Design Part 3](system-design/ci-pr-automation-03.md)
+- [Task PR auto 1](system-design/ci-pr-automation-01.md)
+- [Task PR auto 2](system-design/ci-pr-automation-02.md)
+- [Task PR auto 3](system-design/ci-pr-automation-03.md)
 - [Merge Queue Recovery Controls](system-design/ci-pr-merge-queue-recovery-controls.md)
 - [Entity Reference Composer](system-design/entity-reference-composer.md)
 - [File Tree Keyboard Scope](system-design/file-tree-keyboard-scope.md)
-- [Kandev MCP Tool Results](system-design/kandev-mcp-tool-results.md)
+- [File Tree Chat](system-design/file-tree-chat-context.md)
+- [MCP results](system-design/kandev-mcp-tool-results.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
@@ -176,15 +172,13 @@ feature behavior and state.
 - [Session](system-design/session-start-composer-readiness.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
+- [Threads Deck](system-design/threads-conversation-deck.md)
 - [Command-panel Sidebar Task Reveal](system-design/command-panel-sidebar-task-reveal.md)
-- [Command Panel Task Activity Icons](system-design/command-panel-task-activity-icons.md)
+- [Command-panel activity icons](system-design/command-panel-task-activity-icons.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
+- [Terminal Touch Scrolling](system-design/terminal-touch-scrolling.md)
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
-- [Task Transcript History Visibility](system-design/task-prompt-transcript-visibility.md)
+- [Transcript history visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
-
-## Related systems
-
-- [Tasks](../tasks/README.md)
-- [Plugins](../plugins/README.md)
+## Related
 - [Platform](../platform/README.md)

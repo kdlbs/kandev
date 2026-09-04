@@ -29,10 +29,8 @@ import {
 import { reorderWorkflows } from "@/lib/api";
 import { SwimlaneSection } from "./swimlane-section";
 import { ColumnsMenu } from "./columns-menu";
-import {
-  deriveAutoHiddenStepIds,
-  sortWorkflowStepsByPosition,
-} from "@/lib/kanban/auto-hide-empty-columns";
+import { deriveAutoHiddenStepIds } from "@/lib/kanban/auto-hide-empty-columns";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import {
   getEffectiveView,

@@ -30,6 +30,8 @@ export type MessageListProps = {
   taskId?: string;
   sessionId: string | null;
   messagesLoading: boolean;
+  /** Latest-session history is still reconciling while cached rows remain visible. */
+  historyRefreshPending?: boolean;
   isWorking: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;

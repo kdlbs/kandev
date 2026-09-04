@@ -42,8 +42,16 @@ async function setupTask(
 
 async function startCreateAtRoot(testPage: Page) {
   const btn = testPage.getByRole("button", { name: "New file" });
-  await expect(btn).toBeVisible({ timeout: 15_000 });
-  await btn.click();
+  if (await btn.isVisible().catch(() => false)) {
+    await btn.click();
+  } else {
+    const createMenu = testPage.getByTestId("files-create-menu");
+    await expect(createMenu).toBeVisible({ timeout: 15_000 });
+    await createMenu.click();
+    const menuItem = testPage.getByRole("menuitem", { name: "New file" });
+    await expect(menuItem).toBeVisible({ timeout: 5_000 });
+    await menuItem.click();
+  }
   const input = testPage.getByPlaceholder("filename...");
   await expect(input).toBeVisible({ timeout: 5_000 });
   await expect(input).toBeFocused({ timeout: 2_000 });
@@ -154,9 +162,7 @@ test.describe("File tree create file", () => {
     await folder.click();
     await expect(session.fileTreeNode("scope/existing.ts")).toBeVisible({ timeout: 10_000 });
 
-    await testPage.getByRole("button", { name: "New file" }).click();
-    const input = testPage.getByPlaceholder("filename...");
-    await expect(input).toBeVisible({ timeout: 5_000 });
+    const input = await startCreateAtRoot(testPage);
     await input.fill("inside.ts");
     await input.press("Enter");
 

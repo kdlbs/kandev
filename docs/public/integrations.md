@@ -14,6 +14,14 @@ Integrations let Kandev's backend read and update provider data. They power repo
 3. Test the connection before browsing or enabling watches.
 4. Keep provider API credentials, task Git credentials, and agent credentials separate.
 
+![Three separate integration credential paths from workspace and executor configuration to provider APIs, repository remotes, and the agent CLI.](../screenshots/integrations.svg)
+
+[Open full-size SVG diagram][integrations-diagram]
+
+[integrations-diagram]: ../../docs/screenshots/integrations.svg
+
+The path that fails identifies the configuration surface to inspect. A working provider connection does not prove that a task can push Git changes or that its agent CLI can authenticate.
+
 They do **not** provide every credential a task needs. Keep these paths distinct:
 
 - an integration credential lets the Kandev backend call a provider API;

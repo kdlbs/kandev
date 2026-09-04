@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- this suite covers the toolbar's desktop and mobile interaction surfaces. */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,6 +39,7 @@ const responsiveMock = vi.hoisted(() => ({
 let mockPendingByFile: Record<string, import("@/lib/state/slices/comments").DiffComment[]> = {};
 let mockPlanModeEnabled = false;
 let mockImplementPlanHandler: ((fresh: boolean) => void) | undefined;
+let mockIsFinePointer = true;
 let mockNextStep: {
   proceedStepName: string | null;
   proceed: ReturnType<typeof vi.fn>;
@@ -54,6 +56,9 @@ const chatInputMock = vi.hoisted(() => ({
   renderProps: vi.fn(),
   focusInput: vi.fn(),
   getTextareaElement: vi.fn(() => null as HTMLElement | null),
+}));
+const passthroughTerminalMock = vi.hoisted(() => ({
+  renderProps: vi.fn(),
 }));
 
 // --- Module mocks (hoisted by Vitest) ---
@@ -118,6 +123,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
     isMobile: responsiveMock.breakpoint === "mobile",
     isTablet: responsiveMock.breakpoint === "tablet",
+    isFinePointer: mockIsFinePointer,
   }),
 }));
 
@@ -127,7 +133,10 @@ vi.mock("@/lib/ws/connection", () => ({
 
 // Stub heavy sub-components that involve xterm / canvas / WebGL.
 vi.mock("./passthrough-terminal", () => ({
-  PassthroughTerminal: () => <div data-testid="passthrough-terminal-stub" />,
+  PassthroughTerminal: (props: { enableTouchScroll?: boolean }) => {
+    passthroughTerminalMock.renderProps(props);
+    return <div data-testid="passthrough-terminal-stub" />;
+  },
 }));
 
 vi.mock("@/components/github/pr-status-chip", () => ({
@@ -295,15 +304,22 @@ function resetMocks() {
   mockPendingByFile = {};
   mockPlanModeEnabled = false;
   mockImplementPlanHandler = undefined;
+  mockIsFinePointer = true;
   mockNextStep = { proceedStepName: null, proceed: vi.fn(), isMoving: false };
   mockWsRequestFn = vi.fn().mockResolvedValue(undefined);
   chatInputMock.renderProps.mockClear();
+  passthroughTerminalMock.renderProps.mockClear();
   vi.clearAllMocks();
 }
 
 function latestChatInputProps(): Record<string, unknown> {
   const calls = chatInputMock.renderProps.mock.calls;
   return (calls[calls.length - 1]?.[0] ?? {}) as Record<string, unknown>;
+}
+
+function latestPassthroughTerminalProps(): { enableTouchScroll?: boolean } {
+  const calls = passthroughTerminalMock.renderProps.mock.calls;
+  return (calls[calls.length - 1]?.[0] ?? {}) as { enableTouchScroll?: boolean };
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +404,27 @@ describe("PassthroughToolbar – mobile touch targets", () => {
   it("sizes status controls for coarse-pointer tablets", () => {
     renderStatusRow("tablet");
     for (const testId of [TID_TOGGLE, TID_TOGGLE_COMMENTS, TID_PROCEED]) expectTouchSized(testId);
+  });
+});
+
+describe("PassthroughToolbar – touch-scroll activation", () => {
+  beforeEach(resetMocks);
+  afterEach(cleanup);
+
+  it("enables touch scrolling for a coarse pointer at tablet width", () => {
+    // @covers AC-UI-TERMINAL-TOUCH-SCROLLING-001.2
+    mockIsFinePointer = false;
+    renderToolbar();
+
+    expect(latestPassthroughTerminalProps().enableTouchScroll).toBe(true);
+  });
+
+  it("keeps the custom touch handler disabled for a fine pointer", () => {
+    // @covers AC-UI-TERMINAL-TOUCH-SCROLLING-001.5
+    mockIsFinePointer = true;
+    renderToolbar();
+
+    expect(latestPassthroughTerminalProps().enableTouchScroll).toBe(false);
   });
 });
 

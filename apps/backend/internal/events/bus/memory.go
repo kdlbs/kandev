@@ -139,7 +139,7 @@ func (b *MemoryEventBus) Publish(ctx context.Context, subject string, event *Eve
 			}
 
 			// Regular subscription - deliver to all synchronously to preserve ordering
-			if err := sub.handler(ctx, event); err != nil {
+			if err := invokeHandler(ctx, b.logger, "regular", subject, pattern, event, sub.handler); err != nil {
 				b.logger.Error("Event handler error",
 					zap.String("subject", subject),
 					zap.Error(err))
@@ -384,7 +384,7 @@ func (b *MemoryEventBus) publishToQueue(ctx context.Context, queueKey, subject s
 	}
 
 	// Deliver synchronously to preserve ordering.
-	if err := selected.handler(ctx, event); err != nil {
+	if err := invokeHandler(ctx, b.logger, "queue", subject, selected.subject, event, selected.handler); err != nil {
 		b.logger.Error("Queue event handler error",
 			zap.String("subject", subject),
 			zap.String("queue", queueKey),

@@ -79,6 +79,9 @@ type UpdateUserSettingsRequest struct {
 	SidebarViews                      *[]models.SidebarView
 	SidebarActiveViewID               *string
 	SidebarDraft                      **models.SidebarViewDraft
+	ThreadViews                       *[]models.ThreadView
+	ThreadActiveViewID                *string
+	ThreadViewDraft                   **models.ThreadViewDraft
 	SidebarTaskPrefs                  *models.SidebarTaskPrefs
 	TaskCreateLastUsed                *models.TaskCreateLastUsed
 	JiraSavedViews                    **json.RawMessage
@@ -213,6 +216,12 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
 		if err := applySidebarViewState(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyThreadViews(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyThreadViewState(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
 		if err := applyUserPreferenceBlobs(settings, req); err != nil {
@@ -952,6 +961,9 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"sidebar_views":                            settings.SidebarViews,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
+		"thread_views":                             settings.ThreadViews,
+		"thread_active_view_id":                    settings.ThreadActiveViewID,
+		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       settings.SidebarTaskPrefs,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
