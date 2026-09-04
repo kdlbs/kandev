@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -358,6 +361,101 @@ func TestCredentialResolverLegacyIdentityProbeCancellation(t *testing.T) {
 			}
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("err = %v, want context.Canceled", err)
+			}
+		})
+	}
+}
+
+func TestCredentialResolverLegacyIdentityProbeUsesAdmission(t *testing.T) {
+	tests := []struct {
+		name      string
+		client    func(*testing.T, *atomic.Int32) Client
+		calls     func(*testing.T) int
+		wantLogin string
+	}{
+		{
+			name: "TokenClient",
+			client: func(t *testing.T, calls *atomic.Int32) Client {
+				client := NewPATClient("legacy-token")
+				client.httpClient.Transport = legacyIdentityRoundTripper(func(req *http.Request) (*http.Response, error) {
+					calls.Add(1)
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader(`{"login":"legacy-user"}`)),
+					}, nil
+				})
+				return client
+			},
+			calls:     func(*testing.T) int { return 0 },
+			wantLogin: "legacy-user",
+		},
+		{
+			name: "GHClient",
+			client: func(t *testing.T, _ *atomic.Int32) Client {
+				newFakeGH(t, ghResponse{Prefix: "api user -q", Stdout: "legacy-user\n"})
+				return NewGHClient()
+			},
+			calls:     func(t *testing.T) int { return len(readGHInvocations(t, os.Getenv("GH_ARGS_LOG"))) },
+			wantLogin: "legacy-user",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var tokenCalls atomic.Int32
+			tracker := NewRateTracker(nil, nil)
+			tracker.Record(RateSnapshot{
+				Resource: ResourceCore, Remaining: 0, RemainingObserved: true,
+				Limit: 5000, ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now().UTC(),
+			})
+			resolver := NewCredentialResolver(nil, nil)
+			resolver.rateTracker = tracker
+			client := test.client(t, &tokenCalls)
+			resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+				return client, AuthMethodPAT, nil
+			})
+			connection := &WorkspaceConnection{
+				WorkspaceID: "legacy-workspace", GitHubHost: defaultGitHubHost,
+				Login: "legacy-user", Status: ConnectionStatusActive,
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			resolvedCh := make(chan *ResolvedCredential, 1)
+			errCh := make(chan error, 1)
+			go func() {
+				resolved, err := resolver.resolveLegacy(ctx, connection, CredentialPurposeAutomation)
+				resolvedCh <- resolved
+				errCh <- err
+			}()
+
+			select {
+			case <-resolvedCh:
+				t.Fatal("identity probe completed during the primary retry window")
+			case <-time.After(25 * time.Millisecond):
+			}
+			got := test.calls(t)
+			if test.name == "TokenClient" {
+				got = int(tokenCalls.Load())
+			}
+			if got != 0 {
+				t.Fatalf("provider calls during retry window = %d, want zero", got)
+			}
+
+			tracker.Record(RateSnapshot{
+				Resource: ResourceCore, Remaining: 100, RemainingObserved: true,
+				Limit: 5000, ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now().UTC(),
+			})
+			select {
+			case resolved := <-resolvedCh:
+				if resolved == nil || resolved.Principal.Login != test.wantLogin {
+					t.Fatalf("resolved = %+v, want login %q", resolved, test.wantLogin)
+				}
+				if err := <-errCh; err != nil {
+					t.Fatalf("resolve legacy: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("identity probe did not resume after the retry window")
 			}
 		})
 	}
