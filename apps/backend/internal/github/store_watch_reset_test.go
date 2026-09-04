@@ -18,6 +18,13 @@ func TestIsPRWatchUniqueViolation_PostgresConstraint(t *testing.T) {
 	}
 }
 
+func TestIsPRWatchDiscoveredUniqueViolation_PostgresConstraint(t *testing.T) {
+	err := &pgconn.PgError{Code: "23505", ConstraintName: prWatchDiscoveredIndexName}
+	if !isPRWatchDiscoveredUniqueViolation(errors.Join(errors.New("wrapped"), err)) {
+		t.Fatal("expected PostgreSQL PR-watch discovered unique violation to be recognized")
+	}
+}
+
 func TestStore_UpdatePRWatchBranchIfSearching_PostgresDifferentSessionCollision(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	ctx := context.Background()

@@ -2159,7 +2159,7 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 		// external writer could still race between the probe and this
 		// UPDATE. Treat a UNIQUE violation identically to the probe-found
 		// path.
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if isPRWatchDiscoveredUniqueViolation(err) {
 			if _, delErr := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); delErr != nil {
 				return delErr
 			}
@@ -2263,6 +2263,7 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 }
 
 const prWatchSearchingIndexName = "idx_github_pr_watches_searching"
+const prWatchDiscoveredIndexName = "idx_github_pr_watches_discovered"
 
 func isPRWatchUniqueViolation(err error) bool {
 	if err == nil {
@@ -2271,6 +2272,17 @@ func isPRWatchUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		return pgErr.Code == "23505" && pgErr.ConstraintName == prWatchSearchingIndexName
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+func isPRWatchDiscoveredUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == prWatchDiscoveredIndexName
 	}
 	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
