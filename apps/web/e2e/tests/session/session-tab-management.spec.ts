@@ -103,7 +103,7 @@ function starInTab(session: SessionPage, sessionId: string) {
 }
 
 test.describe("Session tab management — close behavior", () => {
-  test("tab close button deletes the session after confirmation", async ({
+  test("tab close button closes only the panel and keeps the session", async ({
     testPage,
     apiClient,
     seedData,
@@ -122,27 +122,17 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.sessionTabCloseButton(session1Id).click();
 
-    const confirmation = session.alertDialog();
-    await expect(confirmation).toBeVisible({ timeout: 5_000 });
-    await confirmation.getByRole("button", { name: "Delete" }).click();
-
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 5_000 });
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
 
     await expect
       .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.map((s) => s.id))
-      .toEqual([session2Id]);
-
-    // Hide the remaining panel through the context menu. This removes only the
-    // Dockview panel and must not delete the session.
-    await session.sessionTabBySessionId(session2Id).click({ button: "right" });
-    await session.contextMenuItem("Hide").click();
-    await expect(session.sessionTabBySessionId(session2Id)).not.toBeVisible({ timeout: 5_000 });
+      .toEqual(expect.arrayContaining([session1Id, session2Id]));
 
     await session.addPanelButton().click();
-    await expect(session.sessionReopenItem(session2Id)).toBeVisible();
-    await session.sessionReopenItem(session2Id).click();
-    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
+    await expect(session.sessionReopenItem(session1Id)).toBeVisible();
+    await session.sessionReopenItem(session1Id).click();
+    await expect(session.sessionTabBySessionId(session1Id)).toBeVisible({ timeout: 5_000 });
   });
 
   test("Hide closes the panel without deleting the session and allows reopening", async ({

@@ -156,6 +156,7 @@ describe("SessionContextMenuItems optional actions", () => {
             handleSetPrimary: vi.fn(),
             handleStop: vi.fn(),
             handleResume: vi.fn(),
+            hideSessionPanel: vi.fn(),
           }}
           onDelete={vi.fn()}
           onShare={vi.fn()}

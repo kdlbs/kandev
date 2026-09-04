@@ -46,7 +46,12 @@ export function PreviewSessionTabMenu({
       canShare={shareableSessionStateClient(session.state)}
       taskId={taskId}
       sessionId={session.id}
-      actions={{ handleSetPrimary: setPrimary, handleStop: stop, handleResume: resume }}
+      actions={{
+        handleSetPrimary: setPrimary,
+        handleStop: stop,
+        handleResume: resume,
+        hideSessionPanel: () => undefined,
+      }}
       onDelete={(event) => onRequestDelete(session.id, event, () => remove({ feedback: "toast" }))}
       onShare={() => onShareRequested(session.id)}
       onHandoffProfile={(profileId) => onHandoff(session.id, profileId)}

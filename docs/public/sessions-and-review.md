@@ -60,10 +60,10 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Handoff**        | Starts another session with a generated summary of this conversation                                                                                                       |
 | **Close Others**   | Closes other visible agent panels in that tab group without deleting their sessions                                                                                        |
 
-On desktop, the X on an agent tab deletes the session after confirmation. Use **Hide** from the
-tab context menu when you want to close only the panel and keep the conversation. Reopen a hidden
-conversation from **+ > Agents**. The X is available only for deletable sessions when the task has
-more than one session.
+On desktop, the X on an agent tab closes only the panel and keeps the conversation. Reopen a hidden
+conversation from **+ > Agents**. Use **Delete** in the tab context menu when you want to permanently
+remove the conversation after confirmation. The X is available when more than one agent panel is
+visible; the last visible agent panel remains open.
 
 Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
 

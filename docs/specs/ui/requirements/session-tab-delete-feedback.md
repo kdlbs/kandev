@@ -10,19 +10,23 @@ owners:
 
 ## Overview
 
-An agent-session tab's X deletes its session after confirmation. Users who want to keep the conversation but remove its panel can choose Hide from the desktop context menu. Mobile users can still delete from the Sessions picker.
+An agent-session tab's X closes only its Dockview panel. Users who want to keep the conversation
+available can reopen it from **+ > Agents**. Permanent deletion remains an explicit, confirmed
+Delete action in the desktop context menu and mobile Sessions picker.
 
 ## Requirements
 
 ### REQ-UI-SESSION-TAB-DELETE-FEEDBACK-001: Session tab close and delete feedback
 
-**Intent:** Deletion and panel visibility are separate, explicit actions. The tab X is the existing confirmed session-delete action. Hide removes only the panel and keeps the conversation available for reopening.
+**Intent:** Deletion and panel visibility are separate, explicit actions. The tab X and Hide remove
+only the panel and keep the conversation available for reopening. Delete is the confirmed permanent
+session-removal action.
 
 #### Acceptance criteria
 
-- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.1:** Clicking the X opens the session-delete confirmation. Confirming removes the session and its panel. Cancelling leaves both unchanged.
+- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.1:** Clicking the X closes only the session panel without confirmation or lifecycle change. The session and conversation remain available for reopening.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.2:** The desktop context menu offers Hide, which removes only that panel without a confirmation or lifecycle change. A hidden session remains listed under **+ > Agents** and reopening restores the same existing conversation.
-- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.3:** The X is shown only when the task has more than one session and the target session is deletable. It is unavailable for the sole task session or for a running session that cannot be deleted.
+- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.3:** The X is shown only when more than one agent-session panel is visible. It is unavailable for the last visible agent panel, regardless of the total backend session count or lifecycle state.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.4:** Close Others affects only sibling visible agent-session panels in its Dockview group; it does not remove backend sessions or non-session panels.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.5:** Ordinary synchronization does not recreate a panel explicitly hidden during the mounted layout; newly created sessions and explicit reopen targets still open.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.6:** Desktop context-menu Delete and mobile Sessions-picker Delete retain their existing confirmation and permanent deletion behavior.
@@ -31,8 +35,8 @@ An agent-session tab's X deletes its session after confirmation. Users who want 
 
 ## Why
 
-Users need to delete a session from the tab while also having a safe panel-only option. The X retains confirmation before permanent deletion. The explicit Hide command
-provides panel-only removal, while the explicit Delete command remains available from the context menu. The existing
+Users need a safe panel-only option without weakening deliberate deletion. The X and explicit Hide command
+provide panel-only removal, while the explicit Delete command remains available from the context menu. The existing
 **Close Others** action also previously removed panels only briefly because session synchronization
 recreated every missing sibling panel.
 
@@ -46,10 +50,10 @@ hides the session context the user is acting on.
 
 ## What
 
-- Clicking a desktop agent-session tab's X opens the existing confirmation and, after confirmation, calls the session deletion API and removes its Dockview panel.
+- Clicking a desktop agent-session tab's X removes only its Dockview panel. It does not open confirmation or call the session deletion API.
 - The context-menu Hide command removes only the Dockview panel. It does not call the session deletion
   API or change session lifecycle state.
-- The X is available only while the task has more than one session and the target session is deletable. A running or sole session has no X.
+- The X is available only while more than one agent-session panel is visible. A sole visible session panel has no X, even when other sessions remain in backend state.
 - A hidden session remains available under **+ > Agents** and reopening it restores the same
   session and conversation.
 - **Close Others** removes the other visible agent-session panels in the current group. It does not
@@ -75,8 +79,8 @@ hides the session context the user is acting on.
 
 ## Scenarios
 
-- **GIVEN** a task with two deletable agent-session tabs, **WHEN** the user clicks one tab's X and confirms,
-  **THEN** that session and its panel are removed and the remaining tab stays active.
+- **GIVEN** a task with two visible agent-session tabs, **WHEN** the user clicks one tab's X,
+  **THEN** only that panel is removed, the session remains available, and the remaining tab stays active.
 - **GIVEN** a session panel was hidden from its context menu, **WHEN** the user opens **+ > Agents** and selects
   that session, **THEN** the same session panel opens again with its existing conversation.
 - **GIVEN** only one agent-session panel remains visible, **WHEN** its tab renders, **THEN** it does
