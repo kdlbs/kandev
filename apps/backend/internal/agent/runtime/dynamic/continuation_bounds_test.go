@@ -78,6 +78,30 @@ func TestBoundedConversationRetainsUserMessagesWhenConversationOverflows(t *test
 	}
 }
 
+// TestBoundedConversationValidUTF8WhenSanitizeGrowsPastRawLimit is the R2-1
+// regression: routingerr.Sanitize can grow its input past MaxRawExcerptBytes
+// (redacting "/Users/henry/" to the longer "/Users/<redacted>/") and then
+// truncates with a bare byte slice, which can split a multi-byte rune at the
+// tail. boundedTailN only repairs the leading cut, so that broken tail must
+// otherwise survive into Continuation.Conversation. Swept across byte
+// alignments the way TestBoundedTruncatesOnRuneBoundary sweeps bounded(): the
+// redaction-dense unit is repeated well past continuationFieldLimit so the
+// budget's internal tail-cut still lands in a redaction-growing, multi-byte
+// region regardless of the alignment prefix.
+func TestBoundedConversationValidUTF8WhenSanitizeGrowsPastRawLimit(t *testing.T) {
+	unit := "/Users/henry/p à"
+
+	for alignment := 0; alignment < 12; alignment++ {
+		pad := strings.Repeat("x", alignment)
+		conversation := pad + strings.Repeat(unit, 300)
+
+		continuation := BuildBoundedContinuation(ContinuationInput{Conversation: conversation})
+		if !utf8.ValidString(continuation.Conversation) {
+			t.Errorf("alignment=%d: Conversation is invalid UTF-8: %q", alignment, continuation.Conversation)
+		}
+	}
+}
+
 // TestBoundedTaskDescriptionKeepsHead pins the unchanged head-keep contract
 // for every field other than Conversation (PlanSummary is separately pinned
 // by TestBoundedIsNoOpOnReducedPlanOutput).
