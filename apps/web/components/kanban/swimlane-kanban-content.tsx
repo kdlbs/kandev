@@ -452,7 +452,12 @@ export function SwimlaneKanbanContent({
 
   return (
     <>
-      <div role="status" aria-live="polite" className="sr-only">
+      <div
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+        data-testid="kanban-reorder-announcement"
+      >
         {keyboard.announcement}
       </div>
       <KanbanDragSurface
