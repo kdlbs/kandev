@@ -295,6 +295,20 @@ func TestGzipDecompressRejectsActualOversize(t *testing.T) {
 	}
 }
 
+func TestGzipDecompressRejectsCompressedExpansionBomb(t *testing.T) {
+	plain := strings.Repeat("b", 1<<20)
+	compressed, err := gzipCompress([]byte(plain))
+	if err != nil {
+		t.Fatalf("gzipCompress: %v", err)
+	}
+	if len(compressed) >= len(plain) {
+		t.Fatalf("fixture did not compress: compressed=%d plain=%d", len(compressed), len(plain))
+	}
+	if _, err := gzipDecompress(compressed, 1024); err == nil {
+		t.Fatal("gzipDecompress accepted compressed expansion beyond the configured cap")
+	}
+}
+
 func TestGzipDecompressRejectsExpectedOversize(t *testing.T) {
 	compressed, err := gzipCompress([]byte("123456789"))
 	if err != nil {

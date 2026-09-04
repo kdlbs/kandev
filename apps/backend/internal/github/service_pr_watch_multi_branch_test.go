@@ -332,6 +332,41 @@ func TestResetPRWatch_ConcurrentSessionsCoalesceDestination(t *testing.T) {
 	}
 }
 
+func TestResetPRWatch_CollisionDoesNotSwitchBackToSource(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	source, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-A", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	if err != nil {
+		t.Fatalf("create source watch: %v", err)
+	}
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-B", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	if err != nil {
+		t.Fatalf("create sibling watch: %v", err)
+	}
+
+	if err := svc.ResetPRWatch(ctx, source.ID, sibling.Branch); err != nil {
+		t.Fatalf("ResetPRWatch must coalesce the source into the canonical branch: %v", err)
+	}
+	// A delayed reset from the source session must be a no-op after its row
+	// was merged, rather than recreating or switching the canonical watch.
+	if err := svc.ResetPRWatch(ctx, source.ID, source.Branch); err != nil {
+		t.Fatalf("stale source reset must remain a no-op: %v", err)
+	}
+
+	watches, err := store.ListPRWatchesByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(watches) != 1 || watches[0].ID != sibling.ID {
+		t.Fatalf("expected only canonical sibling after stale reset, got %+v", watches)
+	}
+	if watches[0].Branch != sibling.Branch || watches[0].PRNumber != 0 {
+		t.Fatalf("canonical sibling switched unexpectedly: %+v", watches[0])
+	}
+}
+
 // TestUpdatePRWatchBranchIfSearching_PRAlreadyFound_NoOp preserves the
 // existing "searching" guard: a watch that already found its PR
 // (pr_number != 0) must not have its branch overwritten.
