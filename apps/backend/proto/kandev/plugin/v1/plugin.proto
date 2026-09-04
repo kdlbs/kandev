@@ -394,6 +394,8 @@ message Task {
   // `runner` row in workflow_step_participants (ADR 0005 Wave F); this is the
   // same read-time projection kandev's own callers consume.
   string assignee_agent_profile_id = 22;
+  reserved 23;
+  reserved "labels";
   bool autopilot = 24;
   // Whether the task consumes a slot in its current step's WIP capacity. A
   // queued task stays visible but admits nothing, so a capacity report that

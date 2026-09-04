@@ -7411,7 +7411,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\bPageInfo\x12\x1f\n" +
 	"\vnext_cursor\x18\x01 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xd8\b\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xe6\b\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
@@ -7458,7 +7458,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"_parent_idB\x0e\n" +
 	"\f_archived_atB\f\n" +
 	"\n" +
-	"_queued_at\"\xab\x01\n" +
+	"_queued_atJ\x04\b\x17\x10\x18R\x06labels\"\xab\x01\n" +
 	"\x0eTaskRepository\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
 	"\rrepository_id\x18\x02 \x01(\tR\frepositoryId\x12\x1f\n" +

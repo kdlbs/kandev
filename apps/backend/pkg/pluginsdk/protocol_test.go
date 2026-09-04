@@ -26,6 +26,7 @@ func TestProtocolDeclaresAdditivePluginAndHostMethods(t *testing.T) {
 	assertMessageFields(t, "CreateTaskRequest", "repositories", "launch", "metadata", "priority")
 	assertMessageFields(t, "UpdateTaskRequest", "priority")
 	assertMessageOmitsFields(t, "Task", "labels")
+	assertMessageReservesField(t, "Task", 23, "labels")
 	assertMessageOmitsFields(t, "CreateTaskRequest", "labels")
 	assertMessageOmitsFields(t, "UpdateTaskRequest", "labels")
 	assertMessageFields(t, "RemoteRepositoryDescriptor", "provider_id", "provider_host", "owner_or_project", "provider_repository_id", "name", "clone_url", "provider_scope")
@@ -67,5 +68,34 @@ func assertMessageOmitsFields(t *testing.T, messageName string, fields ...protor
 		if message.Fields().ByName(field) != nil {
 			t.Fatalf("%s must not expose field %s", message.FullName(), field)
 		}
+	}
+}
+
+func assertMessageReservesField(t *testing.T, messageName string, number protoreflect.FieldNumber, name protoreflect.Name) {
+	t.Helper()
+	message := pluginv1.File_kandev_plugin_v1_plugin_proto.Messages().ByName(protoreflect.Name(messageName))
+	if message == nil {
+		t.Fatalf("required message %s is missing", messageName)
+	}
+	reservedNumber := false
+	for index := 0; index < message.ReservedRanges().Len(); index++ {
+		rangeValue := message.ReservedRanges().Get(index)
+		if number >= rangeValue[0] && number < rangeValue[1] {
+			reservedNumber = true
+			break
+		}
+	}
+	if !reservedNumber {
+		t.Fatalf("%s must reserve field number %d", message.FullName(), number)
+	}
+	reservedName := false
+	for index := 0; index < message.ReservedNames().Len(); index++ {
+		if message.ReservedNames().Get(index) == name {
+			reservedName = true
+			break
+		}
+	}
+	if !reservedName {
+		t.Fatalf("%s must reserve field name %s", message.FullName(), name)
 	}
 }
