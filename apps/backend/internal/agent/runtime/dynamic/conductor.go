@@ -439,30 +439,47 @@ func BuildBoundedContinuation(input ContinuationInput) Continuation {
 // every user message; splitting the limit guarantees both survive.
 const conversationUserBudget = continuationFieldLimit / 2
 
+// sanitizeSlack overshoots a tail budget before the first cut so a
+// credential straddling the cut boundary still has its leading fragment
+// present when Sanitize runs, instead of only the fragment past the cut
+// (which matches no redaction rule). It must exceed the length of any single
+// credential token Sanitize's rules match.
+const sanitizeSlack = 512
+
+// sanitizedTail returns the newest `budget` bytes of raw with credentials
+// redacted. It first takes a window that overshoots budget by sanitizeSlack
+// so a credential straddling the tail-cut boundary is complete when Sanitize
+// runs, instead of arriving as a bare suffix that matches no redaction rule.
+// The window is capped at routingerr.MaxRawExcerptBytes so Sanitize's own
+// truncation, which is head-first, never engages on it: engaging would
+// silently drop the newest bytes this function exists to keep, the same
+// direction of loss a straight cut-then-sanitize order produces for
+// credentials.
+func sanitizedTail(raw string, budget int) string {
+	window := budget + sanitizeSlack
+	if window > routingerr.MaxRawExcerptBytes {
+		window = routingerr.MaxRawExcerptBytes
+	}
+	part := boundedTailN(raw, window)
+	return boundedTailN(routingerr.Sanitize(part), budget)
+}
+
 // boundedConversation bounds user messages and the agent conversation on
 // independent tail-kept budgets, then joins them, so the newest user asks
 // and the newest agent turns both survive regardless of how large the other
 // side is. Both halves can carry raw content that must not cross a provider
 // boundary unsanitized: the agent half can echo command output or env
 // values, and the user half can carry a secret the user typed, or one
-// forwarded from the launch prompt. Each half is sanitized only after being
-// bounded: Sanitize's own MaxRawExcerptBytes truncation is head-first, and
-// running it before the tail-keep would discard the most recent turns
-// instead of the oldest. Sanitize's redactions can grow the string (e.g.
-// replacing a short path with a longer placeholder) past its own
-// MaxRawExcerptBytes cap, so each half is re-bounded to its budget after
-// sanitizing to keep the final result within continuationFieldLimit and on a
-// valid UTF-8 boundary at both ends.
+// forwarded from the launch prompt. sanitizedTail keeps each half's
+// redaction and truncation on a valid UTF-8 boundary at both ends.
 func boundedConversation(userMessages []string, conversation string) string {
-	userPart := boundedTailN(strings.Join(userMessages, "\n"), conversationUserBudget)
-	userPart = boundedTailN(routingerr.Sanitize(userPart), conversationUserBudget)
+	userPart := sanitizedTail(strings.Join(userMessages, "\n"), conversationUserBudget)
 
 	convBudget := continuationFieldLimit - len(userPart)
 	if userPart != "" {
 		convBudget-- // separating newline
 	}
-	convPart := boundedTailN(conversation, convBudget)
-	convPart = boundedTailN(routingerr.Sanitize(convPart), convBudget)
+	convPart := sanitizedTail(conversation, convBudget)
 
 	switch {
 	case userPart == "":
