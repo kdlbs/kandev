@@ -35,6 +35,33 @@ func TestDynamicAttemptEvidenceRequiresDiagnosticTextContainment(t *testing.T) {
 	}
 }
 
+// TestDynamicAttemptEvidenceContainmentIsCaseSensitive pins AC.23's
+// case-sensitive comparison rule. Both catalogue rules feeding this path are
+// case-insensitive, so containment is the only remaining discriminator: a
+// title-cased diagnostic chunk classifies identically to the terminal
+// failure's lower-cased text but must not satisfy containment.
+func TestDynamicAttemptEvidenceContainmentIsCaseSensitive(t *testing.T) {
+	var service Service
+	const chunk = "API Error: 500 Internal Server Error."
+	const terminal = "Internal error: API Error: 500 Internal server error. This is a server-side issue, usually temporary - try again in a moment."
+
+	service.beginPromptAttempt("session-1", "execution-1", 1, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, chunk)
+
+	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 1,
+		ErrorMessage:     terminal,
+	})
+	if !got.OutputObserved {
+		t.Fatal("case-mismatched diagnostic was incorrectly treated as contained in the terminal message")
+	}
+	if service.promptAttemptPreResultSafe(got) {
+		t.Fatal("case-mismatched diagnostic was incorrectly treated as pre-result safe")
+	}
+}
+
 // TestDynamicAttemptEvidenceContainmentSatisfiedByGatewaySubstring pins the
 // gateway-500 sample from the system design's input inventory: the chunk text
 // is a strict substring of the sanitized terminal message, and containment
