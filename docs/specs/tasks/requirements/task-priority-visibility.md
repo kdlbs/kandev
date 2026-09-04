@@ -17,8 +17,8 @@ carry the value. This capability makes that value visible and usable on the
 kanban board without changing the task model or priority vocabulary.
 
 The `tasks` system owns this capability because priority is part of the durable
-task record. The board is one presentation and interaction surface for that
-record.
+task record. The board and task switcher are presentation and interaction
+surfaces for that record.
 
 ## Terminology
 
@@ -31,6 +31,8 @@ record.
 - **Card menu:** the task card's action menu. It has two triggers that render
   from one shared entry list: a desktop-only right-click context menu, and a
   dots-button dropdown available at every breakpoint.
+- **Task switcher:** the shared task tree rendered in the desktop sidebar and in
+  the phone or tablet task-navigation surface.
 - **Board order:** the order cards appear within a workflow step, driven by the
   task's `position` and controlled by drag and drop.
 
@@ -215,6 +217,48 @@ compared or sent.
 - **AC-TASKS-PRIORITY-VISIBILITY-004.5:** No priority label or related copy shall
   contain a Unicode em dash (U+2014).
 
+### REQ-TASKS-PRIORITY-VISIBILITY-005: Priority is visible and editable in the task switcher
+
+**Intent:** Let a person scan and triage tasks from task detail without returning
+to the board.
+
+**User story:** As someone working from a task detail, I want to see and change
+another task's priority in the task switcher, so that I can triage work without
+leaving my current task.
+
+#### Acceptance criteria
+
+- **AC-TASKS-PRIORITY-VISIBILITY-005.1:** When a live task in the desktop sidebar
+  or phone or tablet task switcher has priority `critical`, `high` or `low`, the
+  system shall show the same priority indicator at the leading side of its task
+  row, after the task-state indicator and before the title.
+- **AC-TASKS-PRIORITY-VISIBILITY-005.2:** When the task priority is `medium`,
+  absent, empty or not one of the four priority tokens, the task switcher shall
+  show no priority indicator and shall not show the raw value.
+- **AC-TASKS-PRIORITY-VISIBILITY-005.3:** The task-switcher indicator shall use
+  the same shape, color and localized accessible name as the corresponding card
+  indicator. Priority shall remain distinguishable by more than color alone.
+- **AC-TASKS-PRIORITY-VISIBILITY-005.4:** The single-task action menu shall show a
+  Priority submenu with a leading flag icon, the four localized priority labels
+  and a visible current-value marker. An absent, empty or unrecognized value
+  shall mark no option as current.
+- **AC-TASKS-PRIORITY-VISIBILITY-005.5:** Desktop users shall reach the Priority
+  submenu from the task row's right-click menu. Phone and tablet users shall
+  reach the same submenu from the visible task-actions control. On coarse
+  pointers, the task-actions control and menu rows shall have a hit area of at
+  least 44 CSS pixels in the active dimensions.
+- **AC-TASKS-PRIORITY-VISIBILITY-005.6:** When a person selects a priority from
+  the task switcher, the system shall persist only that task's priority and shall
+  surface a failure without replacing the last known stored value. Reselecting
+  the current priority shall complete without error.
+- **AC-TASKS-PRIORITY-VISIBILITY-005.7:** When the stored priority changes from
+  any source, every visible desktop, phone and tablet task-switcher row shall
+  converge on the stored value without a page reload. A snapshot or refresh that
+  omits priority shall not clear an existing value.
+- **AC-TASKS-PRIORITY-VISIBILITY-005.8:** The Priority submenu shall not be
+  available for an archived row or a multi-task selection. Showing or changing
+  priority shall not reorder, regroup, select or navigate any task.
+
 ## Out of scope
 
 Each exclusion below is a decision, not an omission.
@@ -241,9 +285,9 @@ Each exclusion below is a decision, not an omission.
   constraint already exist and are not touched.
 - **Labels and tags.** Priority remains a task field. It is not modelled as a
   label or tag.
-- **Changing priority from anywhere other than the board.** A control on the task
-  detail page, in the session sidebar or in a command palette is additive and not
-  required to satisfy REQ-TASKS-PRIORITY-VISIBILITY-003.
+- **Changing priority from other surfaces.** A control on the task detail page
+  outside the task switcher, or in a command palette, is additive and is not
+  required by this capability.
 - **Bulk priority changes.** Setting priority across a multi-selection is a
   separate interaction with its own partial-failure semantics.
 - **Priority on ephemeral tasks.** Quick-chat and other ephemeral tasks are
