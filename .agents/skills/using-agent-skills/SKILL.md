@@ -32,7 +32,7 @@ Task arrives
 |-- Need local QA/review/simplification? ----> only on explicit user request or PR finding
 |-- Improve skills/agents/commands? --------> /harness-improvement
 |-- Record decisions/specification changes? -> /record
-|-- Public docs impact? --------------------> /docs-maintainer
+|-- Public docs impact? --------------------> /docs-maintainer -> /diagram-design when a visual helps
 |-- Commit/push/PR? ------------------------> /commit -> /push or /pr
 `-- Release/versioning? --------------------> /release
 ```

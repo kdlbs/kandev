@@ -31,16 +31,15 @@ support, not a starter repository.
 
 ## Lifecycle
 
-```mermaid
-flowchart LR
-  A[Package install] --> B[Manifest and package validation]
-  B --> C[Safe extraction]
-  C --> D[Runtime subprocess]
-  D <-->|Host gRPC over go-plugin| E[Go plugin backend]
-  C --> F[Frontend bundle and styles]
-  F --> G[Browser bundle loading]
-  G --> H[registerKandevPlugin initialize]
-```
+![Plugin authoring lifecycle: package validation and safe extraction feed the supervised Go runtime path and the browser native-UI path, which ends in plugin initialization.](../screenshots/plugin-authoring-lifecycle.svg)
+
+[Open full-size SVG diagram][plugin-authoring-diagram]
+
+[plugin-authoring-diagram]: ../../docs/screenshots/plugin-authoring-lifecycle.svg
+
+The two lower paths are intentionally separate: the Go subprocess uses the
+host gRPC connection, while the browser receives static bundle assets and then
+calls `registerKandevPlugin`.
 
 Installation validates the manifest, archive paths, checksums, managed runtime,
 and the current host executable before extraction. Kandev then supervises the

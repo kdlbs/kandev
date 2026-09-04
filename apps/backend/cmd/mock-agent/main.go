@@ -112,6 +112,7 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 			McpCapabilities: acp.McpCapabilities{Sse: true},
 			SessionCapabilities: acp.SessionCapabilities{
 				AdditionalDirectories: &acp.SessionAdditionalDirectoriesCapabilities{},
+				Close:                 &acp.SessionCloseCapabilities{},
 			},
 			Meta: meta,
 		},

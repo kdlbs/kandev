@@ -47,7 +47,7 @@ Subscribe to the three events that exist:
 - `events.GitHubTaskPRUpdated` (`:291`)
 - `events.GitLabTaskMRUpdated` (`:306`)
 
-The spec's fourth trigger, a git snapshot write, has no event type: 
+The spec's fourth trigger, a git snapshot write, has no event type:
 `internal/task/repository/sqlite/git_snapshots.go:101` writes the row and
 publishes nothing. Per plan decision D6 it is served by the sweep's freshness
 predicate, bounding latency at one 5-minute interval rather than putting a

@@ -57,8 +57,8 @@ apps/backend/
 │   │   ├── models/       # Task, Session, Executor, Message models
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
-│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, costs,
-│   │                     # dashboard, infra, labels, onboarding, projects, repository, runtime,
+│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, configsync,
+│   │                     # costs, dashboard, infra, labels, onboarding, projects, repository, runtime,
 │   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway

@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001
 created: 2026-08-24
-updated: 2026-09-01
+updated: 2026-09-03
 owners:
   - cfl12
 ---
@@ -90,6 +90,13 @@ state. A successor execution or prompt remains unchanged.
 Backend shutdown keeps its existing stopped-session behavior. A shutdown error
 does not create a durable user-visible launch failure.
 
+The task environment has `creating`, `ready`, `stopped`, and `failed` states.
+A worktree path is optional when the state is `creating` or `failed`.
+The `ready` and `stopped` states require a non-empty worktree path.
+
+After a materialization error, the materialization owner clears its claim and
+stores the `failed` state. This update remains valid when no worktree path exists.
+
 ## Branch resolution and persistence
 
 Local default detection remains a pure helper and returns empty when only a
@@ -116,6 +123,10 @@ The task Chat surface renders one persistent error card from the shared
 projection. Desktop actions are inline; mobile actions wrap and branch
 selection uses the existing mobile picker. Both surfaces use the same action
 authorization and remain free of horizontal overflow.
+
+`useEnsureTaskSession` keeps one request latch after an error. Store updates and
+loader identity changes do not start another request. The Retry control starts
+the next request explicitly. A task change clears the prior task's error state.
 
 ## Verification
 

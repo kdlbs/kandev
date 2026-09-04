@@ -95,6 +95,7 @@ export function SettingsSaveProvider({
     refreshRegistry,
   );
   const hasDirty = dirtyContributors.length > 0;
+  const hasInvalid = dirtyContributors.some(({ contributor }) => contributor.canSave === false);
   const invalidReason = dirtyContributors.find(({ contributor }) => contributor.canSave === false)
     ?.contributor.invalidReason;
   const displayStatus = status === "saved" && hasDirty ? "dirty" : status;
@@ -129,6 +130,7 @@ export function SettingsSaveProvider({
         clearSavedStatus,
       }}
       placement={placement}
+      hasInvalid={hasInvalid}
       displayStatus={displayStatus}
       errorKind={errorKind}
       dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
@@ -149,6 +151,7 @@ type SettingsSaveProviderBodyProps = {
   registry: Registry;
   coordinator: SettingsSaveCoordinator;
   placement: SettingsSavePlacement;
+  hasInvalid: boolean;
   displayStatus: SettingsSaveStatus;
   errorKind: SettingsSaveErrorKind | null;
   dirtyContributorIds: string;
@@ -171,6 +174,7 @@ function SettingsSaveProviderBody({
   registry,
   coordinator,
   placement,
+  hasInvalid,
   displayStatus,
   errorKind,
   dirtyContributorIds,
@@ -192,6 +196,7 @@ function SettingsSaveProviderBody({
           <SettingsFloatingSave
             status={displayStatus}
             placement={placement}
+            canSave={!hasInvalid}
             errorKind={errorKind}
             dirtyContributorIds={dirtyContributorIds}
             invalidReason={invalidReason}

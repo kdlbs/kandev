@@ -31,7 +31,11 @@ trust, see [Security posture](#security-posture).
 
 ## How it works
 
-![Plugin lifecycle: install, verify, extract, and spawn a go-plugin gRPC subprocess; then, over one supervised gRPC connection, kandev delivers bus events and relays external webhooks to the plugin, the plugin calls back into the Host API, and the SPA optionally loads the native UI bundle.](../screenshots/plugin-architecture.png)
+![Plugin runtime lifecycle: Kandev installs, verifies, extracts, and supervises a plugin subprocess; bus events and external webhooks reach it, it calls the Host API, and the SPA can optionally load its native UI bundle.](../screenshots/plugin-architecture.svg)
+
+[Open full-size SVG diagram][plugin-runtime-diagram]
+
+[plugin-runtime-diagram]: ../../docs/screenshots/plugin-architecture.svg
 
 Kandev owns the whole process lifecycle: it extracts the package, spawns the
 binary, completes the go-plugin handshake, health-checks it (`Ping` every

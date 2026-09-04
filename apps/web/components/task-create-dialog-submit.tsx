@@ -15,6 +15,8 @@ import { t } from "@/lib/i18n";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
 import { ApiError } from "@/lib/api/client";
+import { getTaskDependencyCycle } from "@/lib/api/domains/task-dependencies-api";
+import { isTaskDependencyUpdateFailure } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
@@ -84,11 +86,63 @@ const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
 };
 
 export function taskSubmitErrorMessage(error: unknown): string {
+  if (isTaskDependencyUpdateFailure(error)) {
+    const cycle = getTaskDependencyCycle(error.cause);
+    if (cycle?.length) return t("task:dependencyCycleError", { cycle: cycle.join(" -> ") });
+    return t("task:dependencyUpdateFailed");
+  }
   if (error instanceof ApiError) {
     const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
     if (key) return t(key);
   }
   return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
+}
+
+type EditDependencySaveArgs = {
+  editDependencies?: SubmitHandlersDeps["editDependencies"];
+  updatedTask: Awaited<ReturnType<typeof updateTask>>;
+  isStartedEdit: boolean;
+  descriptionInputRef: SubmitHandlersDeps["descriptionInputRef"];
+  setTaskName: SubmitHandlersDeps["setTaskName"];
+  setHasDescription: SubmitHandlersDeps["setHasDescription"];
+};
+
+async function saveEditedTaskDependencies({
+  editDependencies,
+  updatedTask,
+  isStartedEdit,
+  descriptionInputRef,
+  setTaskName,
+  setHasDescription,
+}: EditDependencySaveArgs): Promise<void> {
+  if (!editDependencies?.isDirty) return;
+  try {
+    await editDependencies.save();
+  } catch (error) {
+    setTaskName(updatedTask.title);
+    if (!isStartedEdit) {
+      const confirmedDescription = updatedTask.description?.trim() ?? "";
+      descriptionInputRef.current?.setValue(confirmedDescription);
+      setHasDescription(confirmedDescription.length > 0);
+    }
+    throw error;
+  }
+}
+
+function areEditDependenciesReady(
+  isEditMode: boolean,
+  editDependencies: SubmitHandlersDeps["editDependencies"],
+): boolean {
+  return !isEditMode || editDependencies?.ready !== false;
+}
+
+async function shouldKeepEditDialogOpen(
+  error: unknown,
+  refreshStaleBranchPolicies: (error: unknown) => Promise<boolean>,
+): Promise<boolean> {
+  if (isRepositorySelectionError(error)) return true;
+  if (isTaskDependencyUpdateFailure(error)) return true;
+  return refreshStaleBranchPolicies(error);
 }
 
 function isRepositorySelectionError(error: unknown): boolean {
@@ -146,6 +200,7 @@ export function useTaskSubmitHandlers({
   noRepository,
   workspacePath,
   blockedBy,
+  editDependencies,
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
   const router = useRouter();
@@ -363,6 +418,7 @@ export function useTaskSubmitHandlers({
 
   const performTaskUpdate = useCallback(async () => {
     if (!editingTask) return null;
+    if (!areEditDependenciesReady(isEditMode, editDependencies)) return null;
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
     const description = isStartedEdit
@@ -379,6 +435,14 @@ export function useTaskSubmitHandlers({
     };
 
     const updatedTask = await updateTask(editingTask.id, updatePayload);
+    await saveEditedTaskDependencies({
+      editDependencies,
+      updatedTask,
+      isStartedEdit,
+      descriptionInputRef,
+      setTaskName,
+      setHasDescription,
+    });
     return { updatedTask, trimmedDescription };
   }, [
     editingTask,
@@ -387,9 +451,14 @@ export function useTaskSubmitHandlers({
     getRepositoriesPayload,
     isStartedEdit,
     repositoriesDirty,
+    editDependencies,
+    isEditMode,
+    setTaskName,
+    setHasDescription,
   ]);
 
   const handleEditSubmit = useCallback(async () => {
+    if (!areEditDependenciesReady(isEditMode, editDependencies)) return;
     if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
     let closeDialog = true;
@@ -422,9 +491,7 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
-      closeDialog = !(
-        isRepositorySelectionError(error) || (await refreshStaleBranchPolicies(error))
-      );
+      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -446,9 +513,12 @@ export function useTaskSubmitHandlers({
     toast,
     setIsCreatingTask,
     applyAgentProfileRecentUse,
+    editDependencies,
+    isEditMode,
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
+    if (!areEditDependenciesReady(isEditMode, editDependencies)) return;
     if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
     let closeDialog = true;
@@ -457,9 +527,7 @@ export function useTaskSubmitHandlers({
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
-      closeDialog = !(
-        isRepositorySelectionError(error) || (await refreshStaleBranchPolicies(error))
-      );
+      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -477,6 +545,8 @@ export function useTaskSubmitHandlers({
     refreshStaleBranchPolicies,
     toast,
     setIsCreatingTask,
+    editDependencies,
+    isEditMode,
   ]);
 
   const performCreate = useCallback(
@@ -630,6 +700,7 @@ export function useTaskSubmitHandlers({
 
   const handleCreateWithPlanMode = useCallback(async () => {
     if (isEditMode) {
+      if (editDependencies && !editDependencies.ready) return;
       setIsCreatingTask(true);
       try {
         await performEditWithPlanMode();
@@ -687,6 +758,7 @@ export function useTaskSubmitHandlers({
     toast,
     descriptionInputRef,
     setIsCreatingTask,
+    editDependencies,
   ]);
 
   const submitCreateTask = useCallback(

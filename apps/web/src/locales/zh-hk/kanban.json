@@ -88,6 +88,7 @@
   "taskList": "任務列表",
   "tasksOverWipLimit": "{{label}} 個任務，超出 WIP 限制",
   "theseOptionsAffectThisTaskList": "這些選項僅影響此任務列表。",
+  "threads": "對話流",
   "utilities": "實用工具",
   "view": "視圖",
   "whenEnabledClickingATaskOpens": "啓用後，點擊任務會開啟預覽面板；停用後，點擊會直接進入工作階段。",

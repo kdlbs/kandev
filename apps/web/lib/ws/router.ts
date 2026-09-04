@@ -9,6 +9,7 @@ import { registerAgentCapabilitiesHandlers } from "@/lib/ws/handlers/agent-capab
 import { registerSessionModelsHandlers } from "@/lib/ws/handlers/session-models";
 import { registerSessionMCPStatusHandlers } from "@/lib/ws/handlers/session-mcp-status";
 import { registerSessionInfoHandlers } from "@/lib/ws/handlers/session-info";
+import { registerSessionPendingActionHandlers } from "@/lib/ws/handlers/session-pending-action";
 import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
 import { registerPromptUsageHandlers } from "@/lib/ws/handlers/prompt-usage";
 import { registerWorkflowsHandlers } from "@/lib/ws/handlers/workflows";
@@ -63,6 +64,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSessionModelsHandlers(store),
     ...registerSessionMCPStatusHandlers(store),
     ...registerSessionInfoHandlers(store),
+    ...registerSessionPendingActionHandlers(store),
     ...registerSessionTodosHandlers(store),
     ...registerPromptUsageHandlers(store),
     ...registerUsersHandlers(store),
