@@ -100,7 +100,8 @@ instead needs to reconcile the destination step that lost WIP occupants.
 
 - RED: both archive and delete cases left `feeder-first` in `waiting-step`.
 - GREEN: the focused regression test passed all archive and delete assertions.
-- The task-service package passed 1,561 tests.
+- The task-service package passed 1,567 tests after review regressions added
+  coverage for concurrent placement changes and partial cascade failures.
 - The full backend suite passed after removing the session's pinned
   `KANDEV_INTERNAL_CONFIG_FILE` and `KANDEV_INTERNAL_CONFIG_HOME_FILE` values.
 - Backend lint passed with zero issues.
@@ -113,3 +114,7 @@ instead needs to reconcile the destination step that lost WIP occupants.
   from different steps must each wake their own destination.
 - Post-commit reconciliation must retain caller identity for authorization but
   discard caller cancellation, matching the existing cascade cleanup context.
+
+The repository mutation returns the vacated workflow step from the same
+transaction that archives or deletes the task. A deferred batch finalizer also
+reconciles successful mutations when a later tree mutation fails.

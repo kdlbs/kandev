@@ -61,7 +61,7 @@ go test -run '^TestHandoffTaskTreeLifecycleBackfillsFeederVacancies$' ./internal
 cd ../..
 make -C apps/backend test
 make -C apps/backend lint
-bash -c 'files=$(git diff --cached --name-only --diff-filter=ACMR | grep "\.go$"); if [ -n "$files" ]; then gofmt -l $files; fi'
+bash -c 'files=$(git diff --cached --name-only --diff-filter=ACMR | grep "\.go$"); [ -z "$files" ] || [ -z "$(gofmt -l $files)" ]'
 git diff --check
 ```
 
@@ -118,7 +118,9 @@ None.
 - The SQLite-backed regression test failed before production changes because
   both cascade paths stranded feeder work. It now passes for archive and
   delete, including distinct-step batching and `wip_pull` ledger attribution.
-- `go test ./internal/task/service -count=1` passed 1,561 tests.
+- Review remediation moved vacancy capture into the archive/delete transaction
+  and added a deferred batch finalizer for committed partial cascades.
+- `go test ./internal/task/service -count=1` passed 1,567 tests.
 - `make -C apps/backend test` passed with the session's pinned internal config
   path removed so config-discovery tests could use their temporary fixtures.
 - `make -C apps/backend lint` passed with zero issues.

@@ -231,9 +231,11 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	// but keeps the audit log readable.
 	postArchiveCtx := ctx
 	vacatedStepIDs := make(map[string]struct{})
+	defer func() {
+		s.pullTasksForVacatedSteps(postArchiveCtx, vacatedStepIDs)
+	}()
 	for i := len(all) - 1; i >= 0; i-- {
-		snapshot := s.taskSnapshotForVacancy(postArchiveCtx, all[i])
-		ok, err := s.tasks.ArchiveTaskIfActive(postArchiveCtx, all[i], cascadeID)
+		vacatedStepID, ok, err := s.archiveTaskWithVacatedStep(postArchiveCtx, all[i], cascadeID)
 		if err != nil {
 			s.cancelCascadeResourceCleanupRange(postArchiveCtx, all[:i+1], cleanupOps)
 			return out, fmt.Errorf("archive %s: %w", all[i], err)
@@ -243,7 +245,7 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 			// survive a disconnected caller.
 			postArchiveCtx = context.WithoutCancel(ctx)
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
-			recordVacatedStep(vacatedStepIDs, snapshot)
+			recordVacatedStep(vacatedStepIDs, vacatedStepID)
 			// The archive mutation committed, so it is now safe to finalize
 			// any session that the runtime canceller could not update.
 			s.finalizeActiveSessions(postArchiveCtx, all[i], models.SessionArchiveTreeCancelReason)
@@ -273,7 +275,6 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, all[i])
 		}
 	}
-	s.pullTasksForVacatedSteps(postArchiveCtx, vacatedStepIDs)
 
 	// Release group memberships for THIS cascade's tasks. Memberships
 	// owned by an earlier cascade or manual archive are left alone.
@@ -351,17 +352,24 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	// delete is destructive by design and re-running is idempotent.
 	postDeleteCtx := ctx
 	vacatedStepIDs := make(map[string]struct{})
+	defer func() {
+		s.pullTasksForVacatedSteps(postDeleteCtx, vacatedStepIDs)
+	}()
 	for i := len(all) - 1; i >= 0; i-- {
 		// Snapshot the task row BEFORE deletion so the published event
 		// carries workflow_id / workspace_id — the kanban WS handler keys
 		// off workflow_id to remove the card from the right swimlane.
 		// Fetch is best-effort: if the row is already gone (rare race) we
 		// fall back to a minimal payload below.
-		snapshot := s.taskSnapshotForVacancy(postDeleteCtx, all[i])
+		var snapshot *models.Task
+		if s.eventPublisher != nil {
+			snapshot, _ = s.tasks.GetTask(postDeleteCtx, all[i])
+		}
 		// Tear down runtime resources BEFORE the DB delete so the env / worktree
 		// rows are still queryable for the gather step. The actual destroy work
 		// runs async after this returns. Delete cascade removes the env row.
-		if err := s.tasks.DeleteTask(postDeleteCtx, all[i]); err != nil {
+		vacatedStepID, err := s.deleteTaskWithVacatedStep(postDeleteCtx, all[i])
+		if err != nil {
 			s.cancelCascadeResourceCleanupRange(postDeleteCtx, all[:i+1], cleanupOps)
 			deleteErr := fmt.Errorf("delete %s: %w", all[i], err)
 			if len(out.ArchivedTaskIDs) == 0 {
@@ -379,12 +387,11 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 			s.resourceCleaner.CleanupTaskResources(postDeleteCtx, all[i], true)
 		}
 		out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
-		recordVacatedStep(vacatedStepIDs, snapshot)
+		recordVacatedStep(vacatedStepIDs, vacatedStepID)
 		if s.eventPublisher != nil && snapshot != nil {
 			s.eventPublisher.PublishTaskDeleted(postDeleteCtx, snapshot)
 		}
 	}
-	s.pullTasksForVacatedSteps(postDeleteCtx, vacatedStepIDs)
 
 	for _, gid := range groupIDs {
 		if err := s.evaluateWorkspaceGroupCleanup(postDeleteCtx, gid); err != nil {
@@ -395,21 +402,31 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	return out, nil
 }
 
-func (s *HandoffService) taskSnapshotForVacancy(ctx context.Context, taskID string) *models.Task {
-	task, err := s.tasks.GetTask(ctx, taskID)
-	if err != nil {
-		s.logf().Warn("cascade: capture task workflow step failed",
-			zap.String("task_id", taskID), zap.Error(err))
-		return nil
+func (s *HandoffService) archiveTaskWithVacatedStep(
+	ctx context.Context,
+	taskID string,
+	cascadeID string,
+) (string, bool, error) {
+	repo, ok := s.tasks.(cascadeArchiveTaskRepository)
+	if !ok {
+		return "", false, errors.New("task repo cannot capture archive vacancy atomically")
 	}
-	return task
+	return repo.ArchiveTaskIfActiveWithVacatedStep(ctx, taskID, cascadeID)
 }
 
-func recordVacatedStep(stepIDs map[string]struct{}, task *models.Task) {
-	if task == nil || task.WorkflowStepID == "" {
+func (s *HandoffService) deleteTaskWithVacatedStep(ctx context.Context, taskID string) (string, error) {
+	repo, ok := s.tasks.(cascadeDeleteTaskRepository)
+	if !ok {
+		return "", errors.New("task repo cannot capture delete vacancy atomically")
+	}
+	return repo.DeleteTaskWithVacatedStep(ctx, taskID)
+}
+
+func recordVacatedStep(stepIDs map[string]struct{}, stepID string) {
+	if stepID == "" {
 		return
 	}
-	stepIDs[task.WorkflowStepID] = struct{}{}
+	stepIDs[stepID] = struct{}{}
 }
 
 func (s *HandoffService) pullTasksForVacatedSteps(ctx context.Context, stepIDs map[string]struct{}) {

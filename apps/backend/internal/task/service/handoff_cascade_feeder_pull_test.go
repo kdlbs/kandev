@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -13,6 +15,118 @@ import (
 type recordingCascadeTaskService struct {
 	*Service
 	vacatedStepIDs []string
+}
+
+type recordingVacatedStepReconciler struct {
+	stepIDs []string
+}
+
+func (r *recordingVacatedStepReconciler) ReconcileVacatedStep(_ context.Context, stepID string) {
+	r.stepIDs = append(r.stepIDs, stepID)
+}
+
+type placementChangingCascadeRepo struct {
+	*fakeDeleteRepo
+}
+
+func (r *placementChangingCascadeRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	task, err := r.fakeDeleteRepo.GetTask(ctx, id)
+	if task == nil || err != nil {
+		return task, err
+	}
+	copy := *task
+	return &copy, nil
+}
+
+func (r *placementChangingCascadeRepo) ArchiveTaskIfActive(
+	ctx context.Context,
+	id string,
+	cascadeID string,
+) (bool, error) {
+	_, changed, err := r.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
+	return changed, err
+}
+
+func (r *placementChangingCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
+	_ context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	task := r.base.tasks[id]
+	if task == nil || task.ArchivedAt != nil {
+		return "", false, nil
+	}
+	task.WorkflowStepID = "actual-step"
+	now := time.Now().UTC()
+	task.ArchivedAt = &now
+	task.ArchivedByCascadeID = cascadeID
+	return task.WorkflowStepID, true, nil
+}
+
+func (r *placementChangingCascadeRepo) DeleteTask(ctx context.Context, id string) error {
+	_, err := r.DeleteTaskWithVacatedStep(ctx, id)
+	return err
+}
+
+func (r *placementChangingCascadeRepo) DeleteTaskWithVacatedStep(_ context.Context, id string) (string, error) {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	task := r.base.tasks[id]
+	if task == nil {
+		return "", errors.New("task not found")
+	}
+	task.WorkflowStepID = "actual-step"
+	delete(r.base.tasks, id)
+	return task.WorkflowStepID, nil
+}
+
+type partialFailureCascadeRepo struct {
+	*fakeDeleteRepo
+	failTaskID string
+	err        error
+}
+
+func (r *partialFailureCascadeRepo) ArchiveTaskIfActive(
+	ctx context.Context,
+	id string,
+	cascadeID string,
+) (bool, error) {
+	_, changed, err := r.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
+	return changed, err
+}
+
+func (r *partialFailureCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
+	ctx context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
+	if id == r.failTaskID {
+		return "", false, r.err
+	}
+	task, err := r.GetTask(ctx, id)
+	if err != nil || task == nil {
+		return "", false, err
+	}
+	changed, err := r.fakeCascadeRepo.ArchiveTaskIfActive(ctx, id, cascadeID)
+	return task.WorkflowStepID, changed, err
+}
+
+func (r *partialFailureCascadeRepo) DeleteTask(ctx context.Context, id string) error {
+	_, err := r.DeleteTaskWithVacatedStep(ctx, id)
+	return err
+}
+
+func (r *partialFailureCascadeRepo) DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error) {
+	if id == r.failTaskID {
+		return "", r.err
+	}
+	task, err := r.GetTask(ctx, id)
+	if err != nil || task == nil {
+		return "", err
+	}
+	return task.WorkflowStepID, r.fakeDeleteRepo.DeleteTask(ctx, id)
 }
 
 func (s *recordingCascadeTaskService) ReconcileVacatedStep(ctx context.Context, vacatedStepID string) {
@@ -56,6 +170,83 @@ func TestHandoffTaskTreeLifecycleBackfillsFeederVacancies(t *testing.T) {
 			assertHandoffFeederBackfill(t, ctx, repo)
 			if len(recorder.vacatedStepIDs) != 1 || recorder.vacatedStepIDs[0] != "review-step" {
 				t.Fatalf("vacated step reconciliations = %v, want [review-step]", recorder.vacatedStepIDs)
+			}
+		})
+	}
+}
+
+func TestHandoffTaskTreeLifecycleUsesMutationPlacementForVacancy(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(context.Context, *HandoffService) error
+	}{
+		{name: "archive", mutate: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.ArchiveTaskTree(ctx, "root", false)
+			return err
+		}},
+		{name: "delete", mutate: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.DeleteTaskTree(ctx, "root", false)
+			return err
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks := newFakeTaskRepo()
+			tasks.addTask("root", "", "workspace")
+			tasks.tasks["root"].WorkflowStepID = "snapshot-step"
+			repo := &placementChangingCascadeRepo{fakeDeleteRepo: &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}}
+			reconciler := &recordingVacatedStepReconciler{}
+			handoff := NewHandoffService(repo, nil, nil, nil, nil, nil)
+			handoff.SetVacatedStepReconciler(reconciler)
+
+			if err := tt.mutate(context.Background(), handoff); err != nil {
+				t.Fatalf("tree lifecycle mutation: %v", err)
+			}
+			if len(reconciler.stepIDs) != 1 || reconciler.stepIDs[0] != "actual-step" {
+				t.Fatalf("vacated step reconciliations = %v, want [actual-step]", reconciler.stepIDs)
+			}
+		})
+	}
+}
+
+func TestHandoffTaskTreeLifecycleReconcilesCommittedPartialMutations(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(context.Context, *HandoffService) error
+	}{
+		{name: "archive", mutate: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.ArchiveTaskTree(ctx, "root", true)
+			return err
+		}},
+		{name: "delete", mutate: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.DeleteTaskTree(ctx, "root", true)
+			return err
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks := newFakeTaskRepo()
+			tasks.addTask("root", "", "workspace")
+			tasks.addTask("child", "root", "workspace")
+			tasks.tasks["root"].WorkflowStepID = "review-step"
+			tasks.tasks["child"].WorkflowStepID = "review-step"
+			mutationErr := errors.New("parent mutation failed")
+			repo := &partialFailureCascadeRepo{
+				fakeDeleteRepo: &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)},
+				failTaskID:     "root",
+				err:            mutationErr,
+			}
+			reconciler := &recordingVacatedStepReconciler{}
+			handoff := NewHandoffService(repo, nil, nil, nil, nil, nil)
+			handoff.SetVacatedStepReconciler(reconciler)
+
+			if err := tt.mutate(context.Background(), handoff); !errors.Is(err, mutationErr) {
+				t.Fatalf("tree lifecycle error = %v, want %v", err, mutationErr)
+			}
+			if len(reconciler.stepIDs) != 1 || reconciler.stepIDs[0] != "review-step" {
+				t.Fatalf("vacated step reconciliations = %v, want [review-step]", reconciler.stepIDs)
 			}
 		})
 	}

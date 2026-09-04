@@ -239,6 +239,14 @@ type VacatedStepReconciler interface {
 	ReconcileVacatedStep(ctx context.Context, vacatedStepID string)
 }
 
+type cascadeArchiveTaskRepository interface {
+	ArchiveTaskIfActiveWithVacatedStep(ctx context.Context, id, cascadeID string) (string, bool, error)
+}
+
+type cascadeDeleteTaskRepository interface {
+	DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error)
+}
+
 // taskSessionCancellationPublisher is the optional event side effect paired
 // with activeTaskSessionCanceller. Cascade archive/delete paths do not call
 // Service.ArchiveTask, so they must publish the session transition themselves
