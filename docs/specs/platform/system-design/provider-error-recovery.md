@@ -447,17 +447,17 @@ before the closing quote) is redacted only up to the line break — unchanged
 from the plain-text matching this replaced. Neither tier is a general secret
 scanner: a credential shaped like something not on that list (a
 vendor-specific token prefix, for example) survives the narrow tier unless it
-also matches a listed pattern. The narrower tier's purpose is to avoid
-mangling non-credential content in fields the user already sees, not to
-certify zero residual leakage risk.
+also matches a listed pattern.
 
-The key match is a substring match, not exact-name: it also matches a key
-merely containing a keyword without naming a credential, e.g. `max_tokens` or
-`tokenizer`. A bare decimal integer value under such a key (a token count) is
-left untouched; a non-numeric value (`tokenizer: cl100k_base`) is still
-redacted by design — narrowing to an exact-name allowlist would also exclude
-the qualified env-var keys (`AWS_SECRET_ACCESS_KEY=`) this match exists to
-catch.
+The key match is a substring match, not exact-name, so it also matches a key
+merely containing a keyword without naming a credential (`max_tokens`,
+`tokenizer`); an exact-name allowlist would drop the qualified env-var keys
+(`AWS_SECRET_ACCESS_KEY=`) this match exists to catch. A bare decimal integer
+value is therefore left untouched under ANY matched key, not only a count
+key: `password: 123456` and a numeric OTP survive both tiers unredacted. That
+is a known, accepted gap, wider than the `(password|secret|token)` rule it
+replaced, which masked them. A non-numeric value (`tokenizer: cl100k_base`)
+is still redacted.
 
 ## API surface
 
