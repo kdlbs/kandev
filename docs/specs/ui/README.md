@@ -96,6 +96,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Session](requirements/session-start-composer-readiness.md)
 - [Session tab delete feedback](requirements/session-tab-delete-feedback.md)
 - [Settings Discovery](requirements/settings-discovery.md)
+- [Settings Menu Default](requirements/settings-menu-default.md)
 - [Settings Manual Save](requirements/settings-manual-save.md)
 - [Settings Prompt Editor](requirements/settings-prompt-editor.md)
 - [Consistent settings typography](requirements/settings-typography.md)
@@ -178,6 +179,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Terminal Rendering](system-design/terminal-rendering.md)
 - [Terminal Touch Scrolling](system-design/terminal-touch-scrolling.md)
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
+- [Settings Menu Default](system-design/settings-menu-default.md)
 - [Transcript history visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 ## Related
