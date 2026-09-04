@@ -37,13 +37,24 @@ var redactions = []redaction{
 	{regexp.MustCompile(`/home/[^/\s]+/`), "/home/<redacted>/"},
 }
 
+// Redact applies the same credential and home-path rules as Sanitize but
+// performs no truncation, so a caller that needs to bound the result by a
+// different rule (e.g. keeping the newest bytes of a longer budget cut) sees
+// every credential intact and redacted rather than racing a head-truncation
+// that runs before it can see the whole input. Redact is idempotent:
+// applying it twice equals applying it once.
+func Redact(s string) string {
+	for _, r := range redactions {
+		s = r.pattern.ReplaceAllString(s, r.replace)
+	}
+	return s
+}
+
 // Sanitize redacts likely credentials, normalizes home paths, and truncates
 // to MaxRawExcerptBytes. The function is idempotent: applying it twice
 // equals applying it once.
 func Sanitize(s string) string {
-	for _, r := range redactions {
-		s = r.pattern.ReplaceAllString(s, r.replace)
-	}
+	s = Redact(s)
 	if len(s) > MaxRawExcerptBytes {
 		s = s[:MaxRawExcerptBytes]
 	}

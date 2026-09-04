@@ -38,10 +38,14 @@ func TestBoundedTruncatesOnRuneBoundary(t *testing.T) {
 }
 
 // TestBoundedConversationRetainsNewestContent is the defect-C regression:
-// Conversation must keep the tail (most recent turns), not the head.
+// Conversation must keep the tail (most recent turns), not the head. Filler
+// is space-separated tokens rather than one long run of a single character:
+// a bare run of 32+ alnum characters matches routingerr's generic
+// credential-shaped rule and would redact to a few bytes regardless of
+// position, which would make this test assert nothing about truncation.
 func TestBoundedConversationRetainsNewestContent(t *testing.T) {
-	oldest := "OLDEST-MARKER " + strings.Repeat("a", continuationFieldLimit)
-	newest := strings.Repeat("b", continuationFieldLimit) + " NEWEST-MARKER"
+	oldest := "OLDEST-MARKER " + strings.Repeat("aa ", continuationFieldLimit/3)
+	newest := strings.Repeat("bb ", continuationFieldLimit/3) + " NEWEST-MARKER"
 
 	continuation := BuildBoundedContinuation(ContinuationInput{
 		Conversation: oldest + "\n" + newest,
@@ -164,4 +168,60 @@ func TestBoundedTaskDescriptionKeepsHead(t *testing.T) {
 	if strings.Contains(continuation.TaskDescription, "TAIL-MARKER") {
 		t.Fatalf("TaskDescription unexpectedly kept the tail: %q", continuation.TaskDescription)
 	}
+}
+
+// TestBoundedConversationRetainsBudgetVolumeRegardlessOfNewlinePlacement is
+// the Review-round-1 regression: dropLeadingPartialLine used to discard a
+// truncated window's front up to its first newline with no bound on how
+// much, so a conversation whose only newline sits near the very start of the
+// kept window threw away nearly the whole budget. Content is built from
+// space-separated tokens (never a run of 32+ non-space characters) so the
+// generic credential-shaped redaction rule never fires here — this test is
+// about retained volume under truncation, not about redaction, and a
+// collision with that rule would make the byte-count assertion meaningless.
+// Assertions check retained BYTE COUNT, not marker presence, so a fix that
+// keeps only a small fragment cannot pass vacuously.
+func TestBoundedConversationRetainsBudgetVolumeRegardlessOfNewlinePlacement(t *testing.T) {
+	const minKept = continuationFieldLimit - 8
+
+	t.Run("single_newline_near_front_of_long_tail", func(t *testing.T) {
+		// 10003 bytes, budget 4000; the only "\n" sits right after 10000
+		// bytes of leading content, so it is nowhere near the kept window.
+		conv := strings.Repeat("word ", 2000) + "\nok"
+		continuation := BuildBoundedContinuation(ContinuationInput{Conversation: conv})
+		if got := len(continuation.Conversation); got < minKept {
+			t.Fatalf("kept only %d of a %d-byte budget: %q", got, continuationFieldLimit, continuation.Conversation)
+		}
+	})
+
+	t.Run("many_long_lines", func(t *testing.T) {
+		// 20 lines of 1500 bytes each (30020 bytes total, budget 4000); the
+		// kept window straddles several line boundaries.
+		line := strings.Repeat("word ", 300)
+		conv := strings.Repeat(line+"\n", 20)
+		continuation := BuildBoundedContinuation(ContinuationInput{Conversation: conv})
+		if got := len(continuation.Conversation); got < minKept {
+			t.Fatalf("kept only %d of a %d-byte budget: %q", got, continuationFieldLimit, continuation.Conversation)
+		}
+	})
+
+	// Controls: shapes that must stay healthy after the fix.
+	t.Run("control_normal_multiline", func(t *testing.T) {
+		conv := strings.Repeat("agent turn discussing the change in detail.\n", 400) + "NEWEST-TAIL-LINE"
+		continuation := BuildBoundedContinuation(ContinuationInput{Conversation: conv})
+		if got := len(continuation.Conversation); got != continuationFieldLimit {
+			t.Fatalf("control regressed: kept %d bytes, want %d", got, continuationFieldLimit)
+		}
+		if !strings.Contains(continuation.Conversation, "NEWEST-TAIL-LINE") {
+			t.Fatalf("control regressed: dropped the newest line: %q", continuation.Conversation)
+		}
+	})
+
+	t.Run("control_single_long_line_no_newline", func(t *testing.T) {
+		conv := strings.Repeat("b ", 6000)
+		continuation := BuildBoundedContinuation(ContinuationInput{Conversation: conv})
+		if got := len(continuation.Conversation); got != continuationFieldLimit {
+			t.Fatalf("control regressed: kept %d bytes, want %d", got, continuationFieldLimit)
+		}
+	})
 }

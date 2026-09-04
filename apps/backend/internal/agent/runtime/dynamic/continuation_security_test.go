@@ -239,7 +239,10 @@ func TestContinuationRedactsAnchoredCredentialAtWindowCut(t *testing.T) {
 
 			prefix := strings.Repeat("x", 99) + "\n"
 			line := tc.line
-			window := conversationUserBudget + sanitizeSlack
+			// 512 is an arbitrary sweep width (not tied to any production
+			// constant); redaction now runs on the full raw input before any
+			// window cut, so no window size can bisect an anchored rule.
+			window := conversationUserBudget + 512
 
 			for o := -5; o <= len(line)+5; o++ {
 				tailLen := window - len(line) - 2 + o - len(marker)
