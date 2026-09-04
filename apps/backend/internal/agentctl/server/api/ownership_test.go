@@ -70,6 +70,59 @@ func TestOwnershipStateBeginShutdownIsOneWay(t *testing.T) {
 	}
 }
 
+// TestOwnershipStateTryBeginShutdownIfUnownedForRefusesAfterRecentRenewal
+// pins the atomic check-and-latch's core correctness: a renewal that landed
+// before the call must be observed by the SAME call that would otherwise
+// latch shutdown, closing the TOCTOU window a separate UnownedFor()-then-
+// BeginShutdown() sequence leaves open (Review round 1, finding 5).
+func TestOwnershipStateTryBeginShutdownIfUnownedForRefusesAfterRecentRenewal(t *testing.T) {
+	o := newOwnershipState()
+	if !o.Renew() {
+		t.Fatal("Renew() = false, want true")
+	}
+
+	if o.TryBeginShutdownIfUnownedFor(time.Hour) {
+		t.Fatal("TryBeginShutdownIfUnownedFor() = true immediately after a renewal, want false")
+	}
+	if o.IsShuttingDown() {
+		t.Fatal("IsShuttingDown() = true after a refused attempt, want false")
+	}
+}
+
+// TestOwnershipStateTryBeginShutdownIfUnownedForLatchesOnceElapsed pins the
+// success path: once the period has genuinely elapsed, the call both
+// reports true and latches the one-way shutdown door.
+func TestOwnershipStateTryBeginShutdownIfUnownedForLatchesOnceElapsed(t *testing.T) {
+	o := newOwnershipState()
+	o.mu.Lock()
+	o.lastRenewal = time.Now().Add(-time.Hour)
+	o.mu.Unlock()
+
+	if !o.TryBeginShutdownIfUnownedFor(time.Minute) {
+		t.Fatal("TryBeginShutdownIfUnownedFor() = false once the period elapsed, want true")
+	}
+	if !o.IsShuttingDown() {
+		t.Fatal("IsShuttingDown() = false after a successful latch, want true")
+	}
+}
+
+// TestOwnershipStateTryBeginShutdownIfUnownedForIsOneWay pins idempotency:
+// a second call after the door is already latched must not report success
+// again, matching BeginShutdown's existing one-way-door contract.
+func TestOwnershipStateTryBeginShutdownIfUnownedForIsOneWay(t *testing.T) {
+	o := newOwnershipState()
+	o.mu.Lock()
+	o.lastRenewal = time.Now().Add(-time.Hour)
+	o.mu.Unlock()
+
+	if !o.TryBeginShutdownIfUnownedFor(time.Minute) {
+		t.Fatal("first TryBeginShutdownIfUnownedFor() = false, want true")
+	}
+	if o.TryBeginShutdownIfUnownedFor(time.Minute) {
+		t.Fatal("second TryBeginShutdownIfUnownedFor() = true, want false (one-way latch)")
+	}
+}
+
 // TestHandleOwnershipClaimRenewsOwnership pins that a successful claim
 // renews the tracked ownership instant. The claim operation carries no
 // instance identity -- a server with zero instances is still owned.

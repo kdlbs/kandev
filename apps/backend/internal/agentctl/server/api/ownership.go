@@ -63,6 +63,29 @@ func (o *ownershipState) BeginShutdown() bool {
 	return true
 }
 
+// TryBeginShutdownIfUnownedFor atomically checks whether at least period has
+// elapsed since the last renewal and, if so, latches the one-way shutdown
+// door in the same critical section (AC-EXECUTORS-CONTROL-OWNERSHIP-003.9).
+// Performing the elapsed check and the latch under one lock acquisition
+// closes the window a separate UnownedFor()-then-BeginShutdown() sequence
+// leaves open: a claim's Renew() landing between those two calls would
+// succeed (shuttingDown still false) while the reaper's latch still fires
+// right after, killing every instance out from under a backend that was just
+// told its claim succeeded. Returns true only when this call itself both
+// observed the elapsed period and performed the latch.
+func (o *ownershipState) TryBeginShutdownIfUnownedFor(period time.Duration) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.shuttingDown {
+		return false
+	}
+	if time.Since(o.lastRenewal) < period {
+		return false
+	}
+	o.shuttingDown = true
+	return true
+}
+
 // IsShuttingDown reports whether the one-way shutdown latch has fired.
 func (o *ownershipState) IsShuttingDown() bool {
 	o.mu.Lock()

@@ -199,6 +199,15 @@ type Manager struct {
 	// confusing errors against children already being stopped.
 	shuttingDown atomic.Bool
 
+	// recoveryComplete is flipped true once Start's synchronous recovery
+	// pass (adoption, enumeration, and per-instance reconstruction) has
+	// finished for this process's lifetime. AC-EXECUTORS-SURVIVAL-003.6
+	// requires a caller outside that pass (e.g. RowLiveness, the idle
+	// reclaim path) to answer Unknown without enumerating while recovery is
+	// still in flight, rather than racing a live enumeration against work
+	// recovery itself has not finished doing.
+	recoveryComplete atomic.Bool
+
 	// pollAggregator routes hub session-mode events to agentctl. See
 	// manager_subscription.go.
 	pollAggregator *workspacePollAggregator

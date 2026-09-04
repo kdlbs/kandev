@@ -50,11 +50,10 @@ func (m *ControlServer) runUnownedReaper(period, interval time.Duration) {
 		case <-m.reaperStop:
 			return
 		case <-ticker.C:
-			if m.ownership.UnownedFor() >= period {
+			if m.ownership.TryBeginShutdownIfUnownedFor(period) {
+				m.requestShutdown()
 				m.logger.Warn("no ownership claim renewed within the unowned period, shutting down",
 					zap.Duration("unowned_period", period))
-				m.ownership.BeginShutdown()
-				m.requestShutdown()
 				return
 			}
 		}

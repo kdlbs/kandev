@@ -116,9 +116,18 @@ func (m *Manager) RowLivenessScoped(row *models.ExecutorRunning, scope interface
 // fresh enumeration rather than reading one a pass cached (design 02 "two
 // kinds of caller"), since such a caller can fire at any moment and a cached
 // answer would age without bound.
+//
+// AC-EXECUTORS-SURVIVAL-003.6: such a caller firing before Start's recovery
+// pass has finished for this process's lifetime must answer Unknown
+// immediately -- neither enumerate nor wait -- since re-tracking has not yet
+// reached an outcome for every record and a live enumeration taken now could
+// race work recovery itself has not finished doing.
 func (m *Manager) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
 	if row == nil || !isLocalRuntime(row.Runtime) {
 		return RowProcessLiveness(row)
+	}
+	if !m.recoveryComplete.Load() {
+		return models.ProcessLivenessUnknown
 	}
 	scope, _ := m.NewStandaloneLivenessScope(context.Background()).(*standaloneLivenessScope)
 	return m.classifyStandaloneLiveness(row, scope)

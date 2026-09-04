@@ -30,6 +30,72 @@ type AdoptionRecordStore interface {
 	UpsertControlServerRecord(ctx context.Context, record *models.ControlServerRecord) error
 }
 
+// staleExecutionRepairStore is the optional persistence capability
+// AC-EXECUTORS-CONTROL-OWNERSHIP-004.3 and AC-EXECUTORS-SURVIVAL-005.5's
+// immediate-repair step need: list this installation's live standalone
+// recovery-inventory records and repair each in place. Satisfied by
+// *sqlite.Repository alongside AdoptionRecordStore; type-asserted rather
+// than folded into AdoptionRecordStore itself so RecordFreshControlServer's
+// store parameter and every existing AdoptionRecordStore test double stay
+// unaffected, matching this package's turnOutcomeApplier/recoveryStopper
+// optional-capability convention.
+type staleExecutionRepairStore interface {
+	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
+	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
+}
+
+// repairLiveStandaloneRecordsAfterOwnServerStopped implements
+// AC-EXECUTORS-CONTROL-OWNERSHIP-004.3's "repair their recovery-inventory
+// records itself... performed immediately" for a control server this
+// backend has just proved is its own and has itself successfully stopped:
+// unlike the deferred unowned-shutdown repair of AC-EXECUTORS-CONTROL-
+// OWNERSHIP-003.5 (no backend attached at kill time), a backend is attached
+// here and can write the durable store right away. Since exactly one
+// control server is ever recorded per installation, stopping it makes every
+// currently-live standalone recovery-inventory record definitively dead --
+// there is no live enumeration to correlate against, unlike an ordinary
+// recovery pass. Repair preserves resume token and worktree identity
+// (RepairExecutorRunningDead), never deletes. Best-effort: a listing or
+// per-record repair failure is logged and does not block the caller, since
+// the stopped server is gone regardless and a later reconciliation pass
+// will eventually repair any row this call missed.
+func repairLiveStandaloneRecordsAfterOwnServerStopped(ctx context.Context, store staleExecutionRepairStore, log *logger.Logger) {
+	records, err := store.ListExecutorsRunningLiveStandalone(ctx)
+	if err != nil {
+		log.Warn("failed to list live standalone recovery-inventory records for immediate repair after stopping this installation's own control server", zap.Error(err))
+		return
+	}
+	for _, record := range records {
+		if record == nil || record.SessionID == "" {
+			continue
+		}
+		if err := store.RepairExecutorRunningDead(ctx, record.SessionID); err != nil {
+			log.Warn("failed to repair recovery-inventory record after stopping this installation's own control server",
+				zap.String("session_id", record.SessionID), zap.Error(err))
+		}
+	}
+}
+
+// shutdownControlServerWithRetry issues the ownership-shutdown operation
+// within the same bounded per-attempt timeout and retry count as
+// AC-EXECUTORS-SURVIVAL-002.13 (AC-EXECUTORS-CONTROL-OWNERSHIP-004.7),
+// reusing that criterion's own default (defaultRecoveryReadTimeout/
+// defaultRecoveryReadRetries) rather than threading the operator-configured
+// override through this free function's signature -- every existing caller
+// of this stop already accepts the same default when unconfigured.
+func shutdownControlServerWithRetry(ctx context.Context, client AdoptionControlClient) error {
+	var lastErr error
+	for attempt := 0; attempt <= defaultRecoveryReadRetries; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, defaultRecoveryReadTimeout)
+		lastErr = client.ShutdownControlServer(attemptCtx)
+		cancel()
+		if lastErr == nil {
+			return nil
+		}
+	}
+	return lastErr
+}
+
 // AdoptionControlClient is the subset of agentctl.ControlClient's ownership
 // surface the adoption orchestration drives, narrowed so the decision below
 // is testable without a real HTTP round trip.
@@ -169,9 +235,19 @@ func AttemptAdoptControlServer(
 
 	if !capabilitiesSatisfy(requiredCapabilities, identity.Capabilities) {
 		client.SetAuthToken(rotated.Credential)
-		if stopErr := client.ShutdownControlServer(ctx); stopErr != nil {
-			log.Warn("failed to stop incompatible control server; leaving it to its own unowned shutdown",
+		if stopErr := shutdownControlServerWithRetry(ctx, client); stopErr != nil {
+			// AC-EXECUTORS-CONTROL-OWNERSHIP-004.7: retries exhausted --
+			// record no repair, report no recovered instances (already true,
+			// Adopted stays false below), and leave the server to its own
+			// unowned shutdown; a later backend repairs through the deferred
+			// AC-EXECUTORS-CONTROL-OWNERSHIP-003.5 path once it stops itself.
+			log.Warn("failed to stop incompatible control server after exhausting retries; leaving it to its own unowned shutdown",
 				zap.String("endpoint", record.Endpoint), zap.Error(stopErr))
+		} else if repairStore, ok := store.(staleExecutionRepairStore); ok {
+			// AC-EXECUTORS-CONTROL-OWNERSHIP-004.3: the stop succeeded and a
+			// backend is attached, so repair every live standalone record
+			// immediately rather than deferring to the next start.
+			repairLiveStandaloneRecordsAfterOwnServerStopped(ctx, repairStore, log)
 		}
 		return AdoptionOutcome{Reason: AdoptionReasonCapabilityIncompatible, ContactedAt: contactedAt}
 	}
@@ -255,6 +331,70 @@ func RecordFreshControlServer(
 		DiagnosticLogPath:  identity.DiagnosticLogPath,
 	}
 	return store.UpsertControlServerRecord(ctx, record)
+}
+
+// ReclaimUnneededControlServer implements AC-EXECUTORS-SURVIVAL-005.5: when
+// the agent-survival capability is disabled, a detached control server left
+// running by an earlier survival-enabled launch is stopped rather than left
+// running unowned -- but only when this backend can prove that server is
+// its own by the same identity+credential test AttemptAdoptControlServer
+// applies to adoption. A server this backend cannot prove is its own is
+// left untouched, and so is one that answers nothing (nothing left to
+// reclaim) or has no recorded endpoint at all.
+//
+// This never adopts: it does not rotate the credential, so a backend
+// holding only a superseded credential can still perform it, which
+// AC-EXECUTORS-SURVIVAL-005.1 forbids adoption itself from doing. The stop
+// is issued as the ownership-shutdown operation of
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.9, which requires no prior adoption or
+// rotation for exactly this reason. Every failure mode here is logged and
+// non-fatal to startup: the caller always falls through to spawning a fresh
+// server regardless of what this reclaim attempt did.
+func ReclaimUnneededControlServer(
+	ctx context.Context,
+	store AdoptionRecordStore,
+	secretStore secrets.SecretStore,
+	newClient AdoptionControlClientFactory,
+	homeDir string,
+	log *logger.Logger,
+) {
+	record, err := store.GetControlServerRecord(ctx)
+	if err != nil {
+		return
+	}
+
+	client, err := newClient(record.Endpoint)
+	if err != nil {
+		return
+	}
+
+	identity, err := client.GetIdentity(ctx)
+	if err != nil {
+		return
+	}
+	if identity.HomeDir == "" || identity.HomeDir != homeDir {
+		return
+	}
+
+	credential, err := revealControlServerCredential(ctx, secretStore, record.CredentialSecretID)
+	if err != nil {
+		log.Warn("cannot reclaim detached control server: stored credential unavailable",
+			zap.String("endpoint", record.Endpoint), zap.Error(err))
+		return
+	}
+
+	client.SetAuthToken(credential)
+	if err := shutdownControlServerWithRetry(ctx, client); err != nil {
+		log.Warn("failed to stop detached control server left by an earlier survival-enabled launch after exhausting retries; leaving it to its own unowned shutdown",
+			zap.String("endpoint", record.Endpoint), zap.Error(err))
+		return
+	}
+
+	log.Info("stopped a detached control server left by an earlier survival-enabled launch now that the capability is disabled",
+		zap.String("endpoint", record.Endpoint))
+	if repairStore, ok := store.(staleExecutionRepairStore); ok {
+		repairLiveStandaloneRecordsAfterOwnServerStopped(ctx, repairStore, log)
+	}
 }
 
 func capabilitiesSatisfy(required, advertised []string) bool {

@@ -52,6 +52,13 @@ func provideAgentctlLauncher(
 			availability.MarkAvailable()
 			return result, nil
 		}
+	} else {
+		// AC-EXECUTORS-SURVIVAL-005.5: the capability just turned off (or was
+		// never on for this launch) -- reclaim a detached control server an
+		// earlier survival-enabled launch may have left running, rather than
+		// leaving it running unowned until its own unowned-shutdown timer
+		// elapses.
+		lifecycle.ReclaimUnneededControlServer(ctx, store, secretStore, controlClientFactory(log), cfg.ResolvedHomeDir(), log)
 	}
 	return spawnFreshAgentctl(ctx, cfg, log, availability, store, secretStore)
 }

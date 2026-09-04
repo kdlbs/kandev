@@ -75,28 +75,36 @@ func (m *Manager) Start(ctx context.Context) error {
 	// AC-EXECUTORS-SURVIVAL-003.7: bound this pass's
 	// adoption+enumeration+reconstruction work with a single deadline, clocked
 	// from this launch's first control-server contact (or, absent one, from
-	// right now). A backend implementation that honors ctx.Deadline() (see
+	// right now). recoveryCtx now covers not just RecoverAll (the producer)
+	// but every per-instance reconstruction step in the consumer loop below,
+	// per design 02's "Startup" steps 4-7 sharing one deadline. A backend
+	// implementation that honors ctx.Deadline() (see
 	// StandaloneExecutor.RecoverInstances) may still let work already in
 	// flight at the deadline finish in the background rather than aborting
-	// it -- cancelling recoveryCtx below only stops the deadline timer itself
-	// from leaking, it never reaches that background work, which deliberately
-	// runs against context.Background() instead.
+	// it -- cancelling recoveryCtx once this pass is over only stops the
+	// deadline timer itself from leaking, it never reaches that background
+	// work, which deliberately runs against context.Background() instead.
 	recoveryCtx, cancelRecovery := context.WithDeadline(ctx, m.recoveryDeadlineDeadline())
 	recovered, err := m.executorRegistry.RecoverAll(recoveryCtx, records)
-	cancelRecovery()
 	if err != nil {
 		m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
 	}
 
-	// Recovery is synchronous above: by this point every guarded session's
-	// outcome (re-tracked or not) is already decided, so every guard taken
-	// for this pass is released now. ReleaseAllExceptRetained leaves held
-	// whatever a later layer marks retained-unstoppable or stop-in-flight
-	// (AC-EXECUTORS-SURVIVAL-002.16, AC-EXECUTORS-SURVIVAL-003.7); neither is
-	// wired into this synchronous startup pass yet.
-	m.recoveryGuard.ReleaseAllExceptRetained()
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
+			if recoveryCtx.Err() != nil {
+				// AC-EXECUTORS-SURVIVAL-003.7: the deadline elapsed before this
+				// record could be reconstructed -- treat it as not re-tracked
+				// and stop it (against context.Background(), matching every
+				// other recovery-time stop: an elapsed deadline must not abort
+				// a stop already dispatched). Its guard, if any, is released by
+				// ReleaseAllExceptRetained below rather than individually here.
+				m.logger.Warn("recovery deadline elapsed before this record could be reconstructed; treating as not re-tracked",
+					zap.String("instance_id", ri.InstanceID),
+					zap.String("session_id", ri.SessionID))
+				m.stopUnreconstructableRecoveredInstance(context.Background(), ri)
+				continue
+			}
 			execution := &AgentExecution{
 				ID:        ri.InstanceID,
 				TaskID:    ri.TaskID,
@@ -142,7 +150,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			// re-tracked execution until its next full relaunch.
 			execution.setSessionInitialized(true)
 			execution.setRuntimeEnvironment(ri.Env)
-			m.hydrateRecoveredTaskEnvironmentID(ctx, execution)
+			m.hydrateRecoveredTaskEnvironmentID(recoveryCtx, execution)
 			// AC-EXECUTORS-SURVIVAL-002.14: Office profile identity is a new key
 			// in the same persisted metadata this record already carries, not a
 			// new source -- an empty value here is a legitimate non-Office
@@ -159,13 +167,13 @@ func (m *Manager) Start(ctx context.Context) error {
 			// value: refuse to re-track it and leave it to the stop path
 			// AC-EXECUTORS-SURVIVAL-002.6 defines, rather than tracking a
 			// session the backend cannot safely operate.
-			if err := m.reDeriveRecoveredAgentIdentity(ctx, execution); err != nil {
+			if err := m.reDeriveRecoveredAgentIdentity(recoveryCtx, execution); err != nil {
 				m.logger.Error("refusing to re-track recovered execution: agent identity could not be reconstructed",
 					zap.String("instance_id", execution.ID),
 					zap.String("session_id", execution.SessionID),
 					zap.String("agent_profile_id", execution.AgentProfileID),
 					zap.Error(err))
-				m.stopUnreconstructableRecoveredInstance(ctx, ri)
+				m.stopUnreconstructableRecoveredInstance(context.Background(), ri)
 				continue
 			}
 			// AC-EXECUTORS-SURVIVAL-004.2/004.5: retrieve this instance's
@@ -174,12 +182,12 @@ func (m *Manager) Start(ctx context.Context) error {
 			// as running -- it is authoritatively unknown, not running -- so
 			// it takes the same not-re-tracked stop path as an
 			// unreconstructable agent identity above.
-			turnOutcome, turnOutcomeResult := m.retrieveRecoveredTurnOutcome(ctx, ri)
+			turnOutcome, turnOutcomeResult := m.retrieveRecoveredTurnOutcome(recoveryCtx, ri)
 			if turnOutcomeResult == recoveredTurnOutcomeReadFailed {
 				m.logger.Error("refusing to re-track recovered execution: turn status could not be retrieved",
 					zap.String("instance_id", execution.ID),
 					zap.String("session_id", execution.SessionID))
-				m.stopUnreconstructableRecoveredInstance(ctx, ri)
+				m.stopUnreconstructableRecoveredInstance(context.Background(), ri)
 				continue
 			}
 			// Create trace span for the recovered session
@@ -222,7 +230,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			// If executors_running.agent_execution_id had drifted (e.g. from a
 			// prior bug or manual edit), the recovered runtime instance is the
 			// truth — overwrite the row to match. No-op if already in sync.
-			m.persistExecutorRunning(ctx, execution)
+			m.persistExecutorRunning(recoveryCtx, execution)
 
 			// Re-seed the base-branch map before reconnecting. A surviving
 			// agentctl instance never passes through waitForAgentctlReady, so
@@ -230,8 +238,8 @@ func (m *Manager) Start(ctx context.Context) error {
 			// if it was created by a path that could not supply one — and
 			// their diff stats stay pinned to an integration-branch fallback.
 			if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
-				m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
-				m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
+				m.pushTaskBaseBranches(recoveryCtx, execution.TaskID, execution.ID, client)
+				m.pushTaskComparisonTargets(recoveryCtx, execution.TaskID, execution.ID, client)
 				releaseClient()
 			}
 
@@ -242,10 +250,19 @@ func (m *Manager) Start(ctx context.Context) error {
 			// 004.3/004.4), so this ordering makes the recovery-time
 			// application the one that wins in the common case.
 			if turnOutcomeResult == recoveredTurnOutcomeApplied {
-				m.applyRecoveredTurnOutcome(ctx, execution, ri, turnOutcome)
+				m.applyRecoveredTurnOutcome(recoveryCtx, execution, ri, turnOutcome)
 			} else {
-				m.publishRecoveredExecutionRunning(ctx, execution)
+				m.publishRecoveredExecutionRunning(recoveryCtx, execution)
 			}
+
+			// AC-EXECUTORS-SURVIVAL-003.7/002.8: release this session's guard
+			// now that its outcome has actually been published, rather than
+			// waiting for every session in this pass to finish (design 02
+			// step 7's "releasing each session's guard as its outcome is
+			// published"). ReleaseAllExceptRetained below still covers any
+			// session a later layer marked retained-unstoppable or
+			// stop-in-flight, and any session this loop never reached.
+			m.recoveryGuard.Release(execution.SessionID)
 
 			// Reconnect to workspace streams (shell, git, file changes) in background
 			// This is needed so shell.input, git status, etc. work after backend restart
@@ -255,6 +272,23 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
+	cancelRecovery()
+
+	// Recovery is synchronous above: by this point every guarded session's
+	// outcome (re-tracked or not) is already decided, so every guard still
+	// held for this pass is released now. Most were already released
+	// individually inside the loop as each session's outcome was published;
+	// this covers a session whose record was skipped by the deadline check,
+	// a duplicate-execution anomaly, or anything a later layer marks
+	// retained-unstoppable or stop-in-flight (AC-EXECUTORS-SURVIVAL-002.16,
+	// AC-EXECUTORS-SURVIVAL-003.7), which ReleaseAllExceptRetained leaves held.
+	m.recoveryGuard.ReleaseAllExceptRetained()
+
+	// AC-EXECUTORS-SURVIVAL-003.6: this pass's recovery work (adoption,
+	// enumeration, and every recovered instance's reconstruction above) is
+	// synchronous and now complete, so a caller outside a reconciliation
+	// pass may safely enumerate live standalone instances from this point on.
+	m.recoveryComplete.Store(true)
 
 	// Start remote status polling loop for runtimes exposing remote status.
 	m.wg.Add(1)
@@ -346,15 +380,31 @@ func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution 
 	return nil
 }
 
+// recoveryStopper is the optional capability satisfied by *StandaloneExecutor
+// that stops a recovered instance within the bounded per-attempt timeout and
+// retry count AC-EXECUTORS-SURVIVAL-002.15 requires for every recovery-time
+// stop -- the same budget stopWithRetry already applies to the
+// AC-EXECUTORS-SURVIVAL-002.6/002.10 loser/orphan stop paths in
+// StandaloneExecutor.RecoverInstances. A backend that doesn't implement it
+// falls back to a single StopInstance call: AC-EXECUTORS-SURVIVAL-002.15's
+// retry contract covers the WORKTREE and LOCAL executor types only, both
+// standalone-runtime.
+type recoveryStopper interface {
+	stopWithRetry(ctx context.Context, instanceID string) error
+}
+
 // stopUnreconstructableRecoveredInstance implements the
 // AC-EXECUTORS-SURVIVAL-002.4 refusal path's "leave the instance to the stop
 // path defined by AC-EXECUTORS-SURVIVAL-002.6" for an instance whose agent
 // identity could not be re-derived: it was never added to the execution
 // store, so RemoveExecution's teardown does not apply -- stop the live
-// instance directly through its owning runtime backend. A stop failure is
-// logged; the instance is left to the existing stale-execution repair path
-// like any other recovery-time stop failure that isn't part of the joint
-// winner/loser accounting.
+// instance directly through its owning runtime backend. Run against
+// context.Background(), matching every sibling AC-002.6/002.10 recovery stop
+// (executor_standalone.go's dispatchRecoveryStops): an elapsed recovery
+// deadline (AC-EXECUTORS-SURVIVAL-003.7) must not abort a stop already in
+// flight. A stop failure is logged; the instance is left to the existing
+// stale-execution repair path like any other recovery-time stop failure that
+// isn't part of the joint winner/loser accounting.
 func (m *Manager) stopUnreconstructableRecoveredInstance(ctx context.Context, ri *ExecutorInstance) {
 	backend, err := m.executorRegistry.GetBackend(ri.RuntimeName)
 	if err != nil {
@@ -362,6 +412,14 @@ func (m *Manager) stopUnreconstructableRecoveredInstance(ctx context.Context, ri
 			zap.String("instance_id", ri.InstanceID),
 			zap.String("runtime", string(ri.RuntimeName)),
 			zap.Error(err))
+		return
+	}
+	if stopper, ok := backend.(recoveryStopper); ok {
+		if err := stopper.stopWithRetry(context.Background(), ri.StandaloneInstanceID); err != nil {
+			m.logger.Warn("failed to stop unreconstructable recovered instance after exhausting retries",
+				zap.String("instance_id", ri.InstanceID),
+				zap.Error(err))
+		}
 		return
 	}
 	if err := backend.StopInstance(ctx, ri, true); err != nil {

@@ -145,6 +145,9 @@ func TestManagerRowLivenessTakesFreshEnumerationEachCall(t *testing.T) {
 	control := newStandaloneControlServer(t, true)
 	control.listInstances = []*agentctlclient.InstanceInfo{{ID: "instance-1", SessionID: "session-1"}}
 	mgr := newLivenessTestManager(t, control)
+	// A caller outside Start's recovery pass only enumerates once recovery
+	// has completed for this process's lifetime (AC-EXECUTORS-SURVIVAL-003.6).
+	mgr.recoveryComplete.Store(true)
 	row := &models.ExecutorRunning{SessionID: "session-1", Runtime: agentruntime.RuntimeStandalone}
 
 	mgr.RowLiveness(row)
@@ -154,6 +157,30 @@ func TestManagerRowLivenessTakesFreshEnumerationEachCall(t *testing.T) {
 	defer control.mu.Unlock()
 	if control.listInstancesAttempts != 2 {
 		t.Fatalf("listInstances attempts = %d, want exactly 2 (one fresh enumeration per out-of-pass call, never cached)", control.listInstancesAttempts)
+	}
+}
+
+// TestManagerRowLivenessReturnsUnknownBeforeRecoveryCompletes pins Review
+// round 1 finding 8 (AC-EXECUTORS-SURVIVAL-003.6): a caller outside a
+// reconciliation pass (e.g. idle reclaim) firing before Start's recovery
+// pass has finished for this process's lifetime must get Unknown immediately
+// -- neither enumerate nor wait -- rather than racing a live enumeration
+// against work recovery itself has not finished doing.
+func TestManagerRowLivenessReturnsUnknownBeforeRecoveryCompletes(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{{ID: "instance-1", SessionID: "session-1"}}
+	mgr := newLivenessTestManager(t, control)
+	row := &models.ExecutorRunning{SessionID: "session-1", Runtime: agentruntime.RuntimeStandalone}
+
+	got := mgr.RowLiveness(row)
+	if got != models.ProcessLivenessUnknown {
+		t.Fatalf("RowLiveness before recovery completes = %v, want Unknown", got)
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if control.listInstancesAttempts != 0 {
+		t.Fatalf("listInstances attempts = %d, want 0 (must not enumerate before recovery completes)", control.listInstancesAttempts)
 	}
 }
 
