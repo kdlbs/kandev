@@ -64,10 +64,14 @@ without reopening the dialog or guessing which credential is missing.
   profile, with a link to that executor profile's credential settings, and
   shall keep the start action disabled.
 - **AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.5:** When the workflow locks an
-  agent profile that is not compatible with the selected executor profile, the
-  dialog shall show a message that names the workflow, the agent profile, and
-  the executor profile, with the same credential link, and shall keep the start
-  action disabled.
+  enabled agent profile that is not compatible with the selected executor
+  profile, the dialog shall show a message that names the workflow, the agent
+  profile, and the executor profile, with the same credential link, and shall
+  keep the start action disabled. This message takes precedence over the
+  message in 001.4 when no other profile is compatible either, because the
+  user cannot change the locked agent. A workflow that locks a disabled
+  profile keeps the behavior in
+  [Disable an Agent Profile](../../agents/requirements/profile-disable.md).
 - **AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6:** The dialog shall not state
   that no compatible agent profile exists while at least one compatible profile
   exists.

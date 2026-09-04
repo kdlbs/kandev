@@ -55,15 +55,22 @@ export type AgentCompatState = "compatible" | "selected-incompatible" | "none-co
 ```
 
 `computeAgentCompatState` derives the state from the selected executor profile,
-`compatibleAgentProfiles`, and the effective agent profile id (the user value or
-the workflow override):
+`compatibleAgentProfiles`, the effective agent profile id (the user value or the
+workflow override) and its store row, the workflow lock, and the dynamic
+routing feature flag:
 
 1. No executor profile selected: `compatible`.
-2. `compatibleAgentProfiles` is empty: `none-compatible`.
-3. No effective agent id: `compatible`.
-4. The effective agent id is absent from `compatibleAgentProfiles`:
-   `selected-incompatible`.
-5. Otherwise: `compatible`.
+2. No effective agent id: `none-compatible` when `compatibleAgentProfiles` is
+   empty, otherwise `compatible`.
+3. The effective agent id is in `compatibleAgentProfiles`: `compatible`.
+4. The selected row exists but is not selectable (disabled, or a dynamic
+   profile while routing is off): `none-compatible`. A locked disabled profile
+   is a profile-disable outcome, not a credential problem.
+5. The workflow locks the agent: `selected-incompatible`, even when
+   `compatibleAgentProfiles` is empty, so the locked note names the workflow
+   and agent instead of the generic empty state.
+6. `compatibleAgentProfiles` is empty: `none-compatible`.
+7. Otherwise: `selected-incompatible`.
 
 `noCompatibleAgent` equals `agentCompatState !== "compatible"`, so the footer
 and submit gates keep their existing input.

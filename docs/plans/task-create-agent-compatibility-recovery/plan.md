@@ -190,3 +190,17 @@ rendered result of Task 02 against the production build.
   the new state. Extract the note into its own component.
 - Copy changes gate the build: `check-i18n-keys.mjs` fails on a missing key or
   an untranslated value in any locale.
+
+### Review remediation results
+
+- Merged the advanced base into the branch; the only conflict was the footer's
+  reason table, resolved by keeping both new reason keys and evaluating the
+  compatibility reason before the upstream dependencies-loading reason.
+- Codex review (P2): a workflow-locked incompatible agent with no other
+  compatible profile fell through to the generic empty state. The state helper
+  now takes the workflow lock and the selected row, keeps
+  `selected-incompatible` for an enabled locked profile even when the
+  compatible list is empty, and keeps a disabled locked profile on the empty
+  state. AC 001.5 and the design derivation record the precedence.
+- Reverified: the nine dialog test files (137 tests), typecheck, eslint, i18n
+  ratchet, prettier, and the specification linter.

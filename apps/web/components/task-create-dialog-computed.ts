@@ -143,31 +143,58 @@ export function filterCompatibleAgentProfiles(
   );
 }
 
+export type AgentCompatInput = {
+  selectedExecutorProfile: ExecutorProfile | null;
+  compatibleAgentProfiles: AgentProfileOption[];
+  /** Effective selection: the user's pick or the workflow override. */
+  selectedAgentProfileId: string;
+  /** The selected profile's store row, or null when the id is unknown. */
+  selectedAgentProfile: AgentProfileOption | null;
+  workflowAgentLocked: boolean;
+  dynamicRoutingEnabled: boolean;
+};
+
 /**
  * Three-way compatibility of the effective agent selection with the selected
  * executor profile. Pure so the dialog's empty state, note, and footer reason
  * can be tested without rendering.
+ *
+ * A workflow-locked profile that fails only the credential check keeps the
+ * `selected-incompatible` state even when nothing else is compatible: the
+ * user cannot change the agent, so the note has to name the workflow and the
+ * agent rather than the generic empty state. A locked profile that is not
+ * selectable at all (disabled) is not a credential problem and stays on the
+ * empty state.
  */
-export function computeAgentCompatState(
-  selectedExecutorProfile: ExecutorProfile | null,
-  compatibleAgentProfiles: AgentProfileOption[],
-  selectedAgentProfileId: string,
-): AgentCompatState {
+export function computeAgentCompatState(input: AgentCompatInput): AgentCompatState {
+  const { selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId } = input;
   if (!selectedExecutorProfile) return "compatible";
-  if (compatibleAgentProfiles.length === 0) return "none-compatible";
-  if (!selectedAgentProfileId) return "compatible";
-  return compatibleAgentProfiles.some((ap) => ap.id === selectedAgentProfileId)
-    ? "compatible"
-    : "selected-incompatible";
+  if (!selectedAgentProfileId) {
+    return compatibleAgentProfiles.length === 0 ? "none-compatible" : "compatible";
+  }
+  if (compatibleAgentProfiles.some((ap) => ap.id === selectedAgentProfileId)) return "compatible";
+  const selectable = input.selectedAgentProfile
+    ? isSelectableAgentProfile(input.selectedAgentProfile, input.dynamicRoutingEnabled)
+    : true;
+  if (!selectable) return "none-compatible";
+  if (input.workflowAgentLocked) return "selected-incompatible";
+  return compatibleAgentProfiles.length === 0 ? "none-compatible" : "selected-incompatible";
 }
+
+type AgentSelectionInput = {
+  /** Effective selection: the user's pick or the workflow override. */
+  agentProfileId: string;
+  agentProfiles: DialogComputedArgs["agentProfiles"];
+  workflowAgentLocked: boolean;
+};
 
 function useExecutorProfileCompat(
   allExecutorProfiles: ExecutorProfile[],
   selectedProfileId: string,
-  selectedAgentProfileId: string,
-  agentProfiles: DialogComputedArgs["agentProfiles"],
+  selection: AgentSelectionInput,
   disabledReasonFor?: (profile: ExecutorProfile) => string | null,
 ) {
+  const { agentProfileId: selectedAgentProfileId, agentProfiles, workflowAgentLocked } = selection;
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles, {
     disabledReasonFor,
   });
@@ -189,20 +216,31 @@ function useExecutorProfileCompat(
   // The agent column renders per state and the submit gate reads the derived
   // boolean, so both "no compatible agent at all" and "selected agent is not
   // compatible" block submission while only the former hides the selector.
+  const selectedAgentProfile = useMemo(
+    () => agentProfiles.find((ap) => ap.id === selectedAgentProfileId) ?? null,
+    [agentProfiles, selectedAgentProfileId],
+  );
   const agentCompatState = useMemo(
     () =>
-      computeAgentCompatState(
+      computeAgentCompatState({
         selectedExecutorProfile,
         compatibleAgentProfiles,
         selectedAgentProfileId,
-      ),
-    [selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId],
+        selectedAgentProfile,
+        workflowAgentLocked,
+        dynamicRoutingEnabled,
+      }),
+    [
+      selectedExecutorProfile,
+      compatibleAgentProfiles,
+      selectedAgentProfileId,
+      selectedAgentProfile,
+      workflowAgentLocked,
+      dynamicRoutingEnabled,
+    ],
   );
   const noCompatibleAgent = agentCompatState !== "compatible";
-  const selectedAgentProfileName = useMemo(
-    () => agentProfiles.find((ap) => ap.id === selectedAgentProfileId)?.label ?? null,
-    [agentProfiles, selectedAgentProfileId],
-  );
+  const selectedAgentProfileName = selectedAgentProfile?.label ?? null;
   return {
     selectedExecutorProfile,
     compatibleAgentProfiles,
@@ -288,8 +326,7 @@ export function useDialogComputed({
   const exec = useExecutorProfileCompat(
     allExecutorProfiles,
     fs.executorProfileId,
-    effectiveAgentProfileId,
-    agentProfiles,
+    { agentProfileId: effectiveAgentProfileId, agentProfiles, workflowAgentLocked },
     pickExecutorDisabledReason(fs.noRepository, isMultiRepoSelection),
   );
   const agentProfileOptions = useAgentProfileOptions(
