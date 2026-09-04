@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -285,5 +286,159 @@ func TestMarkOfficeTaskCompleted_SeamNil_SkipsWrite(t *testing.T) {
 	}
 	if task.State != v1.TaskStateInProgress {
 		t.Fatalf("state = %q, want unchanged IN_PROGRESS: a nil seam must skip the write, not fall through", task.State)
+	}
+}
+
+// recordingTaskEventPublisher captures PublishTaskUpdated /
+// PublishTaskStateChanged calls so tests can assert the emitted events
+// themselves, not just the persisted task state.
+type recordingTaskEventPublisher struct {
+	updated      []string
+	stateChanges []recordedStateChange
+}
+
+type recordedStateChange struct {
+	taskID   string
+	oldState v1.TaskState
+	newState v1.TaskState
+}
+
+func (r *recordingTaskEventPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
+	if task != nil {
+		r.updated = append(r.updated, task.ID)
+	}
+}
+
+func (r *recordingTaskEventPublisher) PublishTaskStateChanged(_ context.Context, task *models.Task, oldState v1.TaskState) {
+	if task == nil {
+		return
+	}
+	r.stateChanges = append(r.stateChanges, recordedStateChange{taskID: task.ID, oldState: oldState, newState: task.State})
+}
+
+func (r *recordingTaskEventPublisher) PublishTaskActivityIfChanged(context.Context, string) {}
+
+// waitStepWithChildrenCompletedTrigger seeds a two-step workflow (position 0
+// "step-wait" with an on_children_completed move-to-next action, position 1
+// "step-done") on the mockStepGetter and returns it. seedSession always
+// creates its task on workflow "wf1", so the steps are registered there.
+func waitStepWithChildrenCompletedTrigger() *mockStepGetter {
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-wait"] = &wfmodels.WorkflowStep{
+		ID: "step-wait", WorkflowID: "wf1", Name: "Wait for children", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{
+				{Type: wfmodels.GenericActionMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf1", Name: "Done", Position: 1,
+	}
+	return stepGetter
+}
+
+// TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects is the
+// BLOCKER-1 regression test (review round 2): the raw (non-Office)
+// completion path publishes task.updated / task.state_changed and drives
+// the parent's on_children_completed trigger. The Office seam dropped all
+// three when it landed on COMPLETED, so dependency resolution, the parent
+// workflow transition, and every task.updated subscriber silently stopped
+// seeing Office completions. Assert the emitted events and the parent's
+// resulting workflow step, not just the child's persisted state.
+func TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	stepGetter := waitStepWithChildrenCompletedTrigger()
+	seedSession(t, repo, "parent-office", "parent-office-session", "step-wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, repo, &models.Task{
+		ID: "office-done-fx", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Office task", State: v1.TaskStateInProgress, ParentID: "parent-office",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+	svc.SetOfficeTaskStatusUpdater(&recordingOfficeStatusUpdater{repo: repo})
+	events := &recordingTaskEventPublisher{}
+	svc.SetTaskEventPublisher(events)
+
+	svc.markTaskCompletedForTerminalStep(ctx, "office-done-fx", "child_done")
+
+	// The parent's own on_children_completed transition legitimately
+	// republishes task.updated for the parent itself; only assert on the
+	// completed child's events, which are what BLOCKER 1 dropped.
+	childUpdates := 0
+	for _, id := range events.updated {
+		if id == "office-done-fx" {
+			childUpdates++
+		}
+	}
+	if childUpdates != 1 {
+		t.Fatalf("PublishTaskUpdated calls = %+v, want exactly one for office-done-fx", events.updated)
+	}
+	var childChanges []recordedStateChange
+	for _, c := range events.stateChanges {
+		if c.taskID == "office-done-fx" {
+			childChanges = append(childChanges, c)
+		}
+	}
+	if len(childChanges) != 1 {
+		t.Fatalf("PublishTaskStateChanged calls for office-done-fx = %+v, want exactly one", childChanges)
+	}
+	if change := childChanges[0]; change.oldState != v1.TaskStateInProgress || change.newState != v1.TaskStateCompleted {
+		t.Fatalf("state change = %+v, want IN_PROGRESS -> COMPLETED", change)
+	}
+
+	parentAfter, err := repo.GetTask(ctx, "parent-office")
+	if err != nil {
+		t.Fatalf("load parent: %v", err)
+	}
+	if parentAfter.WorkflowStepID != "step-done" {
+		t.Fatalf("parent.WorkflowStepID = %q, want step-done: on_children_completed must fire for an Office completion",
+			parentAfter.WorkflowStepID)
+	}
+}
+
+// TestMarkOfficeTaskCompleted_ApproversPending_DoesNotFireCompletionSideEffects
+// is the negative half of the BLOCKER-1 regression: a gate redirect to
+// in_review is not a completion, so it must not publish task.updated /
+// task.state_changed, nor drive the parent's on_children_completed trigger.
+func TestMarkOfficeTaskCompleted_ApproversPending_DoesNotFireCompletionSideEffects(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	stepGetter := waitStepWithChildrenCompletedTrigger()
+	seedSession(t, repo, "parent-office", "parent-office-session", "step-wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, repo, &models.Task{
+		ID: "office-pending-fx", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Office task", State: v1.TaskStateInProgress, ParentID: "parent-office",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+	svc.SetOfficeTaskStatusUpdater(&recordingOfficeStatusUpdater{
+		repo:     repo,
+		newState: v1.TaskStateReview,
+		err:      &dashboard.ApprovalsPendingError{Pending: []string{"agent-A"}},
+	})
+	events := &recordingTaskEventPublisher{}
+	svc.SetTaskEventPublisher(events)
+
+	svc.markTaskCompletedForTerminalStep(ctx, "office-pending-fx", "child_done")
+
+	if len(events.updated) != 0 || len(events.stateChanges) != 0 {
+		t.Fatalf("events = updated=%v stateChanges=%v, want none: a gate redirect is not a completion",
+			events.updated, events.stateChanges)
+	}
+	parentAfter, err := repo.GetTask(ctx, "parent-office")
+	if err != nil {
+		t.Fatalf("load parent: %v", err)
+	}
+	if parentAfter.WorkflowStepID != "step-wait" {
+		t.Fatalf("parent.WorkflowStepID = %q, want unchanged step-wait: a redirect must not drive on_children_completed",
+			parentAfter.WorkflowStepID)
 	}
 }

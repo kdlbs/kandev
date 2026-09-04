@@ -5,7 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/dashboard"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // insertTestTaskAtNonTerminalStep creates a two-step workflow (stepID at
@@ -88,5 +91,50 @@ func TestUpdateTaskStatus_AgentDoneAtReview_NoApproverSeats_RedirectsToReview(t 
 	}
 	if state := readTaskState(t, deps, "rv1"); state != "REVIEW" {
 		t.Errorf("state = %q, want REVIEW (task must never read COMPLETED while on the Review step)", state)
+	}
+}
+
+// erroringTerminalStepRepo wraps a real *sqlite.Repository, replacing
+// IsTaskWorkflowStepTerminal with one that always fails, to test the
+// gate's behavior on a transient lookup error.
+type erroringTerminalStepRepo struct {
+	*sqlite.Repository
+	err error
+}
+
+func (r *erroringTerminalStepRepo) IsTaskWorkflowStepTerminal(context.Context, string) (bool, error) {
+	return false, r.err
+}
+
+// TestUpdateTaskStatus_TerminalStepLookupError_AbortsWithoutPersistingRedirect
+// is the MAJOR-2 regression test (review round 2): a transient
+// IsTaskWorkflowStepTerminal error must not be folded into "not terminal"
+// and persisted as a REVIEW redirect, since nothing then re-evaluates the
+// gate and the task is stranded reporting in_review forever with no
+// approver to clear it. A lookup error must abort the whole status update
+// (a plain, non-ApprovalsPendingError error) and leave the prior state
+// intact — still refusing the "done" write, but without a bogus redirect.
+func TestUpdateTaskStatus_TerminalStepLookupError_AbortsWithoutPersistingRedirect(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "lookup-err", "ws-g", "LE", "in_progress", 1)
+
+	wrapped := &erroringTerminalStepRepo{Repository: deps.repo, err: errors.New("database is locked")}
+	log := logger.Default()
+	svc := dashboard.NewDashboardService(wrapped, log, shared.NewActivityLogger(deps.repo, log), deps.agents, &stubCostChecker{})
+
+	err := svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
+		TaskID:    "lookup-err",
+		NewStatus: "done",
+	})
+
+	var pending *dashboard.ApprovalsPendingError
+	if errors.As(err, &pending) {
+		t.Fatalf("err = %v, want a plain error: a lookup failure is not a confirmed redirect", err)
+	}
+	if err == nil {
+		t.Fatal("err = nil, want an error: a lookup failure must not silently let the task complete")
+	}
+	if state := readTaskState(t, deps, "lookup-err"); state != "in_progress" {
+		t.Errorf("state = %q, want unchanged in_progress (no redirect and no completion persisted)", state)
 	}
 }
