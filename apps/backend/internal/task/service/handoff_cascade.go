@@ -230,7 +230,9 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	// the walk; not strictly required by the schema (no FK on parent_id)
 	// but keeps the audit log readable.
 	postArchiveCtx := ctx
+	vacatedStepIDs := make(map[string]struct{})
 	for i := len(all) - 1; i >= 0; i-- {
+		snapshot := s.taskSnapshotForVacancy(postArchiveCtx, all[i])
 		ok, err := s.tasks.ArchiveTaskIfActive(postArchiveCtx, all[i], cascadeID)
 		if err != nil {
 			s.cancelCascadeResourceCleanupRange(postArchiveCtx, all[:i+1], cleanupOps)
@@ -241,6 +243,7 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 			// survive a disconnected caller.
 			postArchiveCtx = context.WithoutCancel(ctx)
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
+			recordVacatedStep(vacatedStepIDs, snapshot)
 			// The archive mutation committed, so it is now safe to finalize
 			// any session that the runtime canceller could not update.
 			s.finalizeActiveSessions(postArchiveCtx, all[i], models.SessionArchiveTreeCancelReason)
@@ -270,6 +273,7 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, all[i])
 		}
 	}
+	s.pullTasksForVacatedSteps(postArchiveCtx, vacatedStepIDs)
 
 	// Release group memberships for THIS cascade's tasks. Memberships
 	// owned by an earlier cascade or manual archive are left alone.
@@ -346,16 +350,14 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	// the caller can retry. We do NOT roll back partial deletions —
 	// delete is destructive by design and re-running is idempotent.
 	postDeleteCtx := ctx
+	vacatedStepIDs := make(map[string]struct{})
 	for i := len(all) - 1; i >= 0; i-- {
 		// Snapshot the task row BEFORE deletion so the published event
 		// carries workflow_id / workspace_id — the kanban WS handler keys
 		// off workflow_id to remove the card from the right swimlane.
 		// Fetch is best-effort: if the row is already gone (rare race) we
 		// fall back to a minimal payload below.
-		var snapshot *models.Task
-		if s.eventPublisher != nil {
-			snapshot, _ = s.tasks.GetTask(postDeleteCtx, all[i])
-		}
+		snapshot := s.taskSnapshotForVacancy(postDeleteCtx, all[i])
 		// Tear down runtime resources BEFORE the DB delete so the env / worktree
 		// rows are still queryable for the gather step. The actual destroy work
 		// runs async after this returns. Delete cascade removes the env row.
@@ -377,10 +379,12 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 			s.resourceCleaner.CleanupTaskResources(postDeleteCtx, all[i], true)
 		}
 		out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
+		recordVacatedStep(vacatedStepIDs, snapshot)
 		if s.eventPublisher != nil && snapshot != nil {
 			s.eventPublisher.PublishTaskDeleted(postDeleteCtx, snapshot)
 		}
 	}
+	s.pullTasksForVacatedSteps(postDeleteCtx, vacatedStepIDs)
 
 	for _, gid := range groupIDs {
 		if err := s.evaluateWorkspaceGroupCleanup(postDeleteCtx, gid); err != nil {
@@ -389,6 +393,38 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		}
 	}
 	return out, nil
+}
+
+func (s *HandoffService) taskSnapshotForVacancy(ctx context.Context, taskID string) *models.Task {
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		s.logf().Warn("cascade: capture task workflow step failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return nil
+	}
+	return task
+}
+
+func recordVacatedStep(stepIDs map[string]struct{}, task *models.Task) {
+	if task == nil || task.WorkflowStepID == "" {
+		return
+	}
+	stepIDs[task.WorkflowStepID] = struct{}{}
+}
+
+func (s *HandoffService) pullTasksForVacatedSteps(ctx context.Context, stepIDs map[string]struct{}) {
+	if s.vacancyReconciler == nil || len(stepIDs) == 0 {
+		return
+	}
+	orderedStepIDs := make([]string, 0, len(stepIDs))
+	for stepID := range stepIDs {
+		orderedStepIDs = append(orderedStepIDs, stepID)
+	}
+	sort.Strings(orderedStepIDs)
+	pullCtx := context.WithoutCancel(ctx)
+	for _, stepID := range orderedStepIDs {
+		s.vacancyReconciler.ReconcileVacatedStep(pullCtx, stepID)
+	}
 }
 
 // transferSharedWorkspaceEnvironmentOwnership moves a materialized environment
