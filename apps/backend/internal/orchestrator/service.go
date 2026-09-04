@@ -611,6 +611,14 @@ type Service struct {
 	parkedMu     sync.Mutex
 	parkedStates map[string]*parkedSessionState
 
+	// taskParkedStates is the task-level parked_on_background_work OR-aggregate
+	// (spec: Data model -> Task-level projection), keyed by task ID. Guarded by
+	// parkedMu — the same critical section as parkedStates — because computing
+	// the OR reads every session currently tracked for a task. Never derived by
+	// max()-ing member sessions' revisions; it carries its own monotonic
+	// counter that increments only when the aggregated boolean itself flips.
+	taskParkedStates map[string]*taskParkedState
+
 	// parkedEpoch is this process's start time in Unix nanoseconds, fixed for
 	// the process's life and identical on every parked carrier (spec: Data
 	// model -> Revision epoch). It is what lets a client tell "the backend
@@ -1406,6 +1414,7 @@ func NewService(
 		idleReaper:                   newIdleSessionReaper(),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
+		taskParkedStates:             make(map[string]*taskParkedState),
 		parkedEpoch:                  uint64(time.Now().UnixNano()),
 		parkedLoopCtx:                parkedLoopCtx,
 		parkedLoopCancel:             parkedLoopCancel,

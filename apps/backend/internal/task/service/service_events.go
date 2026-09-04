@@ -414,6 +414,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 
 	activity = s.addTaskSessionEventFieldsWithActivity(ctx, task.ID, data, activity)
+	s.addTaskParkedEventField(data, task.ID)
 
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
@@ -578,6 +579,22 @@ func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{
 		data["active_subagent_count"] = activity.activeSubagentCount
 	}
 	return activity
+}
+
+// addTaskParkedEventField stamps the task-level parked_on_background_work
+// OR-aggregate, its own monotonic revision, and the process epoch onto a
+// task.updated payload (AC-22, AC-62, AC-78). Always serialized when a
+// provider is wired, so a settled projection clears stale client state; a nil
+// provider (unwired, or in tests) omits the fields entirely rather than
+// asserting false values the backend cannot actually vouch for.
+func (s *Service) addTaskParkedEventField(data map[string]interface{}, taskID string) {
+	if s.taskParkedProvider == nil {
+		return
+	}
+	parked, revision := s.taskParkedProvider.TaskParkedSnapshot(taskID)
+	data["parked_on_background_work"] = parked
+	data["parked_revision"] = revision
+	data["parked_epoch"] = s.taskParkedProvider.ParkedEpoch()
 }
 
 func (s *Service) addPrimarySessionEventFields(ctx context.Context, taskID string, data map[string]interface{}, sessionInfo *models.TaskSession) {

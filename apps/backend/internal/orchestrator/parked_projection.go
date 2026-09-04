@@ -27,6 +27,16 @@ type parkedSessionState struct {
 	loopCancel context.CancelFunc
 }
 
+// taskParkedState is the task-level parked_on_background_work OR-aggregate
+// (spec: "Data model -> Task-level projection"). sessions tracks only the
+// member sessions currently parked (true); the aggregate is len(sessions) > 0
+// so no session ever needs an explicit false entry removed on task deletion.
+type taskParkedState struct {
+	sessions map[string]bool
+	parked   bool
+	revision uint64
+}
+
 // serviceBackgroundProbeAdapter is the production BackgroundProbe: it
 // forwards to Service.ProbeBackgroundWorkloads (the F6-guarded, budget-bound
 // port from task-04). A distinct type keeps *Service from needing its own
@@ -69,6 +79,24 @@ func (s *Service) ParkedEpoch() uint64 {
 	return s.parkedEpoch
 }
 
+// TaskParkedSnapshot returns taskID's task-level parked_on_background_work
+// OR-aggregate and its own monotonic revision, read from one critical section
+// (spec: "Data model -> Task-level projection"). A task with no tracked
+// transition reads as (false, 0) per D9 — this covers both "no sessions" and
+// "sessions exist but none ever parked" (AC-50).
+func (s *Service) TaskParkedSnapshot(taskID string) (bool, uint64) {
+	if taskID == "" {
+		return false, 0
+	}
+	s.parkedMu.Lock()
+	defer s.parkedMu.Unlock()
+	tst := s.taskParkedStates[taskID]
+	if tst == nil {
+		return false, 0
+	}
+	return tst.parked, tst.revision
+}
+
 // parkedStateLocked returns sessionID's parked state, lazily creating the map
 // and the entry. Callers must hold parkedMu. The map is not guaranteed
 // non-nil at construction — *Service values built outside NewService (tests,
@@ -83,6 +111,39 @@ func (s *Service) parkedStateLocked(sessionID string) *parkedSessionState {
 		s.parkedStates[sessionID] = st
 	}
 	return st
+}
+
+// recomputeTaskParkedLocked applies sessionID's freshly-recomputed parked
+// value to taskID's OR-aggregate and returns the resulting task-level
+// projection. Callers must hold parkedMu, and must call this only when the
+// session-level value actually changed — the task-level revision increments
+// once per observed change of the task-level boolean, never per session
+// transition (AC-49: two sessions toggling independently must not let the
+// task's counter run ahead of its own actual flips).
+func (s *Service) recomputeTaskParkedLocked(taskID, sessionID string, sessionParked bool) (parked bool, revision uint64, changed bool) {
+	if taskID == "" {
+		return false, 0, false
+	}
+	if s.taskParkedStates == nil {
+		s.taskParkedStates = make(map[string]*taskParkedState)
+	}
+	tst, ok := s.taskParkedStates[taskID]
+	if !ok {
+		tst = &taskParkedState{sessions: make(map[string]bool)}
+		s.taskParkedStates[taskID] = tst
+	}
+	if sessionParked {
+		tst.sessions[sessionID] = true
+	} else {
+		delete(tst.sessions, sessionID)
+	}
+	newParked := len(tst.sessions) > 0
+	changed = newParked != tst.parked
+	if changed {
+		tst.revision++
+		tst.parked = newParked
+	}
+	return tst.parked, tst.revision, changed
 }
 
 // recomputeParkedLocked applies the three-term formula (spec: "Data model ->
@@ -189,12 +250,20 @@ func (s *Service) applyParkedTransition(
 	s.parkedMu.Lock()
 	st := s.parkedStateLocked(sessionID)
 	parked, revision, changed := recomputeParkedLocked(st, attested, sample, hasSample, state)
+	var taskParked, taskChanged bool
+	var taskRevision uint64
+	if changed {
+		taskParked, taskRevision, taskChanged = s.recomputeTaskParkedLocked(taskID, sessionID, parked)
+	}
 	s.parkedMu.Unlock()
 
 	if !changed {
 		return
 	}
 	s.publishParkedTransition(ctx, taskID, sessionID, parked, revision)
+	if taskChanged {
+		s.publishTaskParkedTransition(ctx, taskID, taskParked, taskRevision)
+	}
 	if parked {
 		s.maybeStartParkedSamplingLoop(taskID, sessionID)
 	} else {
@@ -226,6 +295,30 @@ func (s *Service) publishParkedTransition(ctx context.Context, taskID, sessionID
 			zap.Uint64("revision", revision),
 			zap.Error(err))
 	}
+}
+
+// publishTaskParkedTransition emits task.updated when the task-level
+// parked_on_background_work OR-aggregate changes (AC-62, AC-78). Unlike
+// publishTaskActivityIfChanged (task/service), the caller here already knows
+// from the locked recompute that the aggregate changed, so this always
+// publishes when called rather than recomputing and deduplicating again.
+func (s *Service) publishTaskParkedTransition(ctx context.Context, taskID string, taskParked bool, taskRevision uint64) {
+	if s.taskEvents == nil || taskID == "" || s.repo == nil {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		if err != nil {
+			s.logger.Warn("failed to load task for parked transition",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+		return
+	}
+	s.logger.Debug("task-level parked_on_background_work transition",
+		zap.String("task_id", taskID),
+		zap.Bool("parked_on_background_work", taskParked),
+		zap.Uint64("parked_revision", taskRevision))
+	s.publishTaskUpdated(ctx, task)
 }
 
 // maybeStartParkedSamplingLoop starts the per-session sampling goroutine
@@ -355,10 +448,18 @@ func (s *Service) sampleParkedSessionTick(ctx context.Context, taskID, sessionID
 		return false
 	}
 	parked, revision, changed := recomputeParkedLocked(st, attested, result, true, session.State)
+	var taskParked, taskChanged bool
+	var taskRevision uint64
+	if changed {
+		taskParked, taskRevision, taskChanged = s.recomputeTaskParkedLocked(taskID, sessionID, parked)
+	}
 	s.parkedMu.Unlock()
 
 	if changed {
 		s.publishParkedTransition(ctx, taskID, sessionID, parked, revision)
+		if taskChanged {
+			s.publishTaskParkedTransition(ctx, taskID, taskParked, taskRevision)
+		}
 	}
 	return parked
 }

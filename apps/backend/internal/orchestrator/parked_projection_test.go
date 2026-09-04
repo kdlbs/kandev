@@ -24,14 +24,32 @@ type parkedTestRepo struct {
 	repoStore
 	mu       sync.Mutex
 	sessions map[string]*models.TaskSession
+	tasks    map[string]*models.Task
 }
 
 func newParkedTestRepo(sessions ...*models.TaskSession) *parkedTestRepo {
-	r := &parkedTestRepo{sessions: make(map[string]*models.TaskSession)}
+	r := &parkedTestRepo{sessions: make(map[string]*models.TaskSession), tasks: make(map[string]*models.Task)}
 	for _, s := range sessions {
 		r.sessions[s.ID] = s
+		if _, ok := r.tasks[s.TaskID]; !ok && s.TaskID != "" {
+			r.tasks[s.TaskID] = &models.Task{ID: s.TaskID}
+		}
 	}
 	return r
+}
+
+// GetTask satisfies the repoStore method publishTaskParkedTransition uses to
+// load the task row before delegating to the TaskEventPublisher. Tasks are
+// auto-seeded from newParkedTestRepo's session TaskIDs.
+func (r *parkedTestRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.tasks[id]
+	if !ok {
+		return nil, errors.New("task not found")
+	}
+	cp := *t
+	return &cp, nil
 }
 
 func (r *parkedTestRepo) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
@@ -102,21 +120,33 @@ func (p *spyBackgroundProbe) callCount() int {
 
 func newParkedTestService(t *testing.T, repo *parkedTestRepo) (*Service, *recordingEventBus, *spyBackgroundProbe) {
 	t.Helper()
+	svc, bus, probe, _ := newParkedTestServiceWithTaskEvents(t, repo)
+	return svc, bus, probe
+}
+
+// newParkedTestServiceWithTaskEvents is newParkedTestService plus a
+// recordingTaskUpdatedPublisher, for tests asserting task.updated is
+// published (or is not) on the task-level OR-aggregate flip.
+func newParkedTestServiceWithTaskEvents(t *testing.T, repo *parkedTestRepo) (*Service, *recordingEventBus, *spyBackgroundProbe, *recordingTaskUpdatedPublisher) {
+	t.Helper()
 	bus := &recordingEventBus{}
 	probe := &spyBackgroundProbe{}
+	publisher := &recordingTaskUpdatedPublisher{}
 	loopCtx, loopCancel := context.WithCancel(context.Background())
 	svc := &Service{
 		logger:           testLogger(),
 		eventBus:         bus,
 		repo:             repo,
+		taskEvents:       publisher,
 		parkedStates:     make(map[string]*parkedSessionState),
+		taskParkedStates: make(map[string]*taskParkedState),
 		parkedEpoch:      1,
 		parkedLoopCtx:    loopCtx,
 		parkedLoopCancel: loopCancel,
 	}
 	svc.SetBackgroundProbe(probe)
 	t.Cleanup(svc.stopParkedSamplingLoops)
-	return svc, bus, probe
+	return svc, bus, probe, publisher
 }
 
 func lastParkedEvent(b *recordingEventBus) (parked bool, revision uint64, ok bool) {
@@ -453,5 +483,174 @@ func TestParkedProjectionOrdering_ProbeCallSitesFollowTurnCompletion(t *testing.
 	}
 	if publishStateChangedIdx >= dispatchIdx {
 		t.Fatal("expected the parked-projection dispatch to be wired after publishTaskSessionStateChanged")
+	}
+}
+
+// --- Task-level projection (task-06) ---
+// Spec: docs/specs/disambiguate-waiting/spec.md, "Data model -> Task-level
+// projection". ACs: AC-22, AC-36, AC-38, AC-49, AC-50, AC-62, AC-78.
+// AC-39 and AC-77 are consumer/boot-payload-side discard behavior verified at
+// the DTO/frontend layers (task-07/08), not here.
+
+// AC-50: a task with no sessions, or no session that ever transitioned, reads
+// (false, 0) — the D9 default, not an error or a distinguishable "unknown".
+func TestTaskParkedSnapshot_NoTransitions_DefaultsFalseZero(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	svc, _, _ := newParkedTestService(t, repo)
+
+	if parked, revision := svc.TaskParkedSnapshot("task-1"); parked || revision != 0 {
+		t.Fatalf("TaskParkedSnapshot(no-sessions-tracked) = (%v, %d), want (false, 0)", parked, revision)
+	}
+	if parked, revision := svc.TaskParkedSnapshot(""); parked || revision != 0 {
+		t.Fatalf("TaskParkedSnapshot(\"\") = (%v, %d), want (false, 0)", parked, revision)
+	}
+}
+
+// AC-38/AC-62: a session parking flips the task-level OR to true (revision 1)
+// and publishes task.updated; the session then leaving WAITING_FOR_INPUT flips
+// it back to false (revision 2) and publishes task.updated again. Re-deriving
+// the same task-level value must not be possible via this path since every
+// call here is a genuine session-level change.
+func TestTaskParkedSnapshot_SingleSessionToggle_RevisionMonotonicallyIncreases(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	svc, _, probe, publisher := newParkedTestServiceWithTaskEvents(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.setObservedDetachedLaunch("sess-1")
+
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	if parked, revision := svc.TaskParkedSnapshot("task-1"); !parked || revision != 1 {
+		t.Fatalf("after park: TaskParkedSnapshot = (%v, %d), want (true, 1)", parked, revision)
+	}
+	if len(publisher.updatedTaskIDs) != 1 || publisher.updatedTaskIDs[0] != "task-1" {
+		t.Fatalf("expected exactly one task.updated for task-1 after the first parking, got %v", publisher.updatedTaskIDs)
+	}
+
+	svc.clearParkedOnSessionStateLeft(context.Background(), "task-1", "sess-1", models.TaskSessionStateRunning)
+	if parked, revision := svc.TaskParkedSnapshot("task-1"); parked || revision != 2 {
+		t.Fatalf("after clear: TaskParkedSnapshot = (%v, %d), want (false, 2)", parked, revision)
+	}
+	if len(publisher.updatedTaskIDs) != 2 {
+		t.Fatalf("expected a second task.updated after the OR cleared, got %v", publisher.updatedTaskIDs)
+	}
+}
+
+// AC-49: two sessions on one task. S1 toggles twice (parks, then clears —
+// session revision 2, ending false); S2 never transitions. S2 then parks.
+// The task's parked_revision must be exactly 1 (its own first-ever flip),
+// never max(2, 1) == 2 and never conflated with either session's own
+// revision counter.
+func TestTaskParkedSnapshot_TwoSessions_RevisionIsOwnCounterNotMaxOfSessions(t *testing.T) {
+	repo := newParkedTestRepo(
+		&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning},
+		&models.TaskSession{ID: "sess-2", TaskID: "task-1", State: models.TaskSessionStateRunning},
+	)
+	svc, _, probe, _ := newParkedTestServiceWithTaskEvents(t, repo)
+	svc.setObservedDetachedLaunch("sess-1")
+	svc.setObservedDetachedLaunch("sess-2")
+
+	// S1: park then clear (its own revision reaches 2, ends false) — this
+	// touches the task-level OR twice (true, then false again) but must not
+	// leave the task's revision at 2.
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	svc.clearParkedOnSessionStateLeft(context.Background(), "task-1", "sess-1", models.TaskSessionStateRunning)
+	if _, revision := svc.ParkedSnapshot("sess-1"); revision != 2 {
+		t.Fatalf("precondition: sess-1 revision = %d, want 2", revision)
+	}
+	if parked, revision := svc.TaskParkedSnapshot("task-1"); parked || revision != 2 {
+		t.Fatalf("after S1 round-trip: TaskParkedSnapshot = (%v, %d), want (false, 2) — "+
+			"one flip up (revision 1), one flip back down (revision 2)", parked, revision)
+	}
+
+	// S2 parks for the first time.
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-2")
+
+	parked, revision := svc.TaskParkedSnapshot("task-1")
+	if !parked {
+		t.Fatal("expected the task-level OR to be true once sess-2 parks")
+	}
+	if revision != 3 {
+		t.Fatalf("TaskParkedSnapshot revision = %d, want 3 (strictly greater than its prior value 2, "+
+			"not max(sess-1=2, sess-2=1)=2)", revision)
+	}
+}
+
+// AC-78: two sessions, S1 already parked (task-level OR already true). S2
+// parks too — a session-level transition occurs (session.activity_changed for
+// S2), but the task-level OR does not change (already true), so no
+// task.updated is published and the task's parked_revision is unchanged.
+func TestPublishTaskParkedTransition_ORAlreadyTrue_NoTaskUpdatedPublished(t *testing.T) {
+	repo := newParkedTestRepo(
+		&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning},
+		&models.TaskSession{ID: "sess-2", TaskID: "task-1", State: models.TaskSessionStateRunning},
+	)
+	svc, bus, probe, publisher := newParkedTestServiceWithTaskEvents(t, repo)
+	svc.setObservedDetachedLaunch("sess-1")
+	svc.setObservedDetachedLaunch("sess-2")
+
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	if parked, revision := svc.TaskParkedSnapshot("task-1"); !parked || revision != 1 {
+		t.Fatalf("precondition: TaskParkedSnapshot = (%v, %d), want (true, 1)", parked, revision)
+	}
+	publishesBeforeS2 := len(publisher.updatedTaskIDs)
+
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-2")
+
+	// Session-level: sess-2 itself still gets its own transition + event.
+	if parked, revision := svc.ParkedSnapshot("sess-2"); !parked || revision != 1 {
+		t.Fatalf("sess-2 ParkedSnapshot = (%v, %d), want (true, 1)", parked, revision)
+	}
+	if got, want, ok := lastParkedEvent(bus); !ok || got != true || want != 1 {
+		t.Fatalf("expected sess-2's own session.activity_changed event, got (%v, %d, %v)", got, want, ok)
+	}
+	// Task-level: OR was already true, so it must not have changed, and no
+	// additional task.updated must have been published.
+	if parked, revision := svc.TaskParkedSnapshot("task-1"); !parked || revision != 1 {
+		t.Fatalf("TaskParkedSnapshot after sess-2 parks = (%v, %d), want (true, 1) unchanged", parked, revision)
+	}
+	if len(publisher.updatedTaskIDs) != publishesBeforeS2 {
+		t.Fatalf("expected no additional task.updated when the task-level OR does not change, "+
+			"publishes before=%d after=%d", publishesBeforeS2, len(publisher.updatedTaskIDs))
+	}
+}
+
+// AC-36: TaskParkedSnapshot on a freshly constructed Service (simulating a
+// backend restart) reads (false, 0) for every task, regardless of what any
+// prior process instance had recorded — there is no persisted state to carry
+// forward.
+func TestTaskParkedSnapshot_FreshService_ReadsFalseZero(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	svc, _, probe, _ := newParkedTestServiceWithTaskEvents(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.setObservedDetachedLaunch("sess-1")
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	if parked, _ := svc.TaskParkedSnapshot("task-1"); !parked {
+		t.Fatal("precondition: task should be parked before simulating the restart")
+	}
+
+	freshRepo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
+	freshSvc, _, _ := newParkedTestService(t, freshRepo)
+
+	if parked, revision := freshSvc.TaskParkedSnapshot("task-1"); parked || revision != 0 {
+		t.Fatalf("fresh service TaskParkedSnapshot = (%v, %d), want (false, 0)", parked, revision)
+	}
+}
+
+// publishTaskParkedTransition must not publish (and must not panic) when no
+// TaskEventPublisher is wired, mirroring publishTaskUpdated's own no-op
+// contract for an unwired publisher.
+func TestPublishTaskParkedTransition_NoPublisherWired_NoOp(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	svc, _, probe := newParkedTestService(t, repo) // no taskEvents wired
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.setObservedDetachedLaunch("sess-1")
+
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+
+	if parked, revision := svc.TaskParkedSnapshot("task-1"); !parked || revision != 1 {
+		t.Fatalf("TaskParkedSnapshot = (%v, %d), want (true, 1) even without a wired publisher", parked, revision)
 	}
 }
