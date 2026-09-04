@@ -130,8 +130,76 @@ function preserveMultiSnapshotFields(
   };
 }
 
+function applyPositionsToTasks<T extends { id: string; position: number }>(
+  tasks: T[],
+  positionById: Map<string, number>,
+): T[] {
+  let changed = false;
+  const next = tasks.map((task) => {
+    const position = positionById.get(task.id);
+    if (position === undefined || task.position === position) return task;
+    changed = true;
+    return { ...task, position };
+  });
+  return changed ? next : tasks;
+}
+
+function makeTaskReorderedHandler(store: StoreApi<AppState>): WsHandlers["task.reordered"] {
+  return (message) => {
+    const { workflow_step_id: stepId, band, revision, tasks } = message.payload;
+    const pendingKey = `${stepId}:${band}`;
+    const positionById = new Map(tasks.map((task) => [task.id, task.position]));
+
+    store.setState((state) => {
+      // AC.27: this band's optimistic order owns the view until the
+      // in-flight request resolves — an unsolicited event for the same band
+      // must not clobber it.
+      if (state.kanbanMulti.pendingReorderBandKeys[pendingKey]) {
+        return state;
+      }
+      // Asymmetric revision gate (Decision 11 / F31): an unsolicited event
+      // only applies on a strictly-greater revision. A step with no recorded
+      // revision (-1) accepts the first order it ever receives.
+      const currentRevision = state.kanbanMulti.orderRevisionByStepId[stepId] ?? -1;
+      if (revision <= currentRevision) {
+        return state;
+      }
+
+      const nextKanbanTasks = applyPositionsToTasks(state.kanban.tasks, positionById);
+      let snapshotsChanged = false;
+      const nextSnapshots: typeof state.kanbanMulti.snapshots = {};
+      for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+        const nextTasks = applyPositionsToTasks(snapshot.tasks, positionById);
+        if (nextTasks !== snapshot.tasks) {
+          snapshotsChanged = true;
+          nextSnapshots[workflowId] = { ...snapshot, tasks: nextTasks };
+        } else {
+          nextSnapshots[workflowId] = snapshot;
+        }
+      }
+
+      return {
+        ...state,
+        kanban:
+          nextKanbanTasks === state.kanban.tasks
+            ? state.kanban
+            : { ...state.kanban, tasks: nextKanbanTasks },
+        kanbanMulti: {
+          ...state.kanbanMulti,
+          snapshots: snapshotsChanged ? nextSnapshots : state.kanbanMulti.snapshots,
+          orderRevisionByStepId: {
+            ...state.kanbanMulti.orderRevisionByStepId,
+            [stepId]: revision,
+          },
+        },
+      };
+    });
+  };
+}
+
 export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    "task.reordered": makeTaskReorderedHandler(store),
     "kanban.update": (message) => {
       const workflowId = message.payload.workflowId;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
