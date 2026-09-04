@@ -261,16 +261,15 @@ func TestContinuationRedactsAnchoredCredentialAtWindowCut(t *testing.T) {
 	}
 }
 
-// TestSanitizedTailFallsBackToFullInputWhenWindowCollapses proves that once
-// an input exceeds maxRedactionInputBytes, a credential whose anchor
-// ("Authorization: ") sits just outside the newest maxRedactionInputBytes
-// window still gets redacted correctly. The window alone would see the bare
-// value with no anchor and leave it raw (no rule matches an unanchored
-// value under 32 chars), but the rest of the window is a single long alnum
-// run that the generic credential rule collapses to a few bytes, so the
-// window's redacted length falls under budget and sanitizedTail re-derives
-// from the complete input instead, where the anchor and value are together.
-func TestSanitizedTailFallsBackToFullInputWhenWindowCollapses(t *testing.T) {
+// TestSanitizedTailAnchorSurvivesWhenLookbackClampsToInputStart proves that
+// a credential whose anchor ("Authorization: ") sits at the very start of an
+// oversized conversation still gets redacted together with its value. The
+// naive window alone would start right after the anchor and see the bare
+// value with no anchor to trigger the Authorization rule (no other rule
+// matches an unanchored value under 32 chars), but here the lookback
+// boundary (start-redactionLookbackBytes) clamps to 0, so the window covers
+// the complete raw input and the anchor is never separated from its value.
+func TestSanitizedTailAnchorSurvivesWhenLookbackClampsToInputStart(t *testing.T) {
 	const credential = "hunter2WindowSecret1"
 	const marker = "BENIGN-KEEP-MARKER"
 	const anchor = "Authorization: "
@@ -297,6 +296,74 @@ func TestSanitizedTailFallsBackToFullInputWhenWindowCollapses(t *testing.T) {
 	}
 	if len(continuation.Conversation) > continuationFieldLimit {
 		t.Fatalf("Conversation exceeded continuationFieldLimit: %d bytes", len(continuation.Conversation))
+	}
+}
+
+// TestSanitizedTailExcludesCredentialBisectedAtLookbackFallback is the
+// R4-BLOCKER-1 regression: when no newline exists within
+// redactionLookbackBytes of the lookback boundary,
+// snapWindowStartToLineBoundary used to fall back to the raw boundary
+// unconditionally, which can land inside a credential. The surviving
+// fragment here ("ABCDEFGHIJKL") is too short for both the sk- rule (needs
+// the "sk-" prefix, now excluded) and the generic 32+ char rule, so it
+// leaked unredacted while the adjacent long run of "a"s collapsed to "***"
+// and made room for it inside the tail budget.
+func TestSanitizedTailExcludesCredentialBisectedAtLookbackFallback(t *testing.T) {
+	const credential = "sk-ABCDEFGHIJKL"
+
+	raw := strings.Repeat("x ", 50000) + credential + " " + strings.Repeat("a", 327667)
+	if len(raw) <= maxRedactionInputBytes {
+		t.Fatalf("test input must exceed maxRedactionInputBytes, got %d bytes", len(raw))
+	}
+
+	got := sanitizedTail(raw, 2000)
+
+	if leaked := rawValueSuffix(credential, got); leaked != "" {
+		t.Fatalf("sanitizedTail retained a raw credential fragment %q: %q", leaked, got)
+	}
+}
+
+// TestSanitizedHeadExcludesCredentialBisectedAtLookbackFallback mirrors
+// TestSanitizedTailExcludesCredentialBisectedAtLookbackFallback for
+// sanitizedHead (ToolSummary's cut direction), which had no large-input
+// coverage before this fix: snapWindowEndToLineBoundary's raw ceil fallback
+// bisected the credential from the other side, leaking its prefix
+// ("sk-ABCDEFGHIJ") instead of its suffix.
+func TestSanitizedHeadExcludesCredentialBisectedAtLookbackFallback(t *testing.T) {
+	const credential = "sk-ABCDEFGHIJKL"
+
+	raw := strings.Repeat("a", maxRedactionInputBytes+redactionLookbackBytes-14) + " " + credential + " trailing"
+	if len(raw) <= maxRedactionInputBytes {
+		t.Fatalf("test input must exceed maxRedactionInputBytes, got %d bytes", len(raw))
+	}
+
+	got := sanitizedHead(raw)
+
+	if strings.Contains(got, "ABCDEFGHIJ") {
+		t.Fatalf("sanitizedHead leaked the bisected credential fragment: %q", got)
+	}
+}
+
+// TestSanitizedTailExcludesDottedTokenBisectedAtLookbackFallback proves the
+// lookback fallback fix is not keyed to any single redaction rule's
+// character class. A bisected JWT-shaped token leaves dot-separated
+// segments each under 32 chars, so a fix that only recognized
+// [A-Za-z0-9+/=_-]{32,} runs would still leak a segment; excluding the whole
+// non-whitespace run (dots included) at the fallback boundary catches it
+// regardless of which rule, if any, would eventually match the intact
+// token.
+func TestSanitizedTailExcludesDottedTokenBisectedAtLookbackFallback(t *testing.T) {
+	fakeJWT := strings.Repeat("A", 20) + "." + strings.Repeat("B", 20) + "." + strings.Repeat("C", 20)
+
+	raw := strings.Repeat("x ", 50000) + fakeJWT + " " + strings.Repeat("a", 327667)
+	if len(raw) <= maxRedactionInputBytes {
+		t.Fatalf("test input must exceed maxRedactionInputBytes, got %d bytes", len(raw))
+	}
+
+	got := sanitizedTail(raw, 2000)
+
+	if leaked := rawValueSuffix(fakeJWT, got); leaked != "" {
+		t.Fatalf("sanitizedTail retained a raw JWT fragment %q: %q", leaked, got)
 	}
 }
 

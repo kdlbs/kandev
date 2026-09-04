@@ -490,8 +490,10 @@ func sanitizedHead(raw string) string {
 }
 
 // snapWindowStartToLineBoundary moves start back to just after the nearest
-// preceding newline within redactionLookbackBytes, or to the lookback
-// boundary itself if no newline is found there.
+// preceding newline within redactionLookbackBytes. If no newline is found,
+// it falls back to the lookback boundary, then advances that boundary past
+// a bisected run instead of keeping the fragment: losing bytes at the
+// window edge is always preferable to leaking them.
 func snapWindowStartToLineBoundary(raw string, start int) int {
 	floor := start - redactionLookbackBytes
 	if floor < 0 {
@@ -500,12 +502,14 @@ func snapWindowStartToLineBoundary(raw string, start int) int {
 	if idx := strings.LastIndexByte(raw[floor:start], '\n'); idx >= 0 {
 		return floor + idx + 1
 	}
-	return floor
+	return skipBisectedRunForward(raw, floor)
 }
 
 // snapWindowEndToLineBoundary moves end forward to just before the nearest
-// following newline within redactionLookbackBytes, or to the lookback
-// boundary itself if no newline is found there.
+// following newline within redactionLookbackBytes. If no newline is found,
+// it falls back to the lookback boundary, then retreats that boundary past
+// a bisected run instead of keeping the fragment: losing bytes at the
+// window edge is always preferable to leaking them.
 func snapWindowEndToLineBoundary(raw string, end int) int {
 	ceil := end + redactionLookbackBytes
 	if ceil > len(raw) {
@@ -514,7 +518,69 @@ func snapWindowEndToLineBoundary(raw string, end int) int {
 	if idx := strings.IndexByte(raw[end:ceil], '\n'); idx >= 0 {
 		return end + idx
 	}
-	return ceil
+	return skipBisectedRunBackward(raw, ceil)
+}
+
+// isRedactionBoundaryByte reports whether b is one of the ASCII whitespace
+// bytes matched by \s in the redactions table (Bearer, Authorization:, and
+// password|secret|token all use \s and can span one newline). A run of
+// bytes with none of these on either side of a cut is never split cleanly
+// by that cut, regardless of which redaction rule's character class it
+// happens to fall in — which is what lets skipBisectedRunForward/Backward
+// stay correct for rules keyed on other classes, such as a dotted JWT.
+func isRedactionBoundaryByte(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\f', '\r':
+		return true
+	default:
+		return false
+	}
+}
+
+// skipBisectedRunForward returns pos unchanged unless pos sits strictly
+// inside a run of non-whitespace bytes that continues across pos (i.e. both
+// raw[pos-1] and raw[pos] are non-whitespace) — the signature of a token
+// bisected by a window cut landing at pos with no clean line boundary
+// nearby. When that happens, it advances to just past the nearest
+// whitespace byte at or after pos, excluding the bisected fragment from the
+// window entirely. The scan is bounded by redactionLookbackBytes; if no
+// whitespace is found within that bound, it gives up at the bound.
+func skipBisectedRunForward(raw string, pos int) int {
+	if pos <= 0 || pos >= len(raw) || isRedactionBoundaryByte(raw[pos-1]) || isRedactionBoundaryByte(raw[pos]) {
+		return pos
+	}
+	limit := pos + redactionLookbackBytes
+	if limit > len(raw) {
+		limit = len(raw)
+	}
+	for i := pos; i < limit; i++ {
+		if isRedactionBoundaryByte(raw[i]) {
+			return i + 1
+		}
+	}
+	return limit
+}
+
+// skipBisectedRunBackward is skipBisectedRunForward's mirror for a window's
+// trailing edge: it returns pos unchanged unless raw[pos-1] and raw[pos] are
+// both non-whitespace, in which case it retreats to just past the nearest
+// preceding whitespace byte, excluding the bisected fragment. The scan is
+// bounded by redactionLookbackBytes; if no whitespace is found within that
+// bound, it gives up at the bound.
+func skipBisectedRunBackward(raw string, pos int) int {
+	if pos <= 0 || pos >= len(raw) || isRedactionBoundaryByte(raw[pos-1]) || isRedactionBoundaryByte(raw[pos]) {
+		return pos
+	}
+	limit := pos - redactionLookbackBytes
+	if limit < 0 {
+		limit = 0
+	}
+	for i := pos - 1; i >= limit; i-- {
+		if isRedactionBoundaryByte(raw[i]) {
+			return i + 1
+		}
+	}
+	return limit
 }
 
 // boundedConversation bounds user messages and the agent conversation on
