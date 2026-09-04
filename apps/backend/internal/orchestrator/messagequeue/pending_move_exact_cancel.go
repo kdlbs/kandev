@@ -196,7 +196,6 @@ func (r *sqliteRepository) deleteExactCancelTarget(
 					ON execution.session_id = caller_session.id
 					AND execution.task_id = caller.id
 					AND execution.agent_execution_id = ?
-					AND caller_session.agent_execution_id = execution.agent_execution_id
 				JOIN workspace_coordinator_grants coordinator_grant
 					ON coordinator_grant.workspace_id = caller.workspace_id
 					AND coordinator_grant.coordinator_task_id = caller.id
@@ -254,7 +253,6 @@ func (r *sqliteRepository) exactCancelActorAuthorized(
 			ON execution.session_id = caller_session.id
 			AND execution.task_id = caller.id
 			AND execution.agent_execution_id = ?
-			AND caller_session.agent_execution_id = execution.agent_execution_id
 		JOIN workspace_coordinator_grants coordinator_grant
 			ON coordinator_grant.workspace_id = caller.workspace_id
 			AND coordinator_grant.coordinator_task_id = caller.id

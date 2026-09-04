@@ -216,6 +216,36 @@ func TestSQLiteRepository_ExactCancelPendingMove(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ExactPendingMoveAuthorizationUsesCurrentSessionSchema(t *testing.T) {
+	t.Run("exact cancellation", func(t *testing.T) {
+		fixture := newExactCancelFixture(t)
+		if _, err := fixture.sql.Exec(`ALTER TABLE task_sessions DROP COLUMN agent_execution_id`); err != nil {
+			t.Fatalf("drop legacy session execution column: %v", err)
+		}
+
+		result, err := fixture.repo.ExactCancelPendingMove(
+			context.Background(), fixture.actor, fixture.match, "correlation-current-schema-cancel",
+		)
+		if err != nil || result == nil || !result.Cancelled {
+			t.Fatalf("current-schema exact cancel result=%#v err=%v", result, err)
+		}
+	})
+
+	t.Run("read census", func(t *testing.T) {
+		fixture := newExactCancelFixture(t)
+		if _, err := fixture.sql.Exec(`ALTER TABLE task_sessions DROP COLUMN agent_execution_id`); err != nil {
+			t.Fatalf("drop legacy session execution column: %v", err)
+		}
+
+		result, err := fixture.repo.ReadPendingMoveCensus(
+			context.Background(), fixture.actor, exactTargetTaskID, "correlation-current-schema-census",
+		)
+		if err != nil || result == nil || !result.Found {
+			t.Fatalf("current-schema census result=%#v err=%v", result, err)
+		}
+	})
+}
+
 func TestMemoryRepository_ExactPendingMoveAdministrationFailsClosed(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
@@ -431,11 +461,6 @@ func TestSQLiteRepository_ExactCancelPendingMoveAuthorizationIsNonLeaking(t *tes
 				t.Fatalf("stop execution: %v", err)
 			}
 		},
-		"caller session execution mismatched": func(f *exactCancelFixture) {
-			if _, err := f.sql.Exec(`UPDATE task_sessions SET agent_execution_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' WHERE id = ?`, exactCallerSessionID); err != nil {
-				t.Fatalf("replace caller session execution: %v", err)
-			}
-		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -507,10 +532,8 @@ func TestSQLiteRepository_ExactDeleteRevalidatesStateAndAuthorization(t *testing
 		"caller session stopped":    `UPDATE task_sessions SET state = 'STOPPED' WHERE id = '` + exactCallerSessionID + `'`,
 		"execution replaced":        `UPDATE executors_running SET agent_execution_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'`,
 		"execution stopped":         `UPDATE executors_running SET status = 'stopped'`,
-		"caller session execution changed": `UPDATE task_sessions SET agent_execution_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
-			WHERE id = '` + exactCallerSessionID + `'`,
-		"grant reassigned": `UPDATE workspace_coordinator_grants SET coordinator_task_id = '` + exactTargetTaskID + `'`,
-		"grant revoked":    `DELETE FROM workspace_coordinator_grants`,
+		"grant reassigned":          `UPDATE workspace_coordinator_grants SET coordinator_task_id = '` + exactTargetTaskID + `'`,
+		"grant revoked":             `DELETE FROM workspace_coordinator_grants`,
 	}
 	for name, mutation := range cases {
 		t.Run(name, func(t *testing.T) {
