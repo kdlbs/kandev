@@ -665,10 +665,16 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 }
 
 // applyApprovalGate redirects a "done" transition to in_review when the
-// task is not yet on a terminal workflow step, or when it is but approvals
-// are pending. Mutates dbState and apiStatus in place so the rest of
-// UpdateTaskStatus persists and emits the redirected status. Returns a
-// *ApprovalsPendingError when the gate fires; nil otherwise.
+// task is on a non-terminal workflow step, or when it is terminal (or has
+// no workflow step at all) but approvals are pending. Mutates dbState and
+// apiStatus in place so the rest of UpdateTaskStatus persists and emits
+// the redirected status. Returns a *ApprovalsPendingError when the gate
+// fires; nil otherwise.
+//
+// A task with no resolvable workflow step (e.g. a channel task, which is
+// never placed on a workflow) has nowhere to advance to, so it falls
+// through to the approver check exactly like a terminal-step task rather
+// than being redirected forever.
 //
 // The step-position check fails CLOSED, but a lookup error is not the same
 // as a confirmed non-terminal step: it aborts the whole update (a plain,
@@ -682,11 +688,11 @@ func (s *DashboardService) applyApprovalGate(
 	if *dbState != stateCompleted {
 		return nil
 	}
-	terminal, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
+	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
 	}
-	if !terminal {
+	if hasStep && !terminal {
 		*dbState = stateInReview
 		*apiStatus = statusInReviewLowercase
 		return &ApprovalsPendingError{}
