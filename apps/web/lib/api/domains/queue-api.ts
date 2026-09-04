@@ -182,26 +182,45 @@ async function findAcceptedQueueAdmission(
     // Continue to transcript reconciliation in case the queue already drained.
   }
   try {
-    const response = await client.request<{ messages?: Message[] }>(
-      "message.list",
-      { session_id: params.session_id, limit: 100, sort: "desc" },
-      5000,
-    );
-    const recorded = response.messages?.find(
-      (message) => message.metadata?.client_queue_id === params.client_queue_id,
-    );
-    if (!recorded) return undefined;
-    return {
-      id: params.client_queue_id,
-      session_id: params.session_id,
-      task_id: params.task_id,
-      content: recorded.content,
-      model: params.model,
-      plan_mode: params.plan_mode ?? false,
-      attachments: params.attachments,
-      metadata: recorded.metadata,
-      queued_at: recorded.created_at,
-    };
+    let before: string | undefined;
+    const seenCursors = new Set<string>();
+    do {
+      const response = await client.request<{
+        messages?: Message[];
+        has_more?: boolean;
+        cursor?: string;
+      }>(
+        "message.list",
+        {
+          session_id: params.session_id,
+          limit: 100,
+          sort: "desc",
+          ...(before ? { before } : {}),
+        },
+        5000,
+      );
+      const recorded = response.messages?.find(
+        (message) => message.metadata?.client_queue_id === params.client_queue_id,
+      );
+      if (recorded) {
+        return {
+          id: params.client_queue_id,
+          session_id: params.session_id,
+          task_id: params.task_id,
+          content: recorded.content,
+          model: params.model,
+          plan_mode: params.plan_mode ?? false,
+          attachments: params.attachments,
+          metadata: recorded.metadata,
+          queued_at: recorded.created_at,
+        };
+      }
+      const cursor = response.cursor;
+      if (!response.has_more || !cursor || seenCursors.has(cursor)) return undefined;
+      seenCursors.add(cursor);
+      before = cursor;
+    } while (before);
+    return undefined;
   } catch {
     return undefined;
   }

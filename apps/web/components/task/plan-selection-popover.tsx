@@ -135,6 +135,7 @@ function usePopoverComposer(
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.repeat) return;
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         if (e.shiftKey && onAddAndRun) {
@@ -215,7 +216,7 @@ function PlanCommentDrawerHeader({
   );
 }
 
-function DeleteCommentButton({ onDelete }: { onDelete?: () => void }) {
+function DeleteCommentButton({ onDelete, disabled }: { onDelete?: () => void; disabled: boolean }) {
   const { t } = useTranslation();
   if (!onDelete) return null;
   return (
@@ -223,6 +224,7 @@ function DeleteCommentButton({ onDelete }: { onDelete?: () => void }) {
       size="sm"
       variant="ghost"
       onClick={onDelete}
+      disabled={disabled}
       aria-label={t("task:deleteComment")}
       className="h-6 px-1.5 text-muted-foreground hover:text-destructive cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11"
     >
@@ -247,16 +249,18 @@ function RunCommentButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          onClick={onSubmitAndRun}
-          disabled={isDisabled || !!runDisabledReason}
-          data-testid={runButtonTestId}
-          className="h-7 gap-1 rounded-l-none text-xs cursor-pointer [@media(pointer:coarse)]:h-11"
-        >
-          <IconPlayerPlay className="h-3 w-3" />
-          {t("task:run")}
-        </Button>
+        <span className="inline-flex" tabIndex={runDisabledReason ? 0 : undefined}>
+          <Button
+            size="sm"
+            onClick={onSubmitAndRun}
+            disabled={isDisabled || !!runDisabledReason}
+            data-testid={runButtonTestId}
+            className="h-7 gap-1 rounded-l-none text-xs cursor-pointer [@media(pointer:coarse)]:h-11"
+          >
+            <IconPlayerPlay className="h-3 w-3" />
+            {t("task:run")}
+          </Button>
+        </span>
       </TooltipTrigger>
       <TooltipContent side="bottom">
         <p>{runDisabledReason || t("task:saveAndSendToAgent")}</p>
@@ -274,6 +278,7 @@ function PopoverActions({
   addButtonTestId,
   runButtonTestId,
   runDisabledReason,
+  mutationPending,
 }: {
   isEditing: boolean;
   isDisabled: boolean;
@@ -283,6 +288,7 @@ function PopoverActions({
   addButtonTestId?: string;
   runButtonTestId?: string;
   runDisabledReason?: string | null;
+  mutationPending: boolean;
 }) {
   const { t } = useTranslation();
   const splitAction = Boolean(onSubmitAndRun && !isEditing);
@@ -293,7 +299,10 @@ function PopoverActions({
           {isEditing ? t("task:cmdEnterToUpdate") : t("task:cmdEnterToAdd")}
           {onSubmitAndRun && !isEditing ? t("task:shiftEnterToRun") : ""}
         </span>
-        <DeleteCommentButton onDelete={isEditing ? onDelete : undefined} />
+        <DeleteCommentButton
+          onDelete={isEditing ? onDelete : undefined}
+          disabled={mutationPending}
+        />
       </div>
       <TooltipProvider delayDuration={400}>
         <div className="inline-flex">
@@ -420,6 +429,7 @@ function DesktopPlanSelectionPopover({
           addButtonTestId={addButtonTestId}
           runButtonTestId={runButtonTestId}
           runDisabledReason={runDisabledReason}
+          mutationPending={isSubmitting || isDeleting}
         />
       </div>
     </div>,
@@ -480,7 +490,7 @@ function PlanSelectionDrawer({
                 size="sm"
                 variant="ghost"
                 onClick={() => void deleteComment()}
-                disabled={isDeleting}
+                disabled={isDeleting || isSubmitting}
                 aria-label={t("task:deleteComment")}
                 className="min-h-11 min-w-11 cursor-pointer px-3 text-muted-foreground hover:text-destructive"
               >

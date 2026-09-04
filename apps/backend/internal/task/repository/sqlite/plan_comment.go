@@ -9,13 +9,26 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 )
 
 const planCommentSelectCols = `id, task_id, plan_id, body, selected_text, anchor_from, anchor_to, version, created_at, updated_at`
 
 // ListTaskPlanComments returns the complete pending-comment snapshot for the current plan.
 func (r *Repository) ListTaskPlanComments(ctx context.Context, taskID string) (*models.TaskPlanCommentSnapshot, error) {
-	return r.readPlanCommentSnapshot(ctx, r.ro, taskID)
+	tx, err := r.ro.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin task plan comment snapshot read: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	snapshot, err := r.readPlanCommentSnapshot(ctx, tx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit task plan comment snapshot read: %w", err)
+	}
+	return snapshot, nil
 }
 
 // CreateTaskPlanComment inserts a caller-identified comment and increments the collection revision.
@@ -23,6 +36,10 @@ func (r *Repository) CreateTaskPlanComment(
 	ctx context.Context,
 	comment *models.TaskPlanComment,
 ) (*models.TaskPlanCommentSnapshot, error) {
+	fingerprint, err := planCommentCreateFingerprint(comment)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := r.beginPlanCommentTx(ctx, comment.TaskID)
 	if err != nil {
 		return nil, err
@@ -36,6 +53,12 @@ func (r *Repository) CreateTaskPlanComment(
 	if planID != comment.PlanID {
 		return r.commitPlanCommentConflict(ctx, tx, comment.TaskID)
 	}
+	snapshot, handled, err := r.resolvePlanCommentAdmissionReplay(
+		ctx, tx, comment, fingerprint,
+	)
+	if err != nil || handled {
+		return snapshot, err
+	}
 
 	existing, err := getPlanCommentInTx(ctx, tx, r.db, comment.ID)
 	if err != nil {
@@ -43,6 +66,9 @@ func (r *Repository) CreateTaskPlanComment(
 	}
 	if existing != nil {
 		if samePlanCommentCreate(existing, comment) {
+			if err := insertPlanCommentAdmission(ctx, tx, r.db, comment, fingerprint); err != nil {
+				return nil, err
+			}
 			return r.commitPlanCommentRead(ctx, tx, comment.TaskID)
 		}
 		return r.commitPlanCommentConflict(ctx, tx, comment.TaskID)
@@ -52,6 +78,9 @@ func (r *Repository) CreateTaskPlanComment(
 	comment.Version = 1
 	comment.CreatedAt = now
 	comment.UpdatedAt = now
+	if err := insertPlanCommentAdmission(ctx, tx, r.db, comment, fingerprint); err != nil {
+		return nil, err
+	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_plan_comments
 			(id, task_id, plan_id, body, selected_text, anchor_from, anchor_to, version, created_at, updated_at)
@@ -62,6 +91,88 @@ func (r *Repository) CreateTaskPlanComment(
 		return nil, fmt.Errorf("insert task plan comment: %w", err)
 	}
 	return r.incrementAndCommitPlanCommentSnapshot(ctx, tx, comment.TaskID)
+}
+
+type planCommentAdmission struct {
+	taskID      string
+	planID      string
+	fingerprint string
+}
+
+func (r *Repository) resolvePlanCommentAdmissionReplay(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	comment *models.TaskPlanComment,
+	fingerprint string,
+) (*models.TaskPlanCommentSnapshot, bool, error) {
+	admission, err := getPlanCommentAdmissionInTx(ctx, tx, r.db, comment.ID)
+	if err != nil {
+		return nil, true, err
+	}
+	if admission == nil {
+		return nil, false, nil
+	}
+	if admission.taskID == comment.TaskID && admission.planID == comment.PlanID &&
+		admission.fingerprint == fingerprint {
+		snapshot, err := r.commitPlanCommentRead(ctx, tx, comment.TaskID)
+		return snapshot, true, err
+	}
+	snapshot, err := r.commitPlanCommentConflict(ctx, tx, comment.TaskID)
+	return snapshot, true, err
+}
+
+func planCommentCreateFingerprint(comment *models.TaskPlanComment) (string, error) {
+	return plancomments.Fingerprint(struct {
+		ID           string `json:"id"`
+		TaskID       string `json:"task_id"`
+		PlanID       string `json:"plan_id"`
+		Body         string `json:"body"`
+		SelectedText string `json:"selected_text"`
+		AnchorFrom   int    `json:"anchor_from"`
+		AnchorTo     int    `json:"anchor_to"`
+	}{
+		ID: comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
+		Body: comment.Body, SelectedText: comment.SelectedText,
+		AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo,
+	})
+}
+
+func getPlanCommentAdmissionInTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	commentID string,
+) (*planCommentAdmission, error) {
+	admission := &planCommentAdmission{}
+	err := tx.QueryRowContext(ctx, db.Rebind(`
+		SELECT task_id, plan_id, request_fingerprint
+		FROM task_plan_comment_admissions WHERE id = ?
+	`), commentID).Scan(&admission.taskID, &admission.planID, &admission.fingerprint)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read task plan comment admission: %w", err)
+	}
+	return admission, nil
+}
+
+func insertPlanCommentAdmission(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	comment *models.TaskPlanComment,
+	fingerprint string,
+) error {
+	_, err := tx.ExecContext(ctx, db.Rebind(`
+		INSERT INTO task_plan_comment_admissions
+			(id, task_id, plan_id, request_fingerprint, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), comment.ID, comment.TaskID, comment.PlanID, fingerprint, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("insert task plan comment admission: %w", err)
+	}
+	return nil
 }
 
 // UpdateTaskPlanComment changes a comment body when its plan and row version still match.

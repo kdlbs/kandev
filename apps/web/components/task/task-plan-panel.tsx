@@ -90,7 +90,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
   } = usePlanDraft({ plan, isSaving, savePlan, editorWrapperRef, taskId, saveError });
   const commentState = usePlanComments(taskId);
   const planCommentMigration = usePlanCommentMigration(taskId);
-  const selectionState = usePlanSelection(taskId, commentState);
+  const selectionState = usePlanSelection(taskId, plan?.id, commentState);
 
   const handleEditorReady = useCallback((editor: Editor) => {
     editorInstanceRef.current = editor;
@@ -318,10 +318,21 @@ function usePlanSelectionCommentActions({
   runComment: ReturnType<typeof useRunComment>["runComment"];
 }) {
   const [runError, setRunError] = useState<string | null>(null);
-  const savedRunCommentRef = useRef<{ selection: string; comment: PlanComment } | null>(null);
+  const savedRunCommentRef = useRef<{
+    owner: string;
+    selection: string;
+    body: string;
+    comment: PlanComment;
+  } | null>(null);
+  const ownerIdentity = `${commentState.snapshot?.task_id ?? ""}:${commentState.snapshot?.plan_id ?? ""}`;
   const selectionIdentity = textSelection
     ? `${textSelection.from ?? ""}:${textSelection.to ?? ""}:${textSelection.text}`
     : "";
+
+  useEffect(() => {
+    savedRunCommentRef.current = null;
+    setRunError(null);
+  }, [ownerIdentity]);
 
   const addCommentAndApplyMark = useCallback(
     async (comment: string, selectedText: string) => {
@@ -353,11 +364,27 @@ function usePlanSelectionCommentActions({
     async (comment: string, selectedText: string) => {
       setRunError(null);
       const previous = savedRunCommentRef.current;
-      let saved = previous?.selection === selectionIdentity ? previous.comment : null;
+      const current = previous
+        ? commentState.comments.find((candidate) => candidate.id === previous.comment.id)
+        : null;
+      let saved =
+        previous?.owner === ownerIdentity &&
+        previous.selection === selectionIdentity &&
+        previous.body === comment.trim() &&
+        current != null &&
+        current?.version === previous.comment.version &&
+        current.text === previous.comment.text
+          ? current
+          : null;
       if (!saved) {
         saved = await addCommentAndApplyMark(comment, selectedText);
         if (!saved) return false;
-        savedRunCommentRef.current = { selection: selectionIdentity, comment: saved };
+        savedRunCommentRef.current = {
+          owner: ownerIdentity,
+          selection: selectionIdentity,
+          body: comment.trim(),
+          comment: saved,
+        };
       }
       try {
         await runComment(saved);
@@ -368,7 +395,7 @@ function usePlanSelectionCommentActions({
         return false;
       }
     },
-    [addCommentAndApplyMark, runComment, selectionIdentity],
+    [addCommentAndApplyMark, commentState.comments, ownerIdentity, runComment, selectionIdentity],
   );
 
   return { handleAdd, handleAddAndRun, runError };

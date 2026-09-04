@@ -27,7 +27,7 @@ describe("plan selection task ownership", () => {
     const view = renderHook(
       ({ taskId, sessionId, comments }) => {
         void sessionId;
-        return usePlanSelection(taskId, { comments, setEditingCommentId });
+        return usePlanSelection(taskId, "plan-1", { comments, setEditingCommentId });
       },
       {
         initialProps: {
@@ -50,6 +50,27 @@ describe("plan selection task ownership", () => {
     expect(setEditingCommentId).not.toHaveBeenCalled();
 
     view.rerender({ taskId: OTHER_TASK_ID, sessionId: "session-other", comments: [] });
+
+    await waitFor(() => expect(view.result.current.textSelection).toBeNull());
+    expect(setEditingCommentId).toHaveBeenLastCalledWith(null);
+  });
+
+  it("clears comment editing state when the current plan is replaced", async () => {
+    const setEditingCommentId = vi.fn();
+    const view = renderHook(
+      ({ planId }) =>
+        usePlanSelection(TASK_ID, planId, {
+          comments: [primaryComment],
+          setEditingCommentId,
+        }),
+      { initialProps: { planId: "plan-1" } },
+    );
+    act(() => {
+      view.result.current.handleCommentHighlightClick(primaryComment.id, { x: 20, y: 20 });
+    });
+    setEditingCommentId.mockClear();
+
+    view.rerender({ planId: "plan-2" });
 
     await waitFor(() => expect(view.result.current.textSelection).toBeNull());
     expect(setEditingCommentId).toHaveBeenLastCalledWith(null);

@@ -7,9 +7,11 @@ const getWebSocketClientMock = vi.hoisted(() => vi.fn());
 const queueMock = vi.hoisted(() => vi.fn());
 const addMessageMock = vi.hoisted(() => vi.fn());
 const setTaskPlanCommentsMock = vi.hoisted(() => vi.fn());
+const getTaskPlanCommentsMock = vi.hoisted(() => vi.fn());
 const storeState = vi.hoisted(() => ({
   current: {
     taskSessions: { items: {} as Record<string, unknown> },
+    queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: addMessageMock,
     setTaskPlanComments: setTaskPlanCommentsMock,
   },
@@ -20,6 +22,9 @@ vi.mock("@/lib/ws/connection", () => ({
 }));
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({ getState: () => storeState.current }),
+}));
+vi.mock("@/lib/api/domains/plan-comment-api", () => ({
+  getTaskPlanComments: getTaskPlanCommentsMock,
 }));
 vi.mock("./domains/session/use-queue", () => ({
   useQueue: () => ({ queue: queueMock }),
@@ -50,7 +55,14 @@ function renderMessageHandler() {
 beforeEach(() => {
   vi.clearAllMocks();
   storeState.current.taskSessions.items = {};
+  storeState.current.queue.metaBySessionId = {};
   getWebSocketClientMock.mockReturnValue({ request: vi.fn().mockResolvedValue(undefined) });
+  getTaskPlanCommentsMock.mockResolvedValue({
+    task_id: TASK_ID,
+    plan_id: "plan-1",
+    revision: 3,
+    comments: [],
+  });
 });
 
 describe("sendMessageRequest task plan comments", () => {
@@ -101,6 +113,23 @@ describe("useMessageHandler queued plan comments", () => {
         planCommentRefs: [{ id: COMMENT_ID, version: 2 }],
       }),
     );
+  });
+
+  it("queues behind existing prompts for a steer-capable running session", async () => {
+    selectedSession("RUNNING", "generating");
+    Object.assign(storeState.current.taskSessions.items[SESSION_ID] as object, {
+      supports_steering: true,
+    });
+    storeState.current.queue.metaBySessionId[SESSION_ID] = { count: 1 };
+    const { result } = renderMessageHandler();
+
+    await result.current.handleSendMessage({
+      message: "Use this feedback",
+      planCommentRefs: [{ id: COMMENT_ID, version: 2 }],
+    } as never);
+
+    expect(queueMock).toHaveBeenCalled();
+    expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });
 });
 

@@ -53,11 +53,15 @@ func TestPostgresPlanCommentSchemaReplayAndCRUD(t *testing.T) {
 	if snapshot.PlanID != "plan-comments-pg" || snapshot.Revision != 0 || len(snapshot.Comments) != 0 {
 		t.Fatalf("snapshot after migration = %#v", snapshot)
 	}
-	if _, err := repo.CreateTaskPlanComment(ctx, &models.TaskPlanComment{
+	created, err := repo.CreateTaskPlanComment(ctx, &models.TaskPlanComment{
 		ID: "comment-comments-pg-new", TaskID: "task-plan-comments-pg", PlanID: "plan-comments-pg",
 		Body: "Retained", SelectedText: "Plan", AnchorFrom: 1, AnchorTo: 5,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("create after migration: %v", err)
+	}
+	if created.Revision != 1 {
+		t.Fatalf("revision after create = %d, want 1", created.Revision)
 	}
 	if _, err := db.Exec(db.Rebind(`DELETE FROM tasks WHERE id = ?`), "task-plan-comments-pg"); err != nil {
 		t.Fatalf("delete task: %v", err)

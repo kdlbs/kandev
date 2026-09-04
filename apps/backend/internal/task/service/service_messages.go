@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 )
@@ -31,6 +32,17 @@ type planCommentMessageWriter interface {
 		*models.Message,
 		[]models.TaskPlanCommentRef,
 		bool,
+	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type queuedPlanCommentMessageWriter interface {
+	CreateMessageWithPlanCommentsAndQueue(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		[]models.TaskPlanCommentRef,
+		bool,
+		int,
 	) (*models.TaskPlanCommentSnapshot, error)
 }
 
@@ -168,6 +180,130 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 		return existing, nil
 	}
 	return nil, err
+}
+
+type planCommentMessageValidator interface {
+	ValidateMessagePlanComments(
+		context.Context,
+		string,
+		string,
+		string,
+		[]models.TaskPlanCommentRef,
+		bool,
+	) error
+}
+
+// ValidatePlanCommentMessage rejects stale references before callers execute
+// stateful turn-start hooks. Persistence repeats the same validation under its
+// atomic message/comment boundary to close races.
+func (s *Service) ValidatePlanCommentMessage(
+	ctx context.Context,
+	taskID, sessionID, content string,
+	refs []models.TaskPlanCommentRef,
+	requirePrimary bool,
+) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	validator, ok := s.messages.(planCommentMessageValidator)
+	if !ok {
+		return errors.New("plan comment message validation is unavailable")
+	}
+	return validator.ValidateMessagePlanComments(
+		ctx, taskID, sessionID, plancomments.WithPlaceholder(content), refs, requirePrimary,
+	)
+}
+
+// CreateQueuedMessageIdempotent commits a comment-bearing user message and
+// its deferred queue delivery in the same repository transaction. Exact
+// caller-ID replays return the original message without adding another queue
+// entry or consuming another comment snapshot.
+func (s *Service) CreateQueuedMessageIdempotent(
+	ctx context.Context,
+	id string,
+	req *CreateMessageRequest,
+	queued *messagequeue.QueuedMessage,
+	maxPerSession int,
+) (*models.Message, error) {
+	if err := validateQueuedPlanCommentMessage(id, req, queued); err != nil {
+		return nil, err
+	}
+	existing, found, err := s.findPlanCommentMessageReplay(ctx, id, req)
+	if err != nil || found {
+		return existing, err
+	}
+
+	session, err := s.getSessionWithRetry(ctx, req.TaskSessionID, id, messageCreateMaxRetries, messageCreateRetryDelay)
+	if err != nil {
+		return nil, err
+	}
+	message, err := s.buildMessage(ctx, id, req, session)
+	if err != nil {
+		return nil, err
+	}
+	queued.ID = id
+	queued.SessionID = message.TaskSessionID
+	queued.TaskID = message.TaskID
+	queued.Content = message.Content
+	queued.QueuedBy = messagequeue.QueuedByUser
+
+	writer, ok := s.messages.(queuedPlanCommentMessageWriter)
+	if !ok {
+		return nil, errors.New("queued plan comment message admission is unavailable")
+	}
+	snapshot, err := writer.CreateMessageWithPlanCommentsAndQueue(
+		ctx, message, queued, req.PlanCommentRefs, req.RequirePrimarySession, maxPerSession,
+	)
+	if err != nil {
+		existing, found, lookupErr := s.findPlanCommentMessageReplay(ctx, id, req)
+		if lookupErr == nil && found {
+			return existing, nil
+		}
+		return nil, err
+	}
+
+	_ = s.publishMessageEvent(ctx, events.MessageAdded, message)
+	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
+	s.logger.Info("queued message created with ID",
+		zap.String("message_id", message.ID),
+		zap.String("session_id", message.TaskSessionID),
+		zap.String("author_type", string(message.AuthorType)))
+	return message, nil
+}
+
+func validateQueuedPlanCommentMessage(
+	id string,
+	req *CreateMessageRequest,
+	queued *messagequeue.QueuedMessage,
+) error {
+	if id == "" {
+		return errors.New("message id is required for idempotent creation")
+	}
+	if req == nil || len(req.PlanCommentRefs) == 0 {
+		return errors.New("plan comment refs are required for queued message creation")
+	}
+	if queued == nil {
+		return errors.New("queued message is required")
+	}
+	return preparePlanCommentMessageRequest(req)
+}
+
+func (s *Service) findPlanCommentMessageReplay(
+	ctx context.Context,
+	id string,
+	req *CreateMessageRequest,
+) (*models.Message, bool, error) {
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && existing == nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("check existing queued message: %w", err)
+	}
+	if !matchesPlanCommentMessageReplay(existing, req) {
+		return nil, false, ErrMessageIDConflict
+	}
+	return existing, true, nil
 }
 
 // CreateMessageWithID creates a new message with a pre-generated ID.

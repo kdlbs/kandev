@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -115,6 +116,11 @@ type QueueAttachmentClaimer interface {
 
 type QueueAttachmentReleaser interface {
 	ReleaseMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
+}
+
+type QueueAttachmentAdmissionClaimer interface {
+	ClaimQueuedMessageAttachments(ctx context.Context, taskID, sessionID, queueID string, attachments []v1.MessageAttachment) error
+	RestoreQueuedMessageAttachments(ctx context.Context, taskID, sessionID, queueID string, attachments []v1.MessageAttachment) error
 }
 
 type queueEntryTaker interface {
@@ -343,12 +349,18 @@ func (h *QueueHandlers) admitPlanCommentQueuedMessage(
 		return nil, errors.New("plan comment queue admission is unavailable")
 	}
 	attachments := queueAttachmentsToV1(req.Attachments)
-	claimed := false
+	var admissionClaimer QueueAttachmentAdmissionClaimer
 	if h.attachmentClaimer != nil && len(attachments) > 0 {
-		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, req.TaskID, req.SessionID, attachments); err != nil {
+		var ok bool
+		admissionClaimer, ok = h.attachmentClaimer.(QueueAttachmentAdmissionClaimer)
+		if !ok {
+			return nil, errors.New("queued attachment admission is unavailable")
+		}
+		if err := admissionClaimer.ClaimQueuedMessageAttachments(
+			ctx, req.TaskID, req.SessionID, req.ClientQueueID, attachments,
+		); err != nil {
 			return nil, fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, err)
 		}
-		claimed = true
 	}
 	result, err := service.QueueMessageWithPlanComments(ctx, messagequeue.PlanCommentQueueRequest{
 		ClientQueueID: req.ClientQueueID, SessionID: req.SessionID, TaskID: req.TaskID,
@@ -356,15 +368,13 @@ func (h *QueueHandlers) admitPlanCommentQueuedMessage(
 		Attachments: req.Attachments, Metadata: metadata, PlanCommentRefs: req.PlanCommentRefs,
 		RequirePrimarySession: req.RequirePrimarySession,
 	})
-	if err == nil || !claimed {
+	if err == nil || admissionClaimer == nil {
 		return result, err
 	}
-	releaser, ok := h.attachmentClaimer.(QueueAttachmentReleaser)
-	if !ok {
-		return nil, fmt.Errorf("%w: attachment releaser unavailable", errQueuedAttachmentRollback)
-	}
-	if releaseErr := releaser.ReleaseMessageAttachments(ctx, req.TaskID, req.SessionID, attachments); releaseErr != nil {
-		return nil, fmt.Errorf("%w: %v", errQueuedAttachmentRollback, releaseErr)
+	if restoreErr := admissionClaimer.RestoreQueuedMessageAttachments(
+		ctx, req.TaskID, req.SessionID, req.ClientQueueID, attachments,
+	); restoreErr != nil {
+		return nil, fmt.Errorf("%w: %v", errQueuedAttachmentRollback, restoreErr)
 	}
 	return nil, err
 }
@@ -378,6 +388,9 @@ func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
 	}
 	if len(req.ClientQueueID) > 128 {
 		return "client_queue_id is too long"
+	}
+	if plancomments.ContainsReservedPlaceholder(req.Content) {
+		return "content contains a reserved plan comment marker"
 	}
 	seen := make(map[string]struct{}, len(req.PlanCommentRefs))
 	for _, ref := range req.PlanCommentRefs {

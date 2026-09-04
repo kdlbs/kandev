@@ -329,6 +329,7 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	if headState == planHeadFound {
 		plan.ID = headPlan.ID
 		plan.CreatedAt = headPlan.CreatedAt
+		plan.CommentsRevision = headPlan.CommentsRevision
 	}
 
 	latest, latestState := s.readLatestRevision(readCtx, req.TaskID)
@@ -782,6 +783,7 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 	if headState == planHeadFound {
 		plan.ID = headPlan.ID
 		plan.CreatedAt = headPlan.CreatedAt
+		plan.CommentsRevision = headPlan.CommentsRevision
 	}
 
 	targetID := target.ID

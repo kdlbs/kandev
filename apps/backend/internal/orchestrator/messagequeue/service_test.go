@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1034,6 +1035,34 @@ func TestMemoryRepository_MergeIntoAbove_MixedKindsRejected(t *testing.T) {
 
 	_, err = repo.MergeIntoAbove(ctx, "s1", "missing", "alice")
 	assert.ErrorIs(t, err, ErrEntryNotFound)
+}
+
+func TestMemoryRepository_MergeIntoAbove_PlanCommentAdmissionRejected(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		sourceMetadata map[string]interface{}
+		targetMetadata map[string]interface{}
+	}{
+		{name: "source", sourceMetadata: map[string]interface{}{plancomments.MetadataClientQueueID: "comment-request"}},
+		{name: "target", targetMetadata: map[string]interface{}{plancomments.MetadataRefs: []interface{}{}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := NewMemoryRepository()
+			target := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "target", QueuedBy: "alice", Metadata: test.targetMetadata}
+			require.NoError(t, repo.Insert(ctx, target, 0))
+			source := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "source", QueuedBy: "alice", Metadata: test.sourceMetadata}
+			require.NoError(t, repo.Insert(ctx, source, 0))
+
+			_, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "alice")
+			assert.ErrorIs(t, err, ErrNoMergeTarget)
+			items, listErr := repo.ListBySession(ctx, "s1")
+			require.NoError(t, listErr)
+			require.Len(t, items, 2)
+			assert.Equal(t, target.ID, items[0].ID)
+			assert.Equal(t, source.ID, items[1].ID)
+		})
+	}
 }
 
 // TestMemoryRepository_MergeIntoAbove_ReferenceOverflow asserts an over-cap

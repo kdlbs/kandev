@@ -52,7 +52,7 @@ including lifecycle cascades and live task notifications.
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/gateway/websocket
+cd apps/backend && go test -tags fts5 ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/gateway/websocket
 ```
 
 ## Files likely touched

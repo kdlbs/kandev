@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
@@ -17,6 +18,17 @@ type planCommentMessageRepository interface {
 		*models.Message,
 		[]models.TaskPlanCommentRef,
 		bool,
+	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type queuedPlanCommentMessageRepository interface {
+	CreateMessageWithPlanCommentsAndQueue(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		[]models.TaskPlanCommentRef,
+		bool,
+		int,
 	) (*models.TaskPlanCommentSnapshot, error)
 }
 
@@ -51,6 +63,15 @@ func TestCreateMessageWithPlanCommentsConsumesAtomically(t *testing.T) {
 	stored, err := repo.GetMessageWithPromptIndex(ctx, message.ID)
 	if err != nil || stored.Content != want || stored.PromptIndex != 1 {
 		t.Fatalf("stored message = %#v, err=%v", stored, err)
+	}
+	var storedMetadata string
+	if err := repo.db.GetContext(ctx, &storedMetadata, repo.db.Rebind(
+		`SELECT metadata FROM task_session_messages WHERE id = ?`,
+	), message.ID); err != nil {
+		t.Fatalf("read stored metadata: %v", err)
+	}
+	if storedMetadata != "{}" {
+		t.Fatalf("stored metadata = %q, want an empty JSON object", storedMetadata)
 	}
 }
 
@@ -99,6 +120,82 @@ func TestCreateMessageWithPlanCommentsRejectsStalePrimary(t *testing.T) {
 	pending, listErr := repo.ListTaskPlanComments(ctx, "task-message-comments-primary")
 	if listErr != nil || len(pending.Comments) != 1 {
 		t.Fatalf("pending snapshot = %#v, err=%v", pending, listErr)
+	}
+}
+
+func TestCreateMessageWithPlanCommentsAndQueueIsAtomic(t *testing.T) {
+	tests := []struct {
+		name             string
+		occupyQueueID    bool
+		wantErr          error
+		wantCommentCount int
+		wantMessage      bool
+	}{
+		{name: "commits message queue and consumption", wantMessage: true},
+		{
+			name: "queue conflict rolls back message and consumption", occupyQueueID: true,
+			wantErr: messagequeue.ErrQueueIDConflict, wantCommentCount: 1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			seedMessagePlanComment(t, ctx, repo, "queued")
+			queueRepo, err := messagequeue.NewSQLiteRepository(repo.db, repo.db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.occupyQueueID {
+				err = queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
+					ID: "message-plan-comments-queued", SessionID: "session-message-comments-queued",
+					TaskID: "task-message-comments-queued", Content: "different", QueuedBy: messagequeue.QueuedByUser,
+				}, 10)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			writes, ok := any(repo).(queuedPlanCommentMessageRepository)
+			if !ok {
+				t.Fatal("Repository does not implement atomic queued plan-comment message creation")
+			}
+			message := planCommentMessage("queued", "message-plan-comments-queued")
+			queued := &messagequeue.QueuedMessage{
+				ID: message.ID, SessionID: message.TaskSessionID, TaskID: message.TaskID,
+				Content: message.Content, Model: "test-model", PlanMode: true,
+				Metadata: map[string]interface{}{"user_message_recorded": true}, QueuedBy: messagequeue.QueuedByUser,
+			}
+
+			snapshot, err := writes.CreateMessageWithPlanCommentsAndQueue(
+				ctx, message, queued, []models.TaskPlanCommentRef{{ID: "comment-queued", Version: 1}}, true, 10,
+			)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("CreateMessageWithPlanCommentsAndQueue error = %v, want %v", err, test.wantErr)
+			}
+			pending, listErr := repo.ListTaskPlanComments(ctx, message.TaskID)
+			if listErr != nil || len(pending.Comments) != test.wantCommentCount {
+				t.Fatalf("pending snapshot = %#v, err=%v", pending, listErr)
+			}
+			stored, messageErr := repo.GetMessageWithPromptIndex(ctx, message.ID)
+			if test.wantMessage {
+				if messageErr != nil || stored.Content != queued.Content || snapshot == nil || snapshot.Revision != 2 {
+					t.Fatalf("stored message=%#v queued=%#v snapshot=%#v err=%v", stored, queued, snapshot, messageErr)
+				}
+			} else if !errors.Is(messageErr, sql.ErrNoRows) {
+				t.Fatalf("rolled-back message lookup error = %v, want sql.ErrNoRows", messageErr)
+			}
+			entries, queueErr := queueRepo.ListBySession(ctx, message.TaskSessionID)
+			if queueErr != nil {
+				t.Fatal(queueErr)
+			}
+			if test.wantMessage {
+				if len(entries) != 1 || entries[0].ID != message.ID || entries[0].Content != message.Content {
+					t.Fatalf("queued entries = %#v", entries)
+				}
+			} else if len(entries) != 1 || entries[0].Content != "different" {
+				t.Fatalf("conflicting queue entry changed: %#v", entries)
+			}
+		})
 	}
 }
 

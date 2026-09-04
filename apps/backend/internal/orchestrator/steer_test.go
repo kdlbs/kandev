@@ -148,7 +148,7 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 		t.Fatalf("pause queue auto-run: %v", err)
 	}
 
-	result, err := svc.SteerTask(ctx, taskID, sessionID, "steer second", "", false, nil)
+	result, err := svc.SteerRecordedMessage(ctx, taskID, sessionID, "steer second", "", false, nil)
 	if err != nil {
 		t.Fatalf("SteerTask with a queued message errored: %v", err)
 	}
@@ -163,6 +163,9 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	if status.Entries[0].Content != "queued first" || status.Entries[1].Content != "steer second" {
 		t.Fatalf("queue order = [%q, %q], want [queued first, steer second]",
 			status.Entries[0].Content, status.Entries[1].Content)
+	}
+	if recorded, _ := status.Entries[1].Metadata["user_message_recorded"].(bool); !recorded {
+		t.Fatalf("queued steer metadata = %#v, want user_message_recorded", status.Entries[1].Metadata)
 	}
 	if len(eventBus.events) != 1 {
 		t.Fatalf("queue status event count = %d, want 1", len(eventBus.events))

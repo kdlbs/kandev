@@ -3197,6 +3197,22 @@ func (s *Service) QueueUserPrompt(
 	return nil
 }
 
+// MaxQueuedPromptsPerSession exposes the active queue capacity to transaction
+// owners that persist a user message and its deferred delivery atomically.
+func (s *Service) MaxQueuedPromptsPerSession() int {
+	if s.messageQueue == nil {
+		return 0
+	}
+	return s.messageQueue.MaxPerSession()
+}
+
+// NotifyQueuedUserPrompt publishes and opportunistically drains a queue row
+// that another repository committed atomically with its user-message record.
+func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
+	s.publishQueueStatusEvent(ctx, sessionID)
+	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)
+}
+
 // tryFastPathDrainAfterEnqueue is the T2 fast-path drain. After QueueUserPrompt
 // has admitted a user message into the session's queue, this method
 // decides whether the message is safe to dispatch right now. The

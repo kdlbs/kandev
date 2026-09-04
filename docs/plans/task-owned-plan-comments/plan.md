@@ -179,7 +179,7 @@ owns dialect parity.
   consumption, reload, migration, retained diff context, touch targets, and
   overflow checks.
 - Specifications and public docs: spec lint, all 61 docs validator tests, and
-  validation of all 41 published pages passed.
+  validation of all 42 published pages passed.
 
 ## Implementation waves and parallel candidates
 

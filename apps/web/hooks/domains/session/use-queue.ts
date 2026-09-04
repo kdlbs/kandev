@@ -234,7 +234,12 @@ function useQueueActions({
           ...(requirePrimarySession ? { require_primary_session: true } : {}),
           ...(contextFilesMeta ? { context_files: contextFilesMeta } : {}),
         });
-        await refetch(sessionId);
+        try {
+          await refetch(sessionId);
+        } catch {
+          // Admission already committed. Notifications and foreground refresh
+          // will reconcile the queue without turning success into a retry.
+        }
       } finally {
         setQueueLoading(sessionId, false);
       }

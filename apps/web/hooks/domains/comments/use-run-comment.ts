@@ -26,6 +26,7 @@ import type { TaskSession } from "@/lib/types/http";
 import { sendMessageRequest } from "@/hooks/use-message-handler";
 import { t } from "@/lib/i18n";
 import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
+import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 
 /**
  * Format a single comment into markdown suitable for sending to the agent.
@@ -98,7 +99,10 @@ export type PlanCommentRunAvailability =
 function listedPrimarySession(state: AppState, taskId: string): TaskSession | undefined {
   const taskSessions = state.taskSessionsByTask?.itemsByTaskId[taskId] ?? [];
   const listed = taskSessions.find((candidate) => candidate.is_primary);
-  if (listed) return state.taskSessions.items[listed.id] ?? listed;
+  if (listed) {
+    const live = state.taskSessions.items[listed.id];
+    if (!live || live.is_primary) return live ?? listed;
+  }
   return Object.values(state.taskSessions.items).find(
     (candidate) => candidate.task_id === taskId && candidate.is_primary,
   );
@@ -116,7 +120,8 @@ export function resolvePlanCommentRunAvailability(
   if (!primary) {
     return { session: null, inputMode: "unavailable", reason: NO_PRIMARY_SESSION };
   }
-  const inputMode = deriveSessionInputMode(primary);
+  const queuedCount = state.queue.metaBySessionId[primary.id]?.count ?? 0;
+  const inputMode = deriveSessionInputMode(primary, queuedCount);
   if (inputMode === "unavailable") {
     return { session: null, inputMode, reason: "primary-session-unavailable" };
   }
@@ -183,6 +188,7 @@ async function runTaskPlanComment(
       plan_comment_refs: planCommentRefs,
       require_primary_session: true,
     });
+    await refreshAcceptedPlanComments(taskId, storeApi);
     return { queued: true };
   }
   const created = await sendMessageRequest({
@@ -196,7 +202,21 @@ async function runTaskPlanComment(
     requirePrimarySession: true,
   });
   if (created?.id && created.session_id) storeApi.getState().addMessage(created);
+  await refreshAcceptedPlanComments(taskId, storeApi);
   return { queued: false };
+}
+
+async function refreshAcceptedPlanComments(
+  taskId: string,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  try {
+    const snapshot = await getTaskPlanComments(taskId);
+    storeApi.getState().setTaskPlanComments(taskId, snapshot);
+  } catch (error) {
+    // i18n-exempt: accepted delivery remains successful; foreground recovery retries this refresh.
+    console.error("Failed to refresh task plan comments after delivery:", error);
+  }
 }
 
 function buildQueuePayload(
@@ -228,6 +248,29 @@ function buildMessagePayload(
   return payload;
 }
 
+function applyPrimarySessionChange(
+  conflict: NonNullable<ReturnType<typeof planCommentAdmissionConflict>>,
+  taskId: string,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  if (!conflict.primarySessionId) return;
+  const state = storeApi.getState();
+  for (const candidate of Object.values(state.taskSessions.items)) {
+    if (candidate.task_id !== taskId) continue;
+    const shouldBePrimary = candidate.id === conflict.primarySessionId;
+    if (candidate.is_primary === shouldBePrimary && !shouldBePrimary) continue;
+    if (!shouldBePrimary || conflict.primarySessionState) {
+      state.setTaskSession({
+        ...candidate,
+        is_primary: shouldBePrimary,
+        ...(shouldBePrimary && conflict.primarySessionState
+          ? { state: conflict.primarySessionState }
+          : {}),
+      });
+    }
+  }
+}
+
 function normalizePlanCommentRunError(
   error: unknown,
   taskId: string,
@@ -240,6 +283,7 @@ function normalizePlanCommentRunError(
     return new PlanCommentRunError("plan-comments-changed");
   }
   if (conflict?.code === "primary_session_changed") {
+    applyPrimarySessionChange(conflict, taskId, storeApi);
     return new PlanCommentRunError("primary-session-changed");
   }
   return new PlanCommentRunError("delivery-failed");
@@ -274,7 +318,8 @@ async function runSessionComment({
 }): Promise<{ queued: boolean }> {
   const state = storeApi.getState();
   const activeSession = state.taskSessions.items[sessionId] ?? null;
-  const inputMode = deriveSessionInputMode(activeSession);
+  const queuedCount = state.queue.metaBySessionId[sessionId]?.count ?? 0;
+  const inputMode = deriveSessionInputMode(activeSession, queuedCount);
   const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
   const content = formatSingleComment(comment);
 

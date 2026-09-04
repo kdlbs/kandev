@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Queue rendering, accessibility, and merge contracts share one harness. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
@@ -597,6 +598,19 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
 
   it("treats server entries as non-mergeable", () => {
     expect(canMergeEntry(entry({ queued_by: "server" }))).toBe(false);
+  });
+
+  it("rejects entries carrying plan-comment admission identity", () => {
+    expect(
+      canMergeEntry(
+        entry({ queued_by: "user-1", metadata: { client_queue_id: "comment-request" } }),
+      ),
+    ).toBe(false);
+    expect(
+      canMergeEntry(
+        entry({ queued_by: "user-1", metadata: { plan_comment_refs: [{ id: "c1" }] } }),
+      ),
+    ).toBe(false);
   });
 
   it("allows user behind user owned by the caller", () => {

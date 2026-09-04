@@ -85,6 +85,30 @@ func (s *Service) SteerTask(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 ) (*PromptResult, error) {
+	return s.steerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, nil)
+}
+
+// SteerRecordedMessage steers a prompt whose user transcript row was already
+// committed by message.add. If steering races an existing queue, the fallback
+// entry retains that provenance so queue drain does not record it twice.
+func (s *Service) SteerRecordedMessage(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+) (*PromptResult, error) {
+	return s.steerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, map[string]interface{}{
+		metaKeyUserMessageRecorded: true,
+	})
+}
+
+func (s *Service) steerTask(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	queuedMetadata map[string]interface{},
+) (*PromptResult, error) {
 	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
 		return nil, err
 	}
@@ -118,7 +142,7 @@ func (s *Service) SteerTask(
 			}
 			_, qErr := s.messageQueue.QueueMessageWithMetadata(
 				admittedCtx, sessionID, taskID, prompt, model, messagequeue.QueuedByUser,
-				planMode, toQueuedAttachments(attachments), nil,
+				planMode, toQueuedAttachments(attachments), queuedMetadata,
 			)
 			if qErr != nil {
 				return fmt.Errorf("queue steer behind pending work: %w", qErr)
@@ -144,6 +168,16 @@ func (s *Service) SteerTask(
 			zap.Bool("steer_outstanding", steerOutstanding))
 		return admittedResult, nil
 	}
+	return s.dispatchSteer(ctx, taskID, sessionID, prompt, planMode, attachments, session)
+}
+
+func (s *Service) dispatchSteer(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	session *models.TaskSession,
+) (*PromptResult, error) {
 	// We now own the single in-flight slot. The queue admission lock is released
 	// before the blocking dispatch; clear the slot when the dispatch completes.
 	promptCtx := context.WithoutCancel(ctx)

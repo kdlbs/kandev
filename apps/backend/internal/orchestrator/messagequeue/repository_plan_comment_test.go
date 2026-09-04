@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 type planCommentQueueWriter interface {
@@ -165,6 +167,75 @@ func TestSQLiteRepositoryInsertWithPlanCommentsFailuresPreserveComments(t *testi
 				t.Fatalf("pending snapshot = %#v, err=%v", pending, listErr)
 			}
 		})
+	}
+}
+
+func TestPostgresInsertWithPlanCommentsConcurrentQueueIDConflictIsTyped(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := testutil.OpenIsolatedPostgres(t, dsn)
+	taskRepo, err := tasksqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueRepoA, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueRepoB, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	seedQueuePlanComment(t, ctx, taskRepo, "race-a")
+	seedQueuePlanComment(t, ctx, taskRepo, "race-b")
+	refsA := []models.TaskPlanCommentRef{{ID: "comment-race-a", Version: 1}}
+	refsB := []models.TaskPlanCommentRef{{ID: "comment-race-b", Version: 1}}
+	messages := []*messagequeue.QueuedMessage{
+		planCommentQueuedMessage("race-a", "shared-client-queue-id", "fingerprint-a", refsA),
+		planCommentQueuedMessage("race-b", "shared-client-queue-id", "fingerprint-b", refsB),
+	}
+	writers := []planCommentQueueWriter{
+		requirePlanCommentQueueWriter(t, queueRepoA), requirePlanCommentQueueWriter(t, queueRepoB),
+	}
+	refs := [][]models.TaskPlanCommentRef{refsA, refsB}
+	start := make(chan struct{})
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			_, _, errs[index] = writers[index].InsertWithPlanComments(ctx, messages[index], refs[index], true, 10)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	succeeded, conflicted := 0, 0
+	for _, insertErr := range errs {
+		switch {
+		case insertErr == nil:
+			succeeded++
+		case errors.Is(insertErr, messagequeue.ErrQueueIDConflict):
+			conflicted++
+		default:
+			t.Fatalf("concurrent insert returned untyped error: %v", insertErr)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("concurrent results = %#v, want one success and one conflict", errs)
+	}
+	pendingA, err := taskRepo.ListTaskPlanComments(ctx, "task-race-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingB, err := taskRepo.ListTaskPlanComments(ctx, "task-race-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pendingA.Comments)+len(pendingB.Comments) != 1 {
+		t.Fatalf("losing comment was not preserved: A=%#v B=%#v", pendingA, pendingB)
 	}
 }
 

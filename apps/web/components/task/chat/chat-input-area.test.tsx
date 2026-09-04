@@ -128,6 +128,12 @@ describe("resolveInputPlaceholder", () => {
 });
 
 describe("useSubmitHandler", () => {
+  it("reports accepted delivery", async () => {
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await expect(result.current.handleSubmit({ message: "hello" })).resolves.toBe(true);
+  });
+
   it("shows a toast when sending fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     handleSendMessageMock.mockRejectedValueOnce(new Error("WebSocket request timed out"));

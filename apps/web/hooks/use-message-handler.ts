@@ -26,6 +26,7 @@ import {
   type SessionInputMode,
 } from "./domains/session/session-input-mode";
 import { t } from "@/lib/i18n";
+import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 
 export function buildDocumentContext(
   activeDocument: ActiveDocument | null,
@@ -281,7 +282,8 @@ const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
 
 function requireSessionInputMode(state: AppState, selectedSessionId: string): SessionInputMode {
   const selectedSession = state.taskSessions.items[selectedSessionId] ?? null;
-  const inputMode = deriveSessionInputMode(selectedSession);
+  const queuedCount = state.queue.metaBySessionId[selectedSessionId]?.count ?? 0;
+  const inputMode = deriveSessionInputMode(selectedSession, queuedCount);
   if (inputMode === "unavailable") {
     // A terminal session row (agent process has exited) gets the backend's
     // actionable copy; a missing row keeps the generic message since there is
@@ -370,6 +372,7 @@ async function deliverComposedMessage({
         ...(planCommentRefs.length > 0 ? { clientQueueId: generateUUID(), planCommentRefs } : {}),
         ...(contextFilesMeta ? { contextFilesMeta } : {}),
       });
+      await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
       return;
     }
 
@@ -387,8 +390,24 @@ async function deliverComposedMessage({
       planCommentRefs,
     });
     if (created?.id && created.session_id) storeApi.getState().addMessage(created);
+    await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
   } catch (error) {
     throw normalizePlanCommentSendError(error, taskId, storeApi);
+  }
+}
+
+async function refreshAcceptedPlanComments(
+  taskId: string,
+  refs: TaskPlanCommentRef[],
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  if (refs.length === 0) return;
+  try {
+    const snapshot = await getTaskPlanComments(taskId);
+    storeApi.getState().setTaskPlanComments(taskId, snapshot);
+  } catch (error) {
+    // i18n-exempt: accepted delivery remains successful; foreground recovery retries this refresh.
+    console.error("Failed to refresh task plan comments after delivery:", error);
   }
 }
 

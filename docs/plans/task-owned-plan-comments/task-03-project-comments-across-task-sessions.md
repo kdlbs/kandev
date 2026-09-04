@@ -69,7 +69,7 @@ selected session, and route plan-comment Run to the primary.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- lib/ws/handlers/task-plan-comments.test.ts hooks/domains/comments/use-plan-comments.test.ts hooks/domains/comments/use-pending-comments.test.ts hooks/domains/comments/use-run-comment.test.ts components/task/task-plan-panel.test.tsx components/task/chat/use-chat-panel-state.test.tsx components/task/chat/chat-input-area.test.tsx components/task/passthrough-chat-composer.test.tsx
+cd apps && pnpm --filter @kandev/web test -- lib/ws/handlers/task-plan-comments.test.ts hooks/domains/comments/use-plan-comments.test.tsx hooks/domains/comments/use-pending-comments.test.ts hooks/domains/comments/use-run-comment.test.ts components/task/task-plan-panel.session-switch.test.tsx components/task/task-plan-panel-draft.test.ts components/task/chat/chat-input-area.test.tsx components/task/passthrough-chat-composer.test.ts
 cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet
 ```
 

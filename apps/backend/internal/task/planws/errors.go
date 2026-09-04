@@ -118,6 +118,7 @@ func PlanCommentError(msg *ws.Message, err error, snapshot interface{}) (*ws.Mes
 		commentBodyRequired,
 		commentVersionNeeded,
 		commentAnchorInvalid,
+		taskNotFound,
 		planNotFound,
 	})
 }

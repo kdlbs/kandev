@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
@@ -168,7 +169,7 @@ func TestWsQueueMessageMapsPlanCommentConflicts(t *testing.T) {
 	}
 }
 
-func TestWsQueueMessageReleasesPreclaimedAttachmentsWhenCommentAdmissionFails(t *testing.T) {
+func TestWsQueueMessageRestoresOwnedAttachmentClaimsWhenCommentAdmissionFails(t *testing.T) {
 	handlers, service, eventBus := newPlanCommentQueueHandlers(t)
 	service.err = messagequeue.ErrQueueFull
 	attachments := &recordingQueueAttachmentClaimer{}
@@ -184,8 +185,17 @@ func TestWsQueueMessageReleasesPreclaimedAttachmentsWhenCommentAdmissionFails(t 
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeError, response.Type)
 	require.Equal(t, []string{"attachment"}, attachments.claims)
-	require.Equal(t, []string{"attachment"}, attachments.releases)
+	require.Equal(t, "queue", attachments.claimQueueID)
+	require.Equal(t, []string{"attachment"}, attachments.restores)
+	require.Empty(t, attachments.releases)
 	require.Empty(t, eventBus.subjects)
+}
+
+func TestValidatePlanCommentQueueRequestRejectsReservedMarker(t *testing.T) {
+	require.Equal(t, "content contains a reserved plan comment marker", validatePlanCommentQueueRequest(wsQueueMessageRequest{
+		ClientQueueID: "queue", Content: plancomments.WithPlaceholder("typed"),
+		PlanCommentRefs: []models.TaskPlanCommentRef{{ID: "comment", Version: 1}},
+	}))
 }
 
 func newPlanCommentQueueHandlers(
@@ -203,3 +213,4 @@ func newPlanCommentQueueHandlers(
 var _ QueueService = (*planCommentQueueServiceStub)(nil)
 var _ bus.EventBus = (*recordingPlanCommentQueueBus)(nil)
 var _ QueueAttachmentReleaser = (*recordingQueueAttachmentClaimer)(nil)
+var _ QueueAttachmentAdmissionClaimer = (*recordingQueueAttachmentClaimer)(nil)

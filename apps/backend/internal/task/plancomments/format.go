@@ -15,14 +15,21 @@ import (
 const placeholder = "\x00kandev-plan-comments\x00"
 
 const (
-	MetadataRefs               = "plan_comment_refs"
-	MetadataRequestFingerprint = "plan_comment_request_fingerprint"
-	MetadataClientQueueID      = "client_queue_id"
+	MetadataRefs                     = "plan_comment_refs"
+	MetadataRequestFingerprint       = "plan_comment_request_fingerprint"
+	MetadataClientQueueID            = "client_queue_id"
+	MetadataClientMessageFingerprint = "client_message_request_fingerprint"
 )
 
 // WithPlaceholder reserves the task-comment position in content that may be wrapped later.
 func WithPlaceholder(content string) string {
 	return placeholder + content
+}
+
+// ContainsReservedPlaceholder reports whether user-controlled content contains
+// the server-owned marker used while comments are resolved transactionally.
+func ContainsReservedPlaceholder(content string) bool {
+	return strings.Contains(content, placeholder)
 }
 
 // ResolvePlaceholder replaces the server-owned marker with canonical comment Markdown.

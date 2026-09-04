@@ -78,4 +78,14 @@ describe("task plan comment state", () => {
     expect(store.getState().taskPlans.commentsLoadedByTaskId[TASK_ID]).toBe(true);
     expect(store.getState().taskPlans.commentsMigrationStatusByTaskId[TASK_ID]).toBe("idle");
   });
+
+  it("keeps comment load state when the same plan is refreshed", () => {
+    const store = createAppStore();
+    store.getState().setTaskPlan(TASK_ID, plan());
+    store.getState().setTaskPlanCommentsLoading(TASK_ID, true);
+
+    store.getState().setTaskPlan(TASK_ID, plan());
+
+    expect(store.getState().taskPlans.commentsLoadingByTaskId[TASK_ID]).toBe(true);
+  });
 });

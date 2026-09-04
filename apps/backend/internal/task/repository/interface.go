@@ -263,6 +263,20 @@ type AttachmentRepository interface {
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
 }
 
+// QueueAttachmentAdmissionRepository scopes provisional attachment claims to
+// one caller-owned queue admission so rollback can restore only that attempt.
+type QueueAttachmentAdmissionRepository interface {
+	ClaimQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID, queueID string) error
+	RestoreQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID, queueID string) error
+}
+
+// MessageAttachmentAdmissionRepository scopes provisional claims to one
+// caller-owned direct-message admission.
+type MessageAttachmentAdmissionRepository interface {
+	ClaimDirectMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID, messageID string) error
+	RestoreDirectMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID, messageID string) error
+}
+
 // TurnRepository handles conversation turn persistence.
 type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error

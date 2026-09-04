@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -243,6 +244,15 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	msg *ws.Message,
 ) error {
 	switch action {
+	case ws.ActionTaskPlanCommentsChanged:
+		taskID := extractStringField(data, "task_id")
+		if snapshot, ok := data.(*models.TaskPlanCommentSnapshot); ok {
+			taskID = snapshot.TaskID
+		}
+		if taskID != "" {
+			b.hub.BroadcastToTask(taskID, msg)
+		}
+		return nil
 	case ws.ActionWorkspaceCreated, ws.ActionWorkspaceUpdated, ws.ActionWorkspaceDeleted:
 		// Workspace event payloads are the workspace DTO itself: the
 		// workspace ID lives under "id", not "workspace_id". Without this

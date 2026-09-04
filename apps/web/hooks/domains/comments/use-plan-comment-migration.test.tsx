@@ -5,6 +5,7 @@ import { useCommentsStore } from "@/lib/state/slices/comments";
 import { COMMENTS_STORAGE_PREFIX } from "@/lib/state/slices/comments/persistence";
 import type { DiffComment, PlanComment } from "@/lib/state/slices/comments";
 import type { TaskPlan, TaskPlanComment, TaskPlanCommentSnapshot } from "@/lib/types/http";
+import { WebSocketRequestError } from "@/lib/ws/request-error";
 
 const api = vi.hoisted(() => ({
   createTaskPlanComment: vi.fn(),
@@ -14,6 +15,7 @@ const sessionsHook = vi.hoisted(() => ({
   sessions: [{ id: "session-1" }, { id: "session-2" }],
   isLoaded: true,
   isLoading: false,
+  error: null as string | null,
   loadSessions: vi.fn(),
 }));
 
@@ -110,9 +112,13 @@ function useHarness() {
   return { store, migration };
 }
 
+// eslint-disable-next-line max-lines-per-function -- Migration recovery cases share browser-storage and store fixtures.
 describe("usePlanCommentMigration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionsHook.isLoaded = true;
+    sessionsHook.error = null;
+    sessionsHook.loadSessions.mockResolvedValue(undefined);
     window.sessionStorage.clear();
     useCommentsStore.setState({
       byId: {},
@@ -177,7 +183,7 @@ describe("usePlanCommentMigration", () => {
     const finalSnapshot = snapshot([serverComment(first), serverComment(second)], 2);
     api.createTaskPlanComment.mockResolvedValueOnce(finalSnapshot);
     api.getTaskPlanComments.mockResolvedValue(finalSnapshot);
-    act(() => result.current.migration.retry());
+    await act(async () => result.current.migration.retry());
 
     await waitFor(() => expect(result.current.migration.status).toBe("complete"));
     expect(api.createTaskPlanComment.mock.calls.map(([input]) => input.id)).toEqual([
@@ -198,5 +204,71 @@ describe("usePlanCommentMigration", () => {
     await waitFor(() => expect(result.current.migration.status).toBe("waiting_for_plan"));
     expect(api.createTaskPlanComment).not.toHaveBeenCalled();
     expect(readSession("session-1")).toEqual([comment]);
+  });
+
+  it("derives a missing legacy anchor end from its start", async () => {
+    const comment = { ...legacyPlanComment("comment-1", "session-1"), from: 100, to: undefined };
+    writeSession("session-1", [comment]);
+    api.createTaskPlanComment.mockResolvedValue(snapshot([serverComment(comment)]));
+    api.getTaskPlanComments.mockResolvedValue(snapshot([serverComment(comment)]));
+
+    const { result } = renderHook(useHarness, { wrapper });
+    act(() => result.current.store.getState().setTaskPlan(TASK_ID, taskPlan));
+
+    await waitFor(() => expect(result.current.migration.status).toBe("complete"));
+    expect(api.createTaskPlanComment).toHaveBeenCalledWith(
+      expect.objectContaining({ anchorFrom: 100, anchorTo: 109 }),
+    );
+  });
+
+  it("reconciles a committed migration whose response was lost", async () => {
+    const legacy = legacyPlanComment("comment-1", "session-1", "old body");
+    const authoritative = serverComment({ ...legacy, text: "edited remotely" }, 2);
+    const authoritativeSnapshot = snapshot([authoritative], 2);
+    writeSession("session-1", [legacy]);
+    api.createTaskPlanComment.mockRejectedValue(
+      new WebSocketRequestError("Task plan comments changed", "plan_comments_changed", {
+        snapshot: authoritativeSnapshot,
+      }),
+    );
+    api.getTaskPlanComments.mockResolvedValue(authoritativeSnapshot);
+
+    const { result } = renderHook(useHarness, { wrapper });
+    act(() => result.current.store.getState().setTaskPlan(TASK_ID, taskPlan));
+
+    await waitFor(() => expect(result.current.migration.status).toBe("complete"));
+    expect(readSession("session-1")).toEqual([]);
+    expect(result.current.store.getState().taskPlans.commentsByTaskId[TASK_ID]).toEqual(
+      authoritativeSnapshot,
+    );
+  });
+
+  it("surfaces session discovery failure and force reloads on retry", async () => {
+    sessionsHook.isLoaded = false;
+    sessionsHook.error = "offline";
+    const { result, rerender } = renderHook(useHarness, { wrapper });
+    act(() => result.current.store.getState().setTaskPlan(TASK_ID, taskPlan));
+
+    await waitFor(() => expect(result.current.migration.status).toBe("failed"));
+    sessionsHook.error = null;
+    sessionsHook.isLoaded = true;
+    await act(async () => result.current.migration.retry());
+    rerender();
+
+    expect(sessionsHook.loadSessions).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(result.current.migration.status).toBe("complete"));
+  });
+
+  it("surfaces current-plan load failure and clears it on retry", async () => {
+    const { result } = renderHook(useHarness, { wrapper });
+    act(() => result.current.store.getState().setTaskPlanCommentsError(TASK_ID, "offline"));
+
+    await waitFor(() => expect(result.current.migration.status).toBe("failed"));
+    await act(async () => result.current.migration.retry());
+
+    expect(
+      result.current.store.getState().taskPlans.commentsErrorByTaskId[TASK_ID],
+    ).toBeUndefined();
+    expect(sessionsHook.loadSessions).toHaveBeenCalledWith(true);
   });
 });

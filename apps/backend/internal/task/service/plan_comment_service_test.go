@@ -90,12 +90,16 @@ func TestPlanCommentServiceAuthorizesPublishesAndMapsConflicts(t *testing.T) {
 }
 
 func TestPlanCommentServiceValidatesRequests(t *testing.T) {
-	svc, _, _ := createTestPlanService(t)
+	svc, _, repo := createTestPlanService(t)
 	comments := requirePlanCommentService(t, svc)
 	ctx := context.Background()
 
 	if _, err := comments.ListPlanComments(ctx, ""); !errors.Is(err, ErrTaskIDRequired) {
 		t.Fatalf("empty list task error = %v", err)
+	}
+	seedTask(t, ctx, repo, "task-without-plan")
+	if _, err := comments.ListPlanComments(ctx, "task-without-plan"); !errors.Is(err, ErrTaskPlanNotFound) {
+		t.Fatalf("missing plan list error = %v, want ErrTaskPlanNotFound", err)
 	}
 	if _, err := comments.CreatePlanComment(ctx, CreatePlanCommentRequest{TaskID: "task"}); !errors.Is(err, ErrPlanIDRequired) {
 		t.Fatalf("create validation error = %v", err)

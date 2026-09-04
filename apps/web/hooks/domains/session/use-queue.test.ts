@@ -235,6 +235,24 @@ describe("useQueue payload forwarding", () => {
     );
   });
 
+  it("keeps an accepted queue admission successful when reconciliation fails", async () => {
+    queueApiMock.queueMessage.mockResolvedValue(entry({ id: "accepted" }));
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockRejectedValueOnce(new Error("snapshot unavailable"));
+
+    await expect(
+      act(async () => {
+        await result.current.queue({
+          taskId: TASK_ID,
+          content: "",
+          clientQueueId: "accepted",
+          planCommentRefs: [{ id: "comment-1", version: 2 }],
+        } as never);
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("replaces queued reference metadata with an explicit empty array", async () => {
     queueApiMock.updateQueuedMessage.mockResolvedValue({ entry_id: "q-1" });
     const { result } = renderHook(() => useQueue(SESSION_ID));

@@ -91,9 +91,12 @@ context to a non-primary session when I choose.
   Kandev shall consume exactly the included comments and remove them from the
   plan and every session composer. Comments created after the submitted
   snapshot shall remain pending.
-- **AC-TASKS-PLAN-COMMENTS-002.6:** If delivery is rejected or Kandev cannot
-  establish that it was accepted, the included comments and typed composer
-  text shall remain available for retry.
+- **AC-TASKS-PLAN-COMMENTS-002.6:** If delivery is rejected, the included
+  comments and typed composer text shall remain available for retry. If Kandev
+  cannot establish whether delivery was accepted, it shall reconcile the
+  attempt by the caller-generated message or queue identifier. An accepted
+  replay returns the durable delivery without re-sending or re-consuming the
+  comments; an absent delivery leaves the comments pending.
 - **AC-TASKS-PLAN-COMMENTS-002.7:** If two delivery attempts include the same
   pending comment, no more than one attempt shall be accepted with that
   comment. A competing attempt shall fail without silently sending its typed

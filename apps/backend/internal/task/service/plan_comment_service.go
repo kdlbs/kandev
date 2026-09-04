@@ -59,7 +59,11 @@ func (s *PlanService) ListPlanComments(ctx context.Context, taskID string) (*mod
 	if err := s.authorize(ctx, taskID); err != nil {
 		return nil, err
 	}
-	return s.repo.ListTaskPlanComments(ctx, taskID)
+	snapshot, err := s.repo.ListTaskPlanComments(ctx, taskID)
+	if err != nil {
+		return snapshot, mapPlanCommentError(err)
+	}
+	return snapshot, nil
 }
 
 // CreatePlanComment persists pending feedback and publishes its committed snapshot.

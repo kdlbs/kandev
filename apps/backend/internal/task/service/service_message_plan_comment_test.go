@@ -5,7 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -85,6 +87,59 @@ func TestServiceCreateMessageWithPlanCommentsRollsBackStaleReference(t *testing.
 	messages, err := repo.ListMessages(ctx, sessionID)
 	if err != nil || len(messages) != 0 {
 		t.Fatalf("messages after rollback = %#v, err=%v", messages, err)
+	}
+}
+
+func TestServiceCreateQueuedMessageWithPlanCommentsPublishesAfterAtomicCommit(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	sessionID, turnID := seedServicePlanComment(t, ctx, repo, "queued")
+	db := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventBus.ClearEvents()
+	request := &CreateMessageRequest{
+		TaskSessionID: sessionID, TaskID: "task-123", TurnID: turnID,
+		Content: plancomments.WithPlaceholder("typed body"), AuthorType: "user",
+		PlanCommentRefs:       []models.TaskPlanCommentRef{{ID: "comment-service-queued", Version: 1}},
+		RequirePrimarySession: true,
+	}
+	queued := &messagequeue.QueuedMessage{
+		ID: "message-service-plan-comment-queued", SessionID: sessionID, TaskID: "task-123",
+		Content: request.Content, Model: "test-model", PlanMode: true,
+		Metadata: map[string]interface{}{"user_message_recorded": true}, QueuedBy: messagequeue.QueuedByUser,
+	}
+
+	created, err := svc.CreateQueuedMessageIdempotent(
+		ctx, "message-service-plan-comment-queued", request, queued, 10,
+	)
+	if err != nil {
+		t.Fatalf("CreateQueuedMessageIdempotent: %v", err)
+	}
+	if created.Content != queued.Content || created.PromptIndex != 1 {
+		t.Fatalf("created=%#v queued=%#v", created, queued)
+	}
+	entries, err := queueRepo.ListBySession(ctx, sessionID)
+	if err != nil || len(entries) != 1 || entries[0].ID != created.ID {
+		t.Fatalf("queued entries=%#v err=%v", entries, err)
+	}
+	if got := eventTypesForPlanCommentTest(eventBus); len(got) != 3 ||
+		got[0] != events.MessageAdded || got[1] != events.SessionPendingActionChanged ||
+		got[2] != events.TaskPlanCommentsChanged {
+		t.Fatalf("published event types = %v", got)
+	}
+
+	replayed, err := svc.CreateQueuedMessageIdempotent(
+		ctx, "message-service-plan-comment-queued", request, queued, 10,
+	)
+	if err != nil || replayed.ID != created.ID {
+		t.Fatalf("replay=%#v err=%v", replayed, err)
+	}
+	entries, err = queueRepo.ListBySession(ctx, sessionID)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("replay duplicated queue: %#v err=%v", entries, err)
 	}
 }
 

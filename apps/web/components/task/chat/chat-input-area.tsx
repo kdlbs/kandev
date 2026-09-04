@@ -236,7 +236,7 @@ export function useSubmitHandler(
 
   const handleSubmit = useCallback(
     async (payload: ChatSubmitPayload) => {
-      if (isSending) return;
+      if (isSending) return false;
       if (panelState.planCommentMigration?.isBlocking) {
         showMessageSendToast(
           new MessageSendError(
@@ -250,6 +250,7 @@ export function useSubmitHandler(
       setIsSending(true);
       try {
         await submitChatPayload({ payload, panelState, onSend, storeApi, handleSendMessage });
+        return true;
       } catch (error) {
         showMessageSendToast(error, toast);
         return false;

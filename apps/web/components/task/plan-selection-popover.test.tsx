@@ -15,6 +15,7 @@ afterEach(() => {
   cleanup();
 });
 
+// eslint-disable-next-line max-lines-per-function -- Desktop and touch popover contracts share one render harness.
 describe("PlanSelectionPopover", () => {
   it("keeps entered feedback open when the submitter rejects the save", () => {
     const onClose = vi.fn();
@@ -109,5 +110,47 @@ describe("PlanSelectionPopover", () => {
     expect(screen.getByTestId("plan-comment-drawer").className).toContain("max-h-[82dvh]");
     expect(screen.getByRole("button", { name: "Add" }).className).toContain("min-h-11");
     expect(screen.getByRole("button", { name: "Run" }).className).toContain("min-h-11");
+  });
+
+  it("ignores repeated keyboard submission events", () => {
+    const onAdd = vi.fn();
+    render(
+      <PlanSelectionPopover
+        selectedText="plan step"
+        position={{ x: 100, y: 100 }}
+        onAdd={onAdd}
+        onClose={() => undefined}
+      />,
+    );
+    const input = screen.getByPlaceholderText("Add your comment or instruction...");
+    fireEvent.change(input, { target: { value: SAVED_FEEDBACK } });
+
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, repeat: true });
+
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it("disables delete while an edit submission is pending", async () => {
+    let finish!: () => void;
+    const onAdd = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    render(
+      <PlanSelectionPopover
+        selectedText="plan step"
+        position={{ x: 100, y: 100 }}
+        editingComment={SAVED_FEEDBACK}
+        onAdd={onAdd}
+        onDelete={() => true}
+        onClose={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Delete comment" }).hasAttribute("disabled")).toBe(
+        true,
+      ),
+    );
+    finish();
   });
 });

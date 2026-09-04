@@ -115,13 +115,14 @@ test.describe("mobile: task-owned plan comments", () => {
       testPage.locator('[data-testid="plan-comment-migration-notice"]:visible'),
     ).toHaveCount(0, { timeout: 15_000 });
     await expect(session.activeChat().getByText("2 plan comments", { exact: true })).toBeVisible();
-    const retainedStorage = await testPage.evaluate(
-      (primaryId) => JSON.parse(sessionStorage.getItem(`kandev.comments.${primaryId}`) ?? "[]"),
-      primary.id,
-    );
-    expect(retainedStorage).toEqual([
-      expect.objectContaining({ id: "legacy-diff", source: "diff" }),
-    ]);
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          (primaryId) => JSON.parse(sessionStorage.getItem(`kandev.comments.${primaryId}`) ?? "[]"),
+          primary.id,
+        ),
+      )
+      .toEqual([expect.objectContaining({ id: "legacy-diff", source: "diff" })]);
 
     const pill = testPage.getByTestId("mobile-sessions-pill");
     await pill.tap();
@@ -154,7 +155,10 @@ test.describe("mobile: task-owned plan comments", () => {
     await editor.focus();
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await testPage.keyboard.press(`${modifier}+a`);
-    await testPage.keyboard.press(`${modifier}+Shift+c`);
+    const commentAction = testPage.getByTestId("plan-formatting-action-comment");
+    await expect(commentAction).toBeVisible();
+    await expect(commentAction).toBeEnabled();
+    await commentAction.tap();
 
     const drawer = testPage.getByTestId("plan-comment-drawer");
     await expect(drawer).toBeVisible({ timeout: 5_000 });

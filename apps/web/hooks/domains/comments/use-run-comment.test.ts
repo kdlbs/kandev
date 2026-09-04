@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/no-duplicate-string -- Session IDs are repeated to make primary-session transitions explicit. */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type {
@@ -19,6 +20,14 @@ const mockSendMessageRequest = vi.fn();
 const mockMarkCommentsSent = vi.fn();
 const mockAddMessage = vi.fn();
 const mockSetTaskPlanComments = vi.fn();
+const mockGetTaskPlanComments = vi.fn();
+const mockSetTaskSession = vi.fn((next: Record<string, unknown>) => {
+  const state = mockStoreState as ReturnType<typeof makeStoreState>;
+  state.taskSessions.items[next.id as string] = next as never;
+  const list = state.taskSessionsByTask.itemsByTaskId[next.task_id as string];
+  const index = list.findIndex((candidate) => candidate.id === next.id);
+  if (index >= 0) list[index] = next as never;
+});
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 let mockStoreState: Record<string, unknown> = {};
 
@@ -29,6 +38,10 @@ vi.mock("@/lib/ws/connection", () => ({
 vi.mock("@/lib/api/domains/queue-api", () => ({
   appendToQueue: (...args: unknown[]) => mockAppendToQueue(...args),
   queueMessage: (...args: unknown[]) => mockQueueMessage(...args),
+}));
+
+vi.mock("@/lib/api/domains/plan-comment-api", () => ({
+  getTaskPlanComments: (...args: unknown[]) => mockGetTaskPlanComments(...args),
 }));
 
 vi.mock("@/hooks/use-message-handler", () => ({
@@ -60,6 +73,14 @@ import { useRunComment } from "./use-run-comment";
 // Helpers
 // ---------------------------------------------------------------------------
 
+type MockSession = {
+  id?: string;
+  task_id?: string;
+  state: string;
+  foreground_activity?: string;
+  is_primary?: boolean;
+};
+
 function makeStoreState(sessionState: string, planMode = false, foregroundActivity?: string) {
   const selected = {
     id: "sess-1",
@@ -74,23 +95,27 @@ function makeStoreState(sessionState: string, planMode = false, foregroundActivi
     state: "WAITING_FOR_INPUT",
     is_primary: true,
   };
+  const items: Record<string, MockSession> = {
+    "sess-1": selected,
+    "primary-session": primary,
+    "other-session": { state: "RUNNING", foreground_activity: "generating" },
+  };
+  const itemsByTaskId: Record<string, MockSession[]> = { "task-1": [primary, selected] };
   return {
     taskSessions: {
-      items: {
-        "sess-1": selected,
-        "primary-session": primary,
-        "other-session": { state: "RUNNING", foreground_activity: "generating" },
-      },
+      items,
     },
-    taskSessionsByTask: { itemsByTaskId: { "task-1": [primary, selected] } },
+    taskSessionsByTask: { itemsByTaskId },
     chatInput: {
       planModeBySessionId: { "sess-1": planMode },
     },
     taskPlans: {
       commentsMigrationStatusByTaskId: { "task-1": "complete" },
     },
+    queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: mockAddMessage,
     setTaskPlanComments: mockSetTaskPlanComments,
+    setTaskSession: mockSetTaskSession,
   };
 }
 
@@ -177,6 +202,12 @@ function renderCommentHook(sessionId: string | null = "sess-1") {
 function setup() {
   vi.clearAllMocks();
   mockStoreState = makeStoreState("WAITING_FOR_INPUT");
+  mockGetTaskPlanComments.mockResolvedValue({
+    task_id: "task-1",
+    plan_id: "plan-1",
+    revision: 3,
+    comments: [],
+  });
 }
 
 describe("useRunComment — idle agent sends directly", () => {
@@ -372,6 +403,7 @@ describe("useRunComment — edge cases", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- Primary routing and recovery cases share one store fixture.
 describe("useRunComment — plan routing", () => {
   beforeEach(setup);
 
@@ -434,6 +466,28 @@ describe("useRunComment — plan routing", () => {
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
   });
 
+  it("queues a steer-capable primary when earlier prompts are already queued", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    Object.assign(state.taskSessions.items["primary-session"], {
+      state: "RUNNING",
+      foreground_activity: "generating",
+      supports_steering: true,
+    });
+    Object.assign(state.taskSessionsByTask.itemsByTaskId["task-1"][0], {
+      state: "RUNNING",
+      foreground_activity: "generating",
+      supports_steering: true,
+    });
+    state.queue.metaBySessionId["primary-session"] = { count: 1 };
+    mockStoreState = state;
+    const { result } = renderCommentHook();
+
+    await result.current.runComment(makePlanComment());
+
+    expect(mockQueueMessage).toHaveBeenCalled();
+    expect(mockSendMessageRequest).not.toHaveBeenCalled();
+  });
+
   it("re-resolves the primary at action time", async () => {
     const { result } = renderCommentHook();
     const changed = makeStoreState("WAITING_FOR_INPUT");
@@ -455,6 +509,25 @@ describe("useRunComment — plan routing", () => {
     await act(async () => {
       await result.current.runComment(makePlanComment());
     });
+
+    expect(mockSendMessageRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ resolvedSessionId: "new-primary" }),
+    );
+  });
+
+  it("ignores a stale primary flag in the task list", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    state.taskSessions.items["primary-session"].is_primary = false;
+    state.taskSessions.items["new-primary"] = {
+      id: "new-primary",
+      task_id: "task-1",
+      state: "WAITING_FOR_INPUT",
+      is_primary: true,
+    } as never;
+    mockStoreState = state;
+    const { result } = renderCommentHook();
+
+    await result.current.runComment(makePlanComment());
 
     expect(mockSendMessageRequest).toHaveBeenCalledWith(
       expect.objectContaining({ resolvedSessionId: "new-primary" }),
@@ -501,6 +574,36 @@ describe("useRunComment — plan availability failures", () => {
       code: "primary-session-changed",
     });
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  });
+
+  it("applies stale-primary recovery details before retry", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    state.taskSessions.items["new-primary"] = {
+      id: "new-primary",
+      task_id: "task-1",
+      state: "STARTING",
+      is_primary: false,
+    } as never;
+    state.taskSessionsByTask.itemsByTaskId["task-1"].push(
+      state.taskSessions.items["new-primary"] as never,
+    );
+    mockStoreState = state;
+    mockSendMessageRequest.mockRejectedValueOnce(
+      new WebSocketRequestError("Primary session changed", "primary_session_changed", {
+        primary_session_id: "new-primary",
+        primary_session_state: "WAITING_FOR_INPUT",
+      }),
+    );
+    const { result } = renderCommentHook();
+
+    await expect(result.current.runComment(makePlanComment())).rejects.toMatchObject({
+      code: "primary-session-changed",
+    });
+    await result.current.runComment(makePlanComment());
+
+    expect(mockSendMessageRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ resolvedSessionId: "new-primary" }),
+    );
   });
 });
 

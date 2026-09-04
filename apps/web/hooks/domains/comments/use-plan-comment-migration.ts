@@ -13,7 +13,15 @@ import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
 
 type AppStore = ReturnType<typeof useAppStoreApi>;
 
-const migrationRuns = new Map<string, Promise<void>>();
+const migrationRunsByStore = new WeakMap<AppStore, Map<string, Promise<void>>>();
+
+function migrationRunsFor(store: AppStore) {
+  const existing = migrationRunsByStore.get(store);
+  if (existing) return existing;
+  const runs = new Map<string, Promise<void>>();
+  migrationRunsByStore.set(store, runs);
+  return runs;
+}
 
 function planIdentityMatches(state: AppState, taskId: string, plan: TaskPlan | null) {
   return (state.taskPlans.byTaskId[taskId]?.id ?? null) === (plan?.id ?? null);
@@ -31,6 +39,63 @@ function setStatusIfCurrent(
   }
 }
 
+type LegacyPlanCommentRecord = ReturnType<typeof listLegacyPlanComments>[number];
+
+function acknowledgeLegacyComment({ sessionId, comment }: LegacyPlanCommentRecord) {
+  const removed = removeAcknowledgedLegacyPlanComment(sessionId, comment);
+  const sameIdStillStored = listLegacyPlanComments([sessionId]).some(
+    (record) => record.comment.id === comment.id,
+  );
+  if (!removed && sameIdStillStored) return false;
+  useCommentsStore.getState().forgetMigratedPlanComment(sessionId, comment.id);
+  return true;
+}
+
+async function migrateLegacyComment(
+  taskId: string,
+  plan: TaskPlan,
+  record: LegacyPlanCommentRecord,
+  store: AppStore,
+) {
+  const { comment } = record;
+  try {
+    const anchorFrom = comment.from ?? 0;
+    const snapshot = await createTaskPlanComment({
+      taskId,
+      planId: plan.id,
+      id: comment.id,
+      body: comment.text,
+      selectedText: comment.selectedText,
+      anchorFrom,
+      anchorTo: comment.to ?? anchorFrom + Math.max(1, comment.selectedText.length),
+    });
+    store.getState().setTaskPlanComments(taskId, snapshot);
+    return acknowledgeLegacyComment(record);
+  } catch (error) {
+    const snapshot = planCommentAdmissionConflict(error)?.snapshot;
+    if (snapshot) store.getState().setTaskPlanComments(taskId, snapshot);
+    const authoritativeMatch = snapshot?.comments.some(
+      (candidate) => candidate.id === comment.id && candidate.plan_id === plan.id,
+    );
+    if (authoritativeMatch && acknowledgeLegacyComment(record)) return true;
+    // i18n-exempt: developer diagnostic; the migration notice is localized.
+    console.error("Failed to migrate legacy plan comment:", error);
+    return false;
+  }
+}
+
+async function refreshMigratedComments(taskId: string, store: AppStore) {
+  try {
+    const snapshot = await getTaskPlanComments(taskId);
+    store.getState().setTaskPlanComments(taskId, snapshot);
+    return true;
+  } catch (error) {
+    // i18n-exempt: developer diagnostic; the migration notice is localized.
+    console.error("Failed to refresh task plan comments after migration:", error);
+    return false;
+  }
+}
+
 async function migrateLegacyComments(
   taskId: string,
   plan: TaskPlan | null,
@@ -45,45 +110,11 @@ async function migrateLegacyComments(
 
   setStatusIfCurrent(store, taskId, plan, "running");
   let failed = false;
-  for (const { sessionId, comment } of records) {
+  for (const record of records) {
     if (!planIdentityMatches(store.getState(), taskId, plan)) return;
-    try {
-      const snapshot = await createTaskPlanComment({
-        taskId,
-        planId: plan.id,
-        id: comment.id,
-        body: comment.text,
-        selectedText: comment.selectedText,
-        anchorFrom: comment.from ?? 0,
-        anchorTo: comment.to ?? Math.max(1, comment.selectedText.length),
-      });
-      store.getState().setTaskPlanComments(taskId, snapshot);
-      const removed = removeAcknowledgedLegacyPlanComment(sessionId, comment);
-      const sameIdStillStored = listLegacyPlanComments([sessionId]).some(
-        (record) => record.comment.id === comment.id,
-      );
-      if (removed || !sameIdStillStored) {
-        useCommentsStore.getState().forgetMigratedPlanComment(sessionId, comment.id);
-      } else {
-        failed = true;
-      }
-    } catch (error) {
-      failed = true;
-      const snapshot = planCommentAdmissionConflict(error)?.snapshot;
-      if (snapshot) store.getState().setTaskPlanComments(taskId, snapshot);
-      // i18n-exempt: developer diagnostic; the migration notice is localized.
-      console.error("Failed to migrate legacy plan comment:", error);
-    }
+    if (!(await migrateLegacyComment(taskId, plan, record, store))) failed = true;
   }
-
-  try {
-    const snapshot = await getTaskPlanComments(taskId);
-    store.getState().setTaskPlanComments(taskId, snapshot);
-  } catch (error) {
-    failed = true;
-    // i18n-exempt: developer diagnostic; the migration notice is localized.
-    console.error("Failed to refresh task plan comments after migration:", error);
-  }
+  if (!(await refreshMigratedComments(taskId, store))) failed = true;
   setStatusIfCurrent(store, taskId, plan, failed ? "failed" : "complete");
 }
 
@@ -93,19 +124,26 @@ function startMigration(
   sessionIds: string[],
   store: AppStore,
 ) {
-  const existing = migrationRuns.get(taskId);
+  const migrationRuns = migrationRunsFor(store);
+  const runKey = `${taskId}:${plan?.id ?? "none"}`;
+  const existing = migrationRuns.get(runKey);
   if (existing) return existing;
   const request = migrateLegacyComments(taskId, plan, sessionIds, store).finally(() => {
-    if (migrationRuns.get(taskId) === request) migrationRuns.delete(taskId);
+    if (migrationRuns.get(runKey) === request) migrationRuns.delete(runKey);
   });
-  migrationRuns.set(taskId, request);
+  migrationRuns.set(runKey, request);
   return request;
 }
 
 /** Losslessly promotes sessionStorage plan drafts into the task-owned collection. */
 export function usePlanCommentMigration(taskId: string | null | undefined) {
   const store = useAppStoreApi();
-  const { sessions, isLoaded: sessionsLoaded } = useTaskSessions(taskId ?? null);
+  const {
+    sessions,
+    isLoaded: sessionsLoaded,
+    error: sessionsError,
+    loadSessions,
+  } = useTaskSessions(taskId ?? null);
   const plan = useAppStore((state) => (taskId ? state.taskPlans.byTaskId[taskId] : undefined));
   const planLoaded = useAppStore((state) =>
     taskId ? (state.taskPlans.loadedByTaskId[taskId] ?? false) : true,
@@ -113,19 +151,50 @@ export function usePlanCommentMigration(taskId: string | null | undefined) {
   const storedStatus = useAppStore((state) =>
     taskId ? state.taskPlans.commentsMigrationStatusByTaskId[taskId] : "complete",
   );
+  const planLoadError = useAppStore((state) =>
+    taskId ? (state.taskPlans.commentsErrorByTaskId[taskId] ?? null) : null,
+  );
   const status = storedStatus ?? "idle";
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
 
   useEffect(() => {
+    if (
+      taskId &&
+      status !== "complete" &&
+      status !== "running" &&
+      (sessionsError || planLoadError)
+    ) {
+      store.getState().setTaskPlanCommentMigrationStatus(taskId, "failed");
+      return;
+    }
     if (!taskId || !sessionsLoaded || !planLoaded || plan === undefined) return;
     if (status === "running" || status === "complete" || status === "failed") return;
     if (status === "waiting_for_plan" && plan === null) return;
     void startMigration(taskId, plan, sessionIds, store);
-  }, [plan, planLoaded, sessionIds, sessionsLoaded, status, store, taskId]);
+  }, [
+    plan,
+    planLoadError,
+    planLoaded,
+    sessionIds,
+    sessionsError,
+    sessionsLoaded,
+    status,
+    store,
+    taskId,
+  ]);
 
-  const retry = useCallback(() => {
-    if (taskId) store.getState().setTaskPlanCommentMigrationStatus(taskId, "idle");
-  }, [store, taskId]);
+  const retry = useCallback(async () => {
+    if (!taskId) return;
+    const state = store.getState();
+    state.setTaskPlanCommentMigrationStatus(taskId, "running");
+    state.setTaskPlanCommentsError(taskId);
+    await loadSessions(true);
+    const next = store.getState();
+    next.setTaskPlanCommentMigrationStatus(
+      taskId,
+      next.taskSessionsByTask.errorByTaskId?.[taskId] ? "failed" : "idle",
+    );
+  }, [loadSessions, store, taskId]);
 
   return {
     status,

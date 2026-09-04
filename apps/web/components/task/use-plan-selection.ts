@@ -10,19 +10,21 @@ type PlanSelectionCommentState = Pick<
 /** Own transient plan-comment selection for the currently open task. */
 export function usePlanSelection(
   taskId: string | null | undefined,
+  planId: string | null | undefined,
   commentState: PlanSelectionCommentState,
 ) {
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
-  const previousTaskIdRef = useRef(taskId);
+  const ownerIdentity = `${taskId ?? ""}:${planId ?? ""}`;
+  const previousOwnerIdentityRef = useRef(ownerIdentity);
 
   useEffect(() => {
-    if (previousTaskIdRef.current === taskId) return;
-    previousTaskIdRef.current = taskId;
+    if (previousOwnerIdentityRef.current === ownerIdentity) return;
+    previousOwnerIdentityRef.current = ownerIdentity;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- task identity owns this transient editor state
     setTextSelection(null);
     commentState.setEditingCommentId(null);
     window.getSelection()?.removeAllRanges();
-  }, [taskId, commentState.setEditingCommentId]);
+  }, [ownerIdentity, commentState.setEditingCommentId]);
 
   const handleCommentHighlightClick = useCallback(
     (id: string, position: { x: number; y: number }) => {

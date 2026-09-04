@@ -1,5 +1,9 @@
 import type { PlanComment } from "@/lib/state/slices/comments";
-import type { TaskPlanCommentRef, TaskPlanCommentSnapshot } from "@/lib/types/http";
+import type {
+  TaskPlanCommentRef,
+  TaskPlanCommentSnapshot,
+  TaskSessionState,
+} from "@/lib/types/http";
 import { WebSocketRequestError } from "@/lib/ws/request-error";
 
 /** Freeze the task-plan comment versions visible when a user submits. */
@@ -16,6 +20,8 @@ export function toTaskPlanCommentRefs(comments: PlanComment[]): TaskPlanCommentR
 export type PlanCommentAdmissionConflict = {
   code: "plan_comments_changed" | "primary_session_changed";
   snapshot?: TaskPlanCommentSnapshot;
+  primarySessionId?: string;
+  primarySessionState?: TaskSessionState;
 };
 
 /** Read the stable plan-comment conflict fields from a rejected WS request. */
@@ -36,5 +42,13 @@ export function planCommentAdmissionConflict(
     "comments" in candidate
       ? (candidate as TaskPlanCommentSnapshot)
       : undefined;
-  return { code: error.code, snapshot };
+  const primarySessionId =
+    typeof error.details?.primary_session_id === "string"
+      ? error.details.primary_session_id
+      : undefined;
+  const primarySessionState =
+    typeof error.details?.primary_session_state === "string"
+      ? (error.details.primary_session_state as TaskSessionState)
+      : undefined;
+  return { code: error.code, snapshot, primarySessionId, primarySessionState };
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -243,6 +244,31 @@ func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 	}
 	if clientReceived(second) {
 		t.Fatal("cancellation notification crossed the session boundary")
+	}
+}
+
+func TestTaskEventBroadcaster_PlanCommentsAreTaskScoped(t *testing.T) {
+	hub := newTestHub(t)
+	first := newTestClient("first")
+	second := newTestClient("second")
+	registerTestClient(hub, first)
+	registerTestClient(hub, second)
+	hub.SubscribeToTask(first, "task-1")
+	hub.SubscribeToTask(second, "task-2")
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	snapshot := &models.TaskPlanCommentSnapshot{TaskID: "task-1", PlanID: "plan-1"}
+
+	require.NoError(t, broadcaster.broadcastEvent(context.Background(), bus.NewEvent(
+		events.TaskPlanCommentsChanged,
+		"test",
+		snapshot,
+	), ws.ActionTaskPlanCommentsChanged))
+
+	if !clientReceived(first) {
+		t.Fatal("task subscriber did not receive plan comments notification")
+	}
+	if clientReceived(second) {
+		t.Fatal("plan comments notification crossed the task boundary")
 	}
 }
 

@@ -82,6 +82,23 @@ func TestTaskPlanCommentHandlersCRUDAndConflictSnapshot(t *testing.T) {
 	}
 }
 
+func TestTaskPlanCommentHandlersHideMalformedPayloadDetails(t *testing.T) {
+	handlers := requirePlanCommentHandlers(t, newPlanTestHandlers(t))
+	response, err := handlers.wsListTaskPlanComments(t.Context(), &ws.Message{
+		ID: "malformed", Action: ws.ActionTaskPlanCommentsList, Payload: json.RawMessage(`{"task_id":`),
+	})
+	if err != nil {
+		t.Fatalf("wsListTaskPlanComments: %v", err)
+	}
+	var payload ws.ErrorPayload
+	if err := json.Unmarshal(response.Payload, &payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.Code != ws.ErrorCodeBadRequest || payload.Message != "Invalid payload" {
+		t.Fatalf("malformed payload response = %#v", payload)
+	}
+}
+
 type planCommentSnapshotPayload struct {
 	TaskID   string `json:"task_id"`
 	PlanID   string `json:"plan_id"`

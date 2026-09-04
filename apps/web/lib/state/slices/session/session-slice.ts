@@ -469,7 +469,9 @@ function reconcilePlanCommentIdentity(
   taskId: string,
   nextPlanId: string | null,
 ) {
-  const previousPlanId = taskPlans.byTaskId[taskId]?.id ?? null;
+  const previousPlan = taskPlans.byTaskId[taskId];
+  const previousPlanId = previousPlan?.id ?? null;
+  if (previousPlan !== undefined && previousPlanId === nextPlanId) return;
   if (previousPlanId !== nextPlanId) {
     taskPlans.commentsMigrationStatusByTaskId[taskId] = "idle";
   }

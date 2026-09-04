@@ -52,7 +52,7 @@ its own UUID is acknowledged and prevent a send from racing ahead of migration.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- lib/state/slices/comments/persistence.test.ts hooks/domains/comments/use-plan-comment-migration.test.tsx hooks/use-message-handler.test.ts components/task/passthrough-chat-composer.test.tsx
+cd apps && pnpm --filter @kandev/web test -- lib/state/slices/comments/persistence.test.ts hooks/domains/comments/use-plan-comment-migration.test.tsx hooks/use-message-handler.test.ts components/task/passthrough-chat-composer.test.ts
 cd apps/web && pnpm run typecheck
 ```
 

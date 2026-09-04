@@ -61,7 +61,7 @@ Add the primary-session guard and durable queue identity required by Run.
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/task/handlers ./internal/task/repository/sqlite ./internal/orchestrator/handlers ./internal/orchestrator/messagequeue
+cd apps/backend && go test -tags fts5 ./internal/task/handlers ./internal/task/plancomments ./internal/task/repository/plancommenttx ./internal/task/repository/sqlite ./internal/orchestrator/handlers ./internal/orchestrator/messagequeue
 ```
 
 ## Files likely touched

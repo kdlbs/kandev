@@ -2,9 +2,13 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +16,7 @@ import (
 	dbutil "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	"github.com/mattn/go-sqlite3"
 )
 
 type planCommentRepositoryContract interface {
@@ -19,6 +24,84 @@ type planCommentRepositoryContract interface {
 	CreateTaskPlanComment(context.Context, *models.TaskPlanComment) (*models.TaskPlanCommentSnapshot, error)
 	UpdateTaskPlanComment(context.Context, *models.TaskPlanComment, int64) (*models.TaskPlanCommentSnapshot, error)
 	DeleteTaskPlanComment(context.Context, string, string, string, int64) (*models.TaskPlanCommentSnapshot, error)
+}
+
+func TestListTaskPlanCommentsReturnsOneDatabaseSnapshot(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "plan-comment-snapshot.db")
+	writerConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open writer: %v", err)
+	}
+	writer := sqlx.NewDb(writerConn, "sqlite3")
+	t.Cleanup(func() { _ = writer.Close() })
+
+	var enabled atomic.Bool
+	var gate sync.Once
+	commentsRead := make(chan struct{})
+	continueRead := make(chan struct{})
+	driverName := fmt.Sprintf("sqlite3-plan-comment-snapshot-%d", time.Now().UnixNano())
+	sql.Register(driverName, &sqlite3.SQLiteDriver{ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+		conn.RegisterAuthorizer(func(op int, table, _, _ string) int {
+			if enabled.Load() && op == sqlite3.SQLITE_READ && table == "task_plan_comments" {
+				gate.Do(func() {
+					close(commentsRead)
+					<-continueRead
+				})
+			}
+			return sqlite3.SQLITE_OK
+		})
+		return nil
+	}})
+	readerConn, err := sql.Open(driverName, "file:"+dbPath+"?_mode=ro&_busy_timeout=5000")
+	if err != nil {
+		t.Fatalf("open reader: %v", err)
+	}
+	readerConn.SetMaxOpenConns(1)
+	reader := sqlx.NewDb(readerConn, "sqlite3")
+	t.Cleanup(func() { _ = reader.Close() })
+
+	repo, err := NewWithDB(writer, reader, nil)
+	if err != nil {
+		t.Fatalf("initialize repository: %v", err)
+	}
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-plan-comments-snapshot")
+	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
+		ID: "plan-comments-snapshot", TaskID: "task-plan-comments-snapshot", Content: "Plan",
+	}); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	type listResult struct {
+		snapshot *models.TaskPlanCommentSnapshot
+		err      error
+	}
+	result := make(chan listResult, 1)
+	enabled.Store(true)
+	go func() {
+		snapshot, listErr := repo.ListTaskPlanComments(ctx, "task-plan-comments-snapshot")
+		result <- listResult{snapshot: snapshot, err: listErr}
+	}()
+	select {
+	case <-commentsRead:
+	case <-time.After(time.Second):
+		t.Fatal("comment-row read did not start")
+	}
+	if _, err := repo.CreateTaskPlanComment(ctx, &models.TaskPlanComment{
+		ID: "comment-snapshot", TaskID: "task-plan-comments-snapshot", PlanID: "plan-comments-snapshot",
+		Body: "New", SelectedText: "Plan", AnchorFrom: 0, AnchorTo: 4,
+	}); err != nil {
+		t.Fatalf("concurrent create: %v", err)
+	}
+	close(continueRead)
+
+	got := <-result
+	if got.err != nil {
+		t.Fatalf("ListTaskPlanComments: %v", got.err)
+	}
+	if got.snapshot.Revision == 0 && len(got.snapshot.Comments) != 0 {
+		t.Fatalf("snapshot mixed revision 0 with %d new comments", len(got.snapshot.Comments))
+	}
 }
 
 func TestPlanCommentSchemaReplaysOnLegacyDatabase(t *testing.T) {
@@ -158,6 +241,12 @@ func TestPlanCommentSchemaExistsOnFreshDatabase(t *testing.T) {
 	if revisionColumnCount != 1 {
 		t.Fatalf("comments_revision column count = %d, want 1", revisionColumnCount)
 	}
+	if err := repo.db.Get(&tableName, `
+		SELECT name FROM sqlite_master
+		WHERE type = 'table' AND name = 'task_plan_comment_admissions'
+	`); err != nil {
+		t.Fatalf("task_plan_comment_admissions table is missing: %v", err)
+	}
 }
 
 func TestPlanCommentRepositoryCRUDAndOptimisticConflicts(t *testing.T) {
@@ -240,6 +329,48 @@ func TestPlanCommentRepositoryCRUDAndOptimisticConflicts(t *testing.T) {
 	assertPlanCommentSnapshot(t, deleted, "task-plan-comments", "plan-comments", 3, []*models.TaskPlanComment{})
 	if _, err := comments.DeleteTaskPlanComment(ctx, "task-plan-comments", "plan-comments", "comment-b", 2); !errors.Is(err, repoerrors.ErrTaskPlanCommentsChanged) {
 		t.Fatalf("repeated delete error = %v, want ErrTaskPlanCommentsChanged", err)
+	}
+}
+
+func TestPlanCommentCreateReplayDoesNotResurrectRetiredComment(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedTaskForDocs(t, repo, "task-plan-comment-replay")
+	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
+		ID: "plan-comment-replay", TaskID: "task-plan-comment-replay", Content: "Plan",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	original := &models.TaskPlanComment{
+		ID: "comment-retired", TaskID: "task-plan-comment-replay", PlanID: "plan-comment-replay",
+		Body: "Keep once", SelectedText: "Plan", AnchorFrom: 0, AnchorTo: 4,
+	}
+	created, err := repo.CreateTaskPlanComment(ctx, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := repo.DeleteTaskPlanComment(ctx, original.TaskID, original.PlanID, original.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	replayed, err := repo.CreateTaskPlanComment(ctx, &models.TaskPlanComment{
+		ID: original.ID, TaskID: original.TaskID, PlanID: original.PlanID,
+		Body: original.Body, SelectedText: original.SelectedText, AnchorFrom: original.AnchorFrom, AnchorTo: original.AnchorTo,
+	})
+	if err != nil {
+		t.Fatalf("retired create replay: %v", err)
+	}
+	if replayed.Revision != deleted.Revision || len(replayed.Comments) != 0 {
+		t.Fatalf("retired replay resurrected comment: %#v (created revision %d)", replayed, created.Revision)
+	}
+
+	conflict, err := repo.CreateTaskPlanComment(ctx, &models.TaskPlanComment{
+		ID: original.ID, TaskID: original.TaskID, PlanID: original.PlanID,
+		Body: "different", SelectedText: original.SelectedText, AnchorFrom: original.AnchorFrom, AnchorTo: original.AnchorTo,
+	})
+	if !errors.Is(err, repoerrors.ErrTaskPlanCommentsChanged) || conflict.Revision != deleted.Revision {
+		t.Fatalf("mismatched retired replay = %#v, %v", conflict, err)
 	}
 }
 

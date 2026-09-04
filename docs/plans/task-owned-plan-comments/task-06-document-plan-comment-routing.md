@@ -83,5 +83,5 @@ Task 03.
 - Updated the public task workflow to describe task-level pending comments,
   all-session composer visibility, selected-session Send, primary-session Run,
   and clearing after accepted delivery.
-- All 61 public-doc validator tests and validation of all 41 published pages
+- All 61 public-doc validator tests and validation of all 42 published pages
   pass.

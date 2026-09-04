@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 	internaldb "github.com/kandev/kandev/internal/db"
 )
@@ -835,11 +837,41 @@ func (r *sqliteRepository) replaceCoalesced(ctx context.Context, tx *sqlx.Tx, ex
 
 // insertCoalesced inserts msg as a new tail entry inside the transaction, honoring the capacity cap.
 func (r *sqliteRepository) insertCoalesced(ctx context.Context, tx *sqlx.Tx, msg *QueuedMessage, maxPerSession int) error {
-	if err := r.ensureQueueCapacity(ctx, tx, msg.SessionID, maxPerSession); err != nil {
+	return insertQueuedMessageInTransaction(ctx, tx, r.db, msg, maxPerSession)
+}
+
+// InsertTaskOwnedInTransaction appends an exact queue row inside a transaction
+// owned by another repository. Task message admission uses it to commit the
+// visible user message and its deferred queue delivery as one durable unit.
+// The caller must lock the owning task before entering this boundary.
+func InsertTaskOwnedInTransaction(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	msg *QueuedMessage,
+	maxPerSession int,
+) error {
+	if msg == nil || msg.ID == "" {
+		return errors.New("queued message id is required")
+	}
+	if err := lockSessionTxIn(ctx, tx, db, msg.SessionID); err != nil {
+		return err
+	}
+	return insertQueuedMessageInTransaction(ctx, tx, db, msg, maxPerSession)
+}
+
+func insertQueuedMessageInTransaction(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	msg *QueuedMessage,
+	maxPerSession int,
+) error {
+	if err := ensureQueueCapacityInTransaction(ctx, tx, db, msg.SessionID, maxPerSession); err != nil {
 		return err
 	}
 	var maxPos sql.NullInt64
-	if err := tx.GetContext(ctx, &maxPos, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
+	if err := tx.GetContext(ctx, &maxPos, db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
 		return fmt.Errorf("max position: %w", err)
 	}
 	msg.Position = maxPos.Int64 + 1
@@ -857,7 +889,7 @@ func (r *sqliteRepository) insertCoalesced(ctx context.Context, tx *sqlx.Tx, msg
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO queued_messages
 			(id, session_id, task_id, position, content, model, plan_mode, attachments_json, metadata_json, queued_at, queued_by)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -865,6 +897,9 @@ func (r *sqliteRepository) insertCoalesced(ctx context.Context, tx *sqlx.Tx, msg
 		msg.ID, msg.SessionID, msg.TaskID, msg.Position, msg.Content, msg.Model,
 		boolToInt(msg.PlanMode), attachmentsJSON, metadataJSON, msg.QueuedAt, msg.QueuedBy,
 	); err != nil {
+		if isQueuedMessageIDViolation(err) {
+			return ErrQueueIDConflict
+		}
 		return fmt.Errorf("insert coalesced queued: %w", err)
 	}
 	return nil
@@ -872,17 +907,35 @@ func (r *sqliteRepository) insertCoalesced(ctx context.Context, tx *sqlx.Tx, msg
 
 // ensureQueueCapacity rejects the insert when the session already holds maxPerSession entries.
 func (r *sqliteRepository) ensureQueueCapacity(ctx context.Context, tx *sqlx.Tx, sessionID string, maxPerSession int) error {
+	return ensureQueueCapacityInTransaction(ctx, tx, r.db, sessionID, maxPerSession)
+}
+
+func ensureQueueCapacityInTransaction(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	sessionID string,
+	maxPerSession int,
+) error {
 	if maxPerSession <= 0 {
 		return nil
 	}
 	var count int
-	if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
+	if err := tx.GetContext(ctx, &count, db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
 		return fmt.Errorf("count: %w", err)
 	}
 	if count >= maxPerSession {
 		return ErrQueueFull
 	}
 	return nil
+}
+
+func isQueuedMessageIDViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == "queued_messages_pkey"
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed: queued_messages.id")
 }
 
 // ListBySession returns all entries for a session ordered by position ascending.

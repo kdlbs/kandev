@@ -85,6 +85,6 @@ func (h *TaskHandlers) wsDeleteTaskPlanComment(ctx context.Context, msg *ws.Mess
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanCommentSnapshotFromModel(snapshot))
 }
 
-func invalidPlanCommentPayload(msg *ws.Message, err error) (*ws.Message, error) {
-	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+func invalidPlanCommentPayload(msg *ws.Message, _ error) (*ws.Message, error) {
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload", nil)
 }

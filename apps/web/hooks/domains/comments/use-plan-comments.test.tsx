@@ -70,6 +70,7 @@ function setUpApis() {
   api.getTaskPlanComments.mockResolvedValue(snapshot());
 }
 
+// eslint-disable-next-line max-lines-per-function -- Loading and reconnect cases share one task-plan store fixture.
 describe("usePlanComments loading", () => {
   beforeEach(setUpApis);
 
@@ -135,8 +136,104 @@ describe("usePlanComments loading", () => {
     await waitFor(() => expect(api.getTaskPlanComments).toHaveBeenCalledWith(TASK_ID));
     expect(result.current.comments.comments).toHaveLength(1);
   });
+
+  it("authoritatively discovers a plan created while disconnected", async () => {
+    const { result } = renderHook(
+      () => {
+        const store = useAppStoreApi();
+        return { store, comments: usePlanComments(TASK_ID) };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.store.getState().setTaskPlan(TASK_ID, null);
+      result.current.store.setState({
+        connection: { status: "disconnected", error: null, issueSeverity: "none" },
+      });
+    });
+
+    act(() => {
+      result.current.store.setState({
+        connection: { status: "connected", error: null, issueSeverity: "none" },
+      });
+    });
+
+    await waitFor(() => expect(result.current.comments.comments).toHaveLength(1));
+    expect(planApi.getTaskPlan).toHaveBeenCalledWith(TASK_ID);
+  });
+
+  it("replaces a stale cached plan before loading reconnect comments", async () => {
+    const replacement = { ...taskPlan, id: "plan-2", content: "# Replacement" };
+    const replacementSnapshot = { ...snapshot(2), plan_id: "plan-2" };
+    replacementSnapshot.comments = replacementSnapshot.comments.map((comment) => ({
+      ...comment,
+      plan_id: "plan-2",
+      body: "replacement feedback",
+    }));
+    planApi.getTaskPlan.mockResolvedValue(replacement);
+    api.getTaskPlanComments.mockResolvedValue(replacementSnapshot);
+    const { result } = renderHook(
+      () => {
+        const store = useAppStoreApi();
+        return { store, comments: usePlanComments(TASK_ID) };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot());
+      result.current.store.setState({
+        connection: { status: "disconnected", error: null, issueSeverity: "none" },
+      });
+    });
+
+    act(() => {
+      result.current.store.setState({
+        connection: { status: "connected", error: null, issueSeverity: "none" },
+      });
+    });
+
+    await waitFor(() =>
+      expect(result.current.comments.comments[0]?.text).toBe("replacement feedback"),
+    );
+    expect(result.current.store.getState().taskPlans.byTaskId[TASK_ID]?.id).toBe("plan-2");
+  });
+
+  it("does not let a stale plan fetch clear the replacement plan loading state", async () => {
+    let rejectOld!: (error: Error) => void;
+    api.getTaskPlanComments.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => (rejectOld = reject)),
+    );
+    const { result } = renderHook(
+      () => {
+        const store = useAppStoreApi();
+        return { store, comments: usePlanComments(TASK_ID) };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.setState({
+        connection: { status: "connected", error: null, issueSeverity: "none" },
+      });
+    });
+    await waitFor(() => expect(result.current.comments.isLoading).toBe(true));
+    act(() => {
+      result.current.store.getState().setTaskPlan(TASK_ID, { ...taskPlan, id: "plan-2" });
+      result.current.store.getState().setTaskPlanCommentsLoading(TASK_ID, true);
+      rejectOld(new Error("old plan failed"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.store.getState().taskPlans.commentsLoadingByTaskId[TASK_ID]).toBe(true);
+      expect(
+        result.current.store.getState().taskPlans.commentsErrorByTaskId[TASK_ID],
+      ).toBeUndefined();
+    });
+  });
 });
 
+// eslint-disable-next-line max-lines-per-function -- Optimistic concurrency cases share one task-plan store fixture.
 describe("usePlanComments mutations", () => {
   beforeEach(setUpApis);
 
@@ -193,5 +290,85 @@ describe("usePlanComments mutations", () => {
 
     expect(result.current.comments.comments[0]?.text).toBe("shared feedback");
     expect(result.current.comments.mutationError).toBeTruthy();
+  });
+
+  it("keeps the edit base version when a live snapshot arrives", async () => {
+    api.updateTaskPlanComment.mockRejectedValue(new Error("version conflict"));
+    const { result } = renderHook(
+      () => {
+        const store = useAppStoreApi();
+        return { store, comments: usePlanComments(TASK_ID) };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot(1));
+    });
+    await waitFor(() => expect(result.current.comments.comments).toHaveLength(1));
+    act(() => {
+      result.current.comments.setEditingCommentId("comment-1");
+    });
+    act(() => result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot(2, "remote")));
+
+    await act(async () => {
+      await result.current.comments.handleAddComment("local draft", "selected", 2, 7);
+    });
+
+    expect(api.updateTaskPlanComment).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "comment-1", expectedVersion: 1, body: "local draft" }),
+    );
+  });
+
+  it("keeps the delete base version when a live snapshot arrives", async () => {
+    api.deleteTaskPlanComment.mockRejectedValue(new Error("version conflict"));
+    const { result } = renderHook(
+      () => {
+        const store = useAppStoreApi();
+        return { store, comments: usePlanComments(TASK_ID) };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot(1));
+    });
+    await waitFor(() => expect(result.current.comments.comments).toHaveLength(1));
+    act(() => {
+      result.current.comments.setEditingCommentId("comment-1");
+    });
+    act(() => result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot(2, "remote")));
+
+    await act(async () => {
+      await result.current.comments.handleDeleteComment("comment-1");
+    });
+
+    expect(api.deleteTaskPlanComment).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "comment-1", expectedVersion: 1 }),
+    );
+  });
+
+  it("reprojects the saved snapshot when delete transport fails", async () => {
+    api.deleteTaskPlanComment.mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(
+      () => {
+        const store = useAppStoreApi();
+        return { store, comments: usePlanComments(TASK_ID) };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot(1));
+    });
+    const before = result.current.store.getState().taskPlans.commentsByTaskId[TASK_ID];
+
+    await act(async () => {
+      await result.current.comments.handleDeleteComment("comment-1");
+    });
+
+    const after = result.current.store.getState().taskPlans.commentsByTaskId[TASK_ID];
+    expect(after).not.toBe(before);
+    expect(after?.comments).toHaveLength(1);
   });
 });
