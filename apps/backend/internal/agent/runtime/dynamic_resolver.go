@@ -363,7 +363,7 @@ func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 		if resumeErr == nil {
 			return r.executionFromDecision(ctx, profileID, sessionID, decision)
 		}
-		if !errors.Is(resumeErr, dynamic.ErrRecoveryPending) && !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
+		if !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
 			return ProfileExecution{}, resumeErr
 		}
 	}
@@ -375,6 +375,11 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 	sessionID, profileID, currentExecutionProfileID string,
 	expectedGeneration int64,
 ) (ProfileExecution, error) {
+	if state, exists, err := r.engine.LoadState(ctx, sessionID); err != nil {
+		return ProfileExecution{}, err
+	} else if exists && state.Generation == expectedGeneration && state.Status == "retrying" {
+		return ProfileExecution{}, dynamic.ErrRecoveryPending
+	}
 	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
 	if err != nil {
 		return ProfileExecution{}, err

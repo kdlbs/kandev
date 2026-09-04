@@ -39,15 +39,18 @@ func TestConcurrentResumePendingClaimsExactlyOneGeneration(t *testing.T) {
 		t.Fatalf("SaveRouteState: %v", err)
 	}
 
-	engine := dynamicruntime.NewEngine(
-		dynamicruntime.WithPersistence(repo),
-		dynamicruntime.WithStateLoader(repo),
-	)
-	if _, _, err := engine.LoadState(ctx, "session-race"); err != nil {
-		t.Fatalf("warm engine cache: %v", err)
+	const callers = 2
+	engines := make([]*dynamicruntime.Engine, callers)
+	for i := range engines {
+		engines[i] = dynamicruntime.NewEngine(
+			dynamicruntime.WithPersistence(repo),
+			dynamicruntime.WithStateLoader(repo),
+		)
+		if _, _, err := engines[i].LoadState(ctx, "session-race"); err != nil {
+			t.Fatalf("warm engine cache %d: %v", i, err)
+		}
 	}
 
-	const callers = 2
 	var wg sync.WaitGroup
 	decisions := make([]dynamicruntime.RouteDecision, callers)
 	errs := make([]error, callers)
@@ -55,7 +58,7 @@ func TestConcurrentResumePendingClaimsExactlyOneGeneration(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		go func(i int) {
 			defer wg.Done()
-			decisions[i], errs[i] = engine.ResumePending(ctx, "session-race", 4)
+			decisions[i], errs[i] = engines[i].ResumePending(ctx, "session-race", 4)
 		}(i)
 	}
 	wg.Wait()

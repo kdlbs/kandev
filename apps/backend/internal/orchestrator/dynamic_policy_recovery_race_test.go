@@ -28,8 +28,8 @@ import (
 // status, so both callers could claim the same retry_wait -> retrying
 // transition and both launch a successor, delivering the same prompt twice.
 // With the exact-status CAS (ClaimRouteStatus) plus the shared
-// acquireCancelInFlightGuard now held across resolve+launch, exactly one
-// caller claims the transition and only it reaches the downstream launch.
+// acquireCancelInFlightGuard held through the claim and session projection,
+// exactly one caller claims the transition and only it reaches the launch.
 func TestConcurrentDynamicPolicyRecoveryLaunchesExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	const (

@@ -157,14 +157,17 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	if !ok {
 		return
 	}
-	// Hold the same per-session guard ApplyRouteAction holds across resolve
-	// and launch, so a concurrent manual retry cannot interleave with this
-	// timer path before either reaches the durable claim.
+	// Hold the same per-session guard ApplyRouteAction holds through the
+	// durable claim and task-session projection. Release it before lifecycle
+	// launch because that path acquires the session lifecycle lock.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
+	locked := true
 	defer func() {
-		lock.Unlock()
-		release()
+		if locked {
+			lock.Unlock()
+			release()
+		}
 	}()
 	state, ok := loadDueDynamicPolicyState(ctx, loader, sessionID, generation)
 	if !ok {
@@ -177,7 +180,15 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	if s.handleDynamicPolicyResumeError(ctx, loader, sessionID, generation, err) {
 		return
 	}
-	s.persistDynamicPolicyRecovery(ctx, sessionID, generation, resolved)
+	if !s.persistDynamicPolicyRecovery(ctx, sessionID, generation, resolved) {
+		return
+	}
+	lock.Unlock()
+	release()
+	locked = false
+	if err := s.LaunchDynamicRouteAction(ctx, sessionID); err != nil {
+		s.markDynamicPolicyRecoveryActionRequired(ctx, sessionID, err)
+	}
 }
 
 func (s *Service) removeDynamicPolicyRecoveryTimer(sessionID string) {
@@ -243,10 +254,10 @@ func (s *Service) persistDynamicPolicyRecovery(
 	sessionID string,
 	generation int64,
 	resolved agentruntime.ProfileExecution,
-) {
+) bool {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil || session.RouteGeneration != generation || session.ExecutionProfileID != resolved.ExecutionProfileID {
-		return
+		return false
 	}
 	applyDynamicRouteDecisionProjection(session, resolved.Decision)
 	session.RouteState = resolved.Decision.Status
@@ -255,11 +266,9 @@ func (s *Service) persistDynamicPolicyRecovery(
 	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
 		s.logger.Warn("failed to persist dynamic policy retry state",
 			zap.String("session_id", sessionID), zap.Error(err))
-		return
+		return false
 	}
-	if err := s.LaunchDynamicRouteAction(ctx, sessionID); err != nil {
-		s.markDynamicPolicyRecoveryActionRequired(ctx, sessionID, err)
-	}
+	return true
 }
 
 func dynamicPolicyDeadline(rawPolicyState string) *time.Time {
