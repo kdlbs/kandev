@@ -425,11 +425,48 @@ func BuildBoundedContinuation(input ContinuationInput) Continuation {
 	return Continuation{
 		TaskDescription:   bounded(input.TaskDescription),
 		WorkflowStep:      bounded(input.WorkflowStep),
-		Conversation:      boundedTail(strings.Join(input.UserMessages, "\n") + "\n" + input.Conversation),
+		Conversation:      boundedConversation(input.UserMessages, input.Conversation),
 		ToolSummary:       bounded(routingerr.Sanitize(input.ToolSummary)),
 		RepositorySummary: bounded(input.RepositorySummary),
 		PlanSummary:       bounded(input.PlanSummary),
 		FailureReason:     bounded(routingerr.Sanitize(input.FailureReason)),
+	}
+}
+
+// conversationUserBudget caps how much of continuationFieldLimit the user
+// messages half of Conversation may claim. A long agent conversation alone
+// can reach the full limit, so without a separate budget it would crowd out
+// every user message; splitting the limit guarantees both survive.
+const conversationUserBudget = continuationFieldLimit / 2
+
+// boundedConversation bounds user messages and the agent conversation on
+// independent tail-kept budgets, then joins them, so the newest user asks
+// and the newest agent turns both survive regardless of how large the other
+// side is. Conversation can carry raw agent-authored provider output (echoed
+// command output, env values), so it is sanitized only after being bounded:
+// Sanitize's own MaxRawExcerptBytes truncation is head-first, and running it
+// before the tail-keep would discard the most recent turns instead of the
+// oldest. Sanitize's redactions can grow the string slightly (e.g. replacing
+// a short path with a longer placeholder), so the sanitized value is
+// re-bounded to the same budget to keep the final result within
+// continuationFieldLimit.
+func boundedConversation(userMessages []string, conversation string) string {
+	userPart := boundedTailN(strings.Join(userMessages, "\n"), conversationUserBudget)
+
+	convBudget := continuationFieldLimit - len(userPart)
+	if userPart != "" {
+		convBudget-- // separating newline
+	}
+	convPart := boundedTailN(conversation, convBudget)
+	convPart = boundedTailN(routingerr.Sanitize(convPart), convBudget)
+
+	switch {
+	case userPart == "":
+		return convPart
+	case convPart == "":
+		return userPart
+	default:
+		return userPart + "\n" + convPart
 	}
 }
 
@@ -488,11 +525,17 @@ func bounded(value string) string {
 // a rune boundary. Used for Conversation, whose most recent content lives at
 // the end of the composed string.
 func boundedTail(value string) string {
+	return boundedTailN(value, continuationFieldLimit)
+}
+
+// boundedTailN truncates to limit bytes keeping the tail, on a rune
+// boundary, so a multi-byte character is never split into invalid UTF-8.
+func boundedTailN(value string, limit int) string {
 	value = strings.TrimSpace(value)
-	if len(value) <= continuationFieldLimit {
+	if len(value) <= limit {
 		return value
 	}
-	cut := len(value) - continuationFieldLimit
+	cut := len(value) - limit
 	for cut < len(value) && !utf8.RuneStart(value[cut]) {
 		cut++
 	}

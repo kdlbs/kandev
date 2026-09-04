@@ -55,6 +55,29 @@ func TestBoundedConversationRetainsNewestContent(t *testing.T) {
 	}
 }
 
+// TestBoundedConversationRetainsUserMessagesWhenConversationOverflows is the
+// R1-2 regression: once the agent conversation alone reaches the field
+// limit, user messages must still survive on their own budget rather than
+// being crowded out by a single tail cut over the concatenated string.
+func TestBoundedConversationRetainsUserMessagesWhenConversationOverflows(t *testing.T) {
+	overflowingConversation := strings.Repeat("agent: working on it. ", 500) // well over continuationFieldLimit
+
+	continuation := BuildBoundedContinuation(ContinuationInput{
+		UserMessages: []string{"USERMSG-1: please fix the bug", "USERMSG-2: also add a test"},
+		Conversation: overflowingConversation,
+	})
+
+	if !strings.Contains(continuation.Conversation, "USERMSG-1") {
+		t.Fatalf("Conversation dropped USERMSG-1: %q", continuation.Conversation)
+	}
+	if !strings.Contains(continuation.Conversation, "USERMSG-2") {
+		t.Fatalf("Conversation dropped USERMSG-2: %q", continuation.Conversation)
+	}
+	if len(continuation.Conversation) > continuationFieldLimit {
+		t.Fatalf("Conversation exceeded continuationFieldLimit: %d bytes", len(continuation.Conversation))
+	}
+}
+
 // TestBoundedTaskDescriptionKeepsHead pins the unchanged head-keep contract
 // for every field other than Conversation (PlanSummary is separately pinned
 // by TestBoundedIsNoOpOnReducedPlanOutput).

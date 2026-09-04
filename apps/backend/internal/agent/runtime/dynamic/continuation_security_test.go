@@ -60,6 +60,34 @@ func TestContinuationSanitizesFailureReasonAndFramesItAsUntrusted(t *testing.T) 
 	}
 }
 
+// TestContinuationRedactsConversationSecret is the R1-1 regression: agent-
+// authored provider output lands in Conversation verbatim (dynamic_launch.go
+// addDynamicConversation), so a secret-shaped token there must not survive
+// into the persisted continuation JSON or the rendered successor prompt any
+// more than one in ToolSummary or FailureReason does.
+func TestContinuationRedactsConversationSecret(t *testing.T) {
+	continuation := BuildBoundedContinuation(ContinuationInput{
+		Conversation: "agent: I exported API_KEY=" + secretShapedToken + " into the shell",
+	})
+
+	if strings.Contains(continuation.Conversation, secretShapedToken) {
+		t.Fatalf("Conversation retained the raw secret: %q", continuation.Conversation)
+	}
+
+	payload, err := json.Marshal(continuation)
+	if err != nil {
+		t.Fatalf("marshal continuation: %v", err)
+	}
+	if strings.Contains(string(payload), secretShapedToken) {
+		t.Fatalf("continuation_json retained the raw secret: %s", payload)
+	}
+
+	prompt := ContinuationPrompt("do the task", continuation)
+	if strings.Contains(prompt, secretShapedToken) {
+		t.Fatalf("rendered prompt retained the raw secret: %q", prompt)
+	}
+}
+
 // TestContinuationWithFailureSanitizesFallbackReason covers the fallback-loop
 // path (conductor.go's continuationWithFailure), which sets FailureReason
 // directly from a classified launch error rather than through
