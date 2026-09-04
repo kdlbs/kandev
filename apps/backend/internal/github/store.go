@@ -2043,7 +2043,7 @@ func (s *Store) GetPRWatchByTask(ctx context.Context, taskID string) (*PRWatch, 
 func (s *Store) ListPRWatchesByTask(ctx context.Context, taskID string) ([]*PRWatch, error) {
 	var watches []*PRWatch
 	err := s.ro.SelectContext(ctx, &watches,
-		`SELECT * FROM github_pr_watches WHERE task_id = ? ORDER BY created_at ASC`, taskID)
+		s.ro.Rebind(`SELECT * FROM github_pr_watches WHERE task_id = ? ORDER BY created_at ASC`), taskID)
 	return watches, err
 }
 
