@@ -114,6 +114,38 @@ func TestProviderErrorFromErrorDropsMalformedOrOversizedMetadata(t *testing.T) {
 	})
 }
 
+// TestProviderErrorFromErrorNeverLeaksRawDataWhenMessageSanitizesEmpty pins
+// AC.22's unconditional "raw JSON-RPC error data shall never cross the
+// boundary": a *acp.RequestError whose Message sanitizes to empty (here, an
+// all-URL message) must still yield a non-nil projection, so a caller never
+// falls back to the SDK's own Error(), which JSON-marshals the raw Data
+// verbatim.
+func TestProviderErrorFromErrorNeverLeaksRawDataWhenMessageSanitizesEmpty(t *testing.T) {
+	err := &sdk.RequestError{
+		Code:    -32603,
+		Message: "https://gateway.internal/billing",
+		Data:    map[string]any{"account_id": "acct_topsecret", "session_token": "sk-do-not-leak"},
+	}
+
+	if !strings.Contains(err.Error(), "sk-do-not-leak") {
+		t.Fatalf("test setup invalid: raw Error() does not contain the secret it is meant to prove is contained: %q", err.Error())
+	}
+
+	got := ProviderErrorFromError(err, "claude-acp", "")
+	if got == nil {
+		t.Fatal("ProviderErrorFromError() = nil, want a non-nil projection so callers never fall back to err.Error()")
+	}
+	if strings.Contains(got.Message, "sk-do-not-leak") || strings.Contains(got.Message, "acct_topsecret") {
+		t.Fatalf("message leaked raw Data: %q", got.Message)
+	}
+	if got.Message == "" {
+		t.Fatal("message is empty, want a fixed generic message")
+	}
+	if got.RPCCode != -32603 {
+		t.Fatalf("rpc_code = %d, want -32603 (metadata merge should still run)", got.RPCCode)
+	}
+}
+
 // TestProviderErrorFromErrorNeverOverwritesRicherExtractor pins the merge
 // rule: allowlisted metadata fills only fields the winning projection left
 // empty, so OpenCode's own provider_id/model_id (read from structured stderr

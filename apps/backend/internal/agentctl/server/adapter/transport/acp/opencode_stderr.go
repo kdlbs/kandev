@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	opencodeAgentID         = "opencode-acp"
-	maxProviderMessageBytes = 2048
+	opencodeAgentID             = "opencode-acp"
+	maxProviderMessageBytes     = 2048
+	genericProviderErrorMessage = "provider prompt error"
 )
 
 var (
@@ -125,7 +126,9 @@ func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, er
 // JSON-RPC error. Error data is adapter-defined and can contain credentials,
 // account identifiers, or opaque gateway details, so it never crosses this
 // boundary. Provider-specific extractors may attach richer allowlisted fields
-// before this generic fallback runs.
+// before this generic fallback runs. It always returns non-nil for a genuine
+// *acp.RequestError, so a caller never falls back to the SDK's own Error(),
+// which serializes the raw Data it is this function's job to keep contained.
 func providerErrorFromACPPrompt(err error) *streams.ProviderError {
 	var reqErr *acp.RequestError
 	if !errors.As(err, &reqErr) || reqErr == nil {
@@ -133,7 +136,7 @@ func providerErrorFromACPPrompt(err error) *streams.ProviderError {
 	}
 	message := sanitizeProviderMessage(reqErr.Message)
 	if message == "" {
-		return nil
+		message = genericProviderErrorMessage
 	}
 	return &streams.ProviderError{
 		Source:     streams.ProviderErrorSourceACPPrompt,
