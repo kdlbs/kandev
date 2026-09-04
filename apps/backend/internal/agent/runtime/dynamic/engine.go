@@ -636,14 +636,16 @@ func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGener
 	return nil
 }
 
-// MarkActionRequired transitions a claimed route to durable action_required
-// from any current status, fenced to the caller's known generation. Unlike
-// CancelPending, it does not require the route to already be in a pending
-// wait — it is the catch-all recovery marker for a launch that claimed a
-// generation but failed before reaching a terminal status of its own, so the
-// recovery UI always has something to act on instead of a route silently
-// stuck at "starting". Calling it on a route that is already
-// action_required is a no-op.
+// MarkActionRequired transitions a claimed route to durable action_required,
+// fenced to the caller's known generation. It is the catch-all recovery
+// marker for a launch that claimed a generation but failed before reaching a
+// terminal status of its own, so the recovery UI always has something to act
+// on instead of a route silently stuck at "starting". Like MarkActive, it
+// only transitions a route that is still "starting": a route a launch has
+// already carried past that phase (active) is left untouched, so a later,
+// unrelated failure on a healthy route cannot demote it and offer a fallback
+// the failure classifier explicitly declined. Calling it on a route that is
+// already action_required is a no-op.
 func (e *Engine) MarkActionRequired(
 	ctx context.Context,
 	sessionID string,
@@ -660,7 +662,7 @@ func (e *Engine) MarkActionRequired(
 	if state.Generation != expectedGeneration {
 		return RouteDecision{}, ErrStaleGeneration
 	}
-	if state.Status != routeStatusActionRequired {
+	if state.Status == routeStatusStarting {
 		state.Status = routeStatusActionRequired
 		state.UpdatedAt = e.now()
 		if err := e.persistSameGeneration(ctx, expectedGeneration, state); err != nil {

@@ -338,15 +338,15 @@ func TestEngineMarkActiveIsNoOpWhenRouteAlreadyLeftStarting(t *testing.T) {
 	}
 }
 
-func TestEngineMarkActionRequiredAcceptsAnyStatusAndFencesGeneration(t *testing.T) {
+func TestEngineMarkActionRequiredFromStartingAndFencesGeneration(t *testing.T) {
 	engine := NewEngine()
 	profile := Profile{ID: "dynamic-action-required", Candidates: []Candidate{{ID: "first", Enabled: true}}}
 	initial, err := engine.Select("action-required-session", profile, 0, "")
 	if err != nil {
 		t.Fatalf("initial Select: %v", err)
 	}
-	// Unlike CancelPending, a route sitting in "starting" (the exact stranded
-	// case this exists to fix) must be acceptable input.
+	// A route sitting in "starting" (the exact stranded case this exists to
+	// fix) must be acceptable input.
 	decision, err := engine.MarkActionRequired(context.Background(), "action-required-session", initial.Generation, "launch_failed")
 	if err != nil {
 		t.Fatalf("MarkActionRequired: %v", err)
@@ -372,6 +372,35 @@ func TestEngineMarkActionRequiredAcceptsAnyStatusAndFencesGeneration(t *testing.
 	}
 	if _, err := engine.MarkActionRequired(context.Background(), "missing-session", 1, "missing"); !errors.Is(err, ErrRouteStateNotFound) {
 		t.Fatalf("missing session MarkActionRequired error = %v, want %v", err, ErrRouteStateNotFound)
+	}
+}
+
+// TestEngineMarkActionRequiredIsNoOpOnceRouteIsActive is the regression test
+// for review finding F1: a route a launch already carried to "active" must
+// not be demoted to action_required by an unrelated later failure (for
+// example a permission-denied or resume-corrupted error the classifier
+// forbids fallback for), which would surface a "Try next provider" recovery
+// banner on a healthy session.
+func TestEngineMarkActionRequiredIsNoOpOnceRouteIsActive(t *testing.T) {
+	engine := NewEngine()
+	profile := Profile{ID: "dynamic-action-required-active", Candidates: []Candidate{{ID: "first", Enabled: true}}}
+	initial, err := engine.Select("active-route-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if err := engine.MarkActive(context.Background(), "active-route-session", initial.Generation); err != nil {
+		t.Fatalf("MarkActive: %v", err)
+	}
+	decision, err := engine.MarkActionRequired(context.Background(), "active-route-session", initial.Generation, "permission_denied")
+	if err != nil {
+		t.Fatalf("MarkActionRequired on active route: %v", err)
+	}
+	if decision.Status != routeStatusActive {
+		t.Fatalf("decision.Status = %q, want unchanged %q", decision.Status, routeStatusActive)
+	}
+	state, ok := engine.State("active-route-session")
+	if !ok || state.Status != routeStatusActive {
+		t.Fatalf("state after no-op MarkActionRequired = %#v, ok=%v, want unchanged active", state, ok)
 	}
 }
 

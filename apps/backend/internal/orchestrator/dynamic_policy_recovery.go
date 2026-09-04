@@ -58,9 +58,7 @@ func (s *Service) startDynamicPolicyRecovery(ctx context.Context) {
 // LaunchDynamicRouteAction) can strand a route this way, and no timer or
 // event fires for a durable status that is not a pending wait. A route that
 // reached MarkActive is no longer "starting", so this sweep cannot demote a
-// healthy idling dynamic session; only a session whose current state is not
-// RUNNING is treated as orphaned, so a launch already back in flight when
-// this runs is left alone.
+// healthy idling dynamic session.
 func (s *Service) reconcileOrphanedDynamicStartingRoutes(ctx context.Context) {
 	if s.profileExecutionResolver == nil {
 		return
@@ -84,10 +82,28 @@ func (s *Service) reconcileOrphanedDynamicStartingRoute(ctx context.Context, sta
 	if err != nil || session == nil || session.RouteGeneration != state.Generation {
 		return
 	}
-	if session.State == models.TaskSessionStateRunning {
+	if !isOrphanableDynamicSessionState(session.State) {
 		return
 	}
 	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
+}
+
+// isOrphanableDynamicSessionState reports whether a session's current state
+// is consistent with "a route claimed as starting has no in-flight launch
+// owner". STARTING means a launch was under way when the process that owned
+// it stopped; IDLE (office runs only) means the executor was already torn
+// down between turns with no successor launched. Every other state either
+// already has a live owner (RUNNING), has not attempted a launch for this
+// claim yet (CREATED — PrepareSession's background workspace launch claims a
+// route ahead of the user's first prompt, which can sit unstarted for a
+// long time by design), or is a terminal/parked outcome the ordinary
+// session UI already explains (WAITING_FOR_INPUT, COMPLETED, FAILED,
+// CANCELLED). Flagging those would put a stale "Retry / Try next / Stop"
+// banner on a session with nothing left to recover — including every
+// dynamic session that predates MarkActive, which is "starting" for exactly
+// this reason and not because anything is actually stuck.
+func isOrphanableDynamicSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateStarting || state == models.TaskSessionStateIdle
 }
 
 func (s *Service) stopDynamicPolicyRecovery() {

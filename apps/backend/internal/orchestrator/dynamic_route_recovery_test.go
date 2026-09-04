@@ -182,69 +182,91 @@ func TestLaunchDynamicRouteAction_MarksRouteActionRequiredWhenRelaunchFails(t *t
 	}
 }
 
-func TestReconcileOrphanedDynamicStartingRoutes_SweepsNonRunningSession(t *testing.T) {
-	ctx := context.Background()
-	const (
-		taskID      = "task-dynamic-orphan-sweep"
-		sessionID   = "session-dynamic-orphan-sweep"
-		executionID = "execution-dynamic-orphan-sweep"
-	)
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
-	taskRepo := newMockTaskRepo()
-	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
-	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+func TestReconcileOrphanedDynamicStartingRoutes_SweepsInFlightLaunchStates(t *testing.T) {
+	// STARTING means a launch was under way when the owning process stopped;
+	// IDLE (office runs) means the executor was already torn down between
+	// turns. Both have no possible owner left after a restart.
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateIdle,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			taskID := "task-dynamic-orphan-sweep-" + string(state)
+			sessionID := "session-dynamic-orphan-sweep-" + string(state)
+			executionID := "execution-dynamic-orphan-sweep-" + string(state)
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, taskID, sessionID, state)
+			taskRepo := newMockTaskRepo()
+			seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 
-	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
-	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
-	seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+			engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+			seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
 
-	// This reproduces the two live stranded rows found in production: a
-	// route claimed as "starting" with a session that is not RUNNING and no
-	// process can still be launching it.
-	svc.reconcileOrphanedDynamicStartingRoutes(ctx)
+			svc.reconcileOrphanedDynamicStartingRoutes(ctx)
 
-	routeState, err := repo.LoadRouteState(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("LoadRouteState: %v", err)
-	}
-	if routeState == nil || routeState.Status != "action_required" {
-		t.Fatalf("durable route state = %#v, want action_required", routeState)
-	}
-	session, err := repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("GetTaskSession: %v", err)
-	}
-	if session.RouteState != "action_required" {
-		t.Fatalf("task session route_state = %q, want action_required", session.RouteState)
+			routeState, err := repo.LoadRouteState(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("LoadRouteState: %v", err)
+			}
+			if routeState == nil || routeState.Status != "action_required" {
+				t.Fatalf("durable route state = %#v, want action_required", routeState)
+			}
+			session, err := repo.GetTaskSession(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("GetTaskSession: %v", err)
+			}
+			if session.RouteState != "action_required" {
+				t.Fatalf("task session route_state = %q, want action_required", session.RouteState)
+			}
+		})
 	}
 }
 
-func TestReconcileOrphanedDynamicStartingRoutes_SkipsRunningSession(t *testing.T) {
-	ctx := context.Background()
-	const (
-		taskID      = "task-dynamic-orphan-sweep-running"
-		sessionID   = "session-dynamic-orphan-sweep-running"
-		executionID = "execution-dynamic-orphan-sweep-running"
-	)
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
-	taskRepo := newMockTaskRepo()
-	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
-	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+// TestReconcileOrphanedDynamicStartingRoutes_SkipsNonOrphanStates is the
+// regression test for review finding F3: RUNNING already has a live owner;
+// CREATED is PrepareSession's ordinary pre-first-prompt claim, which can sit
+// unstarted for a long time by design; WAITING_FOR_INPUT/COMPLETED/FAILED/
+// CANCELLED are terminal or parked outcomes the normal session UI already
+// explains — including every dynamic session that predates MarkActive and is
+// "starting" only because that transition did not exist yet, not because
+// anything is stuck. None of these should grow a stale recovery banner.
+func TestReconcileOrphanedDynamicStartingRoutes_SkipsNonOrphanStates(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateCreated,
+		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			taskID := "task-dynamic-orphan-skip-" + string(state)
+			sessionID := "session-dynamic-orphan-skip-" + string(state)
+			executionID := "execution-dynamic-orphan-skip-" + string(state)
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, taskID, sessionID, state)
+			taskRepo := newMockTaskRepo()
+			seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 
-	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
-	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
-	seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+			engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+			seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
 
-	svc.reconcileOrphanedDynamicStartingRoutes(ctx)
+			svc.reconcileOrphanedDynamicStartingRoutes(ctx)
 
-	routeState, err := repo.LoadRouteState(ctx, sessionID)
-	if err != nil {
-		t.Fatalf("LoadRouteState: %v", err)
-	}
-	if routeState == nil || routeState.Status != "starting" {
-		t.Fatalf("durable route state = %#v, want unchanged starting for a live RUNNING session", routeState)
+			routeState, err := repo.LoadRouteState(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("LoadRouteState: %v", err)
+			}
+			if routeState == nil || routeState.Status != "starting" {
+				t.Fatalf("durable route state = %#v, want unchanged starting for a %s session", routeState, state)
+			}
+		})
 	}
 }
 
