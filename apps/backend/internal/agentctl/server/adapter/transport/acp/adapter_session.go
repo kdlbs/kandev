@@ -24,6 +24,13 @@ func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
 
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+	return a.newSession(ctx, mcpServers)
+}
+
+//nolint:funlen // pre-existing session creation flow retained for transition ordering
+func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.mu.Lock()
 	conn := a.acpConn
 	a.mu.Unlock()
@@ -377,6 +384,9 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 //
 //nolint:funlen // pre-existing length preserved from adapter.go file split
 func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+
 	a.mu.Lock()
 	conn := a.acpConn
 	supportsLoad := a.capabilities.LoadSession
@@ -528,8 +538,67 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // ResetSession creates a new session on the existing connection, effectively resetting
 // the agent's conversation context without restarting the subprocess. This is much faster
 // than a full process restart since the ACP protocol supports multiple sessions per connection.
+//
+// The session/new call spawns a fresh agent-side child process without releasing the
+// superseded one, so a successful reset closes the outgoing session to release its
+// resources. The old session is captured before NewSession overwrites a.sessionID.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
-	return a.NewSession(ctx, mcpServers)
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+
+	a.mu.RLock()
+	previous, conn := a.sessionID, a.acpConn
+	a.mu.RUnlock()
+
+	newID, err := a.newSession(ctx, mcpServers)
+	if err != nil {
+		return "", err
+	}
+	a.closeSupersededSessionLocked(ctx, conn, previous, newID)
+	return newID, nil
+}
+
+// closeSupersededSessionTimeout bounds session/close after a reset so cleanup
+// can't hang the caller when the agent doesn't respond.
+const closeSupersededSessionTimeout = 10 * time.Second
+
+// closeSupersededSession releases the session a successful reset just replaced.
+// It fails closed: absent capability, an empty or unchanged previous id, a nil
+// connection, or a.sessionID no longer matching newID all skip the close
+// silently rather than risk closing the live session. The last case guards a
+// concurrent session transition: WS requests are dispatched to the adapter
+// without serialization, so a LoadSession or another ResetSession can replace
+// newID with a different session between NewSession returning and this check
+// running. A close error is logged and never surfaces to the caller, since the
+// reset itself already succeeded.
+func (a *Adapter) closeSupersededSession(ctx context.Context, conn *acp.ClientSideConnection, previous, newID string) {
+	a.sessionTransitionMu.Lock()
+	defer a.sessionTransitionMu.Unlock()
+	a.closeSupersededSessionLocked(ctx, conn, previous, newID)
+}
+
+// closeSupersededSessionLocked requires sessionTransitionMu to be held so the
+// still-current check and session/close request form one transition.
+func (a *Adapter) closeSupersededSessionLocked(ctx context.Context, conn *acp.ClientSideConnection, previous, newID string) {
+	if previous == "" || previous == newID || conn == nil {
+		return
+	}
+	a.mu.RLock()
+	supportsClose := a.capabilities.SessionCapabilities.Close != nil
+	stillCurrent := a.sessionID == newID
+	a.mu.RUnlock()
+	if !supportsClose || !stillCurrent {
+		return
+	}
+
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeSupersededSessionTimeout)
+	defer cancel()
+	if _, err := conn.CloseSession(closeCtx, acp.CloseSessionRequest{
+		SessionId: acp.SessionId(previous),
+	}); err != nil {
+		a.logger.Warn("failed to close superseded session after reset",
+			zap.String("session_id", previous), zap.Error(err))
+	}
 }
 
 // emitReplayPlan re-emits the plan captured during session/load replay so the todo

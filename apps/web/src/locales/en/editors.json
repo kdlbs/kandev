@@ -87,5 +87,6 @@
   "toggleCode": "Toggle code",
   "toggleWordWrap": "Toggle word wrap",
   "underlineCmdU": "Underline (Cmd+U)",
-  "failedToOpenEditor": "Failed to open editor"
+  "failedToOpenEditor": "Failed to open editor",
+  "downloadFile": "Download file"
 }

@@ -18,6 +18,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -308,6 +309,13 @@ type repoStore interface {
 type sessionExecutorStore interface {
 	// Session
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	// HasUserPromptHistory reads the durable prompt sequence without scanning
+	// the session transcript. Empty workflow steps use it to decide whether the
+	// task description is still eligible as the initial prompt.
+	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
+	// ClaimInitialPromptFallback atomically reserves the first prompt slot for
+	// an empty workflow-step task-description fallback.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error)
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
@@ -640,6 +648,12 @@ type Service struct {
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
 	workflowStore  *workflowStore
+	// agentErrorDeps bundles the engine, callback registry and store the
+	// on_agent_error dispatch reads, published as one atomic value by
+	// initWorkflowEngine so a dispatch racing a Set* reinit never pairs a new
+	// engine with a stale registry or store (see agentErrorDispatchDeps' own
+	// doc comment).
+	agentErrorDeps atomic.Pointer[agentErrorDispatchDeps]
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
 	childCompletionLocksMu sync.Mutex
 	childCompletionLocks   map[string]*childCompletionOperationLock
@@ -1131,6 +1145,17 @@ type Service struct {
 	ciAutomationCancel  context.CancelFunc
 	ciAutomationStopped bool
 	ciAutomationWorkers sync.WaitGroup
+
+	// dynamicSuccessorWorkers owns the detached dynamic fallback launches. The
+	// launch has to leave the agent.failed dispatch to avoid the prompt
+	// lifecycle deadlock, but a detached goroutine must still stop mutating
+	// session state once Stop begins, so it runs under a service-owned context
+	// instead of an unbounded context.WithoutCancel.
+	dynamicSuccessorMu      sync.Mutex
+	dynamicSuccessorCtx     context.Context
+	dynamicSuccessorCancel  context.CancelFunc
+	dynamicSuccessorStopped bool
+	dynamicSuccessorWorkers sync.WaitGroup
 }
 
 func (s *Service) officeStallDependencies() (
@@ -1310,6 +1335,7 @@ func NewService(
 	// Create the service (watcher will be created after we have handlers)
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
 	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
+	dynamicSuccessorCtx, dynamicSuccessorCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1331,6 +1357,8 @@ func NewService(
 		sendNowCancel:                sendNowCancel,
 		ciAutomationCtx:              ciAutomationCtx,
 		ciAutomationCancel:           ciAutomationCancel,
+		dynamicSuccessorCtx:          dynamicSuccessorCtx,
+		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
@@ -1394,6 +1422,8 @@ func NewService(
 	})
 	exec.SetLaunchFailureReviewEligibility(s.resolveLaunchFailureReviewEligibility)
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
+	exec.SetOnAgentProcessStarted(s.handleAgentProcessStarted)
+	exec.SetOnAgentProcessStartFailed(s.handleAgentProcessStartFailed)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
 	}
@@ -1848,6 +1878,11 @@ func (s *Service) initWorkflowEngine() {
 	// dependencies those methods wire in after Service creation.
 	options := append([]engine.Option{engine.WithLogger(s.logger)}, s.engineOptions...)
 	s.workflowEngine = engine.New(store, callbacks, options...)
+	s.agentErrorDeps.Store(&agentErrorDispatchDeps{
+		engine:   s.workflowEngine,
+		registry: callbacks,
+		store:    store,
+	})
 }
 
 // SetEngineRunQueue wires the engine's RunQueueAdapter dependency. Used
@@ -2484,6 +2519,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
 	s.resetCIAutomationWorkers()
+	s.resetDynamicSuccessorWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -2503,6 +2539,15 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	// Recover routes orphaned at "starting" by a launch failure that never
+	// reached a terminal route status. Must run before
+	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former
+	// normalizes every STARTING/RUNNING session to WAITING_FOR_INPUT, which
+	// would make every orphaned route look like a terminal, already-explained
+	// session and hide it from this sweep; the latter can begin dispatching
+	// new launches, which would let a genuinely in-flight claim race this
+	// snapshot of "starting" routes.
+	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
@@ -2597,6 +2642,10 @@ func (s *Service) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("stopping orchestrator service")
+	// Stop detached dynamic successors before the scheduler and watcher. Their
+	// workers can otherwise observe the shutdown only after those components
+	// have already stopped, and may launch or recover a session during teardown.
+	s.stopDynamicSuccessorWorkers()
 	s.stopDynamicPolicyRecovery()
 
 	// Stop components in reverse order

@@ -8,6 +8,7 @@ import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import {
   IconDeviceFloppy,
   IconLoader2,
+  IconDownload,
   IconTrash,
   IconTextWrap,
   IconTextWrapDisabled,
@@ -59,6 +60,7 @@ type FileEditorContentProps = {
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onDownload?: () => void;
 };
 
 function CodeMirrorCommentBadge({
@@ -161,6 +163,28 @@ function CodeMirrorDeleteButton({ onDelete }: { onDelete?: () => void }) {
   );
 }
 
+function CodeMirrorDownloadButton({ onDownload }: { onDownload?: () => void }) {
+  const { t } = useTranslation();
+  if (!onDownload) return null;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onDownload}
+          aria-label={t("editors:downloadFile")}
+          className="h-11 w-11 p-0 cursor-pointer sm:h-8 sm:w-8"
+        >
+          <IconDownload className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("editors:downloadFile")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function CodeMirrorSaveButton({
   isDirty,
   isSaving,
@@ -234,6 +258,7 @@ function CodeMirrorToolbar({
   onSave,
   onReloadFromAgent,
   onDelete,
+  onDownload,
   onToggleMarkdownPreview,
 }: {
   path: string;
@@ -253,6 +278,7 @@ function CodeMirrorToolbar({
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onDownload?: () => void;
   onToggleMarkdownPreview?: () => void;
 }) {
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
@@ -295,6 +321,7 @@ function CodeMirrorToolbar({
             repositoryName={repositoryName}
             size="sm"
           />
+          <CodeMirrorDownloadButton onDownload={onDownload} />
           <CodeMirrorDeleteButton onDelete={onDelete} />
           <CodeMirrorSaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />
         </div>
@@ -408,6 +435,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
     onSave,
     onReloadFromAgent,
     onDelete,
+    onDownload,
   } = props;
   const { wrapperRef, editorAreaRef, editorRef, state, walkthroughRange, handleCreateEditor } =
     useCodeMirrorCodeEditorSetup(props);
@@ -432,6 +460,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
         onSave={onSave}
         onReloadFromAgent={onReloadFromAgent}
         onDelete={onDelete}
+        onDownload={onDownload}
         onToggleMarkdownPreview={onToggleMarkdownPreview}
       />
       <div ref={editorAreaRef} className="flex-1 overflow-hidden relative">

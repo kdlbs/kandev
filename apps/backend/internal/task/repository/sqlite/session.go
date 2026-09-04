@@ -1568,6 +1568,32 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	return rows > 0, now, nil
 }
 
+// UpdateTaskSessionDynamicRouteIfCurrent changes only the route projection
+// while the session generation and projected route state still match the
+// caller's observation. It avoids writing a stale full session row after an
+// asynchronous launch or recovery callback.
+func (r *Repository) UpdateTaskSessionDynamicRouteIfCurrent(
+	ctx context.Context,
+	id string,
+	expectedGeneration int64,
+	expectedRouteState, routeState, routeReason string,
+) (bool, time.Time, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET route_state = ?, route_reason = ?, updated_at = ?
+		WHERE id = ? AND route_generation = ? AND route_state = ?
+	`), routeState, routeReason, now, id, expectedGeneration, expectedRouteState)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return rows > 0, now, nil
+}
+
 // CancelActiveTaskSession atomically transitions one active session to
 // CANCELLED. A false result means the row exists in a non-active state or was
 // concurrently changed before this conditional write; callers re-read to
@@ -2841,6 +2867,16 @@ func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", id)
+	}
+	// task_session_prompt_seq intentionally has no foreign key because it was
+	// added by a replay-safe migration. Remove its session-scoped admission
+	// state explicitly so a later session that reuses this ID starts fresh.
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_prompt_seq WHERE task_session_id = ?`), id); err != nil {
+		// Isolated unit tests may omit the prompt-sequence schema. Production
+		// always has it; treat a missing table as already-cleaned.
+		if !db.IsMissingTableError(err) {
+			return fmt.Errorf("purge prompt history for session %s: %w", id, err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), id); err != nil {
 		// Isolated unit tests may omit the messagequeue schema. Production

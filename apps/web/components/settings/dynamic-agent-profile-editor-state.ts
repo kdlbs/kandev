@@ -7,6 +7,7 @@ import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { isDynamicErrorPolicyValid } from "@/components/settings/dynamic-agent-policy-editor";
 import { updateAgentProfileAction } from "@/app/actions/agents";
+import { isHandledApiError } from "@/lib/api/client";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
@@ -204,6 +205,7 @@ export function useDynamicAgentProfileEditorState({
       );
       toast({ title: t("agents:dynamicProfileSaved") });
     } catch (error) {
+      if (isHandledApiError(error)) return;
       toast({
         title: t("agents:failedToSaveProfile"),
         description: error instanceof Error ? error.message : undefined,

@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type stubEnvRepo struct {
@@ -94,6 +95,37 @@ func (s *stubDestroyer) GetContainerLiveStatus(context.Context, string) (*Contai
 type stubRunningChecker struct {
 	running bool
 	err     error
+}
+
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.4
+func TestCleanupTaskEnvironmentSkipsStaleOwnershipGeneration(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-transferred", TaskID: "detached-child", OwnershipGeneration: 2,
+	}}
+	svc := newResetTestService(t, repo)
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+	worktreeCleaner := &recordingWorktreeCleanup{}
+	svc.SetWorktreeCleanup(worktreeCleaner)
+
+	errs := svc.cleanupDestructiveTaskResources(
+		context.Background(), "former-parent", nil,
+		[]*worktree.Worktree{{ID: "replacement-worktree"}},
+		taskEnvironmentCleanup{
+			env: &models.TaskEnvironment{
+				ID: "env-transferred", TaskID: "former-parent", OwnershipGeneration: 1,
+				ContainerID: "replacement-container",
+			},
+			deleteRow: true,
+		}, nil)
+
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v, want stale snapshot no-op", errs)
+	}
+	if len(destroyer.containerCalls) != 0 || len(worktreeCleaner.cleaned) != 0 || repo.deleted {
+		t.Fatalf("stale cleanup mutated replacement: container calls %v, worktree calls %v, row deleted %v",
+			destroyer.containerCalls, worktreeCleaner.cleaned, repo.deleted)
+	}
 }
 
 func (s *stubRunningChecker) IsAnySessionRunningForTask(context.Context, string) (bool, error) {
