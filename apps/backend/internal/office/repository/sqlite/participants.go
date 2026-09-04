@@ -83,6 +83,41 @@ func (r *Repository) GetWorkflowStepStageType(ctx context.Context, stepID string
 // role slate.
 type ParticipantWriteOutcome string
 
+// IsTaskWorkflowStepTerminal reports whether a task's current workflow step
+// is terminal by the existing board convention: last by position and named
+// done/complete/completed/approved (models.IsTerminalStepName). Mirrors
+// orchestrator.workflowStepIsTerminal, which this package cannot reach
+// directly since it depends on the workflow step store, not this repo.
+// Returns false, nil when the task has no resolvable step.
+func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (bool, error) {
+	var workflowID, name string
+	var position int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT ws.workflow_id, ws.position, ws.name
+		FROM tasks t
+		JOIN workflow_steps ws ON ws.id = t.workflow_step_id
+		WHERE t.id = ?
+	`), taskID).Scan(&workflowID, &position, &name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	var hasNext bool
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT EXISTS(SELECT 1 FROM workflow_steps WHERE workflow_id = ? AND position > ?)
+	`), workflowID, position).Scan(&hasNext)
+	if err != nil {
+		return false, err
+	}
+	if hasNext {
+		return false, nil
+	}
+	return models.IsTerminalStepName(name), nil
+}
+
 const (
 	// ParticipantWriteOutcomeClaimed means an existing unclaimed "auto"
 	// seat was reassigned to the named agent profile and marked "manual".
