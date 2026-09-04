@@ -11,9 +11,17 @@ import {
   Task,
   type KanbanPresentation,
 } from "../kanban-card";
-import type { Repository } from "@/lib/types/http";
+import type { ReorderBand, Repository } from "@/lib/types/http";
 import type { WorkflowStep } from "../kanban-column";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
+
+/** A card picked up for a keyboard reorder gesture (REQ-TASKS-KANBAN-TASK-REORDERING-001.12). */
+export type KeyboardReorderDraft = {
+  taskId: string;
+  stepId: string;
+  band: ReorderBand;
+  order: string[];
+};
 
 type VirtualizedColumnTaskListProps = {
   orderedTasks: Task[];
@@ -31,6 +39,9 @@ type VirtualizedColumnTaskListProps = {
   selectedIds?: Set<string>;
   /** The task currently being dragged anywhere on the board, if any (AC.7's insertion indicator). */
   activeTaskId?: string | null;
+  /** The card currently picked up via the keyboard, if any (AC.12). */
+  keyboardDraft?: KeyboardReorderDraft | null;
+  onCardKeyDown?: (event: React.KeyboardEvent, task: Task) => void;
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
@@ -147,6 +158,7 @@ function DroppableTaskRow({
   top,
   measureElement,
   insertionEdge,
+  forceShowIndicator,
   children,
 }: {
   taskId: string;
@@ -154,6 +166,8 @@ function DroppableTaskRow({
   top: number;
   measureElement: (node: HTMLDivElement | null) => void;
   insertionEdge: "top" | "bottom" | null;
+  /** True while a keyboard reorder (no pointer drag, so no `isOver`) targets this row. */
+  forceShowIndicator: boolean;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: taskId });
@@ -164,7 +178,7 @@ function DroppableTaskRow({
     },
     [measureElement, setNodeRef],
   );
-  const showIndicator = isOver && insertionEdge !== null;
+  const showIndicator = (isOver || forceShowIndicator) && insertionEdge !== null;
 
   return (
     <div
@@ -186,19 +200,162 @@ function DroppableTaskRow({
 /**
  * AC.7: while a card is dragged over its own band, show which edge of the
  * hovered card the drop would insert next to. `null` for a different band
- * (AC.11's cross-band reject) or when nothing is being dragged.
+ * (AC.11's cross-band reject) or when nothing is being dragged. Takes the
+ * dragged/picked-up card's index directly rather than resolving it from an
+ * id, so the same math serves both the pointer path (its static starting
+ * index, gated by that row's own `isOver`) and the keyboard path (the
+ * draft's current virtual index, gated by strict adjacency below).
  */
 export function computeInsertionEdge(
-  orderedTasks: Task[],
   queuedStartIndex: number,
-  activeTaskId: string | null | undefined,
+  activeIndex: number | null,
   index: number,
 ): "top" | "bottom" | null {
-  if (!activeTaskId) return null;
-  const activeIndex = orderedTasks.findIndex((task) => task.id === activeTaskId);
-  if (activeIndex === -1 || activeIndex === index) return null;
+  if (activeIndex === null || activeIndex === index) return null;
   if (activeIndex < queuedStartIndex !== index < queuedStartIndex) return null;
   return activeIndex < index ? "bottom" : "top";
+}
+
+export function findTaskIndex(
+  orderedTasks: Task[],
+  taskId: string | null | undefined,
+): number | null {
+  if (!taskId) return null;
+  const index = orderedTasks.findIndex((task) => task.id === taskId);
+  return index === -1 ? null : index;
+}
+
+/**
+ * The keyboard draft's current virtual index within this column's rendered
+ * order, or `null` when the draft belongs to a different step. Unlike the
+ * pointer path, this evolves with every arrow press (REQ-TASKS-KANBAN-TASK-REORDERING-001.12),
+ * since keyboard reorder never live-reorders the DOM — only the insertion
+ * indicator tracks the in-progress move.
+ */
+export function computeKeyboardActiveIndex(
+  stepId: string,
+  queuedStartIndex: number,
+  draft: KeyboardReorderDraft | null | undefined,
+): number | null {
+  if (!draft || draft.stepId !== stepId) return null;
+  const draftIndex = draft.order.indexOf(draft.taskId);
+  if (draftIndex === -1) return null;
+  return (draft.band === "admitted" ? 0 : queuedStartIndex) + draftIndex;
+}
+
+type VirtualizedTaskRowProps = Pick<
+  VirtualizedColumnTaskListProps,
+  | "step"
+  | "steps"
+  | "presentation"
+  | "workspaceId"
+  | "repositories"
+  | "externalLinkAvailability"
+  | "showMaximizeButton"
+  | "deletingTaskId"
+  | "archivingTaskId"
+  | "selectedIds"
+  | "keyboardDraft"
+  | "onCardKeyDown"
+  | "onPreviewTask"
+  | "onOpenTask"
+  | "onEditTask"
+  | "onDeleteTask"
+  | "onArchiveTask"
+  | "onMoveTask"
+  | "onToggleSelect"
+  | "onSelectRange"
+  | "isMultiSelectMode"
+> & {
+  task: Task;
+  queuedCount: number;
+  queuedStartIndex: number;
+  virtualIndex: number;
+  top: number;
+  measureElement: (node: HTMLDivElement | null) => void;
+  insertionEdge: "top" | "bottom" | null;
+  forceShowIndicator: boolean;
+  columnTaskIds: string[];
+};
+
+/** One rendered card row, including its optional "Queued" section header. */
+function VirtualizedTaskRow({
+  task,
+  queuedCount,
+  queuedStartIndex,
+  virtualIndex,
+  top,
+  measureElement,
+  insertionEdge,
+  forceShowIndicator,
+  columnTaskIds,
+  step,
+  steps,
+  presentation,
+  workspaceId,
+  repositories,
+  externalLinkAvailability,
+  showMaximizeButton,
+  deletingTaskId,
+  archivingTaskId,
+  selectedIds,
+  keyboardDraft,
+  onCardKeyDown,
+  onPreviewTask,
+  onOpenTask,
+  onEditTask,
+  onDeleteTask,
+  onArchiveTask,
+  onMoveTask,
+  onToggleSelect,
+  onSelectRange,
+  isMultiSelectMode,
+}: VirtualizedTaskRowProps) {
+  const { t } = useTranslation();
+  return (
+    <DroppableTaskRow
+      taskId={task.id}
+      index={virtualIndex}
+      top={top}
+      measureElement={measureElement}
+      insertionEdge={insertionEdge}
+      forceShowIndicator={forceShowIndicator}
+    >
+      {queuedCount > 0 && virtualIndex === queuedStartIndex && (
+        <div
+          className="mb-2 flex items-center gap-2 border-t border-dashed border-border/60 pt-3 text-xs font-medium text-muted-foreground"
+          data-testid="kanban-queued-section"
+        >
+          <span>{t("kanban:queuedSection")}</span>
+          <span className="tabular-nums">{queuedCount}</span>
+        </div>
+      )}
+      <KanbanCard
+        task={queuedTaskWithTitle(task, steps, step)}
+        workspaceId={workspaceId}
+        presentation={presentation}
+        externalLinkAvailability={externalLinkAvailability}
+        repositoryChips={resolveTaskRepositoryChips(task, repositories)}
+        onClick={onPreviewTask}
+        onOpenFullPage={onOpenTask}
+        onEdit={onEditTask}
+        onDelete={onDeleteTask}
+        onCardKeyDown={onCardKeyDown}
+        isPickedUpForReorder={keyboardDraft?.taskId === task.id}
+        onArchive={onArchiveTask}
+        onMove={onMoveTask}
+        steps={steps}
+        showMaximizeButton={showMaximizeButton}
+        isDeleting={deletingTaskId === task.id}
+        isArchiving={archivingTaskId === task.id}
+        isSelected={selectedIds?.has(task.id)}
+        selectedIds={selectedIds}
+        onToggleSelect={onToggleSelect}
+        onRangeSelect={onSelectRange ? (taskId) => onSelectRange(taskId, columnTaskIds) : undefined}
+        isMultiSelectMode={isMultiSelectMode}
+      />
+    </DroppableTaskRow>
+  );
 }
 
 export function VirtualizedColumnTaskList({
@@ -216,6 +373,8 @@ export function VirtualizedColumnTaskList({
   archivingTaskId,
   selectedIds,
   activeTaskId,
+  keyboardDraft,
+  onCardKeyDown,
   onPreviewTask,
   onOpenTask,
   onEditTask,
@@ -226,7 +385,6 @@ export function VirtualizedColumnTaskList({
   onSelectRange,
   isMultiSelectMode,
 }: VirtualizedColumnTaskListProps) {
-  const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const columnTaskIds = useStableTaskIds(orderedTasks);
   const stableExternalLinkAvailability =
@@ -238,6 +396,8 @@ export function VirtualizedColumnTaskList({
     getItemKey: (index) => orderedTasks[index]?.id ?? index,
     overscan: 5,
   });
+  const pointerActiveIndex = findTaskIndex(orderedTasks, activeTaskId);
+  const keyboardActiveIndex = computeKeyboardActiveIndex(step.id, queuedStartIndex, keyboardDraft);
 
   return (
     <div
@@ -250,53 +410,46 @@ export function VirtualizedColumnTaskList({
           const task = orderedTasks[virtualItem.index];
           if (!task) return null;
 
+          const isKeyboardAdjacent =
+            keyboardActiveIndex !== null && Math.abs(virtualItem.index - keyboardActiveIndex) === 1;
+          const insertionEdge = isKeyboardAdjacent
+            ? computeInsertionEdge(queuedStartIndex, keyboardActiveIndex, virtualItem.index)
+            : computeInsertionEdge(queuedStartIndex, pointerActiveIndex, virtualItem.index);
+
           return (
-            <DroppableTaskRow
+            <VirtualizedTaskRow
               key={task.id}
-              taskId={task.id}
-              index={virtualItem.index}
+              task={task}
+              queuedCount={queuedCount}
+              queuedStartIndex={queuedStartIndex}
+              virtualIndex={virtualItem.index}
               top={virtualItem.start}
               measureElement={virtualizer.measureElement}
-              insertionEdge={computeInsertionEdge(
-                orderedTasks,
-                queuedStartIndex,
-                activeTaskId,
-                virtualItem.index,
-              )}
-            >
-              {queuedCount > 0 && virtualItem.index === queuedStartIndex && (
-                <div
-                  className="mb-2 flex items-center gap-2 border-t border-dashed border-border/60 pt-3 text-xs font-medium text-muted-foreground"
-                  data-testid="kanban-queued-section"
-                >
-                  <span>{t("kanban:queuedSection")}</span>
-                  <span className="tabular-nums">{queuedCount}</span>
-                </div>
-              )}
-              <VirtualizedKanbanCard
-                task={task}
-                columnTaskIds={columnTaskIds}
-                step={step}
-                steps={steps}
-                presentation={presentation}
-                workspaceId={workspaceId}
-                repositories={repositories}
-                externalLinkAvailability={stableExternalLinkAvailability}
-                showMaximizeButton={showMaximizeButton}
-                isDeleting={deletingTaskId === task.id}
-                isArchiving={archivingTaskId === task.id}
-                selectedIds={selectedIds}
-                onPreviewTask={onPreviewTask}
-                onOpenTask={onOpenTask}
-                onEditTask={onEditTask}
-                onDeleteTask={onDeleteTask}
-                onArchiveTask={onArchiveTask}
-                onMoveTask={onMoveTask}
-                onToggleSelect={onToggleSelect}
-                onSelectRange={onSelectRange}
-                isMultiSelectMode={isMultiSelectMode}
-              />
-            </DroppableTaskRow>
+              insertionEdge={insertionEdge}
+              forceShowIndicator={isKeyboardAdjacent}
+              columnTaskIds={columnTaskIds}
+              step={step}
+              steps={steps}
+              presentation={presentation}
+              workspaceId={workspaceId}
+              repositories={repositories}
+              externalLinkAvailability={externalLinkAvailability}
+              showMaximizeButton={showMaximizeButton}
+              deletingTaskId={deletingTaskId}
+              archivingTaskId={archivingTaskId}
+              selectedIds={selectedIds}
+              keyboardDraft={keyboardDraft}
+              onCardKeyDown={onCardKeyDown}
+              onPreviewTask={onPreviewTask}
+              onOpenTask={onOpenTask}
+              onEditTask={onEditTask}
+              onDeleteTask={onDeleteTask}
+              onArchiveTask={onArchiveTask}
+              onMoveTask={onMoveTask}
+              onToggleSelect={onToggleSelect}
+              onSelectRange={onSelectRange}
+              isMultiSelectMode={isMultiSelectMode}
+            />
           );
         })}
       </div>

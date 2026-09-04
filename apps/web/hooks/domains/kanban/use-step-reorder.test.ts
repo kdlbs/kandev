@@ -173,6 +173,52 @@ describe("useStepReorder", () => {
   });
 });
 
+describe("useStepReorder — board filter membership", () => {
+  it("keeps a board-filtered-out task in the band without reordering it (AC.34)", async () => {
+    // Full membership includes "h", a task the current board filter hides;
+    // the caller (the board) only ever sees/submits a, b, c.
+    resetStore([
+      admittedTask("a", 0),
+      admittedTask("b", 1),
+      admittedTask("h", 2),
+      admittedTask("c", 3),
+    ]);
+    reorderStepTasks.mockResolvedValue({
+      workflow_step_id: STEP_ID,
+      revision: 1,
+      tasks: [
+        { id: "c", position: 0 },
+        { id: "a", position: 1 },
+        { id: "b", position: 2 },
+        { id: "h", position: 3 },
+      ],
+    });
+    const { result } = renderHook(() => useStepReorder());
+
+    await act(async () => {
+      await result.current.reorderBand({
+        workflowId: WORKFLOW_ID,
+        stepId: STEP_ID,
+        band: "admitted",
+        draggedId: "c",
+        visibleOrderAfterMove: ["c", "a", "b"],
+      });
+    });
+
+    // The hidden task's full-membership order is preserved (still last,
+    // behind a and b) — only the dragged task moved.
+    expect(reorderStepTasks).toHaveBeenCalledWith(STEP_ID, {
+      band: "admitted",
+      ordered_task_ids: ["c", "a", "b", "h"],
+    });
+    const tasks = storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks;
+    expect(tasks.find((t) => t.id === "c")?.position).toBe(0);
+    expect(tasks.find((t) => t.id === "a")?.position).toBe(1);
+    expect(tasks.find((t) => t.id === "b")?.position).toBe(2);
+    expect(tasks.find((t) => t.id === "h")?.position).toBe(3);
+  });
+});
+
 describe("useStepReorder — failure handling", () => {
   it("reconciles silently to the authoritative order on a step_changed conflict, without a toast", async () => {
     reorderStepTasks.mockRejectedValue(

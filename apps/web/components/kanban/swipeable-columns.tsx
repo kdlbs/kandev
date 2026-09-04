@@ -6,6 +6,7 @@ import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task, type KanbanPresentation } from "../kanban-card";
 import { compareStepOrder } from "@/lib/kanban/task-order";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
+import type { KeyboardReorderDraft } from "./virtualized-column-task-list";
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
@@ -31,6 +32,8 @@ type SwipeableColumnsProps = {
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
   activeTaskId?: string | null;
+  keyboardDraft?: KeyboardReorderDraft | null;
+  onCardKeyDown?: (event: React.KeyboardEvent, task: Task) => void;
 };
 
 /** Two-way sync between Embla's carousel position and the external activeIndex. */
@@ -91,6 +94,8 @@ export function SwipeableColumns({
   isMultiSelectMode,
   externalLinkAvailability,
   activeTaskId,
+  keyboardDraft,
+  onCardKeyDown,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -145,6 +150,8 @@ export function SwipeableColumns({
               isMultiSelectMode={isMultiSelectMode}
               externalLinkAvailability={externalLinkAvailability}
               activeTaskId={activeTaskId}
+              keyboardDraft={keyboardDraft}
+              onCardKeyDown={onCardKeyDown}
               hideHeader
             />
           </div>

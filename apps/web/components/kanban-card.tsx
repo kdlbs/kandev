@@ -161,6 +161,10 @@ export interface KanbanCardProps {
   /** Shift-click range select within this card's column. */
   onRangeSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
+  /** Keyboard reorder (REQ-TASKS-KANBAN-TASK-REORDERING-001.12): pick up/move/drop/cancel. */
+  onCardKeyDown?: (event: React.KeyboardEvent, task: Task) => void;
+  /** Whether this card is the one currently picked up for a keyboard reorder. */
+  isPickedUpForReorder?: boolean;
 }
 
 function useKanbanCardMoveMenuActions({
@@ -423,6 +427,8 @@ function KanbanCardFrame({
   onClick,
   onToggleSelect,
   onOpenFullPage,
+  onKeyDown,
+  isPickedUpForReorder,
 }: Pick<
   KanbanCardProps,
   | "task"
@@ -436,11 +442,13 @@ function KanbanCardFrame({
   | "onArchive"
   | "onToggleSelect"
   | "onOpenFullPage"
+  | "isPickedUpForReorder"
 > & {
   draggable: ReturnType<typeof useDraggable>;
   menu: KanbanCardMenuState;
   isPreviewed: boolean;
   onClick: (e: React.MouseEvent) => void;
+  onKeyDown?: (event: React.KeyboardEvent) => void;
 }) {
   return (
     <>
@@ -468,6 +476,8 @@ function KanbanCardFrame({
               onToggleSelect?.(task.id);
             }}
             onOpenFullPage={onOpenFullPage}
+            onKeyDown={onKeyDown}
+            isPickedUpForReorder={isPickedUpForReorder}
           />
         </KanbanCardContextMenu>
       </div>
@@ -517,6 +527,8 @@ export function KanbanCard({
   onToggleSelect,
   onRangeSelect,
   isMultiSelectMode,
+  onCardKeyDown,
+  isPickedUpForReorder,
 }: KanbanCardProps) {
   const draggable = useDraggable({
     id: task.id,
@@ -566,6 +578,8 @@ export function KanbanCard({
         onClick={handleClick}
         onToggleSelect={onToggleSelect}
         onOpenFullPage={onOpenFullPage}
+        onKeyDown={onCardKeyDown ? (event) => onCardKeyDown(event, task) : undefined}
+        isPickedUpForReorder={isPickedUpForReorder}
       />
       <KanbanCardDialogs
         task={task}

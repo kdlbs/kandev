@@ -1,52 +1,37 @@
 "use client";
 
-import { useEffect, useState, type RefObject } from "react";
+import { type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { CSS, type Transform } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
-import {
-  IconAlertCircle,
-  IconArrowsMaximize,
-  IconDots,
-  IconLock,
-  IconSubtask,
-  IconUsersGroup,
-} from "@tabler/icons-react";
+import { IconAlertCircle, IconLock, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { AssigneeBadge } from "@/components/kanban-card-assignee-badge";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
-import {
-  KanbanCardDropdownMenuItems,
-  type KanbanCardMenuEntry,
-} from "@/components/kanban-card-menu-items";
+import { KanbanCardActions } from "@/components/kanban-card-actions";
+import { type KanbanCardMenuEntry } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
 import { KanbanCardPriorityIndicator } from "@/components/kanban-card-priority-indicator";
 import { RepoChipRow } from "@/components/kanban-card-repository-chips";
 import { CardTitle } from "@/components/kanban-card-title";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
-import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
-import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
-import {
-  getTaskStateIcon,
-  shouldShowTaskRunningSpinner,
-  shouldUsePermissionTaskIcon,
-  shouldUseQuestionTaskIcon,
-} from "@/lib/ui/state-icons";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import { canShowHumanAssignee } from "@/lib/auth/human-assignee";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
 
-const kanbanStatusDebug = createDebugLogger("kanban:task-status");
+export {
+  renderSubagentCountChip,
+  renderTaskStatusIcon,
+} from "@/components/kanban-card-status-icon";
 
-type KanbanCardActionProps = {
+export type KanbanCardActionProps = {
   task: Task;
   showMaximizeButton?: boolean;
   onOpenFullPage?: (task: Task) => void;
@@ -72,6 +57,9 @@ export type KanbanCardShellProps = KanbanCardActionProps &
     isPreviewed: boolean;
     onClick: (e: React.MouseEvent) => void;
     onCheckboxClick: (e: React.MouseEvent) => void;
+    /** Keyboard reorder (REQ-TASKS-KANBAN-TASK-REORDERING-001.12). */
+    onKeyDown?: (event: React.KeyboardEvent) => void;
+    isPickedUpForReorder?: boolean;
   };
 
 export function KanbanCardBody({
@@ -244,283 +232,6 @@ function hasCardBadges(task: Task, showHumanAssignee: boolean): boolean {
   );
 }
 
-// Status markers that mask the launch spinner and gate the "resting" no-affordance
-// case. Bundled together so renderTaskStatusIcon's own branching stays under the
-// complexity limit — see the helpers below for what each flag means for masking.
-type StatusMaskFlags = {
-  needsMe: boolean;
-  showInterrupted: boolean;
-  showAutoStartFailed: boolean;
-  parkedOnBackgroundWork: boolean;
-  showWorkspaceOrphaned: boolean;
-};
-
-function hasNoStatusAffordance(
-  showRunningSpinner: boolean,
-  hasActivity: boolean,
-  flags: StatusMaskFlags,
-): boolean {
-  return (
-    !showRunningSpinner &&
-    !flags.needsMe &&
-    !hasActivity &&
-    !flags.showInterrupted &&
-    !flags.showAutoStartFailed &&
-    !flags.parkedOnBackgroundWork &&
-    !flags.showWorkspaceOrphaned
-  );
-}
-
-// A "needs me" prompt (pending clarification / permission) must not be masked
-// by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
-// coarse running state. Live foreground activity still wins, handled inside
-// getTaskStateIcon. A failed auto-start or an orphaned workspace must not be
-// masked either: startTask sets the task to SCHEDULING before the launch, so
-// a session-less SCHEDULING/IN_PROGRESS task (whether from a launch failure
-// or a vanished parent workspace) reads as showRunningSpinner=true, the exact
-// shape both markers exist to surface. The parked affordance (AC-58) is
-// likewise never masked by the generic spinner — it renders through
-// getTaskStateIcon below.
-function resolveForegroundActivity(
-  task: Task,
-  showRunningSpinner: boolean,
-  flags: StatusMaskFlags,
-): Task["foregroundActivity"] {
-  const shouldForceGenerating =
-    showRunningSpinner &&
-    !flags.needsMe &&
-    !flags.showAutoStartFailed &&
-    !flags.parkedOnBackgroundWork &&
-    !flags.showWorkspaceOrphaned &&
-    task.foregroundActivity !== "background";
-  return shouldForceGenerating ? "generating" : task.foregroundActivity;
-}
-
-// renderTaskStatusIcon resolves the card status icon, or null when the actions
-// cluster shows none (a resting done/todo task). The backend task-level
-// MOST-ACTIVE-WINS aggregate takes precedence: a
-// background-running task shows the distinct background affordance — even when its
-// primary session has finished and only a secondary session is still working, so
-// it reads as working, not done — while any generating session keeps the spinner.
-// When the aggregate is absent it falls back to the primary-session-driven spinner
-// (covers STARTING/SCHEDULING before a session reads RUNNING) or the pending-input
-// question icon.
-export function renderTaskStatusIcon(
-  task: Task,
-  showRunningSpinner: boolean,
-  hasPendingClarification: boolean,
-  hasPendingPermission: boolean,
-) {
-  const flags: StatusMaskFlags = {
-    needsMe:
-      shouldUseQuestionTaskIcon(task.state, hasPendingClarification) ||
-      shouldUsePermissionTaskIcon(hasPendingPermission),
-    showInterrupted: !!task.interrupted,
-    showAutoStartFailed: !!task.autoStartFailed,
-    parkedOnBackgroundWork: !!task.parkedOnBackgroundWork,
-    showWorkspaceOrphaned: !!task.workspaceOrphaned,
-  };
-  const hasActivity =
-    task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (hasNoStatusAffordance(showRunningSpinner, hasActivity, flags)) return null;
-  const foregroundActivity = resolveForegroundActivity(task, showRunningSpinner, flags);
-  return getTaskStateIcon(task.state, "h-4 w-4", {
-    hasPendingClarification,
-    foregroundActivity,
-    hasPendingPermission,
-    interrupted: flags.showInterrupted,
-    autoStartFailed: flags.showAutoStartFailed,
-    parkedOnBackgroundWork: flags.parkedOnBackgroundWork,
-    workspaceOrphaned: flags.showWorkspaceOrphaned,
-  });
-}
-
-// The board's only window into a fan-out. `activeSubagentCount` is derived from
-// the live registry (never a mutable counter) and summed across a task's
-// sessions, so it needs no local reconciliation: at zero there is nothing live
-// and the chip is absent.
-export function renderSubagentCountChip(task: Task, label: string) {
-  const count = task.activeSubagentCount ?? 0;
-  if (count <= 0) return null;
-  return (
-    <span
-      data-testid="task-subagent-count"
-      title={label}
-      aria-label={label}
-      className="flex items-center gap-0.5 text-muted-foreground font-mono text-[10px]"
-    >
-      <IconUsersGroup className="h-3.5 w-3.5" aria-hidden="true" />
-      {count}
-    </span>
-  );
-}
-
-function OpenFullPageButton({
-  task,
-  onOpenFullPage,
-}: {
-  task: Task;
-  onOpenFullPage: (task: Task) => void;
-}) {
-  const { t } = useTranslation("common");
-
-  return (
-    <button
-      type="button"
-      className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm p-1 -m-1 transition-colors cursor-pointer"
-      onClick={(event) => {
-        event.stopPropagation();
-        onOpenFullPage(task);
-      }}
-      onPointerDown={(event) => event.stopPropagation()}
-      aria-label={t("common:openFullPage")}
-      title={t("common:openFullPage")}
-    >
-      <IconArrowsMaximize className="h-4 w-4" />
-    </button>
-  );
-}
-
-function KanbanCardActions({
-  task,
-  showMaximizeButton,
-  onOpenFullPage,
-  menuEntries,
-  isDeleting,
-  isArchiving,
-  menuTriggerRef,
-}: KanbanCardActionProps) {
-  const { t } = useTranslation("common");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [storePrimarySessionState, setStorePrimarySessionState] = useState<string | null>(null);
-  const storeApi = useAppStoreApi();
-  const debugEnabled = isDebug();
-  const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
-  const pendingInput = useTaskPendingInput(task.primarySessionId, {
-    taskId: task.id,
-    taskPendingAction: task.taskPendingAction,
-    statusSummary: task.statusSummary,
-    primarySessionState: task.primarySessionState,
-    primarySessionPendingAction: task.primarySessionPendingAction,
-  });
-  const showRunningSpinner = shouldShowTaskRunningSpinner(task.state, task.primarySessionState);
-  const storeWouldShowRunningSpinner =
-    storePrimarySessionState === null
-      ? null
-      : shouldShowTaskRunningSpinner(task.state, storePrimarySessionState);
-  const hasSpinnerMismatch =
-    showRunningSpinner &&
-    storeWouldShowRunningSpinner === false &&
-    task.primarySessionState !== storePrimarySessionState;
-  const statusIcon = renderTaskStatusIcon(
-    task,
-    showRunningSpinner,
-    pendingInput.clarification,
-    pendingInput.permission,
-  );
-  const hasKnownSession =
-    Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
-
-  useEffect(() => {
-    if (!debugEnabled || !task.primarySessionId) {
-      setStorePrimarySessionState(null);
-      return;
-    }
-
-    const primarySessionId = task.primarySessionId;
-    const readPrimarySessionState = () =>
-      storeApi.getState().taskSessions.items[primarySessionId]?.state ?? null;
-    const syncPrimarySessionState = () => {
-      const nextState = readPrimarySessionState();
-      setStorePrimarySessionState((current) => (current === nextState ? current : nextState));
-    };
-
-    syncPrimarySessionState();
-    return storeApi.subscribe(syncPrimarySessionState);
-  }, [debugEnabled, storeApi, task.primarySessionId]);
-
-  useEffect(() => {
-    if (!hasSpinnerMismatch || !debugEnabled) return;
-    kanbanStatusDebug("spinner mismatch", {
-      task_id: task.id,
-      taskState: task.state ?? "-",
-      primarySessionId: task.primarySessionId ?? "-",
-      taskPrimarySessionState: task.primarySessionState ?? "-",
-      storePrimarySessionState: storePrimarySessionState ?? "-",
-      showSpinner: showRunningSpinner,
-    });
-  }, [
-    debugEnabled,
-    hasSpinnerMismatch,
-    showRunningSpinner,
-    storePrimarySessionState,
-    task.id,
-    task.primarySessionId,
-    task.primarySessionState,
-    task.state,
-  ]);
-
-  return (
-    <div className="flex items-center gap-2">
-      {renderSubagentCountChip(
-        task,
-        t("common:activeSubagents", { count: task.activeSubagentCount ?? 0 }),
-      )}
-      {statusIcon}
-      {showMaximizeButton && onOpenFullPage && hasKnownSession && (
-        <OpenFullPageButton task={task} onOpenFullPage={onOpenFullPage} />
-      )}
-      <KanbanCardMenu
-        task={task}
-        effectiveMenuOpen={effectiveMenuOpen}
-        setMenuOpen={setMenuOpen}
-        isDeleting={isDeleting}
-        isArchiving={isArchiving}
-        menuEntries={menuEntries}
-        menuTriggerRef={menuTriggerRef}
-      />
-    </div>
-  );
-}
-
-type KanbanCardMenuProps = KanbanCardActionProps & {
-  effectiveMenuOpen: boolean;
-  setMenuOpen: (open: boolean) => void;
-};
-
-function KanbanCardMenu(props: KanbanCardMenuProps) {
-  const { t } = useTranslation();
-  const { effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving, menuTriggerRef } = props;
-  const { menuEntries } = props;
-  const isProcessing = isDeleting || isArchiving;
-
-  return (
-    <DropdownMenu
-      open={effectiveMenuOpen}
-      onOpenChange={(open) => {
-        if (!open && isProcessing) return;
-        setMenuOpen(open);
-      }}
-    >
-      <DropdownMenuTrigger asChild>
-        <button
-          ref={menuTriggerRef}
-          type="button"
-          className="text-muted-foreground hover:text-foreground hover:bg-muted inline-flex h-11 min-h-11 w-11 min-w-11 items-center justify-center rounded-sm p-0 transition-colors cursor-pointer sm:h-auto sm:min-h-0 sm:w-auto sm:min-w-0 sm:p-1 sm:-m-1"
-          onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-          aria-label={t("kanban:moreOptions")}
-        >
-          <IconDots className="h-4 w-4" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <KanbanCardDropdownMenuItems entries={menuEntries} />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 function KanbanCardCheckbox({
   taskId,
   taskTitle,
@@ -547,6 +258,38 @@ function KanbanCardCheckbox({
       />
     </div>
   );
+}
+
+function getKanbanCardShellClassName(
+  task: Task,
+  state: {
+    isSelected?: boolean;
+    isDragging?: boolean;
+    isPreviewed?: boolean;
+    isPickedUpForReorder?: boolean;
+  },
+): string {
+  const { isSelected, isDragging, isPreviewed, isPickedUpForReorder } = state;
+  return cn(
+    "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
+    "touch-none md:touch-auto",
+    needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
+    isDragging && "opacity-50 z-50",
+    isSelected && "ring-1 ring-primary/60 border-primary/60",
+    isPreviewed && !isSelected && "ring-2 ring-primary border-primary",
+    isPickedUpForReorder && "ring-2 ring-primary border-primary",
+  );
+}
+
+/** Suppresses dnd-kit's drag/keyboard wiring while multi-select is active. */
+function getDragInteractionProps(
+  isMultiSelectMode: boolean | undefined,
+  listeners: DraggableSyntheticListeners,
+  attributes: DraggableAttributes,
+  onKeyDown: ((event: React.KeyboardEvent) => void) | undefined,
+) {
+  if (isMultiSelectMode) return {};
+  return { ...listeners, ...attributes, onKeyDown };
 }
 
 function KanbanCardActionSlot({
@@ -590,6 +333,8 @@ export function KanbanCardShell({
   onClick,
   onCheckboxClick,
   onOpenFullPage,
+  onKeyDown,
+  isPickedUpForReorder,
   menuEntries,
   menuTriggerRef,
 }: KanbanCardShellProps) {
@@ -607,17 +352,15 @@ export function KanbanCardShell({
       style={style}
       data-testid={`task-card-${task.id}`}
       data-kanban-card=""
-      className={cn(
-        "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
-        "touch-none md:touch-auto",
-        needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
-        isDragging && "opacity-50 z-50",
-        isSelected && "ring-1 ring-primary/60 border-primary/60",
-        isPreviewed && !isSelected && "ring-2 ring-primary border-primary",
-      )}
+      className={getKanbanCardShellClassName(task, {
+        isSelected,
+        isDragging,
+        isPreviewed,
+        isPickedUpForReorder,
+      })}
+      aria-grabbed={isPickedUpForReorder || undefined}
       onClick={onClick}
-      {...(!isMultiSelectMode ? listeners : {})}
-      {...(!isMultiSelectMode ? attributes : {})}
+      {...getDragInteractionProps(isMultiSelectMode, listeners, attributes, onKeyDown)}
     >
       <CardContent className="px-2 py-1">
         <div className="flex items-start gap-1.5">
