@@ -597,8 +597,14 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if err != nil {
 		return nil, err
 	}
+	if err := m.prepareExecutionGitMetadata(info, rt, preparation.request); err != nil {
+		return nil, err
+	}
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
 	defer launchCancel()
+	if err := preflightGitMetadataProjection(launchCtx, rt, preparation.request); err != nil {
+		return nil, err
+	}
 	if err := resumeRemoteInstancePreflight(launchCtx, rt, preparation.request); err != nil {
 		return nil, err
 	}
@@ -606,6 +612,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	runtimeInstance, err := rt.CreateInstance(launchCtx, preparation.request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+	if err := installAttestedCloneGitMetadataPolicy(launchCtx, preparation.request, runtimeInstance); err != nil {
+		_ = rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, false)
+		return nil, fmt.Errorf("install clone Git metadata policy: %w", err)
 	}
 
 	execution := m.initializeCreatedExecution(ctx, taskID, info, executionID, rt, runtimeInstance, preparation)
@@ -658,6 +668,41 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 
 	return execution, nil
+}
+
+func (m *Manager) prepareExecutionGitMetadata(info *WorkspaceInfo, rt ExecutorBackend, req *ExecutorCreateRequest) error {
+	if info == nil || req == nil || rt == nil {
+		return errors.New(gitMetadataProjectionInvalid)
+	}
+	if rt.RequiresCloneURL() {
+		req.GitMetadataRequirement = cloneGitMetadataRequirement(len(info.WorkspaceRepositories) > 0)
+		return nil
+	}
+	if len(info.WorkspaceRepositories) == 0 {
+		return nil
+	}
+	projections := make([]*worktree.GitMetadataProjection, 0, len(info.WorkspaceRepositories))
+	for _, repository := range info.WorkspaceRepositories {
+		spec := RepoLaunchSpec{
+			RepositoryPath: repository.RepositoryPath,
+			RepoName:       repository.RepoName,
+			BranchSlug:     repository.BranchSlug,
+		}
+		checkoutPath, err := resumedWorktreeCheckoutPath(info.WorkspacePath, spec)
+		if err != nil {
+			return errors.New(gitMetadataProjectionInvalid)
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(checkoutPath, repository.RepositoryPath)
+		if err != nil {
+			return errors.New(gitMetadataProjectionInvalid)
+		}
+		projections = append(projections, projection)
+	}
+	if err := validateGitMetadataProjections(projections); err != nil {
+		return errors.New(gitMetadataProjectionInvalid)
+	}
+	req.GitMetadataProjections = projections
+	return nil
 }
 
 type executionCreatePreparation struct {
