@@ -75,18 +75,15 @@ func TestSSHResolvePrepareScriptUsesRemoteWorkspaceForContributionDestination(t 
 	}
 }
 
-func TestSSHDefaultPrepareScriptExecutesCheckoutAndSetup(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash not available")
-	}
-
-	root := t.TempDir()
-	origin := filepath.Join(root, "origin.git")
+// newSSHPrepareFixture seeds a bare origin with one commit on main and returns
+// the temp root, that origin path, and a task workspace that already carries
+// the session runtime directory the SSH executor creates before preparation.
+func newSSHPrepareFixture(t *testing.T) (root, origin, workspace string) {
+	t.Helper()
+	root = t.TempDir()
+	origin = filepath.Join(root, "origin.git")
 	seed := filepath.Join(root, "seed")
-	workspace := filepath.Join(root, "workspace")
+	workspace = filepath.Join(root, "workspace")
 	runIn(t, root, "git", "init", "--quiet", "--bare", "--initial-branch=main", origin)
 	runIn(t, root, "git", "init", "--quiet", "--initial-branch=main", seed)
 	runIn(t, seed, "git", "config", "user.email", "test@example.com")
@@ -97,6 +94,55 @@ func TestSSHDefaultPrepareScriptExecutesCheckoutAndSetup(t *testing.T) {
 	runIn(t, seed, "git", "remote", "add", "origin", origin)
 	runIn(t, seed, "git", "push", "--quiet", "origin", "main")
 	runIn(t, root, "mkdir", "-p", filepath.Join(workspace, ".kandev", "sessions", "session-1"))
+	return root, origin, workspace
+}
+
+// TestSSHDefaultPrepareScriptExecutesUnderZsh runs the resolved default
+// prepare script through zsh, the login shell macOS SSH targets use unless a
+// profile overrides it. An unbraced `$repository_branch:` in the fetch refspec
+// made zsh strip the `:r` and fetch `refs/heads/mainefs/remotes/origin/main`.
+func TestSSHDefaultPrepareScriptExecutesUnderZsh(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh not available")
+	}
+
+	root, origin, workspace := newSSHPrepareFixture(t)
+	script, err := (&SSHExecutor{}).resolvePrepareScript(&ExecutorCreateRequest{
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			"repository_clone_url":    origin,
+			MetadataKeyBaseBranch:     "main",
+			MetadataKeyWorktreeBranch: "feature/task-1",
+		},
+	}, workspace, "/remote/bin/agentctl")
+	if err != nil {
+		t.Fatalf("resolvePrepareScript() error = %v", err)
+	}
+	cmd := exec.Command("zsh", "-e", "-c", script)
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("SSH prepare script failed under zsh: %v\n%s\nscript:\n%s", err, output, script)
+	}
+	if got := strings.TrimSpace(string(runIn(t, workspace, "git", "branch", "--show-current"))); got != "feature/task-1" {
+		t.Fatalf("prepared branch = %q, want feature/task-1", got)
+	}
+	if got := strings.TrimSpace(string(runIn(t, workspace, "git", "rev-parse", "--verify", "origin/main"))); got == "" {
+		t.Fatal("origin/main was not fetched")
+	}
+}
+
+func TestSSHDefaultPrepareScriptExecutesCheckoutAndSetup(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	root, origin, workspace := newSSHPrepareFixture(t)
 
 	executor := &SSHExecutor{}
 	req := &ExecutorCreateRequest{

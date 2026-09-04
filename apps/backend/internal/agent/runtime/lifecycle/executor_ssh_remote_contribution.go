@@ -163,7 +163,7 @@ func sshRemoteContributionSetupLines() []string {
 		"mkdir -p \"$(dirname \"$exclude_file\")\"",
 		"touch \"$exclude_file\"",
 		"grep -Fqx '/.kandev/' \"$exclude_file\" || printf '%%s\\n' '/.kandev/' >>\"$exclude_file\"",
-		"if ! git -C \"$workspace\" fetch --no-tags origin \"+refs/heads/$base_branch:refs/remotes/origin/$base_branch\" >/dev/null 2>&1; then",
+		"if ! git -C \"$workspace\" fetch --no-tags origin \"+refs/heads/${base_branch}:refs/remotes/origin/${base_branch}\" >/dev/null 2>&1; then",
 		"  echo 'kandev: target base branch is unavailable' >&2",
 		"  exit 1",
 		"fi",
