@@ -294,6 +294,74 @@ func TestLaunchPreparedSessionAutoRepairsExactStagingPy3IncidentAndLaunchesOnce(
 	}
 }
 
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+//
+// TestResumeSessionWithOptionsAutoRepairsExactDevIncidentAndLaunchesOnce
+// reproduces the separate logged incident for task
+// 24cab57c-8e2c-44cc-8214-c0600d559391 / branch "dev" through the production
+// resume entry point. The incident evidence did not include a session ID, so
+// the session identity here is synthetic while the task and branch identities
+// remain exact.
+func TestResumeSessionWithOptionsAutoRepairsExactDevIncidentAndLaunchesOnce(t *testing.T) {
+	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
+	repo := newMockRepository()
+	const taskID = "24cab57c-8e2c-44cc-8214-c0600d559391"
+	const sessionID = "session-dev-inventory-recovery"
+	const branch = "dev"
+	seedWorktreeExecutor(repo)
+	repo.repositories["repo-front"] = &models.Repository{
+		ID: "repo-front", Name: "frontend", Provider: "github", LocalPath: repositoryPath,
+	}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: taskID, RepositoryID: "repo-front", Position: 0, BaseBranch: branch,
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Dev"}
+	repo.taskEnvironments["env-dev"] = &models.TaskEnvironment{
+		ID: "env-dev", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: worktreePath,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-dev", TaskEnvironmentID: "env-dev",
+			RepositoryID: "repo-front", BranchSlug: "stale",
+			WorktreeID: "worktree-recovery", WorktreePath: worktreePath,
+			WorktreeBranch: "feature/recovery", Position: 0, Status: "active",
+		}},
+	}
+	repo.taskEnvironmentRepos["env-dev"] = repo.taskEnvironments["env-dev"].Repos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: "env-dev",
+		RepositoryID: "repo-front", AgentProfileID: "profile-123",
+		ExecutorID: models.ExecutorIDWorktree, State: models.TaskSessionStateFailed,
+		StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+
+	manager := &mockAgentManager{}
+	exec := newTestExecutor(t, manager, repo)
+	execution, err := exec.ResumeSessionWithOptions(
+		context.Background(),
+		repo.sessions[sessionID],
+		true,
+		ResumeOptions{
+			RepairWorkspaceInventory:         true,
+			WorkspaceInventoryIdempotencyKey: "exact-dev-incident",
+		},
+	)
+	if err != nil {
+		t.Fatalf("ResumeSessionWithOptions (dev reproduction): %v", err)
+	}
+	if manager.launchAgentCallCount != 1 {
+		t.Fatalf("LaunchAgent calls = %d, want exactly 1", manager.launchAgentCallCount)
+	}
+	if execution.WorkspaceInventoryRecoveryReceipt == nil ||
+		execution.WorkspaceInventoryRecoveryReceipt.ResultCode != models.WorkspaceInventoryRecoveryRepaired {
+		t.Fatalf("execution receipt = %+v, want a committed repair", execution.WorkspaceInventoryRecoveryReceipt)
+	}
+	rows := repo.taskEnvironmentRepos["env-dev"]
+	if len(rows) != 1 || rows[0].BranchSlug != branch {
+		t.Fatalf("canonical inventory not repaired in place: %+v", rows)
+	}
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
 //
