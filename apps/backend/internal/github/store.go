@@ -2225,11 +2225,11 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 // preventing races with concurrent PR association.
 //
 // Collision semantics: a sibling watch may already own the destination
-// (session_id, repository_id, branch) triple — e.g. multi-branch task where
-// the agent's live branch collapsed onto a peer watch's branch. In that
-// case the raw UPDATE would trip the UNIQUE constraint. We instead drop the
-// source row (which is still searching, pr_number=0, so it owns no PR
-// state) and let the sibling continue to track the branch.
+// (task_id, repository_id, branch) triple — e.g. multi-branch task where the
+// agent's live branch collapsed onto a peer watch's branch. In that case the
+// raw UPDATE would trip the UNIQUE constraint. We instead drop the source row
+// (which is still searching, pr_number=0, so it owns no PR state) and let the
+// sibling continue to track the branch.
 func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -115,6 +115,10 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 	if err != nil {
 		return fmt.Errorf("failed to load message payload %s: %w", message.PayloadDigest, err)
 	}
+	if uncompressedSize < 0 {
+		return fmt.Errorf("message payload %s has invalid rehydrate size: %d",
+			message.PayloadDigest, uncompressedSize)
+	}
 	if uncompressedSize > maxMessagePayloadRehydrateBytes {
 		return fmt.Errorf("message payload %s exceeds maximum rehydrate size: %d > %d",
 			message.PayloadDigest, uncompressedSize, maxMessagePayloadRehydrateBytes)
@@ -122,6 +126,10 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 	payloadBytes, err := gzipDecompress(compressed, maxMessagePayloadRehydrateBytes)
 	if err != nil {
 		return fmt.Errorf("failed to decompress message payload %s: %w", message.PayloadDigest, err)
+	}
+	if int64(len(payloadBytes)) != uncompressedSize {
+		return fmt.Errorf("message payload %s size mismatch: %d != %d",
+			message.PayloadDigest, len(payloadBytes), uncompressedSize)
 	}
 	if actual := sha256Hex(payloadBytes); actual != message.PayloadDigest {
 		return fmt.Errorf("message payload %s failed integrity check (got %s)", message.PayloadDigest, actual)
