@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/planinjection"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -67,7 +68,6 @@ func (d *dynamicTaskDownstream) Launch(
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
 	d.service.bindPromptAttemptToExecution(ctx, d.sessionID, execution.AgentExecutionID)
 	d.execution = execution
-	d.service.markDynamicRouteActive(ctx, d.sessionID, launch.Decision.Generation)
 	acpSessionID := ""
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
 		acpSessionID = session.DownstreamACPSessionID
@@ -187,14 +187,16 @@ func (s *Service) markDynamicRouteActive(ctx context.Context, sessionID string, 
 		return
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.RouteGeneration != generation || session.RouteState == dynamicRouteStatusActive {
+	if err != nil || session == nil || session.RouteGeneration != generation {
 		return
 	}
-	session.RouteState = dynamicRouteStatusActive
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
-		s.logger.Warn("failed to mirror dynamic route active state to task session",
-			zap.String("session_id", sessionID), zap.Error(err))
+	if loader, ok := s.repo.(dynamicRouteStateLoader); ok {
+		state, loadErr := loader.LoadRouteState(ctx, sessionID)
+		if loadErr != nil || state == nil || state.Generation != generation || state.Status != dynamicRouteStatusActive {
+			return
+		}
 	}
+	s.mirrorDynamicRouteProjection(ctx, session, generation, dynamicRouteStatusActive, session.RouteReason)
 }
 
 // markDynamicRouteActionRequired transitions a claimed dynamic route to
@@ -225,12 +227,108 @@ func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID 
 	if err != nil || session == nil || session.RouteGeneration != generation {
 		return
 	}
-	session.RouteState = decision.Status
+	s.mirrorDynamicRouteProjection(ctx, session, generation, decision.Status, reason)
+}
+
+type dynamicRouteSessionProjector interface {
+	UpdateTaskSessionDynamicRouteIfCurrent(
+		context.Context,
+		string,
+		int64,
+		string,
+		string,
+		string,
+	) (bool, time.Time, error)
+}
+
+func (s *Service) mirrorDynamicRouteProjection(
+	ctx context.Context,
+	session *models.TaskSession,
+	generation int64,
+	status, reason string,
+) {
+	if session == nil || session.RouteGeneration != generation || status == "" {
+		return
+	}
+	if session.RouteState == status && session.RouteReason == reason {
+		return
+	}
+	oldState := session.State
+	if projector, ok := s.repo.(dynamicRouteSessionProjector); ok {
+		changed, updatedAt, err := projector.UpdateTaskSessionDynamicRouteIfCurrent(
+			ctx, session.ID, generation, session.RouteState, status, reason,
+		)
+		if err != nil {
+			s.logger.Warn("failed to mirror dynamic route state to task session",
+				zap.String("session_id", session.ID), zap.Error(err))
+			return
+		}
+		if !changed {
+			return
+		}
+		session.RouteState = status
+		session.RouteReason = reason
+		session.UpdatedAt = updatedAt
+		s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, oldState, session.State, session.ErrorMessage, &updatedAt, session)
+		return
+	}
+	// Legacy repositories do not expose the narrow route projection update. Keep
+	// the fallback for tests and older adapters, while production SQLite uses the
+	// generation/status-guarded method above.
+	session.RouteState = status
 	session.RouteReason = reason
 	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
-		s.logger.Warn("failed to mirror dynamic route action_required to task session",
-			zap.String("session_id", sessionID), zap.Error(err))
+		s.logger.Warn("failed to mirror dynamic route state to task session",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return
 	}
+	updatedAt := session.UpdatedAt
+	s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, oldState, session.State, session.ErrorMessage, &updatedAt, session)
+}
+
+// handleAgentProcessStarted settles a dynamic route only after the asynchronous
+// process start succeeds. LaunchPreparedSession returns before this point.
+func (s *Service) handleAgentProcessStarted(
+	ctx context.Context,
+	_, sessionID, agentExecutionID string,
+) {
+	if s.profileExecutionResolver == nil || sessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
+		return
+	}
+	if session.AgentExecutionID != "" && agentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return
+	}
+	if session.State != models.TaskSessionStateStarting && session.State != models.TaskSessionStateRunning {
+		return
+	}
+	s.markDynamicRouteActive(ctx, sessionID, session.RouteGeneration)
+}
+
+// handleAgentProcessStartFailed settles a claimed dynamic route when process
+// startup fails after LaunchPreparedSession already returned successfully.
+func (s *Service) handleAgentProcessStartFailed(
+	ctx context.Context,
+	_, sessionID, agentExecutionID string,
+	_ error,
+) {
+	if s.profileExecutionResolver == nil || sessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
+		return
+	}
+	if session.AgentExecutionID != "" && agentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return
+	}
+	if session.State == models.TaskSessionStateCancelled || session.State == models.TaskSessionStateCompleted {
+		return
+	}
+	s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "agent_process_start_failed")
 }
 
 func applyDynamicRouteDecisionProjection(

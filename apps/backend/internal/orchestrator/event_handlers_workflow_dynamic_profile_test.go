@@ -215,6 +215,30 @@ func newWorkflowDynamicProfileResolverWithCandidate(
 	t *testing.T,
 	dynamicProfileID, concreteProfileID string,
 	candidateEnabled bool,
+	engineOptions ...dynamicruntime.EngineOption,
+) *agentruntime.ProfileExecutionResolver {
+	return newWorkflowDynamicProfileResolverWithCandidates(
+		t,
+		dynamicProfileID,
+		[]workflowDynamicCandidate{{
+			executionProfileID: concreteProfileID,
+			enabled:            candidateEnabled,
+		}},
+		engineOptions...,
+	)
+}
+
+type workflowDynamicCandidate struct {
+	executionProfileID string
+	enabled            bool
+	rulesJSON          string
+}
+
+func newWorkflowDynamicProfileResolverWithCandidates(
+	t *testing.T,
+	dynamicProfileID string,
+	candidates []workflowDynamicCandidate,
+	engineOptions ...dynamicruntime.EngineOption,
 ) *agentruntime.ProfileExecutionResolver {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -236,23 +260,35 @@ func newWorkflowDynamicProfileResolverWithCandidate(
 			t.Fatal(err)
 		}
 	}
-	for _, profile := range []*agentsettingsmodels.AgentProfile{
-		{ID: dynamicProfileID, AgentID: "dynamic", Name: "Cascade", Enabled: true},
-		{ID: concreteProfileID, AgentID: "concrete-agent", Name: "Concrete", Enabled: true},
-	} {
+	profiles := []*agentsettingsmodels.AgentProfile{{
+		ID: dynamicProfileID, AgentID: "dynamic", Name: "Cascade", Enabled: true,
+	}}
+	for _, candidate := range candidates {
+		profiles = append(profiles, &agentsettingsmodels.AgentProfile{
+			ID: candidate.executionProfileID, AgentID: "concrete-agent",
+			Name: candidate.executionProfileID, Enabled: true,
+		})
+	}
+	for _, profile := range profiles {
 		if err := repo.CreateAgentProfile(ctx, profile); err != nil {
 			t.Fatal(err)
 		}
 	}
+	routes := make([]agentsettingsmodels.DynamicAgentRoute, 0, len(candidates))
+	for position, candidate := range candidates {
+		routes = append(routes, agentsettingsmodels.DynamicAgentRoute{
+			DynamicProfileID:   dynamicProfileID,
+			Position:           position,
+			ExecutionProfileID: candidate.executionProfileID,
+			Enabled:            candidate.enabled,
+			RulesJSON:          candidate.rulesJSON,
+		})
+	}
 	if err := repo.CreateDynamicAgentProfile(ctx,
 		&agentsettingsmodels.DynamicAgentProfile{ProfileID: dynamicProfileID, Version: 1},
-		[]agentsettingsmodels.DynamicAgentRoute{{
-			DynamicProfileID:   dynamicProfileID,
-			ExecutionProfileID: concreteProfileID,
-			Enabled:            candidateEnabled,
-		}},
+		routes,
 	); err != nil {
 		t.Fatal(err)
 	}
-	return agentruntime.NewProfileExecutionResolver(repo, dynamicruntime.NewEngine(), true)
+	return agentruntime.NewProfileExecutionResolver(repo, dynamicruntime.NewEngine(engineOptions...), true)
 }

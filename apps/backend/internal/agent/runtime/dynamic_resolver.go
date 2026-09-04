@@ -315,8 +315,8 @@ func (r *ProfileExecutionResolver) ResolveRouteAction(
 	}
 }
 
-// MarkRouteActive completes a claimed route's starting phase. The downstream
-// launch callback calls this immediately after a concrete launch succeeds.
+// MarkRouteActive completes a claimed route's starting phase after the
+// asynchronous agent process-start callback confirms success.
 func (r *ProfileExecutionResolver) MarkRouteActive(ctx context.Context, sessionID string, expectedGeneration int64) error {
 	if r.engine == nil {
 		return errors.New("dynamic profile execution is not configured")

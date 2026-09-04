@@ -216,6 +216,55 @@ func TestClaimRouteStateAdvancesGenerationWithFence(t *testing.T) {
 	}
 }
 
+func TestClaimRouteStateFromRequiresExpectedStatus(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-conditional-status"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "conditional-status-session", TaskID: "task-conditional-status",
+		State: models.TaskSessionStateStarting,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	initial := dynamicruntime.RouteState{
+		SessionID: "conditional-status-session", LogicalProfileID: "logical",
+		ExecutionProfileID: "candidate", Generation: 1, Status: "starting",
+		UpdatedAt: time.Now().UTC(),
+	}
+	claimed, err := repo.ClaimRouteState(ctx, 0, initial)
+	if err != nil || !claimed {
+		t.Fatalf("initial ClaimRouteState = %v, %v", claimed, err)
+	}
+
+	active := initial
+	active.Status = "active"
+	active.UpdatedAt = time.Now().UTC()
+	claimed, err = repo.ClaimRouteStateFrom(ctx, 1, "starting", active)
+	if err != nil || !claimed {
+		t.Fatalf("conditional active transition = %v, %v", claimed, err)
+	}
+
+	stale := active
+	stale.Status = "action_required"
+	stale.UpdatedAt = time.Now().UTC()
+	claimed, err = repo.ClaimRouteStateFrom(ctx, 1, "starting", stale)
+	if err != nil {
+		t.Fatalf("stale conditional transition: %v", err)
+	}
+	if claimed {
+		t.Fatal("conditional transition succeeded after status changed")
+	}
+	loaded, err := repo.LoadRouteState(ctx, initial.SessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if loaded == nil || loaded.Status != "active" {
+		t.Fatalf("route state after stale transition = %#v, want active", loaded)
+	}
+}
+
 func TestRecordRouteDecisionClaimsInitialGenerationAndWritesAttemptAtomically(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

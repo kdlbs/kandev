@@ -138,6 +138,9 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 				updateCtx, taskID, sessionID, agentExecutionID, err,
 				escalateTaskOnFailure, fromResume,
 			)
+			if e.onAgentProcessStartFailed != nil {
+				e.onAgentProcessStartFailed(updateCtx, taskID, sessionID, agentExecutionID, err)
+			}
 			return
 		}
 		if _, terminal := e.stopStartedExecutionIfSessionTerminal(
@@ -150,6 +153,9 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 		}
 
 		onSuccess(updateCtx)
+		if e.onAgentProcessStarted != nil {
+			e.onAgentProcessStarted(updateCtx, taskID, sessionID, agentExecutionID)
+		}
 	}()
 }
 

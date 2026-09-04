@@ -425,7 +425,7 @@ func (e *Engine) applyPolicyFailure(
 	if evaluation.Kind == routingpolicy.DecisionStop {
 		nextState.Status = routeStatusActionRequired
 	}
-	if err := e.persistSameGeneration(ctx, expectedGeneration, nextState); err != nil {
+	if err := e.persistSameGeneration(ctx, expectedGeneration, state.Status, nextState); err != nil {
 		return RouteDecision{}, err
 	}
 	e.mu.Lock()
@@ -516,8 +516,26 @@ func (e *Engine) stateForFailure(ctx context.Context, sessionID string) (RouteSt
 	return e.loadStateLocked(ctx, sessionID)
 }
 
-func (e *Engine) persistSameGeneration(ctx context.Context, expectedGeneration int64, state RouteState) error {
+func (e *Engine) persistSameGeneration(
+	ctx context.Context,
+	expectedGeneration int64,
+	expectedStatus string,
+	state RouteState,
+) error {
 	if e.persistence == nil {
+		return nil
+	}
+	if handled, err := e.persistInitialGeneration(ctx, expectedGeneration, expectedStatus, state); handled {
+		return err
+	}
+	if claimer, ok := e.persistence.(GenerationStatusClaimer); ok {
+		claimed, err := claimer.ClaimRouteStateFrom(ctx, expectedGeneration, expectedStatus, state)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			return ErrStaleGeneration
+		}
 		return nil
 	}
 	if claimer, ok := e.persistence.(GenerationClaimer); ok {
@@ -531,6 +549,31 @@ func (e *Engine) persistSameGeneration(ctx context.Context, expectedGeneration i
 		return nil
 	}
 	return e.persistence.SaveRouteState(ctx, state)
+}
+
+// persistInitialGeneration preserves the insert path for an adapter that
+// observes a policy failure before the initial route row exists.
+func (e *Engine) persistInitialGeneration(
+	ctx context.Context,
+	expectedGeneration int64,
+	expectedStatus string,
+	state RouteState,
+) (bool, error) {
+	if expectedGeneration != 0 || expectedStatus != "" {
+		return false, nil
+	}
+	claimer, ok := e.persistence.(GenerationClaimer)
+	if !ok {
+		return false, nil
+	}
+	claimed, err := claimer.ClaimRouteState(ctx, expectedGeneration, state)
+	if err != nil {
+		return true, err
+	}
+	if !claimed {
+		return true, ErrStaleGeneration
+	}
+	return true, nil
 }
 
 func mustJSON(value PolicyState) []byte {
@@ -585,10 +628,11 @@ func (e *Engine) CancelPending(
 		}
 	}
 	policyState.PendingOutcome = routingpolicy.OutcomeStop
+	expectedStatus := state.Status
 	state.PolicyStateJSON = string(mustJSON(policyState))
 	state.Status = routeStatusActionRequired
 	state.UpdatedAt = e.now()
-	if err := e.persistSameGeneration(ctx, expectedGeneration, state); err != nil {
+	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
 		return RouteDecision{}, err
 	}
 	e.mu.Lock()
@@ -612,7 +656,9 @@ func (e *Engine) CancelPending(
 // transition, or a duplicate call), so it is safe to call unconditionally
 // after a successful launch.
 func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGeneration int64) error {
-	state, exists, err := e.stateForFailure(ctx, sessionID)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -625,14 +671,13 @@ func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGener
 	if state.Status != routeStatusStarting {
 		return nil
 	}
+	expectedStatus := state.Status
 	state.Status = routeStatusActive
 	state.UpdatedAt = e.now()
-	if err := e.persistSameGeneration(ctx, expectedGeneration, state); err != nil {
+	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
 		return err
 	}
-	e.mu.Lock()
 	e.states[sessionID] = state
-	e.mu.Unlock()
 	return nil
 }
 
@@ -652,7 +697,9 @@ func (e *Engine) MarkActionRequired(
 	expectedGeneration int64,
 	reason string,
 ) (RouteDecision, error) {
-	state, exists, err := e.stateForFailure(ctx, sessionID)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -663,14 +710,13 @@ func (e *Engine) MarkActionRequired(
 		return RouteDecision{}, ErrStaleGeneration
 	}
 	if state.Status == routeStatusStarting {
+		expectedStatus := state.Status
 		state.Status = routeStatusActionRequired
 		state.UpdatedAt = e.now()
-		if err := e.persistSameGeneration(ctx, expectedGeneration, state); err != nil {
+		if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
 			return RouteDecision{}, err
 		}
-		e.mu.Lock()
 		e.states[sessionID] = state
-		e.mu.Unlock()
 	}
 	return RouteDecision{
 		SessionID: sessionID, LogicalProfileID: state.LogicalProfileID,
@@ -711,9 +757,10 @@ func (e *Engine) resumePending(
 	if !force && policyState.Deadline != nil && now.Before(*policyState.Deadline) {
 		return RouteDecision{}, ErrRecoveryNotDue
 	}
+	expectedStatus := state.Status
 	state.Status = "retrying"
 	state.UpdatedAt = now
-	if err := e.persistSameGeneration(ctx, expectedGeneration, state); err != nil {
+	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
 		return RouteDecision{}, err
 	}
 	e.mu.Lock()

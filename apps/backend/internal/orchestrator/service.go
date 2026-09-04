@@ -1401,6 +1401,8 @@ func NewService(
 	})
 	exec.SetLaunchFailureReviewEligibility(s.resolveLaunchFailureReviewEligibility)
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
+	exec.SetOnAgentProcessStarted(s.handleAgentProcessStarted)
+	exec.SetOnAgentProcessStartFailed(s.handleAgentProcessStartFailed)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
 	}

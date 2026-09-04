@@ -10,6 +10,8 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentruntimekind "github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -203,9 +205,16 @@ func TestReconcileOrphanedDynamicStartingRoutes_SweepsInFlightLaunchStates(t *te
 			seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
 			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 
-			engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
-			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
-			seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+			seedEngine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, seedEngine, true))
+			seedClaimedDynamicRoute(t, ctx, repo, seedEngine, sessionID, executionID)
+			// Reconcile through a fresh engine. This proves the startup path loads
+			// the durable route row instead of relying on the old process cache.
+			recoveryEngine := dynamicruntime.NewEngine(
+				dynamicruntime.WithPersistence(repo),
+				dynamicruntime.WithStateLoader(repo),
+			)
+			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, recoveryEngine, true))
 
 			svc.reconcileOrphanedDynamicStartingRoutes(ctx)
 
@@ -263,9 +272,14 @@ func TestReconcileOrphanedDynamicStartingRoutes_PrecedesGeneralStartupReconcilia
 	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 
-	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
-	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
-	seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+	seedEngine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, seedEngine, true))
+	seedClaimedDynamicRoute(t, ctx, repo, seedEngine, sessionID, executionID)
+	recoveryEngine := dynamicruntime.NewEngine(
+		dynamicruntime.WithPersistence(repo),
+		dynamicruntime.WithStateLoader(repo),
+	)
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, recoveryEngine, true))
 
 	// Mirror Service.Start's exact ordering: the orphan sweep must run before
 	// the general startup reconciler.
@@ -381,5 +395,304 @@ func TestMarkDynamicRouteActive_MirrorsBothStores(t *testing.T) {
 	}
 	if routeState.Status != dynamicRouteStatusActive {
 		t.Fatalf("route state after sweep = %#v, want unchanged active", routeState)
+	}
+}
+
+func TestDynamicTaskDownstreamLaunchMarksRouteActiveAfterProcessStart(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-downstream-active"
+		sessionID   = "session-dynamic-downstream-active"
+		executionID = "execution-dynamic-downstream-active"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: executionID}, nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error { return nil },
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+	started := make(chan struct{})
+	svc.executor.SetOnAgentProcessStarted(func(callbackCtx context.Context, callbackTaskID, callbackSessionID, callbackExecutionID string) {
+		svc.handleAgentProcessStarted(callbackCtx, callbackTaskID, callbackSessionID, callbackExecutionID)
+		close(started)
+	})
+
+	downstream := &dynamicTaskDownstream{
+		service:   svc,
+		task:      &v1.Task{ID: taskID, WorkspaceID: "ws1", Description: "test"},
+		sessionID: sessionID,
+		options: executor.LaunchOptions{
+			AgentProfileID: "candidate-1",
+			StartAgent:     true,
+		},
+	}
+	if _, err := downstream.Launch(ctx, dynamicruntime.DownstreamLaunch{
+		ExecutionProfileID: "candidate-1",
+		Decision:           decision,
+	}); err != nil {
+		t.Fatalf("dynamic downstream launch: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for process-start settlement")
+	}
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Status != dynamicRouteStatusActive || state.Generation != decision.Generation {
+		t.Fatalf("route state after downstream launch = %#v, want active generation %d", state, decision.Generation)
+	}
+}
+
+func TestMarkDynamicRouteActionRequiredPublishesRouteProjection(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-action-event"
+		sessionID   = "session-dynamic-action-event"
+		executionID = "execution-dynamic-action-event"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	eventBus := &recordingEventBus{}
+	svc.eventBus = eventBus
+
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+
+	svc.markDynamicRouteActionRequired(ctx, sessionID, decision.Generation, "launch_failed")
+
+	if len(eventBus.events) != 1 || eventBus.events[0].subject != events.TaskSessionStateChanged {
+		t.Fatalf("published events = %#v, want one session state event", eventBus.events)
+	}
+	data, ok := eventBus.events[0].event.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map[string]interface{}", eventBus.events[0].event.Data)
+	}
+	if data["route_state"] != dynamicRouteStatusActionRequired {
+		t.Fatalf("event route_state = %#v, want action_required", data["route_state"])
+	}
+	if data["route_reason"] != "launch_failed" {
+		t.Fatalf("event route_reason = %#v, want launch_failed", data["route_reason"])
+	}
+}
+
+func TestMarkDynamicRouteActiveDoesNotOverwriteActionRequiredRoute(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-dynamic-active-noop"
+		sessionID = "session-dynamic-active-noop"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = "dynamic-logical"
+	session.ExecutionProfileID = "candidate-1"
+	session.RouteGeneration = 1
+	session.RouteState = dynamicRouteStatusActionRequired
+	session.RouteReason = "launch_failed"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+	if err := repo.SaveRouteState(ctx, dynamicruntime.RouteState{
+		SessionID: sessionID, LogicalProfileID: session.AgentProfileID,
+		ExecutionProfileID: session.ExecutionProfileID, Generation: 1,
+		Status: dynamicRouteStatusActionRequired, UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("SaveRouteState: %v", err)
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	engine := dynamicruntime.NewEngine(
+		dynamicruntime.WithPersistence(repo),
+		dynamicruntime.WithStateLoader(repo),
+	)
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+
+	svc.markDynamicRouteActive(ctx, sessionID, 1)
+
+	loaded, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if loaded == nil || loaded.Status != dynamicRouteStatusActionRequired {
+		t.Fatalf("durable route state = %#v, want action_required", loaded)
+	}
+	updated, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after MarkActive: %v", err)
+	}
+	if updated.RouteState != dynamicRouteStatusActionRequired || updated.RouteReason != "launch_failed" {
+		t.Fatalf("session route projection = (%q, %q), want action_required/launch_failed", updated.RouteState, updated.RouteReason)
+	}
+}
+
+func TestHandleAgentProcessStartedMarksDynamicRouteActive(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-process-started"
+		sessionID   = "session-dynamic-process-started"
+		executionID = "execution-dynamic-process-started"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+
+	svc.handleAgentProcessStarted(ctx, taskID, sessionID, executionID)
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != decision.Generation || state.Status != dynamicRouteStatusActive {
+		t.Fatalf("route state after process start = %#v, want active generation %d", state, decision.Generation)
+	}
+}
+
+func TestHandleAgentProcessStartedSkipsCancelledSession(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-process-cancelled"
+		sessionID   = "session-dynamic-process-cancelled"
+		executionID = "execution-dynamic-process-cancelled"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCancelled)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+
+	svc.handleAgentProcessStarted(ctx, taskID, sessionID, executionID)
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != decision.Generation || state.Status != "starting" {
+		t.Fatalf("route state after cancelled process start = %#v, want unchanged starting generation %d", state, decision.Generation)
+	}
+}
+
+func TestHandleAgentProcessStartFailedMarksDynamicRouteActionRequired(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-process-failed"
+		sessionID   = "session-dynamic-process-failed"
+		executionID = "execution-dynamic-process-failed"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+
+	svc.handleAgentProcessStartFailed(ctx, taskID, sessionID, executionID, errors.New("provider process failed"))
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != decision.Generation || state.Status != dynamicRouteStatusActionRequired {
+		t.Fatalf("route state after process failure = %#v, want action_required generation %d", state, decision.Generation)
+	}
+}
+
+func TestRouteDynamicAgentFailureMarksSuccessorGenerationActionRequiredWhenLaunchFails(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-successor-failure"
+		sessionID   = "session-dynamic-successor-failure"
+		executionID = "execution-dynamic-successor-failure"
+		dynamicID   = "dynamic-successor-failure"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	agentManager := &mockAgentManager{stopAgentWithReasonErr: errors.New("predecessor stop failed")}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "retry the task"})
+	engineOptions := []dynamicruntime.EngineOption{dynamicruntime.WithPersistence(repo)}
+	resolver := newWorkflowDynamicProfileResolverWithCandidates(t, dynamicID, []workflowDynamicCandidate{
+		{
+			executionProfileID: "candidate-1",
+			enabled:            true,
+			rulesJSON:          `{"on_provider_error":"try_next"}`,
+		},
+		{executionProfileID: "candidate-2", enabled: true},
+	}, engineOptions...)
+	svc.SetProfileExecutionResolver(resolver)
+	selected, err := resolver.Resolve(ctx, sessionID, dynamicID, 0, "")
+	if err != nil {
+		t.Fatalf("initial dynamic resolve: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = dynamicID
+	session.ExecutionProfileID = selected.ExecutionProfileID
+	session.RouteGeneration = selected.Generation
+	session.RouteState = selected.Decision.Status
+	session.AgentExecutionID = executionID
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("project initial route: %v", err)
+	}
+	svc.beginDynamicAttempt(sessionID)
+	svc.bindDynamicAttemptExecution(sessionID, executionID)
+
+	handled := svc.routeDynamicAgentFailure(ctx, watcher.AgentEventData{
+		TaskID: taskID, SessionID: sessionID, AgentExecutionID: executionID,
+		PromptGeneration: 1,
+	}, &routingerr.Error{
+		Code: routingerr.CodeProviderOverloaded, Class: routingerr.ClassTransient,
+		FallbackAllowed: true,
+	})
+	if handled {
+		t.Fatal("routeDynamicAgentFailure succeeded despite successor launch failure")
+	}
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != 2 || state.Status != dynamicRouteStatusActionRequired {
+		t.Fatalf("route state after successor failure = %#v, want action_required generation 2", state)
+	}
+	updated, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after successor failure: %v", err)
+	}
+	if updated.RouteGeneration != 2 || updated.RouteState != dynamicRouteStatusActionRequired {
+		t.Fatalf("session route projection = generation %d state %q, want generation 2/action_required", updated.RouteGeneration, updated.RouteState)
 	}
 }
