@@ -1105,6 +1105,16 @@ type Service struct {
 	cancelOperationsMu sync.Mutex
 	cancelOperations   map[string]*cancellationOperationState
 
+	// observedDetachedMu / observedDetached track, per session, whether a
+	// registered launch recogniser attested a Detached=true background-shell
+	// launch during the turn that is currently settling (D3). Set by
+	// trackBackgroundToolUpdate's terminal-detached-shell branch; cleared on
+	// EventTypeTurnStarted, which agentctl emits on every session/prompt
+	// dispatch (human or synthetic self-resume) — the single turn boundary
+	// this feature uses for both processes. Runtime-only, never persisted.
+	observedDetachedMu sync.Mutex
+	observedDetached   map[string]bool
+
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
 	// A backoff timer per session re-drives the failed prompt; cancelled on

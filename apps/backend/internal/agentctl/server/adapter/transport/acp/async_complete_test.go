@@ -131,6 +131,14 @@ func TestAsyncTurnComplete_CancelledByPromptStart(t *testing.T) {
 
 		a.beginPromptTurn("s-start")
 
+		started := readAdapterEvent(t, a, 100*time.Millisecond)
+		if started.Type != streams.EventTypeTurnStarted {
+			t.Fatalf("event type = %q, want %q", started.Type, streams.EventTypeTurnStarted)
+		}
+		if started.SessionID != "s-start" {
+			t.Errorf("turn_started SessionID = %q, want s-start", started.SessionID)
+		}
+
 		time.Sleep(150 * time.Millisecond)
 		synctest.Wait()
 		assertNoAdapterEvent(t, a, "after prompt start")

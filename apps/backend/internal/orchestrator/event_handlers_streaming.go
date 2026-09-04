@@ -212,6 +212,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case "log":
 		s.handleAgentLogEvent(ctx, payload)
+
+	case streams.EventTypeTurnStarted:
+		// D3: the single turn boundary for the whole feature. Clearing here,
+		// on the same ordered stream consumer that applies the attestation
+		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
+		// a detached launch attested during turn N cannot leak into turn N+1.
+		s.clearObservedDetachedLaunch(sessionID)
 	}
 }
 
@@ -822,6 +829,15 @@ func (s *Service) trackBackgroundToolUpdate(
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
 			kind := backgroundWorkKind(payload.Data.Normalized)
+			if kind == streams.BackgroundWorkKindShell {
+				// Waiting-attribution spec (docs/specs/disambiguate-waiting):
+				// this is the recognised condition for "a detached
+				// background-shell launch happened during this turn" — the
+				// same terminal, Detached=true shape stampBackgroundShellWork
+				// stamps in agentctl. Subagent/monitor kinds are unrelated to
+				// the parked projection.
+				s.setObservedDetachedLaunch(payload.SessionID)
+			}
 			if s.registerBackgroundWorkKind(
 				payload.SessionID,
 				payload.Data.ToolCallID,

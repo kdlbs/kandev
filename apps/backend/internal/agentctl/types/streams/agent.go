@@ -87,6 +87,14 @@ const (
 	// configuration delivery and observed use. It deliberately excludes raw
 	// protocol frames, tool payloads, credentials, and full endpoints.
 	EventTypeMCPAttachment = "mcp_attachment"
+
+	// EventTypeTurnStarted marks the single turn boundary this feature relies
+	// on: agentctl's own session/prompt dispatch, emitted on both a human
+	// prompt and a synthetic ScheduleWakeup self-resume. It carries only the
+	// session ID — the turn start itself stays in agentctl's memory and clock,
+	// never crossing the process boundary. The backend consumes it to clear
+	// the background-launch attestation for the turn that is starting.
+	EventTypeTurnStarted = "turn_started"
 )
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
