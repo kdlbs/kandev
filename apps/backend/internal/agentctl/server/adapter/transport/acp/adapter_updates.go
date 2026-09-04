@@ -635,7 +635,12 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		}
 		event.Text = text
 		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, Stderr: text})
-		event.ProviderDiagnosticCandidate = classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
+		// Only an assistant chunk may carry the diagnostic-candidate marker: the
+		// clearing rule (AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.21) only reads an
+		// unmarked assistant/thought chunk, so a marked user chunk would never be
+		// cleared by the ordinary-output path.
+		event.ProviderDiagnosticCandidate = role == "assistant" &&
+			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}
 
