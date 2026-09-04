@@ -321,6 +321,264 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 	return tx.Commit()
 }
 
+// PersistTaskEnvironmentTransition atomically updates an existing environment
+// and reconciles its repository inventory. A transition must not leave the old
+// executor attached to a partially replaced inventory when any write fails.
+// When replacePhysical is true, active rows absent from repos become deleted
+// tombstones so old worktree paths cannot re-enter a later launch.
+func (r *Repository) PersistTaskEnvironmentTransition(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+	repos []*models.TaskEnvironmentRepo,
+	replacePhysical bool,
+) error {
+	if env == nil || env.ID == "" {
+		return fmt.Errorf("persist task environment transition: environment is required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	taskID, _, err := r.taskEnvironmentStateTx(ctx, tx, env.ID)
+	if err != nil {
+		return err
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return err
+	}
+	existing, err := listTaskEnvironmentReposTx(ctx, r, tx, env.ID)
+	if err != nil {
+		return err
+	}
+	if err := r.validateTaskEnvironmentTransitionWorkspace(ctx, tx, taskID, env, existing); err != nil {
+		return err
+	}
+	if err := r.reconcileTaskEnvironmentReposTx(ctx, tx, env.ID, existing, repos, replacePhysical); err != nil {
+		return err
+	}
+	if err := r.validateTaskEnvironmentTransitionReady(ctx, tx, env.ID, env.Status); err != nil {
+		return err
+	}
+	if err := r.updateTaskEnvironmentTransitionTx(ctx, tx, env); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) validateTaskEnvironmentTransitionWorkspace(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	env *models.TaskEnvironment,
+	existing []*models.TaskEnvironmentRepo,
+) error {
+	if env.ExecutorType != string(models.ExecutorTypeWorktree) || env.WorkspacePath != "" {
+		return nil
+	}
+	hasRepos, err := r.taskHasRepositoriesTx(ctx, tx, taskID)
+	if err != nil {
+		return err
+	}
+	if hasRepos || len(existing) > 0 {
+		return fmt.Errorf("persist task environment transition: worktree-mode env requires workspace_path (id=%s)", env.ID)
+	}
+	return nil
+}
+
+func (r *Repository) validateTaskEnvironmentTransitionReady(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID string,
+	status models.TaskEnvironmentStatus,
+) error {
+	if status != models.TaskEnvironmentStatusReady {
+		return nil
+	}
+	return r.validateReadyTaskEnvironment(ctx, tx, environmentID)
+}
+
+func (r *Repository) updateTaskEnvironmentTransitionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	env *models.TaskEnvironment,
+) error {
+	env.UpdatedAt = time.Now().UTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments SET
+			executor_type = ?, executor_id = ?, executor_profile_id = ?,
+			control_port = ?, status = ?, materialization_session_id = ?,
+			workspace_path = ?,
+			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?, task_dir_name = ?,
+			updated_at = ?
+		WHERE id = ?
+	`),
+		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
+		env.ControlPort, string(env.Status), env.MaterializationSessionID,
+		env.WorkspacePath,
+		env.ContainerID, env.ContainerBootstrapNonceSecretID, env.ContainerControlAuthTokenSecretID, env.SandboxID, env.TaskDirName,
+		env.UpdatedAt,
+		env.ID,
+	)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, env.ID)
+	}
+	return nil
+}
+
+func listTaskEnvironmentReposTx(ctx context.Context, r *Repository, tx *sqlx.Tx, envID string) ([]*models.TaskEnvironmentRepo, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT `+envRepoSelectCols+`
+		FROM task_environment_repos ter
+		WHERE ter.task_environment_id = ?
+		ORDER BY ter.position ASC, ter.created_at ASC
+	`), envID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var result []*models.TaskEnvironmentRepo
+	for rows.Next() {
+		row, err := scanEnvRepoRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
+func (r *Repository) reconcileTaskEnvironmentReposTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	envID string,
+	existing, repos []*models.TaskEnvironmentRepo,
+	replacePhysical bool,
+) error {
+	byKey, legacyFlatByRepo := indexTaskEnvironmentReposTx(existing)
+	matched := make(map[string]struct{}, len(repos))
+	for position, incoming := range repos {
+		row := findTaskEnvironmentRepoTransition(byKey, legacyFlatByRepo, incoming)
+		if row == nil {
+			if incoming == nil || incoming.RepositoryID == "" {
+				continue
+			}
+			incoming.TaskEnvironmentID = envID
+			incoming.Position = position
+			if err := r.insertTaskEnvironmentRepoTx(ctx, tx, incoming); err != nil {
+				return err
+			}
+			continue
+		}
+		matched[row.ID] = struct{}{}
+		if err := r.updateTaskEnvironmentRepoTransitionTx(ctx, tx, row, incoming, position, replacePhysical); err != nil {
+			return err
+		}
+	}
+	if !replacePhysical {
+		return nil
+	}
+	return r.tombstoneOmittedTaskEnvironmentReposTx(ctx, tx, existing, matched)
+}
+
+func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (map[string]*models.TaskEnvironmentRepo, map[string]*models.TaskEnvironmentRepo) {
+	byKey := make(map[string]*models.TaskEnvironmentRepo, len(rows))
+	legacyFlatByRepo := make(map[string]*models.TaskEnvironmentRepo)
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		byKey[row.RepositoryID+"\x00"+row.BranchSlug] = row
+		if row.RepositoryID != "" && row.BranchSlug == "" {
+			legacyFlatByRepo[row.RepositoryID] = row
+		}
+	}
+	return byKey, legacyFlatByRepo
+}
+
+func findTaskEnvironmentRepoTransition(
+	byKey map[string]*models.TaskEnvironmentRepo,
+	legacyFlatByRepo map[string]*models.TaskEnvironmentRepo,
+	incoming *models.TaskEnvironmentRepo,
+) *models.TaskEnvironmentRepo {
+	if incoming == nil || incoming.RepositoryID == "" {
+		return nil
+	}
+	key := incoming.RepositoryID + "\x00" + incoming.BranchSlug
+	row := byKey[key]
+	if row == nil && incoming.BranchSlug != "" {
+		row = legacyFlatByRepo[incoming.RepositoryID]
+		if row != nil {
+			delete(legacyFlatByRepo, incoming.RepositoryID)
+			byKey[key] = row
+		}
+	}
+	return row
+}
+
+func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	row, incoming *models.TaskEnvironmentRepo,
+	position int,
+	replacePhysical bool,
+) error {
+	row.BranchSlug = incoming.BranchSlug
+	if replacePhysical || incoming.WorktreeID != "" {
+		row.WorktreeID = incoming.WorktreeID
+		row.WorktreePath = incoming.WorktreePath
+		row.WorktreeBranch = incoming.WorktreeBranch
+	}
+	row.Position = position
+	row.ErrorMessage = incoming.ErrorMessage
+	// A later successful transition can recreate a slot that an earlier
+	// replace-mode transition tombstoned. Rebind the existing row to the
+	// active inventory instead of leaving the matching key permanently
+	// excluded from reuse.
+	if replacePhysical {
+		row.Status = worktreeRepoStatusActive
+		row.DeletedAt = nil
+	}
+	row.UpdatedAt = time.Now().UTC()
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environment_repos SET
+			branch_slug = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+			position = ?, error_message = ?, status = ?, deleted_at = ?, updated_at = ?
+		WHERE id = ?
+	`), row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorktreeBranch,
+		row.Position, row.ErrorMessage, row.Status, row.DeletedAt, row.UpdatedAt, row.ID)
+	return err
+}
+
+func (r *Repository) tombstoneOmittedTaskEnvironmentReposTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	existing []*models.TaskEnvironmentRepo,
+	matched map[string]struct{},
+) error {
+	deletedAt := time.Now().UTC()
+	for _, row := range existing {
+		if row == nil || row.DeletedAt != nil || row.Status == worktreeRepoStatusDeleted {
+			continue
+		}
+		if _, ok := matched[row.ID]; ok {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_environment_repos
+			SET status = ?, deleted_at = ?, updated_at = ?
+			WHERE id = ?
+		`), worktreeRepoStatusDeleted, deletedAt, deletedAt, row.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // taskHasRepositoriesTx reports whether a task has any task_repositories
 // rows, i.e. whether it is repo-backed and therefore expected to carry a
 // non-empty canonical inventory whenever its environment is ready.

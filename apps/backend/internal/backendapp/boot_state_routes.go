@@ -681,6 +681,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
 		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"resolveSessionHostnames":           settings.ResolveSessionHostnames,
 		"appStatusBarOrder":                 mapAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quickChatTabOrderByWorkspace":      settings.QuickChatTabOrderByWorkspace,
 		"hiddenWorkflowStepIds":             stringSliceMap(settings.KanbanHiddenStepIDs),

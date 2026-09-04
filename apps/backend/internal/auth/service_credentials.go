@@ -172,6 +172,27 @@ func (s *Service) ListSessions(ctx context.Context, userID string) ([]*store.Ses
 	return s.store.ListSessionsByUser(ctx, userID)
 }
 
+// SessionIPs returns each distinct raw session IP belonging to the user.
+func (s *Service) SessionIPs(ctx context.Context, userID string) ([]string, error) {
+	sessions, err := s.ListSessions(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(sessions))
+	ips := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session.IP == "" {
+			continue
+		}
+		if _, exists := seen[session.IP]; exists {
+			continue
+		}
+		seen[session.IP] = struct{}{}
+		ips = append(ips, session.IP)
+	}
+	return ips, nil
+}
+
 // RevokeSession deletes one of the user's sessions.
 func (s *Service) RevokeSession(ctx context.Context, sessionID, userID string) error {
 	return s.store.DeleteSession(ctx, sessionID, userID)

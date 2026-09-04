@@ -1493,9 +1493,16 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 
 // DeleteTask deletes a task by ID
 func (r *Repository) DeleteTask(ctx context.Context, id string) error {
+	_, err := r.DeleteTaskWithVacatedStep(ctx, id)
+	return err
+}
+
+// DeleteTaskWithVacatedStep deletes a task and returns the workflow step read
+// under the same task-row lock as the deletion.
+func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
 	// Serialize with session/worktree creation FIRST (task-row lock), then
@@ -1505,30 +1512,34 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	// row is gone. Capturing before the lock could use a stale set (a session
 	// created mid-flight would never be purged). The session capture must also
 	// precede the task-row DELETE because task_sessions cascades on deletion.
-	if err := r.lockTaskRowInTx(ctx, tx, id); err != nil {
-		return err
+	_, vacatedStepID, found, err := r.readTaskStepInTx(ctx, tx, id)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
-		return err
+		return "", err
 	}
 	if err := tx.Commit(); err != nil {
-		return err
+		return "", err
 	}
 	r.notifyTaskQueuePurged(ctx, id)
-	return nil
+	return vacatedStepID, nil
 }
 
 // ListTasks returns all non-archived, non-ephemeral tasks for a workflow
@@ -2273,35 +2284,53 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 // Pass empty cascadeID to opt out of cascade tracking (single-task
 // manual archive); the column will simply not get set.
 func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID string) (bool, error) {
-	now := time.Now().UTC()
+	_, changed, err := r.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
+	return changed, err
+}
+
+// ArchiveTaskIfActiveWithVacatedStep archives an active task and returns the
+// workflow step read under the same task-row lock as the archive mutation.
+func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
+	ctx context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	_, vacatedStepID, found, err := r.readTaskStepInTx(ctx, tx, id)
+	if err != nil {
+		return "", false, err
+	}
+	if !found {
+		return "", false, tx.Commit()
+	}
+	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET archived_at = ?, archived_by_cascade_id = ?, updated_at = ?
 		WHERE id = ? AND archived_at IS NULL
 	`), now, cascadeID, now, id)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return false, tx.Commit()
+		return "", false, tx.Commit()
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
-		return false, err
+		return "", false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return false, err
+		return "", false, err
 	}
 	r.notifyTaskQueuePurged(ctx, id)
-	return true, nil
+	return vacatedStepID, true, nil
 }
 
 // taskQueueSessionsInTx returns the task's authoritative session set (its

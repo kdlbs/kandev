@@ -91,19 +91,28 @@ export function MCPStrategySelect({
         onValueChange={(next) => onChange(fromStrategyValue(next))}
         disabled={disabled}
       >
-        <SelectTrigger id={id} className="cursor-pointer" data-testid="mcp-strategy-select">
+        <SelectTrigger
+          id={id}
+          className="w-full min-w-0 cursor-pointer [@media(pointer:coarse)]:min-h-11"
+          data-testid="mcp-strategy-select"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={MCP_STRATEGY_NONE} className="cursor-pointer">
+          <SelectItem
+            value={MCP_STRATEGY_NONE}
+            className="cursor-pointer [@media(pointer:coarse)]:min-h-11"
+          >
             {t("agents:mcpStrategyNone")}
           </SelectItem>
           {strategies.map((option) => (
-            <SelectItem key={option.key} value={option.key} className="cursor-pointer">
-              {t("agents:mcpStrategyOption", {
-                name: option.key,
-                mechanism: option.description,
-              })}
+            <SelectItem
+              key={option.key}
+              value={option.key}
+              description={option.description}
+              className="cursor-pointer [@media(pointer:coarse)]:min-h-11"
+            >
+              {option.key}
             </SelectItem>
           ))}
         </SelectContent>
