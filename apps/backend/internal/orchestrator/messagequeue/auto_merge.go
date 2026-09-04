@@ -45,7 +45,7 @@ func latestQueuedAt(first, second time.Time) time.Time {
 }
 
 func autoMergeAllowed(target, source *QueuedMessage) bool {
-	if target == nil || source == nil || target.IsDurableLifecycle() || source.IsDurableLifecycle() {
+	if target == nil || source == nil || target.IsDurableQueueDelivery() || source.IsDurableQueueDelivery() {
 		return false
 	}
 	if target.TaskID != source.TaskID || target.Model != source.Model || target.PlanMode != source.PlanMode {

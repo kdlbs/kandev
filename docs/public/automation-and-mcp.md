@@ -589,10 +589,20 @@ the tools are unavailable, preserve the queue and wait for normal FIFO delivery
 or use the authenticated queue UI. Do not use database edits as a fallback.
 
 Trusted scheduled automation messages use the same durable queue with an
-additional guard: identical pending wakes from the same automation and trigger
-with the same complete expanded payload retain one FIFO entry. Different
-payloads and messages from peers, users, webhooks, or provider events remain
-separate.
+additional guard. The Host derives routine identity from the authenticated
+workspace, routine type/name, policy generation, and semantic scope
+generation, not from the carrier task, session, message, automation, or
+trigger. Identical expanded payloads retain one pending FIFO entry. A claimed
+wake stays persisted until prompt acceptance, and arrivals during execution
+form at most one post-run successor even when the queue is at capacity.
+
+The `message_task_kandev` response includes a body-free `routine_wake` receipt
+when a wake is queued. It identifies the canonical entry, absorbed source IDs
+and timestamps, leader fencing token, dirty generation, and post-run requeue
+state. A routine carrier is rejected when its workspace differs from the
+target or it explicitly names a non-primary target session. Different policy
+or scope generations, different payloads, and messages from peers, users,
+webhooks, or provider events remain separate.
 
 `add_workspace_sources_kandev` adds one or more sources to an idle task and defaults `task_id` to the current task. A task may also target its same-workspace direct child; Kandev verifies the calling task and session on the backend, so agents cannot provide or override that provenance. Its `sources` input accepts the same atomic mixed batch as the Files panel: `repository` sources use exactly one saved repository ID, local Git path, or remote repository locator plus branch fields; `folder` sources use a local path and optional display name. Repository sources work on Worktree, Local/Local PC, Local Docker, SSH, and Sprites; folders work only on Worktree and Local/Local PC. The target must be repository-backed and have no active turn or tool call. Exact normalized retries are idempotent; contradictory duplicates, unsupported, or failed sources roll back the batch.
 

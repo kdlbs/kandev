@@ -59,13 +59,11 @@ const MetadataLifecycleDurable = "lifecycle_durable_until_accepted"
 // so stale retries cannot revive work after an archive then unarchive.
 const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 
-// MetadataLifecycleReserved marks a durable lifecycle entry that ReserveHead
-// already handed to a dispatch attempt. The row stays in storage for crash
-// recovery, but it is no longer a pending message, so queue status hides it —
-// otherwise the delivered prompt and its own reservation row are both visible
-// and the reservation looks like a stuck duplicate. Cleared implicitly: a
-// requeue rewrites the row's metadata from the in-memory copy, which never
-// carries the flag.
+// MetadataLifecycleReserved is the legacy wire name for the durable queue
+// reservation marker. Lifecycle and canonical routine rows stay stored for
+// crash recovery after ReserveHead, but queue status hides them until prompt
+// acceptance or requeue. Keeping the established key preserves rolling-restart
+// compatibility.
 const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 
 // MetadataSenderTaskID identifies the task that produced an agent message. Two
@@ -81,6 +79,25 @@ const MetadataRoutineWake = "routine_wake"
 // emitted a scheduled wake. The complete payload digest remains embedded in
 // MetadataCoalesceKey so materially different wakes never collide.
 const MetadataRoutineIdentity = "routine_identity"
+
+// Canonical routine metadata is server-derived from the authenticated
+// workspace, routine policy, and semantic target scope. Sender task, session,
+// and message identities are receipt provenance only and never participate in
+// the canonical identity.
+const (
+	MetadataRoutineWorkspaceID        = "routine_workspace_id"
+	MetadataRoutineType               = "routine_type"
+	MetadataRoutineName               = "routine_name"
+	MetadataRoutinePolicyGeneration   = "routine_policy_generation"
+	MetadataRoutineScopeGeneration    = "routine_scope_generation"
+	MetadataRoutineLeaderFencingToken = "routine_leader_fencing_token"
+	MetadataRoutineDirtyGeneration    = "routine_dirty_generation"
+	MetadataRoutineSourceEntryID      = "routine_source_entry_id"
+	MetadataRoutineSourceQueuedAt     = "routine_source_queued_at"
+	MetadataRoutineAbsorbedSources    = "routine_absorbed_sources"
+	MetadataRoutineAbsorbedCount      = "routine_absorbed_count"
+	MetadataRoutinePostRunRequeue     = "routine_post_run_requeue"
+)
 
 // MetadataDeferredMoveID identifies the hand-off prompt created for one
 // deferred workflow move. The orchestrator uses it to remove only stale move
@@ -135,10 +152,10 @@ type QueuedMessage struct {
 	QueuedAt    time.Time              `json:"queued_at"`
 	QueuedBy    string                 `json:"queued_by"`
 
-	// reservedLifecycleDelivery is process-local evidence that ReserveHead
-	// retained this durable row for acknowledgement. It deliberately is not
+	// reservedQueueDelivery is process-local evidence that ReserveHead retained
+	// this durable lifecycle or routine row for acknowledgement. It is not
 	// persisted in metadata, where a restart could leak it into a retry.
-	reservedLifecycleDelivery bool
+	reservedQueueDelivery bool
 }
 
 // IsDurableLifecycle reports whether this entry uses reserve/ack delivery.
@@ -155,10 +172,28 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 	return origin == "github_pr_automation"
 }
 
-// IsReservedInFlight reports whether this durable row was already reserved for
-// a dispatch attempt and should not be shown as a pending queue entry.
+// IsRoutineWake reports whether the server admitted this row through the
+// authenticated canonical routine path.
+func (m *QueuedMessage) IsRoutineWake() bool {
+	if m == nil {
+		return false
+	}
+	routine, _ := m.Metadata[MetadataRoutineWake].(bool)
+	return routine && metadataString(m.Metadata, MetadataRoutineIdentity) != "" &&
+		metadataString(m.Metadata, MetadataCoalesceKey) != ""
+}
+
+// IsDurableQueueDelivery identifies rows that remain stored until prompt
+// acceptance. Routine wakes use the same reserve/ack safety as lifecycle rows
+// so a backend crash cannot drop the only effective wake.
+func (m *QueuedMessage) IsDurableQueueDelivery() bool {
+	return m != nil && (m.IsDurableLifecycle() || m.IsRoutineWake())
+}
+
+// IsReservedInFlight reports whether this durable lifecycle or routine row was
+// reserved and should not be shown as a pending queue entry.
 func (m *QueuedMessage) IsReservedInFlight() bool {
-	if m == nil || !m.IsDurableLifecycle() {
+	if m == nil || !m.IsDurableQueueDelivery() {
 		return false
 	}
 	reserved, _ := m.Metadata[MetadataLifecycleReserved].(bool)
@@ -168,7 +203,13 @@ func (m *QueuedMessage) IsReservedInFlight() bool {
 // IsReservedLifecycleDelivery reports whether this copy came from the
 // reserve/ack path rather than a destructive legacy TakeHead call.
 func (m *QueuedMessage) IsReservedLifecycleDelivery() bool {
-	return m != nil && m.reservedLifecycleDelivery
+	return m != nil && m.IsDurableLifecycle() && m.reservedQueueDelivery
+}
+
+// IsReservedRoutineWakeDelivery reports that this process received a routine
+// wake through the durable reserve/ack path.
+func (m *QueuedMessage) IsReservedRoutineWakeDelivery() bool {
+	return m != nil && m.IsRoutineWake() && m.reservedQueueDelivery
 }
 
 // markReservedMetadata returns a copy of metadata carrying the in-flight

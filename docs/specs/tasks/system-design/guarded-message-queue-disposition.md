@@ -20,13 +20,13 @@ image customization.
 | Requirement | Design section |
 | --- | --- |
 | `REQ-TASKS-GUARDED-MESSAGE-QUEUE-001` | [Census and exact disposition](#census-and-exact-disposition), [Authorization](#authorization), [Failure and recovery](#failure-and-recovery) |
-| `REQ-TASKS-GUARDED-MESSAGE-QUEUE-002` | [Scheduled routine wake coalescing](#scheduled-routine-wake-coalescing), [Failure and recovery](#failure-and-recovery) |
+| `REQ-TASKS-GUARDED-MESSAGE-QUEUE-002` | [Canonical routine wake coalescing](#canonical-routine-wake-coalescing), [Failure and recovery](#failure-and-recovery) |
 
 ## Components and responsibilities
 
 - `internal/orchestrator/messagequeue.Service` produces content-free census descriptors and validates exact disposition requests.
 - The memory and SQLite/PostgreSQL `messagequeue.Repository` implementations serialize disposition with every queue mutation for the same session.
-- `internal/mcp/handlers` binds both operations to the server-derived MCP principal and stamps trusted scheduled automation messages with routine identity.
+- `internal/mcp/handlers` binds both operations to the server-derived MCP principal and stamps trusted scheduled automation messages with canonical routine identity and current target scope.
 - `internal/mcp/server` exposes `get_message_queue_census_kandev` and `dispose_message_queue_entries_kandev` without callable task, session, workspace, force, clear-all, or message-body fields.
 - `pkg/websocket` carries the two internal MCP bridge actions. Raw WebSocket access remains outside the supported contract.
 
@@ -62,7 +62,7 @@ matching principal binds all three identities.
 Both tools operate only on the calling session. They cannot target a child,
 sibling, another session on the same task, or any foreign workspace.
 
-## Scheduled routine wake coalescing
+## Canonical routine wake coalescing
 
 Only a principal with the automation MCP surface can produce a routine wake
 marker. The handler additionally requires:
@@ -70,13 +70,30 @@ marker. The handler additionally requires:
 - the principal task and session to match the sender task and session;
 - task origin `automation_run`;
 - task metadata `trigger_type="scheduled"`;
-- matching non-empty `automation_id` and `trigger_id`.
+- matching non-empty `automation_id` and `trigger_id`;
+- the sender and target tasks to belong to the authenticated workspace;
+- an explicitly selected target session to be the target's current primary.
 
-The semantic key hashes stable automation and trigger identity plus the
-complete expanded prompt. Session scoping and reserved `queued_by` provenance
-remain part of the repository match. A matching pending row is replaced in
-place, preserving its immutable entry ID and FIFO position. Any distinct
-payload gets a distinct key, and non-scheduled sources never enter this path.
+The canonical identity hashes the authenticated workspace, routine type/name,
+policy/version generation, and semantic scope generation. Carrier task,
+session, message, automation, and trigger identities are excluded. The
+coalescing key additionally hashes the complete expanded prompt, while target
+session and reserved `queued_by` provenance remain repository guards. A
+matching pending row keeps its immutable entry ID, FIFO position, content,
+original queued time, and source attribution.
+
+Each later equivalent receives a fresh source entry ID before admission. The
+canonical row appends that ID and timestamp to a body-free absorption receipt,
+updates the leader fencing token and dirty generation, and increments the
+suppressed-scan metric. Human, peer, task, provider-event, non-scheduled, and
+different-generation messages never enter this path.
+
+Routine rows use durable reserve/ack delivery. Reservation persists an
+in-flight marker and hides the row from pending census; prompt acceptance
+deletes it. If an equivalent arrives while that row is reserved, the
+repository admits one successor even at the normal capacity boundary and
+marks its receipt as a post-run requeue. Further arrivals fold into that
+successor. This preserves an active wake plus at most one freshness signal.
 
 ## Failure and recovery
 
@@ -84,21 +101,29 @@ payload gets a distinct key, and non-scheduled sources never enter this path.
   `changed`. Neither outcome removes another row.
 - A durable lifecycle row reserved in flight is absent from census. If it is
   reserved after census, its snapshot changes and disposition fails closed.
-- Queue rows and routine metadata already live in `queued_messages`, so restart
-  recovery and FIFO order use the existing persistence contract. No schema
-  migration or destructive data rewrite is required.
+- Queue rows, reservation state, and routine receipts live in
+  `queued_messages`, so restart recovery and FIFO order use the existing
+  persistence contract. No schema migration or destructive data rewrite is
+  required.
 - Coalescing checks for an existing semantic key before enforcing capacity, so
   an identical wake remains admissible when the queue is full while distinct
   work still receives the normal `queue_full` result.
 - When the guarded tools are unavailable, the agent must preserve the queue and
   wait for normal FIFO delivery or ask an operator to use the authenticated UI.
+- Session transfer preserves canonical metadata and coalescing. Preservation
+  across destructive session deletion remains owned by the separate unread-
+  queue recovery contract and must reuse this identity rather than duplicate
+  transport semantics.
 
 ## Observability
 
 Census responses expose before count and ordered IDs. Disposition responses
 expose atomic before and after counts and every per-entry outcome. Backend logs
 record the same session, counts, IDs, and outcomes. Routine coalescing logs the
-retained entry ID and stable routine identity. No path logs a message body.
+retained entry ID and stable routine identity. The
+`message_queue_routine_full_board_scans_suppressed_total` expvar counts absorbed
+wakes. Receipts contain source IDs and timestamps but no payload bodies. No
+path logs a message body.
 
 ## Related decisions
 

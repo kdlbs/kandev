@@ -32,17 +32,20 @@ current task session.
 - **AC-TASKS-GUARDED-MESSAGE-QUEUE-001.6:** Queue census and disposition shall preserve persisted FIFO order, capacity policy, durable reserved-delivery rows, and restart recovery for all entries not exactly removed.
 - **AC-TASKS-GUARDED-MESSAGE-QUEUE-001.7:** The system shall emit structured audit evidence containing caller-bound session identity, before and after counts, entry IDs, and per-entry outcomes without logging message bodies.
 
-### REQ-TASKS-GUARDED-MESSAGE-QUEUE-002: Identical scheduled routine wake coalescing
+### REQ-TASKS-GUARDED-MESSAGE-QUEUE-002: Canonical cross-sender routine wake coalescing
 
 Pending scheduled automation wakes must not amplify a Coordinator queue while
 distinct input remains lossless.
 
 #### Acceptance criteria
 
-- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.1:** When two pending messages target the same session and come from the same trusted scheduled automation and trigger with identical expanded payloads, the system shall retain one effective wake at the original FIFO position.
-- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.2:** The coalescing key shall include the target session through queue scope, stable automation and trigger identity, and a digest of the complete expanded payload.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.1:** When trusted scheduled carriers in one workspace emit the same canonical routine generation and identical expanded payload, the system shall retain one effective pending wake at the original FIFO position regardless of carrier task, session, message, automation, or trigger identity.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.2:** The canonical identity shall contain authenticated `workspace_id`, routine type/name, policy/version generation, and semantic scope generation. The coalescing key shall additionally contain a digest of the complete expanded payload.
 - **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.3:** The system shall not routine-coalesce peer, task, human, webhook, pull-request event, or materially different scheduled payloads.
-- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.4:** Concurrent identical wake admission and admission after process restart shall retain at least one wake and shall not consume extra queue capacity.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.4:** A claimed routine row shall remain durable until prompt acceptance. Identical arrivals during the claim or resulting turn shall occupy at most one pending successor, including at normal queue capacity and after process restart.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.5:** A body-free Host receipt shall identify the canonical row, absorbed source entry IDs and timestamps, absorption count, leader fencing token, dirty generation, and whether execution caused a post-run successor.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.6:** The Host shall reject a trusted routine carrier unless its authenticated workspace matches the target task and an explicitly named target session is the task's current primary session.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.7:** The Host shall count absorbed routine wakes as suppressed duplicate full-board scans.
 
 ## Exclusions
 
@@ -51,3 +54,4 @@ distinct input remains lossless.
 - Removing a durable lifecycle row already reserved for delivery.
 - Coalescing distinct messages merely because they share a sender or target.
 - Cross-task, cross-session, or cross-workspace queue management.
+- Scheduler policy, dirty-generation consumption, or Coordinator-plugin leader election.

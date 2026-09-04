@@ -30,10 +30,14 @@ comparison and deletion occur under the same per-session repository lock and
 transaction used by delivery and queue mutation. Reserved in-flight lifecycle
 rows remain outside the disposable set.
 
-Scheduled automation messages may coalesce only when a trusted automation
-principal, stable automation and trigger identity, target session, and complete
-expanded payload are identical. The retained row keeps its entry ID and FIFO
-position. Every other message remains distinct.
+Scheduled routine messages may coalesce only when a trusted automation
+principal has the same authenticated workspace, routine type/name,
+policy/version generation, semantic scope generation, target session guard,
+and complete expanded payload. Carrier task, session, message, automation, and
+trigger identity are receipt provenance, not coalescing identity. The retained
+row keeps its entry ID and FIFO position. A claimed row remains reserved until
+prompt acceptance; arrivals during execution form one durable successor.
+Every other message remains distinct.
 
 ## Consequences
 
@@ -45,6 +49,9 @@ position. Every other message remains distinct.
 - Identical scheduled wakes do not consume capacity repeatedly, including
   after restart, while peer, human, event, and different scheduled messages
   retain lossless FIFO behavior.
+- Body-free receipts preserve absorbed source IDs/timestamps, leader fencing,
+  dirty generation, and post-run requeue evidence. A dedicated expvar counts
+  duplicate full-board scans suppressed.
 - The contract adds no schema migration because queue metadata and immutable
   IDs are already persisted.
 
@@ -61,3 +68,6 @@ position. Every other message remains distinct.
 5. **Coalesce every identical message.** Rejected because peers or humans can
    intentionally send repeated text; only trusted scheduled automation carries
    the required routine identity.
+6. **Key by the carrier automation, task, session, or message.** Rejected
+   because distinct scheduled carriers can emit the same semantic routine
+   generation; those transport identities caused the observed amplification.

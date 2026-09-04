@@ -2617,7 +2617,18 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
 	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
-	applyScheduledRoutineWakeMetadata(ctx, prompt, senderTask, req.SenderSessionID, senderMeta)
+	if err := applyScheduledRoutineWakeMetadata(
+		ctx, prompt, senderTask, req.SenderSessionID, targetTask, session, req.SessionID != "", senderMeta,
+	); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), map[string]interface{}{
+			"routine_scope": map[string]interface{}{
+				"workspace_id":      targetTask.WorkspaceID,
+				"target_task_id":    targetTask.ID,
+				"target_session_id": session.ID,
+				"status":            "denied",
+			},
+		})
+	}
 	if req.ReplyToQuestionID != "" {
 		senderMeta[models.MetaKeyParentQuestionID] = req.ReplyToQuestionID
 		senderMeta[models.MetaKeyParentQuestionResponse] = req.Prompt
@@ -2683,11 +2694,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	response := map[string]interface{}{
 		"task_id":         req.TaskID,
 		"session_id":      result.sessionID,
 		stopTaskStatusKey: result.status,
-	})
+	}
+	if result.routineReceipt != nil {
+		response["routine_wake"] = result.routineReceipt
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 // lookupSenderSessionName resolves the sender session's user-supplied name for
@@ -2965,9 +2980,10 @@ const (
 // InterruptForPeerMessage's doc comment. Never serialized to the wire; the
 // MCP response only reads status/sessionID (see handleMessageTask).
 type taskMessageDispatchResult struct {
-	status        string
-	sessionID     string
-	queuedEntryID string
+	status         string
+	sessionID      string
+	queuedEntryID  string
+	routineReceipt *messagequeue.RoutineWakeReceipt
 }
 
 type taskMessageReviewRollback struct {
@@ -3281,6 +3297,7 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 	routineWake, _ := metadata[messagequeue.MetadataRoutineWake].(bool)
 	coalesceKey, _ := metadata[messagequeue.MetadataCoalesceKey].(string)
 	if routineWake && coalesceKey != "" {
+		metadata[messagequeue.MetadataRoutinePostRunRequeue] = true
 		var replaced bool
 		queued, replaced, err = queue.QueueMessageWithCoalesceKey(
 			ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata, coalesceKey, true,
@@ -3308,7 +3325,10 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
 	h.publishQueueStatusEvent(ctx, session.ID, queue)
-	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
+	return taskMessageDispatchResult{
+		status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID,
+		routineReceipt: messagequeue.RoutineWakeReceiptFromMessage(queued),
+	}, nil
 }
 
 // queueThenInterruptTaskMessage atomically queues prompt for a running/

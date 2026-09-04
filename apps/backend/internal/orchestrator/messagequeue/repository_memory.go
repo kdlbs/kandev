@@ -275,6 +275,7 @@ func (r *memoryRepository) InsertOrReplaceByCoalesceKey(_ context.Context, msg *
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	var reservedMatch bool
 	for _, existing := range r.entries[msg.SessionID] {
 		if existing.QueuedBy != msg.QueuedBy {
 			continue
@@ -282,8 +283,20 @@ func (r *memoryRepository) InsertOrReplaceByCoalesceKey(_ context.Context, msg *
 		if metadataString(existing.Metadata, MetadataCoalesceKey) != coalesceKey {
 			continue
 		}
+		if msg.IsRoutineWake() && existing.IsReservedInFlight() {
+			reservedMatch = true
+			continue
+		}
 		if msg.QueuedAt.IsZero() {
 			msg.QueuedAt = time.Now().UTC()
+		}
+		if msg.IsRoutineWake() && existing.IsRoutineWake() {
+			if reservedMatch {
+				msg.Metadata[MetadataRoutinePostRunRequeue] = true
+			}
+			existing.Metadata = mergeRoutineWakeMetadata(existing.Metadata, msg.Metadata)
+			out := *existing
+			return &out, true, nil
 		}
 		existing.TaskID = msg.TaskID
 		existing.Content = msg.Content
@@ -297,6 +310,10 @@ func (r *memoryRepository) InsertOrReplaceByCoalesceKey(_ context.Context, msg *
 	}
 	if !allowInsert {
 		return nil, false, ErrEntryNotFound
+	}
+	if reservedMatch && msg.IsRoutineWake() {
+		msg.Metadata[MetadataRoutinePostRunRequeue] = true
+		maxPerSession = 0
 	}
 	if err := r.insertLocked(msg, maxPerSession); err != nil {
 		return nil, false, err
@@ -434,12 +451,12 @@ func (r *memoryRepository) reserveHeadLocked(sessionID string) *QueuedMessage {
 	}
 	head := list[0]
 	out := *head
-	if head.IsDurableLifecycle() {
+	if head.IsDurableQueueDelivery() {
 		// Mirror the SQLite reservation: the stored row is flagged in flight so
 		// queue status stops listing it, while the returned copy keeps the
 		// unmarked metadata a requeue would write back.
 		out.Metadata = clearReservedMetadata(head.Metadata)
-		out.reservedLifecycleDelivery = true
+		out.reservedQueueDelivery = true
 		head.Metadata = markReservedMetadata(out.Metadata)
 		return &out
 	}
@@ -588,7 +605,7 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, exp
 			remaining = append(remaining, entry)
 			continue
 		}
-		if entry.IsDurableLifecycle() {
+		if entry.IsDurableQueueDelivery() {
 			entry.Metadata = markReservedMetadata(entry.Metadata)
 			remaining = append(remaining, entry)
 		}
@@ -626,7 +643,7 @@ func (r *memoryRepository) RestoreSendNowClaim(_ context.Context, claim *SendNow
 			continue
 		}
 		if existing[source.ID] != nil {
-			if source.IsDurableLifecycle() {
+			if source.IsDurableQueueDelivery() {
 				existing[source.ID].Metadata = restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata)
 			}
 			continue
@@ -658,7 +675,7 @@ func validateMemorySendNowRestore(
 			continue
 		}
 		entry := existing[source.ID]
-		if source.IsDurableLifecycle() {
+		if source.IsDurableQueueDelivery() {
 			if entry == nil || (!entry.IsReservedInFlight() && !sameQueuedMessageContent(entry, &source)) {
 				return ErrSendNowClaimChanged
 			}
@@ -684,7 +701,7 @@ func (r *memoryRepository) AcknowledgeSendNowClaim(_ context.Context, claim *Sen
 		if source.SessionID != sessionID {
 			return ErrSendNowClaimChanged
 		}
-		if !source.IsDurableLifecycle() {
+		if !source.IsDurableQueueDelivery() {
 			continue
 		}
 		requested[source.ID] = struct{}{}
@@ -719,8 +736,8 @@ func cloneSendNowSources(entries []*QueuedMessage) []QueuedMessage {
 	for _, entry := range entries {
 		clone := cloneQueuedMessage(entry)
 		clone.Metadata = clearReservedMetadata(clone.Metadata)
-		if entry.IsDurableLifecycle() {
-			clone.reservedLifecycleDelivery = true
+		if entry.IsDurableQueueDelivery() {
+			clone.reservedQueueDelivery = true
 		}
 		sources = append(sources, *clone)
 	}
@@ -747,8 +764,8 @@ func sameQueuedMessageContent(left, right *QueuedMessage) bool {
 	rightCopy := cloneQueuedMessage(right)
 	leftCopy.Metadata = clearReservedMetadata(leftCopy.Metadata)
 	rightCopy.Metadata = clearReservedMetadata(rightCopy.Metadata)
-	leftCopy.reservedLifecycleDelivery = false
-	rightCopy.reservedLifecycleDelivery = false
+	leftCopy.reservedQueueDelivery = false
+	rightCopy.reservedQueueDelivery = false
 	return reflect.DeepEqual(leftCopy, rightCopy)
 }
 
