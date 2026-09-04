@@ -11,17 +11,44 @@ import { splitFilesByChangeLayer } from "./git-change-facets";
 
 export type PendingFileOperation = "stage" | "unstage";
 
+export type PendingFileOperationOwner = Readonly<{
+  operation: PendingFileOperation;
+  requestId: number;
+  scopeIdentity: string;
+}>;
+
 export function pendingKey(repo: string | undefined, path: string): string {
   return `${repo ?? ""}::${path}`;
 }
 
+export function pendingKeysForFailedRepositories(
+  buckets: Map<string, string[]>,
+  perRepoResults: Array<{ repository_name: string; success: boolean }> | undefined,
+): string[] {
+  const allKeys = Array.from(buckets).flatMap(([repositoryName, paths]) =>
+    paths.map((path) => pendingKey(repositoryName, path)),
+  );
+  if (!perRepoResults) return allKeys;
+
+  const failedRepositories = new Set(
+    perRepoResults.filter((entry) => !entry.success).map((entry) => entry.repository_name),
+  );
+  if (failedRepositories.size === 0) return allKeys;
+
+  return Array.from(buckets).flatMap(([repositoryName, paths]) =>
+    failedRepositories.has(repositoryName)
+      ? paths.map((path) => pendingKey(repositoryName, path))
+      : [],
+  );
+}
+
 export function clearPendingFileOperations(
   keys: string[],
-  operation: PendingFileOperation,
-  pendingFileOperations: MutableRefObject<Map<string, PendingFileOperation>>,
+  owner: PendingFileOperationOwner,
+  pendingFileOperations: MutableRefObject<Map<string, PendingFileOperationOwner>>,
   setPendingStageFiles: Dispatch<SetStateAction<Set<string>>>,
 ) {
-  const cleared = keys.filter((key) => pendingFileOperations.current.get(key) === operation);
+  const cleared = keys.filter((key) => pendingFileOperations.current.get(key) === owner);
   if (cleared.length === 0) return;
   for (const key of cleared) pendingFileOperations.current.delete(key);
   setPendingStageFiles((prev) => {
@@ -29,6 +56,24 @@ export function clearPendingFileOperations(
     for (const key of cleared) next.delete(key);
     return next;
   });
+}
+
+export function usePendingFileOperationScope(
+  scopeIdentity: string,
+  pendingFileOperations: MutableRefObject<Map<string, PendingFileOperationOwner>>,
+  setPendingStageFiles: Dispatch<SetStateAction<Set<string>>>,
+): boolean {
+  const activeScopeIdentity = useRef(scopeIdentity);
+  const scopeMatches = activeScopeIdentity.current === scopeIdentity;
+
+  useEffect(() => {
+    if (activeScopeIdentity.current === scopeIdentity) return;
+    activeScopeIdentity.current = scopeIdentity;
+    pendingFileOperations.current.clear();
+    setPendingStageFiles(new Set());
+  }, [pendingFileOperations, scopeIdentity, setPendingStageFiles]);
+
+  return scopeMatches;
 }
 
 function pendingFileOperationCompleted(
@@ -58,7 +103,7 @@ export function usePerRepoPendingClear(
   statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>,
   allFiles: FileInfo[],
   setPendingStageFiles: Dispatch<SetStateAction<Set<string>>>,
-  pendingFileOperations: MutableRefObject<Map<string, PendingFileOperation>>,
+  pendingFileOperations: MutableRefObject<Map<string, PendingFileOperationOwner>>,
 ) {
   const prevStatusRef = useRef<Map<string, unknown>>(new Map());
   useEffect(() => {
@@ -79,12 +124,12 @@ export function usePerRepoPendingClear(
       for (const key of prev) {
         const separator = key.indexOf("::");
         const repositoryName = separator === -1 ? "" : key.slice(0, separator);
-        const operation = pendingFileOperations.current.get(key);
+        const owner = pendingFileOperations.current.get(key);
         const repositoryRefreshed = isLegacySingleRepo || refreshed.includes(repositoryName);
         if (
           !repositoryRefreshed ||
-          !operation ||
-          !pendingFileOperationCompleted(key, operation, allFiles)
+          !owner ||
+          !pendingFileOperationCompleted(key, owner.operation, allFiles)
         ) {
           out.add(key);
           continue;

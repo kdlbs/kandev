@@ -23,9 +23,10 @@ systems.
 
 - **File action slot:** The leading Changes-row position that shows either the
   file-type icon, the stage or unstage action, or its pending indicator.
-- **Pending file action:** The latest stage or unstage request that owns the
-  pending state for one repository and file and has not reached its target state
-  or failed.
+- **Pending file action:** The latest stage or unstage request within the active
+  session, environment, and checked-out branch generation that owns the pending
+  state for one repository and file and has not reached its target state or
+  failed.
 
 ## Requirements
 
@@ -62,15 +63,24 @@ the action is complete.
   request shall remain pending through stale status updates and clear only when
   refreshed status reaches the requested staged or unstaged state.
 - **AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.7:** When the current stage or
-  unstage request fails, its pending feedback shall clear. If an inverse request
-  has superseded it for the same repository and file, the older request's
-  completion or failure shall not clear the newer request's pending feedback.
+  unstage request fails, its pending feedback shall clear. If a newer request in
+  either direction has superseded it for the same repository and file, the
+  older request's completion or failure shall not clear the newer request's
+  pending feedback.
+- **AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.8:** When one request spans multiple
+  repositories and only some repository scopes fail, failed scopes shall clear
+  immediately while successful scopes remain pending until their refreshed
+  status reaches the requested state.
+- **AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.9:** Pending ownership shall reset
+  when the active session, environment, or checked-out branch generation
+  changes. A callback from the prior scope shall not add, retain, or clear
+  feedback in the successor scope.
 
 ## Out of scope
 
 - Changing Git stage or unstage execution, transport, or repository status
   refresh.
-- Changing bulk stage, bulk unstage, discard, edit, or commit feedback.
+- Changing discard, edit, commit, or stage-all control presentation.
 - Adding user-facing copy, notifications, cancellation, or progress estimates.
 - Changing Changes-panel navigation, grouping, row density, or scroll
   ownership.

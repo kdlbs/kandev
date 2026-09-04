@@ -81,3 +81,16 @@ export function useSessionGitStatusByRepo(
       .sort((a, b) => a.repository_name.localeCompare(b.repository_name));
   }, [map]);
 }
+
+/**
+ * Identifies the active pending-operation scope. The refetch trigger advances
+ * when the checked-out branch or workspace source generation changes.
+ */
+export function useSessionGitPendingScope(sessionId: string | null): string {
+  return useAppStore((state) => {
+    if (!sessionId) return "";
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    const generation = state.sessionCommits.refetchTrigger[envKey] ?? 0;
+    return `${sessionId}\u0000${envKey}\u0000${generation}`;
+  });
+}

@@ -5,6 +5,7 @@ import { pendingKey, useSessionGit } from "./use-session-git";
 
 const mocks = vi.hoisted(() => ({
   statuses: [] as Array<{ repository_name: string; status: GitStatusEntry }>,
+  scopeGeneration: 0,
   gitOps: {
     isLoading: false,
     loadingOperation: null,
@@ -27,6 +28,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./use-session-git-status", () => ({
   useSessionGitStatus: () => undefined,
   useSessionGitStatusByRepo: () => mocks.statuses,
+  useSessionGitPendingScope: (sessionId: string | null) =>
+    sessionId ? `${sessionId}:environment:${mocks.scopeGeneration}` : "",
 }));
 
 vi.mock("./use-session-commits", () => ({
@@ -41,9 +44,9 @@ vi.mock("@/hooks/use-git-operations", () => ({
   useGitOperations: () => mocks.gitOps,
 }));
 
-function status(path: string, staged: boolean): GitStatusEntry {
+function status(path: string, staged: boolean, branch = "main"): GitStatusEntry {
   return {
-    branch: "main",
+    branch,
     remote_branch: null,
     modified: [path],
     added: [],
@@ -63,22 +66,30 @@ function status(path: string, staged: boolean): GitStatusEntry {
   };
 }
 
+type OperationResult = {
+  success: boolean;
+  operation: string;
+  output: string;
+  error?: string;
+};
+
 function deferredResult() {
-  let resolve!: (value: { success: true; operation: string; output: string }) => void;
-  const promise = new Promise<{ success: true; operation: string; output: string }>((done) => {
+  let resolve!: (value: OperationResult) => void;
+  const promise = new Promise<OperationResult>((done) => {
     resolve = done;
   });
   return { promise, resolve };
 }
 
-describe("useSessionGit pending file actions", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.statuses = [];
-  });
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.statuses = [];
+  mocks.scopeGeneration = 0;
+});
 
-  afterEach(cleanup);
+afterEach(cleanup);
 
+describe("useSessionGit pending target-state reconciliation", () => {
   it.each([
     { operation: "stage" as const, initialStaged: false, completedStaged: true },
     { operation: "unstage" as const, initialStaged: true, completedStaged: false },
@@ -116,7 +127,9 @@ describe("useSessionGit pending file actions", () => {
       pending.resolve({ success: true, operation, output: "" });
     },
   );
+});
 
+describe("useSessionGit failed request cleanup", () => {
   it("clears pending state when the operation returns a failure without a status change", async () => {
     const path = "failed-stage.txt";
     mocks.gitOps.stage.mockResolvedValueOnce({
@@ -134,5 +147,171 @@ describe("useSessionGit pending file actions", () => {
     });
 
     expect(hook.result.current.pendingStageFiles).not.toContain(pendingKey("", path));
+  });
+});
+
+describe("useSessionGit partial repository failures", () => {
+  it.each([
+    { operation: "stage" as const, initialStaged: false, completedStaged: true },
+    { operation: "unstage" as const, initialStaged: true, completedStaged: false },
+  ])(
+    "keeps successful repository scopes pending after a partial $operation failure",
+    async ({ operation, initialStaged, completedStaged }) => {
+      const successfulPath = `successful-${operation}.txt`;
+      const failedPath = `failed-${operation}.txt`;
+      mocks.statuses = [
+        { repository_name: "repo-a", status: status(successfulPath, initialStaged) },
+        { repository_name: "repo-b", status: status(failedPath, initialStaged) },
+      ];
+      mocks.gitOps[operation].mockImplementation(
+        async (_paths: string[] | undefined, repositoryName: string | undefined) => ({
+          success: repositoryName === "repo-a",
+          operation,
+          output: "",
+          error: repositoryName === "repo-a" ? undefined : `${operation} failed`,
+        }),
+      );
+
+      const hook = renderHook(() => useSessionGit("session-1"));
+
+      await act(async () => {
+        await hook.result.current[`${operation}File`]([successfulPath, failedPath]);
+      });
+
+      expect(hook.result.current.pendingStageFiles).toEqual(
+        new Set([pendingKey("repo-a", successfulPath)]),
+      );
+
+      mocks.statuses = [
+        { repository_name: "repo-a", status: status(successfulPath, completedStaged) },
+        { repository_name: "repo-b", status: status(failedPath, initialStaged) },
+      ];
+      hook.rerender();
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).not.toContain(
+          pendingKey("repo-a", successfulPath),
+        );
+      });
+    },
+  );
+});
+
+describe("useSessionGit overlapping request ownership", () => {
+  it.each([
+    { operation: "stage" as const, initialStaged: false, completedStaged: true },
+    { operation: "unstage" as const, initialStaged: true, completedStaged: false },
+  ])(
+    "keeps a newer same-direction $operation request pending when the older request fails",
+    async ({ operation, initialStaged, completedStaged }) => {
+      const path = `overlapping-${operation}.txt`;
+      const older = deferredResult();
+      const newer = deferredResult();
+      mocks.statuses = [{ repository_name: "", status: status(path, initialStaged) }];
+      mocks.gitOps[operation].mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+
+      const hook = renderHook(() => useSessionGit("session-1"));
+
+      act(() => {
+        void hook.result.current[`${operation}File`]([path], "");
+      });
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+      });
+
+      act(() => {
+        void hook.result.current[`${operation}File`]([path], "");
+      });
+      await act(async () => {
+        older.resolve({
+          success: false,
+          operation,
+          output: "",
+          error: `older ${operation} failed`,
+        });
+        await older.promise;
+      });
+
+      expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+
+      newer.resolve({ success: true, operation, output: "" });
+      mocks.statuses = [{ repository_name: "", status: status(path, completedStaged) }];
+      hook.rerender();
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).not.toContain(pendingKey("", path));
+      });
+    },
+  );
+});
+
+describe("useSessionGit pending scope ownership", () => {
+  it("resets pending ownership when the active session changes", async () => {
+    const path = "shared-worktree-path.txt";
+    const older = deferredResult();
+    const newer = deferredResult();
+    mocks.statuses = [{ repository_name: "", status: status(path, false) }];
+    mocks.gitOps.stage.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+
+    const hook = renderHook(({ sessionId }) => useSessionGit(sessionId), {
+      initialProps: { sessionId: "session-1" },
+    });
+
+    act(() => {
+      void hook.result.current.stageFile([path], "");
+    });
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+    });
+
+    hook.rerender({ sessionId: "session-2" });
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).not.toContain(pendingKey("", path));
+    });
+
+    act(() => {
+      void hook.result.current.stageFile([path], "");
+    });
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+    });
+
+    await act(async () => {
+      older.resolve({
+        success: false,
+        operation: "stage",
+        output: "",
+        error: "previous session failed",
+      });
+      await older.promise;
+    });
+
+    expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+
+    newer.resolve({ success: true, operation: "stage", output: "" });
+  });
+
+  it("resets pending ownership when the checked-out branch changes", async () => {
+    const path = "branch-owned-stage.txt";
+    const pending = deferredResult();
+    mocks.statuses = [{ repository_name: "", status: status(path, false, "feature/old") }];
+    mocks.gitOps.stage.mockReturnValueOnce(pending.promise);
+
+    const hook = renderHook(() => useSessionGit("session-1"));
+
+    act(() => {
+      void hook.result.current.stageFile([path], "");
+    });
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+    });
+
+    mocks.scopeGeneration += 1;
+    mocks.statuses = [{ repository_name: "", status: status(path, false, "feature/new") }];
+    hook.rerender();
+
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).not.toContain(pendingKey("", path));
+    });
+
+    pending.resolve({ success: true, operation: "stage", output: "" });
   });
 });

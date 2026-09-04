@@ -24,13 +24,19 @@ scoping, and status acquisition remain unchanged.
 ## Components and responsibilities
 
 - `useSessionGit` continues to own `pendingStageFiles`, keyed by repository and
-  path, plus the latest requested stage or unstage operation for each key. It
-  records that operation before dispatch and replaces the owner when an inverse
-  operation supersedes it.
+  path, plus a unique request owner containing the requested stage or unstage
+  transition and the active session/environment/branch generation. A newer
+  request in either direction replaces the owner for overlapping keys.
 - Pending reconciliation clears a successful operation only when refreshed
-  status reaches its requested staged or unstaged state. Failure cleanup clears
-  a key only while the failed request still owns it, so stale status and an
-  older superseded request cannot clear a newer action.
+  status reaches its requested staged or unstaged state. Partial failures clear
+  only failed repository scopes; successful scopes remain pending for status
+  reconciliation. Failure cleanup clears a key only while the failed request
+  still owns it, so stale status and an older superseded request cannot clear a
+  newer action.
+- Session changes, environment replacement, branch switches, and related
+  workspace-source generations reset the ownership map and visible pending set.
+  Late callbacks retain their prior request owner and cannot mutate the
+  successor scope.
 - `changes-panel-tree.tsx` and `changes-panel-timeline.tsx` continue to derive
   `FileRow.isPending` from that set. No additional local loading state is added.
 - `FileRow` continues to share one implementation across the desktop Changes
@@ -87,11 +93,14 @@ clears pending state only when the acted-on file has reached the target state
 of the operation that currently owns its repository/path key.
 
 A failed or thrown request clears its keys only when it remains their current
-owner. If an inverse operation supersedes it, its later completion or failure
-cannot clear the newer pending state. The newer action remains pending until
-its own target state appears or its request fails. After cleanup, the slot
-restores the idle icon/action presentation, and backend or WebSocket errors
-remain surfaced through their current paths.
+owner. For a multi-repository result, failure cleanup selects only unsuccessful
+or skipped repository scopes. If any newer operation supersedes the request,
+its later completion or failure cannot clear the newer pending state. The newer
+action remains pending until its own target state appears or its request fails.
+Changing the session/environment/branch generation clears the visible state
+before the successor scope can reuse the same repository/path key. After
+cleanup, the slot restores the idle icon/action presentation, and backend or
+WebSocket errors remain surfaced through their current paths.
 
 ## Verification
 
@@ -104,6 +113,9 @@ remain surfaced through their current paths.
 - A focused hook regression publishes a stale same-repository snapshot during
   each paused action and proves pending state survives until status reflects
   the requested transition.
+- Focused hook regressions cover stage and unstage partial failures across two
+  repositories, same-direction overlapping requests, active-session changes,
+  and checked-out branch generation changes.
 - The test intercepts only the selected worktree request at the WebSocket
   transport boundary and forwards every unrelated frame.
 - Existing coarse-pointer component and Pixel 5 Changes tests continue to prove
