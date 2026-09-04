@@ -29,9 +29,9 @@ func TestBoundedTruncatesOnRuneBoundary(t *testing.T) {
 			if !utf8.ValidString(got) {
 				t.Fatalf("%s alignment=%d: bounded() produced invalid UTF-8: %q", sample.name, alignment, got)
 			}
-			tail := boundedTail(padded)
+			tail := boundedTailN(padded, continuationFieldLimit)
 			if !utf8.ValidString(tail) {
-				t.Fatalf("%s alignment=%d: boundedTail() produced invalid UTF-8: %q", sample.name, alignment, tail)
+				t.Fatalf("%s alignment=%d: boundedTailN() produced invalid UTF-8: %q", sample.name, alignment, tail)
 			}
 		}
 	}
@@ -105,6 +105,28 @@ func TestBoundedConversationValidUTF8WhenSanitizeGrowsPastRawLimit(t *testing.T)
 		continuation := BuildBoundedContinuation(ContinuationInput{Conversation: conversation})
 		if !utf8.ValidString(continuation.Conversation) {
 			t.Errorf("alignment=%d: Conversation is invalid UTF-8: %q", alignment, continuation.Conversation)
+		}
+	}
+}
+
+// TestSanitizedTailRetainsNewestContentWhenRedactionsGrowPastRawLimit is the
+// R2-A regression: routingerr.Sanitize can grow its input past
+// routingerr.MaxRawExcerptBytes (each "/Users/henry/" redaction to the longer
+// "/Users/<redacted>/" adds bytes) and then head-truncates its own result,
+// which chopped the newest turns before sanitizedTail's own tail cut ever
+// ran. sanitizedTail must retry with a smaller window until Sanitize stops
+// truncating, so the newest content always survives regardless of how many
+// growing redactions the window contains.
+func TestSanitizedTailRetainsNewestContentWhenRedactionsGrowPastRawLimit(t *testing.T) {
+	for _, homePaths := range []int{0, 1, 5, 20, 100} {
+		conversation := strings.Repeat("agent: thinking about the change. ", 200) +
+			strings.Repeat("agent: edited /Users/henry/proj/file.go ok. ", homePaths) +
+			strings.Repeat("agent: nearly done. ", 20) + "NEWEST-MARKER-END"
+
+		continuation := BuildBoundedContinuation(ContinuationInput{Conversation: conversation})
+
+		if !strings.Contains(continuation.Conversation, "NEWEST-MARKER-END") {
+			t.Fatalf("homePaths=%d: Conversation dropped the newest content: %q", homePaths, continuation.Conversation)
 		}
 	}
 }
