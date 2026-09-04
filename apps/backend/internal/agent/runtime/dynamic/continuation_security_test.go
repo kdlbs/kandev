@@ -206,6 +206,37 @@ func TestContinuationRedactsUserAuthoredFieldSecrets(t *testing.T) {
 	}
 }
 
+// TestContinuationRedactsURLCredentialsInUserAuthoredFields is the R1-F2
+// regression: the credential-only tier used for TaskDescription, PlanSummary,
+// and RepositorySummary left URL userinfo (user:pass@host) untouched, so a
+// credential embedded in a repository remote URL survived verbatim into all
+// three fields and the rendered successor prompt.
+func TestContinuationRedactsURLCredentialsInUserAuthoredFields(t *testing.T) {
+	const secretPassword = "s3cr3tpassw0rd"
+	raw := "origin https://alice:" + secretPassword + "@github.com/acme/repo.git (fetch)"
+
+	continuation := BuildBoundedContinuation(ContinuationInput{
+		RepositorySummary: raw,
+		TaskDescription:   raw,
+		PlanSummary:       raw,
+	})
+
+	if strings.Contains(continuation.RepositorySummary, secretPassword) {
+		t.Fatalf("RepositorySummary retained the raw URL credential: %q", continuation.RepositorySummary)
+	}
+	if strings.Contains(continuation.TaskDescription, secretPassword) {
+		t.Fatalf("TaskDescription retained the raw URL credential: %q", continuation.TaskDescription)
+	}
+	if strings.Contains(continuation.PlanSummary, secretPassword) {
+		t.Fatalf("PlanSummary retained the raw URL credential: %q", continuation.PlanSummary)
+	}
+
+	prompt := ContinuationPrompt("do the task", continuation)
+	if strings.Contains(prompt, secretPassword) {
+		t.Fatalf("rendered prompt retained the raw URL credential: %q", prompt)
+	}
+}
+
 // TestContinuationPreservesNonCredentialContentInUserAuthoredFields is the
 // collateral-damage guard: the credential-only tier used for
 // TaskDescription, PlanSummary, and RepositorySummary must not run the full

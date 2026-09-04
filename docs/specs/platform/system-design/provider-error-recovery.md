@@ -416,25 +416,34 @@ persisted as `dynamic_route_states.continuation_json` and rendered into the
 successor's prompt by `ContinuationPrompt`) mixes two kinds of carrier text,
 and `routingerr` sanitizes them with two different rule sets:
 
-- **Provider diagnostics** (`ToolSummary`, `FailureReason`, and the agent half
-  of `Conversation`) run through `routingerr.Sanitize`, the full rule set. In
-  addition to credential patterns it collapses any 32-plus-character run,
-  rewrites URLs down to scheme and host, and normalizes home paths — accepted
-  collateral damage for text Kandev never shows the user verbatim.
-- **User/agent-authored carrier text** (`TaskDescription`, `PlanSummary`,
-  `RepositorySummary`, and the user-message half of `Conversation`) runs
-  through `routingerr.SanitizeCredentials`, a narrower tier covering only
-  credential-shaped patterns (`sk-`, `ghp_`, `github_pat_`, `kandev_pat_`,
-  `Bearer`, `Authorization:`, `--api-key`, and `password|secret|token`
-  assignments). It excludes the 32-plus-char catch-all, the URL rewrite, and
-  home-path normalization, because this text is already shown to the user
-  unredacted and commonly carries legitimate long identifiers — commit SHAs,
-  UUIDs, file hashes — that the full rule set would render as `***`.
+- **Provider diagnostics and the full `Conversation`** (`ToolSummary`,
+  `FailureReason`, and both the user and agent halves of `Conversation`) run
+  through `routingerr.Sanitize`, the full rule set. In addition to credential
+  patterns it collapses any 32-plus-character run, rewrites URLs down to
+  scheme and host, and normalizes home paths — accepted collateral damage:
+  `Conversation` is bounded by `sanitizedTail`, which cuts to a byte budget
+  before sanitizing, so a long identifier can already straddle the cut and be
+  mangled regardless of which tier applies to it.
+- **User/agent-authored carrier text** (`TaskDescription`, `PlanSummary`, and
+  `RepositorySummary` — none of which is truncation-bound the way
+  `Conversation` is) runs through `routingerr.SanitizeCredentials`, a
+  narrower tier covering only credential-shaped patterns (`sk-`, `ghp_`,
+  `github_pat_`, `kandev_pat_`, `Bearer`, `Authorization:`, `--api-key`,
+  `password|secret|token|api_key` assignments, and URL userinfo). It excludes
+  the 32-plus-char catch-all, the scheme-and-host URL rewrite, and home-path
+  normalization, because this text is already shown to the user unredacted
+  and commonly carries legitimate long identifiers — commit SHAs, UUIDs, file
+  hashes — that the full rule set would render as `***`.
 
-Both tiers are credential-safe: a live token in either kind of field is
-redacted before it is persisted or crosses to a different provider on
-fallback. The narrower tier exists to avoid mangling non-credential content
-in fields the user already sees, not to admit a class of allowed leak.
+Both tiers close the credential shapes they explicitly pattern-match: a `sk-`
+key, a GitHub/Kandev PAT, a bearer/auth header, a `--api-key` flag, a
+`password`/`secret`/`token`/`api_key` assignment, or a URL's `user:pass@`
+userinfo is redacted before persistence or a cross-provider fallback, in
+either tier. Neither tier is a general secret scanner: a credential shaped
+like something not on that list (a vendor-specific token prefix, for example)
+survives the narrow tier unless it also matches a listed pattern. The
+narrower tier's purpose is to avoid mangling non-credential content in fields
+the user already sees, not to certify zero residual leakage risk.
 
 ## API surface
 

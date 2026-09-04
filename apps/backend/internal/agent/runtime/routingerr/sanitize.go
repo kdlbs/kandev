@@ -28,7 +28,11 @@ var credentialRedactions = []redaction{
 	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]{20,}`), "Bearer " + redactionMask},
 	{regexp.MustCompile(`(?i)Authorization:\s*[^\r\n]+`), "Authorization: " + redactionMask},
 	{regexp.MustCompile(`--api-key[= ]\S+`), "--api-key " + redactionMask},
-	{regexp.MustCompile(`(?i)(password|secret|token)\s*[:=]\s*\S+`), "$1: " + redactionMask},
+	{regexp.MustCompile(`(?i)(password|secret|token|api[_-]?key)\s*[:=]\s*\S+`), "$1: " + redactionMask},
+	// URL userinfo (user:pass@host) carries a live credential even though the
+	// rest of the URL does not. Unlike the full Sanitize tier's URL rewrite,
+	// this masks only the userinfo and keeps the path and query intact.
+	{regexp.MustCompile(`(https?://)[^@\s/]+@`), "$1" + redactionMask + "@"},
 }
 
 var redactions = append(append([]redaction{

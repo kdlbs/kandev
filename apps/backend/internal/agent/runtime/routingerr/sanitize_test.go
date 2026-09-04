@@ -185,6 +185,18 @@ func TestSanitizeCredentials_RedactsCredentialPatterns(t *testing.T) {
 			mustNotHave: []string{"hunter2-rocks"},
 			mustHave:    []string{"password: ***"},
 		},
+		{
+			name:        "url userinfo credential",
+			in:          "clone from https://alice:s3cr3tpassw0rd@example.test/api",
+			mustNotHave: []string{"s3cr3tpassw0rd", "alice:s3cr3tpassw0rd@"},
+			mustHave:    []string{"https://***@example.test/api"},
+		},
+		{
+			name:        "api_key query param",
+			in:          "callback https://example.test/callback?api_key=abc123def456",
+			mustNotHave: []string{"abc123def456"},
+			mustHave:    []string{"api_key: ***"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
