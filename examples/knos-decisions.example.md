@@ -5,8 +5,8 @@
 
 ## Decisions
 
-- **rule 1** - **Package manager**: `pnpm` workspace (run from `apps/`, not repo root) _(source: CLAUDE.md)_
-- **rule 2** - **Backend**: Go with Make (`make -C apps/backend test|lint|build`) _(source: CLAUDE.md)_
+- **Package manager**: `pnpm` workspace (run from `apps/`, not repo root) _(source: CLAUDE.md)_
+- **Backend**: Go with Make (`make -C apps/backend test|lint|build`) _(source: CLAUDE.md)_
 
 ## Being worked on right now
 
