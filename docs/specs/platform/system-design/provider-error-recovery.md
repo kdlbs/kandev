@@ -441,12 +441,23 @@ key, a GitHub/Kandev PAT, a bearer/auth header, a `--api-key` flag, a
 env-var key where the keyword is a prefix or suffix rather than the whole
 name (`AWS_SECRET_ACCESS_KEY=`, `SECRET_KEY=`), and including a value that
 contains an embedded quote character — or a URL's `user:pass@` userinfo is
-redacted before persistence or a cross-provider fallback, in either tier.
-Neither tier is a general secret scanner: a credential shaped
-like something not on that list (a vendor-specific token prefix, for example)
-survives the narrow tier unless it also matches a listed pattern. The
-narrower tier's purpose is to avoid mangling non-credential content in fields
-the user already sees, not to certify zero residual leakage risk.
+redacted before persistence or a cross-provider fallback, in either tier. A
+quoted value not terminated on the same line (an embedded, unescaped newline
+before the closing quote) is redacted only up to the line break — unchanged
+from the plain-text matching this replaced. Neither tier is a general secret
+scanner: a credential shaped like something not on that list (a
+vendor-specific token prefix, for example) survives the narrow tier unless it
+also matches a listed pattern. The narrower tier's purpose is to avoid
+mangling non-credential content in fields the user already sees, not to
+certify zero residual leakage risk.
+
+The key match is a substring match, not exact-name: it also matches a key
+merely containing a keyword without naming a credential, e.g. `max_tokens` or
+`tokenizer`. A bare decimal integer value under such a key (a token count) is
+left untouched; a non-numeric value (`tokenizer: cl100k_base`) is still
+redacted by design — narrowing to an exact-name allowlist would also exclude
+the qualified env-var keys (`AWS_SECRET_ACCESS_KEY=`) this match exists to
+catch.
 
 ## API surface
 

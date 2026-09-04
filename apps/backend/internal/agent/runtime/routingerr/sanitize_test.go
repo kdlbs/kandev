@@ -3,9 +3,35 @@ package routingerr
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 )
+
+// fuzzIdempotenceIterations bounds the seeded idempotence fuzz tests (see
+// TestSanitize_IdempotentFuzz / TestSanitizeCredentials_IdempotentFuzz).
+const fuzzIdempotenceIterations = 20000
+
+// credentialFuzzAlphabet is a small vocabulary of tokens combined randomly
+// by randCredentialString. It is dense in the shapes redactAssignments and
+// scanValue branch on — quotes, separators, structural delimiters, and
+// keyword fragments — so a seeded run reliably explores the boundary cases a
+// fixed golden list would only cover by accident.
+var credentialFuzzAlphabet = []string{
+	`"`, `'`, ":", "=", " ", "\t", "\n", ",", "}", ")", "]", ">", ";", `\`,
+	"password", "secret", "token", "api_key", "apikey", "api-key",
+	"max_tokens", "AWS_SECRET_ACCESS_KEY",
+	"a", "1", "2", "_", "-", ".", "@", "hunter2", "x", "kid-1234",
+}
+
+func randCredentialString(rng *rand.Rand) string {
+	n := rng.Intn(12) + 1
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteString(credentialFuzzAlphabet[rng.Intn(len(credentialFuzzAlphabet))])
+	}
+	return b.String()
+}
 
 func TestSanitize_RedactionsGolden(t *testing.T) {
 	cases := []struct {
@@ -152,6 +178,30 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 			mustNotHave: []string{"hunter2"},
 			mustHave:    []string{"token: ***}"},
 		},
+		{
+			name:        "max_tokens numeric value is not redacted",
+			in:          "max_tokens: 8192 > 4096, which is the maximum allowed for this model",
+			mustNotHave: []string{"***"},
+			mustHave:    []string{"max_tokens: 8192 > 4096"},
+		},
+		{
+			name:        "input_tokens and output_tokens numeric values are not redacted",
+			in:          "input_tokens=12000 output_tokens=900 total cost 0.12",
+			mustNotHave: []string{"***"},
+			mustHave:    []string{"input_tokens=12000 output_tokens=900"},
+		},
+		{
+			name:        "max_tokens numeric value in parens is not redacted",
+			in:          "context window exceeded (max_tokens=4096)",
+			mustNotHave: []string{"***"},
+			mustHave:    []string{"(max_tokens=4096)"},
+		},
+		{
+			name:        "tokens numeric value is not redacted",
+			in:          "tokens: 500 remaining",
+			mustNotHave: []string{"***"},
+			mustHave:    []string{"tokens: 500 remaining"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -170,36 +220,20 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 	}
 }
 
-func TestSanitize_Idempotent(t *testing.T) {
-	inputs := []string{
-		"plain text",
-		"Bearer abcdefghij1234567890XYZ tail",
-		"sk-abcdefghijklmnop and ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		"Authorization: foo bar baz qux\n",
-		"--api-key=ABCDEFGHIJKLMNOPQRSTUV --rest",
-		"password: hunter2 token: foobar secret=abc",
-		"/Users/me/projects/x /home/me/x",
-		"password=p@ss'word-tail",
-		"secret=abc'def'ghi",
-		`token: "a"LEAKED"`,
-		`password="p@ss"LEAKED"`,
-		`secret='x'LEAKED'`,
-		`{"password":"abc\"LEAKED_SUFFIX"}`,
-		"password=,LEAKED",
-		"secret=}LEAKED",
-		"token=;LEAKED",
-		"password=)LEAKED",
-		"postgres://alice:prefix@LEAKED_SUFFIX@db.internal/app",
-		`{"a": {"token": "hunter2"}, "b": 1}`,
-		`secret: "multi word secret"`,
-		`{"password": "hunter2"}`,
-		"token=hunter2}",
-	}
-	for _, in := range inputs {
-		first := Sanitize(in)
+// TestSanitize_IdempotentFuzz replaces a fixed golden list with a seeded
+// fuzz over a credential-flavoured alphabet: a golden list only proves
+// idempotence for the handful of inputs it enumerates, and a prior regression
+// (an unbalanced optional quote consumed by the key match but never
+// re-emitted) shrank output by one byte on the second pass for inputs the
+// golden list did not happen to cover.
+func TestSanitize_IdempotentFuzz(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	for i := 0; i < fuzzIdempotenceIterations; i++ {
+		s := randCredentialString(rng)
+		first := Sanitize(s)
 		second := Sanitize(first)
 		if first != second {
-			t.Fatalf("sanitize not idempotent for %q: first=%q second=%q", in, first, second)
+			t.Fatalf("Sanitize not idempotent for %q: first=%q second=%q", s, first, second)
 		}
 	}
 }
@@ -454,6 +488,10 @@ func TestSanitizeCredentials_PreservesNonCredentialContent(t *testing.T) {
 		{name: "base64 sample", in: "payload: aGVsbG8gd29ybGQgdGhpcyBpcyBhIHRlc3Q="},
 		{name: "url with path and query", in: "see https://example.com/org/repo/pull/123?tab=files for details"},
 		{name: "user home path", in: "file at /Users/alice/work/repo/main.go failed"},
+		{name: "max_tokens numeric value is not redacted", in: "max_tokens: 8192 > 4096, which is the maximum allowed for this model"},
+		{name: "input_tokens and output_tokens numeric values are not redacted", in: "input_tokens=12000 output_tokens=900 total cost 0.12"},
+		{name: "max_tokens numeric value in parens is not redacted", in: "context window exceeded (max_tokens=4096)"},
+		{name: "tokens numeric value is not redacted", in: "tokens: 500 remaining"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -465,40 +503,17 @@ func TestSanitizeCredentials_PreservesNonCredentialContent(t *testing.T) {
 	}
 }
 
-func TestSanitizeCredentials_Idempotent(t *testing.T) {
-	inputs := []string{
-		"plain text",
-		"Bearer abcdefghij1234567890XYZ tail",
-		"sk-abcdefghijklmnop and ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		"Authorization: foo bar baz qux\n",
-		"--api-key=ABCDEFGHIJKLMNOPQRSTUV --rest",
-		"password: hunter2 token: foobar secret=abc",
-		"commit 94e7b02458b6c1a2d3e4f5061728394a5b6c7d8",
-		"https://user:pass@host/path",
-		`{"password": "hunter2-rocks"}`,
-		"password=p@ss'word-tail",
-		"secret=abc'def'ghi",
-		"AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
-		"SECRET_KEY=django-insecure-abc123def456ghi789",
-		`token: "a"LEAKED"`,
-		`password="p@ss"LEAKED"`,
-		`secret='x'LEAKED'`,
-		`{"password":"abc\"LEAKED_SUFFIX"}`,
-		"password=,LEAKED",
-		"secret=}LEAKED",
-		"token=;LEAKED",
-		"password=)LEAKED",
-		"postgres://alice:prefix@LEAKED_SUFFIX@db.internal/app",
-		`{"a": {"token": "hunter2"}, "b": 1}`,
-		`secret: "multi word secret"`,
-		`{"password": "hunter2"}`,
-		"token=hunter2}",
-	}
-	for _, in := range inputs {
-		first := SanitizeCredentials(in)
+// TestSanitizeCredentials_IdempotentFuzz is SanitizeCredentials' counterpart
+// to TestSanitize_IdempotentFuzz; see its comment for why this replaced a
+// golden list.
+func TestSanitizeCredentials_IdempotentFuzz(t *testing.T) {
+	rng := rand.New(rand.NewSource(2))
+	for i := 0; i < fuzzIdempotenceIterations; i++ {
+		s := randCredentialString(rng)
+		first := SanitizeCredentials(s)
 		second := SanitizeCredentials(first)
 		if first != second {
-			t.Fatalf("SanitizeCredentials not idempotent for %q: first=%q second=%q", in, first, second)
+			t.Fatalf("SanitizeCredentials not idempotent for %q: first=%q second=%q", s, first, second)
 		}
 	}
 }

@@ -66,13 +66,48 @@ var redactions = append(append([]redaction{
 // plus its `:`/`=` separator, but not the value: the value is consumed
 // separately by scanValue, which needs to make quote- and delimiter-aware
 // decisions a single regexp alternation cannot express reliably (see
-// redactAssignments).
-var credentialAssignmentKey = regexp.MustCompile(`(?i)["']?([A-Za-z0-9_.-]*(?:password|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)["']?\s*[:=]\s*`)
+// redactAssignments). The key's surrounding quote is optional but, when
+// present, must match on both sides (`"key"` or `'key'`) — RE2 has no
+// backreferences, so the three shapes (double-quoted, single-quoted, bare)
+// are spelled out as separate alternatives instead of an independent
+// `["']?` on each side, which could consume an opening quote with no
+// corresponding closing quote and silently drop it from the output.
+var credentialAssignmentKey = regexp.MustCompile(`(?i)(?:"([A-Za-z0-9_.-]*(?:password|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)"|'([A-Za-z0-9_.-]*(?:password|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)'|([A-Za-z0-9_.-]*(?:password|secret|token|api[_-]?key)[A-Za-z0-9_.-]*))\s*[:=]\s*`)
+
+// assignmentKeySpan returns the start/end offsets of whichever
+// credentialAssignmentKey alternative (double-quoted, single-quoted, or
+// bare) matched the key name in a FindAllStringSubmatchIndex result.
+func assignmentKeySpan(loc []int) (int, int) {
+	for i := 1; i <= 3; i++ {
+		if start := loc[2*i]; start != -1 {
+			return start, loc[2*i+1]
+		}
+	}
+	return -1, -1
+}
+
+// isBareDecimalInteger reports whether s consists of one or more ASCII
+// digits and nothing else.
+func isBareDecimalInteger(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
 
 // redactAssignments replaces each password/secret/token/api-key assignment
 // with its key name and a mask, consuming the value with scanValue so an
 // embedded quote or leading structural delimiter cannot truncate the match
-// early and leave part of the credential in cleartext.
+// early and leave part of the credential in cleartext. A bare decimal
+// integer value is left untouched: it is never a credential, and the key
+// pattern also matches non-credential fields that merely contain one of the
+// keywords as a substring (`max_tokens`, `input_tokens`), where redacting a
+// count destroys legitimate diagnostic content for no security benefit.
 func redactAssignments(s string) string {
 	matches := credentialAssignmentKey.FindAllStringSubmatchIndex(s, -1)
 	if matches == nil {
@@ -81,16 +116,22 @@ func redactAssignments(s string) string {
 	var b strings.Builder
 	last := 0
 	for _, loc := range matches {
-		start, end, keyStart, keyEnd := loc[0], loc[1], loc[2], loc[3]
+		start, end := loc[0], loc[1]
 		if start < last {
 			// Already consumed as part of a preceding assignment's value.
 			continue
 		}
+		valueLen := scanValue(s[end:])
 		b.WriteString(s[last:start])
-		b.WriteString(s[keyStart:keyEnd])
-		b.WriteString(": ")
-		b.WriteString(redactionMask)
-		last = end + scanValue(s[end:])
+		if isBareDecimalInteger(s[end : end+valueLen]) {
+			b.WriteString(s[start : end+valueLen])
+		} else {
+			keyStart, keyEnd := assignmentKeySpan(loc)
+			b.WriteString(s[keyStart:keyEnd])
+			b.WriteString(": ")
+			b.WriteString(redactionMask)
+		}
+		last = end + valueLen
 	}
 	b.WriteString(s[last:])
 	return b.String()
