@@ -72,6 +72,8 @@ describe("useTaskSubtasks", () => {
       },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
         snapshots: {
           "wf-2": {
             workflowId: "wf-2",

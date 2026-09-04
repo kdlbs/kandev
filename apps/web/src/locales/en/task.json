@@ -1876,6 +1876,8 @@
   "taskMoveErrorDifferentWorkspace": "The task and target workflow must use the same workspace.",
   "taskMoveErrorWorkflowStep": "The target step does not belong to the target workflow.",
   "taskMoveErrorWipLimit": "The target workflow step is at its WIP limit.",
+  "failedToReorderTasks": "Failed to reorder tasks",
+  "taskReorderErrorGeneric": "The new order could not be saved. Try again.",
   "movedTasksStepDescription_one": "The task is now in the selected step.",
   "movedTasksStepDescription_other": "The tasks are now in the selected step.",
   "movedTasksToStep_one": "Moved task to step",

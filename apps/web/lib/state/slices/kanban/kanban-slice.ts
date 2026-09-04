@@ -11,7 +11,12 @@ import {
 
 export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
-  kanbanMulti: { snapshots: {}, isLoading: false },
+  kanbanMulti: {
+    snapshots: {},
+    isLoading: false,
+    orderRevisionByStepId: {},
+    pendingReorderBandKeys: {},
+  },
   sidebarArchivedTasks: {
     itemsByWorkspaceId: {},
     loadedByWorkspaceId: {},
@@ -257,5 +262,18 @@ export const createKanbanSlice: StateCreator<
       const snapshot = draft.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
       snapshot.tasks = snapshot.tasks.filter((t) => t.id !== taskId);
+    }),
+  setStepOrderRevision: (stepId, revision) =>
+    set((draft) => {
+      draft.kanbanMulti.orderRevisionByStepId[stepId] = revision;
+    }),
+  setBandReorderPending: (stepId, band, pending) =>
+    set((draft) => {
+      const key = `${stepId}:${band}`;
+      if (pending) {
+        draft.kanbanMulti.pendingReorderBandKeys[key] = true;
+      } else {
+        delete draft.kanbanMulti.pendingReorderBandKeys[key];
+      }
     }),
 });

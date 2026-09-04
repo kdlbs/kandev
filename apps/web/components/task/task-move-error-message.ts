@@ -18,6 +18,7 @@ const MOVE_ERROR_TRANSLATIONS: Record<string, string> = {
 };
 
 const GENERIC_MOVE_ERROR_TRANSLATION = "task:taskMoveErrorGeneric";
+const GENERIC_REORDER_ERROR_TRANSLATION = "task:taskReorderErrorGeneric";
 
 function getTaskMoveErrorCode(error: unknown): string | null {
   if (!(error instanceof ApiError) || !error.body || typeof error.body !== "object") return null;
@@ -33,6 +34,26 @@ export function getTaskMoveErrorMessage(
   if (translate && error instanceof ApiError) {
     const code = getTaskMoveErrorCode(error);
     return translate((code && MOVE_ERROR_TRANSLATIONS[code]) || GENERIC_MOVE_ERROR_TRANSLATION);
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return fallback;
+}
+
+/**
+ * Localized failure message for a rejected reorder request
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001.20). The reorder endpoint's only
+ * caller-facing failure codes (`invalid_reorder`; `step_changed` is handled
+ * silently before this is ever called) carry no code-specific copy, so this
+ * always resolves to the one generic message for an ApiError.
+ */
+export function getTaskReorderErrorMessage(
+  error: unknown,
+  fallback: string,
+  translate?: Translate,
+): string {
+  if (translate && error instanceof ApiError) {
+    return translate(GENERIC_REORDER_ERROR_TRANSLATION);
   }
   if (error instanceof Error && error.message.trim()) return error.message;
   if (typeof error === "string" && error.trim()) return error;

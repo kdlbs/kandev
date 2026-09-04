@@ -43,6 +43,8 @@ function snapshotWrapper(tasks: Task[]) {
               "wf-1": { workflowId: "wf-1", workflowName: "wf", steps: [], tasks },
             },
             isLoading: false,
+            orderRevisionByStepId: {},
+            pendingReorderBandKeys: {},
           },
         }}
       >
