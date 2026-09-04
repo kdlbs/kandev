@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 // Surfaces task priority in the kanban UI: REQ-TASKS-PRIORITY-VISIBILITY-001
 // (card indicator), -002 (create dialog control) and -003 (card menu
@@ -93,8 +94,25 @@ test.describe("Task creation — priority control", () => {
     await expect(dialog).toBeVisible();
 
     await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+    await waitForFiniteAnimations(dialog);
     const select = dialog.getByTestId("task-create-priority-select");
     await expect(select).toContainText("Medium");
+    const dependencyRow = dialog.getByTestId("task-create-dependency-setting-row");
+    const priorityRow = dialog.getByTestId("task-create-priority-setting-row");
+    const [dependencyBox, priorityBox] = await Promise.all([
+      dependencyRow.boundingBox(),
+      priorityRow.boundingBox(),
+    ]);
+    expect(dependencyBox).not.toBeNull();
+    expect(priorityBox).not.toBeNull();
+    expect(priorityBox!.x).toBeGreaterThan(dependencyBox!.x);
+    await expect(select).toHaveClass(/bg-muted\/30/);
+
+    const priorityInfo = dialog.getByTestId("task-create-priority-setting-info");
+    await priorityInfo.hover();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "Priority shows how urgent this task is on the board.",
+    );
 
     await select.click();
     const listbox = testPage.getByRole("listbox");

@@ -20,6 +20,8 @@ vi.mock("react-i18next", () => ({
         "task:dependsOn": "Depends on",
         "task:dependencyInfoLabel": "About task dependencies",
         "task:dependencyInfo": "This task waits until every selected task completes successfully.",
+        "task:priorityInfoLabel": "About task priority",
+        "task:priorityInfo": "Priority shows how urgent this task is on the board.",
       })[key] ?? key,
   }),
 }));
@@ -92,12 +94,16 @@ describe("TaskCreateAdvancedSettings", () => {
     );
     const grid = screen.getByTestId("task-create-advanced-settings-grid");
     const row = screen.getByTestId("task-create-dependency-setting-row");
+    const priorityRow = screen.getByTestId("task-create-priority-setting-row");
     const selectorContainer = screen.getByTestId("task-create-dependency-selector-container");
     expect(grid.className).toContain("md:grid-cols-2");
     expect(row.className).toContain("items-center");
     expect(row.className).toContain("gap-3");
     expect(row.className).not.toContain("flex-col");
     expect(row.parentElement).toBe(grid);
+    expect(grid.firstElementChild).toBe(row);
+    expect(grid.lastElementChild).toBe(priorityRow);
+    expect(priorityRow.className).toContain("md:justify-self-end");
     expect(selectorContainer.parentElement).toBe(row);
     const info = screen.getByTestId("task-create-dependency-setting-info");
     expect(info.getAttribute("aria-label")).toBe("About task dependencies");

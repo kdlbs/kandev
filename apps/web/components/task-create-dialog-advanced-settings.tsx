@@ -64,9 +64,6 @@ export function TaskCreateAdvancedSettings({
           className="grid min-w-0 grid-cols-1 gap-4 px-1 md:grid-cols-2"
           data-testid="task-create-advanced-settings-grid"
         >
-          <div data-testid="task-create-priority-setting-row">
-            <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
-          </div>
           <div
             className="flex min-w-0 items-center gap-3"
             data-testid="task-create-dependency-setting-row"
@@ -101,6 +98,9 @@ export function TaskCreateAdvancedSettings({
                 disabled={dependenciesDisabled}
               />
             </div>
+          </div>
+          <div className="md:justify-self-end" data-testid="task-create-priority-setting-row">
+            <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
           </div>
         </div>
       </CollapsibleContent>

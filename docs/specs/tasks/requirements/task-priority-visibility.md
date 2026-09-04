@@ -128,6 +128,10 @@ it appears on the board.
 - **AC-TASKS-PRIORITY-VISIBILITY-002.5:** Selecting a priority shall not change any
   other field of the creation request, and shall not block, gate or reorder any
   other step of task creation.
+- **AC-TASKS-PRIORITY-VISIBILITY-002.6:** On wide layouts, the dialog shall show
+  the dependency selector before the priority selector. The priority label shall
+  provide contextual help on hover or focus, with an equivalent touch-friendly
+  disclosure for coarse pointers.
 
 ### REQ-TASKS-PRIORITY-VISIBILITY-003: A person can change an existing task's priority
 

@@ -45,7 +45,10 @@ Office task surface remains a separate consumer with its own vocabulary.
   changes through the existing update hook.
 - The task creation dialog sends the selected priority token and uses the same
   four-token picker inside the Advanced settings section, which is collapsed by
-  default, at every supported breakpoint.
+  default, at every supported breakpoint. On wide layouts, the dependency picker
+  is first and the priority picker is second. The priority label exposes a
+  localized help description through a fine-pointer tooltip or a coarse-pointer
+  touch disclosure.
 - The mobile E2E scenario checks the touch target sizes and the complete create
   and update flow.
 
@@ -101,8 +104,10 @@ snapshot.
 The task service applies the existing task authorization before either update
 path. Priority tokens are not translated at the API boundary. The card menu
 and the creation picker expose localized accessible names. On coarse pointer
-layouts, the card menu trigger, picker trigger, and picker items use at least a
-44 CSS-pixel hit target while the desktop layout keeps its compact controls.
+layouts, the card menu trigger, picker trigger, picker items, and priority help
+ trigger use at least a 44 CSS-pixel hit target while the desktop layout keeps its
+ compact controls. The priority help description is available on hover and focus
+ for fine pointers, and from a touch disclosure for coarse pointers.
 
 ## Verification
 

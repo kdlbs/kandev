@@ -45,11 +45,22 @@ test.describe("Mobile kanban — task priority", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
     await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+    await waitForFiniteAnimations(dialog);
     const select = dialog.getByTestId("task-create-priority-select");
     await expect(select).toContainText("Medium");
     const selectBox = await select.boundingBox();
     expect(selectBox).not.toBeNull();
     expect(selectBox!.height).toBeGreaterThanOrEqual(44);
+    const priorityInfo = dialog.getByTestId("task-create-priority-setting-info");
+    const priorityInfoBox = await priorityInfo.boundingBox();
+    expect(priorityInfoBox).not.toBeNull();
+    expect(priorityInfoBox!.width).toBeGreaterThanOrEqual(44);
+    expect(priorityInfoBox!.height).toBeGreaterThanOrEqual(44);
+    await priorityInfo.tap();
+    await expect(testPage.locator('[data-slot="drawer-description"]')).toContainText(
+      "Priority shows how urgent this task is on the board.",
+    );
+    await testPage.keyboard.press("Escape");
     await select.click();
     const listbox = testPage.getByRole("listbox");
     await waitForFiniteAnimations(listbox);
