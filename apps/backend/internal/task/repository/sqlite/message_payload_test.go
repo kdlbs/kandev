@@ -190,3 +190,53 @@ func TestRehydrateMessagePayloadRejectsTamperedContent(t *testing.T) {
 		t.Fatal("RehydrateMessagePayload accepted tampered content; want an integrity-check error")
 	}
 }
+
+func TestRehydrateMessagePayloadRejectsOversizedStoredPayload(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-payload-oversized", "sess-payload-oversized", "turn-1")
+
+	largeStdout := strings.Repeat("z", largeMessagePayloadThresholdBytes+1)
+	msg := newShellMessage("msg-oversized", "sess-payload-oversized", largeStdout, "")
+	msg.TurnID = "turn-1"
+	if err := repo.CreateMessage(ctx, msg); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	replacementPayload := []byte(`{"stdout":"small but metadata claims it is too large"}`)
+	oversizedCompressed, err := gzipCompress(replacementPayload)
+	if err != nil {
+		t.Fatalf("gzipCompress: %v", err)
+	}
+	oversizedDigest := sha256Hex(replacementPayload)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE task_message_payloads
+		 SET digest = ?, compressed_content = ?, uncompressed_size = ?, compressed_size = ?
+		 WHERE digest = ?`),
+		oversizedDigest, oversizedCompressed, maxMessagePayloadRehydrateBytes+1, len(oversizedCompressed), msg.PayloadDigest); err != nil {
+		t.Fatalf("replace stored payload: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE task_session_messages SET payload_digest = ?, payload_size = ? WHERE id = ?`),
+		oversizedDigest, maxMessagePayloadRehydrateBytes+1, msg.ID); err != nil {
+		t.Fatalf("point message at oversized payload: %v", err)
+	}
+
+	got, err := repo.GetMessage(ctx, "msg-oversized")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if err := repo.RehydrateMessagePayload(ctx, got); err == nil {
+		t.Fatal("RehydrateMessagePayload accepted an oversized payload; want an error")
+	}
+}
+
+func TestGzipDecompressRejectsActualOversize(t *testing.T) {
+	compressed, err := gzipCompress([]byte("123456789"))
+	if err != nil {
+		t.Fatalf("gzipCompress: %v", err)
+	}
+	if _, err := gzipDecompress(compressed, 8); err == nil {
+		t.Fatal("gzipDecompress accepted output beyond the configured cap")
+	}
+}

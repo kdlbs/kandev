@@ -219,6 +219,39 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSiblingHasPR_DropsSource(t *
 	}
 }
 
+func TestResetPRWatch_CollidesWithCanonicalSibling_DropsSource(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	source, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	if err != nil {
+		t.Fatalf("create source watch: %v", err)
+	}
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-2", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	if err != nil {
+		t.Fatalf("create sibling watch: %v", err)
+	}
+
+	if err := svc.ResetPRWatch(ctx, source.ID, "feature/B"); err != nil {
+		t.Fatalf("ResetPRWatch must merge task-owned branch collisions: %v", err)
+	}
+
+	all, err := store.ListPRWatchesByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected source watch dropped, got %d remaining", len(all))
+	}
+	if all[0].ID != sibling.ID {
+		t.Fatalf("expected sibling watch %q to survive, got %q", sibling.ID, all[0].ID)
+	}
+	if all[0].Branch != "feature/B" || all[0].PRNumber != 0 {
+		t.Fatalf("sibling watch changed unexpectedly: %+v", all[0])
+	}
+}
+
 // TestUpdatePRWatchBranchIfSearching_PRAlreadyFound_NoOp preserves the
 // existing "searching" guard: a watch that already found its PR
 // (pr_number != 0) must not have its branch overwritten.

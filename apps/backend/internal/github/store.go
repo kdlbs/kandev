@@ -2181,10 +2181,44 @@ func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo str
 // for a PR on the new branch without leaving an inconsistent intermediate
 // state.
 func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
-	_, err := s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID, repositoryID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`, id).
+		Scan(&taskID, &repositoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
+	}
+
+	var probe int
+	err = tx.QueryRowContext(ctx,
+		`SELECT 1 FROM github_pr_watches
+		 WHERE task_id = ? AND repository_id = ? AND branch = ? AND pr_number = 0 AND id <> ?`,
+		taskID, repositoryID, branch, id).Scan(&probe)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		return dropSourceAndCommit(ctx, tx, id)
+	}
+
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ?`,
-		branch, time.Now().UTC(), id)
-	return err
+		branch, time.Now().UTC(), id); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return dropSourceAndCommit(ctx, tx, id)
+		}
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0,

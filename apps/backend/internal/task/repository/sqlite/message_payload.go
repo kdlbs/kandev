@@ -24,6 +24,11 @@ import (
 // logs that otherwise dominate SQLite growth.
 const largeMessagePayloadThresholdBytes = 4096
 
+// maxMessagePayloadRehydrateBytes caps one explicit shell-output expansion.
+// The writer normally receives already-bounded agentctl output, but the read
+// path must also defend against corrupt or hostile local database rows.
+const maxMessagePayloadRehydrateBytes = 64 * 1024 * 1024
+
 // externalizeMessagePayload computes the metadata JSON CreateMessage/
 // UpdateMessage should persist for a message, externalizing a large shell
 // command output snapshot into task_message_payloads (content-addressed by
@@ -103,13 +108,18 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 		return nil
 	}
 	var compressed []byte
+	var uncompressedSize int64
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT compressed_content FROM task_message_payloads WHERE digest = ?
-	`), message.PayloadDigest).Scan(&compressed)
+		SELECT compressed_content, uncompressed_size FROM task_message_payloads WHERE digest = ?
+	`), message.PayloadDigest).Scan(&compressed, &uncompressedSize)
 	if err != nil {
 		return fmt.Errorf("failed to load message payload %s: %w", message.PayloadDigest, err)
 	}
-	payloadBytes, err := gzipDecompress(compressed)
+	if uncompressedSize > maxMessagePayloadRehydrateBytes {
+		return fmt.Errorf("message payload %s exceeds maximum rehydrate size: %d > %d",
+			message.PayloadDigest, uncompressedSize, maxMessagePayloadRehydrateBytes)
+	}
+	payloadBytes, err := gzipDecompress(compressed, maxMessagePayloadRehydrateBytes)
 	if err != nil {
 		return fmt.Errorf("failed to decompress message payload %s: %w", message.PayloadDigest, err)
 	}
@@ -175,15 +185,18 @@ func gzipCompress(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func gzipDecompress(data []byte) ([]byte, error) {
+func gzipDecompress(data []byte, maxBytes int64) ([]byte, error) {
 	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("gzip decompress: %w", err)
 	}
 	defer func() { _ = gr.Close() }()
-	out, err := io.ReadAll(gr)
+	out, err := io.ReadAll(io.LimitReader(gr, maxBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("gzip decompress: read: %w", err)
+	}
+	if int64(len(out)) > maxBytes {
+		return nil, fmt.Errorf("gzip decompress: payload exceeds maximum size %d", maxBytes)
 	}
 	return out, nil
 }
