@@ -62,7 +62,10 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	if err != nil {
 		return nil, fmt.Errorf("%w: checkout proof failed", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
-	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	running, err := e.workspaceInventoryRuntimeEvidence(ctx, task.ID, session.ID)
+	if err != nil {
+		return nil, err
+	}
 	preservation := workspaceInventoryPreservation(spec, session, evidence, running)
 	repair := &models.WorkspaceInventoryRepair{
 		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
@@ -207,6 +210,9 @@ func (e *Executor) attestedWorkspaceInventoryRowsReceipt(
 		if !ok {
 			return nil, fmt.Errorf("%w: no server-owned repository identity for attested row", models.ErrWorkspaceInventoryRecoveryConflict)
 		}
+		if !workspaceInventoryRowReceiptMatches(existing, task, env, spec, info, candidate) {
+			return nil, fmt.Errorf("%w: repaired row receipt identity no longer matches", models.ErrWorkspaceInventoryRecoveryConflict)
+		}
 		attested, err := e.attestedExistingWorkspaceInventoryReceipt(ctx, repairer, existing, spec, session, info, candidate)
 		if err != nil {
 			return nil, err
@@ -214,6 +220,60 @@ func (e *Executor) attestedWorkspaceInventoryRowsReceipt(
 		latest = attested
 	}
 	return latest, nil
+}
+
+func workspaceInventoryRowReceiptMatches(
+	receipt *models.WorkspaceInventoryRecoveryReceipt,
+	task *v1.Task,
+	env *models.TaskEnvironment,
+	spec RepoSpec,
+	info *repoInfo,
+	row *models.TaskEnvironmentRepo,
+) bool {
+	if receipt == nil || task == nil || env == nil || info == nil || row == nil {
+		return false
+	}
+	canonicalPath, err := worktree.CanonicalDirectory(row.WorktreePath)
+	if err != nil {
+		return false
+	}
+	pathHash := sha256.Sum256([]byte(canonicalPath))
+	return workspaceInventoryReceiptScopeMatches(receipt, task, env, info, row) &&
+		workspaceInventoryReceiptSlotMatches(receipt, spec, info, row) &&
+		workspaceInventoryReceiptCheckoutMatches(receipt, row, hex.EncodeToString(pathHash[:]))
+}
+
+func workspaceInventoryReceiptScopeMatches(
+	receipt *models.WorkspaceInventoryRecoveryReceipt,
+	task *v1.Task,
+	env *models.TaskEnvironment,
+	info *repoInfo,
+	row *models.TaskEnvironmentRepo,
+) bool {
+	return receipt.TaskID == task.ID && receipt.WorkspaceID == task.WorkspaceID &&
+		receipt.TaskEnvironmentID == env.ID && receipt.TaskRepositoryID == info.TaskRepositoryID &&
+		receipt.EnvironmentRepoID == row.ID && receipt.RepositoryID == info.RepositoryID
+}
+
+func workspaceInventoryReceiptSlotMatches(
+	receipt *models.WorkspaceInventoryRecoveryReceipt,
+	spec RepoSpec,
+	info *repoInfo,
+	row *models.TaskEnvironmentRepo,
+) bool {
+	return row.TaskEnvironmentID == receipt.TaskEnvironmentID && row.RepositoryID == info.RepositoryID &&
+		row.Position == info.Position && receipt.Preservation.ExpectedBranchSlug == launchRepoBranchIdentitySlug(spec)
+}
+
+func workspaceInventoryReceiptCheckoutMatches(
+	receipt *models.WorkspaceInventoryRecoveryReceipt,
+	row *models.TaskEnvironmentRepo,
+	pathHash string,
+) bool {
+	return receipt.Preservation.WorktreeID == row.WorktreeID &&
+		receipt.Preservation.PathHash == pathHash &&
+		receipt.Preservation.ObservedBranch == row.WorktreeBranch &&
+		receipt.Preservation.RefName == "refs/heads/"+row.WorktreeBranch
 }
 
 // attestedExistingWorkspaceInventoryReceipt gates an already-committed
@@ -239,7 +299,11 @@ func (e *Executor) attestedExistingWorkspaceInventoryReceipt(
 	candidate *models.TaskEnvironmentRepo,
 ) (*models.WorkspaceInventoryRecoveryReceipt, error) {
 	if existing.PostRepairVerifiedAt != nil {
-		if existing.PostRepairMatched {
+		if existing.PostRepairMatched && existing.PostRepairEvidence != nil &&
+			samePreservationEvidence(
+				preservationEvidenceFromModel(existing.Preservation),
+				preservationEvidenceFromModel(*existing.PostRepairEvidence),
+			) {
 			return existing, nil
 		}
 		return nil, fmt.Errorf("%w: post-repair attestation recorded a divergent checkout", models.ErrWorkspaceInventoryRecoveryConflict)
@@ -250,7 +314,10 @@ func (e *Executor) attestedExistingWorkspaceInventoryReceipt(
 	before := preservationEvidenceFromModel(existing.Preservation)
 	after, inspectErr := inspectWorkspaceInventoryCandidate(ctx, info, candidate)
 	matched := inspectErr == nil && samePreservationEvidence(before, after)
-	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	running, err := e.workspaceInventoryRuntimeEvidence(ctx, existing.TaskID, session.ID)
+	if err != nil {
+		return nil, err
+	}
 	postEvidence, verifiedAt, attestErr := e.recordWorkspaceInventoryPostRepairAttestation(
 		ctx, repairer, existing.TaskID, existing.IdempotencyKey, spec, session, running, after, matched,
 	)
@@ -265,6 +332,21 @@ func (e *Executor) attestedExistingWorkspaceInventoryReceipt(
 		return nil, fmt.Errorf("%w: checkout changed during metadata repair", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
 	return &completed, nil
+}
+
+func (e *Executor) workspaceInventoryRuntimeEvidence(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+) (*models.ExecutorRunning, error) {
+	running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cannot load authoritative runtime evidence", models.ErrWorkspaceInventoryRecoveryConflict)
+	}
+	if running != nil && (running.TaskID != taskID || running.SessionID != sessionID) {
+		return nil, fmt.Errorf("%w: runtime evidence identity does not match", models.ErrWorkspaceInventoryRecoveryConflict)
+	}
+	return running, nil
 }
 
 // preservationEvidenceFromModel converts durable preservation evidence back

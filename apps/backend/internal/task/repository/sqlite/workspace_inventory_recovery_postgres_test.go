@@ -3,9 +3,12 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
@@ -87,7 +90,8 @@ func TestPostgresWorkspaceInventoryNegativeAttestationIsMonotonic(t *testing.T) 
 // locking the task row would allow. It skips unless
 // KANDEV_TEST_POSTGRES_DSN is set.
 func TestPostgresRepairWorkspaceInventoryConcurrentSameKeyRetryConvergesToOneRepairAndOneDeduplicated(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := testutil.OpenIsolatedPostgres(t, dsn)
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
@@ -122,18 +126,53 @@ func TestPostgresRepairWorkspaceInventoryConcurrentSameKeyRetryConvergesToOneRep
 		}
 	}
 
-	const attempts = 8
+	var schema string
+	if err := db.QueryRowContext(ctx, `SELECT current_schema()`).Scan(&schema); err != nil {
+		t.Fatalf("load isolated postgres schema: %v", err)
+	}
+	firstDB, firstPID := openWorkspaceInventoryPostgresConnection(t, dsn, schema)
+	secondDB, secondPID := openWorkspaceInventoryPostgresConnection(t, dsn, schema)
+	observerDB, _ := openWorkspaceInventoryPostgresConnection(t, dsn, schema)
+	firstRepo, err := NewWithDB(firstDB, firstDB, nil)
+	if err != nil {
+		t.Fatalf("initialize first concurrent postgres repository: %v", err)
+	}
+	secondRepo, err := NewWithDB(secondDB, secondDB, nil)
+	if err != nil {
+		t.Fatalf("initialize second concurrent postgres repository: %v", err)
+	}
+
+	blocker, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin task-row blocker: %v", err)
+	}
+	var lockedTaskID string
+	if err := blocker.QueryRowContext(ctx, `SELECT id FROM tasks WHERE id = $1 FOR UPDATE`, "task-recovery").Scan(&lockedTaskID); err != nil {
+		_ = blocker.Rollback()
+		t.Fatalf("lock task row: %v", err)
+	}
+
+	const attempts = 2
 	receipts := make([]*models.WorkspaceInventoryRecoveryReceipt, attempts)
 	errs := make([]error, attempts)
 	var wg sync.WaitGroup
-	for i := 0; i < attempts; i++ {
+	concurrentRepos := []*Repository{firstRepo, secondRepo}
+	for i, concurrentRepo := range concurrentRepos {
 		wg.Add(1)
-		go func(i int) {
+		go func(i int, concurrentRepo *Repository) {
 			defer wg.Done()
-			receipts[i], errs[i] = repo.RepairWorkspaceInventory(ctx, buildRepair())
-		}(i)
+			receipts[i], errs[i] = concurrentRepo.RepairWorkspaceInventory(ctx, buildRepair())
+		}(i, concurrentRepo)
 	}
+	waitErr := waitForWorkspaceInventoryPostgresLockWaiters(ctx, observerDB, firstPID, secondPID)
+	releaseErr := blocker.Rollback()
 	wg.Wait()
+	if releaseErr != nil {
+		t.Fatalf("release task-row blocker: %v", releaseErr)
+	}
+	if waitErr != nil {
+		t.Fatal(waitErr)
+	}
 
 	repairedCount, deduplicatedCount := 0, 0
 	var firstID string
@@ -174,5 +213,45 @@ func TestPostgresRepairWorkspaceInventoryConcurrentSameKeyRetryConvergesToOneRep
 	}
 	if receiptRowCount != 1 {
 		t.Fatalf("receipt row count = %d, want exactly 1", receiptRowCount)
+	}
+}
+
+func openWorkspaceInventoryPostgresConnection(t *testing.T, dsn, schema string) (*sqlx.DB, int) {
+	t.Helper()
+	db, err := sqlx.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open concurrent postgres connection: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`SELECT set_config('search_path', $1, false)`, schema); err != nil {
+		t.Fatalf("set concurrent postgres search_path: %v", err)
+	}
+	var pid int
+	if err := db.QueryRow(`SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatalf("load concurrent postgres backend pid: %v", err)
+	}
+	return db, pid
+}
+
+func waitForWorkspaceInventoryPostgresLockWaiters(ctx context.Context, db *sqlx.DB, pids ...int) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting int
+		err := db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM pg_stat_activity
+			WHERE pid IN ($1, $2) AND wait_event_type = 'Lock'
+		`, pids[0], pids[1]).Scan(&waiting)
+		if err != nil {
+			return fmt.Errorf("inspect concurrent postgres lock waiters: %w", err)
+		}
+		if waiting == len(pids) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("concurrent postgres repair calls did not both reach the task-row lock: waiting=%d", waiting)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

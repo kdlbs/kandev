@@ -66,6 +66,12 @@ never mutates `.git/index`, including its own status call's normal
 opportunistic index refresh. Host paths remain internal; public
 receipts expose only a path hash.
 
+Executor/runtime evidence is read through the authoritative session-scoped
+runtime store. A lookup failure or a runtime record whose task/session identity
+does not match fails closed before either the repair transaction or a recovered
+attestation write; absence is evidence only when the authoritative lookup
+succeeds and returns no record.
+
 ## Repair transaction and idempotency
 
 `workspace_inventory_recovery_receipts` is an append-only audit and
@@ -134,6 +140,12 @@ crashed, or its attestation write itself failed, before attestation landed.
 Any session reaching the already-valid branch instead completes (or is
 blocked by, if already negative) the same durable attestation a same-session
 retry already requires, before it is ever handed back as an admitted launch.
+Before accepting that row-scoped receipt, admission also binds it back to the
+current task, workspace, environment, task-repository, repository, branch slot,
+worktree ID, canonical path hash, and observed branch/ref identity. A recorded
+positive result is launchable only when its durable post-repair evidence exists
+and exactly matches the receipt's pre-repair checkout evidence; incomplete or
+divergent positive records are conflicts rather than deduplicated successes.
 Both entry points that can reach the already-valid branch are covered
 end-to-end, through the real `LaunchPreparedSession` and resume call sites
 (not only the attestation helper directly), with a genuinely different

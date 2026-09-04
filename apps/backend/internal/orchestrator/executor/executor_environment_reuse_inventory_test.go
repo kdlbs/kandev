@@ -30,6 +30,34 @@ func TestValidateReuseEnvironmentInventory_ZeroRowsFailsClosed(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReuseAllowed_EmptyWorktreeInventoryStillReachesFailClosedGuard(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+	}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+	}
+	req := &LaunchAgentRequest{
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		RepositoryID: "repo-1",
+	}
+
+	req.WorkspaceReuseRequired = workspaceReuseAllowed(
+		env, req.ExecutorType, true, true,
+	)
+	if !req.WorkspaceReuseRequired {
+		t.Fatal("empty preserved Worktree inventory authorized fresh materialization before guarded recovery")
+	}
+	if err := e.validateReuseEnvironmentInventory(context.Background(), req, env); !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("validateReuseEnvironmentInventory() = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+}
+
 // The read-side fix must not weaken the guard's actual purpose: a non-empty
 // but mismatched canonical inventory (wrong repository, wrong branch, or a
 // row explicitly marked failed/deleted) is still an unsafe reuse and must be
