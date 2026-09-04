@@ -74,6 +74,7 @@
   "queuedCount_other": "{{count}} 個排隊任務",
   "queuedForStep": "已排隊等待 {{step}}",
   "queuedSection": "排隊中",
+  "reorderPositionAnnouncement": "{{title}},第 {{position}} 位,共 {{total}} 位",
   "repository": "儲存庫",
   "searchPlaceholder": "搜尋…",
   "searchSection": "搜尋",
