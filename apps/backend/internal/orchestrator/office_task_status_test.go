@@ -155,6 +155,109 @@ func TestMarkTaskCompleted_NonOfficeTask_UsesRawPathUnchanged(t *testing.T) {
 	}
 }
 
+// TestMarkOfficeTaskCompleted_StaleStep_SkipsSeam asserts an Office task
+// whose current WorkflowStepID no longer matches the terminal step named by
+// a replayed/stale move event never reaches the seam and keeps its state.
+func TestMarkOfficeTaskCompleted_StaleStep_SkipsSeam(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, repo, &models.Task{
+		ID: "office-stale-step", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_work",
+		Title: "Office task", State: v1.TaskStateInProgress, ParentID: "parent",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc := &Service{logger: testLogger(), repo: repo}
+	updater := &recordingOfficeStatusUpdater{repo: repo}
+	svc.SetOfficeTaskStatusUpdater(updater)
+
+	svc.markTaskCompletedForTerminalStep(ctx, "office-stale-step", "child_done")
+
+	if len(updater.calls) != 0 {
+		t.Fatalf("seam calls = %+v, want none: a stale-step move must not reach the Office seam", updater.calls)
+	}
+	task, err := repo.GetTask(ctx, "office-stale-step")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.State != v1.TaskStateInProgress {
+		t.Fatalf("state = %q, want unchanged IN_PROGRESS", task.State)
+	}
+	if task.WorkflowStepID != "child_work" {
+		t.Fatalf("workflow_step_id = %q, want unchanged child_work", task.WorkflowStepID)
+	}
+}
+
+// TestMarkOfficeTaskCompleted_AlreadyCancelled_SkipsSeam asserts an Office
+// task already in a terminal state (CANCELLED) never reaches the seam and
+// is not resurrected as COMPLETED.
+func TestMarkOfficeTaskCompleted_AlreadyCancelled_SkipsSeam(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, repo, &models.Task{
+		ID: "office-cancelled", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Office task", State: v1.TaskStateCancelled, ParentID: "parent",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc := &Service{logger: testLogger(), repo: repo}
+	updater := &recordingOfficeStatusUpdater{repo: repo}
+	svc.SetOfficeTaskStatusUpdater(updater)
+
+	svc.markTaskCompletedForTerminalStep(ctx, "office-cancelled", "child_done")
+
+	if len(updater.calls) != 0 {
+		t.Fatalf("seam calls = %+v, want none: an already-terminal task must not reach the Office seam", updater.calls)
+	}
+	task, err := repo.GetTask(ctx, "office-cancelled")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.State != v1.TaskStateCancelled {
+		t.Fatalf("state = %q, want unchanged CANCELLED (not resurrected as COMPLETED)", task.State)
+	}
+}
+
+// TestMarkOfficeTaskCompleted_AlreadyCompleted_SkipsSeam asserts a
+// redelivered terminal-step-move event for an already-COMPLETED Office task
+// never reaches the seam, so it does not re-run the status pipeline
+// (duplicate activity rows, duplicate reactivity cascades).
+func TestMarkOfficeTaskCompleted_AlreadyCompleted_SkipsSeam(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, repo, &models.Task{
+		ID: "office-completed", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Office task", State: v1.TaskStateCompleted, ParentID: "parent",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc := &Service{logger: testLogger(), repo: repo}
+	updater := &recordingOfficeStatusUpdater{repo: repo}
+	svc.SetOfficeTaskStatusUpdater(updater)
+
+	svc.markTaskCompletedForTerminalStep(ctx, "office-completed", "child_done")
+
+	if len(updater.calls) != 0 {
+		t.Fatalf("seam calls = %+v, want none: a redelivered terminal move for an already-completed task must not reach the Office seam", updater.calls)
+	}
+	task, err := repo.GetTask(ctx, "office-completed")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("state = %q, want unchanged COMPLETED", task.State)
+	}
+}
+
 // TestMarkOfficeTaskCompleted_SeamNil_SkipsWrite is test-matrix case (d):
 // with no seam wired, an Office task's terminal completion is skipped
 // rather than falling back to the raw write, which would bypass the

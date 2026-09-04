@@ -68,17 +68,17 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 			zap.Error(err))
 		return
 	}
-	if task.IsFromOffice {
-		s.taskRuntimeStateMu.Unlock()
-		s.markOfficeTaskCompletedForTerminalStep(ctx, task)
-		return
-	}
 	if terminalStepID != "" && task.WorkflowStepID != terminalStepID {
 		s.taskRuntimeStateMu.Unlock()
 		return
 	}
 	if models.IsTerminalTaskState(task.State) {
 		s.taskRuntimeStateMu.Unlock()
+		return
+	}
+	if task.IsFromOffice {
+		s.taskRuntimeStateMu.Unlock()
+		s.markOfficeTaskCompletedForTerminalStep(ctx, task)
 		return
 	}
 	oldState := task.State
