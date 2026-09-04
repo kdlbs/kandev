@@ -445,7 +445,7 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
+	clients := h.authorizedTaskRecipients(taskID)
 	h.logger.Debug("BroadcastToTask",
 		zap.String("task_id", taskID),
 		zap.String("action", msg.Action),
@@ -493,12 +493,64 @@ func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSessionRecipientsLocked(sessionID)
+	clients := h.authorizedSessionRecipients(sessionID)
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
 		zap.Int("recipient_count", len(clients)))
 	h.sendToClients(data, clients, msg.Action)
+}
+
+func (h *Hub) authorizedTaskRecipients(taskID string) []*Client {
+	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
+	allowed, denied := h.partitionAuthorized(clients, taskID, h.authPolicy.Subscriptions.Task)
+	if len(denied) == 0 {
+		return allowed
+	}
+	h.mu.Lock()
+	for _, client := range denied {
+		removeClientFromSubscriberMap(h.taskSubscribers, taskID, client)
+		delete(client.subscriptions, taskID)
+	}
+	h.mu.Unlock()
+	return allowed
+}
+
+func (h *Hub) authorizedSessionRecipients(sessionID string) []*Client {
+	clients := h.getSessionRecipientsLocked(sessionID)
+	allowed, denied := h.partitionAuthorized(clients, sessionID, h.authPolicy.Subscriptions.Session)
+	if len(denied) == 0 {
+		return allowed
+	}
+	h.mu.Lock()
+	for _, client := range denied {
+		removeClientFromSubscriberMap(h.sessionSubscribers, sessionID, client)
+		removeClientFromSubscriberMap(h.sessionMode.focusByClient, sessionID, client)
+		delete(client.sessionSubscriptions, sessionID)
+		delete(client.sessionFocus, sessionID)
+	}
+	h.mu.Unlock()
+	h.recomputeSessionMode(sessionID)
+	return allowed
+}
+
+func (h *Hub) partitionAuthorized(
+	clients []*Client,
+	topicID string,
+	authorize func(context.Context, string) error,
+) (allowed, denied []*Client) {
+	if authorize == nil {
+		return clients, nil
+	}
+	allowed = make([]*Client, 0, len(clients))
+	for _, client := range clients {
+		if err := authorize(client.dispatchContext(), topicID); err != nil {
+			denied = append(denied, client)
+			continue
+		}
+		allowed = append(allowed, client)
+	}
+	return allowed, denied
 }
 
 // BroadcastToUser sends a notification to clients subscribed to a specific user

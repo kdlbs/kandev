@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,20 +38,7 @@ func (s *Service) AdminCreateUser(ctx context.Context, email, password, displayN
 		// identity rather than from the request.
 		OrgID: callerOrgID(ctx),
 	}
-	if err := s.users.CreateUser(ctx, user); err != nil {
-		return nil, ErrEmailTaken
-	}
-	hash, err := HashPassword(password)
-	if err != nil {
-		return nil, err
-	}
-	identity := &store.LoginIdentity{
-		UserID:       user.ID,
-		Provider:     store.ProviderLocal,
-		Subject:      email,
-		PasswordHash: hash,
-	}
-	if err := s.store.CreateIdentity(ctx, identity); err != nil {
+	if err := s.createLocalUser(ctx, user, password); err != nil {
 		return nil, err
 	}
 	return user, nil
@@ -170,17 +158,24 @@ func (s *Service) CreateUserInOrg(
 		Status:      usermodels.StatusActive,
 		OrgID:       orgID,
 	}
-	if err := s.users.CreateUser(ctx, user); err != nil {
-		return ErrEmailTaken
-	}
+	return s.createLocalUser(ctx, user, password)
+}
+
+func (s *Service) createLocalUser(ctx context.Context, user *usermodels.User, password string) error {
 	hash, err := HashPassword(password)
 	if err != nil {
 		return err
 	}
-	return s.store.CreateIdentity(ctx, &store.LoginIdentity{
+	if err := s.users.CreateUser(ctx, user); err != nil {
+		return ErrEmailTaken
+	}
+	if err := s.store.CreateIdentity(ctx, &store.LoginIdentity{
 		UserID:       user.ID,
 		Provider:     store.ProviderLocal,
-		Subject:      email,
+		Subject:      user.Email,
 		PasswordHash: hash,
-	})
+	}); err != nil {
+		return errors.Join(err, s.users.DeleteUser(ctx, user.ID))
+	}
+	return nil
 }

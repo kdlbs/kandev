@@ -164,7 +164,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// The default organization is named generically: an instance has no
 	// company name to borrow, and an operator renames it in one click.
 	const defaultOrgName = "Default organization"
-	orgSvc, orgErr := buildOrgService(cfg, dbPool, repos, log)
+	orgSvc, orgErr := buildOrgService(cfg, dbPool, repos, taskSvc, log)
 	if orgErr != nil {
 		return nil, nil, fmt.Errorf("initialize organizations: %w", orgErr)
 	}

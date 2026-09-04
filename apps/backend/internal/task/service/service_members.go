@@ -68,7 +68,7 @@ func (s *Service) UpsertWorkspaceMember(ctx context.Context, workspaceID, userID
 	if userID == workspace.OwnerID {
 		return nil, ErrMemberSelf
 	}
-	if err := s.requireAssignableUser(ctx, userID); err != nil {
+	if err := s.requireAssignableWorkspaceUser(ctx, userID, workspace.OrgID); err != nil {
 		return nil, err
 	}
 
@@ -118,7 +118,7 @@ func (s *Service) TransferWorkspaceOwnership(ctx context.Context, workspaceID, t
 	if toUserID == workspace.OwnerID {
 		return ErrMemberSelf
 	}
-	if err := s.requireAssignableUser(ctx, toUserID); err != nil {
+	if err := s.requireAssignableWorkspaceUser(ctx, toUserID, workspace.OrgID); err != nil {
 		return err
 	}
 	member, err := s.workspaces.GetWorkspaceMember(ctx, workspaceID, toUserID)
@@ -181,6 +181,29 @@ func (s *Service) requireAssignableUser(ctx context.Context, userID string) erro
 	}
 	if status == "disabled" {
 		return ErrMemberUserDisabled
+	}
+	return nil
+}
+
+// requireAssignableWorkspaceUser additionally enforces the tenant boundary.
+// A mismatch is reported as not found so a crafted user ID cannot reveal an
+// account in another organization.
+func (s *Service) requireAssignableWorkspaceUser(ctx context.Context, userID, workspaceOrgID string) error {
+	if err := s.requireAssignableUser(ctx, userID); err != nil {
+		return err
+	}
+	if workspaceOrgID == "" {
+		return nil
+	}
+	if s.userOrgs == nil {
+		return ErrMemberUserNotFound
+	}
+	userOrgID, err := s.userOrgs(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if userOrgID != workspaceOrgID {
+		return ErrMemberUserNotFound
 	}
 	return nil
 }

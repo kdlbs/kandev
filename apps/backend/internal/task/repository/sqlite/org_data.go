@@ -2,11 +2,10 @@ package sqlite
 
 import (
 	"context"
-	"fmt"
 )
 
-// Tenancy data operations: the task-repository half of the organization
-// migration and of organization deletion.
+// Tenancy data operations: the task-repository half of organization migration
+// and lifecycle counts.
 
 // AssignWorkspacesWithoutOrg puts every workspace that has no organization
 // into the given one. Idempotent: a second run moves nothing.
@@ -44,45 +43,6 @@ func (r *Repository) DropCrossOrgWorkspaceMembers(ctx context.Context) (int64, e
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-// DeleteOrgData removes every workspace owned by an organization, cascading
-// through the normal workspace-delete path so tasks, sessions, workflows and
-// side tables go with them.
-//
-// It deliberately reuses DeleteWorkspaceCascade rather than issuing bulk
-// deletes: the cascade is the one place that knows every dependent table, and
-// a second copy would drift the first time a table is added.
-func (r *Repository) DeleteOrgData(ctx context.Context, orgID string) error {
-	if orgID == "" {
-		return nil
-	}
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(
-		`SELECT id FROM workspaces WHERE org_id = ?`), orgID)
-	if err != nil {
-		return err
-	}
-	ids := make([]string, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	_ = rows.Close()
-
-	for _, id := range ids {
-		if _, _, err := r.DeleteWorkspaceCascade(ctx, id); err != nil {
-			return fmt.Errorf("delete workspace %s: %w", id, err)
-		}
-	}
-	return nil
 }
 
 // CountWorkspacesByOrg reports how many workspaces an organization owns. Used

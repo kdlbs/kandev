@@ -241,6 +241,29 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 	return s.deleteWorkspace(ctx, workspace, &confirmName)
 }
 
+// DeleteOrganizationWorkspaces removes every workspace in one organization
+// through the same lifecycle as an ordinary workspace deletion. Authorization
+// is performed by the operator-only organization controller before this
+// narrow internal seam is called.
+func (s *Service) DeleteOrganizationWorkspaces(ctx context.Context, orgID string) error {
+	if orgID == "" {
+		return nil
+	}
+	workspaces, err := s.workspaces.ListWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("list organization workspaces: %w", err)
+	}
+	for _, workspace := range workspaces {
+		if workspace == nil || workspace.OrgID != orgID {
+			continue
+		}
+		if err := s.deleteWorkspace(ctx, workspace, nil); err != nil {
+			return fmt.Errorf("delete workspace %s: %w", workspace.ID, err)
+		}
+	}
+	return nil
+}
+
 func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
 	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, workspace.ID)
 	if err != nil {

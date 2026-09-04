@@ -111,12 +111,12 @@ type Service struct {
 	// organization. Nil when organizations are off.
 	orgStatus OrgStatusChecker
 
-	// adminCreated runs after the setup wizard creates the first admin, so
-	// organizations can place them and grant the operator tier.
+	// adminCreated places the first admin and grants the operator tier before
+	// setup creates the identity that switches authentication into enabled mode.
 	adminCreated func(ctx context.Context, userID string) error
 }
 
-// SetAdminCreatedHook installs the post-setup callback.
+// SetAdminCreatedHook installs the pre-commit setup callback.
 func (s *Service) SetAdminCreatedHook(hook func(ctx context.Context, userID string) error) {
 	s.adminCreated = hook
 }

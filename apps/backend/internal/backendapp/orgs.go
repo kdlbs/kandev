@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -48,6 +49,39 @@ func (a orgAccountAdapter) tenancy() userstore.TenancyRepository {
 
 var _ org.AccountMigrator = orgAccountAdapter{}
 
+type orgMigrationData interface {
+	AssignWorkspacesWithoutOrg(ctx context.Context, orgID string) (int64, error)
+	DropCrossOrgWorkspaceMembers(ctx context.Context) (int64, error)
+}
+
+type orgWorkspaceLifecycle interface {
+	DeleteOrganizationWorkspaces(ctx context.Context, orgID string) error
+}
+
+// orgDataAdapter keeps migration SQL in the repository while routing
+// destructive workspace removal through the task service's full lifecycle.
+type orgDataAdapter struct {
+	migrations orgMigrationData
+	workspaces orgWorkspaceLifecycle
+}
+
+func (a orgDataAdapter) AssignWorkspacesWithoutOrg(ctx context.Context, orgID string) (int64, error) {
+	return a.migrations.AssignWorkspacesWithoutOrg(ctx, orgID)
+}
+
+func (a orgDataAdapter) DropCrossOrgWorkspaceMembers(ctx context.Context) (int64, error) {
+	return a.migrations.DropCrossOrgWorkspaceMembers(ctx)
+}
+
+func (a orgDataAdapter) DeleteOrgData(ctx context.Context, orgID string) error {
+	if a.workspaces == nil {
+		return errors.New("workspace deletion lifecycle is unavailable")
+	}
+	return a.workspaces.DeleteOrganizationWorkspaces(ctx, orgID)
+}
+
+var _ org.DataMigrator = orgDataAdapter{}
+
 // buildOrgService constructs the organization service. It is built even when
 // organizations are off so callers never branch on nil; the service itself
 // reports Enabled() false and every lifecycle operation is a no-op.
@@ -55,6 +89,7 @@ func buildOrgService(
 	cfg *config.Config,
 	pool *db.Pool,
 	repos *Repositories,
+	workspaces orgWorkspaceLifecycle,
 	log *logger.Logger,
 ) (*org.Service, error) {
 	store, err := org.NewStore(pool)
@@ -64,7 +99,7 @@ func buildOrgService(
 	return org.NewService(
 		store,
 		orgAccountAdapter{accounts: repos.UserAccounts},
-		repos.Task,
+		orgDataAdapter{migrations: repos.Task, workspaces: workspaces},
 		cfg.Features.MultiTenancy,
 		log,
 	), nil
