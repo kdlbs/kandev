@@ -137,6 +137,31 @@ func TestContinuationRedactsSecretStraddlingTailCut(t *testing.T) {
 	}
 }
 
+// TestContinuationRedactsSecretAtWindowBoundaryWhenAdjacentContentShrinks is
+// the R3-A regression: sanitizedTail's own window cut (boundedTailN(raw,
+// window), distinct from the final budget cut
+// TestContinuationRedactsSecretStraddlingTailCut covers) can itself bisect a
+// credential, leaving an incomplete suffix fragment at the very front of the
+// window. That fragment is normally discarded by the final budget cut, but
+// when other content later in the same window collapses under redaction (a
+// long base64/hash-shaped run matching the generic credential rule), the
+// sanitized result can shrink to below budget and turn that final cut into
+// a no-op, letting the fragment through raw. Swept across every byte
+// alignment where the window boundary lands inside the token.
+func TestContinuationRedactsSecretAtWindowBoundaryWhenAdjacentContentShrinks(t *testing.T) {
+	for qLen := 2280; qLen <= 2330; qLen++ {
+		userMessage := secretShapedToken + " " + strings.Repeat("Q", qLen) + " done. " + strings.Repeat("ab ", 60)
+
+		continuation := BuildBoundedContinuation(ContinuationInput{
+			UserMessages: []string{userMessage},
+		})
+
+		if leaked := rawSecretSuffix(continuation.Conversation); leaked != "" {
+			t.Fatalf("qLen=%d: Conversation retained a raw secret suffix %q: %q", qLen, leaked, continuation.Conversation)
+		}
+	}
+}
+
 // rawSecretSuffix returns the longest (>= 8 char) trailing substring of
 // secretShapedToken found verbatim in s, or "" if none is present.
 func rawSecretSuffix(s string) string {

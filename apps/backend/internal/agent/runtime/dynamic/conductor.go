@@ -446,29 +446,69 @@ const conversationUserBudget = continuationFieldLimit / 2
 // credential token Sanitize's rules match.
 const sanitizeSlack = 512
 
-// sanitizedTail returns the newest `budget` bytes of raw with credentials
-// redacted. It first takes a window that overshoots budget by sanitizeSlack
-// so a credential straddling the tail-cut boundary is complete when Sanitize
-// runs, instead of arriving as a bare suffix that matches no redaction rule.
+// windowGuard is prepended to a truncated window before sanitizing.
+// boundedTailN(raw, window) is itself a cut into raw and can bisect a
+// credential the same way the final budget cut can, leaving an incomplete
+// suffix fragment at the very front of the window — too short on its own to
+// match any redaction rule. Unlike the straddle at the budget boundary,
+// nothing later in sanitizedTail gives this fragment more context, because
+// its missing prefix was excluded from the window entirely. windowGuard is
+// 32+ characters from the same class the generic credential rule matches,
+// placed directly adjacent (no separator) to the window, so any alphanumeric
+// run starting the window extends into one the rule always matches: the
+// fragment is redacted together with the guard instead of surviving raw.
+var (
+	windowGuard          = strings.Repeat("Z", 40)
+	windowGuardSanitized = routingerr.Sanitize(windowGuard)
+)
+
+// sanitizedTail returns up to `budget` bytes of the newest content in raw,
+// with credentials redacted. It first takes a window that overshoots budget
+// by sanitizeSlack so a credential straddling the eventual budget cut is
+// complete when Sanitize runs, instead of arriving as a bare suffix that
+// matches no redaction rule; if the window itself is a truncation of raw,
+// windowGuard neutralizes the fragment that cut can leave at the window's
+// own front. That guard runs unconditionally rather than only when the
+// budget cut would otherwise be a no-op, because a redaction elsewhere in
+// the window (e.g. a long token collapsing to a few bytes) can shrink the
+// sanitized result below budget and make that cut a no-op on any call.
 //
-// Sanitize can grow its input (e.g. "/Users/henry/" -> "/Users/<redacted>/")
-// and then truncates its OWN result from the head once it exceeds
-// routingerr.MaxRawExcerptBytes, which would chop the newest bytes this
-// function exists to keep. So the window is capped at MaxRawExcerptBytes to
-// bound the growth, and if Sanitize's result still hits that cap (redactions
-// grew it enough to trigger the head truncation anyway), the window is
-// shrunk and retried until Sanitize returns an untruncated result — at which
-// point its output is known to be the true, un-clipped tail, and the
-// caller's own budget cut below is safe to apply.
+// Sanitize can also grow its input (e.g. "/Users/henry/" ->
+// "/Users/<redacted>/") and then truncates its OWN result from the head once
+// it exceeds routingerr.MaxRawExcerptBytes, which would chop the newest
+// bytes this function exists to keep. So the window is capped short of
+// MaxRawExcerptBytes (leaving room for windowGuard) to bound the growth, and
+// if Sanitize's result still hits that cap (redactions grew it enough to
+// trigger the head truncation anyway, or it landed there naturally), the
+// window is shrunk and retried until Sanitize returns a result under the
+// cap — at which point its output is known to be complete, and the budget
+// cut below is safe to apply.
 func sanitizedTail(raw string, budget int) string {
 	window := budget + sanitizeSlack
-	if window > routingerr.MaxRawExcerptBytes {
-		window = routingerr.MaxRawExcerptBytes
+	if capped := routingerr.MaxRawExcerptBytes - len(windowGuard); window > capped {
+		window = capped
 	}
 	for window > 0 {
 		part := boundedTailN(raw, window)
-		sanitized := routingerr.Sanitize(part)
+		truncatedWindow := len(raw) > window
+
+		guarded := part
+		if truncatedWindow {
+			guarded = windowGuard + part
+		}
+
+		sanitized := routingerr.Sanitize(guarded)
 		if len(sanitized) < routingerr.MaxRawExcerptBytes {
+			if truncatedWindow {
+				if !strings.HasPrefix(sanitized, windowGuardSanitized) {
+					// windowGuard's own redaction should always lead the
+					// result verbatim; if it doesn't, this window doesn't
+					// match that assumption. Fail safe rather than guess
+					// how much of the front is still guard-derived.
+					return ""
+				}
+				sanitized = sanitized[len(windowGuardSanitized):]
+			}
 			return boundedTailN(sanitized, budget)
 		}
 		window -= sanitizeSlack
