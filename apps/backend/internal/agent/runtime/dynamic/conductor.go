@@ -442,16 +442,20 @@ const conversationUserBudget = continuationFieldLimit / 2
 // boundedConversation bounds user messages and the agent conversation on
 // independent tail-kept budgets, then joins them, so the newest user asks
 // and the newest agent turns both survive regardless of how large the other
-// side is. Conversation can carry raw agent-authored provider output (echoed
-// command output, env values), so it is sanitized only after being bounded:
-// Sanitize's own MaxRawExcerptBytes truncation is head-first, and running it
-// before the tail-keep would discard the most recent turns instead of the
-// oldest. Sanitize's redactions can grow the string slightly (e.g. replacing
-// a short path with a longer placeholder), so the sanitized value is
-// re-bounded to the same budget to keep the final result within
-// continuationFieldLimit.
+// side is. Both halves can carry raw content that must not cross a provider
+// boundary unsanitized: the agent half can echo command output or env
+// values, and the user half can carry a secret the user typed, or one
+// forwarded from the launch prompt. Each half is sanitized only after being
+// bounded: Sanitize's own MaxRawExcerptBytes truncation is head-first, and
+// running it before the tail-keep would discard the most recent turns
+// instead of the oldest. Sanitize's redactions can grow the string (e.g.
+// replacing a short path with a longer placeholder) past its own
+// MaxRawExcerptBytes cap, so each half is re-bounded to its budget after
+// sanitizing to keep the final result within continuationFieldLimit and on a
+// valid UTF-8 boundary at both ends.
 func boundedConversation(userMessages []string, conversation string) string {
 	userPart := boundedTailN(strings.Join(userMessages, "\n"), conversationUserBudget)
+	userPart = boundedTailN(routingerr.Sanitize(userPart), conversationUserBudget)
 
 	convBudget := continuationFieldLimit - len(userPart)
 	if userPart != "" {
@@ -508,17 +512,20 @@ func ContinuationPrompt(prompt string, continuation Continuation) string {
 
 // bounded truncates to continuationFieldLimit bytes keeping the head, on a
 // rune boundary so a multi-byte character (e.g. Vietnamese, CJK) is never
-// split into invalid UTF-8.
+// split into invalid UTF-8. The result is also run through
+// strings.ToValidUTF8 so an input that was already invalid UTF-8 (below the
+// limit, so the truncation path below never runs) does not pass through
+// unchanged.
 func bounded(value string) string {
 	value = strings.TrimSpace(value)
-	if len(value) <= continuationFieldLimit {
-		return value
+	if len(value) > continuationFieldLimit {
+		cut := continuationFieldLimit
+		for cut > 0 && !utf8.RuneStart(value[cut]) {
+			cut--
+		}
+		value = value[:cut]
 	}
-	cut := continuationFieldLimit
-	for cut > 0 && !utf8.RuneStart(value[cut]) {
-		cut--
-	}
-	return value[:cut]
+	return strings.ToValidUTF8(value, "")
 }
 
 // boundedTail truncates to continuationFieldLimit bytes keeping the tail, on
@@ -529,15 +536,20 @@ func boundedTail(value string) string {
 }
 
 // boundedTailN truncates to limit bytes keeping the tail, on a rune
-// boundary, so a multi-byte character is never split into invalid UTF-8.
+// boundary, so a multi-byte character is never split into invalid UTF-8. The
+// result is also run through strings.ToValidUTF8: the rune-boundary cut above
+// only repairs the leading edge it introduces, so a value whose trailing
+// edge was already invalid (e.g. routingerr.Sanitize's own bare-byte-slice
+// truncation once its redactions grow the string past MaxRawExcerptBytes)
+// would otherwise carry that broken tail straight through.
 func boundedTailN(value string, limit int) string {
 	value = strings.TrimSpace(value)
-	if len(value) <= limit {
-		return value
+	if len(value) > limit {
+		cut := len(value) - limit
+		for cut < len(value) && !utf8.RuneStart(value[cut]) {
+			cut++
+		}
+		value = value[cut:]
 	}
-	cut := len(value) - limit
-	for cut < len(value) && !utf8.RuneStart(value[cut]) {
-		cut++
-	}
-	return value[cut:]
+	return strings.ToValidUTF8(value, "")
 }

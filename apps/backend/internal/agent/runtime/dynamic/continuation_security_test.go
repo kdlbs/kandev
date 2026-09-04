@@ -88,6 +88,34 @@ func TestContinuationRedactsConversationSecret(t *testing.T) {
 	}
 }
 
+// TestContinuationRedactsUserMessageSecret is the R2-2 regression:
+// boundedConversation only sanitized the agent half (convPart) of
+// Conversation, leaving a secret typed by the user, or forwarded from the
+// launch prompt via UserMessages, to survive verbatim into the persisted
+// continuation JSON and the rendered successor prompt.
+func TestContinuationRedactsUserMessageSecret(t *testing.T) {
+	continuation := BuildBoundedContinuation(ContinuationInput{
+		UserMessages: []string{"here is my key API_KEY=" + secretShapedToken},
+	})
+
+	if strings.Contains(continuation.Conversation, secretShapedToken) {
+		t.Fatalf("Conversation retained the raw secret from UserMessages: %q", continuation.Conversation)
+	}
+
+	payload, err := json.Marshal(continuation)
+	if err != nil {
+		t.Fatalf("marshal continuation: %v", err)
+	}
+	if strings.Contains(string(payload), secretShapedToken) {
+		t.Fatalf("continuation_json retained the raw secret from UserMessages: %s", payload)
+	}
+
+	prompt := ContinuationPrompt("do the task", continuation)
+	if strings.Contains(prompt, secretShapedToken) {
+		t.Fatalf("rendered prompt retained the raw secret from UserMessages: %q", prompt)
+	}
+}
+
 // TestContinuationWithFailureSanitizesFallbackReason covers the fallback-loop
 // path (conductor.go's continuationWithFailure), which sets FailureReason
 // directly from a classified launch error rather than through
