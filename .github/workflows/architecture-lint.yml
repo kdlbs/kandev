@@ -7,6 +7,7 @@ on:
     branches: [main]
   merge_group:
     types: [checks_requested]
+  workflow_dispatch:
 
 concurrency:
   # Pull requests can supersede one another safely. Pushes compare each commit
@@ -57,6 +58,9 @@ jobs:
             # group's equivalent of the pull request's base.
             merge_group) BASE_REF="${MERGE_GROUP_BASE_SHA}" ;;
             push) BASE_REF="${PUSH_BEFORE}" ;;
+            # The updater dispatches this workflow against its stable bot
+            # branch, so the main branch fork point is the PR baseline.
+            workflow_dispatch) BASE_REF="$(git merge-base HEAD origin/main)" ;;
             *) BASE_REF="" ;;
           esac
 

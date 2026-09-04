@@ -55,10 +55,19 @@ function handleRevisionPush(store: StoreApi<AppState>, message: RevisionMessage)
     title: p.title,
     author_kind: p.author_kind,
     author_name: p.author_name,
+    content_length: p.content_length,
     revert_of_revision_id: p.revert_of_revision_id ?? null,
     coalesced: p.coalesced,
     created_at: p.created_at,
     updated_at: p.updated_at,
+    // Step fields are omitempty on the wire (no key at all when the task has
+    // no workflow step). upsertPlanRevision merges via object spread, which
+    // overwrites even with `undefined` when the key is present — so these
+    // must stay absent from `rev`, not merely `undefined`, to avoid
+    // clobbering a coalesced row's existing step badge.
+    ...(p.workflow_step_id !== undefined ? { workflow_step_id: p.workflow_step_id } : {}),
+    ...(p.workflow_step_name !== undefined ? { workflow_step_name: p.workflow_step_name } : {}),
+    ...(p.workflow_step_color !== undefined ? { workflow_step_color: p.workflow_step_color } : {}),
   };
   store.getState().upsertPlanRevision(p.task_id, rev);
 }

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kandev mobile remote access</title>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --paper: #0d0d10;
+      --paper-2: #111114;
+      --ink: #ffffff;
+      --muted: #a1a1a1;
+      --soft: #737373;
+      --rule: rgba(255,255,255,0.12);
+      --rule-solid: #404040;
+      --accent: #6468f0;
+      --accent-tint: rgba(100,104,240,0.16);
+      --link: #53eafd;
+      --sans: 'Figtree', 'Geist', system-ui, sans-serif;
+      --serif: 'Instrument Serif', serif;
+      --mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 32px 24px 40px;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: var(--sans);
+    }
+    .frame { width: min(100%, 1280px); margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--soft);
+      font: 500 10px/1.4 var(--mono);
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font: 400 clamp(28px, 4vw, 36px)/1.1 var(--serif);
+      letter-spacing: -.02em;
+    }
+    .lede {
+      max-width: 70ch;
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    svg { display: block; width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <p class="eyebrow">Architecture · Kandev · doc-wide · balanced</p>
+    <h1>How a phone reaches Kandev</h1>
+    <p class="lede">Private network paths protect one Kandev origin, which routes the task session to the selected executor and repository.</p>
+
+    <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="mobile-remote-access-title mobile-remote-access-desc">
+      <title id="mobile-remote-access-title">How a phone reaches Kandev</title>
+      <desc id="mobile-remote-access-desc">A phone reaches one Kandev origin through Tailscale Serve, Cloudflare Access with cloudflared, or a private VPN. Kandev then routes the task session to the selected executor and repository.</desc>
+      <defs>
+        <marker id="mobile-remote-access-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#53eafd"/>
+        </marker>
+        <marker id="mobile-remote-access-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#6468f0"/>
+        </marker>
+      </defs>
+
+      <rect x="0" y="0" width="1280" height="720" fill="#0d0d10"/>
+
+      <!-- Zones show the trust boundary and the ownership handoff. -->
+      <rect x="160" y="120" width="368" height="352" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <rect x="568" y="236" width="192" height="128" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <rect x="800" y="236" width="432" height="128" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <text x="176" y="140" fill="#737373" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.12em">PROTECTED ACCESS</text>
+      <text x="584" y="256" fill="#737373" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.12em">KANDEV ORIGIN</text>
+      <text x="816" y="256" fill="#737373" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.12em">TASK EXECUTION</text>
+
+      <!-- Routes are painted before nodes so every node surface stays clean. -->
+      <path d="M128 288 H152 Q160 288 160 280 V204 Q160 196 168 196 H208" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow)"/>
+      <path d="M128 304 H208" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow)"/>
+      <path d="M128 320 H168 Q176 320 176 328 V404 Q176 412 184 412 H208" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow)"/>
+      <path d="M352 304 H368" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow)"/>
+      <path d="M352 196 H520 Q528 196 528 204 V288 Q528 296 536 296 H592" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow)"/>
+      <path d="M496 304 H592" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow)"/>
+      <path d="M352 412 H536 Q544 412 544 404 V320 Q544 312 552 312 H592" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow)"/>
+      <path d="M736 312 H824" fill="none" stroke="#6468f0" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow-accent)"/>
+      <path d="M944 312 H968" fill="none" stroke="#6468f0" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow-accent)"/>
+      <path d="M1088 312 H1112" fill="none" stroke="#6468f0" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow-accent)"/>
+
+      <!-- Nodes. The origin is the single focal point. -->
+      <g role="group" aria-label="Phone browser">
+        <rect x="32" y="272" width="96" height="64" rx="8" fill="#111114" stroke="#53eafd" stroke-width="1"/>
+        <text x="80" y="300" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Phone</text>
+        <text x="80" y="320" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">browser</text>
+      </g>
+      <g role="group" aria-label="Tailscale Serve">
+        <rect x="208" y="164" width="144" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="280" y="192" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Tailscale Serve</text>
+        <text x="280" y="212" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">private HTTPS</text>
+      </g>
+      <g role="group" aria-label="Cloudflare Access">
+        <rect x="208" y="272" width="144" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="280" y="300" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Cloudflare Access</text>
+        <text x="280" y="320" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">identity policy</text>
+      </g>
+      <g role="group" aria-label="cloudflared connector">
+        <rect x="368" y="272" width="128" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="432" y="300" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">cloudflared</text>
+        <text x="432" y="320" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">outbound connector</text>
+      </g>
+      <g role="group" aria-label="Private VPN">
+        <rect x="208" y="380" width="144" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="280" y="408" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Private VPN</text>
+        <text x="280" y="428" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">encrypted network</text>
+      </g>
+      <g role="group" aria-label="Kandev HTTP and WebSocket origin">
+        <rect x="592" y="280" width="144" height="64" rx="8" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1.2"/>
+        <text x="664" y="308" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Kandev origin</text>
+        <text x="664" y="328" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace">HTTP + WebSocket</text>
+      </g>
+      <g role="group" aria-label="Task and agent session">
+        <rect x="824" y="280" width="120" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="884" y="308" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Task session</text>
+        <text x="884" y="328" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">workspace-scoped</text>
+      </g>
+      <g role="group" aria-label="Selected executor">
+        <rect x="968" y="280" width="120" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="1028" y="308" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Executor</text>
+        <text x="1028" y="328" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">selected runtime</text>
+      </g>
+      <g role="group" aria-label="Repository">
+        <rect x="1112" y="280" width="104" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="1164" y="308" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Repository</text>
+        <text x="1164" y="328" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">task worktree</text>
+      </g>
+
+      <!-- The legend makes the two route registers explicit. -->
+      <line x1="56" y1="640" x2="88" y2="640" stroke="#53eafd" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow)"/>
+      <text x="104" y="644" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">PROTECTED ACCESS PATH</text>
+      <line x1="344" y1="640" x2="376" y2="640" stroke="#6468f0" stroke-width="1.2" marker-end="url(#mobile-remote-access-arrow-accent)"/>
+      <text x="392" y="644" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">TASK ROUTE</text>
+      <rect x="544" y="632" width="12" height="12" rx="2" fill="#6468f0"/>
+      <text x="572" y="644" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">SINGLE KANDEV ORIGIN</text>
+    </svg>
+  </main>
+</body>
+</html>

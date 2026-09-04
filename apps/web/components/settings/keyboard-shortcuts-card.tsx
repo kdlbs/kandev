@@ -40,6 +40,7 @@ type ShortcutRecorderProps = {
   onClear?: (id: string) => void;
   isDirty?: boolean;
   conflictsWith?: string[];
+  touchSized?: boolean;
 };
 
 export function ShortcutRecorder({
@@ -52,6 +53,7 @@ export function ShortcutRecorder({
   onClear,
   isDirty = false,
   conflictsWith,
+  touchSized = false,
 }: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
   const isDefault = JSON.stringify(current) === JSON.stringify(defaultShortcut);
@@ -99,14 +101,22 @@ export function ShortcutRecorder({
   }, [recording]);
 
   return (
-    <div className="flex items-center justify-between py-2">
+    <div
+      className={
+        touchSized
+          ? "flex flex-col items-stretch gap-2 py-3"
+          : "flex items-center justify-between py-2"
+      }
+    >
       <ShortcutRecorderLabel label={label} conflictsWith={conflictsWith} />
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <button
           data-testid={`shortcut-recorder-${shortcutId}`}
           data-settings-dirty={isDirty}
           onClick={() => setRecording(!recording)}
-          className={`px-3 py-1.5 rounded-md border text-sm cursor-pointer transition-colors ${
+          className={`min-w-0 px-3 py-1.5 rounded-md border text-sm cursor-pointer transition-colors ${
+            touchSized ? "min-h-11" : ""
+          } ${
             recording
               ? "border-primary bg-primary/10 text-primary"
               : "border-border bg-background hover:bg-accent"
@@ -121,6 +131,7 @@ export function ShortcutRecorder({
           defaultIsUnbound={defaultIsUnbound}
           onReset={onReset}
           onClear={onClear}
+          touchSized={touchSized}
         />
       </div>
     </div>
@@ -136,7 +147,7 @@ function ShortcutRecorderLabel({
 }) {
   const { t } = useTranslation();
   return (
-    <span className="text-sm flex items-center gap-1.5">
+    <span className="min-w-0 break-words text-sm flex items-center gap-1.5">
       {label}
       {conflictsWith && conflictsWith.length > 0 && (
         <span
@@ -157,6 +168,7 @@ function ShortcutRecorderActions({
   defaultIsUnbound,
   onReset,
   onClear,
+  touchSized,
 }: {
   shortcutId: string;
   isDefault: boolean;
@@ -164,6 +176,7 @@ function ShortcutRecorderActions({
   defaultIsUnbound: boolean;
   onReset: (id: string) => void;
   onClear?: (id: string) => void;
+  touchSized: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -172,7 +185,7 @@ function ShortcutRecorderActions({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 cursor-pointer"
+          className={`${touchSized ? "h-11 w-11" : "h-8 w-8"} cursor-pointer`}
           onClick={() => onClear(shortcutId)}
           aria-label={t("settings:clearShortcut")}
           title={t("settings:clearShortcut")}
@@ -184,7 +197,7 @@ function ShortcutRecorderActions({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 cursor-pointer"
+          className={`${touchSized ? "h-11 w-11" : "h-8 w-8"} cursor-pointer`}
           onClick={() => onReset(shortcutId)}
           aria-label={
             defaultIsUnbound ? t("settings:resetClearShortcut") : t("settings:resetToDefault")
@@ -216,7 +229,7 @@ function RecorderLabel({
 }
 
 /** Builds a `shortcutId -> conflicting labels` lookup from conflict groups. */
-function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, string[]> {
+export function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, string[]> {
   const labels = new Map<string, string[]>();
   for (const group of groups) {
     for (const entry of group.entries) {
@@ -231,7 +244,7 @@ function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, strin
 
 const CONFIGURABLE_SHORTCUT_IDS = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
 
-function useShortcutConflictLabels(
+export function useShortcutConflictLabels(
   pluginEntries: ShortcutEntry[],
   overrides: StoredShortcutOverrides,
   translate: NonNullable<Parameters<typeof coreShortcutEntries>[0]>,
@@ -312,32 +325,6 @@ export function KeyboardShortcutsCard({
             />
           ))}
         </div>
-        {pluginEntries.length > 0 && (
-          <div className="mt-4">
-            <p className="text-xs font-medium text-muted-foreground mb-1">
-              {t("settings:pluginShortcuts")}
-            </p>
-            <div className="divide-y divide-border">
-              {pluginEntries.map((entry) => (
-                <ShortcutRecorder
-                  key={entry.id}
-                  shortcutId={entry.id}
-                  label={entry.label}
-                  defaultShortcut={entry.default}
-                  current={resolveShortcutEntry(entry, overrides)}
-                  onChange={handleChange}
-                  onReset={handleReset}
-                  onClear={handleClear}
-                  isDirty={
-                    JSON.stringify(resolveShortcutEntry(entry, overrides)) !==
-                    JSON.stringify(resolveShortcutEntry(entry, baselineOverrides))
-                  }
-                  conflictsWith={conflictLabels.get(entry.id)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
         <p className="text-xs text-muted-foreground mt-3">
           {t("settings:clickAShortcutToRecordA")}
         </p>

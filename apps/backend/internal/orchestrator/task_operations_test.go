@@ -3869,6 +3869,64 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 	})
 }
 
+// TestPrepareTaskSession_MarksRouteActionRequiredWhenWorkspaceLaunchFails is
+// the regression test for review finding F2: PrepareTaskSession's own
+// background workspace launch resolves and claims a dynamic route ahead of
+// the actual agent start (see resolveExecutionForLaunchSession), but this
+// launch never starts the agent — it only reaches "active" later, via
+// StartCreatedSession. If it fails here, nothing else revisits the claim, so
+// it must not stay "starting" forever.
+func TestPrepareTaskSession_MarksRouteActionRequiredWhenWorkspaceLaunchFails(t *testing.T) {
+	const taskID = "task-dynamic-prepare-launch-fail"
+	const dynamicProfileID = "profile-dynamic"
+	const concreteProfileID = "profile-concrete"
+
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkflowID: "wf1", Title: "Test Task", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, WorkspaceID: "ws1", Title: "Test Task", State: v1.TaskStateInProgress}
+	launchErr := errors.New("workspace launch failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	svc.SetProfileExecutionResolver(newWorkflowDynamicProfileResolver(t, dynamicProfileID, concreteProfileID))
+
+	sessionID, err := svc.PrepareTaskSession(context.Background(), taskID, dynamicProfileID, "", "", "", true)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+
+	require.Eventually(t, func() bool {
+		session, getErr := repo.GetTaskSession(context.Background(), sessionID)
+		return getErr == nil && session.RouteState == "action_required"
+	}, time.Second, 10*time.Millisecond, "expected the claimed dynamic route to reach action_required after the workspace launch failed")
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.RouteGeneration == 0 {
+		t.Fatal("expected the session to have claimed a route generation before the launch failed")
+	}
+}
+
 func TestHandleSessionLaunchFailure_SkipsTaskFailureWhenSessionTransitionLoses(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
@@ -5245,6 +5303,78 @@ func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
+}
+
+// TestStartTaskWithEnv_OfficeCreateThenReusePublishesOneCreatedEvent drives
+// two sequential office wakeups for the same (task, agent) pair through the
+// full StartTaskWithEnv path — not just the repository call-count proxy used
+// by office_session_race_guard_test.go's convergence tests — and asserts on
+// the actual event bus. The first wakeup has no live session and must create
+// one, publishing exactly one TaskSessionStateChanged/CREATED event for it.
+// The second wakeup reuses that same live session (EnsureSessionForAgentWithCreation)
+// and must not publish a second CREATED event for it: office wakeups often
+// share a session across many turns, and a duplicate CREATED event would make
+// the frontend re-adopt an already-running session as if it were new.
+func TestStartTaskWithEnv_OfficeCreateThenReusePublishesOneCreatedEvent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "existing-session", models.TaskSessionStateCompleted)
+	dbTask, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	dbTask.ProjectID = "office-project"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Office task",
+		Description: "Do the work",
+		State:       v1.TaskStateInProgress,
+	}
+	eventBus := &mockEventBus{}
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = eventBus
+	env := validOfficeRuntimeEnv()
+
+	firstExec, err := svc.StartTaskWithEnv(
+		ctx, "task1", "office-runner", "", "", "", "Do the work",
+		"", false, false, nil, env,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, firstExec)
+	firstSessionID := firstExec.SessionID
+	require.NotEqual(t, "existing-session", firstSessionID,
+		"a completed session must not be reused as the live office session")
+
+	secondExec, err := svc.StartTaskWithEnv(
+		ctx, "task1", "office-runner", "", "", "", "Do the work",
+		"", false, false, nil, env,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, secondExec)
+	require.Equal(t, firstSessionID, secondExec.SessionID,
+		"second office wakeup for the same (task, agent) pair must reuse the live session")
+
+	createdEventsForSession := 0
+	for _, published := range eventBus.published() {
+		if published.Subject != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := published.Event.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		if data[metaKeySessionID] == firstSessionID && data[metaKeyNewState] == string(models.TaskSessionStateCreated) {
+			createdEventsForSession++
+		}
+	}
+	require.Equal(t, 1, createdEventsForSession,
+		"create+reuse across two office wakeups must publish exactly one CREATED event, not zero and not two")
 }
 
 func TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion(t *testing.T) {

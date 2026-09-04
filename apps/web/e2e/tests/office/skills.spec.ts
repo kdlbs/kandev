@@ -10,7 +10,9 @@ test.describe("Skills", () => {
       slug: "test-skill",
       content: "# Test\n\nThis is a test skill.",
     });
-    expect((skill as Record<string, unknown>).slug).toBe("test-skill");
+    // A caller-supplied slug is normalized to its canonical kandev-prefixed
+    // form on write (AC-001.12).
+    expect((skill as Record<string, unknown>).slug).toBe("kandev-test-skill");
 
     const skills = await officeApi.listSkills(officeSeed.workspaceId);
     const list =
@@ -18,7 +20,7 @@ test.describe("Skills", () => {
       (skills as unknown as Record<string, unknown>[]);
     expect(
       Array.isArray(list)
-        ? list.some((s) => (s as Record<string, unknown>).slug === "test-skill")
+        ? list.some((s) => (s as Record<string, unknown>).slug === "kandev-test-skill")
         : false,
     ).toBe(true);
   });
@@ -32,7 +34,7 @@ test.describe("Skills", () => {
     const id = (created as Record<string, unknown>).id as string;
     const fetched = await officeApi.getSkill(id);
     expect((fetched as Record<string, unknown>).id).toBe(id);
-    expect((fetched as Record<string, unknown>).slug).toBe("get-skill");
+    expect((fetched as Record<string, unknown>).slug).toBe("kandev-get-skill");
   });
 
   test("delete skill removes it from list", async ({ officeApi, officeSeed }) => {
@@ -84,7 +86,9 @@ test.describe("Skills", () => {
 
     const imported = await officeApi.importUserHomeSkill(officeSeed.workspaceId, provider, key);
     expect(imported.name).toBe(name);
-    expect(imported.slug).toBe(key);
+    // A discovered provider-skill key is a well-formed slug and gets the
+    // same write-time canonicalization as any other slug (AC-001.12).
+    expect(imported.slug).toBe(`kandev-${key}`);
     expect(imported.source_type).toBe("user_home");
     expect(imported.source_locator).toBe(`${provider}:${key}`);
 

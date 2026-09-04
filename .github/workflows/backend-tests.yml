@@ -13,6 +13,7 @@ on:
     branches: [main]
   merge_group:
     types: [checks_requested]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -464,7 +465,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-    timeout-minutes: 10
+    # The env-gated package suite runs with the race detector and can exceed
+    # ten minutes on a hosted runner as the repository test set grows.
+    timeout-minutes: 20
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
@@ -529,9 +532,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
-    # The race-sensitive Windows package suite can exceed 15 minutes on a
-    # busy hosted runner; keep the cap finite while allowing normal completion.
-    timeout-minutes: 20
+    # The race-sensitive Windows package suite can approach 20 minutes on a
+    # busy hosted runner; keep the cap finite while allowing runner variance.
+    timeout-minutes: 30
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.
@@ -569,7 +572,7 @@ jobs:
       # a self-hosting Go helper (see testmain_test.go) so they run on
       # every platform.
       - name: Test windows-sensitive packages
-        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/...
+        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 
       - name: Test Windows managed runtime cache repair
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent

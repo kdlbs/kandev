@@ -746,6 +746,12 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 	return nil
 }
 
+// ReconcileVacatedStep fills available capacity in a workflow step from its
+// same-step queue or configured feeder.
+func (s *Service) ReconcileVacatedStep(ctx context.Context, vacatedStepID string) {
+	s.pullNextTaskOnVacate(ctx, vacatedStepID, "")
+}
+
 func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
 	// A queue/WIP reconciliation is always wip_pull, unconditionally
 	// overriding whatever trigger the caller that vacated the step declared
@@ -873,7 +879,9 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
 	candidate.Position = position
-	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+	candidate.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{
+		"from_step_id": fromStepID,
+	}
 	if err := s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep); err != nil {
 		s.logger.Warn("failed to prepare same-step queued promotion", zap.String("task_id", candidate.ID), zap.Error(err))
 		skipped[candidate.ID] = struct{}{}
@@ -938,7 +946,9 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
-	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+	candidate.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{
+		"from_step_id": fromStepID,
+	}
 	candidate.Position = position
 	candidate.WorkflowID = targetStep.WorkflowID
 	candidate.WorkflowStepID = targetStep.ID

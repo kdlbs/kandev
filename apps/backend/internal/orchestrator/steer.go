@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -74,7 +75,10 @@ func (s *Service) steerEligibleForSession(ctx context.Context, sessionID string)
 // rather than dispatched now; the caller sees success. ErrSteerNotEligible is
 // returned only when the session is no longer steer-eligible at all (e.g. its
 // turn ended between the caller's check and here), so the caller can fall back
-// to an ordinary prompt. Any other error is a genuine dispatch failure.
+// to an ordinary prompt. If attachment materialization fails after admission,
+// the failed owner releases its slot and retries a queued drain so a completion
+// that raced with the failure cannot strand the successor. Any other error is a
+// genuine dispatch failure.
 func (s *Service) SteerTask(
 	ctx context.Context,
 	taskID, sessionID, prompt, model string,
@@ -142,7 +146,17 @@ func (s *Service) SteerTask(
 	}
 	// We now own the single in-flight slot. The queue admission lock is released
 	// before the blocking dispatch; clear the slot when the dispatch completes.
-	defer s.steerInFlight.Delete(sessionID)
+	promptCtx := context.WithoutCancel(ctx)
+	var dispatchErr error
+	defer func() {
+		s.steerInFlight.Delete(sessionID)
+		if errors.Is(dispatchErr, executor.ErrSteerAttachmentMaterialization) {
+			// A predecessor completion may have skipped its drain while this
+			// marker was set. Retry after releasing the marker so the queued
+			// successor can make progress if the session is promptable now.
+			s.drainQueuedMessageForPromptableSession(promptCtx, sessionID)
+		}
+	}()
 
 	effectivePrompt := s.effectivePromptForSession(sessionID, prompt, planMode, session)
 	s.logger.Info("dispatching mid-turn steer",
@@ -151,19 +165,24 @@ func (s *Service) SteerTask(
 
 	// context.WithoutCancel: a WS request timeout must not abort the steer, same
 	// as the ordinary prompt path.
-	promptCtx := context.WithoutCancel(ctx)
 	// dispatchOnly=true: a steer is dispatch-and-continue. The predecessor turn
 	// owns foreground completion, so this call must not wait for a turn to end,
 	// and must not take the foreground claim.
-	result, err := s.executor.SteerWithDispatchCallback(
+	result, dispatchErr := s.executor.SteerWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, true, func() {}, session,
 	)
-	if err != nil {
+	if dispatchErr != nil {
+		if errors.Is(dispatchErr, executor.ErrSteerNotDispatched) {
+			// The active generation ended before the steer reached agentctl.
+			// Let the handler re-enter PromptTask, which owns ordinary queue and
+			// foreground admission for the replacement turn.
+			return nil, ErrSteerNotEligible
+		}
 		s.logger.Warn("mid-turn steer dispatch failed",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return nil, err
+			zap.Error(dispatchErr))
+		return nil, dispatchErr
 	}
 	return &PromptResult{
 		StopReason:   result.StopReason,

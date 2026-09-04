@@ -476,6 +476,17 @@ type PRWatch struct {
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
 
+// TaskPR "source" values, recording which write path created the
+// association. Empty ("") is the default for rows written before this
+// column existed and is never backfilled.
+const (
+	// TaskPRSourceWatch is a PR observed via push detection or discovered by
+	// a PR watch (branch-based association).
+	TaskPRSourceWatch = "watch"
+	// TaskPRSourceURLLink is a PR the user explicitly linked by URL.
+	TaskPRSourceURLLink = "url_link"
+)
+
 // TaskPR associates a PR with a task. RepositoryID identifies which task
 // repository this PR belongs to (multi-repo tasks can have one PR per repo).
 // Empty for legacy rows persisted before multi-repo support.
@@ -523,6 +534,11 @@ type TaskPR struct {
 	LastSyncedAt            *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
 	DetachedAt              *time.Time `json:"-" db:"detached_at"`
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
+
+	// Source records which write path created this association: see
+	// TaskPRSourceWatch / TaskPRSourceURLLink. Empty on rows written before
+	// this column existed; never backfilled.
+	Source string `json:"source" db:"source"`
 
 	// --- PR outcome attribution (five nullable columns, never backfilled) ---
 	//

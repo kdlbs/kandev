@@ -14,6 +14,14 @@ Integrations let Kandev's backend read and update provider data. They power repo
 3. Test the connection before browsing or enabling watches.
 4. Keep provider API credentials, task Git credentials, and agent credentials separate.
 
+![Three separate integration credential paths from workspace and executor configuration to provider APIs, repository remotes, and the agent CLI.](../screenshots/integrations.svg)
+
+[Open full-size SVG diagram][integrations-diagram]
+
+[integrations-diagram]: ../../docs/screenshots/integrations.svg
+
+The path that fails identifies the configuration surface to inspect. A working provider connection does not prove that a task can push Git changes or that its agent CLI can authenticate.
+
 They do **not** provide every credential a task needs. Keep these paths distinct:
 
 - an integration credential lets the Kandev backend call a provider API;
@@ -573,7 +581,7 @@ When editing, a blank secret preserves the saved credential only if the URL, acc
 
 ### Jira issue watches
 
-Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, a blank branch resolves to that repository's default branch. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
+Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, choose its default branch, a local branch such as `main`, or a qualified remote branch such as `origin/main`. Kandev saves the remote name with the selected branch. Before a watcher-created task worktree is made, branch freshness follows the repository's [worktree and branch lifecycle](git-operations.md#managed-worktree-and-branch-lifecycle) policy. **Always pull before creating a new worktree** controls that refresh; selecting `origin/main` does not enable a pull for this watcher. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
 
 The maximum in-flight value defaults to 5. Leave it blank for no cap. A cap defers remaining matches rather than importing them all at once. Each poll fetches only the first 50 JQL matches and does not paginate. Already-seen issues still occupy that provider result window, so a stable broad query can leave later matches unseen indefinitely; narrow the JQL enough that every important issue can enter the first page. Pause the watch before changing a broad query. Jira task-preset prompts can use ticket key, URL, title, and description placeholders from the preset editor.
 

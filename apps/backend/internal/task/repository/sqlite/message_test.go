@@ -148,7 +148,7 @@ func TestPermissionResolutionClaimIgnoresInvalidSQLiteMetadataRows(t *testing.T)
 			}
 			// Simulate a legacy database that predates the JSON expression indexes;
 			// current indexes reject malformed metadata before the claim path runs.
-			for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id"} {
+			for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id", "idx_messages_metadata_pending_id_lookup"} {
 				if _, err := repo.db.Exec("DROP INDEX " + index); err != nil {
 					t.Fatalf("drop %s: %v", index, err)
 				}

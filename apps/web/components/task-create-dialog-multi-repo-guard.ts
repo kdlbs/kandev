@@ -1,6 +1,12 @@
 import { t } from "@/lib/i18n";
 
-const MULTI_REPO_SUPPORTED_EXECUTOR_TYPES = new Set(["worktree", "local_docker", "ssh", "sprites"]);
+const MULTI_REPO_SUPPORTED_EXECUTOR_TYPES = new Set([
+  "worktree",
+  "local_docker",
+  "ssh",
+  "sprites",
+  "k8s",
+]);
 
 /**
  * Returns the selector explanation for runtimes that cannot launch a task
