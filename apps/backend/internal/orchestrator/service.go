@@ -593,6 +593,12 @@ type Service struct {
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
 	sessionAccessCheck func(ctx context.Context, sessionID string) error
 
+	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
+	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
+	// liveness probe (spec docs/specs/disambiguate-waiting/spec.md). Loaded
+	// once at construction; see LoadBackgroundProbeConfig.
+	backgroundProbeConfig BackgroundProbeConfig
+
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
 	// entry points that name a task rather than a session (session.launch,
 	// session.ensure). Nil = unscoped.
@@ -1370,6 +1376,7 @@ func NewService(
 		dynamicSuccessorCtx:          dynamicSuccessorCtx,
 		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
+		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
 	// status-summary projector zeros queued_prompt_count. Unlike the

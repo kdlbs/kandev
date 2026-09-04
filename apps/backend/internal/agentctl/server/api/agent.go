@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/server/process/probe"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -116,6 +117,20 @@ type PermissionRespondResponse struct {
 // AgentStderrResponse contains recent stderr lines from the agent process.
 type AgentStderrResponse struct {
 	Lines []string `json:"lines"`
+}
+
+// BackgroundProbeRequest is a request to sample the agent process's
+// transitive descendant set for background-workload liveness (spec
+// docs/specs/disambiguate-waiting/spec.md, AC-45). It carries no timestamp:
+// the turn start it compares against was already recorded by the adapter.
+type BackgroundProbeRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// BackgroundProbeResponse carries the probe's three-way outcome — always
+// exactly one of "live", "settled", or "unknown" (AC-45).
+type BackgroundProbeResponse struct {
+	Result string `json:"result"`
 }
 
 // CancelResponse is the response from a cancel request.
@@ -292,6 +307,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSPermissionCancel(msg)
 	case "agent.stderr":
 		return s.handleWSStderr(ctx, msg)
+	case "agent.background.probe":
+		return s.handleWSBackgroundProbe(ctx, msg)
 	case "agent.session.set_mode":
 		return s.handleWSSetMode(ctx, msg)
 	case "agent.session.set_model":
@@ -741,6 +758,50 @@ func (s *Server) handleWSPermissionRespond(_ context.Context, msg *ws.Message) *
 func (s *Server) handleWSStderr(_ context.Context, msg *ws.Message) *ws.Message {
 	lines := s.procMgr.GetRecentStderr()
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, AgentStderrResponse{Lines: lines})
+	return resp
+}
+
+// handleWSBackgroundProbe implements agent.background.probe (spec
+// docs/specs/disambiguate-waiting/spec.md, §"Probe transport"). It samples
+// the running agent process's transitive descendant set for a member
+// started at-or-after the turn start recorded for req.SessionID (D3/D5).
+// Anything short of a clean sample — no adapter, an adapter that doesn't
+// record turn starts, or no recorded turn start for this session — reports
+// ResultUnknown rather than an error, since "unknown" is itself one of the
+// three valid response literals (AC-45); only a fully unavailable agent
+// process is a transport-level error, consistent with the other handlers
+// in this file.
+func (s *Server) handleWSBackgroundProbe(_ context.Context, msg *ws.Message) *ws.Message {
+	var req BackgroundProbeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	recorder, ok := agentAdapter.(adapter.TurnStartRecorder)
+	if !ok {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, BackgroundProbeResponse{Result: string(probe.ResultUnknown)})
+		return resp
+	}
+
+	turnStart, ok := recorder.RecordedTurnStart(req.SessionID)
+	if !ok {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, BackgroundProbeResponse{Result: string(probe.ResultUnknown)})
+		return resp
+	}
+
+	result, err := probe.ProbeBackgroundWorkloads(s.procMgr.AgentPID(), turnStart)
+	if err != nil {
+		s.logger.Warn("background probe failed", zap.String("session_id", req.SessionID), zap.Error(err))
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, BackgroundProbeResponse{Result: string(result)})
 	return resp
 }
 

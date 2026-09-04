@@ -2199,6 +2199,25 @@ func (m *Manager) CancelPermissionBySessionID(ctx context.Context, sessionID, re
 	return client.CancelPermission(requestCtx, requestID, pendingID)
 }
 
+// ProbeBackgroundWorkloadsBySessionID samples the agent execution owning
+// sessionID for background-workload liveness (spec
+// docs/specs/disambiguate-waiting/spec.md, §"Probe transport"). Unlike
+// RespondToPermission, no timeout is applied here — the caller wraps ctx
+// with the KANDEV_PARKED_PROBE_BUDGET timeout (D2) before calling this.
+func (m *Manager) ProbeBackgroundWorkloadsBySessionID(ctx context.Context, sessionID string) (agentctlclient.ProbeResult, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return agentctlclient.ProbeResultUnknown, fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return agentctlclient.ProbeResultUnknown, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
+	}
+
+	return client.ProbeBackgroundWorkloads(ctx, sessionID)
+}
+
 // stopAgentViaBackend stops the agent execution via the runtime that created it.
 func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool, agentStopFailed bool) error {
 	if execution.RuntimeName == "" || m.executorRegistry == nil {
