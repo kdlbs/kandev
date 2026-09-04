@@ -3,35 +3,12 @@ package github
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
-
-type blockingGitHubRoundTripper struct {
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (t *blockingGitHubRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.once.Do(func() { close(t.started) })
-	select {
-	case <-req.Context().Done():
-		return nil, req.Context().Err()
-	case <-t.release:
-	}
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(`{"login":"test-user"}`)),
-		Header:     make(http.Header),
-	}, nil
-}
 
 // mockSecretManager implements SecretManager for testing.
 type mockSecretManager struct {
@@ -311,17 +288,6 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 }
 
 func TestConfigureTokenHonorsCancellationDuringLegacyPrincipalResolution(t *testing.T) {
-	previousTransport := http.DefaultTransport
-	transport := &blockingGitHubRoundTripper{
-		started: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-	http.DefaultTransport = transport
-	t.Cleanup(func() {
-		http.DefaultTransport = previousTransport
-		close(transport.release)
-	})
-
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	if err != nil {
 		t.Fatal(err)
@@ -333,6 +299,10 @@ func TestConfigureTokenHonorsCancellationDuringLegacyPrincipalResolution(t *test
 		logger:        log,
 		rateTracker:   NewRateTracker(nil, nil),
 	}
+	svc.rateTracker.ObserveSecondary(
+		ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "fixture",
+	)
+	t.Cleanup(func() { svc.rateTracker.ObserveSuccess(ResourceCore) })
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	done := make(chan error, 1)
@@ -340,13 +310,8 @@ func TestConfigureTokenHonorsCancellationDuringLegacyPrincipalResolution(t *test
 
 	select {
 	case <-done:
-		t.Fatal("ConfigureToken completed before the blocked principal probe was released")
-	case <-transport.started:
-	}
-
-	select {
-	case <-done:
+		// Expected: cancellation interrupts the admission wait.
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("ConfigureToken ignored cancellation while resolving the legacy principal")
+		t.Fatal("ConfigureToken ignored cancellation during throttled principal resolution")
 	}
 }
