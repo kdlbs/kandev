@@ -52,18 +52,20 @@ keeping Markdown rendering and comments unchanged.
 - Monaco, CodeMirror, center-panel, Dockview, and mobile file viewers expose
   HTML preview only for eligible text files. Source restoration does not change
   the buffer or dirty state.
-- The preview iframe has the exact sandbox, referrer, title, and CSP document
-  contract. A construction error retains a localized route back to source.
+- The preview iframe has the exact empty sandbox, referrer, title, and CSP
+  document contract. A construction error retains a localized route back to
+  source.
 - Markdown behavior, other file actions, mobile focus, touch sizing, and scroll
   containment remain unchanged.
 
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run components/task/html-preview-content.test.tsx components/task/file-editor-content.test.tsx components/task/file-tab-content.test.tsx components/task/mobile/mobile-file-viewer-panel.test.tsx components/editors/monaco/monaco-editor-toolbar.test.tsx components/editors/codemirror/codemirror-code-editor.preview.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm run i18n:check
-cd apps/web && pnpm run i18n:ratchet
+cd apps/web
+pnpm exec vitest run components/task/html-preview-content.test.tsx components/task/file-editor-content.test.tsx components/task/file-tab-content.test.tsx components/task/mobile/mobile-file-viewer-panel.test.tsx components/editors/monaco/monaco-editor-toolbar.test.tsx components/editors/codemirror/codemirror-code-editor.preview.test.tsx
+pnpm run typecheck
+pnpm run i18n:check
+pnpm run i18n:ratchet
 ```
 
 ## Files likely touched
@@ -116,10 +118,11 @@ cd apps/web && pnpm run i18n:ratchet
 
 ## Results
 
-Implemented the sandboxed HTML renderer and wired the format-neutral preview
-state through desktop and mobile file surfaces. Added localized controls and
-component coverage for HTML, Markdown, unsupported files, binary files,
-toolbar selection, mobile identity reset, touch sizing, and source restoration.
+Implemented the sandboxed static HTML renderer and wired the format-neutral
+preview state through desktop and mobile file surfaces. Added localized
+controls and component coverage for HTML, Markdown, unsupported files, binary
+files, toolbar selection, mobile identity reset, touch sizing, and source
+restoration.
 Verification passed:
 
 ```text

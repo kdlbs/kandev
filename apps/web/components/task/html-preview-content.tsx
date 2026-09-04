@@ -124,7 +124,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
           <iframe
             data-testid="html-preview-frame"
             title={t("task:htmlPreview")}
-            sandbox="allow-scripts"
+            sandbox=""
             referrerPolicy="no-referrer"
             srcDoc={srcDoc}
             className="h-full w-full border-0"

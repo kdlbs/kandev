@@ -28,8 +28,8 @@ in-memory buffer. It does not add a workspace file server.
 - `.html` and `.htm` preview eligibility for editable text files.
 - A format-neutral rendered-preview state with legacy Markdown restoration.
 - A self-contained HTML document builder with an injected restrictive CSP.
-- An opaque-origin iframe that permits inline scripts without sharing Kandev
-  application authority.
+- An opaque-origin iframe that renders markup and inline CSS without executing
+  scripts or sharing Kandev application authority.
 - Preview and source toggles in Monaco, CodeMirror, the center-panel file tabs,
   Dockview file editors, and the focused mobile file viewer.
 - Complete localized copy in the five shipped locales and pseudo-locale
@@ -68,9 +68,10 @@ document for `srcDoc`. Its tests own the exact allowed and denied policy tokens.
 ### Rendered file surfaces
 
 Add `apps/web/components/task/html-preview-content.tsx` with a preview header
-and a full-body iframe. The iframe uses `sandbox="allow-scripts"`, omits every
-same-origin and navigation capability, uses `referrerPolicy="no-referrer"`, and
-receives no Kandev identifiers or credentials.
+and a full-body iframe. The iframe uses an empty `sandbox` attribute, omits
+script, same-origin, and navigation capabilities, uses
+`referrerPolicy="no-referrer"`, and receives no Kandev identifiers or
+credentials.
 
 Generalize the `FileEditorContent` contract from Markdown-specific booleans and
 callbacks to preview kind, preview state, and a shared toggle. Monaco and
@@ -94,8 +95,8 @@ repository scripts rather than leaving English fallback text.
 
 Add a short how-to subsection to `docs/public/developer-tools.md` beside the
 Files and editor instructions. Explain the eye action, unsaved-buffer behavior,
-sandboxed inline-script support, the self-contained limitation, and when to use
-a dev server plus Browser panel instead.
+the sandboxed static-preview boundary, the self-contained limitation, and when
+to use a dev server plus Browser panel instead.
 
 ## Tests
 
@@ -103,16 +104,16 @@ a dev server plus Browser panel instead.
 | --- | --- |
 | `AC-UI-NATIVE-HTML-PREVIEW-001.1`, `.8` | Preview-kind, toolbar, and renderer-selection Vitest coverage for HTML, Markdown, unsupported, and binary files |
 | `AC-UI-NATIVE-HTML-PREVIEW-001.2`, `.6` | File-state, dirty-buffer, center-panel, Dockview, and session-storage restoration tests |
-| `AC-UI-NATIVE-HTML-PREVIEW-001.3`, `.4`, `.5` | HTML document-builder and preview-frame component tests for CSP, sandbox attributes, allowed inline content, blocked capabilities, and recoverable failures |
+| `AC-UI-NATIVE-HTML-PREVIEW-001.3`, `.4`, `.5` | HTML document-builder and preview-frame component tests for CSP, sandbox attributes, allowed static content, blocked capabilities, and recoverable failures |
 | `AC-UI-NATIVE-HTML-PREVIEW-001.7` | Focused mobile viewer component tests for entry point, identity reset, touch sizing, and containment |
 
 ## E2E tests
 
 - `apps/web/e2e/tests/chat/html-preview.spec.ts` runs under Chromium. It covers
   `AC-UI-NATIVE-HTML-PREVIEW-001.1` through `.6` and `.8`. The test edits an
-  HTML file without saving and renders markup plus an inline-script result. It
-  proves parent isolation, returns to source, and restores preview after a
-  refresh.
+  HTML file without saving and renders its markup while attempting script and
+  meta-refresh navigation. It proves that neither navigation makes a request,
+  returns to source, and restores preview after a refresh.
 - `apps/web/e2e/tests/task/mobile-html-preview.spec.ts` runs under
   `mobile-chrome`. It covers `AC-UI-NATIVE-HTML-PREVIEW-001.1`, `.2`, `.3`,
   `.7`, and `.8`. The test opens the focused viewer, previews the file, and

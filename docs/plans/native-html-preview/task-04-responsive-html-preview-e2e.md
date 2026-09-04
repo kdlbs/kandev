@@ -25,8 +25,8 @@ system_design:
 ## Summary
 
 Add browser-level evidence that HTML preview works from the current buffer and
-keeps untrusted scripts isolated. Prove the same user outcome in the focused
-mobile file viewer and verify mobile geometry.
+keeps untrusted active content inert. Prove the same user outcome in the
+focused mobile file viewer and verify mobile geometry.
 
 ## In scope
 
@@ -34,8 +34,8 @@ mobile file viewer and verify mobile geometry.
   return to source, and same-session refresh restoration.
 - Mobile Chrome coverage for focused viewer entry, preview, return to source,
   touch-target size, and document overflow containment.
-- Browser assertions that inline scripts run inside the frame but cannot mutate
-  the Kandev parent document.
+- Browser assertions that scripts and meta-refresh navigation remain blocked
+  inside the frame.
 - Rebuild the production Vite bundle before E2E execution.
 
 ## Out of scope
@@ -50,15 +50,16 @@ mobile file viewer and verify mobile geometry.
   state survives the full preview cycle and page refresh.
 - Mobile Chrome completes the same preview cycle with a 44-pixel action and no
   document-level horizontal overflow.
-- The browser test proves inline script execution remains inside the opaque
-  frame and does not alter the parent application.
+- The browser test proves scripts do not execute and navigation attempts do not
+  make requests from the opaque frame.
 
 ## Verification
 
 ```bash
 make build-web
-cd apps/web && pnpm e2e:raw --project=chromium tests/chat/html-preview.spec.ts
-cd apps/web && pnpm e2e:raw --project=mobile-chrome tests/task/mobile-html-preview.spec.ts
+cd apps/web
+pnpm e2e:raw --project=chromium tests/chat/html-preview.spec.ts
+pnpm e2e:raw --project=mobile-chrome tests/task/mobile-html-preview.spec.ts
 ```
 
 ## Files likely touched
@@ -75,7 +76,7 @@ cd apps/web && pnpm e2e:raw --project=mobile-chrome tests/task/mobile-html-previ
 ## Risks
 
 - Happy DOM component tests cannot prove browser sandbox enforcement, so this
-  work order must keep the browser-level parent-isolation assertion.
+  work order must keep the browser-level script and navigation assertions.
 - Preview restoration waits on normal workspace and file-tab hydration and must
   use deterministic visible state rather than fixed sleeps.
 

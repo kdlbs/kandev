@@ -30,7 +30,8 @@ Markdown preview restoration through a one-way legacy read bridge.
 - Exclude binary files before preview selection.
 - Add and persist format-neutral rendered-preview state.
 - Read legacy `markdownPreview` session records without dual-writing them.
-- Build a complete HTML preview document with the required CSP.
+- Build a complete HTML preview document with the required CSP and no active
+  script capability.
 - Add focused unit tests before implementation changes.
 
 ## Out of scope
@@ -47,8 +48,8 @@ Markdown preview restoration through a one-way legacy read bridge.
 - Preview state survives the two desktop restoration paths and accepts legacy
   Markdown records while new records use only the generic field.
 - The document builder always places the restrictive CSP before workspace
-  content and never grants network, form, frame, object, worker, base, or
-  Kandev-origin capabilities.
+  content and never grants script, network, form, frame, object, worker, base,
+  or Kandev-origin capabilities.
 
 ## Verification
 

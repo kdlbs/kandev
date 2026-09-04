@@ -7,18 +7,17 @@ import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
 const SEEDED_HTML = "<!doctype html><html><body><p>Saved source</p></body></html>";
+const BLOCKED_NAVIGATION_URL = "https://html-preview-navigation.invalid/leak";
 const UNSAVED_HTML = `<!doctype html>
 <html>
+  <head>
+    <meta http-equiv="refresh" content="0;url=${BLOCKED_NAVIGATION_URL}">
+  </head>
   <body>
     <h1>Unsaved HTML preview</h1>
     <script>
       document.body.dataset.inlineScript = "ran";
-      document.body.insertAdjacentHTML("beforeend", "<p id='script-result'>Inline script ran</p>");
-      try {
-        parent.document.body.dataset.previewEscaped = "yes";
-      } catch {
-        // The preview must not be able to reach the parent document.
-      }
+      location.replace("${BLOCKED_NAVIGATION_URL}");
     </script>
   </body>
 </html>`;
@@ -57,6 +56,13 @@ test.describe("HTML preview", () => {
     backend,
     prCapture,
   }) => {
+    const navigationRequests: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.isNavigationRequest() && request.url() === BLOCKED_NAVIGATION_URL) {
+        navigationRequests.push(request.url());
+      }
+    });
+
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     fs.writeFileSync(path.join(repoDir, "preview.html"), SEEDED_HTML);
 
@@ -87,7 +93,7 @@ test.describe("HTML preview", () => {
     const preview = testPage.getByTestId("html-preview");
     await expect(preview).toBeVisible({ timeout: 10_000 });
     const frame = preview.getByTestId("html-preview-frame");
-    await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+    await expect(frame).toHaveAttribute("sandbox", "");
     await expect(frame).not.toHaveAttribute("allow-same-origin");
     await expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
     await expect(frame).toHaveAttribute("srcdoc", /default-src 'none'/);
@@ -96,8 +102,11 @@ test.describe("HTML preview", () => {
     await expect(
       frameDocument.getByRole("heading", { name: "Unsaved HTML preview" }),
     ).toBeVisible();
-    await expect(frameDocument.getByText("Inline script ran")).toBeVisible();
-    expect(await testPage.evaluate(() => document.body.dataset.previewEscaped ?? null)).toBeNull();
+    const previewFrame = await frame.elementHandle().then((handle) => handle?.contentFrame());
+    expect(
+      await previewFrame?.evaluate(() => document.body.dataset.inlineScript ?? null),
+    ).toBeNull();
+    expect(navigationRequests).toEqual([]);
 
     await prCapture.screenshot("html-preview-desktop", {
       caption: "Unsaved HTML rendered in the desktop preview surface",

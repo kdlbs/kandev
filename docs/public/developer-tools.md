@@ -169,7 +169,7 @@ The task **Files** panel browses, searches, opens, and edits task-worktree files
 
 ### Preview an HTML file
 
-Open an `.html` or `.htm` file in **Files**, then select **Preview HTML**. The preview uses the current editor buffer, so you can inspect unsaved HTML, inline CSS, inline JavaScript, and `data:` or `blob:` resources. Select **Show code** to return to the source editor.
+Open an `.html` or `.htm` file in **Files**, then select **Preview HTML**. The preview uses the current editor buffer, so you can inspect unsaved HTML, inline CSS, `data:` fonts, and `data:` or `blob:` images and media. Script elements and inline event handlers remain inert. Select **Show code** to return to the source editor.
 
 The preview runs in a sandboxed, opaque-origin frame. It cannot access Kandev authority, workspace files, network resources, forms, popups, downloads, or the parent page. Relative and remote resources therefore do not load. For a multi-file site, start a development server and open it in the Browser panel instead.
 

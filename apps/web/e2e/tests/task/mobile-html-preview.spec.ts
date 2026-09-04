@@ -12,7 +12,6 @@ const HTML_CONTENT = `<!doctype html>
 <html>
   <body>
     <h1>Mobile HTML preview</h1>
-    <script>document.body.insertAdjacentHTML("beforeend", "<p>Mobile script ran</p>");</script>
   </body>
 </html>`;
 
@@ -89,10 +88,7 @@ test.describe("Mobile HTML preview", () => {
     await previewToggle.tap();
     const preview = viewer.getByTestId("html-preview");
     await expect(preview).toBeVisible();
-    await expect(preview.getByTestId("html-preview-frame")).toHaveAttribute(
-      "sandbox",
-      "allow-scripts",
-    );
+    await expect(preview.getByTestId("html-preview-frame")).toHaveAttribute("sandbox", "");
     await expect(
       preview.getByTestId("html-preview-frame").contentFrame().getByRole("heading", {
         name: "Mobile HTML preview",
