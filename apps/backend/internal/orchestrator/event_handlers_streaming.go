@@ -1113,6 +1113,13 @@ func (s *Service) updateTaskSessionStateWithHook(
 
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
 
+	// Parked-projection terms 1 and 3 (spec docs/specs/disambiguate-waiting/spec.md,
+	// D2/D8): this is the single chokepoint every session-state transition
+	// passes through, so it covers entering WAITING_FOR_INPUT (synchronous
+	// first sample, AC-21) and leaving it (immediate clear, AC-68) regardless
+	// of which of this function's many call sites drove the transition.
+	s.onSessionStateChangedForParkedProjection(ctx, taskID, sessionID, oldState, nextState)
+
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
 	return session, true
