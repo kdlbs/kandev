@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import path from "node:path";
 import { backendFixture as test } from "../../fixtures/backend";
 import { login, setupAdmin } from "../../helpers/auth";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 
 const ADMIN = { email: "plugin-admin@demo.dev", password: "adminpass123", displayName: "Ada" };
@@ -86,19 +87,23 @@ test.describe.serial("member plugin settings", () => {
       const shortcutRecorder = shortcutCard.getByTestId(`shortcut-recorder-${PLUGIN_SHORTCUT_ID}`);
       await expect(shortcutRecorder).toBeVisible();
       await shortcutRecorder.click();
-      await page.keyboard.press("Control+Shift+t");
-      await expect(shortcutRecorder).toContainText("T");
+      await page.keyboard.press("Control+Alt+p");
+      await expect(shortcutRecorder).toHaveText("Ctrl+Alt+P");
+      const settingsSaved = waitForHttp(page, "PATCH", /^\/api\/v1\/user\/settings$/, {
+        predicate: (response) => response.ok(),
+      });
       await page
         .getByTestId("settings-floating-save")
         .getByRole("button", {
           name: "Save changes",
         })
         .click();
+      await settingsSaved;
 
       await page.reload();
-      await expect(
-        settingsPanel.getByTestId(`shortcut-recorder-${PLUGIN_SHORTCUT_ID}`),
-      ).toContainText("T");
+      await expect(settingsPanel.getByTestId(`shortcut-recorder-${PLUGIN_SHORTCUT_ID}`)).toHaveText(
+        "Ctrl+Alt+P",
+      );
 
       await page.goto("/settings/plugins");
       await settingsPanel.getByTestId("plugins-tab-browse").click();

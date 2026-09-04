@@ -86,14 +86,19 @@ continues to use the plugin config endpoint and is a separate save contributor.
    plugin list through `usePlugins`, and reads the current portable shortcut
    overrides from the settings store.
 2. The shortcut component builds all plugin entries for conflict comparison,
-   filters the visible list by the selected plugin ID, and initializes saved and
-   draft override snapshots from `userSettings.keyboardShortcuts`.
+   filters the visible list by the selected plugin ID, and seeds saved and draft
+   override snapshots from `userSettings.keyboardShortcuts`. Initial hydration
+   and later higher-revision settings updates replace the saved baseline and
+   rebase locally changed or deleted keys onto that complete incoming map.
 3. A recorder mutation changes only the local draft. The component registers a
    contributor such as `plugin-shortcuts:{pluginId}` with
-   `useSettingsSaveContributor`; discard restores the saved snapshot.
-4. Save sends the complete draft override map through `updateUserSettings`,
-   advances the saved baseline only after success, and updates the in-memory
-   user settings from the authoritative response or current store convention.
+   `useSettingsSaveContributor`; discard restores the saved snapshot. A draft
+   cannot become saveable until the initial portable-settings baseline has been
+   incorporated.
+4. Save rebases the local delta onto the latest settings-store map immediately
+   before sending the complete override map through `updateUserSettings`. A
+   response advances the baseline only when its revision is not older than the
+   store, and edits made while the request is pending remain in the draft.
 5. If an administrator also changed schema-driven plugin configuration, the
    route coordinator invokes both independent contributors. Existing partial
    success and retry behavior applies; a shortcut-only save never calls the
@@ -150,13 +155,16 @@ plugin identity can resolve that key again under existing behavior.
 
 Component tests cover core-only rendering, selected-plugin rendering, empty
 declarations, qualified conflict warnings, drafts, resets, route replacement,
-and persistence boundaries. The existing authenticated member plugin-settings
-scenario proves that the shortcut editor remains available while operator
-controls stay hidden and that the General shortcut page no longer contains the
-plugin row. The existing mobile plugin-detail scenario proves direct entry,
-touch geometry, single-axis containment, Save, and reload while the fixture
-plugin is disabled. Existing plugin dispatcher tests remain the regression
-evidence for dispatch precedence and editor-target rules.
+and persistence boundaries. Deferred-response cases cover initial hydration,
+higher-revision synchronization, complete-map rebasing, stale save responses,
+and edits made during an in-flight save. The existing authenticated member
+plugin-settings scenario proves that the shortcut editor remains available
+while operator controls stay hidden and that the General shortcut page no
+longer contains the plugin row. The existing mobile plugin-detail scenario
+proves direct entry, touch geometry, single-axis containment, an acknowledged
+Save, and reload while the fixture plugin is disabled. Existing plugin
+dispatcher tests remain the regression evidence for dispatch precedence and
+editor-target rules.
 
 ## Related decisions
 

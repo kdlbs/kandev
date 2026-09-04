@@ -106,8 +106,8 @@ None.
 - Hook placement must remain unconditional when a plugin has no keybindings;
   hide only the rendered card, not hook execution.
 - A full-map user-settings save can overwrite a newer concurrent shortcut
-  edit under the existing last-write contract; do not invent a partial merge
-  protocol in this task.
+  edit unless local changes are rebased onto the newest authoritative map and
+  stale responses are prevented from replacing higher store revisions.
 - Auth and mobile Playwright projects use different fixtures and must be run
   separately so test discovery is not mistaken for passing coverage.
 
@@ -137,6 +137,11 @@ None.
   replaces its exact detail route.
 - Added localized English, Portuguese, Simplified Chinese, Traditional
   Chinese, and pseudo-locale copy.
-- Verification passed: targeted Vitest (6 files, 46 tests), web typecheck,
+- Rebased local shortcut edits and deletions across initial hydration, later
+  portable-settings updates, and in-flight saves; stale responses no longer
+  replace a higher store revision.
+- Hardened desktop and mobile persistence coverage to await the successful
+  settings PATCH and assert the complete non-default binding after reload.
+- Verification passed: targeted Vitest (6 files, 52 tests), web typecheck,
   targeted ESLint, `i18n:check`, `i18n:ratchet`, `e2e:sleep-ratchet`, the
   authenticated member E2E (1 passed), and the mobile plugin E2E (1 passed).

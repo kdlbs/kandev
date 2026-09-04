@@ -13,6 +13,7 @@
  * part of the setup and every assertion here is about the same rendered row.
  */
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { PLUGIN_ID, installFixturePlugin } from "../../helpers/plugin-fixture";
 
 test("mobile plugin row: whole card opens settings, controls still act", async ({
@@ -98,22 +99,26 @@ test("mobile plugin row: whole card opens settings, controls still act", async (
     );
 
     await shortcutRecorder.tap();
-    await testPage.keyboard.press("Control+Shift+t");
-    await expect(shortcutRecorder).toContainText("T");
+    await testPage.keyboard.press("Control+Alt+p");
+    await expect(shortcutRecorder).toHaveText("Ctrl+Alt+P");
     const reset = shortcutCard.getByRole("button", { name: "Reset to default" });
     expect((await reset.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    const settingsSaved = waitForHttp(testPage, "PATCH", /^\/api\/v1\/user\/settings$/, {
+      predicate: (response) => response.ok(),
+    });
     await testPage
       .getByTestId("settings-floating-save")
       .getByRole("button", {
         name: "Save changes",
       })
       .tap();
+    await settingsSaved;
     await testPage.reload();
     await expect(
       testPage
         .getByTestId("plugin-shortcuts-card")
         .getByTestId(`shortcut-recorder-plugin:${PLUGIN_ID}:open-demo`),
-    ).toContainText("T");
+    ).toHaveText("Ctrl+Alt+P");
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       await testPage.evaluate(() => document.documentElement.clientWidth),
     );

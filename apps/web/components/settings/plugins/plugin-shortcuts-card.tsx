@@ -1,12 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { updateUserSettings } from "@/lib/api";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { PluginRecord } from "@/lib/types/plugins";
 import {
   buildPluginShortcutEntries,
@@ -19,8 +16,8 @@ import {
   ShortcutRecorder,
   useShortcutConflictLabels,
 } from "@/components/settings/keyboard-shortcuts-card";
-import { useSettingsSaveContributor } from "../settings-save-provider";
 import { SettingsCard } from "../settings-card";
+import { usePluginShortcutDraft } from "./use-plugin-shortcut-draft";
 
 type PluginShortcutEntry = Extract<ShortcutEntry, { source: "plugin" }>;
 
@@ -32,9 +29,6 @@ export function PluginShortcutsCard({
   plugins: PluginRecord[];
 }) {
   const { t } = useTranslation();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const pluginEntries = useMemo(() => buildPluginShortcutEntries(plugins), [plugins]);
   const selectedEntries = useMemo(
@@ -45,38 +39,16 @@ export function PluginShortcutsCard({
       ),
     [plugin.id, pluginEntries],
   );
-  const [saved, setSaved] = useState<StoredShortcutOverrides>(() => ({
-    ...userSettings.keyboardShortcuts,
-  }));
-  const [draft, setDraft] = useState<StoredShortcutOverrides>(saved);
-  const revision = JSON.stringify(draft);
-
-  useSettingsSaveContributor({
-    id: `plugin-shortcuts:${plugin.id}`,
-    revision,
-    isDirty: revision !== JSON.stringify(saved),
-    save: async () => {
-      const response = await updateUserSettings({ keyboard_shortcuts: draft });
-      const current = storeApi.getState().userSettings;
-      const authoritative = mapUserSettingsResponse(response, current);
-      const next = { ...authoritative.keyboardShortcuts } as StoredShortcutOverrides;
-      setSaved(next);
-      setDraft(next);
-      setUserSettings(authoritative);
-    },
-    discard: () => setDraft(saved),
-  });
+  const { saved, draft, setDraft, isDirty } = usePluginShortcutDraft(
+    `plugin-shortcuts:${plugin.id}`,
+  );
 
   const conflictLabels = useShortcutConflictLabels(pluginEntries, draft, t);
   if (selectedEntries.length === 0) return null;
 
   const touchSized = isMobile || !isFinePointer;
   return (
-    <SettingsCard
-      isDirty={revision !== JSON.stringify(saved)}
-      className="min-w-0"
-      data-testid="plugin-shortcuts-card"
-    >
+    <SettingsCard isDirty={isDirty} className="min-w-0" data-testid="plugin-shortcuts-card">
       <CardHeader>
         <CardTitle className="text-base">{t("plugins:shortcuts")}</CardTitle>
       </CardHeader>

@@ -76,9 +76,12 @@ capabilities remain composable.
 Register a route-local `plugin-shortcuts:{pluginId}` save contributor. Its
 draft contains the existing complete `StoredShortcutOverrides` map and saves
 through `updateUserSettings({ keyboard_shortcuts: ... })`; it never calls the
-plugin configuration endpoint. Preserve the existing namespaced keys so no
-migration or dispatcher change is needed. When an administrator changes both
-plugin config and a personal shortcut, the shared coordinator owns partial
+plugin configuration endpoint. Synchronize the baseline after initial
+hydration and later portable-settings updates, rebase local changes onto the
+newest complete map at save time, reject stale response authority, and preserve
+edits made while the request is pending. Preserve the existing namespaced keys
+so no migration or dispatcher change is needed. When an administrator changes
+both plugin config and a personal shortcut, the shared coordinator owns partial
 success, retry, discard, and navigation protection across the two contributors.
 
 ### Responsive composition
@@ -154,6 +157,9 @@ before the production UI changes are made.
   whitespace checks passed.
 - Review remediation removed unrelated generated locale churn and covered the
   exact-root plugin settings-route compatibility path.
+- Review remediation rebased shortcut drafts across hydration, live settings
+  updates, and in-flight saves, and made both persistence E2E scenarios await
+  the successful settings response before reload.
 
 ## Risks
 
@@ -162,8 +168,7 @@ before the production UI changes are made.
   silently remove member access.
 - Separating rendered lists can accidentally narrow conflict detection to the
   visible page and hide core-versus-plugin or plugin-versus-plugin collisions.
-- Saving the complete override map from two independently mounted settings
-  routes retains the existing last-write behavior; this change adds no
-  concurrent-edit merge protocol.
+- Saving still uses the complete-map backend contract, so the contributor must
+  continue rebasing its local delta onto the latest authoritative store map.
 - Mobile recorder rows currently use compact desktop geometry and need an
   explicit narrow/coarse-pointer composition to avoid clipped actions.
