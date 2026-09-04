@@ -134,6 +134,98 @@ func TestSSHDefaultPrepareScriptExecutesUnderZsh(t *testing.T) {
 	}
 }
 
+// TestSSHPrepareScriptRepairsPersistedLegacyRefspec covers the upgrade path.
+// The profile editor persists the generated default in
+// executor_profiles.prepare_script, and resolvePrepareScript prefers that
+// stored value over DefaultPrepareScript, so bracing the managed script alone
+// leaves every profile created before that change still fetching
+// `refs/heads/mainefs/remotes/origin/main` under zsh.
+func TestSSHPrepareScriptRepairsPersistedLegacyRefspec(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh not available")
+	}
+
+	// Exactly what a pre-fix profile stored: the current default with the
+	// refspec expansions unbraced again.
+	legacy := strings.ReplaceAll(
+		DefaultPrepareScript(executorTypeSSH),
+		"+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}",
+		"+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch",
+	)
+	if !strings.Contains(legacy, "+refs/heads/$repository_branch:") {
+		t.Fatal("legacy fixture did not reproduce the unbraced refspec")
+	}
+
+	root, origin, workspace := newSSHPrepareFixture(t)
+	script, err := (&SSHExecutor{}).resolvePrepareScript(&ExecutorCreateRequest{
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			MetadataKeySetupScript:    legacy,
+			"repository_clone_url":    origin,
+			MetadataKeyBaseBranch:     "main",
+			MetadataKeyWorktreeBranch: "feature/task-1",
+		},
+	}, workspace, "/remote/bin/agentctl")
+	if err != nil {
+		t.Fatalf("resolvePrepareScript() error = %v", err)
+	}
+	if strings.Contains(script, "+refs/heads/$repository_branch:") {
+		t.Fatalf("stored legacy refspec was not repaired:\n%s", script)
+	}
+
+	cmd := exec.Command("zsh", "-e", "-c", script)
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("repaired legacy prepare script failed under zsh: %v\n%s\nscript:\n%s", err, output, script)
+	}
+	if got := strings.TrimSpace(string(runIn(t, workspace, "git", "rev-parse", "--verify", "origin/main"))); got == "" {
+		t.Fatal("origin/main was not fetched")
+	}
+}
+
+// TestRepairLegacyFetchRefspec pins the repair to the fragment Kandev itself
+// generated, so a hand-written script that deliberately uses a zsh modifier is
+// left untouched.
+func TestRepairLegacyFetchRefspec(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{
+			name: "kandev fetch refspec",
+			in:   `git fetch origin "+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch"`,
+			want: `git fetch origin "+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}"`,
+		},
+		{
+			name: "contribution base branch refspec",
+			in:   `git fetch origin "+refs/heads/$base_branch:refs/remotes/origin/$base_branch"`,
+			want: `git fetch origin "+refs/heads/${base_branch}:refs/remotes/origin/${base_branch}"`,
+		},
+		{
+			name: "already braced",
+			in:   `git fetch origin "+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}"`,
+			want: `git fetch origin "+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}"`,
+		},
+		{
+			name: "unrelated zsh modifier is preserved",
+			in:   `printf '%s\n' "$archive:t"`,
+			want: `printf '%s\n' "$archive:t"`,
+		},
+		{
+			name: "unrelated colon expansion is preserved",
+			in:   `PATH="$extra_bin:$PATH"`,
+			want: `PATH="$extra_bin:$PATH"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := repairLegacyFetchRefspec(tc.in); got != tc.want {
+				t.Errorf("repairLegacyFetchRefspec()\n got: %s\nwant: %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSSHDefaultPrepareScriptExecutesCheckoutAndSetup(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
