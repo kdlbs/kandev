@@ -83,12 +83,16 @@ KANDEV_TEST_POSTGRES_DSN=<dsn> go test -race ./internal/gitlab -run 'TestPostgre
   reservation, reset, cleanup, mention-scope, and automation queries.
 - Preserved integer-backed `last_ok` and `draft` columns with explicit CASE
   conversion while using boolean literals for PostgreSQL boolean columns.
-- Kept the SQLite-only MR-watch table rebuild on SQLite and skipped it on
-  PostgreSQL.
+- Kept the SQLite-only MR-watch table rebuild on SQLite and added a
+  transaction-safe PostgreSQL migration for legacy two-column MR-watch unique
+  constraints.
 - Added PostgreSQL fresh/replay coverage for settings, mention scope, task
   links, automation checkpoints, MR watches, review/issue watches, dedup
   reservations, and action presets.
+- Added a PostgreSQL legacy-schema upgrade test that calls `EnsureMRWatch` for
+  two branches on one session and repository.
 - Verification: `KANDEV_TEST_POSTGRES_DSN=<local test DSN> go test -race
-  ./internal/gitlab -run 'TestPostgresStore' -v` passed.
+  ./internal/gitlab -run 'TestPostgresStore|TestMigrateMRWatchUniqueKey_PostgresLegacy'
+  -v` passed.
 - Verification: `KANDEV_TEST_POSTGRES_DSN=<local test DSN> go test -race
   ./internal/gitlab` passed.

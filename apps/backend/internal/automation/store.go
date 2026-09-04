@@ -1402,7 +1402,7 @@ const runTaskStateColumnsSQL = `
 			WHEN ar.status = ? AND t.archived_at IS NOT NULL THEN ?
 			WHEN ar.status = ? AND EXISTS (
 				SELECT 1 FROM task_sessions ts
-				WHERE ts.task_id = ar.task_id AND ts.is_primary = TRUE AND ts.state = ?
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
 			) THEN ?
 			ELSE ar.status
 		END AS status,
@@ -1422,7 +1422,7 @@ const runTaskStateColumnsSQL = `
 		-- one query instead of one per run on the client.
 		COALESCE(NULLIF(ar.session_id, ''), (
 			SELECT ts.id FROM task_sessions ts
-				WHERE ts.task_id = ar.task_id AND ts.is_primary = TRUE
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1
 			LIMIT 1
 		), ar.session_id, '') AS session_id`
 
@@ -1696,7 +1696,7 @@ const openRunPredicateSQL = `(
 		OR (ar.status = ? AND t.id IS NOT NULL AND t.archived_at IS NULL
 			AND NOT EXISTS (
 			SELECT 1 FROM task_sessions ts
-				WHERE ts.task_id = ar.task_id AND ts.is_primary = TRUE AND ts.state = ?
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
 			)
 		))`
 

@@ -18,7 +18,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 		CREATE TABLE task_sessions (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
-			is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+			is_primary INTEGER NOT NULL DEFAULT 0,
 			state TEXT NOT NULL
 		);
 		CREATE TABLE task_session_messages (
@@ -44,7 +44,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if _, err := database.Exec(`
 		INSERT INTO tasks (id, archived_at) VALUES ('task-1', NULL);
 		INSERT INTO task_sessions (id, task_id, is_primary, state)
-		VALUES ('session-1', 'task-1', TRUE, 'RUNNING');
+		VALUES ('session-1', 'task-1', 1, 'RUNNING');
 		INSERT INTO task_environments (id, task_id) VALUES ('environment-1', 'task-1');
 		INSERT INTO task_environment_repos (id, task_environment_id, status)
 		VALUES ('environment-repo-1', 'environment-1', 'active')`); err != nil {

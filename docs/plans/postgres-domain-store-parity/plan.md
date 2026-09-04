@@ -92,6 +92,9 @@ No browser test is required. The defect occurs before provider HTTP behavior, an
   ./internal/github` passed.
 - Task 03: `KANDEV_TEST_POSTGRES_DSN=<local test DSN> go test -race
   ./internal/gitlab -run '^TestPostgresStore' -v` passed.
+- Task 03 review regression: `KANDEV_TEST_POSTGRES_DSN=<local test DSN> go
+  test -race ./internal/gitlab -run
+  'TestPostgresStore|TestMigrateMRWatchUniqueKey_PostgresLegacy' -v` passed.
 - Task 03: `KANDEV_TEST_POSTGRES_DSN=<local test DSN> go test -race
   ./internal/gitlab` passed.
 - Task 04: `KANDEV_TEST_POSTGRES_DSN=<local test DSN> go test -race
@@ -108,6 +111,12 @@ No browser test is required. The defect occurs before provider HTTP behavior, an
   -v` passed.
 - Task 06: `KANDEV_TEST_POSTGRES_DSN=<local test DSN> go test -race
   ./internal/workflowsync ./internal/automation` passed.
+- Review regression: `KANDEV_TEST_POSTGRES_DSN=<local test DSN> go test
+  -race ./internal/automation ./internal/github ./internal/gitlab -run
+  'TestPostgresStore|TestMigrateMRWatchUniqueKey_PostgresLegacy' -v` passed.
+- Final affected-package race run across `internal/db/...`, GitHub, GitLab,
+  Jira, Linear, Sentry, Azure DevOps, workflow sync, automation, and
+  `backendapp` passed after the review fixes.
 
 ## Risks
 

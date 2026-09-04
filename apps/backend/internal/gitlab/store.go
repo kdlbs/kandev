@@ -288,12 +288,11 @@ func (s *Store) ensureMRWatchIndexes() error {
 // per branch on the same repository (multi-branch tasks) instead of
 // colliding on the second branch's insert. SQLite can't ALTER TABLE DROP
 // CONSTRAINT, so this uses the same copy-and-rename rebuild as
-// github.Store.migratePRTablesForMultiRepo. Idempotent: only runs when the
-// legacy constraint string is found in sqlite_master, so fresh DBs and
-// already-migrated DBs are no-ops.
+// github.Store.migratePRTablesForMultiRepo. Both paths are idempotent: SQLite
+// checks the stored table DDL, while PostgreSQL checks its unique constraints.
 func (s *Store) migrateMRWatchUniqueKey() error {
 	if dialect.IsPostgres(s.db.DriverName()) {
-		return nil
+		return s.migratePostgresMRWatchUniqueKey()
 	}
 	return s.rebuildIfHasLegacyConstraint(
 		"gitlab_mr_watches",
@@ -324,6 +323,106 @@ func (s *Store) migrateMRWatchUniqueKey() error {
 			created_at, updated_at
 		FROM gitlab_mr_watches`,
 	)
+}
+
+// migratePostgresMRWatchUniqueKey replaces the legacy two-column unique
+// constraint with the branch-aware key. PostgreSQL can alter the constraint
+// directly, so it does not need the SQLite table rebuild used above.
+func (s *Store) migratePostgresMRWatchUniqueKey() error {
+	tx, err := s.db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	legacyConstraint, err := postgresMRWatchUniqueConstraint(tx, "session_id", "repository_id")
+	if err != nil {
+		return err
+	}
+	if legacyConstraint == "" {
+		return tx.Commit()
+	}
+
+	if _, err := tx.Exec(
+		`ALTER TABLE gitlab_mr_watches DROP CONSTRAINT ` + quotePostgresIdentifier(legacyConstraint),
+	); err != nil {
+		return fmt.Errorf("drop legacy gitlab MR watch constraint: %w", err)
+	}
+
+	branchConstraint, err := postgresMRWatchUniqueConstraint(tx, "session_id", "repository_id", "branch")
+	if err != nil {
+		return err
+	}
+	if branchConstraint == "" {
+		if _, err := tx.Exec(`
+			ALTER TABLE gitlab_mr_watches
+			ADD CONSTRAINT gitlab_mr_watches_session_repository_branch_key
+			UNIQUE (session_id, repository_id, branch)`); err != nil {
+			return fmt.Errorf("add branch-aware gitlab MR watch constraint: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// postgresMRWatchUniqueConstraint returns the name of an exact-column unique
+// constraint on gitlab_mr_watches. The catalog query handles PostgreSQL's
+// generated names, which vary with the table's creation history.
+func postgresMRWatchUniqueConstraint(tx *sqlx.Tx, columns ...string) (string, error) {
+	rows, err := tx.Query(`
+		SELECT tc.constraint_name, kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON kcu.constraint_schema = tc.constraint_schema
+			AND kcu.constraint_name = tc.constraint_name
+			AND kcu.table_schema = tc.table_schema
+			AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema = current_schema()
+			AND tc.table_name = 'gitlab_mr_watches'
+			AND tc.constraint_type = 'UNIQUE'
+		ORDER BY tc.constraint_name, kcu.ordinal_position`)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+
+	constraintColumns := make(map[string][]string)
+	for rows.Next() {
+		var constraintName, columnName string
+		if err := rows.Scan(&constraintName, &columnName); err != nil {
+			return "", err
+		}
+		constraintColumns[constraintName] = append(constraintColumns[constraintName], columnName)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	for constraintName, constraintColumns := range constraintColumns {
+		if sameColumnSet(constraintColumns, columns) {
+			return constraintName, nil
+		}
+	}
+	return "", nil
+}
+
+func sameColumnSet(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(expected))
+	for _, column := range expected {
+		seen[column] = struct{}{}
+	}
+	for _, column := range actual {
+		if _, ok := seen[column]; !ok {
+			return false
+		}
+		delete(seen, column)
+	}
+	return len(seen) == 0
+}
+
+func quotePostgresIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
 // rebuildIfHasLegacyConstraint checks the table's stored CREATE statement in

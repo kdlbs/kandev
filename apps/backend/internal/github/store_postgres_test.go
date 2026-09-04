@@ -253,6 +253,12 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if err := store.DeleteUserConnection(ctx, "ws-1", "user-1"); err != nil {
 		t.Fatalf("delete personal GitHub connection: %v", err)
 	}
+	if err := store.UpsertUserConnection(ctx, userConnection); err != nil {
+		t.Fatalf("re-upsert personal GitHub connection: %v", err)
+	}
+	if err := store.DeleteUserConnectionsByWorkspace(ctx, "ws-1"); err != nil {
+		t.Fatalf("delete workspace GitHub connections: %v", err)
+	}
 }
 
 func stringPointer(value string) *string {

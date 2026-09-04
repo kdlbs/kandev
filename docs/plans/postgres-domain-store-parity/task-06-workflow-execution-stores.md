@@ -81,7 +81,7 @@ KANDEV_TEST_POSTGRES_DSN=<dsn> go test -race ./internal/workflowsync ./internal/
 - Replaced the automation repository backfill's SQLite-only conflict syntax
   with a portable `ON CONFLICT ... DO NOTHING` clause.
 - Preserved task-state joins and isolated-test fallbacks while using
-  PostgreSQL boolean predicates for task-session state.
+  integer predicates for the shared `task_sessions.is_primary` column.
 - Added PostgreSQL fresh/replay coverage for workflow settings, automation
   repositories, triggers, runs, run summaries, retention checks, and cleanup
   jobs.
