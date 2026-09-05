@@ -200,6 +200,28 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	return tx.Commit()
 }
 
+// CompareAndSwapWorktree atomically retargets the exact environment/repository
+// row. A changed path, branch, or ownership tuple rejects the replacement.
+func (s *SQLiteStore) CompareAndSwapWorktree(ctx context.Context, expected, replacement *Worktree) (bool, error) {
+	if expected == nil || replacement == nil || expected.TaskEnvironmentID == "" || expected.RepositoryID == "" {
+		return false, fmt.Errorf("invalid worktree compare-and-swap identity")
+	}
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?, updated_at = ?
+		WHERE task_environment_id = ? AND repository_id = ? AND branch_slug = ?
+		  AND worktree_id = ? AND worktree_path = ? AND worktree_branch = ?
+		  AND status = ? AND deleted_at IS NULL
+	`), replacement.ID, replacement.Path, replacement.Branch, replacement.UpdatedAt,
+		expected.TaskEnvironmentID, expected.RepositoryID, expected.BranchSlug,
+		expected.ID, expected.Path, expected.Branch, StatusActive)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
 // checkTaskCleanupBarrierLocked rejects the persistence when a task lifecycle
 // cleanup barrier is active for the owning task. PostgreSQL serializes through
 // a row lock on the task; SQLite's single-writer transaction is the lock.

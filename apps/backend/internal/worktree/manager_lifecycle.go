@@ -363,7 +363,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 			if handle != nil {
 				defer func() { _ = handle.Close() }()
 			}
-			if valid {
+			if valid && m.IsValid(existing.Path) {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -375,11 +375,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 					zap.String("path", existing.Path))
 				return existing, true, nil
 			}
-			m.logger.Warn("worktree directory invalid, recreating",
+			m.logger.Warn("worktree directory invalid; preserving checkout",
 				zap.String("worktree_id", existing.ID),
 				zap.String("session_id", req.SessionID),
 				zap.String("repository_id", req.RepositoryID),
 				zap.String("task_id", req.TaskID))
+			if _, statErr := os.Lstat(existing.Path); statErr == nil {
+				return nil, true, &WorktreeRecoveryError{TaskID: existing.TaskID, Checkout: existing.Path, Reason: m.linkedWorktreeRecoveryReason(ctx, existing)}
+			}
 			wt, err := m.recreate(ctx, existing, req)
 			return wt, true, err
 		}
@@ -396,7 +399,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 			if handle != nil {
 				defer func() { _ = handle.Close() }()
 			}
-			if valid {
+			if valid && m.IsValid(existing.Path) {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -407,10 +410,13 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 					zap.String("path", existing.Path))
 				return existing, true, nil
 			}
-			m.logger.Warn("worktree directory invalid, recreating",
+			m.logger.Warn("worktree directory invalid; preserving checkout",
 				zap.String("worktree_id", req.WorktreeID),
 				zap.String("session_id", req.SessionID),
 				zap.String("task_id", req.TaskID))
+			if _, statErr := os.Lstat(existing.Path); statErr == nil {
+				return nil, true, &WorktreeRecoveryError{TaskID: existing.TaskID, Checkout: existing.Path, Reason: m.linkedWorktreeRecoveryReason(ctx, existing)}
+			}
 			wt, err := m.recreate(ctx, existing, req)
 			return wt, true, err
 		}

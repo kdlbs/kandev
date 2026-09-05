@@ -252,23 +252,123 @@ func (m *Manager) GetAllByTaskID(ctx context.Context, taskID string) ([]*Worktre
 
 // IsValid checks if a worktree directory is valid and usable.
 func (m *Manager) IsValid(path string) bool {
-	// Check directory exists
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
 		return false
 	}
 
-	// Check .git file exists (worktrees have .git file, not directory)
 	gitFile := filepath.Join(path, ".git")
+	gitInfo, err := os.Lstat(gitFile)
+	if err != nil || !gitInfo.Mode().IsRegular() {
+		return false
+	}
 	content, err := os.ReadFile(gitFile)
 	if err != nil {
 		return false
 	}
+	adminPath, found := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
+	if !found {
+		return false
+	}
+	adminPath = strings.TrimSpace(adminPath)
+	if adminPath == "" || !filepath.IsAbs(adminPath) {
+		return false
+	}
+	adminInfo, err := os.Lstat(adminPath)
+	if err != nil || !adminInfo.IsDir() || adminInfo.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
 
-	// .git file should contain "gitdir: <path>"
-	if !strings.HasPrefix(string(content), "gitdir:") {
+	backlinkPath := filepath.Join(adminPath, "gitdir")
+	backlinkInfo, err := os.Lstat(backlinkPath)
+	if err != nil || !backlinkInfo.Mode().IsRegular() {
+		return false
+	}
+	backlink, err := os.ReadFile(backlinkPath)
+	if err != nil {
+		return false
+	}
+	backlinkTarget := strings.TrimSpace(string(backlink))
+	if backlinkTarget == "" {
+		return false
+	}
+	expectedBacklink, err := filepath.Abs(gitFile)
+	if err != nil {
+		return false
+	}
+	actualBacklink, err := filepath.Abs(backlinkTarget)
+	if err != nil || actualBacklink != expectedBacklink {
 		return false
 	}
 
 	return true
+}
+
+func linkedWorktreeIntegrityReason(path string) string {
+	gitFile := filepath.Join(path, ".git")
+	content, err := os.ReadFile(gitFile)
+	if err != nil {
+		return fmt.Sprintf("cannot read git pointer %q", gitFile)
+	}
+	adminPath, found := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
+	if !found {
+		return fmt.Sprintf("git pointer %q has no gitdir target", gitFile)
+	}
+	adminPath = strings.TrimSpace(adminPath)
+	if adminPath == "" {
+		return fmt.Sprintf("git pointer %q has an empty gitdir target", gitFile)
+	}
+	if info, statErr := os.Lstat(adminPath); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Sprintf("linked-worktree admin target %q is missing", adminPath)
+	}
+	backlinkPath := filepath.Join(adminPath, "gitdir")
+	backlinkInfo, err := os.Lstat(backlinkPath)
+	if err != nil || !backlinkInfo.Mode().IsRegular() {
+		return fmt.Sprintf("linked-worktree admin target %q has no reciprocal gitdir backlink", adminPath)
+	}
+	backlink, err := os.ReadFile(backlinkPath)
+	if err != nil {
+		return fmt.Sprintf("linked-worktree admin target %q has no reciprocal gitdir backlink", adminPath)
+	}
+	expected, expectedErr := filepath.Abs(gitFile)
+	actual, actualErr := filepath.Abs(strings.TrimSpace(string(backlink)))
+	if expectedErr != nil || actualErr != nil || expected != actual {
+		return fmt.Sprintf("linked-worktree admin target %q backlink mismatch: expected %q, actual %q", adminPath, expected, strings.TrimSpace(string(backlink)))
+	}
+	return "linked-worktree metadata is invalid"
+}
+
+func isAdminDirectoryMissing(worktreePath string) bool {
+	content, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		return false
+	}
+	adminPath, found := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir:")
+	if !found {
+		return false
+	}
+	info, statErr := os.Lstat(strings.TrimSpace(adminPath))
+	return statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0
+}
+
+// linkedWorktreeRecoveryReason distinguishes a recoverable missing admin entry
+// from content that has no validated Git commit to attach to. A branch name
+// stored in the worktree row is not enough: reconstructing HEAD when its ref
+// is gone would create an unborn branch and make the preserved checkout appear
+// entirely deleted or untracked.
+func (m *Manager) linkedWorktreeRecoveryReason(ctx context.Context, wt *Worktree) string {
+	reason := linkedWorktreeIntegrityReason(wt.Path)
+	if !isAdminDirectoryMissing(wt.Path) ||
+		wt.RepositoryPath == "" || wt.Branch == "" {
+		return reason + "; checkout preserved"
+	}
+
+	exists, err := m.branchExists(ctx, wt.RepositoryPath, "refs/heads/"+wt.Branch)
+	if err != nil {
+		return reason + "; branch validation unavailable; checkout preserved"
+	}
+	if !exists {
+		return fmt.Sprintf("%s; recorded branch %q has no reachable ref; content-only preservation required", reason, wt.Branch)
+	}
+	return reason + "; checkout preserved"
 }

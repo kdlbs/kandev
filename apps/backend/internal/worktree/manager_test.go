@@ -224,14 +224,421 @@ func TestManager_IsValid(t *testing.T) {
 		t.Error("expected false for directory without .git file")
 	}
 
-	// With proper .git file
+	// A pointer without a real linked-worktree admin entry is invalid.
 	gitFile := filepath.Join(worktreePath, ".git")
 	if err := os.WriteFile(gitFile, []byte("gitdir: /some/path/.git/worktrees/test"), 0644); err != nil {
 		t.Fatalf("failed to create .git file: %v", err)
 	}
 
-	if !mgr.IsValid(worktreePath) {
-		t.Error("expected true for valid worktree directory")
+	if mgr.IsValid(worktreePath) {
+		t.Error("expected false for a pointer whose admin directory is missing")
+	}
+}
+
+func TestManager_IsValid_RejectsMissingLinkedWorktreeAdminDirectory(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove linked worktree admin directory: %v", err)
+	}
+
+	if mgr.IsValid(worktreePath) {
+		t.Fatal("IsValid accepted a checkout whose linked-worktree admin directory is missing")
+	}
+}
+
+func TestManager_IsValid_RejectsSymlinkedLinkedWorktreeAdminDirectory(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/symlink-admin", worktreePath, "main")
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	movedAdminPath := filepath.Join(t.TempDir(), "admin-target")
+	if err := os.Rename(adminPath, movedAdminPath); err != nil {
+		t.Fatalf("move admin directory: %v", err)
+	}
+	if err := os.Symlink(movedAdminPath, adminPath); err != nil {
+		t.Fatalf("symlink admin directory: %v", err)
+	}
+
+	if mgr.IsValid(worktreePath) {
+		t.Fatal("IsValid accepted a symlinked linked-worktree admin directory")
+	}
+}
+
+func TestManager_AdmitTaskRecoveryRejectsPresentInvalidCheckout(t *testing.T) {
+	cfg := newTestConfig(t)
+	path := filepath.Join(cfg.TasksBasePath, "invalid-checkout")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatalf("mkdir checkout: %v", err)
+	}
+	store := newMockStore()
+	store.worktrees["wt-1"] = &Worktree{ID: "wt-1", TaskID: "task-1", Path: path, Status: StatusActive}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	if err := mgr.AdmitTaskRecovery(context.Background(), "task-1"); err == nil {
+		t.Fatal("AdmitTaskRecovery accepted an invalid present checkout")
+	} else if !errors.Is(err, ErrWorktreeCorrupted) {
+		t.Fatalf("AdmitTaskRecovery error = %v, want ErrWorktreeCorrupted", err)
+	}
+}
+
+func TestManager_IsValid_RejectsMismatchedLinkedWorktreeBacklink(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	wrongBacklink := filepath.Join(t.TempDir(), "other-checkout", ".git")
+	if err := os.WriteFile(filepath.Join(adminPath, "gitdir"), []byte(wrongBacklink+"\n"), 0644); err != nil {
+		t.Fatalf("write mismatched backlink: %v", err)
+	}
+
+	if mgr.IsValid(worktreePath) {
+		t.Fatal("IsValid accepted a checkout whose reciprocal gitdir backlink points elsewhere")
+	}
+}
+
+func TestManager_Create_RefusesInvalidNonEmptyCheckoutWithoutRemovingIt(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	uniqueFile := filepath.Join(worktreePath, "untracked-preserve-me.txt")
+	if err := os.WriteFile(uniqueFile, []byte("unique content\n"), 0600); err != nil {
+		t.Fatalf("write unique file: %v", err)
+	}
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove linked worktree admin directory: %v", err)
+	}
+
+	store := newMockStore()
+	store.worktrees["wt-1"] = &Worktree{
+		ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, Path: worktreePath, Branch: "feature/pr-branch", Status: StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	_, err = mgr.Create(ctx, CreateRequest{
+		TaskID: "task-1", SessionID: "session-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		BaseBranch: "main", WorktreeID: "wt-1", TaskDirName: "task-1", RepoName: "repo-1",
+	})
+	if !errors.Is(err, ErrWorktreeCorrupted) {
+		t.Fatalf("Create() error = %v, want ErrWorktreeCorrupted", err)
+	}
+	var recoveryErr *WorktreeRecoveryError
+	if !errors.As(err, &recoveryErr) {
+		t.Fatalf("Create() error = %T, want WorktreeRecoveryError", err)
+	}
+	if recoveryErr.TaskID != "task-1" || recoveryErr.Checkout != worktreePath || !strings.Contains(recoveryErr.Reason, adminPath) {
+		t.Fatalf("recovery error = %+v, want owning task, checkout, and missing admin target", recoveryErr)
+	}
+	if content, readErr := os.ReadFile(uniqueFile); readErr != nil || string(content) != "unique content\n" {
+		t.Fatalf("unique checkout content changed after refusal: content=%q err=%v", content, readErr)
+	}
+}
+
+func TestManager_Create_RefusesMissingAdminWhenRecordedBranchIsUnreachable(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	uniqueFile := filepath.Join(worktreePath, "untracked-preserve-me.txt")
+	if err := os.WriteFile(uniqueFile, []byte("unique content\n"), 0600); err != nil {
+		t.Fatalf("write unique file: %v", err)
+	}
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	runGit(t, repoPath, "update-ref", "-d", "refs/heads/feature/pr-branch")
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove linked worktree admin directory: %v", err)
+	}
+
+	store := newMockStore()
+	store.worktrees["wt-1"] = &Worktree{
+		ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, Path: worktreePath, Branch: "feature/pr-branch", Status: StatusActive,
+	}
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	_, err = mgr.Create(ctx, CreateRequest{
+		TaskID: "task-1", SessionID: "session-1", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		BaseBranch: "main", WorktreeID: "wt-1", TaskDirName: "task-1", RepoName: "repo-1",
+	})
+	var recoveryErr *WorktreeRecoveryError
+	if !errors.As(err, &recoveryErr) {
+		t.Fatalf("Create() error = %T, want WorktreeRecoveryError", err)
+	}
+	if !errors.Is(err, ErrWorktreeCorrupted) {
+		t.Fatalf("Create() error = %v, want ErrWorktreeCorrupted", err)
+	}
+	if !strings.Contains(recoveryErr.Reason, "content-only") || !strings.Contains(recoveryErr.Reason, "feature/pr-branch") {
+		t.Fatalf("recovery reason = %q, want content-only unreachable branch refusal", recoveryErr.Reason)
+	}
+	if content, readErr := os.ReadFile(uniqueFile); readErr != nil || string(content) != "unique content\n" {
+		t.Fatalf("unique checkout content changed after refusal: content=%q err=%v", content, readErr)
+	}
+}
+
+func TestManager_RecoverWorktreeSnapshotsAndRematerializesCheckout(t *testing.T) {
+	ctx := context.Background()
+	cfg := newTestConfig(t)
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(cfg.TasksBasePath, "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/recover", worktreePath, "main")
+	uniqueFile := filepath.Join(worktreePath, "preserve-me.txt")
+	if err := os.WriteFile(uniqueFile, []byte("preserved\n"), 0600); err != nil {
+		t.Fatalf("write unique file: %v", err)
+	}
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove admin directory: %v", err)
+	}
+
+	store := newMockStore()
+	original := &Worktree{ID: "wt-1", SessionID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", BranchSlug: "feature-recover", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/recover", BaseBranch: "main", Status: StatusActive}
+	store.worktrees[original.ID] = original
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	mgr.worktrees[cacheKey(original.SessionID, original.RepositoryID, original.BranchSlug)] = original
+	replacement, err := mgr.RecoverWorktree(ctx, original, CreateRequest{TaskID: original.TaskID, RepositoryID: original.RepositoryID, RepositoryPath: repoPath, BaseBranch: "main"})
+	if err != nil {
+		t.Fatalf("RecoverWorktree: %v", err)
+	}
+	if replacement.Path == original.Path || !mgr.IsValid(replacement.Path) {
+		t.Fatalf("replacement = %+v, want a valid sibling checkout", replacement)
+	}
+	content, err := os.ReadFile(filepath.Join(replacement.Path, "preserve-me.txt"))
+	if err != nil || string(content) != "preserved\n" {
+		t.Fatalf("replacement content = %q, err=%v", content, err)
+	}
+	cached, err := mgr.GetBySessionAndRepo(ctx, original.SessionID, original.RepositoryID, original.BranchSlug)
+	if err != nil || cached == nil || cached.Path != replacement.Path {
+		t.Fatalf("cached worktree = %+v, err=%v, want replacement", cached, err)
+	}
+	if _, err := mgr.RecoverWorktree(ctx, original, CreateRequest{
+		TaskID: original.TaskID, RepositoryID: original.RepositoryID,
+		RepositoryPath: repoPath, BaseBranch: "main",
+	}); err == nil || !strings.Contains(err.Error(), "already complete") {
+		t.Fatalf("repeated recovery error = %v, want terminal complete state", err)
+	}
+	if _, err := os.Stat(worktreePath + ".kandev-recovery.json"); err != nil {
+		t.Fatalf("durable recovery record missing: %v", err)
+	}
+}
+
+func TestIsAdminDirectoryMissing(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	if isAdminDirectoryMissing(worktreePath) {
+		t.Fatal("valid linked worktree reported a missing admin directory")
+	}
+
+	gitPointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read linked worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(gitPointer), "gitdir:"))
+	if err := os.RemoveAll(adminPath); err != nil {
+		t.Fatalf("remove linked worktree admin directory: %v", err)
+	}
+	if !isAdminDirectoryMissing(worktreePath) {
+		t.Fatal("missing linked worktree admin directory was not detected")
+	}
+}
+
+func TestRecoveryOperationLockIsExclusiveAndReleasesForAdoption(t *testing.T) {
+	claimPath := filepath.Join(t.TempDir(), "recovery.claim")
+	first, err := acquireRecoveryOperation(claimPath)
+	if err != nil {
+		t.Fatalf("first recovery claim: %v", err)
+	}
+	second, err := acquireRecoveryOperation(claimPath)
+	if !errors.Is(err, errRecoveryOperationClaimed) {
+		t.Fatalf("second recovery claim error = %v, want errRecoveryOperationClaimed", err)
+	}
+	if second != nil {
+		_ = second.Close()
+		t.Fatal("second recovery claim unexpectedly acquired the lock")
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("release first recovery claim: %v", err)
+	}
+	adopted, err := acquireRecoveryOperation(claimPath)
+	if err != nil {
+		t.Fatalf("recovery claim after owner exit: %v", err)
+	}
+	if err := adopted.Close(); err != nil {
+		t.Fatalf("release adopted recovery claim: %v", err)
+	}
+}
+
+func TestRecoveryRecordIsAdoptableAfterRestart(t *testing.T) {
+	worktreePath := t.TempDir()
+	jobPath := worktreePath + ".kandev-recovery.json"
+	claimPath := worktreePath + ".kandev-recovery.claim"
+	if err := os.WriteFile(claimPath, []byte("orphaned operation\n"), 0o600); err != nil {
+		t.Fatalf("write orphaned recovery claim: %v", err)
+	}
+	original := recoveryRecord{
+		OperationID: "operation-1", TaskID: "task-1", WorktreeID: "worktree-1",
+		Original: worktreePath, Snapshot: worktreePath + ".snapshot",
+		State: RecoveryStateSnapshotting,
+	}
+	if err := createRecoveryRecord(jobPath, original); err != nil {
+		t.Fatalf("create recovery record: %v", err)
+	}
+	adopted, snapshot, err := loadOrClaimRecovery(&Worktree{ID: original.WorktreeID, TaskID: original.TaskID, Path: worktreePath}, jobPath)
+	if err != nil {
+		t.Fatalf("adopt recovery record: %v", err)
+	}
+	if adopted.OperationID != original.OperationID || snapshot != original.Snapshot {
+		t.Fatalf("adopted record = %+v, snapshot=%q; want %+v", adopted, snapshot, original)
+	}
+	claim, err := acquireRecoveryOperation(claimPath)
+	if err != nil {
+		t.Fatalf("adopt orphaned recovery claim: %v", err)
+	}
+	if err := claim.Close(); err != nil {
+		t.Fatalf("release adopted orphaned recovery claim: %v", err)
+	}
+}
+
+func TestBeginRecoveryAdoptsOrphanedClaimBeforeCreatingRecord(t *testing.T) {
+	worktreePath := t.TempDir()
+	claimPath := worktreePath + ".kandev-recovery.claim"
+	jobPath := worktreePath + ".kandev-recovery.json"
+	if err := os.WriteFile(claimPath, []byte("operation-from-crashed-process\n"), 0o600); err != nil {
+		t.Fatalf("write orphaned claim: %v", err)
+	}
+
+	wt := &Worktree{ID: "worktree-1", TaskID: "task-1", Path: worktreePath}
+	record, snapshot, claim, err := beginRecovery(wt, jobPath)
+	if err != nil {
+		t.Fatalf("begin recovery after crash: %v", err)
+	}
+	defer func() { _ = claim.Close() }()
+	if record.OperationID == "" || snapshot != record.Snapshot {
+		t.Fatalf("record = %+v, snapshot = %q, want one resumable operation", record, snapshot)
+	}
+	if _, err := os.Stat(jobPath); err != nil {
+		t.Fatalf("recovery record was not created: %v", err)
+	}
+}
+
+func TestBeginRecoveryCoalescesConcurrentCallers(t *testing.T) {
+	worktreePath := t.TempDir()
+	wt := &Worktree{ID: "worktree-1", TaskID: "task-1", Path: worktreePath}
+	jobPath := worktreePath + ".kandev-recovery.json"
+	type result struct {
+		record recoveryRecord
+		claim  *recoveryLock
+		err    error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			record, _, claim, err := beginRecovery(wt, jobPath)
+			results <- result{record: record, claim: claim, err: err}
+		}()
+	}
+	first, second := <-results, <-results
+	owner, blocked := first, second
+	if owner.err != nil {
+		owner, blocked = second, first
+	}
+	if owner.err != nil || owner.claim == nil {
+		t.Fatalf("concurrent recovery owner = %+v", owner)
+	}
+	if blocked.err == nil || !strings.Contains(blocked.err.Error(), errRecoveryOperationClaimed.Error()) {
+		t.Fatalf("concurrent recovery follower error = %v, want claimed", blocked.err)
+	}
+	if err := owner.claim.Close(); err != nil {
+		t.Fatalf("release recovery owner claim: %v", err)
+	}
+	adopted, _, claim, err := beginRecovery(wt, jobPath)
+	if err != nil {
+		t.Fatalf("retry recovery after owner exit: %v", err)
+	}
+	if err := claim.Close(); err != nil {
+		t.Fatalf("release adopted recovery claim: %v", err)
+	}
+	if owner.record.OperationID != adopted.OperationID || owner.record.Snapshot != adopted.Snapshot {
+		t.Fatalf("coalesced records differ: owner=%+v adopted=%+v", owner.record, adopted)
+	}
+}
+
+func TestBeginRecoveryRejectsIncompatibleClaimPath(t *testing.T) {
+	worktreePath := t.TempDir()
+	claimPath := worktreePath + ".kandev-recovery.claim"
+	if err := os.Remove(worktreePath); err != nil {
+		t.Fatalf("remove worktree directory: %v", err)
+	}
+	if err := os.Symlink(t.TempDir(), claimPath); err != nil {
+		t.Fatalf("create symlink claim: %v", err)
+	}
+	_, _, claim, err := beginRecovery(&Worktree{ID: "worktree-1", TaskID: "task-1", Path: worktreePath}, worktreePath+".kandev-recovery.json")
+	if err == nil || claim != nil {
+		t.Fatalf("begin recovery with symlink claim = record/claim=%v/%v, want rejection", err, claim)
 	}
 }
 

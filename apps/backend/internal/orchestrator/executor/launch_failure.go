@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,9 +17,19 @@ import (
 type launchFailureClassification struct {
 	code    string
 	message string
+	noRetry bool
 }
 
 func classifyLaunchFailure(err error) launchFailureClassification {
+	var recoveryErr *worktree.WorktreeRecoveryError
+	if errors.As(err, &recoveryErr) {
+		return launchFailureClassification{
+			code: models.LaunchErrorCategoryGenericLaunchFailure,
+			message: fmt.Sprintf("Worktree recovery is required for task %s at %s: %s",
+				recoveryErr.TaskID, recoveryErr.Checkout, recoveryErr.Reason),
+			noRetry: true,
+		}
+	}
 	switch {
 	case errors.Is(err, worktree.ErrInvalidBaseBranch):
 		return launchFailureClassification{
@@ -76,11 +87,16 @@ func (e *Executor) buildLastAgentError(
 		details = routingerr.Sanitize(launchErr.Error())
 	}
 	return models.LastAgentError{
-		Message:          classification.message,
-		OccurredAt:       occurredAt,
-		Code:             classification.code,
-		Details:          details,
-		RecoveryActions:  launchFailureRecoveryActions(taskRepositoryID, markReviewDone),
+		Message:    classification.message,
+		OccurredAt: occurredAt,
+		Code:       classification.code,
+		Details:    details,
+		RecoveryActions: func() []string {
+			if classification.noRetry {
+				return nil
+			}
+			return launchFailureRecoveryActions(taskRepositoryID, markReviewDone)
+		}(),
 		TaskRepositoryID: taskRepositoryID,
 		StampValue: models.StableLaunchErrorStamp(
 			taskID, classification.code, taskRepositoryID, occurredAt.Format(time.RFC3339Nano),
