@@ -92,8 +92,8 @@ func validateFixture(f Fixture) error {
 		return fmt.Errorf("unknown case %q", f.Case)
 	}
 
-	if f.AgentID == "" {
-		return fmt.Errorf("agentId is required")
+	if !knownAgentIDs[f.AgentID] {
+		return fmt.Errorf("unknown agentId %q", f.AgentID)
 	}
 
 	if err := validateCapture(f); err != nil {

@@ -31,6 +31,16 @@ var classifyingGateways = map[Gateway]bool{
 	GatewayLiteLLM:      false,
 }
 
+// knownAgentIDs is the closed enumeration of backend agent identities a
+// fixture's AgentID may declare. All four gateways front the same ACP agent
+// (see Gateway's doc comment); a fixture names which one it replays through.
+var knownAgentIDs = map[string]bool{
+	"claude-acp":   true,
+	"codex-acp":    true,
+	"opencode-acp": true,
+	"grok-acp":     true,
+}
+
 // Case is the closed enumeration of transport cases a fixture may declare.
 type Case string
 

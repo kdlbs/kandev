@@ -21,6 +21,7 @@ func TestValidateFixtureRejectsStructuralViolations(t *testing.T) {
 		"classifying disagrees with matrix": func(f *Fixture) { f.Classifying = false },
 		"unknown case":                      func(f *Fixture) { f.Case = "unknown-case" },
 		"empty agentId":                     func(f *Fixture) { f.AgentID = "" },
+		"unknown agentId":                   func(f *Fixture) { f.AgentID = "not-a-real-agent" },
 
 		"recorded fixture requires source": func(f *Fixture) {
 			f.Capture, f.Source, f.CapturedAt = CaptureRecorded, "", "2026-01-01T00:00:00Z"
