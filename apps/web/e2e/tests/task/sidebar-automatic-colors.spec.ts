@@ -98,9 +98,21 @@ test.describe("Sidebar automatic task colors", () => {
       "data-state",
       "checked",
     );
-    await expect(automaticSettings.getByTestId("automatic-colors-timing")).toContainText(
-      "Rules apply to existing and new sidebar tasks.",
-    );
+    await expect(automaticSettings.getByTestId("automatic-colors-timing")).toHaveCount(0);
+    await expect(
+      automaticSettings.getByText(
+        "Personal setting. Applies across sidebar views and workspaces.",
+        { exact: true },
+      ),
+    ).toHaveCount(0);
+    await expect(
+      automaticSettings.getByText(
+        "The first matching rule wins. Manual colors remain as fallback.",
+        {
+          exact: true,
+        },
+      ),
+    ).toHaveCount(0);
 
     const dimension = automaticSettings.getByTestId(
       "automatic-color-dimension-desktop-failed-rule",
@@ -126,8 +138,27 @@ test.describe("Sidebar automatic task colors", () => {
     await timingHelp.hover();
     const timingTooltip = testPage.getByRole("tooltip");
     await expect(timingTooltip).toContainText(
+      "Personal setting. Applies across sidebar views and workspaces.",
+    );
+    await expect(timingTooltip).toContainText("Rules apply to existing and new sidebar tasks.");
+    await expect(timingTooltip).toContainText(
+      "The first matching rule wins. Manual colors remain as fallback.",
+    );
+    await expect(timingTooltip).toContainText(
       "Rules run when tasks appear and whenever their workflow step",
     );
+
+    const scrollMetrics = await filters.popover.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      overflowY: getComputedStyle(element).overflowY,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(scrollMetrics.overflowY).toBe("auto");
+    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+    await filters.popover.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(automaticSettings.getByTestId("automatic-color-add-rule")).toBeVisible();
     await prCapture.screenshot("desktop-automatic-task-colors", {
       caption: "Desktop automatic task color rules",
     });

@@ -85,7 +85,10 @@ describe("SidebarFilterPopover task-row editor", () => {
     );
 
     for (const testId of ["sidebar-sort-settings", "sidebar-group-settings", "task-row-settings"]) {
-      expect(screen.getByTestId(testId).className.split(" ")).toContain("border-b");
+      const classes = screen.getByTestId(testId).className.split(" ");
+      expect(classes).toContain("border-b");
+      expect(classes).toContain("pb-1");
+      expect(classes).toContain("pt-1");
     }
     expect(screen.getByTestId("automatic-color-settings").className.split(" ")).not.toContain(
       "border-t",

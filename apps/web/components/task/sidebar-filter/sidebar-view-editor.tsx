@@ -71,7 +71,7 @@ export function SidebarViewEditor({
         title={t("task:sort")}
         summary={sortSummary}
         testId="sidebar-sort-settings"
-        className={`border-b ${isDrawerLayout ? "pt-2" : "pt-0"}`}
+        className="border-b"
         contentClassName="pt-1"
       >
         <SortPicker value={current.sort} onChange={(sort) => onUpdate({ sort })} />
@@ -80,7 +80,7 @@ export function SidebarViewEditor({
         title={t("task:groupBy")}
         summary={t(GROUP_SUMMARY_KEYS[current.group])}
         testId="sidebar-group-settings"
-        className={`border-b ${isDrawerLayout ? "pt-2" : "pt-0"}`}
+        className="border-b"
         contentClassName="pt-1"
       >
         <GroupPicker value={current.group} onChange={(group) => onUpdate({ group })} />

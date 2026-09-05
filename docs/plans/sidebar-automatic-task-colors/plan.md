@@ -103,6 +103,8 @@ Create new rules as disabled incomplete rules. If the list contains 50 rules, di
 
 Add localized copy in all shipped catalogs. Generate the Traditional Chinese catalogs with the existing script.
 
+Keep the shared disclosure padding compact and consistent. Bound the desktop popover by the available viewport with a `100dvh` fallback, retain the drawer as the mobile scroll owner, and expose scope and timing guidance through one hover, focus, and tap-accessible info icon.
+
 ## Tests
 
 | Acceptance criteria | Evidence |
@@ -139,6 +141,7 @@ Add localized copy in all shipped catalogs. Generate the Traditional Chinese cat
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:zh-hant`, `pnpm run i18n:check`, and `pnpm run e2e:sleep-ratchet`: passed.
 - `python3 scripts/lint-spec-files.py --all` and `git diff --check`: passed.
 - Desktop and mobile automatic-color Playwright specs: one test passed in each project.
+- Compact-layout follow-up: focused component tests and desktop or mobile Playwright coverage passed for the shared spacing, viewport scrolling, and responsive help icon.
 - Task 05 backend and frontend settings verification: 1,158 Go tests across 7 packages and 88 focused Vitest tests passed.
 - Task 06 focused frontend verification: 76 Vitest tests passed; typecheck, lint, Traditional Chinese generation, and i18n checks passed.
 - Task 06 desktop and mobile sync Playwright specs: one test passed in each project.

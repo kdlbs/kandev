@@ -38,7 +38,6 @@ export function AutomaticColorSettings({ isDrawerLayout }: Props) {
       testId="automatic-color-settings"
       expanded={controller.expanded}
       onExpandedChange={controller.setExpanded}
-      className={isDrawerLayout ? "pt-2" : undefined}
       contentClassName="space-y-2 pt-1"
     >
       <AutomaticColorSettingsBody controller={controller} isDrawerLayout={isDrawerLayout} t={t} />
@@ -65,10 +64,7 @@ function AutomaticColorSettingsBody({
           <div className="min-w-0 flex-1">
             <span className="flex items-center gap-1 text-xs font-medium">
               {t("task:automaticColorsEnabled")}
-              {!isDrawerLayout && <AutomaticColorsTimingHelp t={t} />}
-            </span>
-            <span className="block text-[11px] text-muted-foreground">
-              {t("task:automaticColorsPersonalGlobal")}
+              <AutomaticColorsInfo t={t} />
             </span>
           </div>
           <label className="flex size-11 shrink-0 cursor-pointer items-center justify-center">
@@ -80,15 +76,6 @@ function AutomaticColorSettingsBody({
             />
           </label>
         </div>
-        <p
-          className="px-1 pt-1 text-[11px] text-muted-foreground"
-          data-testid="automatic-colors-timing"
-        >
-          {t("task:automaticColorsTiming")}
-        </p>
-        <p className="px-1 pt-1 text-[11px] text-muted-foreground">
-          {t("task:automaticColorsPrecedence")}
-        </p>
       </div>
 
       {controller.error && (
@@ -129,7 +116,7 @@ function AutomaticColorSettingsBody({
   );
 }
 
-function AutomaticColorsTimingHelp({
+function AutomaticColorsInfo({
   t,
 }: {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -140,13 +127,20 @@ function AutomaticColorsTimingHelp({
         <button
           type="button"
           aria-label={t("task:automaticColorsHelpLabel")}
-          className="relative inline-flex size-5 shrink-0 cursor-help items-center justify-center text-muted-foreground outline-none after:absolute after:-inset-2 hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="relative inline-flex size-11 shrink-0 cursor-help items-center justify-center text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:size-5 md:after:absolute md:after:-inset-2"
           data-testid="automatic-colors-help"
         >
           <IconInfoCircle className="size-3.5" aria-hidden="true" />
         </button>
       </TooltipTrigger>
-      <TooltipContent className="max-w-[280px]">{t("task:automaticColorsHelp")}</TooltipContent>
+      <TooltipContent className="max-w-[280px]">
+        <div className="space-y-2">
+          <p>{t("task:automaticColorsPersonalGlobal")}</p>
+          <p>{t("task:automaticColorsTiming")}</p>
+          <p>{t("task:automaticColorsPrecedence")}</p>
+          <p>{t("task:automaticColorsHelp")}</p>
+        </div>
+      </TooltipContent>
     </Tooltip>
   );
 }

@@ -39,7 +39,7 @@ export function SidebarSettingsDisclosure({
   };
 
   return (
-    <section className={cn("px-2 pb-2 pt-2", className)} data-testid={testId}>
+    <section className={cn("px-2 pb-1 pt-1", className)} data-testid={testId}>
       <Button
         type="button"
         variant="ghost"

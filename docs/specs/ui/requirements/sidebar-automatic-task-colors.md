@@ -33,9 +33,10 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.1:** The editor shall show Sort and Group by as collapsed summary rows before Task row.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.2:** Each summary shall show the current value. The Sort summary shall also show its direction.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.3:** Expanding or collapsing a summary shall not create or change a saved-view draft.
-- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.4:** The editor shall show Automatic colors after Task row. It shall identify the setting as personal and global across sidebar views and workspaces.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.4:** The editor shall show Automatic colors after Task row. It shall identify the setting as personal and global across sidebar views and workspaces through accessible help content.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.5:** The Automatic colors summary shall show whether automation is off or how many rules are enabled.
-- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.6:** The collapsed Sort, Group by, and Task row summaries shall use the same bottom inset before their separator.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.6:** The collapsed Sort, Group by, and Task row summaries shall use the same compact bottom inset before their separator.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.7:** When editor content exceeds the available viewport, the surface shall use one vertical scroll owner and keep every setting and action reachable.
 
 ### REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002: Ordered personal color rules
 
@@ -62,7 +63,7 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.15:** A task-state rule shall offer every raw task state. It shall not use the broader state groups from sidebar filters.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.16:** Condition selectors shall show localized human-readable labels for each supported dimension and origin value.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.17:** A fixed-color output selector shall show one color swatch for its current selection.
-- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.18:** The editor shall explain that rules apply to existing and new sidebar tasks and reevaluate when relevant task facts or rule settings change. Desktop shall provide detailed timing help on pointer hover and keyboard focus. Phone and tablet shall provide equivalent visible guidance without requiring hover.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.18:** The editor shall explain that rules apply to existing and new sidebar tasks and reevaluate when relevant task facts or rule settings change through a focusable information icon. Desktop shall open the help on pointer hover and keyboard focus. Phone and tablet shall open the same help on focus or tap. No required information or behavior shall depend on hover.
 
 ### REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003: Repository rule targets
 
@@ -89,8 +90,8 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.2:** Successful edits shall store rule order, targets, and output colors in backend settings. They shall appear after reload and in another browser for the same user.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.3:** A failed settings write shall restore the latest confirmed rules and show a localized error.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.4:** Missing or malformed settings shall resolve to disabled automation with no rules.
-- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.5:** Desktop shall use the anchored popover and viewport-contained pickers.
-- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.6:** Phone and tablet shall use the existing safe-area-aware drawer with one vertical scroll owner.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.5:** Desktop shall use the anchored popover with a viewport-bounded vertical scroll region and viewport-contained pickers.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.6:** Phone and tablet shall use the existing safe-area-aware drawer with one vertical scroll owner when content exceeds the drawer height.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.7:** The mobile repository flow shall stay inside the current drawer instead of opening a nested drawer.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.8:** Touch rows, reorder controls, and standalone actions shall have a 44 CSS pixel target.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-004.9:** Rule order and repository selection shall support touch, pointer, and keyboard input.

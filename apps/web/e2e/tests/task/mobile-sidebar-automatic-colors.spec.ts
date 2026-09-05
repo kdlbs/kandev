@@ -62,10 +62,31 @@ test.describe("Mobile sidebar automatic task colors", () => {
     await expect(popover).toBeVisible();
     const automaticSettings = popover.getByTestId("automatic-color-settings");
     await automaticSettings.getByTestId("automatic-color-settings-toggle").tap();
-    await expect(automaticSettings.getByTestId("automatic-colors-timing")).toContainText(
-      "Rules apply to existing and new sidebar tasks.",
+    await expect(automaticSettings.getByTestId("automatic-colors-timing")).toHaveCount(0);
+    await expect(automaticSettings.getByTestId("automatic-colors-help")).toHaveCount(1);
+    await expect(
+      automaticSettings.getByText(
+        "Personal setting. Applies across sidebar views and workspaces.",
+        { exact: true },
+      ),
+    ).toHaveCount(0);
+    await automaticSettings.getByTestId("automatic-colors-help").focus();
+    const timingTooltip = testPage.getByRole("tooltip");
+    await expect(timingTooltip).toContainText("Rules apply to existing and new sidebar tasks.");
+
+    const sectionPadding = await Promise.all(
+      ["sidebar-sort-settings", "sidebar-group-settings", "task-row-settings"].map((testId) =>
+        popover.getByTestId(testId).evaluate((element) => {
+          const styles = getComputedStyle(element);
+          return { paddingBottom: styles.paddingBottom, paddingTop: styles.paddingTop };
+        }),
+      ),
     );
-    await expect(automaticSettings.getByTestId("automatic-colors-help")).toHaveCount(0);
+    expect(sectionPadding).toEqual([
+      { paddingBottom: "4px", paddingTop: "4px" },
+      { paddingBottom: "4px", paddingTop: "4px" },
+      { paddingBottom: "4px", paddingTop: "4px" },
+    ]);
 
     const repositoryTrigger = automaticSettings.getByTestId(
       `automatic-color-repository-trigger-${MOBILE_REPOSITORY_RULE_ID}`,

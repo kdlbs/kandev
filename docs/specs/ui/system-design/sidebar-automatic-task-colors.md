@@ -280,7 +280,7 @@ Tombstones remain while legacy import support exists. A later cleanup can remove
 
 Each disclosure has a label, summary, chevron, stable content ID, and `aria-expanded`. Disclosure state is transient and starts collapsed.
 
-Sort, Group by, and Task row each own their bottom separator. The shared disclosure padding gives each collapsed toggle the same bottom inset before that separator. Automatic colors follows Task row without adding a second adjacent separator.
+Sort, Group by, and Task row each own their bottom separator. The shared disclosure padding is `px-2 pb-1 pt-1`, so each collapsed toggle has the same compact inset before and after its separator. Automatic colors follows Task row without adding a second adjacent separator.
 
 The Sort summary shows the selected field and direction. Its expanded content keeps the current `SortPicker`.
 
@@ -289,11 +289,11 @@ The Group by summary shows the selected group. Its expanded content keeps the cu
 The Automatic colors summary shows Off or an enabled-rule count. Its expanded content contains:
 
 - a global enable switch
-- concise precedence, scope, and evaluation-timing text
+- a focusable information icon containing scope, precedence, and evaluation timing
 - ordered rule cards
 - an Add rule action
 
-The timing text states that rules apply to existing and new sidebar tasks and reevaluate when task facts or rule settings change. Desktop adds a keyboard-focusable, pointer-hoverable help icon with the complete list of triggers. The drawer keeps the concise timing text visible and does not add a nested help surface or require hover.
+The information content states that rules apply to existing and new sidebar tasks, explains personal and global scope, describes first-match precedence, and lists the task facts that trigger reevaluation. The same icon is available in the desktop popover and the phone or tablet drawer. Desktop opens it on hover or focus; the drawer also opens it on focus or tap, so no required information depends on hover.
 
 A rule card shows the condition, target, output color, enabled state, reorder control, and remove action. The first matching rule is visually first.
 
@@ -309,9 +309,9 @@ Deleted workflows, steps, executors, and repositories remain visible as unavaila
 
 ## Responsive behavior
 
-Desktop keeps the current anchored sidebar popover. Selectors use viewport-contained popovers with searchable command lists.
+Desktop keeps the current anchored sidebar popover. Its height is bounded by the Radix available height with a `100dvh` fallback, and it owns vertical scrolling when the editor is taller than the viewport. Selectors use viewport-contained popovers with searchable command lists.
 
-Phone and tablet keep the current inset drawer in `sidebar-filter-popover.tsx`. This existing surface is the nearest mobile exemplar. Its header stays fixed and its editor body remains the only vertical scroll owner.
+Phone and tablet keep the current inset drawer in `sidebar-filter-popover.tsx`. This existing surface is the nearest mobile exemplar. Its header stays fixed and its editor body remains the only vertical scroll owner with overscroll containment.
 
 The repository picker uses a focused pane inside the open drawer. It follows the focused navigation pattern from `mobile-picker-sheet.tsx`. A Back action returns to the rule card without opening another drawer.
 
@@ -319,7 +319,7 @@ Desktop and mobile share rule state, normalization, matching, catalog data, and 
 
 Desktop and mobile also share the server-backed manual-color hook. The existing menus, markers, drawer, touch targets, and scroll ownership do not change.
 
-Touch summary rows, reorder controls, and standalone actions have a 44 CSS pixel active dimension. No action depends on hover. Desktop timing help supports both hover and keyboard focus; the same essential timing guidance is visible in the drawer.
+Touch summary rows, reorder controls, standalone actions, and the information trigger have a 44 CSS pixel active dimension. No action depends on hover. Desktop help supports hover and keyboard focus; the drawer uses the same help on keyboard focus or tap.
 
 ## Failure behavior
 
