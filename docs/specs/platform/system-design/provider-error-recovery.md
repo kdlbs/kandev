@@ -409,6 +409,56 @@ an earlier decision occurred.
 Raw streams, credentials, account identifiers, and unbounded error text are not
 stored in policy or route state.
 
+### Continuation package sanitization tiers
+
+The dynamic-routing continuation package (`dynamic.BuildBoundedContinuation`,
+persisted as `dynamic_route_states.continuation_json` and rendered into the
+successor's prompt by `ContinuationPrompt`) mixes two kinds of carrier text,
+and `routingerr` sanitizes them with two different rule sets:
+
+- **Provider diagnostics and the full `Conversation`** (`ToolSummary`,
+  `FailureReason`, and both the user and agent halves of `Conversation`) run
+  through `routingerr.Sanitize`, the full rule set. In addition to credential
+  patterns it collapses any 32-plus-character run, rewrites URLs down to
+  scheme and host, and normalizes home paths — accepted collateral damage:
+  `Conversation` is bounded by `sanitizedTail`, which cuts to a byte budget
+  before sanitizing, so a long identifier can already straddle the cut and be
+  mangled regardless of which tier applies to it.
+- **User/agent-authored carrier text** (`TaskDescription`, `PlanSummary`, and
+  `RepositorySummary` — none of which is truncation-bound the way
+  `Conversation` is) runs through `routingerr.SanitizeCredentials`, a
+  narrower tier covering only credential-shaped patterns (`sk-`, `ghp_`,
+  `github_pat_`, `kandev_pat_`, `Bearer`, `Authorization:`, `--api-key`,
+  `password|secret|token|api_key` assignments, and URL userinfo). It excludes
+  the 32-plus-char catch-all, the scheme-and-host URL rewrite, and home-path
+  normalization, because this text is already shown to the user unredacted
+  and commonly carries legitimate long identifiers — commit SHAs, UUIDs, file
+  hashes — that the full rule set would render as `***`.
+
+Both tiers close the credential shapes they explicitly pattern-match: a `sk-`
+key, a GitHub/Kandev PAT, a bearer/auth header, a `--api-key` flag, a
+`password`/`secret`/`token`/`api_key` assignment — including a qualified
+env-var key where the keyword is a prefix or suffix rather than the whole
+name (`AWS_SECRET_ACCESS_KEY=`, `SECRET_KEY=`), and including a value that
+contains an embedded quote character — or a URL's `user:pass@` userinfo is
+redacted before persistence or a cross-provider fallback, in either tier. A
+quoted value not terminated on the same line (an embedded, unescaped newline
+before the closing quote) is redacted only up to the line break — unchanged
+from the plain-text matching this replaced. Neither tier is a general secret
+scanner: a credential shaped like something not on that list (a
+vendor-specific token prefix, for example) survives the narrow tier unless it
+also matches a listed pattern.
+
+The key match is a substring match, not exact-name, so it also matches a key
+merely containing a keyword without naming a credential (`max_tokens`,
+`tokenizer`); an exact-name allowlist would drop the qualified env-var keys
+(`AWS_SECRET_ACCESS_KEY=`) this match exists to catch. A bare decimal integer
+value is therefore left untouched under ANY matched key, not only a count
+key: `password: 123456` and a numeric OTP survive both tiers unredacted. That
+is a known, accepted gap, wider than the `(password|secret|token)` rule it
+replaced, which masked them. A non-numeric value (`tokenizer: cl100k_base`)
+is still redacted.
+
 ## API surface
 
 - Dynamic profile CRUD accepts and returns the versioned per-class policy
