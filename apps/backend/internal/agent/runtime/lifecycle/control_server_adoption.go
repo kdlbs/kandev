@@ -135,6 +135,17 @@ type AdoptionControlClientFactory func(endpoint string) (AdoptionControlClient, 
 // endpoint, or nothing answers, or already shutting down" bucket is
 // deliberately NOT a refusal reason (nothing about it was refused), so it
 // gets its own value outside the AC-001.6 refusal-reason precedence list.
+//
+// AC-001.6's own refusal-reason list also names "no answer" as one of its six
+// enumerated reasons, ahead of identity mismatch in its precedence order --
+// which reads as a refusal, in tension with AC-001.8 treating the identical
+// case ("an endpoint that nothing answers") as no refusal at all, and with
+// AC-EXECUTORS-CONTROL-OWNERSHIP-003.9 explicitly mapping its own
+// shutting-down outcome onto AC-001.8's bucket rather than AC-001.6's. Two
+// ACs describing this case as "not a refusal" against one phrase in a third
+// naming it as one: AC-001.8 (reinforced by 003.9) is treated as the
+// authoritative behavior, and AC-001.6's "no answer" is read as the same
+// no_server bucket by another name, not a distinct recorded refusal reason.
 type AdoptionReason string
 
 const (
