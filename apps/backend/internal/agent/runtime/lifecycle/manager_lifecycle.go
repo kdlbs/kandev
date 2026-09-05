@@ -165,7 +165,14 @@ func (m *Manager) Start(ctx context.Context) error {
 			// re-tracked execution until its next full relaunch.
 			execution.setSessionInitialized(true)
 			execution.setRuntimeEnvironment(ri.Env)
-			m.hydrateRecoveredTaskEnvironmentID(recoveryCtx, execution)
+			if err := m.hydrateRecoveredTaskEnvironmentID(recoveryCtx, execution); err != nil {
+				m.logger.Error("refusing to re-track recovered execution: task environment identity could not be reconstructed",
+					zap.String("instance_id", execution.ID),
+					zap.String("session_id", execution.SessionID),
+					zap.Error(err))
+				m.stopUnreconstructableRecoveredInstance(context.Background(), ri)
+				continue
+			}
 			// AC-EXECUTORS-SURVIVAL-002.14: Office profile identity is a new key
 			// in the same persisted metadata this record already carries, not a
 			// new source -- an empty value here is a legitimate non-Office
@@ -338,22 +345,30 @@ func (m *Manager) Start(ctx context.Context) error {
 // task-environment identity (AC-EXECUTORS-SURVIVAL-002.14): the declared
 // source is the durable store, via the session's own task-environment
 // reference, not the adopted instance -- ExecutorInstance carries no such
-// field at all. A lookup failure or absent provider is logged and otherwise
-// ignored; losing this one reconstructed field must never cost the session
-// its recovery.
-func (m *Manager) hydrateRecoveredTaskEnvironmentID(ctx context.Context, execution *AgentExecution) {
+// field at all. Task-environment identity is one of AC-EXECUTORS-SURVIVAL-002.3's
+// required reconstructed values, so unlike an earlier version of this method
+// (which logged and ignored both failure shapes below), neither is silently
+// swallowed: a lookup failure is reported to the caller as an
+// AC-EXECUTORS-SURVIVAL-002.13 failed read, and a durable store that answers
+// successfully with no value at all is the AC-EXECUTORS-SURVIVAL-002.4
+// authoritatively-absent case. A nil provider is a capability this
+// deployment never wired at all -- every production backend wires one via
+// SetWorkspaceInfoProvider, only bare-bones test doubles don't -- so it is
+// treated like any other absent optional recovery capability: skip, not
+// refuse.
+func (m *Manager) hydrateRecoveredTaskEnvironmentID(ctx context.Context, execution *AgentExecution) error {
 	if m.workspaceInfoProvider == nil {
-		return
+		return nil
 	}
 	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, execution.TaskID, execution.SessionID)
 	if err != nil {
-		m.logger.Warn("failed to resolve task-environment identity for recovered session",
-			zap.String("session_id", execution.SessionID), zap.Error(err))
-		return
+		return fmt.Errorf("task environment identity read failed: %w", err)
 	}
-	if info != nil {
-		execution.TaskEnvironmentID = info.TaskEnvironmentID
+	if info == nil || info.TaskEnvironmentID == "" {
+		return errors.New("task environment identity: durable store answered with no value")
 	}
+	execution.TaskEnvironmentID = info.TaskEnvironmentID
+	return nil
 }
 
 // reDeriveRecoveredAgentIdentity implements AC-EXECUTORS-SURVIVAL-002.14's

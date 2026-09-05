@@ -236,14 +236,18 @@ func TestManagerStartRecoveredExecutionCarriesTaskEnvironmentID(t *testing.T) {
 	require.Equal(t, "env-9", execution.TaskEnvironmentID)
 }
 
-// TestManagerStartRecoveredExecutionToleratesWorkspaceInfoLookupFailure pins
-// that a durable-store read failure during recovery is a soft failure: the
-// session is still re-tracked (a missing task-environment identity is far
-// better than losing the recovered execution entirely).
-func TestManagerStartRecoveredExecutionToleratesWorkspaceInfoLookupFailure(t *testing.T) {
+// TestManagerStartRecoveredExecutionRefusesOnWorkspaceInfoLookupFailure pins
+// Review round 3, finding 4: task-environment identity is one of
+// AC-EXECUTORS-SURVIVAL-002.3's required reconstructed values, so a
+// durable-store read failure during recovery must not be tolerated as a soft
+// failure -- AC-EXECUTORS-SURVIVAL-002.13 forbids publishing the session as
+// re-tracked when a required read fails, and this instance is instead routed
+// to the AC-EXECUTORS-SURVIVAL-002.6 stop path. (An earlier version of this
+// test pinned the opposite, buggy behavior.)
+func TestManagerStartRecoveredExecutionRefusesOnWorkspaceInfoLookupFailure(t *testing.T) {
 	log := newTestRegistryLogger()
 	registry := NewExecutorRegistry(log)
-	registry.Register(&MockExecutor{
+	mockExec := &MockExecutor{
 		name: executor.NameStandalone,
 		recoverInstances: []*ExecutorInstance{{
 			InstanceID:     "exec-recovered",
@@ -252,7 +256,8 @@ func TestManagerStartRecoveredExecutionToleratesWorkspaceInfoLookupFailure(t *te
 			AgentProfileID: recoveryTestAgentProfileID,
 			RuntimeName:    executor.NameStandalone,
 		}},
-	})
+	}
+	registry.Register(mockExec)
 	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil,
 		ExecutorFallbackWarn, "", log)
 	cleanupManagerStopCh(t, mgr)
@@ -262,9 +267,10 @@ func TestManagerStartRecoveredExecutionToleratesWorkspaceInfoLookupFailure(t *te
 
 	require.NoError(t, mgr.Start(context.Background()))
 
-	execution, ok := mgr.GetExecutionBySessionID("session-1")
-	require.True(t, ok, "recovery must still re-track the session despite the lookup failure")
-	require.Empty(t, execution.TaskEnvironmentID)
+	_, ok := mgr.GetExecutionBySessionID("session-1")
+	require.False(t, ok, "recovery must refuse to re-track when task-environment identity cannot be reconstructed")
+	require.Len(t, mockExec.stopInstanceCalls, 1)
+	require.Equal(t, "exec-recovered", mockExec.stopInstanceCalls[0].InstanceID)
 }
 
 // TestManagerStartRecoveredExecutionCarriesOfficeAgentProfileID pins
