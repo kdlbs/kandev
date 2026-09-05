@@ -396,6 +396,12 @@ type Service struct {
 	// session (satisfied by the orchestrator). Used to compute the task-level
 	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
 	foregroundActivity ForegroundActivityProvider
+	// taskParkedProvider resolves the task-level parked_on_background_work
+	// OR-aggregate and its own monotonic revision (satisfied by the
+	// orchestrator; spec: docs/specs/disambiguate-waiting/spec.md). Carried on
+	// task.updated events. Optional — unset omits the field's live update path
+	// and task.updated payloads read false/0/0, matching D9's defaults.
+	taskParkedProvider TaskParkedProvider
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.

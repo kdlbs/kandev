@@ -81,6 +81,17 @@ export interface Task {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   autoStartFailed?: boolean;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled
+   * background process still live (spec:
+   * docs/specs/disambiguate-waiting/spec.md). Outranked by pending-input
+   * and any live foregroundActivity. The revision/epoch fields backing the
+   * stale-update discard rule live on the store's KanbanState Task shape
+   * (kanban/types.ts) and the wire payload, not here — this board-rendering
+   * type only needs the resolved boolean.
+   */
+  parkedOnBackgroundWork?: boolean;
   /** Live subagents summed across this task's sessions; drives the count chip. */
   activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;

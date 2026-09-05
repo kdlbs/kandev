@@ -168,6 +168,20 @@ describe("buildSidebarItem", () => {
   });
 });
 
+describe("buildSidebarItem — parked on background work", () => {
+  it("carries the parked-on-background-work projection through to the sidebar row", () => {
+    const item = buildSidebarItem(task({ parkedOnBackgroundWork: true }), emptyContext());
+
+    expect(item.parkedOnBackgroundWork).toBe(true);
+  });
+
+  it("leaves parkedOnBackgroundWork undefined when the task record has no projection", () => {
+    const item = buildSidebarItem(task(), emptyContext());
+
+    expect(item.parkedOnBackgroundWork).toBeUndefined();
+  });
+});
+
 describe("buildSidebarItem priority", () => {
   it("carries task priority into the desktop sidebar row", () => {
     const item = buildSidebarItem(task({ priority: "high" }), emptyContext());

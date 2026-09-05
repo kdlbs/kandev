@@ -124,6 +124,26 @@ describe("TasksListView row — waiting-for-input parity", () => {
   });
 });
 
+describe("TasksListView row — parked on background work (AC-73a)", () => {
+  it("renders the background-work task icon for a parked task", () => {
+    const { container } = renderList(makeTask({ parked_on_background_work: true }));
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).not.toBeNull();
+  });
+
+  it("lets a pending clarification win over the parked reading", () => {
+    const { container } = renderList(makeTask({ parked_on_background_work: true }), {
+      "session-1": [message({ type: "clarification_request", metadata: { status: "pending" } })],
+    });
+    expect(container.querySelector(".tabler-icon-message-question")).not.toBeNull();
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).toBeNull();
+  });
+
+  it("does not render the parked icon when the flag is absent", () => {
+    const { container } = renderList(makeTask({}), { "session-1": [] });
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).toBeNull();
+  });
+});
+
 describe("TasksListView row — destructive-action guard", () => {
   it("warns from the paginated row data even when the task is absent from kanban state", () => {
     renderList(makeTask({ foreground_activity: "background" }));

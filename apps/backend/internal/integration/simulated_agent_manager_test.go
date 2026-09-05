@@ -449,6 +449,11 @@ func TestSimulatedAgentManagerCancelPermissionConsumesExactTuple(t *testing.T) {
 	}
 }
 
+// ProbeBackgroundWorkloads simulates background-workload liveness probing.
+func (s *SimulatedAgentManagerClient) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return client.ProbeResultUnknown, nil
+}
+
 // CompleteAgent marks an agent as completed
 func (s *SimulatedAgentManagerClient) CompleteAgent(executionID string) {
 	s.mu.Lock()

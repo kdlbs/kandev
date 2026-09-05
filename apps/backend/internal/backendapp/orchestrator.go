@@ -175,6 +175,11 @@ func provideOrchestrator(
 	// Office feature.
 	orchestratorSvc.SetTaskDependencyReader(taskSvc)
 
+	// Let the task service read the orchestrator's task-level
+	// parked_on_background_work OR-aggregate and its own monotonic revision so
+	// task.updated events carry it (spec: docs/specs/disambiguate-waiting/spec.md).
+	taskSvc.SetTaskParkedProvider(orchestratorSvc)
+
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
 	// status-summary projector keeps the field live between loads).

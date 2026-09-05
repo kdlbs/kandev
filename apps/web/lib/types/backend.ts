@@ -115,6 +115,12 @@ export type TaskEventPayload = {
   // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
   // absent/null when no session is running.
   foreground_activity?: ForegroundActivity | null;
+  // Task-level parked-on-background-work projection; always serialized
+  // (never omitted) so a settled/reset value clears stale client state
+  // (spec: docs/specs/disambiguate-waiting/spec.md).
+  parked_on_background_work?: boolean;
+  parked_revision?: number;
+  parked_epoch?: number;
   active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -293,12 +299,6 @@ export type StepPayload = {
 export type WorkflowStepEventPayload = {
   step: StepPayload;
 };
-
-/**
- * Payload for `session.activity_changed` — the fine-grained busy signal
- * (see ADR-0049). Fires when foreground ownership or detached background
- * liveness changes, including after the foreground turn settles.
- */
 
 export type OfficeInboxItemNotificationPayload = {
   task_id?: string;

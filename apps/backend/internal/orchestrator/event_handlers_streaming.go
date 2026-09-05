@@ -34,16 +34,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	if payload == nil || payload.Data == nil {
 		return
 	}
+	var streamGuard *lockedCancelInFlightGuard
 	if payload.SessionID != "" {
 		// Serialize stream side effects with cancellation/interrupt decisions.
 		// Checking the terminal-execution marker alone is insufficient: a stream
 		// handler can pass that check, then block while persisting a message while
 		// a coordinator stop marks the execution terminal. Holding the shared
 		// per-session guard makes the check and its side effects one decision.
-		lock, release := s.acquireCancelInFlightGuard(payload.SessionID)
-		defer release()
-		lock.Lock()
-		defer lock.Unlock()
+		streamGuard = s.lockCancelInFlightGuard(payload.SessionID)
+		defer streamGuard.release()
 	}
 	// Cancellation owns the yielded interval between the guarded preparation
 	// and lifecycle wait. Terminal frames from that captured execution/prompt
@@ -155,7 +154,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleToolUpdateEvent(ctx, payload)
 
 	case agentEventComplete:
-		s.handleCompleteStreamEvent(ctx, payload)
+		s.handleCompleteStreamEventWithGuardRelease(ctx, payload, streamGuard)
 
 	case agentEventError:
 		s.handleAgentErrorEvent(ctx, payload)
@@ -212,6 +211,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case "log":
 		s.handleAgentLogEvent(ctx, payload)
+
+	case streams.EventTypeTurnStarted:
+		// D3: the single turn boundary for the whole feature. Clearing here,
+		// on the same ordered stream consumer that applies the attestation
+		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
+		// a detached launch attested during turn N cannot leak into turn N+1.
+		s.clearObservedDetachedLaunch(sessionID)
 	}
 }
 
@@ -822,6 +828,15 @@ func (s *Service) trackBackgroundToolUpdate(
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
 			kind := backgroundWorkKind(payload.Data.Normalized)
+			if kind == streams.BackgroundWorkKindShell {
+				// Waiting-attribution spec (docs/specs/disambiguate-waiting):
+				// this is the recognised condition for "a detached
+				// background-shell launch happened during this turn" — the
+				// same terminal, Detached=true shape stampBackgroundShellWork
+				// stamps in agentctl. Subagent/monitor kinds are unrelated to
+				// the parked projection.
+				s.setObservedDetachedLaunch(payload.SessionID)
+			}
 			if s.registerBackgroundWorkKind(
 				payload.SessionID,
 				payload.Data.ToolCallID,
@@ -1096,6 +1111,13 @@ func (s *Service) updateTaskSessionStateWithHook(
 	}
 
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
+
+	// Parked-projection terms 1 and 3 (spec docs/specs/disambiguate-waiting/spec.md,
+	// D2/D8): this is the single chokepoint every session-state transition
+	// passes through, so it covers entering WAITING_FOR_INPUT (synchronous
+	// first sample, AC-21) and leaving it (immediate clear, AC-68) regardless
+	// of which of this function's many call sites drove the transition.
+	s.onSessionStateChangedForParkedProjection(ctx, taskID, sessionID, oldState, nextState)
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
@@ -1941,6 +1963,20 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 }
 
 func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
+	s.setSessionWaitingForInputWithHook(ctx, taskID, sessionID, nil, preloadedSession...)
+}
+
+// setSessionWaitingForInputWithHook is the state transition path used by a
+// stream completion that owns the RUNNING-to-WAITING decision. The callback
+// runs after the CAS succeeds and before publication, so the caller can
+// release its per-session stream guard before the parked probe and repository
+// read run.
+func (s *Service) setSessionWaitingForInputWithHook(
+	ctx context.Context,
+	taskID, sessionID string,
+	onChanged func(),
+	preloadedSession ...*models.TaskSession,
+) {
 	// Resolve session up front so we can skip the redundant task-state write
 	// when the session was already WAITING_FOR_INPUT. Without this guard, every
 	// caller (workflow on_turn_complete + handleCompleteStreamEvent + other
@@ -1957,14 +1993,31 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 			// Fall back to legacy behavior — still attempt the task-state
 			// write so a transient lookup failure doesn't drop a needed
 			// REVIEW transition.
-			s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
+			s.updateTaskSessionStateWithHook(
+				ctx,
+				taskID,
+				sessionID,
+				models.TaskSessionStateWaitingForInput,
+				"",
+				false,
+				onChanged,
+			)
 			s.writeTaskReviewState(ctx, taskID, sessionID)
 			return
 		}
 	}
 
 	wasAlreadyWaiting := session.State == models.TaskSessionStateWaitingForInput
-	if updatedSession := s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session); updatedSession != nil {
+	if updatedSession, _ := s.updateTaskSessionStateWithHook(
+		ctx,
+		taskID,
+		sessionID,
+		models.TaskSessionStateWaitingForInput,
+		"",
+		false,
+		onChanged,
+		session,
+	); updatedSession != nil {
 		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updatedSession {
 			*preloadedSession[0] = *updatedSession
 		}
@@ -1998,6 +2051,15 @@ func (s *Service) setSessionWaitingForInputIfRequested(
 	taskID, sessionID string,
 	preloadedSession ...*models.TaskSession,
 ) {
+	s.setSessionWaitingForInputIfRequestedWithHook(ctx, taskID, sessionID, nil, preloadedSession...)
+}
+
+func (s *Service) setSessionWaitingForInputIfRequestedWithHook(
+	ctx context.Context,
+	taskID, sessionID string,
+	onChanged func(),
+	preloadedSession ...*models.TaskSession,
+) {
 	task, taskErr := s.repo.GetTask(ctx, taskID)
 	if taskErr != nil || task == nil {
 		// A task lookup failure is not evidence that a child reached a terminal
@@ -2006,11 +2068,11 @@ func (s *Service) setSessionWaitingForInputIfRequested(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(taskErr))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		s.setSessionWaitingForInputWithHook(ctx, taskID, sessionID, onChanged, preloadedSession...)
 		return
 	}
 	if task.ParentID == "" {
-		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		s.setSessionWaitingForInputWithHook(ctx, taskID, sessionID, onChanged, preloadedSession...)
 		return
 	}
 	activeClarifications, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
@@ -2021,7 +2083,7 @@ func (s *Service) setSessionWaitingForInputIfRequested(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		s.setSessionWaitingForInputWithHook(ctx, taskID, sessionID, onChanged, preloadedSession...)
 		return
 	}
 	taskTerminal := models.IsTerminalTaskState(task.State) || s.workflowStepIsTerminal(ctx, task.WorkflowStepID)
@@ -2048,7 +2110,7 @@ func (s *Service) setSessionWaitingForInputIfRequested(
 			zap.String("session_id", sessionID),
 			zap.String("task_state", string(task.State)))
 	}
-	s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+	s.setSessionWaitingForInputWithHook(ctx, taskID, sessionID, onChanged, preloadedSession...)
 }
 
 // taskArchived reports whether a task row has been archived. Runtime-state
@@ -2360,35 +2422,45 @@ func runtimeSessionOwnsTaskState(session *models.TaskSession, state v1.TaskState
 
 // handleCompleteStreamEvent handles the agentEventComplete stream event.
 func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	s.handleCompleteStreamEventWithGuardRelease(ctx, payload, nil)
+}
+
+func (s *Service) loadCompleteEventSession(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) (*models.TaskSession, bool) {
+	if payload.SessionID == "" {
+		return nil, true
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil {
+		s.logger.Warn("skipping complete-event processing; session lookup failed",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+		return nil, false
+	}
+	return session, true
+}
+
+// handleCompleteStreamEventWithGuardRelease processes a completion. When the
+// stream handler owns a per-session guard, guardRelease unlocks it immediately
+// after the session CAS and before the parked projection performs I/O.
+func (s *Service) handleCompleteStreamEventWithGuardRelease(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	streamGuard *lockedCancelInFlightGuard,
+) {
 	s.logger.Debug("handling complete stream event",
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID))
 	terminalMarker, terminalCompleteStream := s.terminalCompleteStreamMarker(payload.SessionID, payload.ExecutionID)
 
 	// Load session once up front — used by storeResumeToken, state check, and setSessionWaitingForInput.
-	var session *models.TaskSession
-	if payload.SessionID != "" {
-		var err error
-		session, err = s.repo.GetTaskSession(ctx, payload.SessionID)
-		if err != nil {
-			s.logger.Warn("skipping complete-event processing; session lookup failed",
-				zap.String("task_id", payload.TaskID),
-				zap.String("session_id", payload.SessionID),
-				zap.Error(err))
-			return
-		}
+	session, ok := s.loadCompleteEventSession(ctx, payload)
+	if !ok {
+		return
 	}
 
 	// Update resume token with latest ACP session ID and message UUID on every turn.
-	if payload.SessionID != "" && payload.Data.ACPSessionID != "" {
-		var lastMsgUUID string
-		if data, ok := payload.Data.Data.(map[string]interface{}); ok {
-			if uuid, ok := data["last_message_uuid"].(string); ok {
-				lastMsgUUID = uuid
-			}
-		}
-		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
-	}
+	s.storeCompleteEventResumeToken(ctx, payload)
 
 	// The lifecycle completion payload carries the durable turn captured before
 	// AgentReady can admit a successor prompt. Older producers do not include
@@ -2399,49 +2471,15 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// branch has: terminalMarker.turnID (captured by markTerminalExecution at
 	// agent.completed) for terminal completions, or a live active-turn lookup
 	// for non-terminal ones.
-	completionTurnID := payload.Data.TurnID
-	if completionTurnID == "" {
-		var ok bool
-		completionTurnID, ok = s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
-		if !ok {
-			if terminalCompleteStream {
-				completionTurnID = terminalMarker.turnID
-			} else {
-				completionTurnID = s.currentTurnIDForSession(ctx, payload.SessionID)
-			}
-		}
-	}
+	completionTurnID := s.resolveCompleteEventTurnID(ctx, payload, terminalCompleteStream, terminalMarker)
 	s.publishPromptUsage(ctx, payload, session, completionTurnID)
 
 	if terminalCompleteStream {
-		terminalTurnID := terminalMarker.turnID
-		if payload.Data.TurnID != "" {
-			terminalTurnID = payload.Data.TurnID
-		}
-		s.saveAgentTextForTurn(ctx, payload, terminalTurnID)
-		s.publishAgentPlanForTurn(ctx, payload, terminalTurnID, false)
-		s.persistTurnPromptMetadataForTurn(ctx, payload, session, terminalTurnID)
-		if terminalTurnID != "" {
-			s.publishAgentTurnCompleteForTurn(ctx, payload, terminalTurnID)
-		}
-		s.detachClarificationWaiters(ctx, payload.SessionID)
-		s.logger.Debug("complete stream from terminal execution flushed final data; skipping active turn and runtime reconciliation",
-			zap.String("task_id", payload.TaskID),
-			zap.String("session_id", payload.SessionID),
-			zap.String("agent_execution_id", payload.ExecutionID),
-			zap.String("turn_id", terminalTurnID))
+		s.flushTerminalCompleteStream(ctx, payload, session, terminalMarker)
 		return
 	}
 
-	if completionTurnID != "" {
-		s.saveAgentTextForTurn(ctx, payload, completionTurnID)
-		s.publishAgentPlanForTurn(ctx, payload, completionTurnID, false)
-		s.persistTurnPromptMetadataForTurn(ctx, payload, session, completionTurnID)
-	} else {
-		s.saveAgentTextIfPresent(ctx, payload)
-		s.publishAgentPlanIfPresent(ctx, payload)
-		s.persistTurnPromptMetadata(ctx, payload, session)
-	}
+	s.persistCompleteStreamOutput(ctx, payload, session, completionTurnID)
 	s.completeTurnForStreamEvent(ctx, payload, completionTurnID)
 
 	// Publish agent turn message event so the office comment bridge can
@@ -2473,39 +2511,16 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// returns. Running async risks the backend being killed (e.g. E2E restart)
 	// before the snapshot is written. Retries handle transient git lock
 	// contention between concurrent worktrees.
-	if payload.SessionID != "" {
-		s.captureGitStatusSnapshotWithRetry(ctx, payload.SessionID)
-	}
+	s.captureCompleteEventGitStatus(ctx, payload.SessionID)
 
 	// Office sessions park at IDLE between scheduler runs; cancelled turns skip that path so the session stays promptable.
-	stopReason := extractStopReason(payload)
-	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
-		return
-	}
-	if session != nil && s.handleAutomationTurnCompleteForTurn(
-		ctx,
-		payload.TaskID,
-		payload.SessionID,
-		session,
-		completionTurnID,
-		stopReason,
-		extractCompleteIsError(payload),
-		extractCompleteErrorMessage(payload),
-	) {
+	if s.reconcileCompleteEventRuntime(ctx, payload, session, completionTurnID) {
 		return
 	}
 
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
-	if session != nil && session.State == models.TaskSessionStateRunning {
-		// Deferring the running→waiting transition to a READY event. If no READY
-		// follows, the session stays RUNNING and the chat UI keeps showing the
-		// agent as working even though the turn already completed. This is the
-		// backend half of the frontend [session:state] trace — filter both by the
-		// same task_id to see whether a clear ever lands.
-		s.logger.Debug("complete-event deferring running->waiting to READY (turn done, state not yet cleared)",
-			zap.String("task_id", payload.TaskID),
-			zap.String("session_id", payload.SessionID))
+	if s.deferCompleteEventStateTransition(payload, session) {
 		return
 	}
 
@@ -2522,7 +2537,147 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// the original affordance so a finishing session on a multi-session
 	// task still flips to WAITING — only subtasks (ParentID non-empty)
 	// get the guard.
-	s.setSessionWaitingForInputIfRequested(ctx, payload.TaskID, payload.SessionID, session)
+	s.setSessionWaitingForInputAfterComplete(ctx, payload, session, streamGuard)
+}
+
+func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload.SessionID == "" || payload.Data.ACPSessionID == "" {
+		return
+	}
+	var lastMsgUUID string
+	if data, ok := payload.Data.Data.(map[string]interface{}); ok {
+		if uuid, ok := data["last_message_uuid"].(string); ok {
+			lastMsgUUID = uuid
+		}
+	}
+	s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
+}
+
+func (s *Service) resolveCompleteEventTurnID(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	terminalCompleteStream bool,
+	terminalMarker terminalExecutionMarker,
+) string {
+	if payload.Data.TurnID != "" {
+		return payload.Data.TurnID
+	}
+	if turnID, ok := s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration); ok {
+		return turnID
+	}
+	if terminalCompleteStream {
+		return terminalMarker.turnID
+	}
+	return s.currentTurnIDForSession(ctx, payload.SessionID)
+}
+
+func (s *Service) flushTerminalCompleteStream(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+	terminalMarker terminalExecutionMarker,
+) {
+	terminalTurnID := terminalMarker.turnID
+	if payload.Data.TurnID != "" {
+		terminalTurnID = payload.Data.TurnID
+	}
+	s.saveAgentTextForTurn(ctx, payload, terminalTurnID)
+	s.publishAgentPlanForTurn(ctx, payload, terminalTurnID, false)
+	s.persistTurnPromptMetadataForTurn(ctx, payload, session, terminalTurnID)
+	if terminalTurnID != "" {
+		s.publishAgentTurnCompleteForTurn(ctx, payload, terminalTurnID)
+	}
+	s.detachClarificationWaiters(ctx, payload.SessionID)
+	s.logger.Debug("complete stream from terminal execution flushed final data; skipping active turn and runtime reconciliation",
+		zap.String("task_id", payload.TaskID),
+		zap.String("session_id", payload.SessionID),
+		zap.String("agent_execution_id", payload.ExecutionID),
+		zap.String("turn_id", terminalTurnID))
+}
+
+func (s *Service) persistCompleteStreamOutput(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+	completionTurnID string,
+) {
+	if completionTurnID != "" {
+		s.saveAgentTextForTurn(ctx, payload, completionTurnID)
+		s.publishAgentPlanForTurn(ctx, payload, completionTurnID, false)
+		s.persistTurnPromptMetadataForTurn(ctx, payload, session, completionTurnID)
+		return
+	}
+	s.saveAgentTextIfPresent(ctx, payload)
+	s.publishAgentPlanIfPresent(ctx, payload)
+	s.persistTurnPromptMetadata(ctx, payload, session)
+}
+
+func (s *Service) captureCompleteEventGitStatus(ctx context.Context, sessionID string) {
+	if sessionID != "" {
+		s.captureGitStatusSnapshotWithRetry(ctx, sessionID)
+	}
+}
+
+func (s *Service) reconcileCompleteEventRuntime(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+	completionTurnID string,
+) bool {
+	if session == nil {
+		return false
+	}
+	stopReason := extractStopReason(payload)
+	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
+		return true
+	}
+	return s.handleAutomationTurnCompleteForTurn(
+		ctx,
+		payload.TaskID,
+		payload.SessionID,
+		session,
+		completionTurnID,
+		stopReason,
+		extractCompleteIsError(payload),
+		extractCompleteErrorMessage(payload),
+	)
+}
+
+func (s *Service) deferCompleteEventStateTransition(
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+) bool {
+	if session == nil || session.State != models.TaskSessionStateRunning {
+		return false
+	}
+	// Deferring the running→waiting transition to a READY event. If no READY
+	// follows, the session stays RUNNING and the chat UI keeps showing the
+	// agent as working even though the turn already completed. This is the
+	// backend half of the frontend [session:state] trace — filter both by the
+	// same task_id to see whether a clear ever lands.
+	s.logger.Debug("complete-event deferring running->waiting to READY (turn done, state not yet cleared)",
+		zap.String("task_id", payload.TaskID),
+		zap.String("session_id", payload.SessionID))
+	return true
+}
+
+func (s *Service) setSessionWaitingForInputAfterComplete(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+	streamGuard *lockedCancelInFlightGuard,
+) {
+	var releaseBeforeProbe func()
+	if streamGuard != nil {
+		releaseBeforeProbe = streamGuard.unlock
+	}
+	s.setSessionWaitingForInputIfRequestedWithHook(
+		ctx,
+		payload.TaskID,
+		payload.SessionID,
+		releaseBeforeProbe,
+		session,
+	)
 }
 
 func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID string) {

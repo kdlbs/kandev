@@ -29,6 +29,8 @@ export type TaskSwitcherItem = {
   foregroundActivity?: ForegroundActivity | null;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when parked on background work (spec docs/specs/disambiguate-waiting). */
+  parkedOnBackgroundWork?: boolean;
   description?: string;
   workflowId?: string;
   workflowName?: string;

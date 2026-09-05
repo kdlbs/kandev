@@ -301,6 +301,10 @@ type mockAgentManager struct {
 	startAgentProcessErr   error
 	startAgentProcessFunc  func(context.Context, string) error
 
+	// probeBackgroundWorkloadsFunc, when non-nil, overrides
+	// ProbeBackgroundWorkloads's default Unknown/nil response.
+	probeBackgroundWorkloadsFunc func(context.Context, string) (client.ProbeResult, error)
+
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
 	stopAgentWithReasonErr  error           // optional error to return from StopAgentWithReason
@@ -599,6 +603,12 @@ func (m *mockAgentManager) CancelPermissionBySessionID(ctx context.Context, sess
 		return m.cancelPermissionFunc(ctx, sessionID, requestID, pendingID)
 	}
 	return nil, nil
+}
+func (m *mockAgentManager) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	if m.probeBackgroundWorkloadsFunc != nil {
+		return m.probeBackgroundWorkloadsFunc(ctx, sessionID)
+	}
+	return client.ProbeResultUnknown, nil
 }
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	if m.isAgentRunningFn != nil {

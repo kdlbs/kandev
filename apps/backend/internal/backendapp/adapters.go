@@ -621,6 +621,12 @@ func (a *lifecycleAdapter) CancelPermissionBySessionID(ctx context.Context, sess
 	return a.mgr.CancelPermissionBySessionID(ctx, sessionID, requestID, pendingID)
 }
 
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (a *lifecycleAdapter) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return a.mgr.ProbeBackgroundWorkloadsBySessionID(ctx, sessionID)
+}
+
 // IsAgentRunningForSession checks if an agent is actually running for a session
 // This probes the actual agent (Docker container or standalone process)
 func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {

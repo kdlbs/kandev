@@ -1257,6 +1257,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	}
 	workflowH := taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
+	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
@@ -1535,6 +1536,8 @@ func registerSecondaryRoutes(
 			officeAgentSvc,
 			p.eventBus,
 			p.log,
+			p.orchestratorSvc,
+			p.taskSvc,
 		)
 		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
 	}
