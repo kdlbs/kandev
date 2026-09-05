@@ -25,6 +25,7 @@ func newModelConfigRouter(t *testing.T) (*gin.Engine, *registry.Registry) {
 	ctrl := controller.NewController(nil, nil, reg, nil, log)
 	ctrl.SetHostUtility(hostutility.NewManager(reg, "127.0.0.1", 0, nil, log))
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	RegisterRoutes(router, ctrl, nil, log, "test-interlock")
 	return router, reg
 }

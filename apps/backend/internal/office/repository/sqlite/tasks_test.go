@@ -35,6 +35,7 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL DEFAULT '',
+			assignee_user_id TEXT NOT NULL DEFAULT '',
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical','high','medium','low')),

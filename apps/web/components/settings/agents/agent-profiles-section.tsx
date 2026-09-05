@@ -19,6 +19,7 @@ import { useToast } from "@/components/toast-provider";
 import { AgentProfileDeleteConfirmation } from "@/components/settings/agent-profile-delete-dialog";
 import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useProfileDuplicate } from "@/hooks/domains/settings/use-profile-duplicate";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -208,6 +209,7 @@ function ProfileRowDeleteConfirmation({
 type ProfileRowCardProps = {
   profile: AgentProfile;
   href: string;
+  canManage: boolean;
   confirmOpen: boolean;
   isFinePointer: boolean;
   isFullDesktop: boolean;
@@ -220,6 +222,7 @@ type ProfileRowCardProps = {
 function ProfileRowCard({
   profile,
   href,
+  canManage,
   confirmOpen,
   isFinePointer,
   isFullDesktop,
@@ -256,7 +259,8 @@ function ProfileRowCard({
           )}
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
-          {!(confirmOpen && !isFinePointer) &&
+          {canManage &&
+            !(confirmOpen && !isFinePointer) &&
             (isFullDesktop ? (
               <ProfileRowInlineActions
                 profile={profile}
@@ -282,6 +286,7 @@ function ProfileRowCard({
 
 /** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
 export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
+  const canManage = useIsAdmin();
   const { t } = useTranslation();
   const { toast } = useToast();
   const router = useRouter();
@@ -348,6 +353,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
     <ProfileRowCard
       profile={profile}
       href={href}
+      canManage={canManage}
       confirmOpen={confirmOpen}
       isFinePointer={isFinePointer}
       isFullDesktop={isFullDesktop}

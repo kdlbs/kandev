@@ -53,14 +53,20 @@ type Engine struct {
 	persistence Persistence
 	loader      StateLoader
 	probes      map[string]ProbeLease
+	// retryClaims identifies retry launches owned by this process. A durable
+	// "retrying" state can survive a restart without its in-memory owner, so
+	// manual recovery may reclaim it only when this map does not contain the
+	// same generation.
+	retryClaims map[string]int64
 }
 
 func NewEngine(options ...EngineOption) *Engine {
 	engine := &Engine{
-		now:      time.Now,
-		circuits: NewCircuitRegistry(),
-		states:   make(map[string]RouteState),
-		probes:   make(map[string]ProbeLease),
+		now:         time.Now,
+		circuits:    NewCircuitRegistry(),
+		states:      make(map[string]RouteState),
+		probes:      make(map[string]ProbeLease),
+		retryClaims: make(map[string]int64),
 	}
 	for _, option := range options {
 		option(engine)
@@ -311,6 +317,18 @@ func (e *Engine) LoadState(ctx context.Context, sessionID string) (RouteState, b
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.loadStateLocked(ctx, sessionID)
+}
+
+// OwnsRetryClaim reports whether this process still owns a retry launch for
+// the session generation. The durable route row alone cannot answer this
+// after a restart because the previous process owner is gone.
+func (e *Engine) OwnsRetryClaim(sessionID string, generation int64) bool {
+	if e == nil || sessionID == "" || generation <= 0 {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.retryClaims[sessionID] == generation
 }
 
 func (e *Engine) ActionFor(profile Profile, candidateID string, code routingerr.Code) Action {
@@ -577,6 +595,26 @@ func (e *Engine) persistInitialGeneration(
 	return true, nil
 }
 
+// persistExpectedStatus atomically updates a same-generation route status.
+// Persistence without status-fencing support fails closed.
+func (e *Engine) persistExpectedStatus(ctx context.Context, expectedGeneration int64, expectedStatus string, state RouteState) error {
+	if e.persistence == nil {
+		return nil
+	}
+	claimer, ok := e.persistence.(GenerationStatusClaimer)
+	if !ok {
+		return ErrStatusClaimUnsupported
+	}
+	claimed, err := claimer.ClaimRouteStateFrom(ctx, expectedGeneration, expectedStatus, state)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return ErrStaleGeneration
+	}
+	return nil
+}
+
 func mustJSON(value PolicyState) []byte {
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -683,6 +721,7 @@ func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGener
 		return err
 	}
 	e.states[sessionID] = state
+	delete(e.retryClaims, sessionID)
 	return nil
 }
 
@@ -722,6 +761,7 @@ func (e *Engine) MarkActionRequired(
 			return RouteDecision{}, err
 		}
 		e.states[sessionID] = state
+		delete(e.retryClaims, sessionID)
 	}
 	return RouteDecision{
 		SessionID: sessionID, LogicalProfileID: state.LogicalProfileID,
@@ -730,13 +770,58 @@ func (e *Engine) MarkActionRequired(
 	}, nil
 }
 
+// ReclaimRetrying returns an orphaned durable retry claim to manual recovery.
+// A retry claim owned by this process is not reclaimable because its launch
+// may still cross the provider boundary.
+func (e *Engine) ReclaimRetrying(ctx context.Context, sessionID string, expectedGeneration int64) (bool, error) {
+	return e.reclaimRetrying(ctx, sessionID, expectedGeneration, false)
+}
+
+func (e *Engine) reclaimRetrying(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	allowOwned bool,
+) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if !exists || state.Generation != expectedGeneration || state.Status != routeStatusRetrying {
+		return false, nil
+	}
+	if !allowOwned && e.retryClaims[sessionID] == expectedGeneration {
+		return false, ErrRecoveryPending
+	}
+	state.Status = routeStatusActionRequired
+	state.UpdatedAt = e.now()
+	if err := e.persistExpectedStatus(ctx, expectedGeneration, routeStatusRetrying, state); err != nil {
+		return false, err
+	}
+	e.states[sessionID] = state
+	delete(e.retryClaims, sessionID)
+	return true, nil
+}
+
+// MarkRecoveryActionRequired returns an in-flight route to manual recovery.
+// The launch owner calls this after a concrete launch failure, so it may
+// reclaim a retry claim owned by this process.
+func (e *Engine) MarkRecoveryActionRequired(ctx context.Context, sessionID string, expectedGeneration int64) error {
+	_, err := e.reclaimRetrying(ctx, sessionID, expectedGeneration, true)
+	return err
+}
+
 func (e *Engine) resumePending(
 	ctx context.Context,
 	sessionID string,
 	expectedGeneration int64,
 	force bool,
 ) (RouteDecision, error) {
-	state, exists, err := e.stateForFailure(ctx, sessionID)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -746,12 +831,20 @@ func (e *Engine) resumePending(
 	if state.Generation != expectedGeneration {
 		return RouteDecision{}, ErrStaleGeneration
 	}
-	if force && state.Status == routeStatusRetrying {
-		return RouteDecision{}, ErrRecoveryPending
+	if force {
+		if state.Status == routeStatusRetrying {
+			return RouteDecision{}, ErrRecoveryPending
+		}
+		if state.Status != string(routingpolicy.DecisionRetry) &&
+			state.Status != string(routingpolicy.DecisionWaitForReset) &&
+			state.Status != routeStatusActionRequired {
+			return RouteDecision{}, ErrRecoveryPending
+		}
 	}
 	if !force && state.Status != string(routingpolicy.DecisionRetry) && state.Status != string(routingpolicy.DecisionWaitForReset) {
 		return RouteDecision{}, ErrRecoveryPending
 	}
+	observedStatus := state.Status
 	var policyState PolicyState
 	if state.PolicyStateJSON != "" {
 		if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); err != nil {
@@ -762,15 +855,13 @@ func (e *Engine) resumePending(
 	if !force && policyState.Deadline != nil && now.Before(*policyState.Deadline) {
 		return RouteDecision{}, ErrRecoveryNotDue
 	}
-	expectedStatus := state.Status
 	state.Status = routeStatusRetrying
 	state.UpdatedAt = now
-	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
+	if err := e.persistExpectedStatus(ctx, expectedGeneration, observedStatus, state); err != nil {
 		return RouteDecision{}, err
 	}
-	e.mu.Lock()
 	e.states[sessionID] = state
-	e.mu.Unlock()
+	e.retryClaims[sessionID] = state.Generation
 	return RouteDecision{
 		SessionID: sessionID, LogicalProfileID: state.LogicalProfileID,
 		ExecutionProfileID: state.ExecutionProfileID, Generation: state.Generation,

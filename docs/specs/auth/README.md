@@ -34,6 +34,7 @@ for user and service requests.
 
 
 - [Opt-in Authentication & Multi-User Segregation](requirements/auth.md)
+- [Org Roles and Scopes](requirements/roles-and-scopes.md)
 - [Isolate Kandev cookies between instances on one host](requirements/fix-multi-instance-cookie-isolation.md)
 - [Public Share Links (v0)](requirements/public-share-links.md)
 - [Repair secure-context browser fallbacks](requirements/secure-context-browser-fallbacks.md)

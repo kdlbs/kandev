@@ -94,8 +94,8 @@ func TestResolveRetryRouteAction_TimerResumeThenManualRetrySameGeneration(t *tes
 	// A manual retry click still observing generation 1 must not claim a
 	// second, independent generation.
 	_, err = resolver.ResolveRouteAction(ctx, sessionID, dynamicID, "candidate-1", 1, "retry")
-	if !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
-		t.Fatalf("manual retry after timer resume error = %v, want %v", err, dynamicruntime.ErrStaleGeneration)
+	if !errors.Is(err, dynamicruntime.ErrRecoveryPending) {
+		t.Fatalf("manual retry after timer resume error = %v, want %v", err, dynamicruntime.ErrRecoveryPending)
 	}
 
 	state, err := repo.LoadRouteState(ctx, sessionID)
@@ -136,8 +136,8 @@ func TestResolveRetryRouteAction_DoubleManualRetrySameGeneration(t *testing.T) {
 	}
 
 	_, err = resolver.ResolveRouteAction(ctx, sessionID, dynamicID, "candidate-1", 1, "retry")
-	if !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
-		t.Fatalf("second manual retry error = %v, want %v", err, dynamicruntime.ErrStaleGeneration)
+	if !errors.Is(err, dynamicruntime.ErrRecoveryPending) {
+		t.Fatalf("second manual retry error = %v, want %v", err, dynamicruntime.ErrRecoveryPending)
 	}
 
 	state, err := repo.LoadRouteState(ctx, sessionID)
@@ -146,6 +146,45 @@ func TestResolveRetryRouteAction_DoubleManualRetrySameGeneration(t *testing.T) {
 	}
 	if state == nil || state.Generation != 1 || state.Status != "retrying" {
 		t.Fatalf("durable route state = %#v, want unchanged generation 1 status retrying (exactly one decision)", state)
+	}
+}
+
+func TestResolveRetryRouteAction_ReclaimsPersistedRetryingAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-retry-after-restart"
+		sessionID = "session-retry-after-restart"
+		dynamicID = "dynamic-retry-after-restart"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedDueDynamicRetryWaitRoute(t, ctx, repo, dynamicID, sessionID)
+
+	firstResolver := newWorkflowDynamicProfileResolverWithCandidates(t, dynamicID, []workflowDynamicCandidate{
+		{executionProfileID: "candidate-1", enabled: true},
+		{executionProfileID: "candidate-2", enabled: true},
+	}, dynamicruntime.WithPersistence(repo), dynamicruntime.WithStateLoader(repo))
+	if _, err := firstResolver.ResumePendingRoute(ctx, sessionID, 1); err != nil {
+		t.Fatalf("timer resume: %v", err)
+	}
+
+	restartedResolver := newWorkflowDynamicProfileResolverWithCandidates(t, dynamicID, []workflowDynamicCandidate{
+		{executionProfileID: "candidate-1", enabled: true},
+		{executionProfileID: "candidate-2", enabled: true},
+	}, dynamicruntime.WithPersistence(repo), dynamicruntime.WithStateLoader(repo))
+	result, err := restartedResolver.ResolveRouteAction(ctx, sessionID, dynamicID, "candidate-1", 1, "retry")
+	if err != nil {
+		t.Fatalf("manual retry after restart: %v", err)
+	}
+	if result.Generation != 2 || result.ExecutionProfileID != "candidate-1" || result.Decision.Status != "starting" {
+		t.Fatalf("result = %+v, want generation 2 candidate-1 starting", result)
+	}
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != 2 || state.Status != "starting" {
+		t.Fatalf("durable route state = %#v, want fenced successor", state)
 	}
 }
 

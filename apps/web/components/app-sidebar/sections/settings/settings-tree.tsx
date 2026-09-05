@@ -170,10 +170,16 @@ export function SettingsTree({
 }) {
   const { t } = useTranslation();
   const authEnabled = useFeature("auth");
+  const multiTenancyEnabled = useFeature("multiTenancy");
   const authMode = useAppStore((s) => s.auth.mode);
   const isAdmin = useIsAdmin();
   const showAccountItems = authEnabled && authMode === "enabled";
   const showUsersItem = authEnabled && isAdmin;
+  // Only the instance operator can use this page, but that answer costs a
+  // request, so the row is gated on the feature instead and the page itself
+  // turns a non-operator away. Before this it was rendered even on installs
+  // with Organizations switched off.
+  const showOrganizationsItem = authEnabled && multiTenancyEnabled;
   const discoveryItems = useSettingsDiscovery();
   const counts = useSettingsMenuCounts();
   const [query, setQuery] = useState("");
@@ -185,6 +191,7 @@ export function SettingsTree({
   const itemVisible = (item: SettingsMenuItem) => {
     if (item.requires === "account") return showAccountItems;
     if (item.requires === "users") return showUsersItem;
+    if (item.requires === "organizations") return showOrganizationsItem;
     return true;
   };
 
@@ -203,7 +210,11 @@ export function SettingsTree({
             const items = section.items.filter(itemVisible);
             if (items.length === 0) return null;
             return (
-              <div key={section.id} className="flex flex-col gap-0.5">
+              <div
+                key={section.id}
+                data-testid={`settings-section-${section.id}`}
+                className="flex flex-col gap-0.5"
+              >
                 <SettingsSectionHeader label={t(section.labelKey)} />
                 {items.map((item) => (
                   <SettingsMenuRow
