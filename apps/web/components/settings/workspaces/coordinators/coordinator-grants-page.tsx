@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import {
   listWorkspaceCoordinatorGrants,
@@ -45,12 +46,14 @@ export function CoordinatorGrantsPage({ workspaceId }: Props) {
   const [grantsLoading, setGrantsLoading] = useState(true);
   const [auditLoading, setAuditLoading] = useState(true);
   const [grantsError, setGrantsError] = useState(false);
+  const [auditError, setAuditError] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!flagEnabled) return;
     setGrantsLoading(true);
     setAuditLoading(true);
     setGrantsError(false);
+    setAuditError(false);
     try {
       const [grantsData, auditData] = await Promise.allSettled([
         listWorkspaceCoordinatorGrants(workspaceId),
@@ -63,6 +66,8 @@ export function CoordinatorGrantsPage({ workspaceId }: Props) {
       }
       if (auditData.status === "fulfilled") {
         setAudit(auditData.value.events);
+      } else {
+        setAuditError(true);
       }
     } finally {
       setGrantsLoading(false);
@@ -100,7 +105,9 @@ export function CoordinatorGrantsPage({ workspaceId }: Props) {
         <CardHeader>
           <CardTitle className="text-lg">{t("workspaces:recentAudit")}</CardTitle>
         </CardHeader>
-        <CardContent>{auditContent(auditLoading, audit, t)}</CardContent>
+        <CardContent data-testid="coordinator-audit-section">
+          {auditContent(auditLoading, auditError, audit, t)}
+        </CardContent>
       </Card>
     </div>
   );
@@ -153,6 +160,7 @@ function grantContent(
 
 function auditContent(
   auditLoading: boolean,
+  auditError: boolean,
   audit: readonly AuditEventDTO[],
   t: (key: string) => string,
 ): React.ReactNode {
@@ -163,6 +171,9 @@ function auditContent(
         <Skeleton className="h-8 w-full" />
       </div>
     );
+  }
+  if (auditError) {
+    return <p className="text-sm text-destructive">{t("common:errorLoading")}</p>;
   }
   if (audit.length === 0) {
     return <p className="text-sm text-muted-foreground">{t("workspaces:noAuditEvents")}</p>;
@@ -179,6 +190,8 @@ function auditContent(
 function GrantRow({ grant, onRevoke }: { grant: GrantDTO; onRevoke: (grant: GrantDTO) => void }) {
   const { t } = useTranslation();
   const isRevoked = !!grant.revoked_at;
+  const revokeButtonRef = useRef<HTMLButtonElement>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const capabilities = grant.capabilities
     .split(",")
     .map((s) => s.trim())
@@ -220,14 +233,34 @@ function GrantRow({ grant, onRevoke }: { grant: GrantDTO; onRevoke: (grant: Gran
         </p>
       </div>
       {!isRevoked && (
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => onRevoke(grant)}
-          data-testid={`revoke-grant-${grant.id}`}
-        >
-          {t("common:revoke")}
-        </Button>
+        <>
+          <Button
+            ref={revokeButtonRef}
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            data-testid={`revoke-grant-${grant.id}`}
+          >
+            {t("common:revoke")}
+          </Button>
+          <ActionConfirmPopover
+            open={confirmOpen}
+            anchorRef={revokeButtonRef}
+            title={t("workspaces:revokeGrantTitle")}
+            description={t("workspaces:revokeGrantDescription", {
+              taskId: grant.coordinator_task_id,
+            })}
+            cancelLabel={t("common:cancel")}
+            confirmLabel={t("common:revoke")}
+            confirmAriaLabel={t("workspaces:revokeGrantConfirmAria", {
+              taskId: grant.coordinator_task_id,
+            })}
+            confirmTestId="revoke-grant-confirm"
+            testId="revoke-grant-confirm-popover"
+            onOpenChange={setConfirmOpen}
+            onConfirm={() => onRevoke(grant)}
+          />
+        </>
       )}
     </div>
   );
