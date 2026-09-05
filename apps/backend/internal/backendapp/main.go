@@ -653,6 +653,9 @@ func startAgentInfrastructure(
 		orchestratorSvc.LaunchDynamicRouteAction,
 	))
 	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
+	// Grants mcpprofile.CapabilityHandoffTask to office sessions whose agent
+	// profile has the can_handoff_tasks permission (handoff_task_kandev).
+	orchestratorSvc.SetHandoffPermissionResolver(agentSettingsController)
 
 	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.
 	// Orphan watchers (their agent profile was soft-deleted by the

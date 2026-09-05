@@ -100,6 +100,10 @@ func (*resumeRetryOrchestrator) SteerTask(
 	return &orchestrator.PromptResult{}, nil
 }
 
+func (*resumeRetryOrchestrator) AgentHasHandoffPermission(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 // newTestMessageHandlersWithOrchestrator mirrors newTestMessageHandlers but
 // wires a real OrchestratorService fake, which forwardMessageAsPrompt/
 // handlePromptWithResume require (they early-return when h.orchestrator is

@@ -789,6 +789,15 @@ type GitLabCredentialResolver interface {
 	ResolveGitLabExecutionCredentials(ctx context.Context, workspaceID string) (host, token string, err error)
 }
 
+// HandoffPermissionResolver reports whether an agent profile has the
+// can_handoff_tasks permission, so the MCP profile granted at session launch
+// can include CapabilityHandoffTask only for agents actually authorized to
+// call handoff_task_kandev. Optional dependency: when unset, the capability
+// is never granted.
+type HandoffPermissionResolver interface {
+	AgentHasHandoffPermission(ctx context.Context, agentProfileID string) (bool, error)
+}
+
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager      AgentManagerClient
@@ -798,6 +807,7 @@ type Executor struct {
 	shellPrefs        ShellPreferenceProvider
 	capabilities      ExecutorTypeCapabilities
 	gitlabCredentials GitLabCredentialResolver
+	handoffPerms      HandoffPermissionResolver
 	logger            *logger.Logger
 
 	gitCredentialIssuer            GitCredentialLeaseIssuer
@@ -1206,4 +1216,11 @@ func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 // SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
 func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
 	e.gitlabCredentials = resolver
+}
+
+// SetHandoffPermissionResolver wires the seam used to grant
+// mcpprofile.CapabilityHandoffTask to office-surface sessions whose agent
+// profile has the can_handoff_tasks permission.
+func (e *Executor) SetHandoffPermissionResolver(resolver HandoffPermissionResolver) {
+	e.handoffPerms = resolver
 }

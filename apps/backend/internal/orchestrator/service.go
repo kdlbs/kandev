@@ -1504,6 +1504,21 @@ func (s *Service) SetOnPrimarySessionSet(fn executor.PrimarySessionSetFunc) {
 	s.executor.SetOnPrimarySessionSet(fn)
 }
 
+// SetHandoffPermissionResolver wires the seam used to grant office sessions
+// mcpprofile.CapabilityHandoffTask when their agent profile has the
+// can_handoff_tasks permission.
+func (s *Service) SetHandoffPermissionResolver(resolver executor.HandoffPermissionResolver) {
+	s.executor.SetHandoffPermissionResolver(resolver)
+}
+
+// AgentHasHandoffPermission passes through to the wired HandoffPermissionResolver
+// (false, nil when unset). Used to decide whether to advertise
+// handoff_task_kandev in a first-turn Office prompt (AC-3), mirroring the
+// capability grant applied at session launch.
+func (s *Service) AgentHasHandoffPermission(ctx context.Context, agentProfileID string) (bool, error) {
+	return s.executor.AgentHasHandoffPermission(ctx, agentProfileID)
+}
+
 // SetRepoCloner sets the repository cloner and updater on the executor, enabling automatic
 // cloning of provider-backed repositories (e.g. from a GitHub URL) when they are launched
 // for local/worktree execution and have no local path yet.

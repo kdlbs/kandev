@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/mcpmode"
@@ -110,6 +111,80 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			require.Equal(t, tt.wantUserQuestion, profile.HasCapability(mcpprofile.CapabilityUserQuestion))
 			require.Equal(t, tt.wantParentQuestion, profile.HasCapability(mcpprofile.CapabilityParentQuestion))
 			require.Equal(t, tt.wantTaskTitle, profile.HasCapability(mcpprofile.CapabilityTaskTitle))
+		})
+	}
+}
+
+type fakeHandoffPermissionResolver struct {
+	granted map[string]bool
+	err     error
+}
+
+func (f *fakeHandoffPermissionResolver) AgentHasHandoffPermission(_ context.Context, agentProfileID string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.granted[agentProfileID], nil
+}
+
+func TestResolveTaskSessionMCPProfile_GrantsHandoffCapabilityOnlyForOfficeSessionsWithPermission(t *testing.T) {
+	tests := []struct {
+		name         string
+		task         *models.Task
+		session      *models.TaskSession
+		resolver     HandoffPermissionResolver
+		wantCapAdded bool
+	}{
+		{
+			name:         "office session with granted permission",
+			task:         &models.Task{ID: "task", IsFromOffice: true},
+			session:      &models.TaskSession{ID: "session", TaskID: "task", AgentProfileID: "profile-ceo"},
+			resolver:     &fakeHandoffPermissionResolver{granted: map[string]bool{"profile-ceo": true}},
+			wantCapAdded: true,
+		},
+		{
+			name:         "office session without permission",
+			task:         &models.Task{ID: "task", IsFromOffice: true},
+			session:      &models.TaskSession{ID: "session", TaskID: "task", AgentProfileID: "profile-worker"},
+			resolver:     &fakeHandoffPermissionResolver{granted: map[string]bool{"profile-ceo": true}},
+			wantCapAdded: false,
+		},
+		{
+			name:         "office session with no resolver wired",
+			task:         &models.Task{ID: "task", IsFromOffice: true},
+			session:      &models.TaskSession{ID: "session", TaskID: "task", AgentProfileID: "profile-ceo"},
+			resolver:     nil,
+			wantCapAdded: false,
+		},
+		{
+			name:         "office session with resolver error fails closed",
+			task:         &models.Task{ID: "task", IsFromOffice: true},
+			session:      &models.TaskSession{ID: "session", TaskID: "task", AgentProfileID: "profile-ceo"},
+			resolver:     &fakeHandoffPermissionResolver{err: errors.New("boom")},
+			wantCapAdded: false,
+		},
+		{
+			name:         "non-office kanban session never gets the capability",
+			task:         &models.Task{ID: "task"},
+			session:      &models.TaskSession{ID: "session", TaskID: "task", AgentProfileID: "profile-ceo"},
+			resolver:     &fakeHandoffPermissionResolver{granted: map[string]bool{"profile-ceo": true}},
+			wantCapAdded: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			repo.tasks[tt.task.ID] = tt.task
+			repo.sessions[tt.session.ID] = tt.session
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			if tt.resolver != nil {
+				exec.SetHandoffPermissionResolver(tt.resolver)
+			}
+
+			profile, err := exec.resolveTaskSessionMCPProfile(context.Background(), tt.task.ID, tt.session, false)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantCapAdded, profile.HasCapability(mcpprofile.CapabilityHandoffTask))
 		})
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -256,6 +257,33 @@ func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
 
 	assert.Equal(t, registered, referenced,
 		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
+}
+
+// TestSyspromptToolNames_ExactlyMatchMCPOfficeModeWithHandoffCapability is
+// AC-3's granted-form assertion: once an Office profile carries
+// CapabilityHandoffTask, the resolved prompt's `_kandev` tool set (with
+// includeHandoff=true) must equal that profile's registered tool set exactly
+// — set equality, matching the ungranted test above.
+func TestSyspromptToolNames_ExactlyMatchMCPOfficeModeWithHandoffCapability(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	profileContext := mcpprofile.New(mcpprofile.SurfaceOfficeTask, []mcpprofile.Capability{
+		mcpprofile.CapabilityUserQuestion, mcpprofile.CapabilityHandoffTask,
+	}, nil)
+	s := NewWithProfile(backend, "test-session", "test-task", 10006, log, "", false, profileContext)
+	require.NotNil(t, s)
+
+	registered := make(map[string]struct{})
+	for _, name := range getRegisteredToolNames(s) {
+		registered[name] = struct{}{}
+	}
+	referenced := extractKandevTools(sysprompt.FormatOfficeContextWithOptions("test-task", "test-session", false, true))
+
+	assert.Equal(t, registered, referenced,
+		"Office first-turn context must advertise exactly the granted-profile tool inventory")
+	assert.Contains(t, registered, "handoff_task_kandev")
 }
 
 // TestSyspromptToolNames_NoBareToolReferences catches the opposite drift: a
