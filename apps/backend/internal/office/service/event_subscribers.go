@@ -122,6 +122,7 @@ type CommentPostedData struct {
 	AuthorType             string `json:"author_type"`
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
 	EngineDispatched       string `json:"engine_dispatched"`
+	Source                 string `json:"source"`
 }
 
 // ApprovalResolvedData represents an approval resolved event payload.
@@ -331,10 +332,25 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return nil
 	}
 
+	// Attribute to the agent that actually ran the session, not the
+	// task's assignee — the two diverge for a reviewer/approver turn
+	// under officeSessionIdentity. Fall back to the assignee when the
+	// session can't be resolved, mirroring handlePromptUsage's
+	// log-and-continue fallback below.
+	authorID := fields.AssigneeAgentProfileID
+	if id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID); lookupErr != nil {
+		s.logger.Warn("session agent profile lookup failed",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(lookupErr))
+	} else if id != "" {
+		authorID = id
+	}
+
 	comment := &models.TaskComment{
 		TaskID:     data.TaskID,
 		AuthorType: "agent",
-		AuthorID:   fields.AssigneeAgentProfileID,
+		AuthorID:   authorID,
 		Body:       agentText,
 		Source:     "session",
 	}
@@ -344,10 +360,10 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return cErr
 	}
 	s.publishCommentCreated(ctx, comment)
-	// Successful turn → reset the agent's consecutive-failure counter
-	// regardless of which task succeeded. A bridged comment is the
-	// only place we know a turn produced real output.
-	s.RecordAgentSuccess(ctx, fields.AssigneeAgentProfileID)
+	// Successful turn → reset the acting agent's consecutive-failure
+	// counter. A bridged comment is the only place we know a turn
+	// produced real output.
+	s.RecordAgentSuccess(ctx, authorID)
 	// Lifecycle: each successful turn under an in-flight run lands a
 	// "step" event so the run detail page's Events log gets a row per
 	// turn. Resolve the run from the currently-claimed run for this
@@ -1156,6 +1172,11 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 		return nil
 	}
 	if data.EngineDispatched == commentkeys.EngineDispatchedValue {
+		return nil
+	}
+	// A session-bridged comment mirrors a turn that already ran; it must
+	// never itself queue a new run, whichever agent it's attributed to.
+	if data.Source == "session" {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is
