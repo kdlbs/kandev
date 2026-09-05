@@ -128,7 +128,7 @@ func TestWorkflowAutoStartNonEmptyPrompt(t *testing.T) {
 	}
 }
 
-// Test-only contract coverage for behavior already corrected on the current head.
+// Regression: a queued move-task handoff must survive a non-empty step prompt on a CREATED session.
 // @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.8
 func TestWorkflowAutoStartCreatedNonEmptyPromptPreservesQueuedHandoff(t *testing.T) {
 	fixture := newInitialPromptDedupFixture(t, false, false)
