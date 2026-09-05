@@ -200,11 +200,17 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
       className={cn("gap-3 p-3", size === "wide" ? "w-72 max-w-[calc(100vw-1rem)]" : "w-64")}
       onOpenAutoFocus={(event) => preventAndFocusCancel(event, cancelRef)}
       onFocusOutside={(event) => {
+        // Ignore stale focus events from the closing context-menu portal.
+        if ((event.target as Element)?.closest?.("[data-radix-menu-content]"))
+          return event.preventDefault();
         // A replaced boundary fails contains(), so the live trigger ref stays correct.
         if (focusBoundaryRef?.current?.contains(event.target as Node)) event.preventDefault();
       }}
       onInteractOutside={(event) => {
         const target = event.target as Node;
+        // Ignore stale interaction events from the closing context-menu portal.
+        if ((target as Element)?.closest?.("[data-radix-menu-content]"))
+          return event.preventDefault();
         // If the interaction target is no longer in the DOM (e.g., the context
         // menu content was just removed), it's a stale event from a preceding
         // close — prevent it from closing the popover.
