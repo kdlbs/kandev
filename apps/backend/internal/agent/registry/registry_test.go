@@ -282,7 +282,12 @@ func TestAgentRuntimesBoundMCPStartupBudget(t *testing.T) {
 	reg := NewRegistry(log)
 	reg.LoadDefaults()
 
-	for _, a := range reg.List() {
+	agentsList := reg.List()
+	if len(agentsList) == 0 {
+		t.Fatal("LoadDefaults registered no agents; cannot verify MCP_TIMEOUT invariant")
+	}
+
+	for _, a := range agentsList {
 		rt := a.Runtime()
 		if rt == nil {
 			continue

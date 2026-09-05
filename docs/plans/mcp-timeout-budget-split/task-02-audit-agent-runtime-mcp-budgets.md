@@ -55,7 +55,7 @@ omission.
 ## Verification
 
 - `make -C apps/backend test` (new regression:
-  `TestAgentRuntimesBoundMCPStartupBudget` in `internal/agent/agents`)
+  `TestAgentRuntimesBoundMCPStartupBudget` in `internal/agent/registry`)
 - `make -C apps/backend lint`
 
 ## Files likely touched
@@ -84,8 +84,9 @@ runtime corrected, and any blocker. Mark this work order `done` and update
 
 Implemented 2026-09-05.
 
-- Audit: `grep -rn "MCP_TIMEOUT|MCP_TOOL_TIMEOUT" apps/backend/internal` (excl.
-  generated/docs) returns exactly one non-doc hit, `claude_acp.go`. All other
+- Audit: `grep -rEn '"(MCP_TIMEOUT|MCP_TOOL_TIMEOUT)":' apps/backend/internal/agent/agents`
+  (scoped to `Runtime().Env` declarations, not incidental comment mentions
+  elsewhere) returns exactly one hit, `claude_acp.go`. All other
   22 registered agents (`Registry.LoadDefaults()`) declare neither key.
   `hermes_acp.go` declares only the unrelated `HERMES_ACP_SKIP_CONFIGURED_MCP`
   flag — confirmed out of scope, not coupled to MCP_TIMEOUT semantics.

@@ -123,10 +123,8 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{}, // Auth via ANTHROPIC_API_KEY or OAuth credentials file (see RemoteAuth)
 		Env: map[string]string{
-			// MCP_TIMEOUT governs the MCP connect deadline and, in Claude Code
-			// CLI 2.1.x, also the first-turn prewait before the CLI dispatches
-			// a prompt (anthropics/claude-code#91414). Keep it at the CLI's
-			// own default so that prewait stays short; MCP_TOOL_TIMEOUT holds
+			// MCP_TIMEOUT also governs the CLI's first-turn MCP prewait, so
+			// it must stay at the CLI's own default; MCP_TOOL_TIMEOUT holds
 			// the long budget Kandev's blocking MCP tool calls need.
 			"MCP_TIMEOUT":      "30000",
 			"MCP_TOOL_TIMEOUT": "7200000",
