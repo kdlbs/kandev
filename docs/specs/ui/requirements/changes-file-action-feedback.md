@@ -60,8 +60,9 @@ the action is complete.
   pending indicator without introducing a hover dependency or reducing the
   existing touch target.
 - **AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.6:** A successful stage or unstage
-  request shall remain pending through stale status updates and clear only when
-  refreshed status reaches the requested staged or unstaged state.
+  request shall remain pending through stale status updates and clear only after
+  both the successful request response and refreshed status reach the requested
+  staged or unstaged state. Either signal may arrive first.
 - **AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.7:** When the current stage or
   unstage request fails, its pending feedback shall clear. If a newer request in
   either direction has superseded it for the same repository and file, the
@@ -72,9 +73,9 @@ the action is complete.
   immediately while successful scopes remain pending until their refreshed
   status reaches the requested state.
 - **AC-UI-CHANGES-FILE-ACTION-FEEDBACK-001.9:** Pending ownership shall reset
-  when the active session, environment, or checked-out branch generation
-  changes. A callback from the prior scope shall not add, retain, or clear
-  feedback in the successor scope.
+  when the active session, environment, checked-out branch generation, or
+  workspace source generation changes. A callback from the prior scope shall
+  not add, retain, or clear feedback in the successor scope.
 
 ## Out of scope
 

@@ -35,6 +35,7 @@ import { normalizeGitStatusFiles } from "@/lib/state/slices/session-runtime/git-
 import { splitFilesByChangeLayer } from "./git-change-facets";
 import {
   clearPendingFileOperations,
+  markPendingFileOperationsSucceeded,
   pendingKey,
   pendingKeysForFailedRepositories,
   usePendingFileOperationRepositoryScope,
@@ -456,6 +457,8 @@ function useStageDispatch({
         operation,
         requestId: ++nextPendingRequestId.current,
         scopeIdentity: pendingScopeIdentity,
+        responseSucceeded: false,
+        targetStateObserved: false,
       };
       for (const key of keys) pendingFileOperations.current.set(key, owner);
       setPendingStageFiles((prev) => {
@@ -465,7 +468,30 @@ function useStageDispatch({
       });
       try {
         const result = await runPerRepo(paths, repo, operation, op);
-        if (!result.success) {
+        if (result.success) {
+          markPendingFileOperationsSucceeded(
+            keys,
+            owner,
+            pendingFileOperations,
+            setPendingStageFiles,
+          );
+        } else if (result.per_repo) {
+          const successfulKeys = Array.from(buckets).flatMap(
+            ([repositoryName, repositoryPaths]) => {
+              const repositoryResult = result.per_repo?.find(
+                (entry) => entry.repository_name === repositoryName,
+              );
+              return repositoryResult?.success
+                ? repositoryPaths.map((path) => pendingKey(repositoryName, path))
+                : [];
+            },
+          );
+          markPendingFileOperationsSucceeded(
+            successfulKeys,
+            owner,
+            pendingFileOperations,
+            setPendingStageFiles,
+          );
           const failedKeys = pendingKeysForFailedRepositories(buckets, result.per_repo);
           clearPendingFileOperations(
             failedKeys,
@@ -473,6 +499,8 @@ function useStageDispatch({
             pendingFileOperations,
             setPendingStageFiles,
           );
+        } else {
+          clearPendingFileOperations(keys, owner, pendingFileOperations, setPendingStageFiles);
         }
         return result;
       } catch (err) {

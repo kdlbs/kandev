@@ -27,9 +27,10 @@ scoping, and status acquisition remain unchanged.
   path, plus a unique request owner containing the requested stage or unstage
   transition and the active session/environment/branch generation. A newer
   request in either direction replaces the owner for overlapping keys.
-- Pending reconciliation clears a successful operation only when refreshed
-  status reaches its requested staged or unstaged state. Partial failures clear
-  only failed repository scopes; successful scopes remain pending for status
+- Pending reconciliation clears a successful operation only after both its
+  successful response and refreshed status reach the requested staged or
+  unstaged state. Either signal can arrive first. Partial failures clear only
+  failed repository scopes; successful scopes remain pending for status
   reconciliation. Failure cleanup clears a key only while the failed request
   still owns it, so stale status and an older superseded request cannot clear a
   newer action.
@@ -87,20 +88,20 @@ section.
 
 ## Failure and recovery
 
-The UI does not infer completion from hover, elapsed time, or a successful
-operation response. It follows the existing `isPending` input. A status refresh
-clears pending state only when the acted-on file has reached the target state
-of the operation that currently owns its repository/path key.
+The UI does not infer completion from hover or elapsed time. It follows the
+existing `isPending` input. Pending state clears only after the operation that
+currently owns the repository/path key has returned success and a refreshed
+status shows the target state. Either event can arrive first.
 
 A failed or thrown request clears its keys only when it remains their current
 owner. For a multi-repository result, failure cleanup selects only unsuccessful
 or skipped repository scopes. If any newer operation supersedes the request,
 its later completion or failure cannot clear the newer pending state. The newer
 action remains pending until its own target state appears or its request fails.
-Changing the session/environment/branch generation clears the visible state
-before the successor scope can reuse the same repository/path key. After
-cleanup, the slot restores the idle icon/action presentation, and backend or
-WebSocket errors remain surfaced through their current paths.
+Changing the session/environment/branch/workspace-source generation clears the
+visible state before the successor scope can reuse the same repository/path
+key. After cleanup, the slot restores the idle icon/action presentation, and
+backend or WebSocket errors remain surfaced through their current paths.
 
 ## Verification
 

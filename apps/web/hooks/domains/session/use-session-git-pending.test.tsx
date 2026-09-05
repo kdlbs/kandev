@@ -2,6 +2,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { pendingKey, useSessionGit } from "./use-session-git";
+import { buildPendingFileStateIndex } from "./use-session-git-pending";
 
 const mocks = vi.hoisted(() => ({
   statuses: [] as Array<{ repository_name: string; status: GitStatusEntry }>,
@@ -124,10 +125,17 @@ describe("useSessionGit pending target-state reconciliation", () => {
       hook.rerender();
 
       await waitFor(() => {
-        expect(hook.result.current.pendingStageFiles).not.toContain(pendingKey("", path));
+        expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
       });
 
-      pending.resolve({ success: true, operation, output: "" });
+      await act(async () => {
+        pending.resolve({ success: true, operation, output: "" });
+        await pending.promise;
+      });
+
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).not.toContain(pendingKey("", path));
+      });
     },
   );
 });
@@ -244,6 +252,84 @@ describe("useSessionGit overlapping request ownership", () => {
       });
     },
   );
+
+  it.each([
+    { operation: "stage" as const, initialStaged: false, completedStaged: true },
+    { operation: "unstage" as const, initialStaged: true, completedStaged: false },
+  ])(
+    "does not clear a newer same-direction $operation request from an older success status",
+    async ({ operation, initialStaged, completedStaged }) => {
+      const path = `overlapping-success-${operation}.txt`;
+      const older = deferredResult();
+      const newer = deferredResult();
+      mocks.statuses = [{ repository_name: "", status: status(path, initialStaged) }];
+      mocks.gitOps[operation].mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+
+      const hook = renderHook(() => useSessionGit("session-1"));
+
+      act(() => {
+        void hook.result.current[`${operation}File`]([path], "");
+      });
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+      });
+
+      act(() => {
+        void hook.result.current[`${operation}File`]([path], "");
+      });
+
+      await act(async () => {
+        older.resolve({ success: true, operation, output: "" });
+        await older.promise;
+      });
+
+      mocks.statuses = [{ repository_name: "", status: status(path, completedStaged) }];
+      hook.rerender();
+
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
+      });
+
+      await act(async () => {
+        newer.resolve({ success: true, operation, output: "" });
+        await newer.promise;
+      });
+
+      await waitFor(() => {
+        expect(hook.result.current.pendingStageFiles).not.toContain(pendingKey("", path));
+      });
+    },
+  );
+});
+
+describe("pending file state indexing", () => {
+  it("tracks staged and unstaged facets for each repository and path", () => {
+    const index = buildPendingFileStateIndex([
+      {
+        path: "shared.ts",
+        repository_name: "repo-a",
+        status: "modified",
+        staged: true,
+        staged_change: { status: "modified" },
+        unstaged_change: { status: "modified" },
+      },
+      {
+        path: "only-staged.ts",
+        repository_name: "repo-b",
+        status: "modified",
+        staged: true,
+      },
+    ]);
+
+    expect(index.get(pendingKey("repo-a", "shared.ts"))).toEqual({
+      hasStaged: true,
+      hasUnstaged: true,
+    });
+    expect(index.get(pendingKey("repo-b", "only-staged.ts"))).toEqual({
+      hasStaged: true,
+      hasUnstaged: false,
+    });
+  });
 });
 
 describe("useSessionGit pending scope ownership", () => {

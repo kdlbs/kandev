@@ -531,6 +531,7 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
     // surfacing the frozen snapshot until the user reloads the tab, masking
     // the per-repo updates streaming in for both the primary and the sibling.
     store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    store.getState().bumpSessionGitCheckoutGeneration(payload.session_id);
     store.getState().bumpSessionCommitsRefetch(payload.session_id);
   }
 }
@@ -688,6 +689,7 @@ function handleWorkspaceSourcesUpdated(
     .reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId], boundaryTimestamp);
   store.getState().bumpWorkspaceFilesRefresh(sessionId);
   store.getState().clearLegacyGitStatusEntry(sessionId);
+  store.getState().bumpSessionGitCheckoutGeneration(sessionId);
   store.getState().bumpSessionCommitsRefetch(sessionId);
 }
 

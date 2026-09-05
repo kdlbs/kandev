@@ -11,11 +11,13 @@ import { splitFilesByChangeLayer } from "./git-change-facets";
 
 export type PendingFileOperation = "stage" | "unstage";
 
-export type PendingFileOperationOwner = Readonly<{
+export type PendingFileOperationOwner = {
   operation: PendingFileOperation;
   requestId: number;
   scopeIdentity: string;
-}>;
+  responseSucceeded: boolean;
+  targetStateObserved: boolean;
+};
 
 export function pendingKey(repo: string | undefined, path: string): string {
   return `${repo ?? ""}::${path}`;
@@ -56,6 +58,27 @@ export function clearPendingFileOperations(
     for (const key of cleared) next.delete(key);
     return next;
   });
+}
+
+/** Marks the current owner's response as successful and clears keys already observed at target state. */
+export function markPendingFileOperationsSucceeded(
+  keys: string[],
+  owner: PendingFileOperationOwner,
+  pendingFileOperations: MutableRefObject<Map<string, PendingFileOperationOwner>>,
+  setPendingStageFiles: Dispatch<SetStateAction<Set<string>>>,
+) {
+  for (const key of keys) {
+    const current = pendingFileOperations.current.get(key);
+    if (current === owner) current.responseSucceeded = true;
+  }
+  clearPendingFileOperations(
+    keys.filter(
+      (key) => pendingFileOperations.current.get(key) === owner && owner.targetStateObserved,
+    ),
+    owner,
+    pendingFileOperations,
+    setPendingStageFiles,
+  );
 }
 
 export function usePendingFileOperationScope(
@@ -111,21 +134,38 @@ export function usePendingFileOperationRepositoryScope(
   }, [generations, pendingFileOperations, setPendingStageFiles]);
 }
 
+type PendingFileState = {
+  hasStaged: boolean;
+  hasUnstaged: boolean;
+};
+
+/** Indexes the current staged/unstaged facets once so each pending key is O(1) to reconcile. */
+export function buildPendingFileStateIndex(allFiles: FileInfo[]): Map<string, PendingFileState> {
+  const index = new Map<string, PendingFileState>();
+  const { stagedFiles, unstagedFiles } = splitFilesByChangeLayer(allFiles);
+  const mark = (files: FileInfo[], layer: keyof PendingFileState) => {
+    for (const file of files) {
+      const key = pendingKey(file.repository_name, file.path);
+      const current = index.get(key) ?? { hasStaged: false, hasUnstaged: false };
+      current[layer] = true;
+      index.set(key, current);
+    }
+  };
+  mark(stagedFiles, "hasStaged");
+  mark(unstagedFiles, "hasUnstaged");
+  return index;
+}
+
 function pendingFileOperationCompleted(
   key: string,
   operation: PendingFileOperation,
-  allFiles: FileInfo[],
+  fileStateIndex: Map<string, PendingFileState>,
 ): boolean {
-  const separator = key.indexOf("::");
-  const repositoryName = separator === -1 ? "" : key.slice(0, separator);
-  const path = separator === -1 ? key : key.slice(separator + 2);
-  const matchingFiles = allFiles.filter(
-    (file) => (file.repository_name ?? "") === repositoryName && file.path === path,
-  );
-  const { stagedFiles, unstagedFiles } = splitFilesByChangeLayer(matchingFiles);
+  const state = fileStateIndex.get(key);
+  if (!state) return false;
   return operation === "stage"
-    ? stagedFiles.length > 0 && unstagedFiles.length === 0
-    : unstagedFiles.length > 0 && stagedFiles.length === 0;
+    ? state.hasStaged && !state.hasUnstaged
+    : state.hasUnstaged && !state.hasStaged;
 }
 
 /**
@@ -153,6 +193,7 @@ export function usePerRepoPendingClear(
     const isLegacySingleRepo = statusByRepo.length === 0;
     prevStatusRef.current = next;
     if (refreshed.length === 0 && !isLegacySingleRepo) return;
+    const fileStateIndex = buildPendingFileStateIndex(allFiles);
     setPendingStageFiles((prev) => {
       if (prev.size === 0) return prev;
       const out = new Set<string>();
@@ -164,12 +205,17 @@ export function usePerRepoPendingClear(
         if (
           !repositoryRefreshed ||
           !owner ||
-          !pendingFileOperationCompleted(key, owner.operation, allFiles)
+          !pendingFileOperationCompleted(key, owner.operation, fileStateIndex)
         ) {
           out.add(key);
           continue;
         }
-        pendingFileOperations.current.delete(key);
+        owner.targetStateObserved = true;
+        if (owner.responseSucceeded) {
+          pendingFileOperations.current.delete(key);
+          continue;
+        }
+        out.add(key);
       }
       return out;
     });
