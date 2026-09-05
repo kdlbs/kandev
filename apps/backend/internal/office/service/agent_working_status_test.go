@@ -171,6 +171,34 @@ func TestAgentStatus_NotLeftWorkingWhenLaunchNeverHappened(t *testing.T) {
 		"after a run that never reached the adapter")
 }
 
+// TestAgentStatus_ReturnsToIdleWhenNoClaimedRunResolves is the regression
+// test for DR-14 review round 1 Finding 3: resolveLifecycleRun only ever
+// looks up claimed runs, so a cancellation that already marked the run
+// terminal, or a late/duplicate delivery, makes it resolve to sql.ErrNoRows.
+// handleAgentCompleted (shared by AgentCompleted and AgentStopped) must
+// still clear "working" on that exit — it never reaches stampRunFinished.
+func TestAgentStatus_ReturnsToIdleWhenNoClaimedRunResolves(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	svc.SetSyncHandlers(true)
+	ctx := context.Background()
+	eb := bus.NewMemoryEventBus(logger.Default())
+	if err := svc.RegisterEventSubscribers(eb); err != nil {
+		t.Fatalf("register subscribers: %v", err)
+	}
+
+	agent := launchedWorkingAgent(t, svc, ctx, "worker-no-claimed-run", "task-working-no-claim")
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "before the event")
+
+	// No run carries this task/agent pair in `claimed` state (e.g. the run
+	// already left `claimed` via another path, or this is a duplicate
+	// delivery), so resolveLifecycleRun returns sql.ErrNoRows.
+	publishLifecycle(t, ctx, eb, events.AgentStopped, "task-with-no-claimed-run", agent.ID)
+
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after an AgentStopped event whose run does not resolve")
+}
+
 func publishLifecycle(
 	t *testing.T, ctx context.Context, eb bus.EventBus,
 	topic, taskID, agentID string,

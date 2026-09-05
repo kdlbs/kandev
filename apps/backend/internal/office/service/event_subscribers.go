@@ -384,6 +384,12 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// No claimed run resolves for this event: it already finished
+			// via another path, arrived late/duplicated, or a cancellation
+			// marked the run terminal before this event landed. There is no
+			// run left to reach stampRunFinished, but the agent may still
+			// be sitting at "working" from the launch that produced it.
+			s.clearAgentWorking(ctx, data.AgentProfileID)
 			return nil
 		}
 		return err
@@ -406,6 +412,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	// eventually reclaims it, instead of releasing a lock for a run that
 	// never actually reached a terminal state.
 	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
+		s.clearAgentWorking(ctx, run.AgentProfileID)
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)
@@ -638,6 +645,10 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Same reasoning as handleAgentCompleted's ErrNoRows exit: no
+			// claimed run resolves, so nothing reaches HandleAgentFailure's
+			// clear, but the agent may still be "working" from the launch.
+			s.clearAgentWorking(ctx, data.AgentProfileID)
 			return nil
 		}
 		return err

@@ -336,24 +336,25 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		Env:       env,
 		ProfileID: profileID,
 	}
-	// launchAgent only returns true when the adapter was actually
-	// invoked. Leave the run `claimed` and let the
-	// AgentCompleted/AgentStopped event subscribers in
-	// event_subscribers.go finish it. This serves as the "agent is
-	// busy on this task" lock that ClaimNextEligibleRun respects, so
-	// new runs (comments, status changes) for the same agent + task
-	// queue up rather than racing the active turn.
+	// launchAgent returns true only when the adapter was actually invoked.
+	// When it was, leave the run `claimed` and let the AgentCompleted/
+	// AgentStopped event subscribers in event_subscribers.go finish it.
+	// This serves as the "agent is busy on this task" lock that
+	// ClaimNextEligibleRun respects, so new runs (comments, status changes)
+	// for the same agent + task queue up rather than racing the active turn.
+	//
 	// Mark before launching, not after: launchAgent returns only once the
 	// adapter has been invoked, by which point a fast run's completion
 	// event may already have been processed — a mark-after-launch would
 	// race that reset and strand the agent showing "working" forever.
 	si.svc.markAgentWorking(ctx, agent)
 	if !si.launchAgent(ctx, run, agent, taskID, execCfg.Type, launchCtx) {
-		// The adapter was never invoked, so no AgentCompleted/AgentStopped/
-		// AgentFailed event will arrive to clear the status. Clear it here
-		// instead. Redundant with the failure paths that route through
-		// HandleAgentFailure, and deliberately so: failTasklessRun calls
-		// MarkRunFailed directly and reaches neither of them.
+		// No adapter was invoked, so no AgentCompleted/AgentStopped/
+		// AgentFailed event will ever arrive to clear the status — every
+		// non-launch exit (taskless/unlaunchable failure, routing parked,
+		// routing dispatch error, legacy start failure) must clear here.
+		// The underlying CAS makes this a safe no-op on paths that already
+		// cleared it themselves (e.g. HandleAgentFailure).
 		si.svc.clearAgentWorking(ctx, agent.ID)
 	}
 }
@@ -581,8 +582,8 @@ func (si *SchedulerIntegration) launchAgent(
 		"executor_type": executorType,
 		"prompt_len":    len(launch.Prompt),
 	})
-	if si.tryRoutingDispatch(ctx, run, agent, taskID, launch) {
-		return true
+	if handled, launched := si.tryRoutingDispatch(ctx, run, agent, taskID, launch); handled {
+		return launched
 	}
 	var err error
 	if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
@@ -715,16 +716,18 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 }
 
 // tryRoutingDispatch routes through the provider-routing dispatcher when
-// one is wired. Returns true when the dispatcher took over (launched OR
-// parked OR error-handled); false to fall through to the legacy launch
-// path (routing disabled / not configured).
+// one is wired. handled is true when the dispatcher took over (launched OR
+// parked OR error-handled), telling the caller not to fall through to the
+// legacy launch path. launched is true only when the adapter was actually
+// invoked — parked and error-handled outcomes are "handled" but not
+// "launched", and callers must not treat them as if a process is running.
 func (si *SchedulerIntegration) tryRoutingDispatch(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	taskID string, launch LaunchContext,
-) bool {
+) (handled bool, launched bool) {
 	rd := si.svc.routingDispatcher
 	if rd == nil {
-		return false
+		return false, false
 	}
 	launched, parked, err := rd.DispatchWithRouting(ctx, run, agent, launch)
 	if err != nil {
@@ -736,16 +739,16 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 		})
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
-		return true
+		return true, false
 	}
 	if launched {
-		return true
+		return true, true
 	}
 	if parked {
 		si.releaseCheckoutIfNeeded(ctx, run)
-		return true
+		return true, false
 	}
-	return false
+	return false, false
 }
 
 // checkoutContendedRetryDelay is the backoff before a run that lost the
