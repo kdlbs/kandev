@@ -37,8 +37,8 @@ action row and valid timestamp behavior.
 
 ## Acceptance
 
-- `formatRelativeTime("")` and `formatRelativeTime("not-a-date")` return an
-  empty string.
+- `formatRelativeTime` returns an empty string for empty, malformed, and
+  normalized-malformed values such as `"0"` and February 30th.
 - `MessageActions` renders no timestamp element or invalid-date disclosure for
   an empty or malformed `created_at` while copy/raw/favorite actions remain
   available.
@@ -47,8 +47,8 @@ action row and valid timestamp behavior.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run lib/utils.test.ts components/task/chat/messages/message-actions.test.tsx
-cd apps/web && pnpm exec eslint lib/utils.ts lib/utils.test.ts components/task/chat/messages/message-actions.tsx components/task/chat/messages/message-actions.test.tsx
+(cd apps && pnpm --filter @kandev/web test -- --run lib/utils.test.ts components/task/chat/messages/message-actions.test.tsx)
+(cd apps/web && pnpm exec eslint lib/utils.ts lib/utils.test.ts lib/utils/strict-timestamp.ts lib/state/slices/session/turn-actions.ts components/task/chat/messages/message-actions.tsx components/task/chat/messages/message-actions.test.tsx)
 python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
@@ -56,7 +56,9 @@ git diff --check
 ## Files likely touched
 
 - `apps/web/lib/utils.ts`
+- `apps/web/lib/utils/strict-timestamp.ts`
 - `apps/web/lib/utils.test.ts`
+- `apps/web/lib/state/slices/session/turn-actions.ts`
 - `apps/web/components/task/chat/messages/message-actions.tsx`
 - `apps/web/components/task/chat/messages/message-actions.test.tsx`
 - `docs/specs/ui/requirements/task-prompt-transcript-visibility.md`
@@ -85,8 +87,9 @@ None.
 
 Implemented and verified:
 
-- `formatRelativeTime` returns an empty label for empty and malformed dates.
+- `parseStrictRfc3339Timestamp` is shared by session reconciliation and UI date formatting.
+- `formatRelativeTime` returns an empty label for empty, malformed, and normalized-malformed dates.
 - `MessageTimestamp` omits the timestamp element and coarse-pointer disclosure for invalid dates while preserving other message actions.
-- Focused frontend tests pass with 47 tests.
+- Focused frontend tests pass with 51 tests; turn timestamp tests pass with 54 tests.
 - ESLint, TypeScript typecheck, specification lint, and `git diff --check` pass.
 - Managed Chromium and Pixel 5 capture specs pass against the production build; the captured fallback shows no `Invalid Date` text. Temporary capture specs were removed.

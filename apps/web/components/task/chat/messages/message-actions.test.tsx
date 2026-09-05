@@ -98,7 +98,7 @@ describe("MessageActions timestamp tooltip", () => {
     expect(timeEl?.getAttribute("title")).toBe(new Date(MESSAGE_TIMESTAMP).toLocaleString());
   });
 
-  it.each(["", "not-a-date"])(
+  it.each(["", "not-a-date", "0", "2026-02-30T10:00:00Z"])(
     "omits the timestamp affordance for invalid created_at value %j",
     (createdAt) => {
       const { container } = render(

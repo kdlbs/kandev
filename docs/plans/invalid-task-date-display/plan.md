@@ -50,11 +50,16 @@ The browser therefore supplies the visible string `Invalid Date`.
 ## Technical approach
 
 - `apps/web/lib/utils.ts`: return `""` immediately when the parsed date is
-  invalid in `formatRelativeTime`.
+  invalid in `formatRelativeTime`, using the shared strict parser.
+- `apps/web/lib/utils/strict-timestamp.ts`: centralize strict RFC3339 calendar,
+  clock, offset, and fractional-second validation for timestamp consumers.
 - `apps/web/components/task/chat/messages/message-actions.tsx`: validate
-  `createdAt` in `MessageTimestamp` before deriving the absolute label or
-  mounting the `<time>`/Drawer surface. Invalid timestamps keep content actions
-  visible but omit only the timestamp affordance.
+-  `createdAt` in `MessageTimestamp` with the shared parser before deriving the
+  absolute label or mounting the `<time>`/Drawer surface. Invalid timestamps
+  keep content actions visible but omit only the timestamp affordance.
+- `apps/web/lib/state/slices/session/turn-actions.ts`: delegate the existing
+  nanosecond parser API to the shared implementation so session reconciliation
+  and UI formatting enforce the same wire contract.
 - Keep the existing `formatRelativeTime` import and action-row presentation so
   valid message timestamps and desktop/mobile interaction behavior are
   unchanged.
@@ -62,10 +67,11 @@ The browser therefore supplies the visible string `Invalid Date`.
 ## Tests
 
 - `apps/web/lib/utils.test.ts`: add an invalid and empty input regression for
-  `formatRelativeTime`, covering the shared helper's empty-label contract.
+  `formatRelativeTime`, including values that `Date.parse` would normalize.
 - `apps/web/components/task/chat/messages/message-actions.test.tsx`: add a
   synthetic-fallback timestamp case asserting no `<time>` element or
-  `Invalid Date` text/disclosure is rendered. This covers
+  `Invalid Date` text/disclosure is rendered for empty, malformed, and
+  normalized-malformed values. This covers
   `AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.15`.
 
 ## E2E tests
@@ -85,7 +91,8 @@ the rendered transcript smoke coverage.
 
 Passed:
 
-- `pnpm --filter @kandev/web test -- --run lib/utils.test.ts components/task/chat/messages/message-actions.test.tsx`: 47 tests passed.
+- `pnpm --filter @kandev/web test -- --run lib/utils.test.ts components/task/chat/messages/message-actions.test.tsx`: 51 tests passed.
+- `pnpm --filter @kandev/web test -- --run lib/state/slices/session/turn-actions.test.ts`: 54 tests passed.
 - ESLint passed for the four changed frontend source and test files.
 - `pnpm run typecheck` passed from `apps/web`.
 - `python3 scripts/lint-spec-files.py --all` passed.
