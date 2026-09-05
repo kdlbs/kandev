@@ -31,6 +31,40 @@ by the [Office system](../office/README.md).
   [executor system](../executors/README.md). Its draft
   [provider contract](../executors/system-design/remote-executor-plugins.md) uses plugin lifecycle and dispatch.
 
+## Specification map
+
+### Requirements
+
+- [Plugin-Contributed Agent Tools](requirements/agent-tools.md)
+- [Isolated plugin web-application contributions](requirements/isolated-web-app-contributions.md)
+- [Plugin-Initiated Workflow Step Transitions](requirements/plugin-initiated-step-transitions.md)
+- [Plugin Authoring Experience](requirements/authoring-experience.md)
+- [Plugin Marketplace](requirements/marketplace.md)
+- [Plugin nav items in the sidebar footer icon row](requirements/plugin-nav-sidebar-footer.md)
+- [Plugin Shortcut Settings](requirements/plugin-shortcut-settings.md)
+- [Plugin System](requirements/plugins.md)
+- [Plugin Repository Task Creation](requirements/repository-provider-task-creation.md)
+- [Task Manager Host Monitor](requirements/task-manager-host-monitor.md)
+- [Voice Plugin Host Prerequisites](requirements/voice-extraction-host.md)
+- [Voice Mode Leaves Core](requirements/voice-extraction.md)
+
+### System design
+
+- [Plugin-Initiated Workflow Step Transitions](system-design/plugin-initiated-step-transitions.md)
+- [Plugin Marketplace](system-design/marketplace.md)
+- [Isolated plugin web-application contributions](system-design/isolated-web-app-contributions.md)
+- [Plugin nav items in the sidebar footer icon row System Design Part 1](system-design/plugin-nav-sidebar-footer-01.md)
+- [Plugin nav items in the sidebar footer icon row System Design Part 2](system-design/plugin-nav-sidebar-footer-02.md)
+- [Plugin nav items in the sidebar footer icon row System Design Part 3](system-design/plugin-nav-sidebar-footer-03.md)
+- [Plugin nav items in the sidebar footer icon row System Design Part 4](system-design/plugin-nav-sidebar-footer-04.md)
+- [Plugin Shortcut Settings](system-design/plugin-shortcut-settings.md)
+- [Plugin System System Design Part 1](system-design/plugins-01.md)
+- [Plugin System System Design Part 2](system-design/plugins-02.md)
+- [Plugin System System Design Part 3](system-design/plugins-03.md)
+- [Plugin System System Design Part 4](system-design/plugins-04.md)
+- [Plugin Repository Task Creation](system-design/repository-provider-task-creation.md)
+- [Task Manager Host Monitor](system-design/task-manager-host-monitor.md)
+
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
