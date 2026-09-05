@@ -245,6 +245,18 @@ counted by that guard at all, so a single pair of counts is either ambiguous
 or actively misleading. `guards` gives the agent the count against each guard
 that exists, which is the question it was actually asking.
 
+A third case reaches the same cross-step scan without either seat sitting at
+the current step at all: both `AddTaskReviewer`/`AddTaskApprover` seats are
+cast while the task sits on an earlier step (e.g. Backlog), so by the time
+the task reaches Review neither seat's `StepID` matches `review`. Here
+`ResolveParticipantRole` reads the role named by Review's own
+`wait_for_quorum` guard and prefers the matching seat — `reviewer`, in the
+thin-workspace Review case — over the fixed approver-first order. This
+guard-role tiebreak only applies when the current step names exactly one
+role; a step naming both roles, naming neither, or that fails to load falls
+back to approver-wins unchanged, so this case narrows rather than replaces
+the existing precedence.
+
 This precedence applies only to the agent decision surface. The human decision
 path retains its existing `resolveDeciderRole` behavior and unconditional
 approver precedence, as required by AC-TASKS-QUORUM-RECORDING-001.4a. The two

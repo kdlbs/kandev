@@ -197,10 +197,13 @@ func TestResolveParticipantRole_StepPreferredTransitionFires(t *testing.T) {
 }
 
 // TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins is AC-4's
-// fallback case: a caller holding both seats, with neither seat's StepID
-// matching the step being queried, still resolves under approver-wins —
-// the step-preference added for the Review re-entry bug only kicks in
-// when the approver seat itself sits at the queried step.
+// no-guard-at-step fallback: a caller holding both seats, with neither
+// seat's StepID matching the step being queried and that step naming no
+// wait_for_quorum guard (quorumEngine's step has a nil Guard), still
+// resolves under approver-wins — the step-preference added for the Review
+// re-entry bug only kicks in when the approver seat itself sits at the
+// queried step, and the guard-role tiebreak only kicks in when the queried
+// step names exactly one guard role.
 func TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins(t *testing.T) {
 	participants := scopedParticipants{perTask: []ParticipantInfo{
 		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review-1", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
@@ -214,5 +217,46 @@ func TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins(t *testing.T) {
 	}
 	if role != "approver" || participantID != "seat-approver" {
 		t.Errorf("role/participantID = %q/%q, want approver/seat-approver", role, participantID)
+	}
+}
+
+// TestResolveParticipantRole_BothSeatsAtSameNonCurrentStep_GuardRoleWins is
+// the regression test for the thin-workspace Review deadlock: both seats
+// were cast at Backlog (before the task ever reached Review), so neither
+// sits at the step being evaluated and the old approver-first cross-step
+// scan always won. The step actually being evaluated (Review) has a
+// reviewer wait_for_quorum guard, so resolution must prefer reviewer, and
+// recording the decision under the resolved seat must satisfy that guard
+// and fire Review -> Approval instead of parking forever.
+func TestResolveParticipantRole_BothSeatsAtSameNonCurrentStep_GuardRoleWins(t *testing.T) {
+	store := quorumStore(&TransitionGuard{
+		WaitForQuorum: &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove},
+	})
+	decisions := newFakeDecisionStore()
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "backlog", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-approver", TaskID: "task-1", StepID: "backlog", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	eng := New(store, MapRegistry{}, WithDecisionStore(decisions), WithParticipantStore(participants))
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "reviewer" || participantID != "seat-reviewer" {
+		t.Fatalf("role/participantID = %q/%q, want reviewer/seat-reviewer", role, participantID)
+	}
+
+	result, err := eng.RecordParticipantDecision(context.Background(), "sess-1", DecisionInfo{
+		TaskID: "task-1", StepID: "review", ParticipantID: participantID, Decision: DecisionApproved,
+	})
+	if err != nil {
+		t.Fatalf("RecordParticipantDecision: %v", err)
+	}
+	if !result.Transitioned {
+		t.Fatalf("expected the resolved reviewer decision to satisfy quorum and transition: %#v", result)
+	}
+	if result.FromStepID != "review" || result.ToStepID != "approval" {
+		t.Fatalf("unexpected transition endpoints: %#v", result)
 	}
 }

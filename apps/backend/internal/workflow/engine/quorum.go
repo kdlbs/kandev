@@ -904,10 +904,13 @@ func (e *Engine) evaluateGuardStateReadOnly(
 // participates, per AC-57's "exactly once, in the engine" mandate.
 // When the caller holds both seats, the seat whose StepID equals stepID
 // wins, since that is the seat the current step's guard actually reads
-// decisions against. If both seats sit at stepID, or neither does,
-// approver wins, matching the precedence in office/dashboard/decisions.go's
-// resolveDeciderRole (AC-4). Returns ErrParticipantNotFound when the
-// agent occupies neither seat.
+// decisions against. When neither seat sits at stepID, the role named by
+// stepID's own wait_for_quorum guard wins, so a decision is never filed
+// under a role no guard at that step is counting. Approver wins as the
+// final tiebreak — when the step names both roles, names neither, or the
+// step cannot be loaded — matching the precedence in
+// office/dashboard/decisions.go's resolveDeciderRole (AC-4). Returns
+// ErrParticipantNotFound when the agent occupies neither seat.
 func (e *Engine) ResolveParticipantRole(
 	ctx context.Context, taskID, stepID, agentProfileID string,
 ) (role, participantID string, err error) {
@@ -945,7 +948,38 @@ func (e *Engine) ResolveParticipantRole(
 	if len(matches) == 0 {
 		return "", "", ErrParticipantNotFound
 	}
+	if guardRoles := e.guardRolesAtStep(ctx, workflowID, stepID); len(guardRoles) == 1 {
+		for _, m := range matches {
+			if guardRoles[m.role] {
+				return m.role, m.seat.ID, nil
+			}
+		}
+	}
 	return matches[0].role, matches[0].seat.ID, nil
+}
+
+// guardRolesAtStep returns the set of roles named by wait_for_quorum guards
+// on stepID's on_turn_complete actions, used to break a cross-step role
+// resolution tie in favor of the role the step is actually waiting on.
+// Returns an empty set when the step names no such guard or cannot be
+// loaded, so callers fall back to approver-wins rather than treating a load
+// failure as a role match.
+func (e *Engine) guardRolesAtStep(ctx context.Context, workflowID, stepID string) map[string]bool {
+	if workflowID == "" {
+		return nil
+	}
+	step, err := e.store.LoadStep(ctx, workflowID, stepID)
+	if err != nil {
+		return nil
+	}
+	roles := make(map[string]bool)
+	for _, action := range step.Events[TriggerOnTurnComplete] {
+		if action.Guard == nil || action.Guard.WaitForQuorum == nil || action.Guard.WaitForQuorum.Role == "" {
+			continue
+		}
+		roles[action.Guard.WaitForQuorum.Role] = true
+	}
+	return roles
 }
 
 // roleSeat pairs a resolved role with the seat matched under it.
