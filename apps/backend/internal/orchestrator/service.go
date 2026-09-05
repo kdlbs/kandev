@@ -660,6 +660,16 @@ type Service struct {
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
 	childCompletionLocksMu sync.Mutex
 	childCompletionLocks   map[string]*childCompletionOperationLock
+	// agentErrorOperationLocks serializes concurrent on_agent_error dispatches
+	// that carry the same operation id — the load -> evaluate -> commit ->
+	// mark window, held from before the task/session/MachineState load so a
+	// blocked racer always reloads state rather than evaluating a
+	// PreloadedState built before another racer's commit. Deliberately a
+	// separate map from childCompletionLocks: coupling two unrelated
+	// triggers' contention through one map would let a change to either
+	// lock's lifetime silently affect the other.
+	agentErrorOperationLocksMu sync.Mutex
+	agentErrorOperationLocks   map[string]*agentErrorOperationLock
 	// onProcessOnEnterComplete is a package-test hook for synchronizing with
 	// applyEngineTransition's asynchronous processOnEnter goroutine.
 	onProcessOnEnterComplete func()

@@ -125,6 +125,13 @@ type HandleResult struct {
 	// abandoning is an expected outcome of concurrent re-evaluation, not a
 	// failure.
 	TransitionAbandoned bool
+
+	// OperationMarkDeferred is true when the engine deliberately skipped
+	// marking HandleInput.OperationID applied because EvaluateOnly deferred
+	// this transition's commit to the caller. The caller then owns the
+	// marker and must invoke TransitionStore.MarkOperationApplied itself,
+	// once and only once its own commit succeeds.
+	OperationMarkDeferred bool
 }
 
 // Option configures an Engine at construction time. Use With* helpers below.
@@ -270,6 +277,15 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 	result, err := e.processActions(ctx, in, state, step, actions, filter)
 	if err != nil {
 		return HandleResult{}, err
+	}
+
+	// A deferred transition is work this call evaluated but did not commit
+	// (processActions skips ApplyTransition under EvaluateOnly). Marking the
+	// operation applied here would claim a commit the caller still owes, so
+	// ownership of the marker passes to the caller instead.
+	if in.EvaluateOnly && result.Transitioned {
+		result.OperationMarkDeferred = in.OperationID != ""
+		return result, nil
 	}
 
 	return result, e.markOperationApplied(ctx, in.OperationID)

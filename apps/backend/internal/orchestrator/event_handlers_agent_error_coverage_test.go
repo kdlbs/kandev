@@ -143,12 +143,16 @@ func TestDispatchKanbanAgentErrorTrigger_ReadsPostReconciliationStep(t *testing.
 	}
 }
 
-// --- AC-C7: a declined transition (target step fails to load) still reports
-// a dispatch and, because the engine already marked the operation applied
-// when it evaluated the action, is never retried on redelivery even though
-// the underlying transition never landed. ---
+// --- AC-EO-11 (workflow-evaluate-only-operation-marking): a declined
+// transition (target step fails to load) still reports a dispatch, and IS
+// retried on redelivery — the engine defers the mark for a deferred
+// transition (OperationMarkDeferred), and the caller only marks once
+// applyEngineTransition actually commits. Superseded former behavior: AC-C7
+// used to describe this operation as marked applied by the engine's
+// unconditional mark and therefore never retried, which was the defect this
+// spec's contract change fixes. ---
 
-func TestDispatchKanbanAgentErrorTrigger_DeclinedTransitionIsNotRetried(t *testing.T) {
+func TestDispatchKanbanAgentErrorTrigger_DeclinedTransitionIsRetried(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -182,6 +186,12 @@ func TestDispatchKanbanAgentErrorTrigger_DeclinedTransitionIsNotRetried(t *testi
 		t.Fatalf("got %d dispatch INFO records, want 1 (dispatch still reports success)", len(got))
 	}
 
+	operationID := agentErrorOperationID("s1", "exec-1")
+	applied, err := svc.workflowStore.IsOperationApplied(ctx, operationID)
+	if err != nil || applied {
+		t.Fatalf("IsOperationApplied = %v, %v, want false, nil (a declined transition must leave the operation unmarked)", applied, err)
+	}
+
 	logs.TakeAll()
 	svc.handleRecoverableFailureLocked(ctx, data)
 
@@ -190,10 +200,10 @@ func TestDispatchKanbanAgentErrorTrigger_DeclinedTransitionIsNotRetried(t *testi
 		t.Fatalf("reload task: %v", err)
 	}
 	if task.WorkflowStepID != "step1" {
-		t.Fatalf("WorkflowStepID = %q after redelivery, want step1 (still not retried)", task.WorkflowStepID)
+		t.Fatalf("WorkflowStepID = %q after redelivery, want step1 (still declined the same way)", task.WorkflowStepID)
 	}
-	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 0 {
-		t.Errorf("redelivery emitted %d dispatch record(s), want 0 (idempotent)", len(got))
+	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
+		t.Errorf("redelivery emitted %d dispatch record(s), want 1 (AC-EO-11: an unmarked declined transition retries instead of short-circuiting on Idempotent)", len(got))
 	}
 }
 
