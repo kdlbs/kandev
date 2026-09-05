@@ -63,4 +63,49 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 	if err != nil || len(grants) != 1 || grants[0].PrincipalID != "principal-1" {
 		t.Fatalf("principal grants = %#v, err = %v; want one principal-bound grant", grants, err)
 	}
+	created, err := repo.ListCoordinatorGrants(ctx, "ws-1", "coordinator", false)
+	if err != nil || len(created) != 1 || created[0].GrantedByUserID != "admin" {
+		t.Fatalf("created grants = %#v, err = %v; want audit actor admin", created, err)
+	}
+}
+
+// Reviewer-requested contract coverage: grant mutation routes must never be
+// reachable by an anonymous or non-admin caller.
+func TestCoordinatorGrantMutationRoutesRequireAdmin(t *testing.T) {
+	_, repo, svc := newRepositoryHTTPTestRouterWithService(t)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	router := gin.New()
+	RegisterCoordinatorGrantRoutes(router, repo, svc, log)
+
+	for name, identity := range map[string]*authn.Identity{
+		"anonymous": nil,
+		"member":    {UserID: "member", Role: authn.RoleMember},
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler := router
+			if identity != nil {
+				handler = gin.New()
+				handler.Use(func(c *gin.Context) {
+					authn.SetOnGin(c, *identity)
+					c.Next()
+				})
+				RegisterCoordinatorGrantRoutes(handler, repo, svc, log)
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/coordinator-grants", nil)
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			want := http.StatusUnauthorized
+			if identity != nil {
+				want = http.StatusForbidden
+			}
+			if response.Code != want {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, want, response.Body.String())
+			}
+		})
+	}
 }
