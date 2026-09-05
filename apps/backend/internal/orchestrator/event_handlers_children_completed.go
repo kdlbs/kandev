@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -74,6 +76,11 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 		s.taskRuntimeStateMu.Unlock()
 		return
 	}
+	if task.IsFromOffice {
+		s.taskRuntimeStateMu.Unlock()
+		s.markOfficeTaskCompletedForTerminalStep(ctx, taskID)
+		return
+	}
 	oldState := task.State
 	task.State = v1.TaskStateCompleted
 	task.UpdatedAt = time.Now().UTC()
@@ -88,6 +95,113 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 	s.publishTaskUpdated(ctx, task)
 	s.publishTaskStateChanged(ctx, task, oldState)
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateCompleted)
+}
+
+// markOfficeTaskCompletedForTerminalStep routes an Office task's terminal
+// step completion through Office's own status pipeline (UpdateTaskStatus)
+// instead of a raw state write, so the approval gate runs (tasks-01.md:76).
+// UpdateTaskStatus persists a redirect to in_review and then returns a
+// typed *dashboard.ApprovalsPendingError when the gate fires — the write
+// has already succeeded, so that return is not a failure and is not
+// logged as one, and no completion side-effects fire below: the redirect
+// is not a completion.
+//
+// A nil error means the gate did not redirect, so the seam persisted
+// "done" (state = COMPLETED). That path must still carry the same
+// side-effects the raw completion write does — publishing task.updated /
+// task.state_changed and driving the parent's on_children_completed
+// trigger — or dependency resolution, the parent workflow transition, and
+// every task.updated subscriber silently stop seeing Office completions.
+//
+// The caller's taskRuntimeStateMu check-then-act is not atomic across this
+// call (the seam runs Office's reactivity pipeline and publishes, so
+// holding that global lock across it risks lock inversion). Two
+// deliveries for the same task can therefore both pass the caller's check
+// before either has written. lockOfficeTerminalCompletion serializes by
+// task ID instead, and the task is re-read and re-checked once inside
+// that lock: whichever delivery gets there first does the write and fires
+// the side effects below; a second, now-redundant delivery finds the task
+// already terminal and returns without calling the seam a second time.
+//
+// The lock is released as soon as the write (or redirect) is durable and
+// before any of the side effects below run, for the same reason the caller
+// releases taskRuntimeStateMu early: processParentChildrenCompletedForTaskState
+// walks up into the parent's own on_children_completed handling, which can
+// itself reach this same lock family (for an Office parent) or
+// lockChildCompletionOperation. Holding this task's lock across that call
+// would invert lock order against a concurrent completion elsewhere in the
+// same ancestry and risk deadlock.
+func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, taskID string) {
+	if s.officeTaskStatusUpdater == nil {
+		// No seam wired (partial wiring, or a test): skip the write rather
+		// than falling through to the raw path, which would bypass the gate.
+		return
+	}
+
+	unlock := s.lockOfficeTerminalCompletion(taskID)
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		unlock()
+		s.logger.Warn("terminal step completion: failed to reload office task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if models.IsTerminalTaskState(task.State) {
+		unlock()
+		return
+	}
+	oldState := task.State
+
+	err = s.officeTaskStatusUpdater.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
+		TaskID:    task.ID,
+		NewStatus: "done",
+	})
+	var pending *dashboard.ApprovalsPendingError
+	if err != nil {
+		unlock()
+		if !errors.As(err, &pending) {
+			s.logger.Warn("terminal step completion: office status update failed",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+		}
+		return
+	}
+	unlock()
+
+	task.State = v1.TaskStateCompleted
+	task.UpdatedAt = time.Now().UTC()
+	s.publishTaskUpdated(ctx, task)
+	s.publishTaskStateChanged(ctx, task, oldState)
+	s.processParentChildrenCompletedForTaskState(ctx, task.ID, v1.TaskStateCompleted)
+}
+
+// lockOfficeTerminalCompletion serializes markOfficeTaskCompletedForTerminalStep
+// calls for the same task ID, mirroring lockChildCompletionOperation.
+func (s *Service) lockOfficeTerminalCompletion(taskID string) func() {
+	s.officeTerminalCompletionLocksMu.Lock()
+	if s.officeTerminalCompletionLocks == nil {
+		s.officeTerminalCompletionLocks = make(map[string]*childCompletionOperationLock)
+	}
+	entry := s.officeTerminalCompletionLocks[taskID]
+	if entry == nil {
+		entry = &childCompletionOperationLock{}
+		s.officeTerminalCompletionLocks[taskID] = entry
+	}
+	entry.refs++
+	s.officeTerminalCompletionLocksMu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		s.officeTerminalCompletionLocksMu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(s.officeTerminalCompletionLocks, taskID)
+		}
+		s.officeTerminalCompletionLocksMu.Unlock()
+		entry.mu.Unlock()
+	}
 }
 
 func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID string) bool {
