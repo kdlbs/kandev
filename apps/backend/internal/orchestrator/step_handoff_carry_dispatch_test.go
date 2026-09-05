@@ -180,15 +180,38 @@ func TestLaunchAfterOnEnterDispatch_PassthroughEmptyPromptDeliversViaDrain(t *te
 	require.NoError(t, err)
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
+	// Pre-consume the one-time initial-prompt fallback claim so buildWorkflowEntryPrompt
+	// treats taskDescription as ineligible and composes an empty prompt below — the
+	// actual case this test targets. Without this, the first claim on a fresh session
+	// wins and taskDescription becomes the composed prompt, silently exercising the
+	// unrelated autoStartPassthroughPrompt branch instead of the drain-only one.
+	_, err = repo.ClaimInitialPromptFallback(ctx, sessionID)
+	require.NoError(t, err)
+
+	done := make(chan struct{}, 1)
+	agentMgr.passthroughStdinFunc = func(context.Context, string, string) error {
+		done <- struct{}{}
+		return nil
+	}
 
 	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Step 1", Prompt: ""}
 	svc.launchAfterOnEnterDispatch(ctx, taskID, session, step, "task description", false, true, false)
 
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
+
 	// The claim happens synchronously inside the guarded reserve, before the
-	// dispatch's async execution — no need to wait for that goroutine here.
+	// dispatch's async execution.
 	if _, present := carryToken(t, repo, taskID); present {
 		t.Fatal("the drain-only passthrough branch must claim the token when it dispatches")
 	}
+	require.Len(t, agentMgr.passthroughStdinCalls, 1)
+	written := agentMgr.passthroughStdinCalls[0].Data
+	require.Contains(t, written, queued)
+	require.Contains(t, written, carried, "the passthrough drain must deliver the claimed handoff text")
 }
 
 // TestProcessOnEnter_NoOnEnterActionsDrainDeliversHandoff covers F22's first
@@ -217,12 +240,25 @@ func TestProcessOnEnter_NoOnEnterActionsDrainDeliversHandoff(t *testing.T) {
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
 
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+
 	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Step 1"}
 	svc.processOnEnter(ctx, taskID, session, step, "task description", 0, nil)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
 
 	if _, present := carryToken(t, repo, taskID); present {
 		t.Fatal("processOnEnter's own drain-only early return must claim the token when it dispatches")
 	}
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+	require.Contains(t, prompt, queued)
+	require.Contains(t, prompt, carried, "processOnEnter's drain-only early return must deliver the claimed handoff text")
 }
 
 // TestLaunchAfterOnEnterDispatch_EmptyEntrySendsNothingClaimsNothing covers
@@ -518,12 +554,25 @@ func TestLaunchAfterOnEnterDispatch_FallbackDrainDeliversHandoff(t *testing.T) {
 	// hasAutoStart=false, sessionSwitched=false: neither the ACP branch nor the
 	// implicit profile-switch branch applies, landing on the final fallback
 	// drain — the shape a step without auto_start_agent (e.g. Review) takes.
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+
 	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Review"}
 	svc.launchAfterOnEnterDispatch(ctx, taskID, session, step, "task description", false, false, false)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
 
 	if _, present := carryToken(t, repo, taskID); present {
 		t.Fatal("the final fallback drain must claim the token when it dispatches")
 	}
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+	require.Contains(t, prompt, queued)
+	require.Contains(t, prompt, carried, "the final fallback drain must deliver the claimed handoff text")
 }
 
 // TestLaunchAfterOnEnterDispatch_AsyncProfileSwitchFailureDrainDeliversHandoff
