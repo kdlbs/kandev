@@ -1,17 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import type { RunError } from "@/app/office/tasks/[id]/types";
-import { hasMatchingSessionLaunchError } from "../chat-entries";
+import { isMatchingTaskLaunchError } from "@/components/task/chat/types";
 import { isTypedTaskLaunchError, TaskLaunchErrorEntry } from "./task-launch-error-entry";
 
 type TaskChatLaunchErrorProps = {
   taskId: string;
   workspaceId: string;
   statusSummary?: TaskStatusSummary | null;
-  runErrors: RunError[];
+  /** When supplied, only render the error that belongs to this session. */
+  sessionId?: string | null;
   repositories?: TaskRepository[];
 };
 
@@ -19,17 +18,16 @@ export function TaskChatLaunchError({
   taskId,
   workspaceId,
   statusSummary,
-  runErrors,
+  sessionId,
   repositories,
 }: TaskChatLaunchErrorProps) {
-  const error = useMemo(() => {
-    const candidate = statusSummary?.active_error;
-    if (!isTypedTaskLaunchError(candidate)) return null;
-    if (hasMatchingSessionLaunchError(candidate.session_id, candidate.stamp, runErrors)) {
-      return null;
-    }
-    return candidate;
-  }, [runErrors, statusSummary]);
+  const candidate = statusSummary?.active_error;
+  const error =
+    isTypedTaskLaunchError(candidate) &&
+    (sessionId === undefined ||
+      isMatchingTaskLaunchError(candidate, { sessionId, errorStamp: candidate.stamp }))
+      ? candidate
+      : null;
 
   if (!error) return null;
   return (

@@ -80,7 +80,6 @@ export const TaskLayout = memo(function TaskLayout({
           taskId={launchErrorContext.taskId}
           workspaceId={launchErrorContext.workspaceId}
           statusSummary={launchErrorContext.statusSummary}
-          runErrors={[]}
           repositories={launchErrorContext.repositories}
         />
       </div>

@@ -30,6 +30,46 @@ func TestLoadLastAgentErrorUsesExplicitStampAndNormalizesRecoveryFields(t *testi
 	}, lastError.RecoveryActions)
 }
 
+func TestNormalizeRecoveryActionsForCategoryFiltersActionsByLaunchCause(t *testing.T) {
+	tests := []struct {
+		name     string
+		category string
+		input    []string
+		want     []string
+	}{
+		{
+			name:     "generic launch failure",
+			category: LaunchErrorCategoryGenericLaunchFailure,
+			input:    []string{RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone},
+			want:     []string{RecoveryActionRetryLaunch},
+		},
+		{
+			name:     "workspace checkout failure",
+			category: LaunchErrorCategoryWorkspaceCheckoutFailed,
+			input:    []string{RecoveryActionRetryDefault, RecoveryActionRetryLaunch},
+			want:     []string{RecoveryActionRetryLaunch},
+		},
+		{
+			name:     "missing base branch",
+			category: LaunchErrorCategoryBaseBranchMissing,
+			input:    []string{RecoveryActionRetryLaunch, RecoveryActionRetryDefault, RecoveryActionPickBaseBranch},
+			want:     []string{RecoveryActionRetryDefault, RecoveryActionPickBaseBranch},
+		},
+		{
+			name:     "closed pull request",
+			category: LaunchErrorCategoryPRAlreadyClosed,
+			input:    []string{RecoveryActionRetryLaunch, RecoveryActionMarkReviewDone},
+			want:     []string{RecoveryActionMarkReviewDone},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, NormalizeRecoveryActionsForCategory(test.category, test.input))
+		})
+	}
+}
+
 func TestTaskLaunchErrorStoreIsNoOpForSameStamp(t *testing.T) {
 	firstTime := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
 	secondTime := firstTime.Add(time.Minute)

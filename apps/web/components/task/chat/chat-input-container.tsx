@@ -96,6 +96,8 @@ type ChatInputContainerProps = {
   isCompleted?: boolean;
   sessionErrorMessage?: string;
   needsRecovery?: boolean;
+  /** The task-owned launch card renders the failed-start recovery. */
+  launchErrorOwned?: boolean;
   executorUnavailable?: boolean;
   executorUnavailableReason?: string;
   contextItems?: ContextItem[];
@@ -163,6 +165,24 @@ export function shouldShowCancelAgent(
   if (!pendingClarification) return isAgentBusy;
   return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
     ?.agent_disconnected;
+}
+
+export function shouldRenderStoppedSessionBanner(input: {
+  isFailed: boolean;
+  isCompleted: boolean;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}): boolean {
+  return (
+    !input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable)
+  );
+}
+
+export function shouldHideChatInputForLaunchError(input: {
+  isFailed: boolean;
+  launchErrorOwned?: boolean;
+}): boolean {
+  return input.launchErrorOwned === true && input.isFailed;
 }
 
 function buildEditorAreaProps(
@@ -287,6 +307,13 @@ function useChatPromptEnhancement({
   return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
 }
 
+function useChatInputRecoveryActions(taskId: string | null, sessionId: string | null) {
+  return useSessionRecoveryActions({
+    taskId: taskId ?? "",
+    sessionId: sessionId ?? "",
+  });
+}
+
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
   // eslint-disable-next-line complexity -- top-level component chooses the stopped or editor surface after shared hook setup.
   function ChatInputContainer(props, ref) {
@@ -322,10 +349,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
-    const recoveryActions = useSessionRecoveryActions({
-      taskId: taskId ?? "",
-      sessionId: sessionId ?? "",
-    });
+    const recoveryActions = useChatInputRecoveryActions(taskId, sessionId);
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
@@ -335,7 +359,23 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskDescription,
     });
 
-    if (p.isFailed || p.isCompleted || executorUnavailable) {
+    if (
+      shouldHideChatInputForLaunchError({
+        isFailed: p.isFailed,
+        launchErrorOwned: p.launchErrorOwned,
+      })
+    ) {
+      return null;
+    }
+
+    if (
+      shouldRenderStoppedSessionBanner({
+        isFailed: p.isFailed,
+        isCompleted: p.isCompleted,
+        executorUnavailable,
+        launchErrorOwned: p.launchErrorOwned,
+      })
+    ) {
       return (
         <SessionStoppedBanner
           mode={p.isCompleted ? "completed" : "recoverable"}

@@ -27,6 +27,7 @@ import { buildCommentTurnContext, type CommentTurnContext } from "./turn-context
 import { groupSessionsForTimeline, groupSortKey, type SessionGroup } from "./session-groups";
 import { synchronizeInputValue } from "./synchronize-input-value";
 import type {
+  RunError,
   TaskComment,
   TaskDecision,
   TaskSession,
@@ -38,6 +39,7 @@ import {
   mergeChatEntries,
   type ChatEntry,
 } from "./chat-entries";
+import { isMatchingTaskLaunchError } from "@/components/task/chat/types";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
@@ -66,6 +68,20 @@ type TaskChatProps = {
   statusSummary?: TaskStatusSummary | null;
   repositories?: TaskRepository[];
 };
+
+function filterVisibleRunErrors(
+  runErrors: RunError[],
+  activeError: TaskStatusSummary["active_error"],
+): RunError[] {
+  if (!activeError) return runErrors;
+  return runErrors.filter(
+    (error) =>
+      !isMatchingTaskLaunchError(activeError, {
+        sessionId: error.sessionId,
+        errorStamp: error.errorStamp,
+      }),
+  );
+}
 
 function partitionGroups(groups: SessionGroup[]): {
   visible: SessionGroup[];
@@ -615,6 +631,10 @@ export function TaskChat({
   );
   const turnCtx = useMemo(() => buildCommentTurnContext(comments, sessions), [comments, sessions]);
   const runErrors = useMemo(() => buildRunErrorsFromSessions(sessions), [sessions]);
+  const visibleRunErrors = useMemo(
+    () => filterVisibleRunErrors(runErrors, statusSummary?.active_error),
+    [runErrors, statusSummary?.active_error],
+  );
   const laterAgentReplyMap = useMemo(() => buildLaterAgentReplyMap(comments), [comments]);
   const entries = useMemo(
     () =>
@@ -624,10 +644,10 @@ export function TaskChat({
         groups: renderedGroups,
         decisions,
         turnCtx,
-        runErrors,
+        runErrors: visibleRunErrors,
         laterAgentReplyMap,
       }),
-    [comments, timeline, renderedGroups, decisions, turnCtx, runErrors, laterAgentReplyMap],
+    [comments, timeline, renderedGroups, decisions, turnCtx, visibleRunErrors, laterAgentReplyMap],
   );
 
   useChatAutoScroll(scrollParent ?? null, sessions, taskId);
@@ -652,7 +672,6 @@ export function TaskChat({
         taskId={taskId}
         workspaceId={workspaceId}
         statusSummary={statusSummary}
-        runErrors={runErrors}
         repositories={repositories}
       />
       {isEmpty ? (

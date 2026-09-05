@@ -57,6 +57,10 @@ var (
 	// ErrNonFastForward is returned when a fetch/pull is rejected due to non-fast-forward updates.
 	ErrNonFastForward = errors.New("non-fast-forward update rejected")
 
+	// ErrWorkspaceCheckoutFailed is returned when a launch cannot materialize
+	// the requested checkout ref without risking an existing local branch.
+	ErrWorkspaceCheckoutFailed = errors.New("workspace checkout failed")
+
 	// ErrGitCryptFailed is returned when git-crypt unlock fails during worktree creation.
 	ErrGitCryptFailed = errors.New("git-crypt unlock failed")
 

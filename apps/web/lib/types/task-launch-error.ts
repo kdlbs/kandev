@@ -2,6 +2,7 @@ export const TASK_LAUNCH_RECOVERY_ACTIONS = [
   "retry_default",
   "pick_base_branch",
   "mark_review_done",
+  "retry_launch",
 ] as const;
 
 export type TaskLaunchRecoveryAction = (typeof TASK_LAUNCH_RECOVERY_ACTIONS)[number];

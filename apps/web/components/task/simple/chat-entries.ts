@@ -2,6 +2,7 @@ import type { CommentTurnContext } from "./turn-context";
 import { groupSortKey, type SessionGroup } from "./session-groups";
 import { normalizeRemediationUrl } from "@/lib/remediation-url";
 import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
+import { isMatchingTaskLaunchError } from "@/components/task/chat/types";
 import type {
   RunError,
   TaskComment,
@@ -85,9 +86,11 @@ export function hasMatchingSessionLaunchError(
   runErrors: RunError[],
 ): boolean {
   if (!summarySessionId) return false;
-  return runErrors.some(
-    (error) =>
-      error.sessionId === summarySessionId && (!summaryStamp || error.errorStamp === summaryStamp),
+  return runErrors.some((error) =>
+    isMatchingTaskLaunchError(
+      { session_id: summarySessionId, stamp: summaryStamp ?? "" },
+      { sessionId: error.sessionId, errorStamp: error.errorStamp },
+    ),
   );
 }
 

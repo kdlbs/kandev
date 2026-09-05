@@ -1,6 +1,7 @@
 "use client";
 
 import type { Message } from "@/lib/types/http";
+import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 import { extractKandevStem } from "./messages/kandev/parse";
 
 export type SubagentTaskPayload = {
@@ -185,6 +186,26 @@ export function isRichOutputMessage(message: Message): boolean {
 export function isSubagentMessage(message: Message): boolean {
   const metadata = message.metadata as ToolCallMetadata | undefined;
   return metadata?.normalized?.kind === "subagent_task";
+}
+
+export type TaskLaunchErrorIdentity = Pick<TaskStatusSummaryActiveError, "session_id" | "stamp">;
+
+/** Matches one rendered error surface to the task-owned launch error. */
+export function isMatchingTaskLaunchError(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  candidate: { sessionId?: string | null; errorStamp?: string | null },
+): boolean {
+  if (!activeError?.stamp || !candidate.errorStamp) return false;
+  return (
+    (activeError.session_id ?? null) === (candidate.sessionId ?? null) &&
+    activeError.stamp === candidate.errorStamp
+  );
+}
+
+/** Messages that are only useful while a launch failure has no typed owner. */
+export function isLaunchErrorSurfaceMessage(message: Message): boolean {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  return metadata?.empty_turn === true || metadata?.failure_kind === "missing_pr_branch";
 }
 
 export type StatusMetadata = {

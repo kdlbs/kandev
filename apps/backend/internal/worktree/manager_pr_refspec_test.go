@@ -11,10 +11,11 @@ import (
 )
 
 // TestFetchBranchToLocal_PRNumberUsesPullRefspec verifies that when a PR
-// number is supplied, the manager fetches refs/pull/<N>/head into the local
-// branch. This is the fork-PR path: the head branch does not exist on origin
-// by name (only as a pull/<N>/head ref), so the previous branch-name fetch
-// would fail with "couldn't find remote ref".
+// number is supplied, the manager fetches refs/pull/<N>/head into an isolated
+// remote-tracking ref. This is the fork-PR path: the head branch does not
+// exist on origin by name (only as a pull/<N>/head ref), so the previous
+// branch-name fetch would fail with "couldn't find remote ref" or overwrite a
+// local branch with the same name.
 func TestFetchBranchToLocal_PRNumberUsesPullRefspec(t *testing.T) {
 	repoPath, prHeadSHA := initGitRepoWithPullRef(t, 974, "feature/enrich-linear-issue-hap")
 
@@ -36,9 +37,12 @@ func TestFetchBranchToLocal_PRNumberUsesPullRefspec(t *testing.T) {
 		t.Fatalf("expected no warning, got %q", result.Warning)
 	}
 
-	gotSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/enrich-linear-issue-hap"))
+	if result.StartPoint != "origin/pr/974" {
+		t.Fatalf("start point = %q, want %q", result.StartPoint, "origin/pr/974")
+	}
+	gotSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "origin/pr/974"))
 	if gotSHA != prHeadSHA {
-		t.Fatalf("local branch SHA = %q, want %q (PR head)", gotSHA, prHeadSHA)
+		t.Fatalf("isolated PR ref SHA = %q, want %q (PR head)", gotSHA, prHeadSHA)
 	}
 }
 
@@ -109,14 +113,9 @@ func TestCreateWorktree_PRNumberCreatesWorktreeFromForkRef(t *testing.T) {
 }
 
 // TestCreateWorktree_PRNumberSecondWorktreeForSameForkPR exercises the
-// retry-path regression flagged in PR #990 review: when a fork PR's head
-// branch is already checked out in another worktree, the refspec fetch is
-// refused and the manager retries with a bare `pull/<N>/head` fetch. That
-// retry updates FETCH_HEAD but does NOT create `origin/<branch>` because
-// the branch doesn't exist on origin — so returning `StartPoint:
-// "origin/<branch>"` would make the downstream `git worktree add` fail
-// with an invalid ref. Empty StartPoint must be returned so the caller
-// falls back to the local branch (already at the PR head from task 1).
+// PR-head isolation when two worktrees use the same source branch name. Each
+// worktree must point at the immutable PR ref while its local branch remains
+// unique.
 func TestCreateWorktree_PRNumberSecondWorktreeForSameForkPR(t *testing.T) {
 	repoPath, prHeadSHA := initGitRepoWithPullRef(t, 974, "feature/fork-pr")
 

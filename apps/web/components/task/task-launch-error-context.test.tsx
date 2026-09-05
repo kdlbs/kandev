@@ -49,6 +49,12 @@ beforeEach(() => {
 });
 
 describe("TaskLaunchErrorProvider", () => {
+  it("does not toast for a typed launch error while its card is visible", () => {
+    renderProvider(initialSummary);
+
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+
   it.each(["provider_auth_required", "model_capacity"])(
     "does not toast for ordinary active error category %s",
     (category) => {

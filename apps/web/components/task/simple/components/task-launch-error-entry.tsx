@@ -9,7 +9,7 @@ import {
   IconRefresh,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { useToast } from "@/components/toast-provider";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskLaunchRecoveryAction } from "@/lib/types/task-launch-error";
@@ -26,10 +26,60 @@ type TaskLaunchErrorEntryProps = {
 
 const pendingRecoveryRequests = new Map<string, Promise<unknown>>();
 
+function useTaskLaunchRecovery({
+  taskId,
+  error,
+}: Pick<TaskLaunchErrorEntryProps, "taskId" | "error">) {
+  const [pendingAction, setPendingAction] = useState<TaskLaunchRecoveryAction | null>(null);
+  const [recoveryError, setRecoveryError] = useState(false);
+
+  const sendRecovery = async (action: TaskLaunchRecoveryAction, baseBranch?: string) => {
+    const client = getWebSocketClient();
+    if (!client || pendingAction) return;
+    setRecoveryError(false);
+    const requestKey = JSON.stringify({ taskId, stamp: error.stamp, action, baseBranch });
+    const existingRequest = pendingRecoveryRequests.get(requestKey);
+    if (existingRequest) {
+      setPendingAction(action);
+      try {
+        await existingRequest;
+      } catch {
+        // The request owner reports the recovery error to avoid duplicate toasts.
+      } finally {
+        setPendingAction(null);
+      }
+      return;
+    }
+    setPendingAction(action);
+    const request = Promise.resolve().then(() =>
+      client.request("task.launch.recover", {
+        task_id: taskId,
+        ...(error.session_id ? { session_id: error.session_id } : {}),
+        ...(error.task_repository_id ? { task_repository_id: error.task_repository_id } : {}),
+        action,
+        ...(baseBranch ? { base_branch: baseBranch } : {}),
+        error_stamp: error.stamp,
+      }),
+    );
+    pendingRecoveryRequests.set(requestKey, request);
+    try {
+      await request;
+    } catch {
+      setRecoveryError(true);
+    } finally {
+      pendingRecoveryRequests.delete(requestKey);
+      setPendingAction(null);
+    }
+  };
+
+  return { pendingAction, recoveryError, sendRecovery };
+}
+
 const TASK_LAUNCH_ERROR_CATEGORIES = new Set([
   "base_branch_missing",
   "default_branch_unresolved",
   "pr_already_closed",
+  "workspace_checkout_failed",
   "generic_launch_failure",
 ]);
 
@@ -51,6 +101,8 @@ function categoryTitle(category: string | undefined, t: (key: string) => string)
       return t("task:launchErrorDefaultBranchUnresolved");
     case "pr_already_closed":
       return t("task:launchErrorPrAlreadyClosed");
+    case "workspace_checkout_failed":
+      return t("task:launchErrorWorkspaceCheckoutFailed");
     default:
       return t("task:launchErrorGeneric");
   }
@@ -64,6 +116,8 @@ function actionLabel(action: TaskLaunchRecoveryAction, t: (key: string) => strin
       return t("task:pickBaseBranch");
     case "mark_review_done":
       return t("task:markReviewDone");
+    case "retry_launch":
+      return t("task:retryLaunch");
   }
 }
 
@@ -76,6 +130,7 @@ function RecoveryActionIcon({
 }) {
   if (pending) return <IconLoader2 className="h-3 w-3 animate-spin" />;
   if (action === "retry_default") return <IconRefresh className="h-3 w-3" />;
+  if (action === "retry_launch") return <IconRefresh className="h-3 w-3" />;
   if (action === "pick_base_branch") return <IconGitBranch className="h-3 w-3" />;
   return <IconCheck className="h-3 w-3" />;
 }
@@ -99,14 +154,14 @@ function TaskLaunchRecoveryActions({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+    <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       {actions.map((action) => {
         const opensBranchPicker = action === "pick_base_branch";
         const button = (
           <Button
             variant="outline"
             size="sm"
-            className="h-auto min-h-11 max-w-full cursor-pointer gap-1.5 text-xs sm:min-h-8"
+            className="h-auto min-h-11 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto sm:min-h-8"
             disabled={pendingAction !== null}
             onClick={opensBranchPicker ? undefined : () => void onRecover(action)}
             data-testid={`task-launch-${action}-button`}
@@ -139,58 +194,16 @@ export function TaskLaunchErrorEntry({
   repositories,
 }: TaskLaunchErrorEntryProps) {
   const { t } = useTranslation();
-  const { toast } = useToast();
-  const [pendingAction, setPendingAction] = useState<TaskLaunchRecoveryAction | null>(null);
+  const { pendingAction, recoveryError, sendRecovery } = useTaskLaunchRecovery({ taskId, error });
+  const [showDetails, setShowDetails] = useState(false);
   const taskRepository = repositories?.find(
     (repository) => repository.id === error.task_repository_id,
   );
   const currentBase = taskRepository?.base_branch ?? t("task:baseBranchNotSet");
 
-  const sendRecovery = async (action: TaskLaunchRecoveryAction, baseBranch?: string) => {
-    const client = getWebSocketClient();
-    if (!client || pendingAction) return;
-    const requestKey = JSON.stringify({ taskId, stamp: error.stamp, action, baseBranch });
-    const existingRequest = pendingRecoveryRequests.get(requestKey);
-    if (existingRequest) {
-      setPendingAction(action);
-      try {
-        await existingRequest;
-      } catch {
-        // The request owner reports the recovery error to avoid duplicate toasts.
-      } finally {
-        setPendingAction(null);
-      }
-      return;
-    }
-    setPendingAction(action);
-    const request = Promise.resolve().then(() =>
-      client.request("task.launch.recover", {
-        task_id: taskId,
-        ...(error.session_id ? { session_id: error.session_id } : {}),
-        ...(error.task_repository_id ? { task_repository_id: error.task_repository_id } : {}),
-        action,
-        ...(baseBranch ? { base_branch: baseBranch } : {}),
-        error_stamp: error.stamp,
-      }),
-    );
-    pendingRecoveryRequests.set(requestKey, request);
-    try {
-      await request;
-    } catch {
-      toast({
-        title: t("task:launchRecoveryFailed"),
-        description: t("task:tryRecoveryAgain"),
-        variant: "error",
-      });
-    } finally {
-      pendingRecoveryRequests.delete(requestKey);
-      setPendingAction(null);
-    }
-  };
-
   return (
     <div
-      className="flex min-w-0 gap-3 border-b border-border/50 py-3"
+      className="flex min-w-0 gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 sm:p-4"
       data-testid="task-launch-error-entry"
       role="alert"
     >
@@ -205,6 +218,27 @@ export function TaskLaunchErrorEntry({
         <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">
           {error.preview}
         </p>
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="task-launch-no-change">
+          {t("task:launchErrorNoChanges")}
+        </p>
+        {error.details && (
+          <Collapsible open={showDetails} onOpenChange={setShowDetails} className="mt-3">
+            <CollapsibleTrigger className="flex min-h-11 items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground cursor-pointer sm:min-h-8">
+              <IconRefresh
+                className={`h-3.5 w-3.5 transition-transform ${showDetails ? "rotate-90" : ""}`}
+              />
+              {t("task:showDetails")}
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <pre
+                className="mt-2 max-w-prose whitespace-pre-wrap break-words rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground"
+                data-testid="task-launch-error-details"
+              >
+                {error.details}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
         <TaskLaunchRecoveryActions
           actions={error.recovery_actions ?? []}
           workspaceId={workspaceId}
@@ -214,6 +248,15 @@ export function TaskLaunchErrorEntry({
           pendingAction={pendingAction}
           onRecover={sendRecovery}
         />
+        {recoveryError && (
+          <p
+            className="mt-2 text-xs text-destructive"
+            data-testid="task-launch-recovery-error"
+            role="alert"
+          >
+            {t("task:launchRecoveryFailed")} {t("task:tryRecoveryAgain")}
+          </p>
+        )}
       </div>
     </div>
   );

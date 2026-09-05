@@ -78,6 +78,7 @@ describe("TaskLaunchErrorEntry", () => {
     "base_branch_missing",
     "default_branch_unresolved",
     "pr_already_closed",
+    "workspace_checkout_failed",
     "generic_launch_failure",
   ])("classifies launch category %s as a typed launch error", (category) => {
     expect(
@@ -86,6 +87,52 @@ describe("TaskLaunchErrorEntry", () => {
         category,
       }),
     ).toBe(true);
+  });
+
+  it("renders checkout details and retries the launch without branch settings", async () => {
+    const checkoutError: TaskStatusSummaryActiveError = {
+      session_id: "session-1",
+      stamp: "checkout-stamp-1",
+      occurred_at: "2026-08-19T10:00:00Z",
+      preview: "The workspace could not be prepared for this launch.",
+      details: "The pull request head was fetched into its isolated ref.",
+      category: "workspace_checkout_failed",
+      recovery_actions: ["retry_launch"],
+    };
+
+    render(
+      <TaskLaunchErrorEntry taskId={TASK_ID} workspaceId="workspace-1" error={checkoutError} />,
+    );
+
+    expect(screen.getByText(checkoutError.preview)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /show details/i }));
+    expect(screen.getByText(checkoutError.details!)).toBeTruthy();
+    expect(screen.getByTestId("task-launch-retry_launch-button")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("task-launch-retry_launch-button"));
+
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
+    expect(requestMock).toHaveBeenCalledWith("task.launch.recover", {
+      task_id: TASK_ID,
+      session_id: "session-1",
+      action: "retry_launch",
+      error_stamp: "checkout-stamp-1",
+    });
+  });
+
+  it("keeps recovery failures inside the launch card", async () => {
+    requestMock.mockRejectedValueOnce(new Error("recovery failed"));
+    render(
+      <TaskLaunchErrorEntry
+        taskId={TASK_ID}
+        workspaceId="workspace-1"
+        error={{ ...error, recovery_actions: ["retry_launch"] }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("task-launch-retry_launch-button"));
+
+    await waitFor(() => expect(screen.getByTestId("task-launch-recovery-error")).toBeTruthy());
+    expect(toastMock).not.toHaveBeenCalled();
   });
 
   it("renders a typed summary error without recovery actions", () => {
@@ -98,7 +145,6 @@ describe("TaskLaunchErrorEntry", () => {
           updated_at: "2026-08-19T10:00:00Z",
           active_error: { ...error, recovery_actions: [] },
         }}
-        runErrors={[]}
       />,
     );
 

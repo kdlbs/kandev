@@ -214,10 +214,8 @@ func (m *Manager) prepareCheckoutFromRefreshedOrigin(ctx context.Context, repoPa
 // prepareBranchFromRefreshedOrigin selects a provider-refreshed source branch
 // without contacting origin. A PR number selects the dedicated origin/pr/<N>
 // ref, which is also how fork PR heads are kept available after the
-// authenticated refresh. When both refs exist, the selected ref is the one
-// that contains the other. A local-only ref is preserved, a refreshed remote
-// ref is returned to the caller as the worktree start point, and divergence or
-// an unverified relationship fails closed.
+// authenticated refresh. PR preparation never creates or resets a local
+// branch with the PR's source name.
 func (m *Manager) prepareBranchFromRefreshedOrigin(
 	ctx context.Context, repoPath, localBranch, sourceBranch string, prNumber int,
 ) (string, error) {
@@ -232,6 +230,12 @@ func (m *Manager) prepareBranchFromRefreshedOrigin(
 	remoteExists, err := m.branchExists(ctx, repoPath, remoteRef)
 	if err != nil {
 		return "", err
+	}
+	if prNumber > 0 {
+		if !remoteExists {
+			return "", fmt.Errorf("required fetched remote ref %q is missing: %w", remoteRef, ErrWorkspaceCheckoutFailed)
+		}
+		return remoteRef, nil
 	}
 	if !localExists && !remoteExists {
 		return "", nil

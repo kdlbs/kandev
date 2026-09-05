@@ -17,6 +17,7 @@ import {
   lastAgentErrorStamp,
   readLastAgentError,
 } from "@/lib/session-last-agent-error";
+import { isLaunchErrorSurfaceMessage } from "./types";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
@@ -67,6 +68,10 @@ export type MessageListProps = {
    * remain mounted while inactive and use this transition to recover missed
    * oldest-page sentinel observations. */
   isVisible?: boolean;
+  /** The task-owned launch card renders the matching failure. */
+  launchErrorOwned?: boolean;
+  /** Stamp used to distinguish a matching last-agent-error notice. */
+  launchErrorStamp?: string;
 };
 
 /** Imperative handle exposed by `MessageList`, letting the chat panel scroll
@@ -89,6 +94,32 @@ export function getItemKey(item: RenderItem): string {
   )
     return item.id;
   return item.message.id;
+}
+
+/** Remove the launch-only transcript decorations once the task card owns them. */
+export function filterLaunchErrorMessages(
+  messages: Message[],
+  launchErrorOwned: boolean,
+): Message[] {
+  return launchErrorOwned
+    ? messages.filter((message) => !isLaunchErrorSurfaceMessage(message))
+    : messages;
+}
+
+/** Remove synthetic launch rows while preserving ordinary transcript activity. */
+export function filterLaunchErrorItems(
+  items: RenderItem[],
+  launchErrorOwned: boolean,
+  launchErrorStamp?: string,
+): RenderItem[] {
+  if (!launchErrorOwned) return items;
+  return items.filter((item) => {
+    if (item.type === "prepare_progress") return false;
+    if (item.type === "agent_error_notice") {
+      return lastAgentErrorStamp(item.error) !== launchErrorStamp;
+    }
+    return item.type !== "message" || !isLaunchErrorSurfaceMessage(item.message);
+  });
 }
 
 /** The active turn id, but only while the agent is working — turns no longer

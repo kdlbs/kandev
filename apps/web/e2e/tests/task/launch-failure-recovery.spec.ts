@@ -221,16 +221,20 @@ test.describe("task launch failure recovery", () => {
       expect(launchError.task_repository_id).toBe(taskRepository.id);
       expect(launchError.recovery_actions).toEqual(["retry_default", "pick_base_branch"]);
 
-      const pointerToast = testPage
-        .getByTestId("toast-message")
-        .filter({ hasText: "The task launch failed. Open the task details for recovery actions." });
-      await expect(pointerToast).toBeVisible({ timeout: 30_000 });
-      await expect(pointerToast).not.toContainText("branch-that-no-longer-exists");
+      await expect(
+        testPage.getByTestId("toast-message").filter({
+          hasText: "The task launch failed. Open the task details for recovery actions.",
+        }),
+      ).toHaveCount(0);
 
       const card = testPage.getByTestId("task-launch-error-entry");
       await expect(card).toHaveCount(1, { timeout: 30_000 });
       await expect(card).toContainText("The selected base branch is not available.");
       await expect(card).not.toContainText("branch-that-no-longer-exists");
+      await expect(testPage.getByTestId("last-agent-error-notice")).toHaveCount(0);
+      await expect(testPage.getByTestId("prepare-progress-panel")).toHaveCount(0);
+      await expect(testPage.getByTestId("missing-branch-recovery")).toHaveCount(0);
+      await expect(testPage.getByTestId("recovery-resume-button")).toHaveCount(0);
 
       restoreSeedRepositoryOrigin(seedData);
       await testPage.reload();
