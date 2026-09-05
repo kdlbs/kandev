@@ -212,7 +212,7 @@
   "workflowPromptSetHint": "已配置；展开以编辑",
   "workflowInstructionsCollapsed": "工作流说明",
   "stepPrompt": "步骤提示词",
-  "stepPromptAutoStartWarning": "任务进入此步骤时，此提示词不会自动运行。请手动启动智能体，或启用“自动启动智能体”。",
+  "stepPromptAutoStartWarning": "此提示词本身不会启动智能体。请手动启动智能体，或启用“自动启动智能体”。步骤切换到其他智能体配置时，也可以启动该提示词。",
   "stepPromptHelp": "为此步骤中的智能体提供自定义指令。使用 {{taskPrompt}} 可插入任务描述。",
   "stepPromptPlaceholderExample": "使用 OAuth2 实现用户身份验证",
   "stepPromptPlaceholderTaskPrompt": "用户提供的原始任务描述",

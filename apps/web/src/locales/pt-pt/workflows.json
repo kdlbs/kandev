@@ -209,7 +209,7 @@
   "workflowPromptSetHint": "Configurado; expanda para editar",
   "workflowInstructionsCollapsed": "Instruções do fluxo de trabalho",
   "stepPrompt": "Prompt do passo",
-  "stepPromptAutoStartWarning": "Este prompt não é executado quando uma tarefa entra neste passo. Inicie o agente manualmente ou ative a opção Iniciar o agente automaticamente.",
+  "stepPromptAutoStartWarning": "Este prompt não inicia o agente por si só. Inicie o agente manualmente ou ative a opção Iniciar o agente automaticamente. Um perfil de agente diferente também pode iniciá-lo quando o passo muda de perfil.",
   "stepPromptHelp": "Instruções personalizadas para o agente neste passo. Use {{taskPrompt}} para incluir a descrição da tarefa.",
   "stepPromptPlaceholderExample": "Implementar a autenticação de utilizadores com OAuth2",
   "stepPromptPlaceholderTaskPrompt": "A descrição original da tarefa indicada pelo utilizador",

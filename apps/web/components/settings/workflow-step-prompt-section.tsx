@@ -30,8 +30,7 @@ export function StepPromptSection({
 }) {
   const { t } = useTranslation();
   const placeholders = useMemo(() => stepPromptPlaceholders(t), [t]);
-  const showAutoStartWarning =
-    localPrompt.trim() !== "" && !hasOnEnterAction(step, "auto_start_agent");
+  const showAutoStartWarning = localPrompt !== "" && !hasOnEnterAction(step, "auto_start_agent");
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
