@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useLayoutEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { TaskSwitcherSkeleton } from "./task-switcher-group";
 import { GroupSection, type GroupSectionProps, type TaskRowBaseProps } from "./task-switcher-tree";
+import { useSharedGroupedSidebarList } from "./task-session-sidebar-grouped-view";
 import type { TaskSwitcherProps } from "./task-switcher-types";
 
 export type {
@@ -23,7 +24,69 @@ function shouldShowRowRepository(grouped: TaskSwitcherProps["grouped"]): boolean
   return grouped.groupKey !== "repository";
 }
 
-function buildTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
+const TASK_ROW_HANDLER_KEYS = [
+  "onSelectTask",
+  "onEditTask",
+  "onRenameTask",
+  "onArchiveTask",
+  "onCreateSubtask",
+  "onDeleteTask",
+  "onDetachTask",
+  "onLinkPullRequest",
+  "onLinkIssue",
+  "onLinkMergeRequest",
+  "onLinkJiraTicket",
+  "onLinkLinearIssue",
+  "onLinkSentryIssue",
+  "onMoveToStep",
+  "onTogglePin",
+  "onToggleSelectTask",
+  "onSelectTaskRange",
+  "onBulkArchive",
+  "onBulkDelete",
+  "onBulkPin",
+  "onBulkMove",
+  "onClearSelection",
+] as const;
+
+type TaskRowHandlerKey = (typeof TASK_ROW_HANDLER_KEYS)[number];
+type StableTaskRowHandlers = {
+  [Key in TaskRowHandlerKey]-?: NonNullable<TaskSwitcherProps[Key]>;
+};
+
+function useStableTaskRowHandlers(props: TaskSwitcherProps): StableTaskRowHandlers {
+  // A memoized row must keep its function identities without retaining a
+  // range-selection or dialog handler from an older committed task tree.
+  const committedPropsRef = useRef(props);
+  useLayoutEffect(() => {
+    committedPropsRef.current = props;
+  }, [props]);
+  return useMemo(() => {
+    const handlers: Partial<Record<TaskRowHandlerKey, (...args: unknown[]) => unknown>> = {};
+    for (const key of TASK_ROW_HANDLER_KEYS) {
+      handlers[key] = (...args: unknown[]) => {
+        const handler = committedPropsRef.current[key];
+        if (typeof handler === "function") {
+          return (handler as (...handlerArgs: unknown[]) => unknown)(...args);
+        }
+      };
+    }
+    return handlers as StableTaskRowHandlers;
+  }, []);
+}
+
+function optionalHandler<Key extends TaskRowHandlerKey>(
+  props: TaskSwitcherProps,
+  handlers: StableTaskRowHandlers,
+  key: Key,
+): StableTaskRowHandlers[Key] | undefined {
+  return props[key] ? handlers[key] : undefined;
+}
+
+function buildTaskRowProps(
+  props: TaskSwitcherProps,
+  handlers: StableTaskRowHandlers,
+): TaskRowBaseProps {
   return {
     workflows: props.workflows,
     stepsByWorkflowId: props.stepsByWorkflowId,
@@ -32,39 +95,59 @@ function buildTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
     showActivityTime: props.showActivityTime,
     taskRowPresentation: props.taskRowPresentation,
     showRepository: shouldShowRowRepository(props.grouped),
-    onSelectTask: props.onSelectTask,
-    onEditTask: props.onEditTask,
-    onRenameTask: props.onRenameTask,
-    onArchiveTask: props.onArchiveTask,
-    onCreateSubtask: props.onCreateSubtask,
-    onDeleteTask: props.onDeleteTask,
-    onDetachTask: props.onDetachTask,
-    onLinkPullRequest: props.onLinkPullRequest,
-    onLinkIssue: props.onLinkIssue,
-    onLinkMergeRequest: props.onLinkMergeRequest,
-    onLinkJiraTicket: props.onLinkJiraTicket,
-    onLinkLinearIssue: props.onLinkLinearIssue,
-    onLinkSentryIssue: props.onLinkSentryIssue,
-    onMoveToStep: props.onMoveToStep,
-    onTogglePin: props.onTogglePin,
+    onSelectTask: handlers.onSelectTask,
+    onEditTask: optionalHandler(props, handlers, "onEditTask"),
+    onRenameTask: optionalHandler(props, handlers, "onRenameTask"),
+    onArchiveTask: optionalHandler(props, handlers, "onArchiveTask"),
+    onCreateSubtask: optionalHandler(props, handlers, "onCreateSubtask"),
+    onDeleteTask: optionalHandler(props, handlers, "onDeleteTask"),
+    onDetachTask: optionalHandler(props, handlers, "onDetachTask"),
+    onLinkPullRequest: optionalHandler(props, handlers, "onLinkPullRequest"),
+    onLinkIssue: optionalHandler(props, handlers, "onLinkIssue"),
+    onLinkMergeRequest: optionalHandler(props, handlers, "onLinkMergeRequest"),
+    onLinkJiraTicket: optionalHandler(props, handlers, "onLinkJiraTicket"),
+    onLinkLinearIssue: optionalHandler(props, handlers, "onLinkLinearIssue"),
+    onLinkSentryIssue: optionalHandler(props, handlers, "onLinkSentryIssue"),
+    onMoveToStep: optionalHandler(props, handlers, "onMoveToStep"),
+    onTogglePin: optionalHandler(props, handlers, "onTogglePin"),
     pinnedTaskIds: props.pinnedTaskIds,
     deletingTaskId: props.deletingTaskId,
     archivingTaskId: props.archivingTaskId,
     isArchiving: props.isArchiving,
     selectedTaskIds: props.selectedTaskIds,
-    onToggleSelectTask: props.onToggleSelectTask,
-    onSelectTaskRange: props.onSelectTaskRange,
-    onBulkArchive: props.onBulkArchive,
-    onBulkDelete: props.onBulkDelete,
-    onBulkPin: props.onBulkPin,
-    onBulkMove: props.onBulkMove,
-    onClearSelection: props.onClearSelection,
+    onToggleSelectTask: optionalHandler(props, handlers, "onToggleSelectTask"),
+    onSelectTaskRange: optionalHandler(props, handlers, "onSelectTaskRange"),
+    onBulkArchive: optionalHandler(props, handlers, "onBulkArchive"),
+    onBulkDelete: optionalHandler(props, handlers, "onBulkDelete"),
+    onBulkPin: optionalHandler(props, handlers, "onBulkPin"),
+    onBulkMove: optionalHandler(props, handlers, "onBulkMove"),
+    onClearSelection: optionalHandler(props, handlers, "onClearSelection"),
     isMixedWorkflowSelection: props.isMixedWorkflowSelection,
   };
 }
 
+function shallowRowPropsEqual(previous: TaskRowBaseProps, next: TaskRowBaseProps): boolean {
+  const keys = Object.keys(previous) as Array<keyof TaskRowBaseProps>;
+  return (
+    keys.length === Object.keys(next).length &&
+    keys.every((key) => Object.is(previous[key], next[key]))
+  );
+}
+
+function useTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
+  const handlers = useStableTaskRowHandlers(props);
+  const previousRef = useRef<TaskRowBaseProps | null>(null);
+  const next = buildTaskRowProps(props, handlers);
+  if (previousRef.current && shallowRowPropsEqual(previousRef.current, next)) {
+    return previousRef.current;
+  }
+  previousRef.current = next;
+  return next;
+}
+
 function buildGroupSectionProps(
   props: TaskSwitcherProps,
+  grouped: TaskSwitcherProps["grouped"],
   options: {
     group: GroupSectionProps["group"];
     rowProps: TaskRowBaseProps;
@@ -76,11 +159,11 @@ function buildGroupSectionProps(
   const { group, rowProps, pinnedSet, collapsedSet, showHeader } = options;
   return {
     group,
-    subTasksByParentId: props.grouped.subTasksByParentId,
+    subTasksByParentId: grouped.subTasksByParentId,
     rowProps,
     pinnedSet,
     isCollapsed: collapsedSet.has(group.key),
-    onToggleCollapsed: () => props.onToggleGroup?.(group.key),
+    onToggleGroup: props.onToggleGroup,
     collapsedSubtaskParentIds: props.collapsedSubtaskParentIds,
     onToggleSubtasks: props.onToggleSubtasks,
     showHeader,
@@ -117,8 +200,14 @@ function LoadErrorNotice({
 
 export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps) {
   const { t } = useTranslation("sidebar");
-  const { grouped, isLoading = false, loadError, onRetryLoad, retryLabel, totalTaskCount } = props;
+  const { isLoading = false, loadError, onRetryLoad, retryLabel, totalTaskCount } = props;
+  const grouped = useSharedGroupedSidebarList(props.grouped);
   const pinnedSet = useMemo(() => new Set(props.pinnedTaskIds ?? []), [props.pinnedTaskIds]);
+  const rowProps = useTaskRowProps(props);
+  const collapsedSet = useMemo(
+    () => new Set(props.collapsedGroupKeys ?? []),
+    [props.collapsedGroupKeys],
+  );
 
   if (isLoading) return <TaskSwitcherSkeleton />;
 
@@ -141,11 +230,9 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
     );
   }
 
-  const collapsedSet = new Set(props.collapsedGroupKeys ?? []);
   const showHeaders =
     grouped.groups.length > 1 ||
     (grouped.groups.length === 1 && grouped.groups[0].key !== "__all__");
-  const rowProps = buildTaskRowProps(props);
 
   return (
     <div>
@@ -153,7 +240,7 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
       {grouped.groups.map((group) => (
         <GroupSection
           key={group.key}
-          {...buildGroupSectionProps(props, {
+          {...buildGroupSectionProps(props, grouped, {
             group,
             rowProps,
             pinnedSet,
