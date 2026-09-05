@@ -48,6 +48,7 @@ func TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabiliti
 		ServerIdentity    string   `json:"server_identity"`
 		Capabilities      []string `json:"capabilities"`
 		DiagnosticLogPath string   `json:"diagnostic_log_path"`
+		UnownedPeriodMS   int64    `json:"unowned_period_ms"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -63,6 +64,15 @@ func TestHandleIdentityIsReachableWithoutAuthAndReportsHomeIdentityAndCapabiliti
 	}
 	if body.DiagnosticLogPath != cfg.DiagnosticLogPath {
 		t.Errorf("DiagnosticLogPath = %q, want %q", body.DiagnosticLogPath, cfg.DiagnosticLogPath)
+	}
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-003.2 (Review round 3, finding 5): an
+	// adopting backend must be able to renew ownership on the cadence this
+	// server actually enforces, not on whatever its own local config
+	// resolves to -- the two can disagree across a restart that changed
+	// agentctl.unownedPeriod. /identity is the only channel that value ever
+	// crosses back to an adopting backend.
+	if body.UnownedPeriodMS != cs.unownedPeriod.Milliseconds() {
+		t.Errorf("UnownedPeriodMS = %d, want %d (this server's own resolved unowned period)", body.UnownedPeriodMS, cs.unownedPeriod.Milliseconds())
 	}
 }
 
@@ -101,5 +111,8 @@ func TestGetIdentityRoundTripsThroughTheRealClient(t *testing.T) {
 	}
 	if identity.DiagnosticLogPath != cfg.DiagnosticLogPath {
 		t.Errorf("DiagnosticLogPath = %q, want %q", identity.DiagnosticLogPath, cfg.DiagnosticLogPath)
+	}
+	if identity.UnownedPeriodMS != cs.unownedPeriod.Milliseconds() {
+		t.Errorf("UnownedPeriodMS = %d, want %d", identity.UnownedPeriodMS, cs.unownedPeriod.Milliseconds())
 	}
 }

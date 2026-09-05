@@ -8,11 +8,13 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ownershipperiod"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -231,8 +233,7 @@ func TestAdoptSurvivingAgentctlAdoptsAndUpdatesConfig(t *testing.T) {
 // the time this is called, so the caller must not fail the whole launch
 // over a renewal-loop wiring problem.
 func TestStartOwnershipRenewalReturnsNilOnMalformedEndpoint(t *testing.T) {
-	cfg := &config.Config{}
-	renewer := startOwnershipRenewal(context.Background(), cfg, newSurvivalTestLogger(t), "not-a-valid-endpoint", "cred")
+	renewer := startOwnershipRenewal(context.Background(), newSurvivalTestLogger(t), "not-a-valid-endpoint", "cred", time.Minute)
 	if renewer != nil {
 		t.Fatal("renewer = non-nil, want nil for a malformed endpoint")
 	}
@@ -244,10 +245,28 @@ func TestStartOwnershipRenewalReturnsNilOnMalformedEndpoint(t *testing.T) {
 // yields a running renewer, and Stop returns promptly rather than blocking
 // for anything resembling the resolved renewal interval.
 func TestStartOwnershipRenewalStartsAndStopsCleanly(t *testing.T) {
-	cfg := &config.Config{}
-	renewer := startOwnershipRenewal(context.Background(), cfg, newSurvivalTestLogger(t), "127.0.0.1:0", "cred")
+	renewer := startOwnershipRenewal(context.Background(), newSurvivalTestLogger(t), "127.0.0.1:0", "cred", time.Minute)
 	if renewer == nil {
 		t.Fatal("renewer = nil, want a started renewer for a well-formed endpoint")
 	}
 	renewer.Stop()
+}
+
+// TestResolveAdoptedRenewalPeriodUsesReportedValue pins Review round 3,
+// finding 5's fix: an adopted server's own reported unowned period drives
+// its renewal cadence, not this launch's local config.
+func TestResolveAdoptedRenewalPeriodUsesReportedValue(t *testing.T) {
+	if got := resolveAdoptedRenewalPeriod(5 * time.Minute); got != 5*time.Minute {
+		t.Fatalf("resolveAdoptedRenewalPeriod(5m) = %v, want 5m", got)
+	}
+}
+
+// TestResolveAdoptedRenewalPeriodFallsBackToFloorWhenUnreported pins the
+// legacy/pre-upgrade fallback: a server that reported no unowned period at
+// all (zero) still gets a sane, non-zero renewal cadence rather than a
+// zero-interval renewal loop.
+func TestResolveAdoptedRenewalPeriodFallsBackToFloorWhenUnreported(t *testing.T) {
+	if got := resolveAdoptedRenewalPeriod(0); got != ownershipperiod.MinPeriod {
+		t.Fatalf("resolveAdoptedRenewalPeriod(0) = %v, want the shared floor %v", got, ownershipperiod.MinPeriod)
+	}
 }

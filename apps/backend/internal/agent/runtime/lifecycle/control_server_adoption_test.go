@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -127,7 +128,7 @@ const testHomeDir = "/home/kandev"
 func validRecord() *models.ControlServerRecord {
 	return &models.ControlServerRecord{
 		Endpoint:           "127.0.0.1:9999",
-		ServerIdentity:     "old-identity",
+		ServerIdentity:     "matching-identity",
 		CredentialSecretID: "secret-1",
 		Capabilities:       []string{"agent-survival.v1"},
 		DiagnosticLogPath:  "/home/kandev/logs/agentctl-diagnostic.log",
@@ -137,9 +138,10 @@ func validRecord() *models.ControlServerRecord {
 func validIdentity() *agentctl.IdentityInfo {
 	return &agentctl.IdentityInfo{
 		HomeDir:           testHomeDir,
-		ServerIdentity:    "new-identity",
+		ServerIdentity:    "matching-identity",
 		Capabilities:      []string{"agent-survival.v1"},
 		DiagnosticLogPath: "/home/kandev/logs/agentctl-diagnostic.log",
+		UnownedPeriodMS:   300000,
 	}
 }
 
@@ -483,6 +485,12 @@ func TestAttemptAdoptControlServerSucceedsRotatesAndPersists(t *testing.T) {
 	if outcome.InstanceCredential != "instance-token" {
 		t.Fatalf("InstanceCredential = %q, want instance-token (never the rotated control credential)", outcome.InstanceCredential)
 	}
+	// Review round 3, finding 5: the adopted server's own reported unowned
+	// period must travel back on the outcome, not be left for the caller to
+	// recompute from its own (potentially stale) local config.
+	if outcome.UnownedPeriod != 300*time.Second {
+		t.Fatalf("UnownedPeriod = %v, want 300s (identity.UnownedPeriodMS read back verbatim)", outcome.UnownedPeriod)
+	}
 	if !client.confirmCalled || client.confirmedID != 3 {
 		t.Fatalf("confirm not called with rotation id 3: called=%v id=%d", client.confirmCalled, client.confirmedID)
 	}
@@ -513,6 +521,96 @@ func TestAttemptAdoptControlServerSucceedsRotatesAndPersists(t *testing.T) {
 	}
 	if written.Endpoint != record.Endpoint {
 		t.Fatalf("Endpoint = %q, want unchanged %q", written.Endpoint, record.Endpoint)
+	}
+}
+
+// TestAttemptAdoptControlServerServerIdentityMismatchRefusesWithoutStop pins
+// AC-CONTROL-OWNERSHIP-001.2: a live server whose home directory matches but
+// whose per-launch ServerIdentity does not match the previously recorded
+// value is a different process sharing the same home directory, not the
+// server this record describes, and must be refused exactly like a
+// home-directory mismatch -- never stopped, since this backend cannot prove
+// it is its own.
+func TestAttemptAdoptControlServerServerIdentityMismatchRefusesWithoutStop(t *testing.T) {
+	record := validRecord()
+	record.ServerIdentity = "recorded-identity"
+	identity := validIdentity()
+	identity.ServerIdentity = "a-different-live-identity"
+	client := &fakeAdoptionControlClient{identity: identity}
+	store, factory := adoptionFixture(t, record, client)
+
+	outcome := AttemptAdoptControlServer(context.Background(), store, newInMemorySecretStore(), factory,
+		testHomeDir, RequiredSurvivalCapabilities, 0, -1, newAdoptionTestLogger(t))
+
+	if outcome.Adopted || outcome.Reason != AdoptionReasonIdentityMismatch {
+		t.Fatalf("outcome = %+v, want unadopted identity_mismatch", outcome)
+	}
+	if client.shutdownCalled {
+		t.Fatal("ShutdownControlServer was called for a ServerIdentity-mismatched server")
+	}
+}
+
+// TestAttemptAdoptControlServerEmptyRecordedServerIdentitySkipsCheck pins
+// backward compatibility with a record written before this field existed (or
+// a first-ever record with no verified identity yet): an empty recorded
+// ServerIdentity does not gate adoption, since there is nothing yet to
+// compare the live server's identity against.
+func TestAttemptAdoptControlServerEmptyRecordedServerIdentitySkipsCheck(t *testing.T) {
+	secretStore := newInMemorySecretStore()
+	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "current-token")
+	if err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	record := validRecord()
+	record.ServerIdentity = ""
+	record.CredentialSecretID = secretID
+	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
+	identity := validIdentity()
+	identity.ServerIdentity = "whatever-this-server-reports"
+	client := &fakeAdoptionControlClient{
+		identity:     identity,
+		rotateResult: &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token"},
+	}
+	store, factory := adoptionFixture(t, record, client)
+
+	outcome := AttemptAdoptControlServer(context.Background(), store, secretStore, factory,
+		testHomeDir, RequiredSurvivalCapabilities, 0, -1, newAdoptionTestLogger(t))
+
+	if !outcome.Adopted {
+		t.Fatalf("outcome = %+v, want Adopted despite an unset recorded ServerIdentity", outcome)
+	}
+}
+
+// TestAttemptAdoptControlServerUnownedPeriodFallsBackToFloorWhenUnreported
+// pins the legacy/pre-upgrade shape: a server that answers /identity without
+// an unowned_period_ms field (zero value) reports a zero UnownedPeriod on the
+// outcome, rather than a value this package fabricates -- the caller
+// (backendapp.resolveAdoptedRenewalPeriod) owns the floor fallback.
+func TestAttemptAdoptControlServerUnownedPeriodFallsBackToFloorWhenUnreported(t *testing.T) {
+	secretStore := newInMemorySecretStore()
+	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "current-token")
+	if err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	record := validRecord()
+	record.CredentialSecretID = secretID
+	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
+	identity := validIdentity()
+	identity.UnownedPeriodMS = 0
+	client := &fakeAdoptionControlClient{
+		identity:     identity,
+		rotateResult: &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token"},
+	}
+	store, factory := adoptionFixture(t, record, client)
+
+	outcome := AttemptAdoptControlServer(context.Background(), store, secretStore, factory,
+		testHomeDir, RequiredSurvivalCapabilities, 0, -1, newAdoptionTestLogger(t))
+
+	if !outcome.Adopted {
+		t.Fatalf("outcome = %+v, want Adopted", outcome)
+	}
+	if outcome.UnownedPeriod != 0 {
+		t.Fatalf("UnownedPeriod = %v, want 0 (unreported), so the caller applies its own floor", outcome.UnownedPeriod)
 	}
 }
 
@@ -815,6 +913,32 @@ func TestReclaimUnneededControlServerIdentityMismatchLeavesServerUntouched(t *te
 
 	if client.shutdownCalled {
 		t.Fatal("ShutdownControlServer was called on a server with a mismatched home directory")
+	}
+}
+
+// TestReclaimUnneededControlServerServerIdentityMismatchLeavesServerUntouched
+// pins the same ServerIdentity gate AttemptAdoptControlServer applies
+// (Review round 3, finding 2) for the reclaim path too: a home-directory
+// match alone is not enough to prove this is the exact recorded server.
+func TestReclaimUnneededControlServerServerIdentityMismatchLeavesServerUntouched(t *testing.T) {
+	secretStore := newInMemorySecretStore()
+	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "own-token")
+	if err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	record := validRecord()
+	record.CredentialSecretID = secretID
+	record.ServerIdentity = "recorded-identity"
+	identity := validIdentity()
+	identity.ServerIdentity = "a-different-live-identity"
+	client := &fakeAdoptionControlClient{identity: identity}
+	store, factory := adoptionFixture(t, record, client)
+
+	ReclaimUnneededControlServer(context.Background(), store, secretStore, factory,
+		testHomeDir, 0, -1, newAdoptionTestLogger(t))
+
+	if client.shutdownCalled {
+		t.Fatal("ShutdownControlServer was called on a ServerIdentity-mismatched server")
 	}
 }
 

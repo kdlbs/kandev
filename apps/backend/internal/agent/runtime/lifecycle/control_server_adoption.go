@@ -198,6 +198,15 @@ type AdoptionOutcome struct {
 	// (agentctl.NewClient / WithAuthToken), not Credential.
 	InstanceCredential string
 	ContactedAt        time.Time
+	// UnownedPeriod is the adopted server's own resolved unowned period, read
+	// back from its /identity response (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/
+	// .7). Only this value is safe to compute an ownership-renewal cadence
+	// from: this backend's local config can disagree with what the adopted
+	// process actually enforces across a restart that changed
+	// agentctl.unownedPeriod. Zero when the server answered without the
+	// field at all (a legacy pre-upgrade server) -- callers apply their own
+	// floor in that case, never a locally-resolved value.
+	UnownedPeriod time.Duration
 }
 
 // AttemptAdoptControlServer implements startup steps 4 through 6 of design
@@ -238,7 +247,7 @@ func AttemptAdoptControlServer(
 		return AdoptionOutcome{Reason: AdoptionReasonNoServer}
 	}
 
-	if identity.HomeDir == "" || identity.HomeDir != homeDir || len(identity.Capabilities) == 0 {
+	if !identityMatchesRecordedServer(identity, record, homeDir) || len(identity.Capabilities) == 0 {
 		return AdoptionOutcome{Reason: AdoptionReasonIdentityMismatch, ContactedAt: contactedAt}
 	}
 
@@ -295,6 +304,7 @@ func AttemptAdoptControlServer(
 		Credential:         rotated.Credential,
 		InstanceCredential: instanceCredential,
 		ContactedAt:        contactedAt,
+		UnownedPeriod:      time.Duration(identity.UnownedPeriodMS) * time.Millisecond,
 	}
 }
 
@@ -395,7 +405,7 @@ func ReclaimUnneededControlServer(
 	if err != nil {
 		return
 	}
-	if identity.HomeDir == "" || identity.HomeDir != homeDir {
+	if !identityMatchesRecordedServer(identity, record, homeDir) {
 		return
 	}
 
@@ -471,6 +481,25 @@ func revealAdoptionCredentials(ctx context.Context, secretStore secrets.SecretSt
 		return "", "", err
 	}
 	return credential, instanceCredential, nil
+}
+
+// identityMatchesRecordedServer reports whether a live server's identity
+// proves it is the exact process a control-server record describes: the
+// home directory matches (installation identity), and -- when the record
+// carries a previously-recorded ServerIdentity -- the live per-launch
+// identity nonce matches it too (AC-CONTROL-OWNERSHIP-001.2). The home
+// directory alone only proves the live server shares an installation with
+// the recorded one, not that it IS that recorded process. record.ServerIdentity
+// is empty only for a record written before this field existed (or never yet
+// verified), which skips that second check rather than refusing on it.
+func identityMatchesRecordedServer(identity *agentctl.IdentityInfo, record *models.ControlServerRecord, homeDir string) bool {
+	if identity.HomeDir == "" || identity.HomeDir != homeDir {
+		return false
+	}
+	if record.ServerIdentity != "" && identity.ServerIdentity != record.ServerIdentity {
+		return false
+	}
+	return true
 }
 
 func capabilitiesSatisfy(required, advertised []string) bool {

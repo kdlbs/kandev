@@ -366,10 +366,16 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 // IdentityInfo is the response from GET /identity: installation identity and
 // the capability set this control server advertises.
 type IdentityInfo struct {
-	HomeDir           string   `json:"home_dir"`
-	ServerIdentity    string   `json:"server_identity"`
-	Capabilities      []string `json:"capabilities"`
-	DiagnosticLogPath string   `json:"diagnostic_log_path"`
+	HomeDir        string   `json:"home_dir"`
+	ServerIdentity string   `json:"server_identity"`
+	Capabilities   []string `json:"capabilities"`
+	// UnownedPeriodMS is the reporting server's own resolved unowned period
+	// in milliseconds (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/.7) -- the value
+	// that server itself enforces, which an adopting backend's local config
+	// can disagree with across a restart. Use this, not local config, to
+	// compute an adopted server's ownership-renewal cadence.
+	UnownedPeriodMS   int64  `json:"unowned_period_ms"`
+	DiagnosticLogPath string `json:"diagnostic_log_path"`
 }
 
 // GetIdentity fetches the control server's identity and capability set. It

@@ -24,5 +24,14 @@ func (m *ControlServer) handleIdentity(c *gin.Context) {
 		"server_identity":     m.cfg.ServerIdentity,
 		"capabilities":        SurvivalCapabilities,
 		"diagnostic_log_path": m.cfg.DiagnosticLogPath,
+		// unowned_period_ms is this server's own resolved unowned period
+		// (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/.7), not the caller's config:
+		// an adopting backend's local config can disagree with what this
+		// process actually enforces (e.g. an operator raised
+		// agentctl.unownedPeriod between restarts), and that mismatch drives
+		// the adopting backend to renew on a cadence too slow for this
+		// server's own reaper. This is the only channel that value crosses
+		// back to an adopting backend.
+		"unowned_period_ms": m.unownedPeriod.Milliseconds(),
 	})
 }

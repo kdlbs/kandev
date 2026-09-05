@@ -103,8 +103,15 @@ func adoptSurvivingAgentctl(
 
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-003.8: the rotation AttemptAdoptControlServer
 	// just performed already counted as the first renewal, but nothing renews
-	// ownership again after that without this loop.
-	renewer := startOwnershipRenewal(ctx, cfg, log, outcome.Endpoint, outcome.Credential)
+	// ownership again after that without this loop. The renewal cadence is
+	// computed from the adopted server's OWN reported unowned period
+	// (outcome.UnownedPeriod), never this launch's local config: the two can
+	// disagree across a restart that changed agentctl.unownedPeriod, and
+	// renewing on a stale/mismatched cadence lets the server's own reaper
+	// fire while this backend still believes it owns it (Review round 3,
+	// finding 5).
+	renewer := startOwnershipRenewal(ctx, log, outcome.Endpoint, outcome.Credential,
+		resolveAdoptedRenewalPeriod(outcome.UnownedPeriod))
 
 	return &agentctlLauncherResult{
 		// Survival is enabled and this server was adopted, not spawned: the
@@ -174,8 +181,12 @@ func spawnFreshAgentctl(
 		}
 		// AC-EXECUTORS-CONTROL-OWNERSHIP-003.8: the bootstrap handshake this
 		// launch just completed already counted as the first renewal, but
-		// nothing renews ownership again after that without this loop.
-		renewer = startOwnershipRenewal(ctx, cfg, log, endpoint, l.AuthToken())
+		// nothing renews ownership again after that without this loop. This
+		// launch spawned the server moments ago from this same config, so
+		// (unlike the adopted path above) the local resolution IS the value
+		// the server itself enforces.
+		period, _ := ownershipperiod.Resolve(cfg.Agentctl.UnownedPeriod, cfg.Agentctl.IdleTimeout)
+		renewer = startOwnershipRenewal(ctx, log, endpoint, l.AuthToken(), period)
 	}
 
 	return &agentctlLauncherResult{
@@ -192,17 +203,21 @@ func spawnFreshAgentctl(
 // startOwnershipRenewal builds a dedicated control client authenticated with
 // the given credential and starts the periodic ownership-claim loop against
 // it (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/.8), computing the renewal
-// interval from the same resolved unowned period agentctl itself enforces
-// so the two sides can never disagree about it. Returns nil (logged, not
-// fatal) when the endpoint can't be parsed; startup already succeeded by
-// this point, so refusing to run the surviving server over a renewal-loop
-// failure would trade a smaller problem for a bigger one.
+// interval from the given already-resolved unowned period. The caller
+// decides where that period comes from: this launch's own local config is
+// only correct for a server this launch just spawned itself -- an adopted
+// server may have been spawned by a prior launch with different config, so
+// its renewal period must come from what that server itself reports (see
+// resolveAdoptedRenewalPeriod). Returns nil (logged, not fatal) when the
+// endpoint can't be parsed; startup already succeeded by this point, so
+// refusing to run the surviving server over a renewal-loop failure would
+// trade a smaller problem for a bigger one.
 func startOwnershipRenewal(
 	ctx context.Context,
-	cfg *config.Config,
 	log *logger.Logger,
 	endpoint string,
 	credential string,
+	period time.Duration,
 ) *lifecycle.OwnershipRenewer {
 	host, port, err := splitEndpoint(endpoint)
 	if err != nil {
@@ -211,10 +226,25 @@ func startOwnershipRenewal(
 	}
 	client := agentctlclient.NewControlClient(host, port, log)
 	client.SetAuthToken(credential)
-	period, _ := ownershipperiod.Resolve(cfg.Agentctl.UnownedPeriod, cfg.Agentctl.IdleTimeout)
 	renewer := lifecycle.NewOwnershipRenewer(client, ownershipperiod.RenewalInterval(period), log)
 	renewer.Start(ctx)
 	return renewer
+}
+
+// resolveAdoptedRenewalPeriod picks the unowned period an adopted server's
+// ownership-renewal loop renews against: the value that server itself
+// reported on /identity during adoption (outcome.UnownedPeriod), never this
+// launch's local config -- the two can disagree across a restart that
+// changed agentctl.unownedPeriod, and renewing on this launch's own
+// (possibly longer) cadence lets the adopted server's own reaper fire while
+// this backend still believes it owns it. Falls back to the shared floor
+// only for a legacy pre-upgrade server that answered /identity without an
+// unowned_period_ms field at all (reported as zero).
+func resolveAdoptedRenewalPeriod(reported time.Duration) time.Duration {
+	if reported <= 0 {
+		return ownershipperiod.MinPeriod
+	}
+	return reported
 }
 
 // controlClientFactory builds the real lifecycle.AdoptionControlClientFactory
