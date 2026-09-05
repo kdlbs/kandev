@@ -44,7 +44,8 @@ export type PreviewRuntimeFailureCode =
   | "budget-exceeded"
   | "malformed-message"
   | "initialization-failed"
-  | "disposed";
+  | "disposed"
+  | "superseded";
 
 export class PreviewRuntimeError extends Error {
   readonly code: PreviewRuntimeFailureCode;

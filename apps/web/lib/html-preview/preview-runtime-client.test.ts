@@ -56,4 +56,19 @@ describe("preview runtime client", () => {
     await expect(result).rejects.toMatchObject({ code: "disposed" });
     expect(worker.messages.at(-1)).toMatchObject({ type: "dispose" });
   });
+
+  it("settles superseded requests so rapid interactions do not retain pending entries", async () => {
+    const worker = new FakeWorker();
+    const client = createPreviewRuntime({ workerFactory: () => worker });
+    const first = client.dispatch({ type: "click", nodeId: "preview-node-1" });
+    const second = client.dispatch({ type: "click", nodeId: "preview-node-1" });
+
+    await expect(first).rejects.toMatchObject({ code: "superseded" });
+    worker.respond({ protocolVersion: 1, type: "snapshot", generation: 1, snapshot });
+    expect(worker.messages).toHaveLength(2);
+    worker.respond({ protocolVersion: 1, type: "snapshot", generation: 2, snapshot });
+
+    await expect(second).resolves.toBe(snapshot);
+    client.dispose();
+  });
 });

@@ -48,4 +48,16 @@ describe("preview resource policy", () => {
       ),
     ).not.toContain("https://");
   });
+
+  it("rejects CSS syntax that can hide imports, network URLs, or the shadow host", () => {
+    const owned = new Set<string>();
+
+    expect(sanitizePreviewCss('@import/**/ "https://example.com/theme.css";', owned)).toBe("");
+    expect(
+      sanitizePreviewCss('background-image: image-set("https://example.com/bg.png" 1x);', owned),
+    ).toBe("");
+    expect(sanitizePreviewCss(":host { position: fixed; }", owned)).toBe("");
+    expect(sanitizePreviewCss(":host-context(body) { display: none; }", owned)).toBe("");
+    expect(sanitizePreviewCss('@im\\70 ort "https://example.com/theme.css";', owned)).toBe("");
+  });
 });

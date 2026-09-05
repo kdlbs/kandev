@@ -38,11 +38,10 @@ export function filterPreviewSrcSet(value: string, ownedBlobTokens: ReadonlySet<
 }
 
 export function sanitizePreviewCss(value: string, ownedBlobTokens: ReadonlySet<string>): string {
-  const withoutImports = value
-    .replace(/@import\s+[^;{}]+;?/gi, "")
-    .replace(/(?:expression|behavior|-moz-binding)\s*:[^;{}]+;?/gi, "");
+  const withoutComments = stripCssComments(value);
+  if (withoutComments === undefined || hasUnsafeCssSyntax(withoutComments)) return "";
 
-  return withoutImports.replace(
+  return withoutComments.replace(
     /url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)/gi,
     (
       _match,
@@ -54,6 +53,74 @@ export function sanitizePreviewCss(value: string, ownedBlobTokens: ReadonlySet<s
       return isAllowedPreviewResourceUrl(url, ownedBlobTokens) ? `url("${url}")` : "none";
     },
   );
+}
+
+function stripCssComments(value: string): string | undefined {
+  let result = "";
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      result += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (character === '"' || character === "'") {
+      quote = character;
+      result += character;
+      continue;
+    }
+    if (character !== "/" || value[index + 1] !== "*") {
+      result += character;
+      continue;
+    }
+
+    const commentEnd = value.indexOf("*/", index + 2);
+    if (commentEnd < 0) return undefined;
+    result += " ";
+    index = commentEnd + 1;
+  }
+
+  return quote || escaped ? undefined : result;
+}
+
+function hasUnsafeCssSyntax(value: string): boolean {
+  if (value.includes("\\")) return true;
+
+  const syntax = maskCssStrings(value);
+  return (
+    syntax === undefined ||
+    syntax.includes("@") ||
+    /:host(?:-context)?(?:[^a-z0-9_-]|$)/i.test(syntax) ||
+    /(?:-moz-binding|behavior|expression|image-set|-webkit-image-set)\s*(?:\(|:)/i.test(syntax)
+  );
+}
+
+function maskCssStrings(value: string): string | undefined {
+  const result = [...value];
+  let quote: '"' | "'" | undefined;
+
+  for (let index = 0; index < result.length; index += 1) {
+    const character = result[index];
+    if (quote) {
+      result[index] = " ";
+      if (character === quote) quote = undefined;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+      result[index] = " ";
+    }
+  }
+
+  return quote ? undefined : result.join("");
 }
 
 function isRenderableResourceAttribute(tagName: string, attributeName: string): boolean {

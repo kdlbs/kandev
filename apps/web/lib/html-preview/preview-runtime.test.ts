@@ -163,4 +163,21 @@ describe("preview runtime isolation", () => {
     });
     await session.dispose();
   });
+
+  it("bounds window load handlers with the event queue limit", async () => {
+    const session = await createPreviewRuntimeSession({
+      ...testOptions,
+      maxEventQueue: 1,
+    });
+
+    await expect(
+      session.load(`
+        <script>
+          window.addEventListener("load", () => {});
+          window.addEventListener("load", () => {});
+        </script>
+      `),
+    ).rejects.toMatchObject({ code: "budget-exceeded" });
+    await session.dispose();
+  });
 });

@@ -12,7 +12,14 @@ const UNSAVED_HTML = `<!doctype html>
 <html>
   <head>
     <meta http-equiv="refresh" content="0;url=${BLOCKED_NAVIGATION_URL}">
-    <style>@import "${BLOCKED_NAVIGATION_URL}/theme.css"; body { background: url("${BLOCKED_NAVIGATION_URL}/background.png"); }</style>
+    <style>
+      @import/**/ "${BLOCKED_NAVIGATION_URL}/theme.css";
+      @im\\70 ort "${BLOCKED_NAVIGATION_URL}/escaped-theme.css";
+      body {
+        background: url("${BLOCKED_NAVIGATION_URL}/background.png");
+        background-image: image-set("${BLOCKED_NAVIGATION_URL}/image-set.png" 1x);
+      }
+    </style>
   </head>
   <body>
     <h1>Unsaved HTML preview</h1>

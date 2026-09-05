@@ -389,9 +389,12 @@ export class PreviewRuntimeNodeApi {
     callback: QuickJSHandle,
   ): void {
     const handlers = node.eventHandlers.get(type) ?? [];
+    if (handlers.length >= this.maxEventQueue) {
+      this.releaseHandle(callback);
+      throw new Error(PREVIEW_BUDGET_ERROR);
+    }
     handlers.push(this.own(callback));
     node.eventHandlers.set(type, handlers);
-    if (handlers.length > this.maxEventQueue) throw new Error(PREVIEW_BUDGET_ERROR);
   }
 
   private syncDataset(node: VirtualNode, dataset: QuickJSHandle): void {

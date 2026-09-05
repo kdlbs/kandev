@@ -159,7 +159,7 @@ export function renderPreviewSnapshot(
       if (!element) return;
       const nodeId = nodeIds.get(element);
       if (!nodeId) return;
-      event.preventDefault();
+      if (type === "submit") event.preventDefault();
       event.stopPropagation();
       onEvent(createPreviewEvent(type, nodeId, event, element));
     };
@@ -220,7 +220,7 @@ function renderNode(parent: Element, node: PreviewSnapshotNode, context: RenderC
     element.setAttribute(attribute.name, attribute.value);
   }
   if (tagName === "style") {
-    const css = rewriteBlobUrls(
+    const css = rewritePreviewBlobUrls(
       sanitizePreviewCss(node.text ?? "", context.ownedBlobTokens),
       context.resourceUrls,
     );
@@ -246,10 +246,13 @@ function renderAttribute(
   if (name === "style")
     return {
       name,
-      value: rewriteBlobUrls(sanitizePreviewCss(rawValue, ownedBlobTokens), resourceUrls),
+      value: rewritePreviewBlobUrls(sanitizePreviewCss(rawValue, ownedBlobTokens), resourceUrls),
     };
   if (name === "srcset") {
-    const value = rewriteBlobUrls(filterPreviewSrcSet(rawValue, ownedBlobTokens), resourceUrls);
+    const value = rewritePreviewBlobUrls(
+      filterPreviewSrcSet(rawValue, ownedBlobTokens),
+      resourceUrls,
+    );
     return value ? { name, value } : undefined;
   }
   if (RESOURCE_ATTRIBUTES.has(name)) {
@@ -274,7 +277,7 @@ function renderStyles(
   const declarations = Object.entries(node.styles).map(([name, value]) => `${name}: ${value}`);
   const attributeStyle = node.attributes.style;
   if (attributeStyle) declarations.push(attributeStyle);
-  return rewriteBlobUrls(
+  return rewritePreviewBlobUrls(
     sanitizePreviewCss(declarations.join("; "), ownedBlobTokens),
     resourceUrls,
   );
@@ -295,9 +298,13 @@ function createResourceUrls(snapshot: PreviewSnapshot): Map<string, string> {
   return urls;
 }
 
-function rewriteBlobUrls(value: string, resourceUrls: ReadonlyMap<string, string>): string {
+export function rewritePreviewBlobUrls(
+  value: string,
+  resourceUrls: ReadonlyMap<string, string>,
+): string {
   let result = value;
-  for (const [token, url] of resourceUrls) result = result.replaceAll(token, url);
+  const entries = [...resourceUrls.entries()].sort(([left], [right]) => right.length - left.length);
+  for (const [token, url] of entries) result = result.replaceAll(token, url);
   return result;
 }
 
