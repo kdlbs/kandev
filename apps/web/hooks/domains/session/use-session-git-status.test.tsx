@@ -17,7 +17,7 @@ describe("useSessionGitPendingScope", () => {
   afterEach(cleanup);
 
   // Reviewer-required contract coverage for the pending ownership boundary.
-  it("changes across session, environment, and checked-out branch generations", () => {
+  it("changes across session and environment scopes but ignores commit refetches", () => {
     mocks.state.environmentIdBySessionId = { "session-1": "environment-1" };
     mocks.state.sessionCommits.refetchTrigger = { "environment-1": 0 };
 
@@ -36,6 +36,6 @@ describe("useSessionGitPendingScope", () => {
 
     mocks.state.sessionCommits.refetchTrigger["environment-2"] = 1;
     hook.rerender({ sessionId: "session-2" });
-    expect(hook.result.current).not.toBe(environmentScoped);
+    expect(hook.result.current).toBe(environmentScoped);
   });
 });

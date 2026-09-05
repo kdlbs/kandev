@@ -76,6 +76,41 @@ export function usePendingFileOperationScope(
   return scopeMatches;
 }
 
+/** Clears pending operations only for repositories whose checkout generation changed. */
+export function usePendingFileOperationRepositoryScope(
+  generations: Record<string, number>,
+  pendingFileOperations: MutableRefObject<Map<string, PendingFileOperationOwner>>,
+  setPendingStageFiles: Dispatch<SetStateAction<Set<string>>>,
+) {
+  const previousGenerations = useRef(generations);
+
+  useEffect(() => {
+    const changedScopes = new Set<string>();
+    const scopes = new Set([
+      ...Object.keys(previousGenerations.current),
+      ...Object.keys(generations),
+    ]);
+    for (const scope of scopes) {
+      if (previousGenerations.current[scope] !== generations[scope]) changedScopes.add(scope);
+    }
+    previousGenerations.current = generations;
+    if (changedScopes.size === 0) return;
+
+    setPendingStageFiles((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      for (const key of prev) {
+        const separator = key.indexOf("::");
+        const repositoryName = separator === -1 ? "" : key.slice(0, separator);
+        if (!changedScopes.has("") && !changedScopes.has(repositoryName)) continue;
+        next.delete(key);
+        pendingFileOperations.current.delete(key);
+      }
+      return next;
+    });
+  }, [generations, pendingFileOperations, setPendingStageFiles]);
+}
+
 function pendingFileOperationCompleted(
   key: string,
   operation: PendingFileOperation,

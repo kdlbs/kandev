@@ -6,6 +6,7 @@ import { pendingKey, useSessionGit } from "./use-session-git";
 const mocks = vi.hoisted(() => ({
   statuses: [] as Array<{ repository_name: string; status: GitStatusEntry }>,
   scopeGeneration: 0,
+  checkoutGenerations: {} as Record<string, number>,
   gitOps: {
     isLoading: false,
     loadingOperation: null,
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./use-session-git-status", () => ({
   useSessionGitStatus: () => undefined,
   useSessionGitStatusByRepo: () => mocks.statuses,
+  useSessionGitPendingCheckoutGenerations: () => mocks.checkoutGenerations,
   useSessionGitPendingScope: (sessionId: string | null) =>
     sessionId ? `${sessionId}:environment:${mocks.scopeGeneration}` : "",
 }));
@@ -85,6 +87,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.statuses = [];
   mocks.scopeGeneration = 0;
+  mocks.checkoutGenerations = {};
 });
 
 afterEach(cleanup);
@@ -313,5 +316,44 @@ describe("useSessionGit pending scope ownership", () => {
     });
 
     pending.resolve({ success: true, operation: "stage", output: "" });
+  });
+
+  it("resets only the repository affected by a checkout generation", async () => {
+    const repoAPath = "repo-a-stage.txt";
+    const repoBPath = "repo-b-stage.txt";
+    const repoAPending = deferredResult();
+    const repoBPending = deferredResult();
+    mocks.statuses = [
+      { repository_name: "repo-a", status: status(repoAPath, false) },
+      { repository_name: "repo-b", status: status(repoBPath, false) },
+    ];
+    mocks.gitOps.stage
+      .mockReturnValueOnce(repoAPending.promise)
+      .mockReturnValueOnce(repoBPending.promise);
+
+    const hook = renderHook(() => useSessionGit("session-1"));
+    act(() => {
+      void hook.result.current.stageFile([repoAPath], "repo-a");
+      void hook.result.current.stageFile([repoBPath], "repo-b");
+    });
+    await waitFor(() => {
+      expect(hook.result.current.pendingStageFiles).toEqual(
+        new Set([pendingKey("repo-a", repoAPath), pendingKey("repo-b", repoBPath)]),
+      );
+    });
+
+    mocks.checkoutGenerations = { "repo-a": 1 };
+    mocks.statuses = [
+      { repository_name: "repo-a", status: status(repoAPath, false) },
+      { repository_name: "repo-b", status: status(repoBPath, false) },
+    ];
+    hook.rerender();
+
+    expect(hook.result.current.pendingStageFiles).toEqual(
+      new Set([pendingKey("repo-b", repoBPath)]),
+    );
+
+    repoAPending.resolve({ success: true, operation: "stage", output: "" });
+    repoBPending.resolve({ success: true, operation: "stage", output: "" });
   });
 });

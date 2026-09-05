@@ -82,15 +82,28 @@ export function useSessionGitStatusByRepo(
   }, [map]);
 }
 
-/**
- * Identifies the active pending-operation scope. The refetch trigger advances
- * when the checked-out branch or workspace source generation changes.
- */
+/** Identifies the active pending-operation scope across session/environment replacement. */
 export function useSessionGitPendingScope(sessionId: string | null): string {
   return useAppStore((state) => {
     if (!sessionId) return "";
     const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
-    const generation = state.sessionCommits.refetchTrigger[envKey] ?? 0;
-    return `${sessionId}\u0000${envKey}\u0000${generation}`;
+    return `${sessionId}\u0000${envKey}`;
   });
+}
+
+/**
+ * Checkout/reset generations are repository-scoped. Commit refetches and
+ * comparison-base refreshes intentionally do not participate here because
+ * they do not replace the checked-out worktree.
+ */
+export function useSessionGitPendingCheckoutGenerations(
+  sessionId: string | null,
+): Record<string, number> {
+  return useAppStore(
+    useShallow((state) => {
+      if (!sessionId) return {};
+      const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+      return state.gitCheckoutGeneration.byEnvironmentId[envKey] ?? {};
+    }),
+  );
 }

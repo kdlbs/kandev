@@ -1,7 +1,10 @@
 "use client";
 
+/* eslint-disable max-lines */
+
 import { useState, useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import {
+  useSessionGitPendingCheckoutGenerations,
   useSessionGitPendingScope,
   useSessionGitStatus,
   useSessionGitStatusByRepo,
@@ -34,6 +37,7 @@ import {
   clearPendingFileOperations,
   pendingKey,
   pendingKeysForFailedRepositories,
+  usePendingFileOperationRepositoryScope,
   usePendingFileOperationScope,
   usePerRepoPendingClear,
   type PendingFileOperationOwner,
@@ -650,6 +654,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   const gitStatus = useSessionGitStatus(sid);
   const statusByRepo = useSessionGitStatusByRepo(sid);
   const pendingScopeIdentity = useSessionGitPendingScope(sid);
+  const pendingCheckoutGenerations = useSessionGitPendingCheckoutGenerations(sid);
   const { commits, loading: commitsLoading } = useSessionCommits(sid);
   const { diff: cumulativeDiff } = useCumulativeDiff(sid);
   const gitOps = useGitOperations(sid);
@@ -666,6 +671,11 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   } = useFileDerivations(statusByRepo, gitStatus);
   const pendingScopeMatches = usePendingFileOperationScope(
     pendingScopeIdentity,
+    pendingFileOperations,
+    setPendingStageFiles,
+  );
+  usePendingFileOperationRepositoryScope(
+    pendingCheckoutGenerations,
     pendingFileOperations,
     setPendingStageFiles,
   );
