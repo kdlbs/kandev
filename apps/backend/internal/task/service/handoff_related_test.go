@@ -15,6 +15,7 @@ type handoffCoordinatorStore struct {
 	principal *models.WorkspaceAgentPrincipal
 	grants    []*models.CoordinatorGrant
 	audits    []*models.CoordinatorAuditEvent
+	finishErr error
 }
 
 func (s *handoffCoordinatorStore) GetActiveWorkspaceAgentPrincipalForTask(_ context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error) {
@@ -40,6 +41,9 @@ func (s *handoffCoordinatorStore) CreateCoordinatorAuditEvent(_ context.Context,
 }
 
 func (s *handoffCoordinatorStore) FinishCoordinatorAuditEvent(_ context.Context, id, result, detail string) error {
+	if s.finishErr != nil {
+		return s.finishErr
+	}
 	for _, event := range s.audits {
 		if event.ID == id {
 			event.Result = result
@@ -363,6 +367,46 @@ func TestListDocumentsForCallerSession_TargetMaterializationFailure_AuditsDenied
 	}
 	if store.audits[0].Decision != "denied" {
 		t.Errorf("audit decision = %q, want denied", store.audits[0].Decision)
+	}
+}
+
+func TestListDocumentsForCallerSession_ListFailureReturnsAuditFinalizationError(t *testing.T) {
+	_, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	for _, id := range []string{"caller", "target"} {
+		if err := repo.CreateTask(ctx, &models.Task{
+			ID: id, WorkspaceID: "ws-1", Title: id, State: v1.TaskStateCreated,
+			Priority: "medium",
+		}); err != nil {
+			t.Fatalf("CreateTask %s: %v", id, err)
+		}
+	}
+	listErr := errors.New("list documents unavailable")
+	finishErr := errors.New("audit finalization unavailable")
+	docsRepo := &stubDocRepo{docRepo: repo, listErr: listErr}
+	store := &handoffCoordinatorStore{
+		principal: &models.WorkspaceAgentPrincipal{
+			ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1",
+			LogicalKey: "coordinator", BackingTaskID: "caller", BackingSessionID: "caller-session",
+		},
+		grants: []*models.CoordinatorGrant{{
+			ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "ws-1",
+			ScopeKind: coordinator.ScopeWorkspace, ScopeID: "ws-1", Capabilities: "inspect",
+		}},
+		finishErr: finishErr,
+	}
+	svc := NewHandoffService(repo, docsRepo, NewDocumentService(docsRepo, accessTestLogger(t)), nil, nil, accessTestLogger(t))
+	svc.SetCoordinatorAuthority(coordinator.New(store, func() bool { return true }))
+
+	_, err := svc.ListDocumentsForCallerSession(ctx, "caller", "caller-session", "target")
+	if !errors.Is(err, finishErr) {
+		t.Fatalf("ListDocumentsForCallerSession error = %v, want audit finalization error %v", err, finishErr)
+	}
+	if len(store.audits) != 1 || store.audits[0].Result != "pending" {
+		t.Fatalf("audits = %#v, want unresolved pending audit when finalization fails", store.audits)
 	}
 }
 

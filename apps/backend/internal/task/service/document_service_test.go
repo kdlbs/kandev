@@ -50,6 +50,7 @@ type stubDocRepo struct {
 	getDocCalls   int
 	getDocNil     bool
 	latestErr     error
+	listErr       error
 	writeErr      error
 	revisionErr   error
 	deleteErr     error
@@ -73,6 +74,13 @@ func (s *stubDocRepo) GetLatestDocumentRevision(ctx context.Context, taskID, key
 		return nil, s.latestErr
 	}
 	return s.docRepo.GetLatestDocumentRevision(ctx, taskID, key)
+}
+
+func (s *stubDocRepo) ListDocuments(ctx context.Context, taskID string) ([]*models.TaskDocument, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.docRepo.ListDocuments(ctx, taskID)
 }
 
 func (s *stubDocRepo) WriteDocumentRevision(ctx context.Context, head *models.TaskDocument, rev *models.TaskDocumentRevision, coalesceID *string) error {

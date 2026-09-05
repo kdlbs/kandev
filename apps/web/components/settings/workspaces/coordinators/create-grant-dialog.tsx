@@ -194,12 +194,12 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
       <DialogTrigger asChild>
         <Button data-testid="create-grant-button">{t("workspaces:createGrant")}</Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>{t("workspaces:createGrantTitle")}</DialogTitle>
           <DialogDescription>{t("workspaces:createGrantDescription")}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="min-h-0 space-y-4 overflow-y-auto pr-1" data-testid="grant-form-scroll">
           <GrantFormFields
             coordinatorTaskId={coordinatorTaskId}
             setCoordinatorTaskId={setCoordinatorTaskId}
@@ -217,8 +217,13 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
             setNote={setNote}
           />
         </div>
-        <DialogFooter>
-          <Button onClick={handleSubmit} disabled={submitting} data-testid="grant-create-submit">
+        <DialogFooter className="pt-2">
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting}
+            data-testid="grant-create-submit"
+            className="max-sm:min-h-11 max-sm:w-full"
+          >
             {t("workspaces:createGrant")}
           </Button>
         </DialogFooter>

@@ -752,7 +752,9 @@ func (s *HandoffService) ListDocumentsForCallerSession(ctx context.Context, curr
 	}
 	docs, err := s.docs.ListDocuments(ctx, targetTaskID)
 	if err != nil {
-		_ = s.finishCoordinatorRead(ctx, decision, err)
+		if finishErr := s.finishCoordinatorRead(ctx, decision, err); finishErr != nil {
+			return nil, finishErr
+		}
 		return nil, err
 	}
 	// Strip Content from the projection so callers cannot accidentally
