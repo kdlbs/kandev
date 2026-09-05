@@ -39,7 +39,7 @@ import {
 } from "@/lib/tasks/task-priority";
 import type { TaskPriority } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
-import { sortWorkflowStepsByPosition } from "@/lib/kanban/auto-hide-empty-columns";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
 import type { PluginIcon, PluginTaskMenuContext } from "@/lib/plugins/types";
 import { buildEditMenuEntry } from "./kanban-card-edit-submenu";

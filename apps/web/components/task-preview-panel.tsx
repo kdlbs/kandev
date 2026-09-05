@@ -79,6 +79,33 @@ function useActionsMenuOpenState(
   return { open, setOpen };
 }
 
+function usePreviewActionsMenu(
+  task: Task | null,
+  taskId: string | null,
+  taskTitle: string,
+  workspaceId: string | null,
+) {
+  const taskCRUD = useTaskCRUD();
+  const boardRow = buildBoardRow(task);
+  const isArchiving = task ? taskCRUD.archivingTaskId === task.id : false;
+  const isDeleting = task ? taskCRUD.deletingTaskId === task.id : false;
+
+  const menu = useTaskActionsMenu({
+    taskId,
+    taskTitle,
+    workspaceId,
+    // The board excludes archived tasks, so the preview panel never holds one.
+    isArchived: false,
+    boardRow,
+    isArchiving,
+    isDeleting,
+    onArchive: (opts) => (task ? taskCRUD.handleArchive(task, opts) : undefined),
+    onDelete: (opts) => (task ? taskCRUD.handleDelete(task, opts) : undefined),
+  });
+
+  return { menu, boardRow, isArchiving, isDeleting };
+}
+
 interface PreviewPanelHeaderProps {
   task: Task | null;
   onClose: () => void;
@@ -200,27 +227,16 @@ export function TaskPreviewPanel({
   const workspaceId = activeWorkspaceId ?? null;
   const taskId = task?.id ?? null;
   const taskTitle = task?.title ?? "";
-  const taskCRUD = useTaskCRUD();
   const { open: actionsMenuOpen, setOpen: setActionsMenuOpen } = useActionsMenuOpenState(
     taskId,
     onActionsMenuOpenChange,
   );
-  const boardRow = buildBoardRow(task);
-  const isArchiving = task ? taskCRUD.archivingTaskId === task.id : false;
-  const isDeleting = task ? taskCRUD.deletingTaskId === task.id : false;
-
-  const menu = useTaskActionsMenu({
+  const { menu, boardRow, isArchiving, isDeleting } = usePreviewActionsMenu(
+    task,
     taskId,
     taskTitle,
     workspaceId,
-    // The board excludes archived tasks, so the preview panel never holds one.
-    isArchived: false,
-    boardRow,
-    isArchiving,
-    isDeleting,
-    onArchive: (opts) => (task ? taskCRUD.handleArchive(task, opts) : undefined),
-    onDelete: (opts) => (task ? taskCRUD.handleDelete(task, opts) : undefined),
-  });
+  );
 
   return (
     <div

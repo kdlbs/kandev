@@ -234,21 +234,6 @@ function useSelectedTask(
   }, [selectedTaskId, kanbanTasks, snapshots]);
 }
 
-// Mirror the previewed task id into the store so kanban cards can highlight
-// the currently-previewed card without prop-drilling through swimlanes.
-function useMirrorPreviewedTaskId(
-  isOpen: boolean,
-  selectedTaskId: string | null | undefined,
-  setKanbanPreviewedTaskId: (taskId: string | null) => void,
-) {
-  useEffect(() => {
-    setKanbanPreviewedTaskId(isOpen ? (selectedTaskId ?? null) : null);
-  }, [isOpen, selectedTaskId, setKanbanPreviewedTaskId]);
-  useEffect(() => {
-    return () => setKanbanPreviewedTaskId(null);
-  }, [setKanbanPreviewedTaskId]);
-}
-
 function useCloseMissingSelectedTask(params: {
   isOpen: boolean;
   selectedTaskId: string | null | undefined;

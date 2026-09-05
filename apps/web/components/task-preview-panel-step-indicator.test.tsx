@@ -1,13 +1,11 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import { TaskPreviewPanel } from "./task-preview-panel";
 import type { WorkflowStepperStep } from "./task/workflow-step-disclosure";
 import type { Task } from "./kanban-card";
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: () => "workspace-1",
-}));
 
 vi.mock("./task/preview-session-tabs", () => ({
   PreviewSessionTabs: () => <div data-testid="preview-session-tabs" />,
@@ -39,17 +37,27 @@ const STEPS: WorkflowStepperStep[] = [
   { id: "b", name: "Work", color: "#222", position: 1, allow_manual_move: true },
 ];
 
+function withProviders(ui: ReactNode) {
+  return (
+    <ToastProvider>
+      <StateProvider>{ui}</StateProvider>
+    </ToastProvider>
+  );
+}
+
 function renderPanel(overrides: Partial<ComponentProps<typeof TaskPreviewPanel>> = {}) {
   return render(
-    <TaskPreviewPanel
-      task={TASK}
-      onClose={vi.fn()}
-      workflowSteps={STEPS}
-      currentStepId={STEP_A_ID}
-      taskWorkflowId={WORKFLOW_ID}
-      onMoveStep={vi.fn()}
-      {...overrides}
-    />,
+    withProviders(
+      <TaskPreviewPanel
+        task={TASK}
+        onClose={vi.fn()}
+        workflowSteps={STEPS}
+        currentStepId={STEP_A_ID}
+        taskWorkflowId={WORKFLOW_ID}
+        onMoveStep={vi.fn()}
+        {...overrides}
+      />,
+    ),
   );
 }
 
@@ -118,14 +126,16 @@ describe("TaskPreviewPanel step indicator", () => {
     expect(screen.getByTestId(DISCLOSURE_TEST_ID)).toBeTruthy();
 
     rerender(
-      <TaskPreviewPanel
-        task={OTHER_TASK}
-        onClose={vi.fn()}
-        workflowSteps={STEPS}
-        currentStepId={STEP_A_ID}
-        taskWorkflowId={WORKFLOW_ID}
-        onMoveStep={vi.fn()}
-      />,
+      withProviders(
+        <TaskPreviewPanel
+          task={OTHER_TASK}
+          onClose={vi.fn()}
+          workflowSteps={STEPS}
+          currentStepId={STEP_A_ID}
+          taskWorkflowId={WORKFLOW_ID}
+          onMoveStep={vi.fn()}
+        />,
+      ),
     );
 
     expect(screen.queryByTestId(DISCLOSURE_TEST_ID)).toBeNull();
@@ -142,14 +152,16 @@ describe("TaskPreviewPanel step indicator", () => {
     expect(onMoveStepForA).toHaveBeenCalledWith("b");
 
     rerender(
-      <TaskPreviewPanel
-        task={OTHER_TASK}
-        onClose={vi.fn()}
-        workflowSteps={STEPS}
-        currentStepId={STEP_A_ID}
-        taskWorkflowId={WORKFLOW_ID}
-        onMoveStep={vi.fn()}
-      />,
+      withProviders(
+        <TaskPreviewPanel
+          task={OTHER_TASK}
+          onClose={vi.fn()}
+          workflowSteps={STEPS}
+          currentStepId={STEP_A_ID}
+          taskWorkflowId={WORKFLOW_ID}
+          onMoveStep={vi.fn()}
+        />,
+      ),
     );
 
     fireEvent.mouseEnter(screen.getByTestId(STEPPER_TEST_ID));
@@ -182,7 +194,7 @@ describe("TaskPreviewPanel step indicator lifecycle", () => {
     fireEvent.mouseEnter(screen.getByTestId(STEPPER_TEST_ID));
     expect(onDisclosureOpenChange).toHaveBeenLastCalledWith(true);
 
-    rerender(<TaskPreviewPanel task={TASK} onClose={vi.fn()} workflowSteps={[]} />);
+    rerender(withProviders(<TaskPreviewPanel task={TASK} onClose={vi.fn()} workflowSteps={[]} />));
 
     expect(onDisclosureOpenChange).toHaveBeenLastCalledWith(false);
   });

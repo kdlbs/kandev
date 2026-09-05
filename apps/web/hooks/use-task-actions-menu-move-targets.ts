@@ -5,7 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { WorkflowStep } from "@/components/kanban-card";
 import type { KanbanCardMoveTargets } from "@/components/kanban-card-menu-items";
 import type { TaskMoveStep, TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
-import { sortWorkflowStepsByPosition } from "@/lib/kanban/auto-hide-empty-columns";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 
 /**
  * Move-target resolution for callers with no board-column context (the
