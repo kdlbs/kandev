@@ -747,11 +747,13 @@ Each returned bundle carries `pending_id`, `task_id`, `session_id`, `created_at`
 `prompt`, `status`, and its `options` (`option_id`, `label`, `description`).
 
 The bundle's `pending_id` is the durable identity of the visible question group. If an agent's
-MCP transport closes or times out while `ask_user_question_kandev` is waiting, the question remains
-answerable and an exact retry is reconciled to the existing visible messages. Clients should retry
-the exact request rather than create a second question. A successful answer is recorded before the
-live agent waiter is released; a losing retry receives the recorded outcome and does not publish a
-duplicate answer or resume.
+MCP transport closes or times out while `ask_user_question_kandev` is waiting, the question stays
+visible and answerable. When the agent re-sends the same JSON-RPC request (same request id on the
+same MCP connection), Kandev maps the retry to the bundle its interrupted call created: no second
+question is published, and if the person already answered, rejected, or cancelled it, the retry
+returns that recorded outcome immediately instead of waiting again. A call with a new request id
+is a new question; an identical question re-asked while the original is still pending is
+deduplicated to the pending bundle.
 
 After the person answers, pass the bundle's `pending_id` plus one entry per question to
 `answer_question_kandev`:

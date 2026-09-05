@@ -46,7 +46,47 @@ const (
 	reqKey               = "required"
 	typeKey              = "type"
 	stringType           = "string"
+	retryKeyArg          = "retry_key"
 )
+
+// transportRequestIDMetaKey is the Kandev-private `_meta` key under which the
+// BeforeCallTool hook records the agent's JSON-RPC request id. mcp-go hands the
+// id to hooks but not to tool handlers, so the hook stamps it onto the request
+// the handler receives.
+const transportRequestIDMetaKey = "kandev.transport_request_id"
+
+// stampTransportRequestID records the JSON-RPC request id on the call request
+// so handlers can build a retry-stable identity. RequestId.String() renders
+// numeric and string ids deterministically regardless of JSON decoding.
+func stampTransportRequestID(request *mcp.CallToolRequest, id any) {
+	if request == nil || id == nil {
+		return
+	}
+	if request.Params.Meta == nil {
+		request.Params.Meta = &mcp.Meta{}
+	}
+	if request.Params.Meta.AdditionalFields == nil {
+		request.Params.Meta.AdditionalFields = map[string]any{}
+	}
+	request.Params.Meta.AdditionalFields[transportRequestIDMetaKey] = mcp.NewRequestId(id).String()
+}
+
+// clarificationRetryKey identifies one agent tool call across exact transport
+// retries: the MCP connection (client session) plus the JSON-RPC request id the
+// agent chose. JSON-RPC ids restart on every new connection, so the connection
+// scope keeps two different calls from aliasing each other. Empty when either
+// component is unavailable, which leaves the backend on its random identity.
+func clarificationRetryKey(ctx context.Context, req mcp.CallToolRequest) string {
+	connectionID := mcpConnectionID(ctx)
+	if connectionID == "" || req.Params.Meta == nil {
+		return ""
+	}
+	requestID, _ := req.Params.Meta.AdditionalFields[transportRequestIDMetaKey].(string)
+	if requestID == "" {
+		return ""
+	}
+	return connectionID + "/" + requestID
+}
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -653,6 +693,11 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			"session_id": s.sessionID,
 			questionsArg: questions,
 			"context":    questionCtx,
+		}
+		// Carry the connection-scoped transport identity so an exact retry of
+		// an interrupted call reconciles to the bundle it already created.
+		if retryKey := clarificationRetryKey(ctx, req); retryKey != "" {
+			payload[retryKeyArg] = retryKey
 		}
 
 		// Waiting on a human answer routinely outlasts the agent MCP client's

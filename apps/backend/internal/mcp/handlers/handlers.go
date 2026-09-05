@@ -107,10 +107,63 @@ type SessionRepository interface {
 }
 
 // clarificationDurableReader is an optional repository extension used to
-// reconcile an interrupted ask_user_question retry with messages already
-// committed before its MCP wait was torn down.
+// reconcile an exact retry of an interrupted ask_user_question call with the
+// question messages already committed before its MCP wait was torn down.
 type clarificationDurableReader interface {
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
+}
+
+// durableClarificationState is what an exact retry finds already recorded for
+// its identity. exists means the visible question messages are present and
+// must not be created again; response carries an answered/rejected outcome;
+// closed names a cancelled/expired outcome that has no answer to return.
+type durableClarificationState struct {
+	exists   bool
+	response *clarification.Response
+	closed   clarification.Status
+}
+
+// reconcileDurableClarification loads whatever the durable identity already
+// recorded. A repository without the optional reader, or an empty identity,
+// yields the zero state so the in-memory path behaves as before. A bundle
+// owned by another session is never reused: the identity already binds the
+// session, so a mismatch is treated as absent and logged.
+func (h *Handlers) reconcileDurableClarification(ctx context.Context, sessionID, pendingID string) (durableClarificationState, error) {
+	var state durableClarificationState
+	if pendingID == "" {
+		return state, nil
+	}
+	reader, ok := h.sessionRepo.(clarificationDurableReader)
+	if !ok {
+		return state, nil
+	}
+	messages, err := reader.FindMessagesByPendingID(ctx, pendingID)
+	if err != nil {
+		return state, err
+	}
+	if len(messages) == 0 {
+		return state, nil
+	}
+	for _, message := range messages {
+		if message.TaskSessionID != sessionID {
+			h.logger.Warn("ignoring clarification bundle owned by another session on retry",
+				zap.String("pending_id", pendingID),
+				zap.String("session_id", sessionID),
+				zap.String("owner_session_id", message.TaskSessionID))
+			return state, nil
+		}
+	}
+	state.exists = true
+	status, response, recorded := clarification.RecordedOutcome(pendingID, messages, h.logger)
+	if !recorded {
+		return state, nil
+	}
+	if response != nil {
+		state.response = response
+	} else {
+		state.closed = status
+	}
+	return state, nil
 }
 
 // stepCompletionTurnReader exposes the immutable workflow-step stamp on the
@@ -3722,6 +3775,9 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		TaskID    string                   `json:"task_id"`
 		Questions []clarification.Question `json:"questions"`
 		Context   string                   `json:"context"`
+		// RetryKey is the connection-scoped transport identity the MCP server
+		// attaches so an exact retry maps to the same durable bundle.
+		RetryKey string `json:"retry_key"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -3749,41 +3805,53 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		}
 	}
 
+	// Reconcile an exact transport retry before touching the in-memory store.
+	// The MCP server scopes retry_key to one connection and request id; the
+	// derived identity lets a retry find the question bundle its interrupted
+	// predecessor already committed, and return a recorded outcome instead of
+	// waiting on a question nobody can answer anymore.
+	retryPendingID := clarification.PendingIDForRequest(req.SessionID, req.RetryKey)
+	durable, err := h.reconcileDurableClarification(ctx, req.SessionID, retryPendingID)
+	if err != nil {
+		h.logger.Error("failed to reconcile clarification retry",
+			zap.String("pending_id", retryPendingID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to reconcile clarification retry", nil)
+	}
+	if durable.response != nil {
+		h.setSessionRunning(ctx, taskID, req.SessionID)
+		h.logger.Info("clarification retry returned recorded outcome",
+			zap.String("pending_id", retryPendingID),
+			zap.String("session_id", req.SessionID),
+			zap.Bool("rejected", durable.response.Rejected))
+		return ws.NewResponse(msg.ID, msg.Action, durable.response)
+	}
+	if durable.closed != "" {
+		h.logger.Warn("clarification retry found closed bundle",
+			zap.String("pending_id", retryPendingID),
+			zap.String("session_id", req.SessionID),
+			zap.String("status", string(durable.closed)))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"Clarification request timed out or was cancelled", nil)
+	}
+
 	// Create the clarification request
 	clarificationReq := &clarification.Request{
-		PendingID: clarification.PendingIDForRequest(req.SessionID, msg.ID),
+		PendingID: retryPendingID,
 		SessionID: req.SessionID,
 		TaskID:    taskID,
 		Questions: req.Questions,
 		Context:   req.Context,
 	}
 	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
-	// A transport retry may arrive after the durable question messages were
-	// committed but before the original MCP call returned. Reconcile that
-	// durable identity before creating messages so the retry cannot publish a
-	// second visible question bundle. Repositories without this optional
-	// extension retain the in-memory behavior used by lightweight test doubles.
-	durableMessagesExist := false
-	if pendingID != "" {
-		if reader, ok := h.sessionRepo.(clarificationDurableReader); ok {
-			messages, readErr := reader.FindMessagesByPendingID(ctx, pendingID)
-			if readErr != nil {
-				h.logger.Error("failed to reconcile clarification retry",
-					zap.String("pending_id", pendingID), zap.Error(readErr))
-				h.clarificationSvc.CancelRequest(pendingID)
-				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-					"failed to reconcile clarification retry", nil)
-			}
-			durableMessagesExist = len(messages) > 0
-		}
-	}
 
 	// Create one chat message per question (triggers WS events to frontend).
 	// If the create fails, the in-store pending entry must be cancelled too —
 	// otherwise the agent's WaitForResponse would block for the full 2-hour
 	// timeout while the user never sees clarification cards.
-	// When dedup fires (isNew=false) the messages already exist, so skip creation.
-	if isNew && !durableMessagesExist && h.messageCreator != nil {
+	// When dedup fires (isNew=false) the messages already exist, so skip
+	// creation; likewise when the retry identity already has durable messages.
+	if isNew && !durable.exists && h.messageCreator != nil {
 		if _, err := h.messageCreator.CreateClarificationRequestMessages(
 			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {

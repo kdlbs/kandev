@@ -5,21 +5,7 @@ package clarification
 import (
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
-
-// PendingIDForRequest returns the durable identity for an MCP request retry.
-// Agent transports reuse the request ID when retrying an interrupted call;
-// binding it to the session prevents the same transport ID in another session
-// from aliasing this clarification bundle. An empty request ID deliberately
-// returns empty so callers can retain the normal random-ID behavior.
-func PendingIDForRequest(sessionID, requestID string) string {
-	if sessionID == "" || requestID == "" {
-		return ""
-	}
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("kandev/clarification/"+sessionID+"/"+requestID)).String()
-}
 
 // Option represents a single choice option for a question.
 type Option struct {
