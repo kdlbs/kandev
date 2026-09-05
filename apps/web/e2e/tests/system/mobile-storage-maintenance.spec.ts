@@ -263,6 +263,11 @@ test.describe("Mobile storage maintenance", () => {
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThanOrEqual(44);
     expect(box!.height).toBeGreaterThanOrEqual(44);
+    if (prCapture.capturing) {
+      await timingHelp.evaluate((element) =>
+        element.scrollIntoView({ block: "center", inline: "nearest" }),
+      );
+    }
     await timingHelp.tap();
     await expect(testPage.getByRole("tooltip")).toContainText("Scan duration");
     await prCapture.screenshot("progressive-analysis-timing", {
