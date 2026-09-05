@@ -100,6 +100,8 @@ test.describe("Mobile Kanban card archive confirmation", () => {
     expect(viewport.width - (dialogBox.x + dialogBox.width)).toBeGreaterThanOrEqual(12);
     expect(dialogBox.y).toBeGreaterThanOrEqual(0);
     expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height);
+    const dialogCenterY = dialogBox.y + dialogBox.height / 2;
+    expect(Math.abs(dialogCenterY - viewport.height / 2)).toBeLessThanOrEqual(8);
     expect(surfaceColors.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
     expect(surfaceColors.backgroundColor).toMatch(/^rgb/);
     expect(surfaceColors.foregroundColor).toMatch(/^rgb/);
