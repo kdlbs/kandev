@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -41,6 +42,24 @@ func mergeSSHMetadata(base, overlay map[string]interface{}) map[string]interface
 	return merged
 }
 
+// legacyFetchRefspec matches the fetch refspec Kandev generated before its
+// managed scripts braced their expansions.
+var legacyFetchRefspec = regexp.MustCompile(
+	`refs/heads/\$([A-Za-z_][A-Za-z0-9_]*):refs/remotes/origin/\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// repairLegacyFetchRefspec braces the expansions in a Kandev-authored fetch
+// refspec that a profile persisted before the managed scripts were fixed. The
+// profile editor stores the generated default in
+// executor_profiles.prepare_script and resolvePrepareScript prefers that stored
+// value, so correcting the default alone would leave those profiles fetching
+// `refs/heads/mainefs/remotes/origin/main` under zsh.
+//
+// Only that exact fragment is rewritten. A hand-written script that uses a zsh
+// modifier of its own keeps whatever the author wrote.
+func repairLegacyFetchRefspec(script string) string {
+	return legacyFetchRefspec.ReplaceAllString(script, `refs/heads/$${$1}:refs/remotes/origin/$${$2}`)
+}
+
 func (r *SSHExecutor) resolvePrepareScript(req *ExecutorCreateRequest, workspacePath, agentctlBin string) (string, error) {
 	if req == nil {
 		return "", fmt.Errorf("ssh: prepare request is required")
@@ -48,6 +67,8 @@ func (r *SSHExecutor) resolvePrepareScript(req *ExecutorCreateRequest, workspace
 	script := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySetupScript))
 	if script == "" {
 		script = DefaultPrepareScript(executorTypeSSH)
+	} else {
+		script = repairLegacyFetchRefspec(script)
 	}
 	if script == "" {
 		return "", nil

@@ -104,6 +104,13 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
   `agentctl` starts. A non-zero exit, timeout, missing primary checkout, or conflicting `origin`
   fails the launch; Kandev does not
   start `agentctl` or the agent in an empty or ambiguous workspace.
+- Managed preparation text is shell-portable. The profile shell may be `sh`, `bash`, or `zsh`, so
+  every parameter expansion that a `:` follows is braced (`${name}:`); zsh otherwise parses `$name:r`
+  as a modifier and silently corrupts fetch refspecs.
+- A profile stores the generated prepare script, and a stored script wins over the managed default,
+  so preparation repairs the one fragment Kandev itself generated before that rule existed: an
+  unbraced `refs/heads/$name:refs/remotes/origin/$name` is braced when the stored script is
+  resolved. Any other expansion in a stored script is left exactly as its author wrote it.
 - On subsequent sessions for the same task on the same host, the default preparation path reuses the
   matching checkout without deleting local commits or untracked work. The profile prepare script may
   run again because it is a per-session pre-launch hook and must therefore be idempotent when the
