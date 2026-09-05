@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { IconFlag } from "@tabler/icons-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import {
@@ -7,6 +9,10 @@ import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "./kanban-card-menu-items";
+
+function renderNodeText(node: ReactNode): string {
+  return render(<>{node}</>).container.textContent ?? "";
+}
 
 const PluginBitbucketIcon = () => null;
 
@@ -314,5 +320,96 @@ describe("buildKanbanCardMenuEntries — detach", () => {
     });
 
     expect(entries.some((entry) => entry.key === "detach")).toBe(false);
+  });
+});
+
+describe("buildKanbanCardMenuEntries — priority action", () => {
+  const baseArgs = {
+    workflows: [],
+    stepsByWorkflowId: {},
+  };
+
+  function priorityChildren(entries: KanbanCardMenuEntry[]) {
+    const priorityEntry = entries.find((entry) => entry.key === "priority");
+    if (priorityEntry?.kind !== "submenu") throw new Error("expected a priority submenu");
+    return priorityEntry.children;
+  }
+
+  it("presents exactly the four priority tokens in severity order, each by its localized label", () => {
+    const entries = buildKanbanCardMenuEntries({ ...baseArgs, onSelectPriority: vi.fn() });
+    const children = priorityChildren(entries);
+
+    expect(children.map((child) => child.key)).toEqual([
+      "priority-critical",
+      "priority-high",
+      "priority-medium",
+      "priority-low",
+    ]);
+    expect(
+      children.map((child) => renderNodeText(child.kind === "item" ? child.label : undefined)),
+    ).toEqual(["Critical", "High", "Medium", "Low"]);
+  });
+
+  it("includes the priority icon on the card menu setting", () => {
+    const entries = buildKanbanCardMenuEntries({ ...baseArgs, onSelectPriority: vi.fn() });
+    const priorityEntry = entries.find((entry) => entry.key === "priority");
+
+    expect(priorityEntry?.kind).toBe("submenu");
+    if (priorityEntry?.kind !== "submenu") return;
+    expect((priorityEntry.icon as { type?: unknown })?.type).toBe(IconFlag);
+  });
+
+  it("marks the task's current priority and leaves all four selectable", () => {
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      currentPriority: "high",
+      onSelectPriority: vi.fn(),
+    });
+    const children = priorityChildren(entries);
+
+    for (const child of children) {
+      if (child.kind !== "item") throw new Error("expected item entries");
+      // Reselecting the current priority must stay enabled, unlike a
+      // move-to-current-step entry which disables the current step.
+      expect(child.disabled).toBeFalsy();
+      if (child.key === "priority-high") {
+        expect(renderNodeText(child.trailing)).toBe("Current");
+      } else {
+        expect(renderNodeText(child.trailing)).toBe("");
+      }
+    }
+  });
+
+  it.each([undefined, null, "", "not-a-real-token"])(
+    "indicates no token as current when the held priority is %s",
+    (currentPriority) => {
+      const entries = buildKanbanCardMenuEntries({
+        ...baseArgs,
+        currentPriority,
+        onSelectPriority: vi.fn(),
+      });
+      const children = priorityChildren(entries);
+
+      for (const child of children) {
+        if (child.kind !== "item") throw new Error("expected item entries");
+        expect(child.trailing).toBeUndefined();
+      }
+    },
+  );
+
+  it("invokes onSelectPriority with the selected token, including reselecting the current one", () => {
+    const onSelectPriority = vi.fn();
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      currentPriority: "critical",
+      onSelectPriority,
+    });
+    const children = priorityChildren(entries);
+    const criticalEntry = children.find((child) => child.key === "priority-critical");
+    if (criticalEntry?.kind !== "item") throw new Error("expected an item entry");
+
+    criticalEntry.onSelect?.();
+
+    expect(onSelectPriority).toHaveBeenCalledWith("critical");
   });
 });

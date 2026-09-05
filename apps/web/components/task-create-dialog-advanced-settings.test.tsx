@@ -20,6 +20,8 @@ vi.mock("react-i18next", () => ({
         "task:dependsOn": "Depends on",
         "task:dependencyInfoLabel": "About task dependencies",
         "task:dependencyInfo": "This task waits until every selected task completes successfully.",
+        "task:priorityInfoLabel": "About task priority",
+        "task:priorityInfo": "Priority shows how urgent this task is on the board.",
       })[key] ?? key,
   }),
 }));
@@ -52,6 +54,8 @@ function renderAdvancedSettings(
         isTaskStarted={false}
         blockedBy={[]}
         onBlockedByChange={() => {}}
+        priority="medium"
+        onPriorityChange={() => {}}
         {...overrides}
       />
     </TooltipProvider>,
@@ -66,6 +70,7 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(trigger.className).toContain("min-h-12");
     expect(screen.queryByTestId(DEPENDENCY_TRIGGER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("task-create-priority-select")).toBeNull();
   });
 
   it("reveals the dependency selector when expanded", () => {
@@ -76,6 +81,7 @@ describe("TaskCreateAdvancedSettings", () => {
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByTestId(DEPENDENCY_TRIGGER_TEST_ID).getAttribute("hidden")).toBeNull();
+    expect(screen.getByTestId("task-create-priority-select").getAttribute("hidden")).toBeNull();
   });
 
   it("labels the dependency setting and provides contextual help", async () => {
@@ -88,12 +94,18 @@ describe("TaskCreateAdvancedSettings", () => {
     );
     const grid = screen.getByTestId("task-create-advanced-settings-grid");
     const row = screen.getByTestId("task-create-dependency-setting-row");
+    const priorityRow = screen.getByTestId("task-create-priority-setting-row");
     const selectorContainer = screen.getByTestId("task-create-dependency-selector-container");
     expect(grid.className).toContain("md:grid-cols-2");
     expect(row.className).toContain("items-center");
     expect(row.className).toContain("gap-3");
     expect(row.className).not.toContain("flex-col");
     expect(row.parentElement).toBe(grid);
+    expect(grid.firstElementChild).toBe(row);
+    expect(grid.lastElementChild).toBe(priorityRow);
+    expect(priorityRow.className).toContain("md:col-start-2");
+    expect(priorityRow.className).toContain("md:justify-self-start");
+    expect(priorityRow.className).not.toContain("md:justify-self-end");
     expect(selectorContainer.parentElement).toBe(row);
     const info = screen.getByTestId("task-create-dependency-setting-info");
     expect(info.getAttribute("aria-label")).toBe("About task dependencies");
@@ -116,6 +128,8 @@ describe("TaskCreateAdvancedSettings", () => {
             isTaskStarted={false}
             blockedBy={blockedBy}
             onBlockedByChange={setBlockedBy}
+            priority="medium"
+            onPriorityChange={() => {}}
           />
         </TooltipProvider>
       );

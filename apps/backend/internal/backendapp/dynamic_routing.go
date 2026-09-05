@@ -47,6 +47,11 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return nil, err
 	}
+	if err := repairDynamicRouteAfterLaunchFailure(
+		ctx, session, request.ExpectedGeneration, resolver.MarkRouteRecoveryActionRequired,
+	); err != nil {
+		return nil, routeActionError(ctx, repo, session, err)
+	}
 	decision, err := resolveDynamicRouteAction(ctx, resolver, request, session)
 	if err != nil {
 		return handleDynamicRouteActionError(ctx, repo, session, err)
@@ -57,7 +62,7 @@ func applyDynamicRouteAction(
 	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {
 		return routeActionResult(ctx, repo, session), nil
 	}
-	return finishDynamicRouteAction(ctx, repo, session.ID, launchSuccessor)
+	return finishDynamicRouteAction(ctx, repo, resolver, session.ID, decision.Generation, launchSuccessor)
 }
 
 func loadDynamicRouteActionSession(
@@ -155,7 +160,9 @@ func persistDynamicRouteSelection(
 func finishDynamicRouteAction(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
+	resolver *agentruntime.ProfileExecutionResolver,
 	sessionID string,
+	expectedGeneration int64,
 	launchSuccessor func(context.Context, string) error,
 ) (*orchestrator.RouteActionResult, error) {
 	if launchSuccessor == nil {
@@ -166,7 +173,7 @@ func finishDynamicRouteAction(
 		return routeActionResult(ctx, repo, session), nil
 	}
 	if err := launchSuccessor(ctx, sessionID); err != nil {
-		return recoverDynamicRouteAction(ctx, repo, sessionID, err)
+		return recoverDynamicRouteAction(ctx, repo, resolver, sessionID, expectedGeneration, err)
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -178,15 +185,23 @@ func finishDynamicRouteAction(
 func recoverDynamicRouteAction(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
+	resolver *agentruntime.ProfileExecutionResolver,
 	sessionID string,
+	expectedGeneration int64,
 	launchErr error,
 ) (*orchestrator.RouteActionResult, error) {
+	if resolver != nil {
+		_ = resolver.MarkRouteRecoveryActionRequired(ctx, sessionID, expectedGeneration)
+	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	if session.RouteGeneration != expectedGeneration {
+		return routeActionResult(ctx, repo, session), nil
+	}
 	session.RouteState = "action_required"
-	session.RouteReason = "route_action_launch_failed"
+	session.RouteReason = orchestrator.RouteActionLaunchFailedReason
 	session.State = models.TaskSessionStateWaitingForInput
 	session.ErrorMessage = launchErr.Error()
 	session.DownstreamACPSessionID = ""
@@ -194,6 +209,23 @@ func recoverDynamicRouteAction(
 		return nil, routeActionPersistenceError(ctx, repo, session, err)
 	}
 	return routeActionResult(ctx, repo, session), nil
+}
+
+func repairDynamicRouteAfterLaunchFailure(
+	ctx context.Context,
+	session *models.TaskSession,
+	expectedGeneration int64,
+	mark func(context.Context, string, int64) error,
+) error {
+	if session == nil || mark == nil ||
+		session.RouteReason != orchestrator.RouteActionLaunchFailedReason ||
+		session.RouteGeneration != expectedGeneration {
+		return nil
+	}
+	if err := mark(ctx, session.ID, expectedGeneration); err != nil {
+		return fmt.Errorf("restore dynamic route after failed launch: %w", err)
+	}
+	return nil
 }
 
 func routeActionResult(

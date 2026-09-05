@@ -4307,7 +4307,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		zap.String("task_id", taskID))
 
 	// Block until user responds or context is cancelled (agent MCP timeout).
-	// With MCP_TIMEOUT set to 2h for Claude Code, this will wait long enough.
+	// With MCP_TOOL_TIMEOUT set to 2h for Claude Code, this will wait long enough.
 	// If the agent times out, the entry is cleaned up and the event-based
 	// fallback in the orchestrator handles resuming with a new turn.
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
