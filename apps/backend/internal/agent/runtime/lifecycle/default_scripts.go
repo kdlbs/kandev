@@ -57,6 +57,15 @@ func KandevBranchCheckoutPostlude() string {
 # quoted literal that cannot inject commands. Do NOT wrap these in double
 # quotes — double quotes would re-expose $(...) command substitution. Do NOT
 # assume they are unquoted data either; the value carries its own quoting.
+#
+# The fetch below must never carry --depth. A depth-limited fetch grafts a
+# history-less tip into the workspace (it writes .git/shallow even when the
+# repository was cloned in full), which leaves the session branch with no
+# common ancestor to the base branch. "git merge-base",
+# "git diff <base>...HEAD" and rebase-onto-base then fail, and those are
+# exactly what the diff panel and pull-request flow run
+# (see internal/agentctl/server/api/git.go computeMergeBase). Nothing in the
+# backend ever unshallows a workspace, so a graft here is permanent.
 (
   if [ -d {{workspace.path}}/.git ] \
      && [ -n {{worktree.branch}} ] \
@@ -64,7 +73,7 @@ func KandevBranchCheckoutPostlude() string {
     cd {{workspace.path}} || exit 0
     if git rev-parse --verify {{worktree.branch}} >/dev/null 2>&1; then
       git checkout {{worktree.branch}}
-    elif git fetch --depth=1 origin {{worktree.branch}} 2>/dev/null; then
+    elif git fetch --no-tags origin {{worktree.branch}} 2>/dev/null; then
       git checkout -b {{worktree.branch}} origin/{{worktree.branch}}
     else
       git checkout -b {{worktree.branch}}
@@ -204,40 +213,118 @@ const defaultSpritesPrepareScript = `#!/bin/bash
 
 set -euo pipefail
 
-# ---- Add SSH host keys (prevent "Host key verification failed") ----
-mkdir -p ~/.ssh
-ssh-keyscan -t ed25519 github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null
+# SECURITY: the providers substitute a fully single-quoted, self-contained
+# shell token (scriptengine.shellQuote) for every DATA placeholder. Each one is
+# dereferenced BARE exactly once, into a shell variable, and used as "$var"
+# afterwards. Never write "{{...}}" — double quotes re-expose $(...) inside a
+# hostile branch name or clone URL, which is the injection the quoting exists
+# to prevent.
+workspace={{workspace.path}}
+repository_url={{repository.clone_url}}
+repository_branch={{repository.branch}}
 
 # ---- Configure git/gh for HTTPS auth (token-based, no SSH keys needed) ----
 # Rewrite SSH URLs to HTTPS so git clone git@github.com:... works via token auth
 git config --global url."https://github.com/".insteadOf "git@github.com:"
 git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 
+# Kandev can write into the workspace before this script runs, so the checkout
+# is not guaranteed to be owned by the user running the prepare script.
+git config --global --add safe.directory '*'
+
 # Configure GitHub token for gh CLI and git operations
 # GH_TOKEN is the primary env var for gh CLI authentication
 {{github.auth_setup}}
 
-# ---- Install pnpm globally ----
-curl -fsSL https://github.com/pnpm/pnpm/releases/download/v10.32.1/pnpm-linux-x64 -o /usr/local/bin/pnpm
-chmod +x /usr/local/bin/pnpm
+# ---- Install pnpm (best effort, never fatal) ----
+# Repositories pin their own pnpm through package.json "packageManager", so a
+# single hardcoded global binary is wrong for any repository that pins a
+# different one; corepack honours the per-repository pin. This must not be able
+# to fail the launch: a prepare failure destroys the whole sandbox, and the
+# agent can install a package manager on demand.
+if ! command -v pnpm >/dev/null 2>&1; then
+  corepack enable pnpm >/dev/null 2>&1 || true
+fi
+if ! pnpm --version >/dev/null 2>&1; then
+  npm install -g pnpm >/dev/null 2>&1 || true
+fi
 
 # ---- Git identity ----
 {{git.identity_setup}}
 
-# ---- Clone repository ----
+# ---- Materialize the primary repository ----
+# The workspace is not guaranteed to be empty when this script runs: office
+# sessions upload skill files under the worktree root first, and "git clone"
+# refuses a non-empty destination. Initialize in place instead, exactly as the
+# SSH default does, so the script is also idempotent for a reused workspace.
+#
+# History is NOT truncated. Sessions open pull requests, so "git merge-base",
+# "git diff <base>...HEAD" and rebase-onto-base have to work; a --depth clone
+# leaves the branch with no common ancestor once the session branch is fetched.
+# A blobless partial clone keeps the whole commit graph while deferring file
+# contents until something reads them, which keeps large repositories inside
+# the preparation timeout. Drop both --filter flags for a full fetch when the
+# sandbox has no network access after preparation.
+#
 # The kandev-managed feature-branch checkout is appended as an invariant
 # postlude (see KandevBranchCheckoutPostlude) — keep it out of the default
 # so old profiles snapshotting this script and the postlude never disagree.
-# SECURITY: the providers substitute fully single-quoted tokens (shellQuote) for
-# these placeholders. printf takes them as separate arguments, NOT inside a
-# double-quoted string (which would re-expand a hostile URL/branch). Do not
-# reintroduce an echo of these placeholders inside a double-quoted string.
-printf 'Cloning %s (branch: %s)...\n' {{repository.clone_url}} {{repository.branch}}
-git clone --depth=1 --quiet --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
-cd {{workspace.path}}
+#
+# Never echo $repository_url: when the profile supplies GH_TOKEN/GITHUB_TOKEN
+# the resolver injects it into the URL, and this script's output is streamed
+# into the task UI and quoted verbatim in preparation failures.
+mkdir -p "$workspace"
+if [ -n "$repository_url" ]; then
+  if git -C "$workspace" rev-parse --git-dir >/dev/null 2>&1; then
+    configured_url=$(git -C "$workspace" config --get remote.origin.url 2>/dev/null || true)
+    if [ -z "$configured_url" ]; then
+      git -C "$workspace" remote add origin "$repository_url"
+    else
+      configured_id=$(printf '%s' "$configured_url" | sed 's|://[^/@]*@|://|')
+      expected_id=$(printf '%s' "$repository_url" | sed 's|://[^/@]*@|://|')
+      if [ "$configured_id" != "$expected_id" ]; then
+        echo 'kandev: target origin identity conflict' >&2
+        exit 1
+      fi
+      git -C "$workspace" remote set-url origin "$repository_url"
+    fi
+  else
+    git init -q "$workspace"
+    git -C "$workspace" remote add origin "$repository_url"
+  fi
 
-# Strip embedded token from remote URL to avoid persisting credentials in .git/config
-git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
+  git_dir=$(git -C "$workspace" rev-parse --absolute-git-dir)
+  exclude_file="$git_dir/info/exclude"
+  mkdir -p "$(dirname "$exclude_file")"
+  touch "$exclude_file"
+  grep -Fqx '/.kandev/' "$exclude_file" || printf '%s\n' '/.kandev/' >>"$exclude_file"
+
+  if [ -z "$repository_branch" ]; then
+    echo 'kandev: target repository has no base branch' >&2
+    exit 1
+  fi
+
+  git -C "$workspace" config remote.origin.promisor true
+  git -C "$workspace" config remote.origin.partialclonefilter blob:none
+  echo "Fetching $repository_branch..."
+  if ! git -C "$workspace" fetch --filter=blob:none --no-tags origin \
+      "+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch"; then
+    echo 'kandev: target base branch is unavailable' >&2
+    exit 1
+  fi
+  # A reused checkout keeps its current branch, local commits, and untracked
+  # files. Only an empty repository needs its initial branch created.
+  if ! git -C "$workspace" rev-parse --verify HEAD >/dev/null 2>&1; then
+    git -C "$workspace" checkout -q -b "$repository_branch" "refs/remotes/origin/$repository_branch"
+  fi
+
+  # Strip embedded token from remote URL to avoid persisting credentials in
+  # .git/config. Runs after the fetches that needed it; later pushes go through
+  # the credential helper configured above.
+  git -C "$workspace" remote set-url origin "$(git -C "$workspace" remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
+fi
+
+cd "$workspace"
 
 # ---- Repository setup (if configured) ----
 {{repository.setup_script}}
