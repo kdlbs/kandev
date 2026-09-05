@@ -480,6 +480,8 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
+| `features.auth` | `KANDEV_FEATURES_AUTH` | off | Experimental authentication, users, per-user workspaces, and team access. |
+| `features.multiTenancy` | `KANDEV_FEATURES_MULTI_TENANCY` | off | Experimental organizations above authenticated users. Requires `features.auth`; startup is refused otherwise. |
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
 | `features.canvases` | `KANDEV_FEATURES_CANVASES` | off | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk. |
 | `features.officeSessionIdentity` | `KANDEV_FEATURES_OFFICE_SESSION_IDENTITY` | off | Experimental Office participant sessions. Enable only after the `(task_id, agent_profile_id)` unique index is available. |
@@ -508,7 +510,7 @@ the rollout is complete, then remove the live flag and move its key and
 environment variable to the runtime registry's append-only retired identities.
 Plugins are part of the base product and are not a runtime toggle.
 
-The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; authentication and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
+The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; authentication, organizations, and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
 
 ## Credentials and product settings
 The **Unread Messages** preference in **Settings > Preferences > Task Behavior** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
@@ -594,6 +596,7 @@ no public YAML key:
   `KANDEV_MOCK_LINEAR`, and `AGENTCTL_AUTO_APPROVE_PERMISSIONS`.
 - Runtime flags and diagnostics: `KANDEV_FEATURES_OFFICE`,
   `KANDEV_FEATURES_AUTH`,
+  `KANDEV_FEATURES_MULTI_TENANCY`,
   `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`,
   `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING`,
   `KANDEV_DEBUG_AGENT_MESSAGES`, `KANDEV_DEBUG_ACP_MAX_FILES`,
