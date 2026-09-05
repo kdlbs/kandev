@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -137,6 +138,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Sessions:          repos.Task,
 			GitSnapshots:      repos.Task,
 			RepoEntities:      repos.Task,
+			DiscoveryRoots:    repos.Task,
 			RepositorySets:    repos.Task,
 			BranchPolicies:    repos.Task,
 			RepositoryCleanup: repos.Task,
@@ -156,6 +158,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Roots:             cfg.RepositoryDiscovery.Roots,
 			MaxDepth:          cfg.RepositoryDiscovery.MaxDepth,
 			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
+			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)

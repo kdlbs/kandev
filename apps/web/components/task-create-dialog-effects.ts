@@ -4,10 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Repository, Executor, ExecutorProfile } from "@/lib/types/http";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
-import {
-  discoverRepositoriesAction,
-  getLocalRepositoryStatusAction,
-} from "@/app/actions/workspaces";
+import { getLocalRepositoryStatusAction } from "@/app/actions/workspaces";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
@@ -22,6 +19,7 @@ import {
 import { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { t } from "@/lib/i18n";
+import { useRepositoryDiscovery } from "@/hooks/domains/workspace/use-repository-discovery";
 
 // Re-export autopick hooks for callers that imported them from this module.
 export { useWorkflowAgentProfileEffect };
@@ -75,41 +73,33 @@ export function useDiscoverReposEffect(
   repositoriesLoading: boolean,
   toast: ReturnType<typeof useToast>["toast"],
 ) {
-  const {
-    discoverReposLoaded,
-    discoverReposLoading,
-    setDiscoveredRepositories,
-    setDiscoverReposLoading,
-    setDiscoverReposLoaded,
-  } = fs;
+  const discovery = useRepositoryDiscovery(workspaceId, open && !repositoriesLoading);
+  const { setDiscoveredRepositories, setDiscoverReposLoading, setDiscoverReposLoaded } = fs;
+  const reportedErrorRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!open || !workspaceId || repositoriesLoading || discoverReposLoaded || discoverReposLoading)
-      return;
-    void Promise.resolve()
-      .then(() => setDiscoverReposLoading(true))
-      .then(() => discoverRepositoriesAction(workspaceId))
-      .then((r) => {
-        setDiscoveredRepositories(r.repositories);
-      })
-      .catch((e) => {
-        toast({
-          title: t("task:failedToDiscoverRepositories"),
-          description: e instanceof Error ? e.message : t("common:requestFailed"),
-          variant: "error",
-        });
-        setDiscoveredRepositories([]);
-      })
-      .finally(() => {
-        setDiscoverReposLoading(false);
-        setDiscoverReposLoaded(true);
+    if (!open || !workspaceId || repositoriesLoading) return;
+    setDiscoveredRepositories(discovery.repositories);
+    setDiscoverReposLoading(discovery.isLoading || discovery.isRefreshing);
+    setDiscoverReposLoaded(discovery.hasSnapshot || discovery.error !== null);
+    if (discovery.error && reportedErrorRef.current !== discovery.error.message) {
+      reportedErrorRef.current = discovery.error.message;
+      toast({
+        title: t("task:failedToDiscoverRepositories"),
+        description: discovery.error.message || t("common:requestFailed"),
+        variant: "error",
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }
   }, [
-    discoverReposLoaded,
-    discoverReposLoading,
+    discovery.error,
+    discovery.hasSnapshot,
+    discovery.isLoading,
+    discovery.isRefreshing,
+    discovery.repositories,
     open,
-    fs.discoveredRepositories.length,
     repositoriesLoading,
+    setDiscoveredRepositories,
+    setDiscoverReposLoaded,
+    setDiscoverReposLoading,
     toast,
     workspaceId,
   ]);

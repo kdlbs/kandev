@@ -5,16 +5,26 @@ import { AddWorkspaceSourcesDialog } from "./add-workspace-sources-dialog";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { repositoryDiscoveryCoordinator } from "@/hooks/domains/workspace/use-repository-discovery";
 
 let isMobile = false;
 const ADD_SOURCES_LABEL = "Add sources";
-const { attachTaskWorkspaceSources, discoverRepositoriesAction, refreshRepositories } = vi.hoisted(
-  () => ({
+const {
+  attachTaskWorkspaceSources,
+  discoverRepositoriesAction,
+  getRepositoryDiscoveryAction,
+  refreshRepositoryDiscoveryAction,
+  refreshRepositories,
+} = vi.hoisted(() => {
+  const discover = vi.fn().mockResolvedValue({ repositories: [] });
+  return {
     attachTaskWorkspaceSources: vi.fn(),
-    discoverRepositoriesAction: vi.fn().mockResolvedValue({ repositories: [] }),
+    discoverRepositoriesAction: discover,
+    getRepositoryDiscoveryAction: discover,
+    refreshRepositoryDiscoveryAction: discover,
     refreshRepositories: vi.fn().mockResolvedValue(undefined),
-  }),
-);
+  };
+});
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile }),
@@ -33,8 +43,16 @@ vi.mock("@/components/folder-picker", () => ({
     </button>
   ),
 }));
+vi.mock("@/components/repository-discovery-controls", () => ({
+  RepositoryDiscoveryControls: ({ enabled }: { enabled?: boolean }) =>
+    enabled !== false ? <div data-testid="repository-discovery-controls" /> : null,
+}));
 vi.mock("@/lib/api/domains/kanban-api", () => ({ attachTaskWorkspaceSources }));
-vi.mock("@/app/actions/workspaces", () => ({ discoverRepositoriesAction }));
+vi.mock("@/app/actions/workspaces", () => ({
+  discoverRepositoriesAction,
+  getRepositoryDiscoveryAction,
+  refreshRepositoryDiscoveryAction,
+}));
 
 async function finishClose(surface: HTMLElement, isDrawer: boolean) {
   await waitFor(() => expect(surface.getAttribute("data-state")).not.toBe("open"));
@@ -110,6 +128,7 @@ function HarnessContent({
 
 afterEach(() => {
   cleanup();
+  repositoryDiscoveryCoordinator.dispose();
   isMobile = false;
   attachTaskWorkspaceSources.mockReset();
   discoverRepositoriesAction.mockClear();
@@ -161,6 +180,24 @@ describe("AddWorkspaceSourcesDialog consequences", () => {
 
     expect(consequences.textContent).toContain("This updates the live task workspace");
     expect(consequences.textContent).not.toContain("This restarts the task workspace");
+  });
+});
+
+describe("AddWorkspaceSourcesDialog repository discovery", () => {
+  it("mounts discovery controls only inside a saved repository selector", async () => {
+    render(
+      <TooltipProvider>
+        <Harness />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
+    openRepositoryMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace repository" }));
+    fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+
+    expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
   });
 });
 
