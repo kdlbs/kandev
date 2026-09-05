@@ -532,16 +532,93 @@ func isRedactionBoundaryByte(b byte) bool {
 	}
 }
 
-// skipBisectedRunForward returns pos unchanged unless pos sits strictly
-// inside a run of non-whitespace bytes that continues across pos (i.e. both
-// raw[pos-1] and raw[pos] are non-whitespace) — the signature of a token
-// bisected by a window cut landing at pos with no clean line boundary
-// nearby. When that happens, it advances to just past the nearest
+// anchorLiterals are the credential-anchor keywords the redaction rules key
+// off of (see routingerr.redactions): Bearer, Authorization:, password,
+// secret, token, --api-key. All are matched case-insensitively below,
+// matching the (?i) rules; --api-key has no (?i) rule, so matching it
+// case-insensitively here is a superset (harmless: retreating into a literal
+// that is not actually cased for a match only ever widens the window, never
+// narrows it).
+var anchorLiterals = []string{"authorization:", "bearer", "password", "secret", "token", "--api-key"}
+
+// maxAnchorSeparatorBytes bounds how much pure whitespace
+// precedingAnchorAtRisk treats as "the anchor's own \s separator" before its
+// value, as opposed to the already-accepted, unbounded anchor-to-value gap
+// (a distinct, documented tradeoff: an anchor more than
+// redactionLookbackBytes of whitespace before its value is not covered by
+// this retreat). A handful of bytes comfortably covers realistic separators
+// like "Authorization:\n" or "Bearer   ".
+const maxAnchorSeparatorBytes = 8
+
+// precedingAnchorAtRisk returns the start of an anchorLiterals entry that a
+// window boundary at pos would exclude: either pos falls strictly inside the
+// literal, or the literal ends at or shortly before pos with only pure
+// whitespace (at most maxAnchorSeparatorBytes of it — the literal's own \s
+// separator) in between. Returns -1 if no such literal is found. Unlike a
+// generic "run started nearby" heuristic, this matches the literal text
+// itself, so it finds an anchor at risk even when it is glued to unrelated
+// preceding content with no whitespace before it (e.g. concatenated header
+// text) — a case a nearby-whitespace heuristic would miss because the
+// containing non-whitespace run extends far beyond the anchor itself.
+func precedingAnchorAtRisk(raw string, pos int) int {
+	for _, lit := range anchorLiterals {
+		n := len(lit)
+		lo := pos - n - maxAnchorSeparatorBytes + 1
+		if lo < 0 {
+			lo = 0
+		}
+		for start := lo; start < pos; start++ {
+			end := start + n
+			if end > len(raw) {
+				break
+			}
+			if end > pos {
+				// The literal straddles pos: always at risk, regardless of
+				// what (if anything) separates its tail from pos.
+			} else if !isAllRedactionBoundaryBytes(raw[end:pos]) {
+				continue
+			}
+			if strings.EqualFold(raw[start:end], lit) {
+				return start
+			}
+		}
+	}
+	return -1
+}
+
+// isAllRedactionBoundaryBytes reports whether every byte of s is one
+// isRedactionBoundaryByte matches.
+func isAllRedactionBoundaryBytes(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isRedactionBoundaryByte(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// skipBisectedRunForward returns pos unchanged unless a window boundary at
+// pos would either bisect a literal credential anchor or land just past one
+// separated only by its own \s (see precedingAnchorAtRisk) — in which case
+// it retreats to the anchor's start so the anchor is included whole rather
+// than excluded: excluding it here would leave its value in the window with
+// no anchor to trigger its rule, an orphaned value that no other rule
+// matches. Failing that, it returns pos unchanged unless pos sits strictly
+// inside an ordinary run of non-whitespace bytes that continues across pos
+// (i.e. both raw[pos-1] and raw[pos] are non-whitespace) — the signature of
+// a token bisected by a window cut landing at pos with no clean line
+// boundary nearby. When that happens, it advances to just past the nearest
 // whitespace byte at or after pos, excluding the bisected fragment from the
-// window entirely. The scan is bounded by redactionLookbackBytes; if no
-// whitespace is found within that bound, it gives up at the bound.
+// window entirely. That forward scan is bounded by redactionLookbackBytes;
+// if no whitespace is found within that bound, it gives up at the bound.
 func skipBisectedRunForward(raw string, pos int) int {
-	if pos <= 0 || pos >= len(raw) || isRedactionBoundaryByte(raw[pos-1]) || isRedactionBoundaryByte(raw[pos]) {
+	if pos <= 0 || pos >= len(raw) {
+		return pos
+	}
+	if start := precedingAnchorAtRisk(raw, pos); start >= 0 {
+		return start
+	}
+	if isRedactionBoundaryByte(raw[pos-1]) || isRedactionBoundaryByte(raw[pos]) {
 		return pos
 	}
 	limit := pos + redactionLookbackBytes

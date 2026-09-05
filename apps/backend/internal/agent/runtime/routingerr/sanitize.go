@@ -1,6 +1,9 @@
 package routingerr
 
-import "regexp"
+import (
+	"regexp"
+	"unicode/utf8"
+)
 
 // MaxRawExcerptBytes caps the sanitized excerpt before persistence.
 const MaxRawExcerptBytes = 4096
@@ -51,12 +54,17 @@ func Redact(s string) string {
 }
 
 // Sanitize redacts likely credentials, normalizes home paths, and truncates
-// to MaxRawExcerptBytes. The function is idempotent: applying it twice
-// equals applying it once.
+// to MaxRawExcerptBytes on a rune boundary so a multi-byte character (e.g.
+// Vietnamese, CJK) is never split into invalid UTF-8. The function is
+// idempotent: applying it twice equals applying it once.
 func Sanitize(s string) string {
 	s = Redact(s)
 	if len(s) > MaxRawExcerptBytes {
-		s = s[:MaxRawExcerptBytes]
+		cut := MaxRawExcerptBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut]
 	}
 	return s
 }

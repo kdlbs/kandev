@@ -243,6 +243,9 @@ func TestContinuationRedactsAnchoredCredentialAtWindowCut(t *testing.T) {
 
 			for o := -5; o <= len(line)+5; o++ {
 				tailLen := window - len(line) - 2 + o - len(marker)
+				if tailLen < 0 {
+					tailLen = 0
+				}
 				tail := strings.Repeat("z", tailLen) + " " + marker
 				message := prefix + line + "\n" + tail
 
@@ -296,6 +299,100 @@ func TestSanitizedTailAnchorSurvivesWhenLookbackClampsToInputStart(t *testing.T)
 	}
 	if len(continuation.Conversation) > continuationFieldLimit {
 		t.Fatalf("Conversation exceeded continuationFieldLimit: %d bytes", len(continuation.Conversation))
+	}
+}
+
+// TestSanitizedHeadAnchorSurvivesWhenLookaheadClampsToInputEnd mirrors
+// TestSanitizedTailAnchorSurvivesWhenLookbackClampsToInputStart for
+// sanitizedHead (ToolSummary's cut direction): a credential whose anchor
+// ("Authorization: ") sits just past the naive maxRedactionInputBytes cut
+// still gets redacted together with its value. The naive window alone would
+// end right before the anchor and never see it or the value after it, but
+// here the lookahead boundary (maxRedactionInputBytes+redactionLookbackBytes)
+// clamps to len(raw), so the window covers the complete raw input and the
+// anchor is never separated from its value.
+func TestSanitizedHeadAnchorSurvivesWhenLookaheadClampsToInputEnd(t *testing.T) {
+	const credential = "hunter2WindowSecretH"
+	const marker = "BENIGN-KEEP-MARKER"
+	const anchor = "Authorization: "
+
+	// headPart is exactly maxRedactionInputBytes long, so the naive window
+	// (end = maxRedactionInputBytes) ends right at the anchor's first byte,
+	// before it and its value.
+	headPart := strings.Repeat("q", maxRedactionInputBytes)
+	// The newline keeps the Authorization rule's greedy value class
+	// (matches to end of line) from also swallowing the trailing marker.
+	raw := headPart + anchor + credential + "\n" + marker
+
+	if len(raw) <= maxRedactionInputBytes {
+		t.Fatalf("test input must exceed maxRedactionInputBytes, got %d bytes", len(raw))
+	}
+	if tail := len(raw) - maxRedactionInputBytes; tail >= redactionLookbackBytes {
+		t.Fatalf("anchor+value tail (%d bytes) must be smaller than redactionLookbackBytes so the lookahead clamps to len(raw)", tail)
+	}
+
+	got := sanitizedHead(raw)
+
+	if strings.Contains(got, credential) {
+		t.Fatalf("sanitizedHead retained the raw credential across the window fallback: %q", got)
+	}
+	if !strings.Contains(got, marker) {
+		t.Fatalf("sanitizedHead dropped the benign marker (vacuous pass risk): %q", got)
+	}
+}
+
+// TestSanitizedTailRetainsAnchorBisectedAtWindowStart is the R6-BLOCKER-1
+// regression: it is the counterpart to
+// TestSanitizedTailRedactsAnchorSeparatedFromValueAtWindowCut, where the
+// window boundary lands in the whitespace gap between anchor and value. Here
+// it lands INSIDE the anchor literal itself. skipBisectedRunForward used to
+// treat a bisected anchor exactly like an ordinary bisected value/token and
+// skip forward past it, excluding the whole anchor from the window while the
+// short value right after it stayed in-window — an orphaned value under 32
+// chars that no other rule matches. Swept across every byte inside the
+// anchor literal where the naive window boundary could land.
+func TestSanitizedTailRetainsAnchorBisectedAtWindowStart(t *testing.T) {
+	const anchor = "Authorization: "
+	const credential = "hunter2xy"
+	const marker = "BENIGN-KEEP-MARKER"
+
+	for splitAt := 1; splitAt < len(anchor); splitAt++ {
+		const prefixLen = 100000
+		// rawLen is chosen so windowStartWithLookback's floor
+		// (len(raw)-maxRedactionInputBytes-redactionLookbackBytes) lands
+		// splitAt bytes into anchor: strictly inside its literal text.
+		rawLen := prefixLen + splitAt + maxRedactionInputBytes + redactionLookbackBytes
+		suffixLen := rawLen - prefixLen - len(anchor) - len(credential) - 1 - 1 - len(marker)
+		if suffixLen < 1 {
+			t.Fatalf("splitAt=%d: suffixLen too small (%d)", splitAt, suffixLen)
+		}
+
+		// prefix is a continuous non-whitespace run, so the window boundary
+		// bisects it (and the anchor immediately following it) rather than
+		// landing on a clean whitespace boundary.
+		prefix := strings.Repeat("p", prefixLen)
+		// suffix is one long non-whitespace run so it collapses to a single
+		// "***" under the generic rule, leaving room in the tail budget for
+		// the credential and marker to survive if they leak.
+		suffix := strings.Repeat("a", suffixLen)
+		// The newline after credential keeps the Authorization rule's greedy
+		// value class (matches to end of line) from also swallowing suffix
+		// and marker once the anchor fix lets it see credential at all.
+		raw := prefix + anchor + credential + "\n" + suffix + " " + marker
+
+		floor := len(raw) - maxRedactionInputBytes - redactionLookbackBytes
+		if floor <= prefixLen || floor >= prefixLen+len(anchor) {
+			t.Fatalf("splitAt=%d: floor %d not inside the anchor [%d,%d)", splitAt, floor, prefixLen, prefixLen+len(anchor))
+		}
+
+		got := sanitizedTail(raw, conversationUserBudget)
+
+		if leaked := rawValueSuffix(credential, got); leaked != "" {
+			t.Fatalf("splitAt=%d: sanitizedTail retained a raw credential suffix %q: %q", splitAt, leaked, got)
+		}
+		if !strings.Contains(got, marker) {
+			t.Fatalf("splitAt=%d: sanitizedTail dropped the benign marker (vacuous pass risk): %q", splitAt, got)
+		}
 	}
 }
 
