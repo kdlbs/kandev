@@ -676,6 +676,14 @@ type Service struct {
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
+	// taskLifecycleRetryTimers keep a durable lifecycle token live while a
+	// route effect is still leased by another process. Timers are task-scoped,
+	// deduplicated, and cancelled with the orchestrator service.
+	taskLifecycleRetryMu      sync.Mutex
+	taskLifecycleRetryCtx     context.Context
+	taskLifecycleRetryCancel  context.CancelFunc
+	taskLifecycleRetryTimers  map[string]*time.Timer
+	taskLifecycleRetryWorkers sync.WaitGroup
 	// officeStalledSignals dedupes the Office stranded-signal surfacing so a
 	// still-stranded signal is reported once, not on every 30-second reaper
 	// tick. Keyed by session ID, step ID and the signal's SignaledAt, so a
@@ -1352,6 +1360,7 @@ func NewService(
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
 		dynamicRecoveryTimers:        make(map[string]*time.Timer),
+		taskLifecycleRetryTimers:     make(map[string]*time.Timer),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
@@ -2546,6 +2555,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
+	s.startTaskLifecycleRetries()
 	s.reconcileTaskLifecycleTokens(ctx)
 	// Chains whose predecessor completed while the process was down: the
 	// dependencies_resolved event is in-memory and is not replayed, so without
@@ -2555,6 +2565,7 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
+		s.stopTaskLifecycleRetries()
 		s.mu.Lock()
 		s.running = false
 		s.mu.Unlock()
@@ -2563,6 +2574,7 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Start the scheduler processing loop
 	if err := s.scheduler.Start(ctx); err != nil {
+		s.stopTaskLifecycleRetries()
 		if stopErr := s.watcher.Stop(); stopErr != nil {
 			s.logger.Warn("failed to stop watcher after scheduler start failure", zap.Error(stopErr))
 		}
@@ -2641,6 +2653,7 @@ func (s *Service) Stop() error {
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
 	s.stopDynamicPolicyRecovery()
+	s.stopTaskLifecycleRetries()
 
 	// Stop components in reverse order
 	var errs []error

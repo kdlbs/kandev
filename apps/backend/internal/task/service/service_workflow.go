@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -18,6 +19,14 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+// ErrWorkflowStepChanged is returned when a route's source generation no
+// longer matches the task row at the transaction boundary.
+var ErrWorkflowStepChanged = errors.New("workflow step changed before route commit")
+
+// ErrWorkflowStepNotFound distinguishes a request for a missing step from a
+// storage failure while preserving the repository's existing error contract.
+var ErrWorkflowStepNotFound = errors.New("workflow step not found")
 
 // ApproveSessionResult contains the result of approving a session
 type ApproveSessionResult struct {
@@ -404,6 +413,10 @@ type MoveTaskResult struct {
 // MoveTaskOptions controls non-default move behavior for trusted callers.
 type MoveTaskOptions struct {
 	AllowActivePrimarySession bool
+	// ExpectedWorkflowStepID is the route-generation CAS. When set, the
+	// repository rejects the move if another producer changed lanes after the
+	// caller resolved its source step.
+	ExpectedWorkflowStepID string
 	// AllowFailedToCompletedRecovery permits the trusted launch-recovery
 	// action to complete a failed task when it moves into a validated terminal
 	// workflow step. Ordinary task moves preserve failed and cancelled states.
@@ -478,6 +491,23 @@ type workflowMoveAdmissionWithStateRepository interface {
 	) (bool, error)
 }
 
+type workflowMoveAdmissionWithStateCASRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx context.Context,
+		task *models.Task,
+		expectedStepID string,
+		targetStepID string,
+		limit int,
+		admittedState *v1.TaskState,
+		queueExitPending bool,
+		expectedWorkflowID string,
+	) (admitted bool, applied bool, err error)
+}
+
+type workflowMoveStepConflictRepository interface {
+	UpdateTaskIfWorkflowStepMatches(ctx context.Context, task *models.Task, expectedStepID, expectedWorkflowID string) error
+}
+
 // workflowMoveConflictRepository is the same-step counterpart of
 // workflowMoveAdmissionWithStateRepository's expectedWorkflowID guard: when a
 // move does not change workflow step, updateMovedTask writes through plain
@@ -526,6 +556,14 @@ func (s *Service) MoveTaskWithOptions(
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	// The task row read above defines this request's source generation for
+	// every producer, including human board moves and internal callers that do
+	// not pass an explicit guard. The repository rechecks it under the task-row
+	// lock, so a lane change that lands during validation cannot be overwritten
+	// by this call's stale snapshot.
+	if opts.ExpectedWorkflowStepID == "" {
+		opts.ExpectedWorkflowStepID = task.WorkflowStepID
 	}
 	if opts.ExpectedWorkflowID != nil && task.WorkflowID != *opts.ExpectedWorkflowID {
 		// Cheap fast-fail only: this GetTask is not inside a lock, so it
@@ -708,6 +746,9 @@ func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID strin
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
 	if err != nil {
+		if strings.Contains(err.Error(), "workflow step not found") {
+			return false, fmt.Errorf("%w: %v", ErrWorkflowStepNotFound, err)
+		}
 		return false, fmt.Errorf("failed to get workflow step %s: %w", workflowStepID, err)
 	}
 	if step == nil {
@@ -718,6 +759,14 @@ func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID strin
 		return false, fmt.Errorf("failed to get next workflow step after %s: %w", workflowStepID, err)
 	}
 	return wfmodels.IsTerminalStep(step, nextStep), nil
+}
+
+// IsTerminalWorkflowStep exposes the workflow's terminal classification to
+// producer adapters that must decide whether success can be deferred. The
+// classification remains owned by the task service so MCP and orchestrator
+// callers cannot drift onto separate "Done" heuristics.
+func (s *Service) IsTerminalWorkflowStep(ctx context.Context, workflowStepID string) (bool, error) {
+	return s.terminalWorkflowStep(ctx, workflowStepID)
 }
 
 func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models.Task, oldStepID, newStepID string, opts MoveTaskOptions) error {
@@ -1179,6 +1228,20 @@ func (s *Service) updateMovedTask(
 // sites, since there is no admission decision to make when the step is
 // unchanged.
 func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions) (bool, error) {
+	if opts.ExpectedWorkflowStepID != "" {
+		conflictRepo, ok := s.tasks.(workflowMoveStepConflictRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow step conflict guard repository unavailable for task %s", task.ID)
+		}
+		expectedWorkflowID := ""
+		if opts.ExpectedWorkflowID != nil {
+			expectedWorkflowID = *opts.ExpectedWorkflowID
+		}
+		if err := conflictRepo.UpdateTaskIfWorkflowStepMatches(ctx, task, opts.ExpectedWorkflowStepID, expectedWorkflowID); err != nil {
+			return false, err
+		}
+		return task.WIPAdmitted, nil
+	}
 	if opts.ExpectedWorkflowID != nil {
 		// Same-step writes go through plain UpdateTask, which has no
 		// expected-workflow parameter (it is the general-purpose writer
@@ -1219,6 +1282,23 @@ func (s *Service) updateMovedTaskCrossStep(
 	expectedWorkflowID := ""
 	if opts.ExpectedWorkflowID != nil {
 		expectedWorkflowID = *opts.ExpectedWorkflowID
+	}
+	if opts.ExpectedWorkflowStepID != "" {
+		casRepo, ok := s.tasks.(workflowMoveAdmissionWithStateCASRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow step conflict guard unavailable for step %s", targetStep.ID)
+		}
+		admitted, applied, err := casRepo.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+			ctx, task, opts.ExpectedWorkflowStepID, targetStep.ID, targetStep.WIPLimit,
+			admittedState, true, expectedWorkflowID,
+		)
+		if err != nil {
+			return false, err
+		}
+		if !applied {
+			return false, ErrWorkflowStepChanged
+		}
+		return admitted, nil
 	}
 	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
 		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(

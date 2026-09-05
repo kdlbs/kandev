@@ -842,18 +842,14 @@ func TestRestoreSession(t *testing.T) {
 		{Type: "image", Data: "abc", MimeType: "image/png"},
 	}, map[string]interface{}{"sender": "task-a"})
 	require.NoError(t, err)
-	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"})
+	require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{MoveID: "move-a", TaskID: "task-1", WorkflowStepID: "step-a"}))
+	snapshotEntries, snapshotMove, err := svc.SnapshotSession(ctx, "s")
+	require.NoError(t, err)
 
 	_, err = svc.QueueMessage(ctx, "s", "task-1", "mutated", "", "user", false, nil)
 	require.NoError(t, err)
-	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
 
-	require.NoError(t, svc.RestoreSession(ctx, "s", []QueuedMessage{*original}, &PendingMove{
-		TaskID:          "task-1",
-		WorkflowStepID:  "step-a",
-		QueuedAt:        original.QueuedAt,
-		SenderSessionID: "sender-s",
-	}))
+	require.NoError(t, svc.RestoreSession(ctx, "s", snapshotEntries, snapshotMove))
 
 	status := svc.GetStatus(ctx, "s")
 	require.Equal(t, 1, status.Count)
@@ -866,7 +862,7 @@ func TestRestoreSession(t *testing.T) {
 	move, ok := svc.TakePendingMove(ctx, "s")
 	require.True(t, ok)
 	assert.Equal(t, "step-a", move.WorkflowStepID)
-	assert.Equal(t, "sender-s", move.SenderSessionID)
+	assert.Equal(t, snapshotMove.ID, move.ID)
 }
 
 func TestPendingMove(t *testing.T) {
@@ -892,8 +888,11 @@ func TestPendingMove(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "a"})
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "b"})
+		first := &PendingMove{MoveID: "move-a", TaskID: "t1", WorkflowStepID: "a"}
+		require.NoError(t, svc.SetPendingMove(ctx, "s", first))
+		require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{
+			ID: first.ID, MoveID: "move-b", TaskID: "t1", WorkflowStepID: "b",
+		}))
 
 		got, ok := svc.TakePendingMove(ctx, "s")
 		require.True(t, ok)

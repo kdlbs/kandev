@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -27,6 +29,7 @@ import (
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -384,20 +387,6 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		return
 	}
 
-	// Get the task to update its workflow step
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to get task for workflow transition",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return
-	}
-	// Atomically admit the target step before exit side effects. A full target
-	// is represented as a durable destination queue entry instead of a failed
-	// transition.
-	task.WorkflowStepID = toStepID
-	task.UpdatedAt = time.Now().UTC()
 	// executeStepTransition's two callers are always a genuine session turn:
 	// on_turn_complete (triggerOnEnter=true) or on_turn_start (false).
 	legacyTrigger := engine.TriggerOnTurnStart
@@ -405,12 +394,36 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		legacyTrigger = engine.TriggerOnTurnComplete
 	}
 	transitionCtx := engineTransitionAttribution(ctx, sessionID, legacyTrigger)
-	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, targetStep); err != nil {
+	signalSession, _ := s.repo.GetTaskSession(ctx, sessionID)
+	if signalSession != nil {
+		if signal, has := models.LoadPendingStepSignal(signalSession.Metadata); has && signal.StepID == fromStep.ID && signal.OperationID != "" {
+			transitionCtx = routing.WithOperation(transitionCtx, routing.Operation{
+				ID: signal.OperationID, TaskID: taskID, Producer: routing.ProducerStepComplete,
+				ExpectedStepID: fromStep.ID, TargetStepID: toStepID,
+				SessionID: sessionID, ActorKind: string(steptelemetry.ActorAgent), ActorID: sessionID,
+			})
+		}
+	}
+	store := s.workflowStore
+	if store == nil {
+		// Some focused callers construct a legacy service without installing
+		// the engine. They still use the same CAS arbiter; only the surrounding
+		// engine callbacks are absent.
+		store = newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, nil, s.logger)
+	}
+	task, _, applied, err := store.applyTransitionIfAtStepRaw(
+		transitionCtx, taskID, fromStep.ID, toStepID,
+	)
+	if err != nil {
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
+	}
+	if !applied {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
 	}
@@ -487,6 +500,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			targetStep,
 			task.Description,
 			true,
+			task.WorkflowStepTransitionID,
 			fromStep,
 		)
 	} else {
@@ -798,7 +812,7 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	s.processParentChildrenCompletedForTerminalStepMove(ctx, task.ID, targetStep.ID)
 	if session != nil {
 		go func() {
-			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), sourceStep); err != nil {
+			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), data.StepTransitionID, sourceStep); err != nil {
 				s.restoreTaskLifecycleToken(context.WithoutCancel(ctx), task.ID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.queue_promoted")
 				return
 			}
@@ -1157,7 +1171,7 @@ func (s *Service) recoverManualMoveLifecycle(ctx context.Context, task *models.T
 	// lifecycle directly so the next attempt observes durable completion.
 	s.processManualMoveLifecycleWithFeederBarrier(
 		ctx, task.ID, session, fromStep, targetStep,
-		sourceStepID, task.WorkflowStepID, task.Description,
+		sourceStepID, task.WorkflowStepID, task.Description, 0,
 	)
 	return true
 }
@@ -1780,14 +1794,14 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	if manualBarrier {
 		go s.processManualMoveLifecycleWithFeederBarrier(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
-			data.FromStepID, data.ToStepID, data.TaskDescription,
+			data.FromStepID, data.ToStepID, data.TaskDescription, data.StepTransitionID,
 		)
 		return
 	}
 	go func() {
 		if err := s.processStepExitAndEnterWithSteps(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
-			data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion, queuePromotionToken,
+			data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion, data.StepTransitionID, queuePromotionToken,
 		); err != nil {
 			s.logger.Warn("task.moved: step exit and enter lifecycle failed",
 				zap.String("task_id", data.TaskID),
@@ -2016,7 +2030,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	taskID string,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
-	fromStepID, toStepID, taskDescription string,
+	fromStepID, toStepID, taskDescription string, transitionID int64,
 ) {
 	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
@@ -2038,11 +2052,18 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	}
 	if err := s.processStepExitAndEnterWithSteps(
 		ctx, taskID, session, fromStep, targetStep,
-		fromStepID, toStepID, taskDescription, false, nil,
+		fromStepID, toStepID, taskDescription, false, transitionID, nil,
 	); err != nil {
-		s.logger.Warn("manual move lifecycle stopped before completion",
-			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
-			zap.String("to_step_id", toStepID), zap.Error(err))
+		if errors.Is(err, errRouteEffectExecutionStarted) {
+			s.logger.Warn("manual move lifecycle execution requires reconciliation",
+				zap.String("task_id", taskID), zap.Error(err))
+			return
+		}
+		if !errors.Is(err, errRouteEffectLeaseHeld) {
+			s.logger.Warn("manual move lifecycle processing failed; scheduling retry",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+		s.scheduleTaskLifecycleRetry(taskID)
 		return
 	}
 	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
@@ -2063,12 +2084,12 @@ func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacat
 	}
 }
 
-// processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
-// sequence for a step transition. Used by handleTaskMovedWithSession (where MoveTask
-// already persisted the step change in the DB).
-func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) error {
+// processStepExitAndEnter runs the claim → prepare session → on_exit → on_enter
+// sequence for a step transition. Used by handleTaskMovedWithSession (where
+// MoveTask already persisted the step change in the DB).
+func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string, transitionID int64) error {
 	// Process on_exit for the step we're leaving
-	if err := s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, nil); err != nil {
+	if err := s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, transitionID, nil); err != nil {
 		s.logger.Warn("step exit and enter lifecycle failed",
 			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
 			zap.String("to_step_id", toStepID), zap.Error(err))
@@ -2082,20 +2103,8 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	taskID string,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
-	fromStepID, toStepID, taskDescription string, queuePromotion bool, queuePromotionToken interface{},
+	fromStepID, toStepID, taskDescription string, queuePromotion bool, transitionID int64, queuePromotionToken interface{},
 ) error {
-	if fromStep == nil {
-		var err error
-		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "transition source")
-		if err != nil {
-			if queuePromotion {
-				s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved source lookup")
-			}
-			return err
-		}
-	}
-	s.processOnExit(ctx, taskID, session, fromStep)
-
 	if targetStep == nil {
 		var err error
 		targetStep, err = s.loadWorkflowStepForLifecycle(ctx, toStepID, "transition target")
@@ -2107,36 +2116,75 @@ func (s *Service) processStepExitAndEnterWithSteps(
 		}
 	}
 
+	effectClaim, claimed, effectErr := s.claimRouteEffectForStepEnter(
+		ctx, taskID, targetStep.ID, transitionID,
+	)
+	if effectErr != nil {
+		return effectErr
+	}
+	if !claimed {
+		return nil
+	}
+	claimFinished := false
+	defer func() {
+		if !claimFinished {
+			_ = effectClaim.finish(false)
+		}
+	}()
+
+	if fromStep == nil {
+		var err error
+		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "transition source")
+		if err != nil {
+			if queuePromotion {
+				s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved source lookup")
+			}
+			return err
+		}
+	}
+
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep); err != nil {
+	preparedSession, err := s.prepareStepEnter(ctx, taskID, session.ID, clearReview)
+	if err != nil {
 		if queuePromotion {
 			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved")
 		}
 		return err
 	}
-	return nil
+	if err := effectClaim.beginExecution(); err != nil {
+		return err
+	}
+
+	s.processOnExit(ctx, taskID, preparedSession, fromStep)
+	s.processOnEnter(ctx, taskID, preparedSession, targetStep, taskDescription, 0, fromStep)
+	claimFinished = true
+	return effectClaim.finish(true)
 }
 
 // finalizeStepEnter optionally clears review status, reloads the session, and
 // processes on_enter actions for the target step. Shared by executeStepTransition
 // and processStepExitAndEnter.
-func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, sourceStep *wfmodels.WorkflowStep) error {
-	if clearReview {
-		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
-			s.logger.Warn("failed to clear session review status",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return fmt.Errorf("clear session review status: %w", err)
-		}
+func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, transitionID int64, sourceStep *wfmodels.WorkflowStep) error {
+	session, err := s.prepareStepEnter(ctx, taskID, sessionID, clearReview)
+	if err != nil {
+		return err
 	}
 
-	// Reload session after on_exit may have changed metadata
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		s.logger.Warn("failed to load session for on_enter",
-			zap.String("session_id", sessionID), zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return fmt.Errorf("load session for on_enter: %w", err)
+	effectClaim, claimed, effectErr := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
+	if effectErr != nil {
+		return effectErr
+	}
+	if !claimed {
+		return nil
+	}
+	claimFinished := false
+	defer func() {
+		if !claimFinished {
+			_ = effectClaim.finish(false)
+		}
+	}()
+	if err := effectClaim.beginExecution(); err != nil {
+		return err
 	}
 
 	// entryID 0: this path (manual move / legacy on_turn_start/complete) does
@@ -2147,7 +2195,280 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 	// docs/specs/workflow-on-enter-action-dispatch/spec.md and the task
 	// plan's scope note for why E2-E5 dispatch is deferred.
 	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0, sourceStep)
+	claimFinished = true
+	return effectClaim.finish(true)
+}
+
+func (s *Service) prepareStepEnter(
+	ctx context.Context, taskID, sessionID string, clearReview bool,
+) (*models.TaskSession, error) {
+	if clearReview {
+		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+			s.logger.Warn("failed to clear session review status",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return nil, fmt.Errorf("clear session review status: %w", err)
+		}
+	}
+
+	// Load the current session snapshot used by the destination lifecycle.
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for on_enter",
+			zap.String("session_id", sessionID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return nil, fmt.Errorf("load session for on_enter: %w", err)
+	}
+
+	return session, nil
+}
+
+type routeEffectRepository interface {
+	GetWorkflowRouteEffectByTransition(context.Context, string, int64) (routing.Effect, bool, error)
+	GetCurrentWorkflowRouteEffect(context.Context, string, string) (routing.Effect, bool, error)
+	ClaimWorkflowRouteEffect(context.Context, string, string, time.Time, time.Duration) (bool, error)
+	BeginWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+	RenewWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+	CompleteWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+}
+
+const routeEffectLease = time.Minute
+const routeEffectCompletionRetryDelay = 25 * time.Millisecond
+const routeEffectCompletionAttempts = 3
+
+var errRouteEffectLeaseHeld = errors.New("workflow route effect lease is still held")
+var errRouteEffectClaimLost = errors.New("workflow route effect claim was lost")
+var errRouteEffectExecutionStarted = errors.New("workflow route effect execution already started")
+
+type routeEffectClaim struct {
+	effects        routeEffectRepository
+	ctx            context.Context
+	effectID       string
+	token          string
+	stopRenewal    chan struct{}
+	renewalStopped chan struct{}
+	renewalResult  chan error
+}
+
+func (c *routeEffectClaim) beginExecution() error {
+	if c.effects == nil {
+		return nil
+	}
+	begun, err := c.effects.BeginWorkflowRouteEffect(
+		c.ctx, c.effectID, c.token, time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("begin workflow route effect execution: %w", err)
+	}
+	if !begun {
+		return errRouteEffectClaimLost
+	}
 	return nil
+}
+
+func (c *routeEffectClaim) finish(complete bool) error {
+	if c.effects == nil {
+		return nil
+	}
+	close(c.stopRenewal)
+	<-c.renewalStopped
+	if renewalErr, ok := <-c.renewalResult; ok {
+		return renewalErr
+	}
+	if !complete {
+		return nil
+	}
+	var lastErr error
+	for attempt := 0; attempt < routeEffectCompletionAttempts; attempt++ {
+		completed, err := c.effects.CompleteWorkflowRouteEffect(
+			c.ctx, c.effectID, c.token, time.Now().UTC(),
+		)
+		if err == nil {
+			if !completed {
+				return errRouteEffectClaimLost
+			}
+			return nil
+		}
+		lastErr = err
+		if attempt+1 < routeEffectCompletionAttempts {
+			time.Sleep(routeEffectCompletionRetryDelay)
+		}
+	}
+	return fmt.Errorf("complete workflow route effect after retries: %w", lastErr)
+}
+
+func noOpRouteEffectClaim() *routeEffectClaim {
+	return &routeEffectClaim{}
+}
+
+func readRouteEffectForStepEnter(
+	ctx context.Context,
+	effects routeEffectRepository,
+	taskID, targetStepID string,
+	transitionID int64,
+) (routing.Effect, bool, error) {
+	if transitionID != 0 {
+		return effects.GetWorkflowRouteEffectByTransition(ctx, taskID, transitionID)
+	}
+	return effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
+}
+
+func failedRouteEffectClaim(
+	ctx context.Context,
+	effects routeEffectRepository,
+	effect routing.Effect,
+	taskID, targetStepID string,
+	transitionID int64,
+) (*routeEffectClaim, bool, error) {
+	latest, found, err := readRouteEffectForStepEnter(
+		ctx, effects, taskID, targetStepID, transitionID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("re-read route effect after failed claim: %w", err)
+	}
+	if !found || latest.ID != effect.ID {
+		return nil, false, errRouteEffectLeaseHeld
+	}
+	switch latest.Status {
+	case routing.EffectCompleted:
+		return noOpRouteEffectClaim(), false, nil
+	case routing.EffectExecuting:
+		return nil, false, errRouteEffectExecutionStarted
+	default:
+		return nil, false, errRouteEffectLeaseHeld
+	}
+}
+
+func (s *Service) claimRouteEffectForStepEnter(
+	ctx context.Context, taskID, targetStepID string, transitionID int64,
+) (*routeEffectClaim, bool, error) {
+	effects, ok := s.repo.(routeEffectRepository)
+	if !ok {
+		return noOpRouteEffectClaim(), true, nil
+	}
+	effect, found, err := readRouteEffectForStepEnter(
+		ctx, effects, taskID, targetStepID, transitionID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("read route effect for step entry: %w", err)
+	}
+	if !found {
+		return noOpRouteEffectClaim(), true, nil
+	}
+	token := uuid.NewString()
+	claimed, err := effects.ClaimWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC(), routeEffectLease)
+	if err != nil {
+		return nil, false, fmt.Errorf("claim route effect for step entry: %w", err)
+	}
+	if !claimed {
+		return failedRouteEffectClaim(
+			ctx, effects, effect, taskID, targetStepID, transitionID,
+		)
+	}
+	renewCtx := context.WithoutCancel(ctx)
+	stopRenewal := make(chan struct{})
+	renewalStopped := make(chan struct{})
+	renewalResult := make(chan error, 1)
+	go s.renewRouteEffectClaim(
+		renewCtx, effects, effect.ID, token, stopRenewal, renewalStopped, renewalResult,
+	)
+	return &routeEffectClaim{
+		effects: effects, ctx: renewCtx, effectID: effect.ID, token: token,
+		stopRenewal: stopRenewal, renewalStopped: renewalStopped, renewalResult: renewalResult,
+	}, true, nil
+}
+
+func (s *Service) scheduleTaskLifecycleRetry(taskID string) {
+	if taskID == "" {
+		return
+	}
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	ctx := s.taskLifecycleRetryCtx
+	if ctx == nil || ctx.Err() != nil {
+		return
+	}
+	if s.taskLifecycleRetryTimers == nil {
+		s.taskLifecycleRetryTimers = make(map[string]*time.Timer)
+	}
+	if _, scheduled := s.taskLifecycleRetryTimers[taskID]; scheduled {
+		return
+	}
+	s.taskLifecycleRetryWorkers.Add(1)
+	s.taskLifecycleRetryTimers[taskID] = time.AfterFunc(routeEffectLease, func() {
+		defer s.taskLifecycleRetryWorkers.Done()
+		s.runTaskLifecycleRetry(ctx, taskID)
+	})
+}
+
+func (s *Service) startTaskLifecycleRetries() {
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	if s.taskLifecycleRetryCtx != nil && s.taskLifecycleRetryCtx.Err() == nil {
+		return
+	}
+	s.taskLifecycleRetryCtx, s.taskLifecycleRetryCancel = context.WithCancel(context.Background())
+	if s.taskLifecycleRetryTimers == nil {
+		s.taskLifecycleRetryTimers = make(map[string]*time.Timer)
+	}
+}
+
+func (s *Service) runTaskLifecycleRetry(ctx context.Context, taskID string) {
+	s.taskLifecycleRetryMu.Lock()
+	delete(s.taskLifecycleRetryTimers, taskID)
+	s.taskLifecycleRetryMu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	s.recoverTaskLifecycleToken(ctx, taskID)
+}
+
+func (s *Service) stopTaskLifecycleRetries() {
+	s.taskLifecycleRetryMu.Lock()
+	if s.taskLifecycleRetryCancel != nil {
+		s.taskLifecycleRetryCancel()
+	}
+	for taskID, timer := range s.taskLifecycleRetryTimers {
+		if timer.Stop() {
+			s.taskLifecycleRetryWorkers.Done()
+		}
+		delete(s.taskLifecycleRetryTimers, taskID)
+	}
+	s.taskLifecycleRetryCtx = nil
+	s.taskLifecycleRetryCancel = nil
+	s.taskLifecycleRetryMu.Unlock()
+	s.taskLifecycleRetryWorkers.Wait()
+}
+
+func (s *Service) renewRouteEffectClaim(
+	ctx context.Context,
+	effects routeEffectRepository,
+	effectID, token string,
+	stop <-chan struct{},
+	stopped chan<- struct{},
+	result chan<- error,
+) {
+	defer close(stopped)
+	defer close(result)
+	ticker := time.NewTicker(routeEffectLease / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case now := <-ticker.C:
+			renewed, err := effects.RenewWorkflowRouteEffect(ctx, effectID, token, now.UTC())
+			if err != nil {
+				s.logger.Warn("failed to renew workflow route effect", zap.String("effect_id", effectID), zap.Error(err))
+				continue
+			}
+			if !renewed {
+				s.logger.Warn("workflow route effect claim was lost", zap.String("effect_id", effectID))
+				result <- errRouteEffectClaimLost
+				return
+			}
+		}
+	}
 }
 
 // resolveStepPlanMode determines whether plan mode should be active for a step.
@@ -3243,58 +3564,20 @@ func (s *Service) engineOnEnterCallback(t wfmodels.OnEnterActionType) engine.Act
 // transition. The move hand-off prompt is correlated by MoveID and removed
 // only when the move is already complete or rejected; unrelated queued
 // messages remain available for the normal drain path.
-func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) {
-	// reinsertPendingMove restores the move so a future agent.ready can retry.
-	// Used on early failure paths (load errors, config issues) where the state
-	// hasn't been touched yet. NOT used after ApplyTransition has executed —
-	// at that point the workflow has either advanced or is in a corrupted state
-	// and re-attempting the move on the next turn would just re-trip the same
-	// failure (or worse, double-apply on a now-half-transitioned task).
-	reinsertPendingMove := func() {
-		if s.messageQueue == nil {
-			return
-		}
-		s.messageQueue.SetPendingMove(ctx, sessionID, move)
-	}
-
+func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) bool {
 	if s.workflowStepGetter == nil || s.workflowStore == nil {
 		s.logger.Warn("cannot apply pending move: workflow components missing",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
-		reinsertPendingMove()
-		return
+		return false
 	}
 	if move.MoveID == "" {
 		move.MoveID = legacyPendingMoveID(sessionID, move)
 	}
 
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Error("failed to load task for pending move",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		reinsertPendingMove()
-		return
-	}
-	fromStepID := task.WorkflowStepID
-	if fromStepID == move.WorkflowStepID {
-		if err := s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, move.MoveID); errors.Is(err, errDeferredMoveAlreadyApplied) {
-			s.logger.Info("dropping already-applied pending move at current target",
-				zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
-		} else if err != nil {
-			s.logger.Error("failed to record pending move at current target",
-				zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(err))
-			reinsertPendingMove()
-			return
-		}
-		// Step already matches. The move is complete, so consume its hand-off
-		// prompt before the natural drain path handles unrelated messages.
-		s.logger.Info("pending move target equals current step; skipping transition",
-			zap.String("task_id", taskID),
-			zap.String("step_id", fromStepID))
-		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
-		return
+	task, fromStepID, ready, outcome := s.resolvePendingMoveSource(ctx, taskID, sessionID, move)
+	if !ready {
+		return outcome
 	}
 
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, move.WorkflowStepID)
@@ -3303,8 +3586,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			zap.String("task_id", taskID),
 			zap.String("target_step_id", move.WorkflowStepID),
 			zap.Error(err))
-		reinsertPendingMove()
-		return
+		return false
 	}
 	if targetStep.WorkflowID != move.WorkflowID {
 		s.logger.Error("pending move target step belongs to a different workflow; dropping move",
@@ -3320,7 +3602,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		// authored for the move's *target* step) — mirrors the cleanup done on
 		// the ApplyTransition failure path below.
 		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		return
+		return true
 	}
 
 	// Mark the session WAITING_FOR_INPUT before processOnEnter runs. The agent
@@ -3328,34 +3610,9 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// otherwise see RUNNING and skip the on_enter processing.
 	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 
-	// sessionID is the target task's queue/execution session. It is not
-	// necessarily the agent that called move_task_kandev (cross-task hand-offs
-	// are supported), so use the sender persisted with the pending move.
-	deferredMoveAttribution := steptelemetry.Attribution{
-		Trigger:   steptelemetry.TriggerMCPDeferredMove,
-		ActorKind: steptelemetry.ActorSystem,
-	}
-	if move.SenderSessionID != "" {
-		deferredMoveAttribution.ActorKind = steptelemetry.ActorAgent
-		deferredMoveAttribution.ActorID = move.SenderSessionID
-		deferredMoveAttribution.SessionID = move.SenderSessionID
-	}
-	deferredMoveCtx := steptelemetry.WithAttribution(ctx, deferredMoveAttribution)
-	if err := s.workflowStore.ApplyDeferredMoveTransition(deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, move.MoveID); errors.Is(err, errDeferredMoveAlreadyApplied) {
-		s.logger.Info("dropping already-applied pending move", zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
-		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		return
-	} else if err != nil {
-		s.logger.Error("failed to apply pending move transition",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		// The hand-off prompt was queued by handleMoveTask before the move was
-		// applied. Now that the move failed, the on_enter path that would have
-		// drained the queue won't run, and handleAgentReady has already returned.
-		// Drop the orphan so it can't be misdelivered to the source step's agent
-		// on a future turn (it was authored for the move's *target* step).
-		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		return
+	committed, outcome, transitionID := s.commitPendingMoveTransition(ctx, taskID, sessionID, fromStepID, move)
+	if !committed {
+		return outcome
 	}
 
 	// ADR 0015 — record the audit row now that the transition is durably
@@ -3378,7 +3635,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		// The destination is visible and queued, but its entry lifecycle is
 		// deferred until promotion. The source exit still runs once now.
 		go s.processStepExit(context.WithoutCancel(ctx), taskID, session, fromStepID)
-		return
+		return true
 	}
 
 	s.syncTaskStateForPendingMove(ctx, taskID, fromStepID, move.WorkflowStepID)
@@ -3391,7 +3648,83 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// for the same session. The DB transition is already persisted above, so
 	// it's safe to defer the rest.
 	taskDescription := task.Description
-	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+	go func() {
+		_ = s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription, transitionID)
+	}()
+	return true
+}
+
+func (s *Service) resolvePendingMoveSource(
+	ctx context.Context, taskID, sessionID string, move *messagequeue.PendingMove,
+) (*models.Task, string, bool, bool) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to load task for pending move", zap.String("task_id", taskID), zap.Error(err))
+		return nil, "", false, false
+	}
+	if move.ExpectedWorkflowStepID == "" {
+		s.logger.Warn("legacy pending move has no expected source step; preserving for exact cancellation or expiry",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", move.MoveID))
+		return nil, "", false, false
+	}
+	fromStepID := task.WorkflowStepID
+	if fromStepID == move.WorkflowStepID {
+		return nil, "", false, s.finishAlreadySatisfiedPendingMove(ctx, taskID, sessionID, fromStepID, move.MoveID)
+	}
+	if fromStepID != move.ExpectedWorkflowStepID {
+		s.logger.Info("dropping stale pending move after source generation changed",
+			zap.String("task_id", taskID), zap.String("expected_step_id", move.ExpectedWorkflowStepID),
+			zap.String("current_step_id", fromStepID), zap.String("move_id", move.MoveID))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		return nil, "", false, true
+	}
+	return task, fromStepID, true, false
+}
+
+func (s *Service) finishAlreadySatisfiedPendingMove(
+	ctx context.Context, taskID, sessionID, stepID, moveID string,
+) bool {
+	err := s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, moveID)
+	if err != nil && !errors.Is(err, errDeferredMoveAlreadyApplied) {
+		s.logger.Error("failed to record pending move at current target",
+			zap.String("task_id", taskID), zap.String("move_id", moveID), zap.Error(err))
+		return false
+	}
+	s.logger.Info("pending move target equals current step; skipping transition",
+		zap.String("task_id", taskID), zap.String("step_id", stepID))
+	s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, moveID)
+	s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
+	return true
+}
+
+func (s *Service) commitPendingMoveTransition(
+	ctx context.Context, taskID, sessionID, fromStepID string, move *messagequeue.PendingMove,
+) (bool, bool, int64) {
+	attribution := steptelemetry.Attribution{Trigger: steptelemetry.TriggerMCPDeferredMove, ActorKind: steptelemetry.ActorSystem}
+	if move.SenderSessionID != "" {
+		attribution.ActorKind = steptelemetry.ActorAgent
+		attribution.ActorID = move.SenderSessionID
+		attribution.SessionID = move.SenderSessionID
+	}
+	moveCtx := steptelemetry.WithAttribution(ctx, attribution)
+	result := &routing.Result{}
+	moveCtx = routing.WithResultHolder(moveCtx, result)
+	err := s.workflowStore.ApplyDeferredMoveTransition(moveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, move.MoveID)
+	switch {
+	case errors.Is(err, errDeferredMoveAlreadyApplied):
+		s.logger.Info("dropping already-applied pending move", zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		return false, true, 0
+	case errors.Is(err, ErrTransitionSourceChanged):
+		s.logger.Info("pending move lost expected-step race", zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+		return false, true, 0
+	case err != nil:
+		s.logger.Error("failed to apply pending move transition", zap.String("task_id", taskID), zap.Error(err))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		return false, false, 0
+	default:
+		return true, false, result.TransitionID
+	}
 }
 
 func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) string {
@@ -5377,10 +5710,12 @@ func (s *Service) applyEngineTransitionWithMode(
 ) bool {
 	return s.applyEngineTransitionWithCommitMode(ctx, taskID, session, result, trigger, taskDescription, mode,
 		func(commitCtx context.Context) (bool, error) {
-			if err := s.workflowStore.ApplyTransition(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger); err != nil {
-				return false, err
-			}
-			return true, nil
+			// applyEngineTransitionWithCommit owns this lifecycle already. Use
+			// the raw CAS store path instead of the guardedLifecycle bridge,
+			// which would recursively dispatch on_exit/on_enter a second time.
+			return s.workflowStore.applyTransitionIfAtStep(
+				commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger,
+			)
 		})
 }
 
@@ -5442,10 +5777,25 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// through the repository's session-independent step-entry path.
 	var stepEntry *stepentry.AllocationResult
 	applyCtx := ctx
+	var consumedSignal *models.PendingStepCompletionSignal
+	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
+		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
+			consumedSignal = &signal
+			if signal.OperationID != "" {
+				applyCtx = routing.WithOperation(applyCtx, routing.Operation{
+					ID: signal.OperationID, TaskID: taskID, Producer: routing.ProducerStepComplete,
+					ExpectedStepID: result.FromStepID, TargetStepID: result.ToStepID,
+					SessionID: session.ID, ActorKind: string(steptelemetry.ActorAgent), ActorID: session.ID,
+				})
+			}
+		}
+	}
 	if mode == transitionLifecycleWithOnEnter {
 		stepEntry = &stepentry.AllocationResult{}
 		applyCtx = stepentry.WithResultHolder(applyCtx, stepEntry)
 	}
+	routeResult := &routing.Result{}
+	applyCtx = routing.WithResultHolder(applyCtx, routeResult)
 	applied, err := commit(applyCtx)
 	if err != nil {
 		s.logger.Error("failed to apply engine transition",
@@ -5464,12 +5814,6 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// ADR 0015 — record the audit row before the pending signal (if any) is
 	// cleared. Only an on_turn_complete transition can have consumed a signal;
 	// guarded decision transitions do not mutate the decider's signal bag.
-	var consumedSignal *models.PendingStepCompletionSignal
-	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
-			consumedSignal = &signal
-		}
-	}
 	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
 	switch trigger {
 	case engine.TriggerOnTurnStart:
@@ -5565,7 +5909,10 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// The caller may still hold the source session guard, but this work runs
 	// asynchronously after that guard is released. Clear the synchronous
 	// ownership marker so profile-switch parking acquires its own guard.
-	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, stepEntryID, fromStep)
+	s.launchProcessOnEnter(
+		withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription,
+		stepEntryID, routeResult.TransitionID, fromStep,
+	)
 	return true
 }
 
@@ -5576,15 +5923,44 @@ func (s *Service) launchProcessOnEnter(
 	targetStep *wfmodels.WorkflowStep,
 	taskDescription string,
 	entryID int64,
+	transitionID int64,
 	sourceStep *wfmodels.WorkflowStep,
 ) {
+	// The hook is test-only, but it still needs the same invocation identity as
+	// the on_enter launch. Reading the mutable field at goroutine completion can
+	// invoke a later transition's callback and make two independent entries
+	// appear as a duplicate effect.
+	onComplete := s.onProcessOnEnterComplete
 	go func() {
 		defer func() {
-			if s.onProcessOnEnterComplete != nil {
-				s.onProcessOnEnterComplete()
+			if onComplete != nil {
+				onComplete()
 			}
 		}()
+		effectClaim, claimed, err := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
+		if err != nil || !claimed {
+			if err != nil {
+				s.logger.Warn("failed to claim workflow route effect", zap.String("task_id", taskID), zap.Error(err))
+			}
+			return
+		}
+		claimFinished := false
+		defer func() {
+			if !claimFinished {
+				_ = effectClaim.finish(false)
+			}
+		}()
+		if err := effectClaim.beginExecution(); err != nil {
+			s.logger.Warn("lost workflow route effect before on_enter",
+				zap.String("task_id", taskID), zap.Error(err))
+			return
+		}
 		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID, sourceStep)
+		claimFinished = true
+		if err := effectClaim.finish(true); err != nil {
+			s.logger.Warn("failed to complete workflow route effect",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
 	}()
 }
 

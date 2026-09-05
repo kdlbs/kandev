@@ -236,6 +236,25 @@ func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmission
 	}
 	return admitted, err
 }
+
+func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedWorkflowID string,
+) (bool, bool, error) {
+	admitted, applied, err := r.Repository.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
+	)
+	if err == nil && applied {
+		r.failRefresh.Store(true)
+	}
+	return admitted, applied, err
+}
 func TestService_MoveTaskReturnsErrorWhenFeederRefreshFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

@@ -1017,19 +1017,20 @@ func (s *Service) RestoreSession(ctx context.Context, sessionID string, entries 
 	return nil
 }
 
-// SetPendingMove records a pending move for a session (replaces any existing one).
+// SetPendingMove records one exact pending generation for a session.
 // The move is applied by handleAgentReady when the agent's current turn completes.
-func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) {
+func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error {
 	if err := s.repo.SetPendingMove(ctx, sessionID, move); err != nil {
 		s.logger.Error("set pending move failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	s.logger.Info("pending move recorded",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", move.TaskID),
 		zap.String("workflow_step_id", move.WorkflowStepID))
+	return nil
 }
 
 // GetPendingMoveWithError retrieves the pending move for a session without

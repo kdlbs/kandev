@@ -11,6 +11,9 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestProcessOnTurnComplete_ExplicitSignalGating verifies the ADR 0015
@@ -354,17 +357,18 @@ func TestLoadPendingStepSignal_RoundTrip(t *testing.T) {
 	t.Run("json-rehydrated map", func(t *testing.T) {
 		meta := map[string]interface{}{
 			models.SessionMetaKeyPendingStepCompletion: map[string]interface{}{
-				"step_id":     "step-2",
-				"source":      "manual_fallback",
-				"summary":     "user marked complete",
-				"signaled_at": "2026-06-04T12:00:00Z",
+				"operation_id": "route-operation-2",
+				"step_id":      "step-2",
+				"source":       "manual_fallback",
+				"summary":      "user marked complete",
+				"signaled_at":  "2026-06-04T12:00:00Z",
 			},
 		}
 		got, ok := models.LoadPendingStepSignal(meta)
 		if !ok {
 			t.Fatal("expected models.LoadPendingStepSignal to recognise map shape")
 		}
-		if got.StepID != "step-2" || got.Source != "manual_fallback" || got.Summary != "user marked complete" {
+		if got.OperationID != "route-operation-2" || got.StepID != "step-2" || got.Source != "manual_fallback" || got.Summary != "user marked complete" {
 			t.Errorf("map round-trip mismatch: %+v", got)
 		}
 	})
@@ -683,6 +687,72 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 			t.Fatal("stop-winning subscriber consumed the queued completion signal")
 		}
 	})
+}
+
+// TestOnStepCompletionSignaled_RealOperationIDCommitsThroughSameOperation
+// exercises the real two-phase step_complete route-operation flow end to
+// end, against the real SQLite repository, unlike the sibling subtests in
+// TestOnStepCompletionSignaled above which all seed a signal with an empty
+// OperationID (skipping route-operation recording entirely) and so never
+// touch the ON CONFLICT identity gate this reproduces. handleStepComplete
+// (handlers.go) records a pending operation with the real turn_id but no
+// target_step_id yet; this test reproduces that write directly against the
+// repository, then drives the same turn-end subscriber path production
+// uses to confirm the auto-advance transition actually commits instead of
+// failing closed as ErrOperationIdentityConflict.
+func TestOnStepCompletionSignaled_RealOperationIDCommitsThroughSameOperation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+		t.Fatalf("flip session waiting: %v", err)
+	}
+
+	const opID = "step-complete:real-request-id"
+	const turnID = "turn-real-1"
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, routing.Operation{
+		ID: opID, TaskID: "t1", WorkspaceID: "ws1",
+		Producer: routing.ProducerStepComplete, ExpectedStepID: "step1",
+		ObservedStepID: "step1", SessionID: "s1", TurnID: turnID,
+		ActorKind: "agent", ActorID: "s1", Outcome: routing.OutcomePending,
+	}))
+	signal := models.PendingStepCompletionSignal{
+		OperationID: opID, StepID: "step1", Source: models.StepCompletionSourceAgent,
+		Summary: "ok", SignaledAt: time.Now().UTC(),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed bag: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		AutoAdvanceRequiresSignal: true,
+		Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	svc.onStepCompletionSignaled(ctx, bus.NewEvent("workflow.step_completion_signaled", "test", map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "step_id": "step1",
+	}))
+
+	updated, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	require.Equal(t, "step2", updated.WorkflowStepID, "the real two-phase operation must not roll back the transition")
+
+	operation, found, err := repo.GetWorkflowRouteOperation(ctx, opID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, routing.OutcomeCommitted, operation.Outcome)
+	assert.Equal(t, "step2", operation.TargetStepID)
+	assert.Equal(t, turnID, operation.TurnID, "the pending turn_id must survive the commit fill")
 }
 
 // newGatedStepFailureService creates the workflow used by the turn-failure

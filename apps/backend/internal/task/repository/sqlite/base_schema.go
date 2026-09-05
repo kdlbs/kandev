@@ -16,6 +16,7 @@ import (
 func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
+		r.initCoordinatorGrantSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,
 		r.initPlansSchema,
@@ -24,6 +25,7 @@ func (r *Repository) initSchema() error {
 		r.initSessionSchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
+		r.initWorkflowRoutingSchema,
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,

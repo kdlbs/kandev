@@ -113,6 +113,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.WorkspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
+	if hasClientControlledConfigMode(req.Metadata) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "config_mode is reserved for configuration chat", nil)
+	}
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
@@ -274,7 +277,6 @@ func (h *TaskHandlers) wsGetTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
-
 	task, err := h.service.GetTask(ctx, req.ID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
@@ -302,6 +304,9 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+	if hasClientControlledConfigMode(req.Metadata) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "config_mode is reserved for configuration chat", nil)
 	}
 
 	// Convert repositories if provided

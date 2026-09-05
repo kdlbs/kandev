@@ -2,10 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // noopPublisher satisfies the taskUpdatedPublisher contract without touching
@@ -187,6 +192,78 @@ func TestWorkflowStore_ApplyTransition(t *testing.T) {
 	if session.ReviewStatus != models.ReviewStatusNone {
 		t.Errorf("expected review status to be cleared, got %q", session.ReviewStatus)
 	}
+}
+
+func TestWorkflowStore_ApplyTransitionRejectsStaleSourceStep(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1}
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+
+	err := store.ApplyTransition(ctx, "t1", "s1", "stale-step", "step2", "on_turn_complete")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source workflow step changed")
+
+	task, loadErr := repo.GetTask(ctx, "t1")
+	require.NoError(t, loadErr)
+	assert.Equal(t, "step1", task.WorkflowStepID)
+}
+
+func TestWorkflowStore_ConcurrentDestinationRoutesAllocateOneStepEntry(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Done", Position: 1,
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterClearDecisions}}},
+	}
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+
+	start := make(chan struct{})
+	type outcome struct {
+		applied bool
+		err     error
+		holder  *stepentry.AllocationResult
+	}
+	results := make(chan outcome, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for range 2 {
+		go func() {
+			holder := &stepentry.AllocationResult{}
+			applyCtx := stepentry.WithResultHolder(ctx, holder)
+			ready.Done()
+			<-start
+			_, _, applied, err := store.applyTransitionIfAtStepRaw(applyCtx, "t1", "step1", "step2")
+			results <- outcome{applied: applied, err: err, holder: holder}
+		}()
+	}
+	ready.Wait()
+	close(start)
+
+	appliedCount := 0
+	entryIDs := 0
+	for range 2 {
+		result := <-results
+		require.NoError(t, result.err)
+		if result.applied {
+			appliedCount++
+		}
+		if result.holder.EntryID != 0 {
+			entryIDs++
+		}
+	}
+	assert.Equal(t, 1, appliedCount)
+	assert.Equal(t, 1, entryIDs)
+
+	var entries, transitions int
+	require.NoError(t, repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM workflow_step_entries WHERE task_id = ?`, "t1").Scan(&entries))
+	require.NoError(t, repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM task_step_transitions WHERE task_id = ? AND to_workflow_step_id = ?`, "t1", "step2").Scan(&transitions))
+	assert.Equal(t, 1, entries, "destination on-entry identity must be allocated exactly once")
+	assert.Equal(t, 1, transitions)
 }
 
 func TestWorkflowStore_ApplyTransitionSyncsWorkflowIDAcrossWorkflows(t *testing.T) {
@@ -549,4 +626,63 @@ func TestWorkflowStore_OperationIdempotency(t *testing.T) {
 			t.Error("expected marked operation to return true")
 		}
 	})
+}
+
+func TestWorkflowStore_DeferredApplyReusesPersistedOperationIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Done", Position: 1,
+	}
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	operation := routing.Operation{
+		ID: "deferred-operation", TaskID: "t1", WorkspaceID: "ws1",
+		Producer: routing.ProducerMergedPR, ExpectedStepID: "step1",
+		ObservedStepID: "step1", TargetStepID: "step2", SessionID: "s1",
+		TurnID: "turn-merged", ActorKind: "agent", ActorID: "s1",
+		ExternalCause: "github_pr_merged", ExternalCauseID: "repo:42",
+		Outcome: routing.OutcomePending,
+	}
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, operation))
+
+	require.NoError(t, store.ApplyDeferredMoveTransition(
+		ctx, "t1", "s1", "step1", "step2", operation.ID,
+	))
+
+	readback, found, err := repo.GetWorkflowRouteOperation(ctx, operation.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, routing.OutcomeCommitted, readback.Outcome)
+	assert.Equal(t, routing.ProducerMergedPR, readback.Producer)
+	assert.Equal(t, "turn-merged", readback.TurnID)
+	assert.Equal(t, "github_pr_merged", readback.ExternalCause)
+	assert.Equal(t, "repo:42", readback.ExternalCauseID)
+}
+
+func TestWorkflowStore_MarkDeferredMoveAppliedSettlesPendingOperationAtCurrentTarget(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	operation := routing.Operation{
+		ID: "deferred-already-satisfied", TaskID: "t1", WorkspaceID: "ws1",
+		Producer: routing.ProducerDeferredMove, ExpectedStepID: "step1",
+		ObservedStepID: "step1", TargetStepID: "step2", SessionID: "s1",
+		ActorKind: "agent", ActorID: "s1", Outcome: routing.OutcomePending,
+	}
+	require.NoError(t, repo.RecordWorkflowRouteOperation(ctx, operation))
+
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step2"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	require.NoError(t, store.MarkDeferredMoveApplied(ctx, "t1", operation.ID))
+
+	readback, found, err := repo.GetWorkflowRouteOperation(ctx, operation.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, routing.OutcomeAlreadySatisfied, readback.Outcome)
 }

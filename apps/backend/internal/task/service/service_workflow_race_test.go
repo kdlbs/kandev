@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -42,6 +43,25 @@ func (r *workflowMoveRaceRepo) UpdateTaskWithWorkflowStepAdmissionAndState(
 	}
 	return r.Repository.UpdateTaskWithWorkflowStepAdmissionAndState(
 		ctx, task, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
+	)
+}
+
+func (r *workflowMoveRaceRepo) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedWorkflowID string,
+) (bool, bool, error) {
+	if !r.injected {
+		r.injected = true
+		r.inject()
+	}
+	return r.Repository.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
 	)
 }
 
@@ -92,6 +112,45 @@ func TestMoveTaskWithOptions_RaceLandingInsideCallIsRejectedByWriteTimeGuard(t *
 	}
 	if final.WorkflowID != "wf-target" || final.WorkflowStepID != "step-target" {
 		t.Fatalf("concurrent reassignment must survive the rejected stale move: got (%s, %s), want (wf-target, step-target)",
+			final.WorkflowID, final.WorkflowStepID)
+	}
+}
+
+// Every MoveTaskWithOptions caller participates in route-generation CAS, even
+// when it did not resolve and pass an explicit expected step. The service's
+// initial task read defines that request generation; a competing move that
+// lands before the write must win rather than be overwritten by the stale
+// snapshot.
+func TestMoveTaskWithOptions_DefaultRouteGenerationRejectsMidCallLaneChange(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-default-step-cas", "wf-source", "step-source", nil)
+
+	raceRepo := &workflowMoveRaceRepo{Repository: repo}
+	raceRepo.inject = func() {
+		if _, err := svc.MoveTaskWithOptions(
+			ctx, "task-default-step-cas", "wf-target", "step-target", 0, MoveTaskOptions{},
+		); err != nil {
+			t.Fatalf("concurrent legitimate reassignment failed: %v", err)
+		}
+	}
+	svc.tasks = raceRepo
+
+	_, err := svc.MoveTaskWithOptions(
+		ctx, "task-default-step-cas", "wf-source", "step-review-target", 0, MoveTaskOptions{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "workflow step changed") {
+		t.Fatalf("stale move: got err %v, want workflow-step generation conflict", err)
+	}
+
+	final, err := repo.GetTask(ctx, "task-default-step-cas")
+	if err != nil {
+		t.Fatalf("GetTask after race: %v", err)
+	}
+	if final.WorkflowID != "wf-target" || final.WorkflowStepID != "step-target" {
+		t.Fatalf("concurrent reassignment must survive: got (%s, %s), want (wf-target, step-target)",
 			final.WorkflowID, final.WorkflowStepID)
 	}
 }

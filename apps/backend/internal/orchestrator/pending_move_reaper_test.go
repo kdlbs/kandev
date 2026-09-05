@@ -11,6 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type failOncePendingMoveDeleteRepository struct {
@@ -42,6 +44,9 @@ func (r *replaceBeforePendingMoveDeleteRepository) DeletePendingMoveIfMatch(
 ) (bool, error) {
 	if r.replacement != nil {
 		replacement := *r.replacement
+		// A deliberate replacement must present the exact generation it
+		// observed; SetPendingMove then rotates to a fresh row identity.
+		replacement.ID = expected.Move.ID
 		r.replacement = nil
 		if err := r.SetPendingMove(ctx, expected.SessionID, &replacement); err != nil {
 			return false, err
@@ -95,11 +100,17 @@ func TestPendingMove_ExpiredMoveIsNotReplayed(t *testing.T) {
 
 	// Re-arm the move the scenario queued, aged past the TTL. The hand-off
 	// prompt the scenario queued alongside it stays as it was.
+	current, exists := sc.svc.messageQueue.GetPendingMove(sc.ctx, sc.reviewSessionID)
+	if !exists {
+		t.Fatal("scenario pending move missing")
+	}
 	sc.svc.messageQueue.SetPendingMove(sc.ctx, sc.reviewSessionID, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
-		QueuedAt:       staleQueuedAt(),
+		ID:                     current.ID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
+		QueuedAt:               staleQueuedAt(),
 	})
 
 	sc.svc.handleAgentReady(sc.ctx, watcherAgentReady(sc.reviewSessionID))
@@ -141,7 +152,7 @@ func TestPendingMove_ExpiredReplayRetriesAfterPromptRemovalFailure(t *testing.T)
 	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
 	staleMove := &messagequeue.PendingMove{
 		MoveID: "move-retry", TaskID: "task-1", WorkflowID: "wf1",
-		WorkflowStepID: stepInProgressID, QueuedAt: staleQueuedAt(),
+		WorkflowStepID: stepInProgressID, ExpectedWorkflowStepID: stepInReviewID, QueuedAt: staleQueuedAt(),
 	}
 	for i := range entries {
 		if entries[i].QueuedBy == messagequeue.QueuedByMoveTask {
@@ -205,11 +216,12 @@ func TestPendingMove_ReplaysReplacementAfterClaimRace(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	queueRepo := messagequeue.NewMemoryRepository()
 	initialMove := &messagequeue.PendingMove{
-		MoveID:         "move-initial",
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
-		QueuedAt:       time.Now().UTC().Add(-time.Minute),
+		MoveID:                 "move-initial",
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
+		QueuedAt:               time.Now().UTC().Add(-time.Minute),
 	}
 	replacement := *initialMove
 	replacement.MoveID = "move-replacement"
@@ -240,11 +252,17 @@ func TestPendingMove_ReplaysReplacementAfterClaimRace(t *testing.T) {
 // TTL check: a move armed moments ago must still apply exactly as before.
 func TestPendingMove_FreshMoveStillReplays(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
+	current, exists := sc.svc.messageQueue.GetPendingMove(sc.ctx, sc.reviewSessionID)
+	if !exists {
+		t.Fatal("scenario pending move missing")
+	}
 	sc.svc.messageQueue.SetPendingMove(sc.ctx, sc.reviewSessionID, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
-		QueuedAt:       time.Now().UTC().Add(-time.Minute),
+		ID:                     current.ID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
+		QueuedAt:               time.Now().UTC().Add(-time.Minute),
 	})
 
 	sc.svc.handleAgentReady(sc.ctx, watcherAgentReady(sc.reviewSessionID))
@@ -257,6 +275,33 @@ func TestPendingMove_FreshMoveStillReplays(t *testing.T) {
 		t.Fatalf("fresh pending move did not apply: workflow_step_id = %q, want %q",
 			task.WorkflowStepID, stepInProgressID)
 	}
+}
+
+// The task transition must commit before exact pending-row cleanup. If cleanup
+// fails, restart recovery sees an already-satisfied route and can retry the
+// cleanup; deleting first would lose the only durable intent before commit.
+func TestPendingMove_DeleteFailureAfterCommitPreservesRecoverableRow(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps[stepInReviewID].Events.OnTurnComplete = nil
+	queueRepo := &failOncePendingMoveDeleteRepository{
+		Repository: messagequeue.NewMemoryRepository(),
+		err:        errors.New("queue storage unavailable"),
+	}
+	move := &messagequeue.PendingMove{
+		MoveID: "move-crash", TaskID: "task-1", WorkflowID: "wf1",
+		WorkflowStepID: stepInProgressID, ExpectedWorkflowStepID: stepInReviewID, QueuedAt: time.Now().UTC(),
+	}
+	require.NoError(t, queueRepo.SetPendingMove(sc.ctx, sc.reviewSessionID, move))
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+
+	sc.svc.handleAgentReady(sc.ctx, watcherAgentReady(sc.reviewSessionID))
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	require.NoError(t, err)
+	assert.Equal(t, stepInProgressID, task.WorkflowStepID, "route must commit before cleanup")
+	stored, exists := sc.svc.messageQueue.GetPendingMove(sc.ctx, sc.reviewSessionID)
+	require.True(t, exists, "failed exact cleanup must leave the row for recovery")
+	assert.Equal(t, "move-crash", stored.MoveID)
 }
 
 func TestDiscardStalePendingMove(t *testing.T) {
