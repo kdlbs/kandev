@@ -30,15 +30,15 @@ An action constant alone is not evidence that an action is registered or emitted
 1. Prefer the UI, CLI, MCP tools, or documented HTTP routes for supported integrations.
 2. If you need the WebSocket, connect to `/ws` and send one JSON request per frame.
 3. Correlate responses by `id`, refetch after reconnects, and treat notifications as invalidation hints.
-4. Protect the endpoint: it has no client authentication boundary.
+4. Protect the endpoint. Authentication is experimental and disabled by default, so an ordinary install has no client authentication boundary.
 
 ## Security and network boundary
 
-The current `/ws` upgrade handler does **not authenticate clients**. It reads `?token=` or the `Authorization` header but does not validate or use the value; JWT validation is still a code TODO. The default backend host is `0.0.0.0`, so a default process can listen on every interface even though examples use `localhost`.
+The experimental [Authentication & Users](authentication.md) feature is disabled by default. In that mode, `/ws` gives every client the synthetic single-user administrator identity. When authentication is enabled, the upgrade requires a valid browser session, bearer token, or `?token=<PAT>` fallback for clients that cannot send headers. The default backend host is `0.0.0.0`, so a default process can listen on every interface even though examples use `localhost`.
 
 The raw gateway rejects every action whose name starts with `mcp.` using a `FORBIDDEN` error before the shared dispatcher runs. This prevents raw clients from forging task or session identity that trusted MCP adapters inject; it is not user authentication. Internal MCP actions remain available through their mode-scoped MCP adapters and trusted in-process dispatch paths.
 
-Treat every client that can reach the backend as fully trusted for the remaining WebSocket surface. Actions can create and delete data, start agents and shells, read and change files, run Git operations, reveal stored secrets, and invoke configured integrations. Do not expose port `38429` directly to an untrusted LAN or the internet. Bind to loopback, firewall the port, or put Kandev behind an authenticated reverse proxy that terminates TLS and restricts access. See [Configuration](configuration.md) and [Run as a Service](run-as-a-service.md).
+With authentication disabled, treat every client that can reach the backend as fully trusted. Actions can create and delete data, start agents and shells, read and change files, run Git operations, reveal stored secrets, and invoke configured integrations. Authentication does not replace TLS or isolate shared executors, agent credentials, and the host filesystem. Do not expose port `38429` directly to an untrusted LAN or the internet. Bind to loopback, firewall the port, or put Kandev behind an authenticated reverse proxy that terminates TLS and restricts access. See [Configuration](configuration.md) and [Run as a Service](run-as-a-service.md).
 
 The upgrade does enforce an origin policy for browser clients:
 
@@ -47,7 +47,7 @@ The upgrade does enforce an origin policy for browser clients:
 - Different loopback names or addresses are accepted when both origin and request hosts are loopback, such as `localhost` and `127.0.0.1` on different ports.
 - Origins must be well-formed `http` or `https` origins with no path, query, fragment, or user information. Other cross-site origins are rejected.
 
-When proxying, preserve a request host that matches the public page's origin and forward WebSocket upgrades. Do not rely on the ignored token parameter for access control.
+When proxying, preserve a request host that matches the public page's origin and forward WebSocket upgrades. The origin policy ignores `?token=` when deciding whether to accept an origin, but the authentication layer still accepts it as a PAT fallback when authentication is enabled. Prefer the bearer header where the client supports it, and do not treat a query PAT as a substitute for TLS or the origin policy.
 
 ## Wire envelope
 
@@ -649,9 +649,9 @@ These registrations back Kandev's agent/MCP bridge. The subset registered in a p
 
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.
 
-### General and workspace broadcasts
+### Shared broadcaster notifications
 
-Most of these live events broadcast to every connected client, which must filter by IDs in the payload. Provider pull-request and merge-request updates instead route to the owning workspace. Session subscribe/focus hydration can also send selected state actions directly to the requesting client.
+Their normal live event path uses a shared broadcaster. With authentication disabled, or when an event has no workspace context, it sends the event to every connected client. With authentication enabled and workspace reach resolves successfully, workspace-carrying events are narrowed to the permitted readers. The regular workspace broadcaster currently falls back to global delivery if both reach and owner resolution fail; only selected sensitive event paths use the fail-closed variant. Do not rely on notification fan-out as a tenant-isolation boundary while this experimental limitation remains. Session subscribe/focus hydration can also send selected state actions directly to the requesting client.
 
 ```text
 workspace.created
@@ -809,14 +809,14 @@ File changes are batched for up to 100 ms and flushed immediately at 50 entries.
 | subscribed run      | `run.event.appended`              | Future events only; there is no replay cursor.                                                                                                                                                                                                                               |
 | metrics subscribers | `system.metrics.updated`          | Live resource snapshot; collection interest follows subscribers.                                                                                                                                                                                                             |
 
-Routing is an efficiency mechanism, not an access-control boundary. The server does not authenticate resource ownership, global messages can contain IDs for other workspaces, and a client can request arbitrary subscription IDs.
+Routing is an efficiency mechanism, not the access-control boundary. With authentication enabled, the server resolves the caller's identity, checks workspace subscriptions, and normally filters workspace fan-out by reach; domain authorization still decides which actions the caller may perform. Because ordinary fan-out can fall back to global delivery on resolution errors as described above, use authorized read requests as the source of truth. With authentication disabled, the synthetic administrator retains the original single-user reach.
 
 </details>
 
 ## Reconnect and troubleshooting
 
 - **Upgrade returns 403:** inspect the browser `Origin` and proxy `Host`. The hostnames must match exactly or both be loopback; ports may differ. A scheme other than `http`/`https` or an origin containing a path is rejected.
-- **Connection works locally but is unsafe remotely:** this is expected with the current unauthenticated handler and `0.0.0.0` default. Add a protected proxy or bind/firewall the backend before allowing network access.
+- **Connection works locally but is unsafe remotely:** this is expected with authentication disabled and the `0.0.0.0` default. Enable authentication deliberately and add TLS, or bind/firewall the backend behind a protected proxy before allowing network access.
 - **Request times out but the mutation happened:** the response may have been dropped or the socket may have closed while the server-side handler continued. Query current state before deciding whether to retry.
 - **Notifications stop or state looks stale:** reconnect, resubscribe, and refetch. Check whether the client is consuming frames quickly enough to avoid the 256-frame drop-new queue.
 - **Session stream is missing:** send `session.subscribe`; for an actively displayed session also send `session.focus`. Verify the payload's `session_id` matches exactly.
