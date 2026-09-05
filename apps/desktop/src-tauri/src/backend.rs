@@ -3,7 +3,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     io::{ErrorKind, Read, Write},
-    net::{TcpListener, TcpStream, ToSocketAddrs},
+    net::{IpAddr, TcpListener, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
@@ -372,10 +372,17 @@ pub fn desktop_environment(
         !key.to_string_lossy()
             .eq_ignore_ascii_case(DESKTOP_NATIVE_NOTIFICATIONS_ENV)
     });
-    env.insert(
-        OsString::from("KANDEV_SERVER_HOST"),
-        OsString::from(LOOPBACK_HOST),
-    );
+    // Desktop remains loopback-only by default. A remote bind is an explicit
+    // Tailnet-only opt-in: it must retain local loopback and include a
+    // Tailscale address. Wildcards and LAN/public addresses fall back safely.
+    if let Some(hosts) = tailnet_server_host_override(env.get(OsStr::new("KANDEV_SERVER_HOST"))) {
+        env.insert(OsString::from("KANDEV_SERVER_HOST"), hosts);
+    } else {
+        env.insert(
+            OsString::from("KANDEV_SERVER_HOST"),
+            OsString::from(LOOPBACK_HOST),
+        );
+    }
     env.insert(
         OsString::from("KANDEV_BUNDLE_DIR"),
         runtime_dir.as_os_str().to_os_string(),
@@ -386,6 +393,34 @@ pub fn desktop_environment(
     );
     env.insert(OsString::from("PATH"), path);
     env
+}
+
+fn tailnet_server_host_override(value: Option<&OsString>) -> Option<OsString> {
+    let raw = value?.to_string_lossy();
+    let mut has_loopback = false;
+    let mut has_tailnet = false;
+    let mut count = 0;
+
+    for host in raw.split(',').map(str::trim).filter(|host| !host.is_empty()) {
+        let ip: IpAddr = host.parse().ok()?;
+        count += 1;
+        if ip.is_loopback() {
+            has_loopback = true;
+        } else if is_tailscale_ip(ip) {
+            has_tailnet = true;
+        } else {
+            return None;
+        }
+    }
+
+    (count > 0 && has_loopback && has_tailnet).then(|| OsString::from(raw.as_ref()))
+}
+
+fn is_tailscale_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => matches!(ip.octets(), [100, 64..=127, _, _]),
+        IpAddr::V6(ip) => matches!(ip.segments(), [0xfd7a, 0x115c, 0xa1e0, _, _, _, _, _]),
+    }
 }
 
 pub fn pick_loopback_port() -> Result<u16, String> {
@@ -918,8 +953,39 @@ mod tests {
     }
 
     #[test]
-    fn desktop_environment_overrides_inherited_server_host_with_loopback() {
-        // Desktop launches must keep the embedded backend on the loopback host.
+    fn desktop_environment_preserves_validated_tailnet_server_hosts() {
+        let mut inherited = BTreeMap::new();
+        inherited.insert(
+            OsString::from("KANDEV_SERVER_HOST"),
+            OsString::from("127.0.0.1,100.78.213.38"),
+        );
+
+        let env = desktop_environment(Path::new("/opt/kandev"), inherited, None);
+
+        assert_eq!(
+            env.get(OsStr::new("KANDEV_SERVER_HOST")),
+            Some(&OsString::from("127.0.0.1,100.78.213.38"))
+        );
+    }
+
+    #[test]
+    fn desktop_environment_rejects_wildcard_or_non_tailnet_server_hosts() {
+        for invalid in ["0.0.0.0", "127.0.0.1,192.168.1.2", "100.78.213.38"] {
+            let mut inherited = BTreeMap::new();
+            inherited.insert(OsString::from("KANDEV_SERVER_HOST"), OsString::from(invalid));
+
+            let env = desktop_environment(Path::new("/opt/kandev"), inherited, None);
+
+            assert_eq!(
+                env.get(OsStr::new("KANDEV_SERVER_HOST")),
+                Some(&OsString::from(LOOPBACK_HOST)),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_environment_rejects_unrelated_inherited_server_host() {
         let mut inherited = BTreeMap::new();
         inherited.insert(
             OsString::from("KANDEV_SERVER_HOST"),
