@@ -204,6 +204,45 @@ func TestStartLifecycleSweepAsyncSkipsWhenServiceStopped(t *testing.T) {
 	svc.stopLifecycleSweepAsync()
 }
 
+// TestLifecycleSweepStartRacingStopDoesNotMisuseWaitGroup is the regression
+// test for lifecycleSweepWorkers.Add being published outside lifecycleSweepMu:
+// startLifecycleSweepAsync used to unlock the mutex and only then call
+// lifecycleSweepWorkers.Add(1), so a concurrent stopLifecycleSweepAsync could
+// take the lock, read the (already-published) cancel func, and call
+// lifecycleSweepWorkers.Wait() before Add(1) ran — the Go runtime's race
+// detector treats an Add not ordered before a concurrent Wait as WaitGroup
+// misuse, because nothing in the source establishes a happens-before edge
+// between them. The fix moves Add(1) inside the same critical section as the
+// cancel-func publish, matching dynamic_launch.go's
+// launchDynamicSuccessorDetached. Run with `-race`; iterated because the
+// unsynchronized window pre-fix is only a couple of instructions wide, so any
+// single iteration has low odds of landing in it — repetition raises the
+// odds of catching a reintroduced regression without claiming certainty.
+//
+// Expected pre-fix failure: `go test -race` reports a data race / WaitGroup
+// misuse on lifecycleSweepWorkers (probabilistically, across repeated runs).
+func TestLifecycleSweepStartRacingStopDoesNotMisuseWaitGroup(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const iterations = 200
+	for i := 0; i < iterations; i++ {
+		svc.resetLifecycleSweepWorkers()
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			svc.startLifecycleSweepAsync(ctx)
+		}()
+		go func() {
+			defer wg.Done()
+			svc.stopLifecycleSweepAsync()
+		}()
+		wg.Wait()
+	}
+}
+
 // TestLifecycleSweepConcurrentWithLiveTaskMovedRunsManualMoveSideEffectsOnce
 // is the regression test for the spec's own concurrent-safety claim
 // (docs/specs/startup-listener-before-recovery/spec.md, Desired-behaviour):

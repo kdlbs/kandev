@@ -2751,8 +2751,8 @@ func (s *Service) startLifecycleSweepAsync(ctx context.Context) bool {
 		return false
 	}
 	s.lifecycleSweepCancel = cancel
-	s.lifecycleSweepMu.Unlock()
 	s.lifecycleSweepWorkers.Add(1)
+	s.lifecycleSweepMu.Unlock()
 	go func() {
 		defer s.lifecycleSweepWorkers.Done()
 		s.reconcileTaskLifecycleTokens(sweepCtx)
