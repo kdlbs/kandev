@@ -21,19 +21,21 @@ export function TaskCreateLaunchPreviewToggle({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 cursor-pointer text-slate-400 hover:bg-muted/40 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          aria-label={label}
-          aria-pressed={active}
-          data-testid="task-create-launch-preview-toggle"
-          disabled={disabled}
-          onClick={onToggle}
-        >
-          {active ? <IconEyeOff /> : <IconEye />}
-        </Button>
+        <span tabIndex={disabled ? 0 : -1} className="inline-flex">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 cursor-pointer text-slate-400 hover:bg-muted/40 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+            aria-label={label}
+            aria-pressed={active}
+            data-testid="task-create-launch-preview-toggle"
+            disabled={disabled}
+            onClick={onToggle}
+          >
+            {active ? <IconEyeOff /> : <IconEye />}
+          </Button>
+        </span>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>

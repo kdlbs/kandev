@@ -6,6 +6,9 @@ import {
   resolveDialogLaunchPreview,
 } from "./task-create-dialog-prop-builders";
 
+const WORKFLOW_ID = "workflow-1";
+const IN_PROGRESS = "In Progress";
+
 function formState(overrides: Partial<DialogFormState>): DialogFormState {
   return {
     noRepository: false,
@@ -92,21 +95,46 @@ describe("resolveDialogLaunchPreview", () => {
     const steps: StepType[] = [
       {
         id: "step-1",
-        title: "In Progress",
+        title: IN_PROGRESS,
         position: 0,
         is_start_step: true,
         prompt: "Run {{task_prompt}}",
       },
     ];
     const snapshots = {
-      "workflow-1": { steps },
+      [WORKFLOW_ID]: { steps },
     } as unknown as DialogFormBodyProps["snapshots"];
 
-    expect(resolveDialogLaunchPreview(true, "workflow-1", null, snapshots)).toEqual({
+    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, null, snapshots, true)).toEqual({
       stepId: "step-1",
-      stepName: "In Progress",
+      stepName: IN_PROGRESS,
       stepPrompt: "Run {{task_prompt}}",
     });
-    expect(resolveDialogLaunchPreview(false, "workflow-1", null, snapshots)).toBeNull();
+    expect(resolveDialogLaunchPreview(false, WORKFLOW_ID, null, snapshots, true)).toBeNull();
+  });
+
+  it("projects the first positional step for the empty-description plan-mode action", () => {
+    const steps: StepType[] = [
+      { id: "backlog", title: "Backlog", position: 0, prompt: "Queue it" },
+      {
+        id: "auto-start",
+        title: IN_PROGRESS,
+        position: 1,
+        events: { on_enter: [{ type: "auto_start_agent" }] },
+        prompt: "Run {{task_prompt}}",
+      },
+    ];
+    const snapshots = {
+      [WORKFLOW_ID]: { steps },
+    } as unknown as DialogFormBodyProps["snapshots"];
+
+    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, null, snapshots, false)).toMatchObject({
+      stepId: "backlog",
+      stepName: "Backlog",
+    });
+    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, null, snapshots, true)).toMatchObject({
+      stepId: "auto-start",
+      stepName: IN_PROGRESS,
+    });
   });
 });

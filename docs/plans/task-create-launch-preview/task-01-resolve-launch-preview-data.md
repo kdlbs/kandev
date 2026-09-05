@@ -23,11 +23,12 @@ system_design:
 ## Summary
 
 Create the shared launch-step and prompt-composition projection. Preserve prompt
-data when the dialog fetches steps for a newly selected workflow.
+data when the dialog fetches steps for the effective workflow, including when it
+is the visible context workflow.
 
 ## In scope
 
-- Add pure launch destination and composed-preview helpers.
+- Add pure action-sensitive launch destination and composed-preview helpers.
 - Retain `prompt` in fetched task-create step data.
 - Derive one launch-preview model for the effective workflow.
 - Add unit tests for routing precedence, stale data, and prompt substitution.
@@ -43,7 +44,9 @@ data when the dialog fetches steps for a newly selected workflow.
 - The resolver matches the backend auto-start, configured-start, and positional
   fallback order.
 - Fetched steps can contribute only when their workflow ID matches the effective
-  workflow.
+  workflow. A successful empty fetch is authoritative over the snapshot.
+- The effect refreshes the effective workflow even when it matches the visible
+  context workflow.
 - Composition replaces only the first `{{task_prompt}}` and preserves all
   server-owned placeholders.
 
@@ -96,3 +99,6 @@ None.
   server-owned prompt placeholders.
 - `cd apps/web && pnpm test -- --run components/task-create-dialog-launch-preview.test.ts components/task-create-dialog-effects.test.ts components/task-create-dialog-prop-builders.test.ts` passed (40 tests).
 - `cd apps/web && pnpm run typecheck` passed.
+- Review fixup coverage passed: plan-mode routing, authoritative empty fetch,
+  and same-workflow refresh. Disabled-tooltip focus coverage passed with the
+  task-create component tests.

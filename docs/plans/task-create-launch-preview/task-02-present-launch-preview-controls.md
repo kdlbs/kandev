@@ -108,6 +108,8 @@ git diff --check
   pressed state, and 44-pixel coarse-pointer sizing.
 - Added all five locale catalog entries, regenerated the pseudo catalog, and
   updated the public task creation guide.
+- Wrapped the disabled preview button in the shared focusable tooltip-trigger
+  pattern so its explanation remains reachable by keyboard and pointer.
 - Focused component tests passed (43 tests), typecheck passed, and the focused
   ESLint command passed with zero warnings.
 - `cd apps/web && pnpm run i18n:check` passed; `pnpm run i18n:ratchet` passed.

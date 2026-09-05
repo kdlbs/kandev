@@ -40,9 +40,11 @@ export function useWorkflowStepsEffect(
   const { setFetchedSteps } = fs;
   useEffect(() => {
     void Promise.resolve().then(() => setFetchedSteps(null));
-    if (!open || !effectiveWorkflowId || effectiveWorkflowId === workflowId) {
+    if (!open || !effectiveWorkflowId) {
       return;
     }
+    // Refresh the effective workflow even when it is the visible context. Its
+    // snapshot can lag behind workflow step edits made in another surface.
     let cancelled = false;
     listWorkflowSteps(effectiveWorkflowId)
       .then((response) => {

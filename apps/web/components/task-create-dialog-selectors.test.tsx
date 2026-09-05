@@ -11,6 +11,7 @@ import {
 } from "@/components/task/chat/file-attachment";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
+import { TaskCreateLaunchPreviewToggle } from "./task-create-dialog-launch-preview-control";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
 import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-preview";
 import type { PluginComposerSlotProps } from "@/lib/plugins/types";
@@ -163,6 +164,19 @@ describe("TaskFormInputs launch prompt preview", () => {
     expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
       ORIGINAL_PROMPT,
     );
+  });
+});
+
+describe("TaskCreateLaunchPreviewToggle", () => {
+  it("keeps a disabled toggle tooltip trigger focusable", () => {
+    render(<TaskCreateLaunchPreviewToggle active={false} disabled onToggle={() => undefined} />, {
+      wrapper: Wrapper,
+    });
+
+    const toggle = screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID);
+    expect(toggle.getAttribute("disabled")).not.toBeNull();
+    expect(toggle.parentElement?.getAttribute("tabindex")).toBe("0");
+    expect(toggle.parentElement?.classList.contains("inline-flex")).toBe(true);
   });
 });
 

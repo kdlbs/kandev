@@ -8,10 +8,13 @@ export type TaskCreateLaunchPreview = {
   stepPrompt: string;
 };
 
+export type TaskCreateLaunchIntent = "start-agent" | "plan-mode";
+
 type ResolveTaskCreateLaunchPreviewArgs = {
   effectiveWorkflowId: string | null;
   fetchedSteps: ReadonlyArray<StepType> | null;
   snapshotSteps?: ReadonlyArray<StepType>;
+  launchIntent?: TaskCreateLaunchIntent;
 };
 
 function byPosition(a: StepType, b: StepType): number {
@@ -22,8 +25,12 @@ function hasAutoStartAction(step: StepType): boolean {
   return step.events?.on_enter?.some((action) => action.type === "auto_start_agent") ?? false;
 }
 
-export function resolveLaunchPreviewStep(steps: ReadonlyArray<StepType>): StepType | null {
+export function resolveLaunchPreviewStep(
+  steps: ReadonlyArray<StepType>,
+  launchIntent: TaskCreateLaunchIntent = "start-agent",
+): StepType | null {
   const ordered = [...steps].sort(byPosition);
+  if (launchIntent === "plan-mode") return ordered[0] ?? null;
   return (
     ordered.find(hasAutoStartAction) ??
     ordered.find((step) => step.is_start_step) ??
@@ -36,6 +43,7 @@ export function resolveTaskCreateLaunchPreview({
   effectiveWorkflowId,
   fetchedSteps,
   snapshotSteps,
+  launchIntent = "start-agent",
 }: ResolveTaskCreateLaunchPreviewArgs): TaskCreateLaunchPreview | null {
   if (!effectiveWorkflowId) return null;
 
@@ -43,10 +51,12 @@ export function resolveTaskCreateLaunchPreview({
     (step) => step.workflowId === effectiveWorkflowId,
   );
   const steps =
-    matchingFetchedSteps && matchingFetchedSteps.length > 0
+    fetchedSteps !== null &&
+    matchingFetchedSteps &&
+    (fetchedSteps.length === 0 || matchingFetchedSteps.length > 0)
       ? matchingFetchedSteps
       : (snapshotSteps ?? []);
-  const step = resolveLaunchPreviewStep(steps);
+  const step = resolveLaunchPreviewStep(steps, launchIntent);
   if (!step) return null;
 
   return {
