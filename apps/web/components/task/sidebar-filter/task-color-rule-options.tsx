@@ -38,23 +38,23 @@ const TASK_STATES: readonly TaskState[] = [
 const PRIORITIES: readonly TaskPriority[] = ["critical", "high", "medium", "low"];
 
 const ORIGINS: readonly { value: TaskOrigin | "kanban"; labelKey: string }[] = [
-  { value: "manual", labelKey: "task:automaticColorOriginManual" },
-  { value: "agent_created", labelKey: "task:automaticColorOriginAgentCreated" },
-  { value: "routine", labelKey: "task:automaticColorOriginRoutine" },
-  { value: "onboarding", labelKey: "task:automaticColorOriginOnboarding" },
-  { value: "automation_run", labelKey: "task:automaticColorOriginAutomationRun" },
-  { value: "automation_task", labelKey: "task:automaticColorOriginAutomationTask" },
-  { value: "kanban", labelKey: "task:automaticColorOriginKanban" },
+  { value: "manual", labelKey: "task:automaticColorsOriginManual" },
+  { value: "agent_created", labelKey: "task:automaticColorsOriginAgentCreated" },
+  { value: "routine", labelKey: "task:automaticColorsOriginRoutine" },
+  { value: "onboarding", labelKey: "task:automaticColorsOriginOnboarding" },
+  { value: "automation_run", labelKey: "task:automaticColorsOriginAutomationRun" },
+  { value: "automation_task", labelKey: "task:automaticColorsOriginAutomationTask" },
+  { value: "kanban", labelKey: "task:automaticColorsOriginKanban" },
 ];
 
 const DIMENSION_LABEL_KEYS: Record<SidebarTaskColorDimension, string> = {
-  workflow_step: "task:automaticColorDimensionWorkflowStep",
-  repository: "task:automaticColorDimensionRepository",
-  workflow: "task:automaticColorDimensionWorkflow",
-  executor_profile: "task:automaticColorDimensionExecutorProfile",
-  task_state: "task:automaticColorDimensionTaskState",
-  priority: "task:automaticColorDimensionPriority",
-  origin: "task:automaticColorDimensionOrigin",
+  workflow_step: "task:automaticColorsDimensionWorkflowStep",
+  repository: "task:automaticColorsDimensionRepository",
+  workflow: "task:automaticColorsDimensionWorkflow",
+  executor_profile: "task:automaticColorsDimensionExecutorProfile",
+  task_state: "task:automaticColorsDimensionTaskState",
+  priority: "task:automaticColorsDimensionPriority",
+  origin: "task:automaticColorsDimensionOrigin",
 };
 
 const TASK_STATE_LABEL_KEYS: Record<TaskState, string> = {

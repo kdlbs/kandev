@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
 
@@ -53,16 +54,48 @@ vi.mock("@/components/state-provider", () => ({
 
 import { AutomaticColorSettings } from "./automatic-color-settings";
 
+const SETTINGS_TOGGLE_TEST_ID = "automatic-color-settings-toggle";
+
+function renderSettings(isDrawerLayout = false) {
+  return render(
+    <TooltipProvider>
+      <AutomaticColorSettings isDrawerLayout={isDrawerLayout} />
+    </TooltipProvider>,
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   mocks.value = { enabled: false, rules: [] };
 });
 
+describe("AutomaticColorSettings timing guidance", () => {
+  it("shows timing help on desktop and visible timing guidance in the drawer", () => {
+    const { rerender } = renderSettings();
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
+
+    expect(screen.getByTestId("automatic-colors-help").getAttribute("aria-label")).toBe(
+      "When automatic colors apply",
+    );
+    expect(screen.getByTestId("automatic-colors-timing").textContent).toContain(
+      "Rules apply to existing and new sidebar tasks.",
+    );
+
+    rerender(
+      <TooltipProvider>
+        <AutomaticColorSettings isDrawerLayout />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByTestId("automatic-colors-help")).toBeNull();
+    expect(screen.getByTestId("automatic-colors-timing")).toBeTruthy();
+  });
+});
+
 describe("AutomaticColorSettings", () => {
   it("adds a disabled incomplete rule without enabling the global setting", () => {
-    render(<AutomaticColorSettings isDrawerLayout={false} />);
-    fireEvent.click(screen.getByTestId("automatic-color-settings-toggle"));
+    renderSettings();
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
     fireEvent.click(screen.getByTestId("automatic-color-add-rule"));
 
     expect(mocks.update).toHaveBeenCalledWith({
@@ -89,8 +122,8 @@ describe("AutomaticColorSettings", () => {
         },
       ],
     };
-    render(<AutomaticColorSettings isDrawerLayout={false} />);
-    fireEvent.click(screen.getByTestId("automatic-color-settings-toggle"));
+    renderSettings();
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
 
     const enabledSwitch = screen.getByTestId(
       "automatic-color-rule-enabled-missing",
@@ -101,6 +134,25 @@ describe("AutomaticColorSettings", () => {
       enabled: true,
       rules: [expect.objectContaining({ id: "missing", enabled: false })],
     });
+  });
+
+  it("shows one color swatch in the selected fixed output", () => {
+    mocks.value = {
+      enabled: true,
+      rules: [
+        {
+          id: "fixed-output",
+          enabled: true,
+          condition: { dimension: "task_state", value: "TODO", label: "To do" },
+          output: { kind: "fixed", color: "red" },
+        },
+      ],
+    };
+    renderSettings();
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
+
+    const output = screen.getByTestId("automatic-color-output-fixed-output");
+    expect(output.querySelectorAll("span.inline-block.rounded-full")).toHaveLength(1);
   });
 
   it("keeps an incomplete rule disabled until its target is available", () => {
@@ -115,8 +167,8 @@ describe("AutomaticColorSettings", () => {
         },
       ],
     };
-    render(<AutomaticColorSettings isDrawerLayout={false} />);
-    fireEvent.click(screen.getByTestId("automatic-color-settings-toggle"));
+    renderSettings();
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
 
     expect(
       (screen.getByTestId("automatic-color-rule-enabled-todo") as HTMLButtonElement).disabled,

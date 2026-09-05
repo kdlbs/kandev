@@ -80,7 +80,7 @@ export function SidebarViewEditor({
         title={t("task:groupBy")}
         summary={t(GROUP_SUMMARY_KEYS[current.group])}
         testId="sidebar-group-settings"
-        className={isDrawerLayout ? "pt-2" : "pt-0"}
+        className={`border-b ${isDrawerLayout ? "pt-2" : "pt-0"}`}
         contentClassName="pt-1"
       >
         <GroupPicker value={current.group} onChange={(group) => onUpdate({ group })} />

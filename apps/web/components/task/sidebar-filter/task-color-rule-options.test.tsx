@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildTaskColorRuleOptions, taskColorRuleOptionKey } from "./task-color-rule-options";
+import {
+  buildTaskColorRuleOptions,
+  taskColorDimensionLabelKey,
+  taskColorRuleOptionKey,
+} from "./task-color-rule-options";
 
 describe("automatic color rule options", () => {
   it("uses workspace-aware values for workflows and steps", () => {
@@ -39,6 +43,40 @@ describe("automatic color rule options", () => {
     );
     expect(options.priority[0]?.key).toBe(taskColorRuleOptionKey("critical"));
     expect(options.origin.some((option) => option.value === "kanban")).toBe(true);
+  });
+
+  it("uses the localized automatic-color keys for dimensions and origins", () => {
+    expect([
+      taskColorDimensionLabelKey("workflow_step"),
+      taskColorDimensionLabelKey("repository"),
+      taskColorDimensionLabelKey("workflow"),
+      taskColorDimensionLabelKey("executor_profile"),
+      taskColorDimensionLabelKey("task_state"),
+      taskColorDimensionLabelKey("priority"),
+      taskColorDimensionLabelKey("origin"),
+    ]).toEqual([
+      "task:automaticColorsDimensionWorkflowStep",
+      "task:automaticColorsDimensionRepository",
+      "task:automaticColorsDimensionWorkflow",
+      "task:automaticColorsDimensionExecutorProfile",
+      "task:automaticColorsDimensionTaskState",
+      "task:automaticColorsDimensionPriority",
+      "task:automaticColorsDimensionOrigin",
+    ]);
+
+    const options = buildTaskColorRuleOptions(
+      { workflows: [], snapshots: {}, executorProfiles: [], activeWorkspaceId: null },
+      (key) => `translated:${key}`,
+    );
+    expect(options.origin.map((option) => option.label)).toEqual([
+      "translated:task:automaticColorsOriginManual",
+      "translated:task:automaticColorsOriginAgentCreated",
+      "translated:task:automaticColorsOriginRoutine",
+      "translated:task:automaticColorsOriginOnboarding",
+      "translated:task:automaticColorsOriginAutomationRun",
+      "translated:task:automaticColorsOriginAutomationTask",
+      "translated:task:automaticColorsOriginKanban",
+    ]);
   });
 
   it("uses executor profile ids instead of agent profile ids", () => {

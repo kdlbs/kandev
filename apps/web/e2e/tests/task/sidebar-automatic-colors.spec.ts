@@ -71,6 +71,26 @@ test.describe("Sidebar automatic task colors", () => {
 
     const filters = new SidebarFilterPopoverPage(testPage);
     await filters.open();
+    const disclosureSections = [
+      filters.popover.getByTestId("sidebar-sort-settings"),
+      filters.popover.getByTestId("sidebar-group-settings"),
+      filters.popover.getByTestId("task-row-settings"),
+    ];
+    const disclosureBottomInsets: number[] = [];
+    for (const section of disclosureSections) {
+      await expect(section).toHaveCSS("border-bottom-width", "1px");
+      disclosureBottomInsets.push(
+        await section.evaluate((element) => {
+          const toggle = element.querySelector("button");
+          if (!toggle) throw new Error("Disclosure toggle not found");
+          return element.getBoundingClientRect().bottom - toggle.getBoundingClientRect().bottom;
+        }),
+      );
+    }
+    expect(
+      Math.max(...disclosureBottomInsets) - Math.min(...disclosureBottomInsets),
+    ).toBeLessThanOrEqual(1);
+
     const automaticSettings = filters.popover.getByTestId("automatic-color-settings");
     await expect(automaticSettings).toBeVisible();
     await automaticSettings.getByTestId("automatic-color-settings-toggle").click();
@@ -78,9 +98,41 @@ test.describe("Sidebar automatic task colors", () => {
       "data-state",
       "checked",
     );
+    await expect(automaticSettings.getByTestId("automatic-colors-timing")).toContainText(
+      "Rules apply to existing and new sidebar tasks.",
+    );
+
+    const dimension = automaticSettings.getByTestId(
+      "automatic-color-dimension-desktop-failed-rule",
+    );
+    await dimension.click();
+    for (const label of [
+      "Workflow step",
+      "Repository",
+      "Workflow",
+      "Executor profile",
+      "Task state",
+      "Priority",
+      "Origin",
+    ]) {
+      await expect(testPage.getByRole("option", { name: label, exact: true })).toBeVisible();
+    }
+    await testPage.keyboard.press("Escape");
+
+    const output = automaticSettings.getByTestId("automatic-color-output-desktop-failed-rule");
+    await expect(output.locator("span.inline-block.rounded-full")).toHaveCount(1);
+
+    const timingHelp = automaticSettings.getByTestId("automatic-colors-help");
+    await timingHelp.hover();
+    const timingTooltip = testPage.getByRole("tooltip");
+    await expect(timingTooltip).toContainText(
+      "Rules run when tasks appear and whenever their workflow step",
+    );
     await prCapture.screenshot("desktop-automatic-task-colors", {
       caption: "Desktop automatic task color rules",
     });
+    await testPage.mouse.move(0, 0);
+    await expect(timingTooltip).toBeHidden();
     await filters.close();
 
     await apiClient.updateTaskState(task.task_id, "REVIEW");
