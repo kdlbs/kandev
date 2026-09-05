@@ -41,6 +41,7 @@ func provideLifecycleManager(
 	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
 	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
+	startupRecoveryGuard *lifecycle.RecoveryGuard,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
@@ -211,6 +212,12 @@ func provideLifecycleManager(
 	// StopAgentWithReason needs the capability state to decide survivable
 	// detach versus terminating stop on backend shutdown.
 	lifecycleMgr.SetAgentSurvivalEnabled(cfg.Features.AgentSurvival)
+	// AC-EXECUTORS-SURVIVAL-002.8: install the guard startupRecoveryGuard
+	// already took against the recovery-inventory read at startup step 3,
+	// before this backend's control-server adoption attempt ran, so Start's
+	// own (idempotent) guard-taking observes these sessions rather than
+	// leaving them unguarded until now.
+	lifecycleMgr.SetRecoveryGuard(startupRecoveryGuard)
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err

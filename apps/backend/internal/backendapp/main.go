@@ -498,6 +498,19 @@ func startServices( //nolint:cyclop
 	log.Info("ACP messages will be stored as comments")
 
 	// ============================================
+	// STARTUP RECOVERY GUARD (AC-EXECUTORS-SURVIVAL-002.8)
+	// ============================================
+	// Read the live standalone recovery-inventory records and take a guard
+	// for every session they name (except a confirmed passthrough one)
+	// before contacting any control server -- including the adoption attempt
+	// provideAgentctlLauncher makes just below. Deferring this until the
+	// lifecycle manager's own Start() runs would be too late: adoption is
+	// this backend's first control-server contact, and design 02 "Startup"
+	// step 3 must precede step 4.
+	startupRecoveryGuard := lifecycle.TakeStartupRecoveryGuards(
+		ctx, repos.Task, passthroughLookupFromSessionProvider(services.Task), log)
+
+	// ============================================
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
 	agentRuntimeAvailability := agentctlclient.NewAvailability(eventBus, log)
@@ -527,7 +540,8 @@ func startServices( //nolint:cyclop
 	}
 
 	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
-		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart, runCleanups, cancelContext)
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart,
+		startupRecoveryGuard, runCleanups, cancelContext)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -548,6 +562,7 @@ func startAgentInfrastructure(
 	agentRegistry *registry.Registry,
 	agentctlBinaryPath string,
 	recoveryDeadlineStart time.Time,
+	startupRecoveryGuard *lifecycle.RecoveryGuard,
 	runCleanups func(),
 	cancelContext context.CancelFunc,
 ) bool {
@@ -594,6 +609,7 @@ func startAgentInfrastructure(
 		services.Task,
 		services.Task,
 		repos.Task,
+		startupRecoveryGuard,
 	)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))

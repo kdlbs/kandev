@@ -574,6 +574,22 @@ func (m *Manager) SetPassthroughLookup(lookup PassthroughLookup) {
 	m.passthroughLookup = lookup
 }
 
+// SetRecoveryGuard installs a pre-populated recovery guard, replacing the
+// empty one NewManager created. Backend startup composition uses this to
+// hand Start the same guard TakeStartupRecoveryGuards already took sessions
+// on before any control server was contacted (AC-EXECUTORS-SURVIVAL-002.8) --
+// something that must happen ahead of an adoption attempt this Manager
+// doesn't yet exist to perform itself. Start's own guard-taking is still
+// safe to run afterward: AcquireOrObserve treats an already-guarded session
+// as observed, not re-acquired. A nil guard is ignored so a caller with
+// nothing pre-taken leaves the Manager's own default in place.
+func (m *Manager) SetRecoveryGuard(guard *RecoveryGuard) {
+	if guard == nil {
+		return
+	}
+	m.recoveryGuard = guard
+}
+
 // SetRecoveryDeadline installs the configured AC-EXECUTORS-SURVIVAL-003.7
 // recovery deadline duration. Zero (unset) falls back to the AC's own 30s
 // default at Start.

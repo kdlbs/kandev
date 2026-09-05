@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // ErrSessionRecoveryGuarded is returned when a launch is requested for a
@@ -184,4 +188,43 @@ func SessionsToGuard(ctx context.Context, liveSessionIDs []string, isPassthrough
 		guarded = append(guarded, sessionID)
 	}
 	return guarded
+}
+
+// TakeStartupRecoveryGuards reads the live standalone recovery-inventory
+// records and takes a guard for every session AC-EXECUTORS-SURVIVAL-002.8
+// requires one for, exactly as Manager.Start does, but callable before a
+// Manager exists at all. Backend startup composition calls this ahead of
+// its own control-server adoption attempt (design 02 "Startup" step 3 must
+// run before step 4): by the time Start would otherwise take these same
+// guards, that adoption contact has already happened. The returned guard is
+// meant to be installed via Manager.SetRecoveryGuard before Start runs.
+//
+// A nil passthroughLookup, or one that fails a given session's read, is
+// treated as "guard it" rather than "exclude it" -- the same fail-closed
+// default Start applies. A failed inventory read yields an empty guard
+// rather than an error, matching ListLiveStandaloneExecutorsRunning's own
+// best-effort contract.
+func TakeStartupRecoveryGuards(
+	ctx context.Context,
+	runningWriter ExecutorRunningWriter,
+	passthroughLookup PassthroughLookup,
+	log *logger.Logger,
+) *RecoveryGuard {
+	guard := NewRecoveryGuard()
+	lister, ok := runningWriter.(executorRunningLister)
+	if !ok {
+		return guard
+	}
+	records, err := lister.ListExecutorsRunningLiveStandalone(ctx)
+	if err != nil {
+		log.Warn("failed to read live standalone recovery-inventory records", zap.Error(err))
+		return guard
+	}
+	if passthroughLookup == nil {
+		passthroughLookup = func(context.Context, string) (bool, bool) { return false, false }
+	}
+	for _, sessionID := range SessionsToGuard(ctx, sessionIDsFromExecutorRunning(records), passthroughLookup) {
+		guard.AcquireOrObserve(sessionID)
+	}
+	return guard
 }
