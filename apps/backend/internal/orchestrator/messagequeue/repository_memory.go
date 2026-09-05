@@ -89,6 +89,20 @@ func (r *memoryRepository) CountPendingByTaskIDs(_ context.Context, taskIDs []st
 	return counts, nil
 }
 
+func (r *memoryRepository) CountQueueDepth(_ context.Context) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, entries := range r.entries {
+		for _, entry := range entries {
+			if !entry.IsReservedInFlight() {
+				count++
+			}
+		}
+	}
+	return count, nil
+}
+
 // Insert appends a new entry at the tail of the session's FIFO queue.
 func (r *memoryRepository) Insert(_ context.Context, msg *QueuedMessage, maxPerSession int) error {
 	r.mu.Lock()

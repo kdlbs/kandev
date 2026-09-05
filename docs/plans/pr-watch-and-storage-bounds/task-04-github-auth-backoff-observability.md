@@ -139,7 +139,9 @@ own file list and verification command targeting only `github`/`workflowsync`/
   `services.WorkflowSync` is already a stable, accessible field.
 - Queue/runtime, storage, database/WAL, and hydration-latency measures named in this
   task's Acceptance bullet — these belong to the plan's later storage/hydration waves
-  (Tasks 05-07) per the plan's AC14, and are not touched here.
+  (Tasks 05-07) per the plan's AC14. Final QA remediation completed those
+  aggregate metrics through the existing debug/status surfaces without
+  adding identifiers or user-controlled values as metric labels.
 - CAS retries/exhaustions metrics — already covered by Task 03's contention-safe
   projection work; not duplicated here.
 - Review/issue watch loops (if any exist outside the PR-watch poller) are not

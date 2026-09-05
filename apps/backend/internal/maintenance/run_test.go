@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 
 	"github.com/kandev/kandev/internal/backendapp/ownershiplock"
 	"github.com/kandev/kandev/internal/system/metrics"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // TestRunDryRunReportsCandidatesWithoutMutating is this wave's core dry-run
@@ -171,6 +174,77 @@ func TestRunExecuteDeletesCandidatesBackupAndIsIdempotent(t *testing.T) {
 	}
 	if second.Execution.TotalDeleted() != 0 {
 		t.Fatalf("second execute deleted %d rows, want 0 (idempotent)", second.Execution.TotalDeleted())
+	}
+}
+
+func TestRunExecutePreservesAuthoritativeGitSnapshots(t *testing.T) {
+	tests := []struct {
+		name         string
+		snapshotType models.SnapshotType
+		triggeredBy  string
+		archiveTask  bool
+	}{
+		{name: "archive", snapshotType: models.SnapshotTypeArchive, triggeredBy: "task_archived", archiveTask: true},
+		{name: "agent completed", snapshotType: models.SnapshotTypeStatusUpdate, triggeredBy: "agent_completed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newTestFixture(t)
+			base := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
+			taskID := "task-protected-" + strings.ReplaceAll(tt.name, " ", "-")
+			sessionID := "session-protected-" + strings.ReplaceAll(tt.name, " ", "-")
+			f.seedTask(taskID)
+			f.seedSession(taskID, sessionID)
+			if tt.archiveTask {
+				if _, err := f.repo.DB().Exec(`UPDATE tasks SET archived_at = ? WHERE id = ?`, base, taskID); err != nil {
+					t.Fatalf("archive task: %v", err)
+				}
+			}
+
+			seedSnapshot := func(id string, snapshotType models.SnapshotType, triggeredBy string, createdAt time.Time) {
+				t.Helper()
+				err := f.repo.CreateGitSnapshot(context.Background(), &models.GitSnapshot{
+					ID: id, SessionID: sessionID, SnapshotType: snapshotType, TriggeredBy: triggeredBy,
+					Branch: "feature/protected", RemoteBranch: "origin/feature/protected",
+					HeadCommit: "protected-head", BaseCommit: "protected-base",
+					Files:     map[string]interface{}{"protected.go": map[string]interface{}{"status": "modified"}},
+					CreatedAt: createdAt,
+				})
+				if err != nil {
+					t.Fatalf("CreateGitSnapshot(%s): %v", id, err)
+				}
+			}
+
+			protectedID := sessionID + "-authoritative"
+			seedSnapshot(protectedID, tt.snapshotType, tt.triggeredBy, base)
+			seedSnapshot(sessionID+"-live-old", models.SnapshotTypeStatusUpdate, sqlite.TriggeredByLiveMonitor, base.Add(time.Minute))
+			seedSnapshot(sessionID+"-live-new", models.SnapshotTypeStatusUpdate, sqlite.TriggeredByLiveMonitor, base.Add(2*time.Minute))
+
+			before, err := f.repo.GetLatestGitSnapshot(context.Background(), sessionID)
+			if err != nil {
+				t.Fatalf("GetLatestGitSnapshot(before): %v", err)
+			}
+			if before.ID != protectedID {
+				t.Fatalf("authoritative snapshot before maintenance = %s, want %s", before.ID, protectedID)
+			}
+
+			outcome, err := Run(context.Background(), t.TempDir(), "sqlite", f.dbPath, RunOptions{Execute: true}, nil)
+			if err != nil {
+				t.Fatalf("Run(execute): %v", err)
+			}
+			if outcome.Execution.DeletedGitSnapshots != 1 {
+				t.Fatalf("DeletedGitSnapshots = %d, want only the older live duplicate", outcome.Execution.DeletedGitSnapshots)
+			}
+
+			after, err := f.repo.GetLatestGitSnapshot(context.Background(), sessionID)
+			if err != nil {
+				t.Fatalf("GetLatestGitSnapshot(after): %v", err)
+			}
+			if after.ID != protectedID {
+				t.Fatalf("authoritative snapshot after maintenance = %s, want %s", after.ID, protectedID)
+			}
+		})
 	}
 }
 

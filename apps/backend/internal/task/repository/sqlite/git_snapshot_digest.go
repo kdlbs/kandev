@@ -95,11 +95,11 @@ func (r *Repository) backfillGitSnapshotContentDigests() error {
 	return nil
 }
 
-// DuplicateGitSnapshotCandidate identifies a git snapshot row that shares
-// its (session_id, content_digest) pair with a newer row for the same
-// session - i.e. removing it would not change what GetLatestGitSnapshot /
-// GetFirstGitSnapshot or snapshotRankExpr currently select, since the
-// newest row in each duplicate group is always retained.
+// DuplicateGitSnapshotCandidate identifies a non-authoritative git snapshot
+// row that shares its (session_id, content_digest) pair with a newer row for
+// the same session. Archive and agent-completed rows are never candidates:
+// their lifecycle purpose can make them authoritative even when a newer live
+// observation has identical Git content.
 type DuplicateGitSnapshotCandidate struct {
 	ID            string
 	SessionID     string
@@ -108,17 +108,19 @@ type DuplicateGitSnapshotCandidate struct {
 
 // ListDuplicateGitSnapshotCandidates returns content-duplicate git snapshot
 // rows across all sessions: for every (session_id, content_digest) group
-// with more than one row, every row except the newest (highest created_at,
-// then id, matching snapshotRankExpr's tie-break) is reported. Read-only and
+// with more than one row, superseded live/status rows are reported while
+// archive and agent-completed rows remain protected. Read-only and
 // non-destructive - CreateGitSnapshot always records every poll (per the
 // plan's "destructive maintenance is explicit, dry-run-first" constraint),
-// so this is the sole place duplicates are identified, for a later,
-// explicit maintenance command (Task 06) to act on.
+// so this is the sole place duplicates are identified for explicit
+// maintenance to act on.
 func (r *Repository) ListDuplicateGitSnapshotCandidates(ctx context.Context, limit int) ([]DuplicateGitSnapshotCandidate, error) {
 	query := `
 		SELECT s.id, s.session_id, s.content_digest
 		FROM task_session_git_snapshots s
 		WHERE s.content_digest <> ''
+		  AND s.snapshot_type <> 'archive'
+		  AND s.triggered_by <> 'agent_completed'
 		  AND EXISTS (
 			  SELECT 1 FROM task_session_git_snapshots newer
 			  WHERE newer.session_id = s.session_id

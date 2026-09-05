@@ -103,6 +103,16 @@ that endpoint. Ordinary user/agent message content (never routed through
 (the common case) are stored inline exactly as before — nothing is dropped or
 truncated for either.
 
+The web client's `use-shell-command-output.ts` uses one module-shared,
+200-entry bounded payload cache keyed by session/message identity. Concurrent
+renderers join the same in-flight request, an underlying request is aborted
+only after its last consumer closes, and a terminal payload survives
+unmount/reopen without another download. Running snapshots continue polling
+and terminal transitions still replace an obsolete in-flight read with one
+final fetch. Hook regressions cover concurrent instances and reopen reuse in
+addition to the existing polling, backoff, abort, and terminal-transition
+cases.
+
 **Git snapshot content dedup (read-only retention candidates).**
 `task_session_git_snapshots` gained `content_digest` (migration
 `migrateGitSnapshotContentDigest` + a Go-side backfill for historical rows,
@@ -210,10 +220,17 @@ Two pre-existing failures observed in `internal/task/service`/
 identically with this wave's changes fully stashed, so unrelated to this
 task.
 
-**Deferred to Task 06** (the maintenance command, explicitly out of scope
-here): actually acting on `ListDuplicateGitSnapshotCandidates` /
-`ListObsoletePlanRevisionCandidates` / stale `task_message_payloads` rows
-(dry-run-first, backup-gated, offline/exclusive per the plan's constraints),
-and the multi-gigabyte-equivalent end-to-end pagination-cost fixture (AC11)
-belongs with the HTTP/WS bounded-read surface once the maintenance command
-exists to generate large fixtures safely.
+**Completed by Tasks 06-07 and final QA remediation.** Task 06 acts on
+`ListDuplicateGitSnapshotCandidates` / `ListObsoletePlanRevisionCandidates` /
+stale `task_message_payloads` rows through the dry-run-first, backup-gated,
+offline command. The final retention regression additionally proves an older
+authoritative archive or `agent_completed` snapshot remains selected and
+preserved when a newer live-monitor row has the same content digest.
+
+The Task 07 large-history fixture now creates one million lightweight message
+rows and 4 GiB of logically externalized payload history in a temporary
+SQLite database. Fifteen page reads return exactly 50 lightweight messages,
+use the prompt-order index, never reference the payload table, and increment
+no payload-hydration metric. It records p50/p95/max latency as diagnostic
+evidence while keeping pass/fail assertions on deterministic query, row, byte,
+and hydration bounds rather than a host-dependent absolute latency threshold.

@@ -136,6 +136,12 @@ func (s *Service) ListActivePRWatches(ctx context.Context) ([]*PRWatch, error) {
 	return s.store.ListActivePRWatches(ctx)
 }
 
+// PRWatchCardinality returns aggregate watch-health gauges without exposing
+// watch identities.
+func (s *Service) PRWatchCardinality(ctx context.Context) (PRWatchCardinality, error) {
+	return s.store.PRWatchCardinality(ctx)
+}
+
 // ListActivePRWatchesForWorkspace returns active PR watches for one authorized
 // workspace. The all-workspaces variant is reserved for identity-less pollers.
 func (s *Service) ListActivePRWatchesForWorkspace(ctx context.Context, workspaceID string) ([]*PRWatch, error) {

@@ -2063,6 +2063,63 @@ func (s *Store) ListActivePRWatches(ctx context.Context) ([]*PRWatch, error) {
 	return watches, err
 }
 
+// PRWatchCardinality is the aggregate, identity-free state exported for
+// operational metrics. Counts never contain task, repository, branch, or
+// workspace labels.
+type PRWatchCardinality struct {
+	Active     int64
+	Searching  int64
+	Duplicates int64
+	Orphans    int64
+}
+
+// PRWatchCardinality returns current watch health across the installation.
+// The duplicate count is the number of rows beyond one canonical survivor;
+// unique indexes normally keep it at zero, making a non-zero value a direct
+// corruption/migration signal.
+func (s *Store) PRWatchCardinality(ctx context.Context) (PRWatchCardinality, error) {
+	var out PRWatchCardinality
+	activeQuery := `
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN w.pr_number = 0 THEN 1 ELSE 0 END), 0)
+		FROM github_pr_watches w
+		INNER JOIN tasks t ON t.id = w.task_id
+		WHERE t.archived_at IS NULL`
+	if err := s.ro.QueryRowContext(ctx, activeQuery).Scan(&out.Active, &out.Searching); err != nil {
+		return PRWatchCardinality{}, fmt.Errorf("count active PR watches: %w", err)
+	}
+
+	duplicateQueries := []string{
+		`SELECT COALESCE(SUM(group_count - 1), 0) FROM (
+			SELECT COUNT(*) AS group_count FROM github_pr_watches
+			WHERE pr_number = 0 GROUP BY task_id, repository_id, branch HAVING COUNT(*) > 1
+		) duplicate_groups`,
+		`SELECT COALESCE(SUM(group_count - 1), 0) FROM (
+			SELECT COUNT(*) AS group_count FROM github_pr_watches
+			WHERE pr_number <> 0 GROUP BY task_id, repository_id, pr_number HAVING COUNT(*) > 1
+		) duplicate_groups`,
+	}
+	for _, query := range duplicateQueries {
+		var duplicates int64
+		if err := s.ro.QueryRowContext(ctx, query).Scan(&duplicates); err != nil {
+			return PRWatchCardinality{}, fmt.Errorf("count duplicate PR watches: %w", err)
+		}
+		out.Duplicates += duplicates
+	}
+
+	orphanQuery := `
+		SELECT COUNT(*) FROM github_pr_watches w
+		LEFT JOIN tasks t ON t.id = w.task_id
+		LEFT JOIN task_repositories tr ON tr.repository_id = w.repository_id AND tr.task_id = w.task_id
+		WHERE t.id IS NULL OR (w.repository_id <> '' AND tr.repository_id IS NULL)`
+	if err := s.ro.QueryRowContext(ctx, orphanQuery).Scan(&out.Orphans); err != nil {
+		fallback := `SELECT COUNT(*) FROM github_pr_watches w LEFT JOIN tasks t ON t.id = w.task_id WHERE t.id IS NULL`
+		if fallbackErr := s.ro.QueryRowContext(ctx, fallback).Scan(&out.Orphans); fallbackErr != nil {
+			return PRWatchCardinality{}, fmt.Errorf("count orphaned PR watches: %w", err)
+		}
+	}
+	return out, nil
+}
+
 // ListActivePRWatchesForWorkspace returns active watches only for one workspace.
 func (s *Store) ListActivePRWatchesForWorkspace(ctx context.Context, workspaceID string) ([]*PRWatch, error) {
 	var watches []*PRWatch

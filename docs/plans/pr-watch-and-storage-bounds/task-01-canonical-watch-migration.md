@@ -1,7 +1,7 @@
 ---
 id: "01-canonical-watch-migration"
 title: "Migrate PR watches to task ownership"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -54,4 +54,38 @@ Report migration before/after fixture counts, the expected red failure, backup b
 
 ## Results
 
-Pending.
+**Status: done.**
+
+`github_pr_watches` now uses task-owned canonical identities. Searching rows
+are unique by `(task_id, repository_id, branch)` and discovered rows by
+`(task_id, repository_id, pr_number)` through partial unique indexes;
+`session_id` remains optional provenance and cannot create another watch.
+Service lookups, create/ensure behavior, and collision-safe PR-number updates
+all use those task-owned keys, so concurrent and resumed sessions converge on
+one row.
+
+The startup migration runs transactionally after the existing SQLite snapshot
+boundary. It removes watches for missing tasks or detached repositories,
+clears missing-session provenance, prefers a discovered row while merging
+newest status/check/review/comment watermarks, resolves cross-branch PR-number
+collisions, and is idempotent on a second boot. A completed provenance session
+does not make a non-archived Review task ineligible for monitoring.
+
+Focused migration and service regressions cover 50 historical sessions
+collapsing to one watch, discovered-row preference, PR-number collisions,
+orphan cleanup, provenance clearing, database-enforced uniqueness,
+create/ensure deduplication, and completed-session Review monitoring. The
+later sustained-load fixture additionally proves those 50 historical sessions
+still produce one canonical polling target per cycle.
+
+Verification:
+
+~~~text
+go test ./internal/github -run 'Test.*(PRWatch|WatchMigration|BackfillPRWatches|Review).*' -count=1 -v
+go test ./internal/persistence ./internal/github -count=1
+golangci-lint run ./internal/github/...
+~~~
+
+All commands passed when this wave was delivered; Task 07's integrated load
+validation and the final PR remediation rerun the affected canonical-watch
+coverage against the current branch head.

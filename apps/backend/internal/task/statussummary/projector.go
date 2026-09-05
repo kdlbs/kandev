@@ -318,7 +318,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.MessageQueueStatusChanged,
 	}
 	for _, pattern := range patterns {
-		sub, err := p.eventBus.Subscribe(pattern, p.handleEvent)
+		sub, err := p.eventBus.Subscribe(pattern, p.HandleEvent)
 		if err != nil {
 			p.Close()
 			return fmt.Errorf("subscribe task status summary source %q: %w", pattern, err)
@@ -350,7 +350,11 @@ func (p *Projector) Close() {
 // HandleEvent is exported for focused tests and for callers that already
 // multiplex event-bus subscriptions. Start normally installs it directly.
 func (p *Projector) HandleEvent(ctx context.Context, event *bus.Event) error {
-	return p.handleEvent(ctx, event)
+	err := p.handleEvent(ctx, event)
+	if err != nil {
+		recordHandlerFailure()
+	}
+	return err
 }
 
 func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
@@ -485,11 +489,13 @@ func (p *Projector) persistPendingRefreshLocked(
 			p.applySourceEventLocked(state, eventType, eventData)
 		}
 		if attempt < maxPendingPersistAttempts-1 {
+			recordCASRetry()
 			if err := p.waitForCASRetry(ctx, attempt); err != nil {
 				return fmt.Errorf("wait before CAS retry refreshing pending task status %q: %w", taskID, err)
 			}
 		}
 	}
+	recordCASExhaustion()
 	p.logger.Warn("exhausted CAS retries refreshing pending task status",
 		zap.String("task_id", taskID),
 		zap.Int("attempts", maxPendingPersistAttempts))
@@ -542,11 +548,13 @@ func (p *Projector) applyQueueStatusEvent(
 		}
 		sourceChanged = true
 		if attempt < maxQueueCountPersistAttempts-1 {
+			recordCASRetry()
 			if err := p.waitForCASRetry(ctx, attempt); err != nil {
 				return fmt.Errorf("wait before CAS retry updating queued prompt count %q: %w", taskID, err)
 			}
 		}
 	}
+	recordCASExhaustion()
 	// The count self-corrects on the next queue event or list load, but a
 	// sustained contention run is worth surfacing so a repeated rejector is not
 	// silently starved.

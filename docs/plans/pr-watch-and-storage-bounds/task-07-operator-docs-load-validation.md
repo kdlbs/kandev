@@ -136,5 +136,32 @@ package needed — both reused existing package test helpers):
 Results remain untouched and out of scope for this wave; this task's
 verification commands do not target `internal/launcher`.
 
+**Final QA amendments.** The initial load suite covered PR polling and status
+projection but did not exercise the large-history half of the accepted
+storage contract. `message_history_load_test.go` now creates 1,000,000
+lightweight message rows and 64 external payload records representing 4 GiB
+of logical tool-output history in a temporary SQLite database. The payload
+bodies are bounded sentinels because integrity and real gzip round trips are
+already covered separately; this fixture isolates normal list amplification
+without allocating a multi-gigabyte artifact. It asserts the SQL has a
+`LIMIT`, does not reference the payload table, uses
+`idx_messages_prompt_order`, returns exactly 50 rows plus the `hasMore`
+sentinel, returns only bounded lightweight content, and records zero explicit
+payload hydrations over 15 repeated reads. A focused run on 2026-09-05
+measured p50 `262.638µs`, p95 `355.927µs`, and max `355.927µs` after fixture
+creation. These latency values are diagnostic rather than a brittle absolute
+pass threshold: the approved risk policy treats structural query/row/payload
+bounds as authoritative across heterogeneous CI hosts.
+
+The final observability pass publishes aggregate counters/gauges for active,
+searching, duplicate, and orphan PR watches; canonical poll targets; status
+projection CAS retries/exhaustions/handler failures; logical message,
+metadata, compressed payload, and Git snapshot bytes; database/WAL bytes;
+bounded payload-hydration latency buckets; current unreserved queue depth; and
+active runtimes. Tests pin every public metric name and update path. Labels
+are absent or limited to bounded success/error and latency-bucket values.
+The operator contract and typed database-stat fields are documented in
+[PR-watch and bounded-storage diagnostics](../../public/cli.md#pr-watch-and-bounded-storage-diagnostics).
+
 This is the final task in the plan; all seven waves (Tasks 01-07) are now
 implemented, tested, documented, and committed.

@@ -115,12 +115,16 @@ func TestCreateMessageExternalizesLargeShellOutputAndRehydrates(t *testing.T) {
 	}
 
 	// Explicit authorized rehydration restores the full output.
+	hydrationsBefore := metricMapValue(t, messagePayloadHydrationsTotal, "outcome=success")
 	if err := repo.RehydrateMessagePayload(ctx, got); err != nil {
 		t.Fatalf("RehydrateMessagePayload: %v", err)
 	}
 	output, ok := models.ExtractShellExecOutput(got.Metadata)
 	if !ok || output.Stdout != largeStdout {
 		t.Fatalf("rehydrated stdout length = %d, want %d (ok=%v)", len(output.Stdout), len(largeStdout), ok)
+	}
+	if delta := metricMapValue(t, messagePayloadHydrationsTotal, "outcome=success") - hydrationsBefore; delta != 1 {
+		t.Fatalf("successful hydration metric delta = %d, want 1", delta)
 	}
 }
 

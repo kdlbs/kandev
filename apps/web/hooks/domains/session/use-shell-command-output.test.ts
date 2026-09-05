@@ -11,6 +11,8 @@ vi.mock("@/lib/api/domains/session-api", () => ({
 }));
 
 const fetchOutputMock = vi.mocked(fetchShellCommandOutput);
+let messageSequence = 0;
+let messageId = "";
 
 function snapshot(
   status: string,
@@ -18,7 +20,7 @@ function snapshot(
   output: ShellCommandOutputSnapshot["output"] = {},
 ): ShellCommandOutputSnapshot {
   return {
-    message_id: "message-1",
+    message_id: messageId,
     status,
     updated_at: "2026-07-16T12:00:00Z",
     output: { ...output, ...(stdout ? { stdout } : {}) },
@@ -45,6 +47,8 @@ async function flushPromises() {
 beforeEach(() => {
   vi.useFakeTimers();
   fetchOutputMock.mockReset();
+  messageSequence += 1;
+  messageId = `message-${messageSequence}`;
 });
 
 afterEach(() => {
@@ -58,7 +62,7 @@ describe("useShellCommandOutput fetching", () => {
       ({ isOpen }) =>
         useShellCommandOutput({
           sessionId: "session-1",
-          messageId: "message-1",
+          messageId,
           isOpen,
           messageStatus: "complete",
         }),
@@ -85,7 +89,7 @@ describe("useShellCommandOutput fetching", () => {
     const { result } = renderHook(() =>
       useShellCommandOutput({
         sessionId: "session-1",
-        messageId: "message-1",
+        messageId,
         isOpen: true,
         messageStatus: "running",
       }),
@@ -112,7 +116,7 @@ describe("useShellCommandOutput fetching", () => {
     const { result } = renderHook(() =>
       useShellCommandOutput({
         sessionId: "session-1",
-        messageId: "message-1",
+        messageId,
         isOpen: true,
         messageStatus: "pending",
       }),
@@ -132,7 +136,7 @@ describe("useShellCommandOutput fetching", () => {
     const { result } = renderHook(() =>
       useShellCommandOutput({
         sessionId: "session-1",
-        messageId: "message-1",
+        messageId,
         isOpen: true,
         messageStatus: "running",
       }),
@@ -156,6 +160,63 @@ describe("useShellCommandOutput fetching", () => {
   });
 });
 
+describe("useShellCommandOutput shared cache", () => {
+  it("deduplicates a concurrent request across hook instances", async () => {
+    const pending = deferred<ShellCommandOutputSnapshot>();
+    fetchOutputMock.mockReturnValue(pending.promise);
+
+    const { result } = renderHook(() => {
+      const first = useShellCommandOutput({
+        sessionId: "session-1",
+        messageId,
+        isOpen: true,
+        messageStatus: "complete",
+      });
+      const second = useShellCommandOutput({
+        sessionId: "session-1",
+        messageId,
+        isOpen: true,
+        messageStatus: "complete",
+      });
+      return { first, second };
+    });
+
+    expect(fetchOutputMock).toHaveBeenCalledTimes(1);
+    pending.resolve(snapshot("complete", "shared", { exit_code: 0 }));
+    await flushPromises();
+    expect(result.current.first.snapshot?.output.stdout).toBe("shared");
+    expect(result.current.second.snapshot?.output.stdout).toBe("shared");
+  });
+
+  it("reuses a terminal payload after the renderer is closed and reopened", async () => {
+    fetchOutputMock.mockResolvedValue(snapshot("complete", "cached", { exit_code: 0 }));
+    const first = renderHook(() =>
+      useShellCommandOutput({
+        sessionId: "session-1",
+        messageId,
+        isOpen: true,
+        messageStatus: "complete",
+      }),
+    );
+    await flushPromises();
+    expect(first.result.current.snapshot?.output.stdout).toBe("cached");
+    first.unmount();
+
+    const reopened = renderHook(() =>
+      useShellCommandOutput({
+        sessionId: "session-1",
+        messageId,
+        isOpen: true,
+        messageStatus: "complete",
+      }),
+    );
+    await flushPromises();
+
+    expect(reopened.result.current.snapshot?.output.stdout).toBe("cached");
+    expect(fetchOutputMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("useShellCommandOutput cleanup", () => {
   it("aborts and ignores stale output after collapse", async () => {
     const pending = deferred<ShellCommandOutputSnapshot>();
@@ -168,7 +229,7 @@ describe("useShellCommandOutput cleanup", () => {
       ({ isOpen }) =>
         useShellCommandOutput({
           sessionId: "session-1",
-          messageId: "message-1",
+          messageId,
           isOpen,
           messageStatus: "running",
         }),
@@ -196,7 +257,7 @@ describe("useShellCommandOutput cleanup", () => {
       ({ messageStatus }) =>
         useShellCommandOutput({
           sessionId: "session-1",
-          messageId: "message-1",
+          messageId,
           isOpen: true,
           messageStatus,
         }),
@@ -227,7 +288,7 @@ describe("useShellCommandOutput terminal lifecycle", () => {
     const unmounted = renderHook(() =>
       useShellCommandOutput({
         sessionId: "session-1",
-        messageId: "message-1",
+        messageId,
         isOpen: true,
         messageStatus: "running",
       }),
@@ -247,7 +308,7 @@ describe("useShellCommandOutput terminal lifecycle", () => {
         ({ messageStatus }) =>
           useShellCommandOutput({
             sessionId: "session-1",
-            messageId: "message-1",
+            messageId,
             isOpen: true,
             messageStatus,
           }),

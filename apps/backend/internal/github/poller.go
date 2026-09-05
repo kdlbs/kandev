@@ -180,6 +180,11 @@ func (p *Poller) checkPRWatches(ctx context.Context) {
 		p.logger.Error("failed to list PR watches", zap.Error(err))
 		return
 	}
+	if cardinality, metricErr := p.service.PRWatchCardinality(ctx); metricErr != nil {
+		p.logger.Debug("failed to observe PR watch cardinality", zap.Error(metricErr))
+	} else {
+		recordPRWatchCardinality(cardinality)
+	}
 	if len(watches) == 0 {
 		return
 	}
@@ -265,6 +270,7 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 	}
 	results := make([]PRWatchSyncResult, 0, len(watches))
 	for workspaceID, workspaceWatches := range byWorkspace {
+		incCanonicalPollRequests(len(workspaceWatches))
 		workspaceResults, err := p.service.SyncWorkspaceWatchesBatched(ctx, workspaceID, workspaceWatches)
 		p.circuits.recordOutcome(workspaceID, classifyPollErr(err), time.Now().UTC())
 		if err != nil {
@@ -329,6 +335,7 @@ func splitPRWatches(watches []*PRWatch) (numbered, searching []*PRWatch) {
 }
 
 func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
+	incCanonicalPollRequests(1)
 	// PRWatch with pr_number=0 means we're still searching for a PR on this branch.
 	if watch.PRNumber == 0 {
 		p.detectPRForWatch(ctx, watch)

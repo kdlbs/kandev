@@ -2,11 +2,34 @@ package messagequeue
 
 import (
 	"context"
+	"expvar"
 	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+func TestMessageQueueDepthMetricPublished(t *testing.T) {
+	if expvar.Get("message_queue_depth") == nil {
+		t.Fatal("message_queue_depth expvar is not published")
+	}
+}
+
+func TestMessageQueueDepthGaugeCountsVisibleEntries(t *testing.T) {
+	repo := NewMemoryRepository()
+	provider := repo.(queueDepthCounter)
+	registerQueueDepthProvider(provider)
+	ctx := context.Background()
+	for _, content := range []string{"first", "second"} {
+		message := &QueuedMessage{SessionID: "session-depth", TaskID: "task-depth", Content: content, QueuedBy: QueuedByUser}
+		if err := repo.Insert(ctx, message, 0); err != nil {
+			t.Fatalf("Insert(%s): %v", content, err)
+		}
+	}
+	if got := currentMessageQueueDepth(); got != 2 {
+		t.Fatalf("message queue depth = %v, want 2", got)
+	}
+}
 
 // repositoriesUnderTest returns one SQLite and one memory Repository so the
 // pending-count contract is proven on both storage backends.

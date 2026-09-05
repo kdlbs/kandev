@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"expvar"
 	"fmt"
 	"io"
 	"os"
@@ -265,6 +266,51 @@ func TestStats_ReturnsPathSizeAndSchemaVersion(t *testing.T) {
 	wantBackupDir := filepath.Join(dataDir, "backups")
 	if got := payload["backup_directory"]; got != wantBackupDir {
 		t.Errorf("backup_directory = %v, want %q", got, wantBackupDir)
+	}
+}
+
+func TestStatsReportsLogicalStorageAndDatabaseGauges(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+	for _, statement := range []string{
+		`CREATE TABLE task_session_messages (content TEXT, metadata TEXT)`,
+		`CREATE TABLE task_message_payloads (compressed_content BLOB)`,
+		`CREATE TABLE task_session_git_snapshots (files TEXT, metadata TEXT)`,
+		`INSERT INTO task_session_messages VALUES ('hello', '{"a":1}')`,
+		`INSERT INTO task_message_payloads VALUES (x'01020304')`,
+		`INSERT INTO task_session_git_snapshots VALUES ('{"f":1}', '{"m":2}')`,
+	} {
+		if _, err := svc.pool.Writer().Exec(statement); err != nil {
+			t.Fatalf("seed storage metrics with %q: %v", statement, err)
+		}
+	}
+
+	stats, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	payload := statsPayload(t, stats)
+	for field, want := range map[string]float64{
+		"message_content_bytes":  5,
+		"message_metadata_bytes": 7,
+		"message_payload_bytes":  4,
+		"git_snapshot_bytes":     14,
+	} {
+		if got := payload[field]; got != want {
+			t.Errorf("%s = %v, want %.0f", field, got, want)
+		}
+	}
+
+	for _, name := range []string{
+		"database_size_bytes",
+		"database_wal_size_bytes",
+		"task_message_content_bytes",
+		"task_message_metadata_bytes",
+		"task_message_payload_compressed_bytes",
+		"task_git_snapshot_bytes",
+	} {
+		if expvar.Get(name) == nil {
+			t.Errorf("expvar %q is not published", name)
+		}
 	}
 }
 

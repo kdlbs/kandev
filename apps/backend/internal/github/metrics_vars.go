@@ -20,6 +20,11 @@ var (
 	// credential change (rotate/reconnect) is promptly detected.
 	authCircuitSkipsTotal  = expvar.NewInt("github_pr_watch_auth_circuit_skips_total")
 	authCircuitResetsTotal = expvar.NewInt("github_pr_watch_auth_circuit_resets_total")
+	prWatchActive          = expvar.NewInt("github_pr_watch_active")
+	prWatchSearching       = expvar.NewInt("github_pr_watch_searching")
+	prWatchDuplicates      = expvar.NewInt("github_pr_watch_duplicates")
+	prWatchOrphans         = expvar.NewInt("github_pr_watch_orphans")
+	canonicalPollRequests  = expvar.NewInt("github_pr_watch_canonical_poll_requests_total")
 )
 
 // outcomeMetricLabel builds a "k1=v1;k2=v2;..." label string for an expvar
@@ -59,4 +64,15 @@ func incAuthCircuitSkip() {
 // reset (rotate/reconnect/revoke-then-reconfigure detected).
 func incAuthCircuitReset() {
 	authCircuitResetsTotal.Add(1)
+}
+
+func recordPRWatchCardinality(cardinality PRWatchCardinality) {
+	prWatchActive.Set(cardinality.Active)
+	prWatchSearching.Set(cardinality.Searching)
+	prWatchDuplicates.Set(cardinality.Duplicates)
+	prWatchOrphans.Set(cardinality.Orphans)
+}
+
+func incCanonicalPollRequests(count int) {
+	canonicalPollRequests.Add(int64(count))
 }

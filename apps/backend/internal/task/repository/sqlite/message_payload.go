@@ -103,12 +103,14 @@ func (r *Repository) putMessagePayload(ctx context.Context, digest string, paylo
 // This is the explicit, authorized single-message detail load: callers must
 // already have resolved and authorized message (see httpGetShellOutput,
 // which fetches by ID under the requesting session).
-func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *models.Message) error {
+func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *models.Message) (err error) {
 	if message == nil || message.PayloadDigest == "" {
 		return nil
 	}
+	startedAt := time.Now()
+	defer func() { recordMessagePayloadHydration(time.Since(startedAt), err) }()
 	var uncompressedSize, compressedSize, actualCompressedSize int64
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT uncompressed_size, compressed_size, length(compressed_content) FROM task_message_payloads WHERE digest = ?
 	`), message.PayloadDigest).Scan(&uncompressedSize, &compressedSize, &actualCompressedSize)
 	if err != nil {
