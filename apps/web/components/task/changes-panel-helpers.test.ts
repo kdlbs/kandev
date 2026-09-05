@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildPrByRepoMap,
   computeReviewProgress,
+  mapToChangedFiles,
   mapPRFilesToChangedFiles,
   selectPRFilesForReviewProgress,
   type ReviewProgressPRFile,
@@ -11,6 +12,27 @@ import type { PRDiffFile } from "@/lib/types/github";
 
 const PRIMARY_PR_ID = "primary-pr";
 const RENAMED_PATH = "src/renamed.ts";
+
+describe("mapToChangedFiles", () => {
+  it("preserves a projected mixed-change layer", () => {
+    expect(
+      mapToChangedFiles([
+        {
+          path: "src/mixed.ts",
+          status: "modified",
+          staged: true,
+          change_layer: "staged",
+        },
+      ]),
+    ).toEqual([
+      expect.objectContaining({
+        path: "src/mixed.ts",
+        staged: true,
+        changeLayer: "staged",
+      }),
+    ]);
+  });
+});
 
 function diffFile(overrides: Partial<PRDiffFile>): PRDiffFile {
   return {

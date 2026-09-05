@@ -188,6 +188,21 @@ func TestDeleteTaskCleanupRemovesEveryWorktreeAfterLastSessionDeletedAndRestart(
 	if err := svc.DeleteTask(ctx, taskID); err != nil {
 		t.Fatalf("delete task: %v", err)
 	}
+	var encodedSnapshot string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT resource_snapshot FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = 'delete'
+		ORDER BY created_at DESC LIMIT 1
+	`, taskID).Scan(&encodedSnapshot); err != nil {
+		t.Fatalf("load delete cleanup snapshot: %v", err)
+	}
+	var cleanupSnapshot taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(encodedSnapshot), &cleanupSnapshot); err != nil {
+		t.Fatalf("decode delete cleanup snapshot: %v", err)
+	}
+	if len(cleanupSnapshot.WorktreeHeadOIDs) != 2 {
+		t.Fatalf("snapshot worktree identities = %#v, want both repository commits", cleanupSnapshot.WorktreeHeadOIDs)
+	}
 	var jobID string
 	if err := repo.DB().QueryRowContext(ctx, `
 		SELECT id FROM task_resource_cleanup_jobs

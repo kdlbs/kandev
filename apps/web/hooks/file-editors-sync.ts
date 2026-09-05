@@ -10,6 +10,18 @@ import { updatePanelAfterSave } from "./use-file-save-delete";
 import type { FileInfo } from "@/lib/state/store";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
+function buildChangeFacetSignature(facet: FileInfo["staged_change"]): string {
+  if (!facet) return "";
+  return [
+    facet.status,
+    facet.additions ?? 0,
+    facet.deletions ?? 0,
+    facet.old_path ?? "",
+    facet.diff ?? "",
+    facet.diff_skip_reason ?? "",
+  ].join("\0");
+}
+
 /**
  * Builds a stable signature string from a file's git status entry. The hook
  * compares signatures across renders to decide whether the editor's content
@@ -24,6 +36,8 @@ export function buildGitFileSignature(file: FileInfo | undefined): string {
     String(file.deletions ?? 0),
     file.old_path ?? "",
     file.diff ?? "",
+    buildChangeFacetSignature(file.staged_change),
+    buildChangeFacetSignature(file.unstaged_change),
   ].join("|");
 }
 

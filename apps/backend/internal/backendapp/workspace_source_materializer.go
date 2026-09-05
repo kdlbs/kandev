@@ -118,6 +118,13 @@ func (m *workspaceSourceMaterializer) MaterializeWorkspaceSources(ctx context.Co
 		return &taskservice.WorkspaceSourceMaterializationResult{}, nil
 	}
 	if !isHostWorkspaceExecutor(state.environment.ExecutorType) {
+		if !models.IsRemoteExecutorType(models.ExecutorType(state.environment.ExecutorType)) {
+			return nil, fmt.Errorf(
+				"%w: executor %q cannot materialize workspace sources",
+				taskservice.ErrUnsupportedWorkspaceSource,
+				state.environment.ExecutorType,
+			)
+		}
 		return m.materializeRemoteWorkspaceSources(ctx, taskID, state, batch)
 	}
 	return m.materializeHostWorkspaceSources(ctx, taskID, state, batch)

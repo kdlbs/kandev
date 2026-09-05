@@ -230,7 +230,7 @@ func (h *CoordinatorGrantHandlers) httpListWorkspaceCoordinatorGrants(c *gin.Con
 	}
 	workspaceID := c.Param("id")
 	taskID := c.Query("task_id")
-	includeRevoked := c.Query("include_revoked") == "true"
+	includeRevoked := c.Query("include_revoked") == queryValueTrue
 
 	grants, err := h.repo.ListCoordinatorGrants(c.Request.Context(), workspaceID, taskID, includeRevoked)
 	if err != nil {

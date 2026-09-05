@@ -17,6 +17,13 @@ import (
 // of registering and returning broken endpoints.
 func (h *Handlers) SetHandoffService(svc *service.HandoffService) {
 	h.handoffSvc = svc
+	if h.taskSvc != nil {
+		if svc == nil {
+			h.taskSvc.SetWorkspacePolicyAttacher(nil)
+		} else {
+			h.taskSvc.SetWorkspacePolicyAttacher(svc)
+		}
+	}
 }
 
 // handleListRelatedTasks dispatches mcp.list_related_tasks.

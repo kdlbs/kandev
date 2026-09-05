@@ -33,7 +33,7 @@ the database stats request returns the error. PostgreSQL and other drivers
 return an empty value because they have no local SQLite snapshot directory.
 
 The frontend adds `backup_directory` to `DatabaseStats`.
-`DataStorageSettings` reads the shared database state after `DatabaseStatsCard` loads it.
+`DataLogsSettings` reads the shared database state after `DatabaseStatsCard` loads it.
 The Backups description uses the resolved value and keeps `VACUUM INTO` as an interpolated command value.
 
 The description stays absent until the database response supplies a directory.
@@ -53,8 +53,9 @@ The icon button and its accessible name remain the primary interaction contract.
 
 ## Responsive behavior
 
-The existing Data and Storage route remains the mobile entry point.
-The Backups table remains the visible action surface on mobile.
+The Data & Logs route remains the mobile entry point for the Backups table.
+Storage maintenance has its own mobile route and remains the visible action
+surface for storage controls.
 
 `queued-ghost-row-actions.tsx` is the nearest shipped coarse-pointer action pattern.
 The row actions use pointer-specific minimum dimensions of 44 pixels without changing desktop density.

@@ -99,7 +99,8 @@ func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, work
 			zap.String("session_id", sessionID))
 		return nil
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		m.logger.Debug("rescan skipped: execution has no agentctl client",
 			zap.String("session_id", sessionID),

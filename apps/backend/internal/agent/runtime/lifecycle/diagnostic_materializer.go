@@ -17,14 +17,19 @@ func (m *Manager) MaterializeDiagnosticBundle(
 	source io.Reader,
 ) (DiagnosticMaterialization, error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
-	if !exists || execution == nil || execution.agentctl == nil {
+	if !exists || execution == nil {
+		return DiagnosticMaterialization{}, fmt.Errorf("active task execution not found")
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
 		return DiagnosticMaterialization{}, fmt.Errorf("active task execution not found")
 	}
 	if execution.TaskID != taskID || execution.SessionID != sessionID {
 		return DiagnosticMaterialization{}, fmt.Errorf("task and session do not match the active execution")
 	}
 	executionID := execution.ID
-	result, err := execution.agentctl.MaterializeDiagnosticBundle(ctx, bundleID, source)
+	result, err := client.MaterializeDiagnosticBundle(ctx, bundleID, source)
 	if err != nil {
 		return DiagnosticMaterialization{}, err
 	}

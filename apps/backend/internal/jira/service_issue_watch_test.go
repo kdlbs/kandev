@@ -289,6 +289,49 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	}
 }
 
+func TestService_CheckIssueWatch_UsesWatcherSearch(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
+		SiteURL: "https://a.net", Email: "e",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "tok",
+	}); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	f.client.searchFn = func(_ string) (*SearchResult, error) {
+		return &SearchResult{
+			Tickets: []JiraTicket{{Key: "PROJ-1"}},
+			IsLast:  true,
+		}, nil
+	}
+	f.client.watchSearchFn = func(_ string) (*SearchResult, error) {
+		return &SearchResult{
+			Tickets: []JiraTicket{{Key: "PROJ-1", Description: "watcher description"}},
+			IsLast:  true,
+		}, nil
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		JQL: "project = PROJ",
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 unseen ticket, got %d", len(got))
+	}
+	if got[0].Description != "watcher description" {
+		t.Errorf("description = %q, want watcher description", got[0].Description)
+	}
+}
+
 func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
@@ -298,7 +341,7 @@ func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
-	f.client.searchFn = func(_ string) (*SearchResult, error) {
+	f.client.watchSearchFn = func(_ string) (*SearchResult, error) {
 		return nil, errors.New("upstream 500")
 	}
 	w, _ := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{

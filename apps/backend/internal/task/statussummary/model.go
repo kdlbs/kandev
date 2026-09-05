@@ -15,6 +15,11 @@ import (
 )
 
 const (
+	// RootRepositoryKey identifies the root repository in summary rebuilds when
+	// a snapshot has no repository_name metadata. It is intentionally stable
+	// across sessions and process restarts.
+	RootRepositoryKey = "default"
+
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
 	MaxActiveErrorPreviewBytes  = 512

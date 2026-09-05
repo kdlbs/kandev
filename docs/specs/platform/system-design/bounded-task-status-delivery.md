@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001
 created: 2026-08-01
-updated: 2026-08-28
+updated: 2026-08-29
 owners:
   - kandev
 ---
@@ -68,7 +68,7 @@ The initial contract is:
 | Field                                          | Meaning                                                                               | Bound                                       |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------- |
 | `revision`, `updated_at`                       | Monotonic task-local version and projection time                                      | Constant                                    |
-| `last_activity_at`                             | Latest durable task, user-prompt, or turn milestone                                   | Constant                                    |
+| `last_activity_at`                             | Latest durable task, user-prompt, or conversational-turn milestone                    | Constant                                    |
 | `primary_session`                              | Primary session ID and lifecycle state                                                | One session                                 |
 | `foreground_activity`, `active_subagent_count` | Existing task-level busy aggregate                                                    | Constant                                    |
 | `pending_action`                               | `permission`, `clarification`, or absent                                              | Constant                                    |
@@ -145,9 +145,13 @@ remain during migration, but switchers use the summary when present.
 - Clients ignore a summary delta whose revision is not newer than the stored
   revision.
 - `last_activity_at` is separate from projection freshness. Task creation,
-  persisted task mutations, user-authored prompts, and turn start or completion
-  advance it by source time. Focus, subscriptions, Git or pull-request polling,
-  queue bookkeeping, summary repair, and streamed chunks do not advance it.
+  persisted task mutations, user-authored prompts, and conversational-turn
+  start or completion advance it by source time. Focus, subscriptions, Git or
+  pull-request polling, queue bookkeeping, summary repair, and streamed chunks
+  do not advance it.
+- A turn with `metadata.lifecycle_only=true` is not conversational. The live
+  projector and the durable batch loader exclude these turns. This rule covers
+  the synthetic `agent_boot` turn that records an agent resume.
 - Missing and older summaries rebuild `last_activity_at` in one batch from
   task, user-message, and turn records. Live and rebuilt values use a monotonic
   maximum, so replay and repair cannot move activity backward. See
@@ -305,6 +309,9 @@ intermediate replacement.
   automation request.
 - **GIVEN** an idle task receives Git or pull-request summary changes, **WHEN**
   its replacement summary arrives, **THEN** `updated_at` can advance while
+  `last_activity_at` remains unchanged.
+- **GIVEN** an idle task after a backend restart, **WHEN** opening the task
+  resumes its agent and creates only a lifecycle turn, **THEN**
   `last_activity_at` remains unchanged.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the

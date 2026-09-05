@@ -466,6 +466,13 @@ type FeaturesConfig struct {
 	// authority. It is disabled in every profile until an operator explicitly
 	// enables the feature for a controlled installation.
 	CoordinatorTaskAuthority bool `mapstructure:"coordinator_task_authority" json:"coordinatorTaskAuthority"`
+	// OfficeSessionIdentity keys an Office task's session identity on the run's
+	// own agent instead of the task's runner seat, and binds an agent's
+	// decision re-evaluation to its own calling session instead of the task's
+	// most-recently-started session. Off in every embedded profile: enabling it
+	// exposes pre-existing duplicate (task_id, agent_profile_id) rows until the
+	// companion unique-index fix has shipped.
+	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
 }
 
 // LoggingConfig holds logging configuration.

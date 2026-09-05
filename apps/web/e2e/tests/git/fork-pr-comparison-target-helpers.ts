@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 
@@ -22,6 +22,11 @@ export async function seedForkPRComparisonTask(
   const targetRemoteDir = path.join(backend.tmpDir, "repos", `upstream-${suffix}.git`);
   const targetWorktreeDir = path.join(backend.tmpDir, "repos", `upstream-${suffix}`);
   const localGit = new GitHelper(seedData.repositoryPath, gitEnv);
+
+  // The seed repository is shared by tests in a worker. A prior git test can
+  // leave it on a feature branch or with uncommitted fixture files, which
+  // makes the fork checkout below fail before the scenario starts.
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
   execFileSync("git", ["clone", "--bare", seedData.repositoryRemoteURL, targetRemoteDir], {
     env: gitEnv,
@@ -138,4 +143,8 @@ export async function seedForkPRComparisonTask(
   });
 
   return { task, headSHA };
+}
+
+export function resetForkPRComparisonRepository(seedData: SeedData, backend: BackendContext) {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 }

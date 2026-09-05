@@ -27,12 +27,17 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 	initErr error,
 	packageSpec string,
 ) *routingerr.Error {
-	if execution == nil || execution.agentctl == nil || initErr == nil {
+	if execution == nil || initErr == nil {
+		return nil
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
 		return nil
 	}
 	stderrCtx, cancel := context.WithTimeout(ctx, managedRuntimeStartupStderrTimeout)
 	defer cancel()
-	lines, err := execution.agentctl.GetAgentStderr(stderrCtx)
+	lines, err := client.GetAgentStderr(stderrCtx)
 	if err != nil {
 		return nil
 	}
@@ -117,7 +122,12 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	initErr error,
 	agentConfig agents.Agent,
 ) (*managedRuntimeStartupRetry, bool) {
-	if execution == nil || !supportsManagedRuntimeCacheRepair(execution.RuntimeName) || execution.agentctl == nil {
+	if execution == nil || !supportsManagedRuntimeCacheRepair(execution.RuntimeName) {
+		return nil, false
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
+	if client == nil {
 		return nil, false
 	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
@@ -157,19 +167,24 @@ func (m *Manager) stopAndRepairManagedRuntime(
 	execution *AgentExecution,
 	retry *managedRuntimeStartupRetry,
 ) (needsFailure bool, err error) {
-	if stopErr := execution.agentctl.Stop(ctx); stopErr != nil {
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
+		return false, errors.New("managed runtime agentctl client is unavailable")
+	}
+	if stopErr := client.Stop(ctx); stopErr != nil {
 		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 			return false, aborted
 		}
 		m.logger.Warn("managed runtime process stop failed before retry; continuing",
 			zap.String("execution_id", execution.ID), zap.Error(stopErr))
 	}
-	execution.agentctl.CloseUpdatesStream()
+	client.CloseUpdatesStream()
 	if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 		return false, aborted
 	}
 
-	if err := execution.agentctl.RepairManagedRuntimeCache(ctx, retry.packageSpec); err != nil {
+	if err := client.RepairManagedRuntimeCache(ctx, retry.packageSpec); err != nil {
 		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 			return false, aborted
 		}

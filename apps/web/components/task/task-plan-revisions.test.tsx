@@ -14,6 +14,7 @@ const restorePopoverTestId = "plan-revision-restore-confirm-popover";
 const restoreInlineTestId = "plan-revision-restore-inline-confirmation";
 const restoreButtonTestId = "plan-revision-revert-button";
 const restoreConfirmTestId = "plan-revision-restore-confirm";
+const deltaTestId = "plan-revision-delta";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => mocks.breakpoint,
@@ -29,7 +30,10 @@ vi.mock("@/components/agent-logo", () => ({ AgentLogo: () => null }));
 vi.mock("./task-plan-preview-dialog", () => ({ PlanRevisionPreviewDialog: () => null }));
 vi.mock("./task-plan-diff-dialog", () => ({ PlanRevisionDiffDialog: () => null }));
 
-function revision(revisionNumber: number): TaskPlanRevision {
+function revision(
+  revisionNumber: number,
+  overrides: Partial<TaskPlanRevision> = {},
+): TaskPlanRevision {
   return {
     id: `revision-${revisionNumber}`,
     task_id: "task-1",
@@ -40,13 +44,17 @@ function revision(revisionNumber: number): TaskPlanRevision {
     author_name: "user",
     created_at: "2026-08-20T10:00:00.000Z",
     updated_at: "2026-08-20T10:00:00.000Z",
+    ...overrides,
   };
 }
 
-function renderHistory(onRevert = vi.fn().mockResolvedValue(revision(3))) {
+function renderHistory(
+  onRevert = vi.fn().mockResolvedValue(revision(3)),
+  revisions: TaskPlanRevision[] = [revision(2), revision(1)],
+) {
   const props = {
     taskId: "task-1",
-    revisions: [revision(2), revision(1)],
+    revisions,
     isLoading: false,
     onOpen: vi.fn(),
     onRevert,
@@ -65,10 +73,16 @@ function renderHistory(onRevert = vi.fn().mockResolvedValue(revision(3))) {
   };
 }
 
-function olderRevisionRow() {
+function revisionRow(revisionNumber: number) {
   return screen
     .getAllByTestId("plan-revision-row")
-    .find((row) => row.getAttribute("data-revision-number") === "1") as HTMLElement;
+    .find(
+      (row) => row.getAttribute("data-revision-number") === String(revisionNumber),
+    ) as HTMLElement;
+}
+
+function olderRevisionRow() {
+  return revisionRow(1);
 }
 
 describe("TaskPlanRevisions restore confirmation", () => {
@@ -174,4 +188,71 @@ describe("TaskPlanRevisions restore confirmation", () => {
       expect(onRevert).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("TaskPlanRevisions metadata", () => {
+  beforeEach(() => {
+    mocks.breakpoint.isFinePointer = true;
+  });
+
+  afterEach(cleanup);
+
+  it("shows character count and signed delta vs the previous version", () => {
+    renderHistory(vi.fn(), [
+      revision(2, { content_length: 1190 }),
+      revision(1, { content_length: 41802 }),
+    ]);
+
+    const newer = revisionRow(2);
+    expect(within(newer).getByTestId("plan-revision-char-count").textContent).toBe("1,190 chars");
+    expect(within(newer).getByTestId(deltaTestId).textContent).toBe("−40,612");
+
+    // The oldest revision has no predecessor in the list, so no delta renders.
+    const older = revisionRow(1);
+    expect(within(older).getByTestId("plan-revision-char-count").textContent).toBe("41,802 chars");
+    expect(within(older).queryByTestId(deltaTestId)).toBeNull();
+  });
+
+  it("renders a positive delta when content grows", () => {
+    renderHistory(vi.fn(), [
+      revision(2, { content_length: 150 }),
+      revision(1, { content_length: 100 }),
+    ]);
+
+    expect(within(revisionRow(2)).getByTestId(deltaTestId).textContent).toBe("+50");
+  });
+
+  it("omits the delta entirely when char counts are unknown", () => {
+    renderHistory(vi.fn(), [revision(2), revision(1)]);
+
+    expect(within(revisionRow(2)).queryByTestId(deltaTestId)).toBeNull();
+  });
+
+  it("renders the workflow step badge stamped on the revision", () => {
+    renderHistory(vi.fn(), [
+      revision(2, {
+        workflow_step_id: "step-build",
+        workflow_step_name: "Build",
+        workflow_step_color: "bg-blue-500",
+      }),
+      revision(1),
+    ]);
+
+    const badge = within(revisionRow(2)).getByTestId("workflow-message-badge");
+    expect(badge.textContent).toContain("Build");
+    expect(within(revisionRow(1)).queryByTestId("workflow-message-badge")).toBeNull();
+  });
+
+  it("shows a coalesce hint only when updated_at differs from created_at", () => {
+    renderHistory(vi.fn(), [
+      revision(2, {
+        created_at: "2026-08-20T10:00:00.000Z",
+        updated_at: "2026-08-20T10:05:00.000Z",
+      }),
+      revision(1),
+    ]);
+
+    expect(within(revisionRow(2)).getByTestId("plan-revision-coalesced-hint")).toBeTruthy();
+    expect(within(revisionRow(1)).queryByTestId("plan-revision-coalesced-hint")).toBeNull();
+  });
 });

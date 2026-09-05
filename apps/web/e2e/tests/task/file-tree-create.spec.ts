@@ -42,8 +42,16 @@ async function setupTask(
 
 async function startCreateAtRoot(testPage: Page) {
   const btn = testPage.getByRole("button", { name: "New file" });
-  await expect(btn).toBeVisible({ timeout: 15_000 });
-  await btn.click();
+  if (await btn.isVisible().catch(() => false)) {
+    await btn.click();
+  } else {
+    const createMenu = testPage.getByTestId("files-create-menu");
+    await expect(createMenu).toBeVisible({ timeout: 15_000 });
+    await createMenu.click();
+    const menuItem = testPage.getByRole("menuitem", { name: "New file" });
+    await expect(menuItem).toBeVisible({ timeout: 5_000 });
+    await menuItem.click();
+  }
   const input = testPage.getByPlaceholder("filename...");
   await expect(input).toBeVisible({ timeout: 5_000 });
   await expect(input).toBeFocused({ timeout: 2_000 });
@@ -85,6 +93,49 @@ test.describe("File tree create file", () => {
       .toBe(true);
   });
 
+  test("select-all stays in the new-file name input", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.1
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.2
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.createFile("select-all-alpha.ts", "alpha");
+    git.createFile("select-all-beta.ts", "beta");
+    git.stageAll();
+    git.commit("seed select-all files");
+
+    const session = await setupTask(
+      testPage,
+      apiClient,
+      seedData,
+      "ft-create-select-all",
+      "FT Create Select All",
+    );
+    await expect(session.fileTreeNode("select-all-alpha.ts")).toBeVisible({ timeout: 15_000 });
+
+    const input = await startCreateAtRoot(testPage);
+    const draftName = "draft-name.ts";
+    await input.fill(draftName);
+    await input.press("ControlOrMeta+a");
+
+    await expect
+      .poll(async () => ({
+        selection: await input.evaluate((element) => ({
+          start: element.selectionStart,
+          end: element.selectionEnd,
+        })),
+        selectedRows: await session.fileTreeSelectedNodes().count(),
+      }))
+      .toEqual({
+        selection: { start: 0, end: draftName.length },
+        selectedRows: 0,
+      });
+  });
+
   test("New file inside expanded folder creates the file in that folder", async ({
     testPage,
     apiClient,
@@ -111,9 +162,7 @@ test.describe("File tree create file", () => {
     await folder.click();
     await expect(session.fileTreeNode("scope/existing.ts")).toBeVisible({ timeout: 10_000 });
 
-    await testPage.getByRole("button", { name: "New file" }).click();
-    const input = testPage.getByPlaceholder("filename...");
-    await expect(input).toBeVisible({ timeout: 5_000 });
+    const input = await startCreateAtRoot(testPage);
     await input.fill("inside.ts");
     await input.press("Enter");
 

@@ -30,7 +30,7 @@ import (
 //  2. The routines service materialises the lightweight routine into
 //     an agent_wakeup_requests row with source=routine.
 //  3. The wakeup dispatcher claims the row and creates a fresh runs
-//     row (taskless) tagged reason="routine_dispatch" with the
+//     row (taskless) tagged reason="routine_dispatch_cron" with the
 //     routine_id mirrored into the run's context_snapshot.
 //  4. A second tick five minutes later produces a second fresh run
 //     and the (agent, "routine:<id>") summary upsert path is reachable
@@ -64,8 +64,8 @@ func TestRoutine_EndToEnd_CoordinatorHeartbeatFire(t *testing.T) {
 	}
 
 	run := requireInflightRun(t, repo, agentID)
-	if run.Reason != "routine_dispatch" {
-		t.Errorf("run.reason: got %q want routine_dispatch", run.Reason)
+	if run.Reason != "routine_dispatch_cron" {
+		t.Errorf("run.reason: got %q want routine_dispatch_cron", run.Reason)
 	}
 	if !strings.Contains(run.ContextSnapshot, `"routine_id":"`+routine.ID+`"`) {
 		t.Errorf("expected routine_id in context_snapshot, got %q", run.ContextSnapshot)

@@ -60,6 +60,13 @@ const OfficeRoutes = lazy(() =>
 const SettingsRoutes = lazy(() =>
   import("./settings-routes").then((mod) => ({ default: mod.SettingsRoutes })),
 );
+// Threads mounts a live chat panel per column, so it stays off the initial
+// bundle for the boards and lists that never open it.
+const ThreadsPageClient = lazy(() =>
+  import("@/app/threads/threads-page-client").then((mod) => ({
+    default: mod.ThreadsPageClient,
+  })),
+);
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
@@ -80,6 +87,7 @@ type SpaRoute =
       mode?: string;
     }
   | { kind: "tasks" }
+  | { kind: "threads" }
   | { kind: "github" }
   | { kind: "gitlab" }
   | { kind: "azure-devops" }
@@ -97,7 +105,7 @@ type SpaRoute =
 
 type DataBackedSpaRoute = Exclude<
   SpaRoute,
-  { kind: "kanban" | "settings" | "office" | "login" | "setup" | "invite" }
+  { kind: "kanban" | "settings" | "office" | "login" | "setup" | "invite" | "threads" }
 >;
 
 type RouteDataState = {
@@ -180,6 +188,8 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
   switch (normalized) {
     case "/tasks":
       return { kind: "tasks" };
+    case "/threads":
+      return { kind: "threads" };
     case "/github":
       return { kind: "github" };
     case "/gitlab":
@@ -244,6 +254,13 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   }
   if (route.kind === "kanban") {
     return <KanbanRoute route={route} fallback={<RouteLoading routeNameKey="sidebar:office" />} />;
+  }
+  if (route.kind === "threads") {
+    return (
+      <Suspense fallback={<RouteLoading routeNameKey="threads:title" />}>
+        <ThreadsPageClient />
+      </Suspense>
+    );
   }
   if (route.kind === "taskDetail") {
     return (

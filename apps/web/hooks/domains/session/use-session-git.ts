@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-git-status";
 import { useSessionCommits } from "./use-session-commits";
 import { useCumulativeDiff } from "./use-cumulative-diff";
@@ -25,6 +25,7 @@ import { useMultiRepoSummary } from "./use-session-git-summary";
 import { deriveComparisonValues, deriveSessionGitValues } from "./use-session-git-derived";
 import { useScopedStageOperations } from "./use-scoped-stage-operations";
 import { normalizeGitStatusFiles } from "@/lib/state/slices/session-runtime/git-status-normalizer";
+import { splitFilesByChangeLayer } from "./git-change-facets";
 
 /**
  * Per-repo result emitted by frontend-side fan-outs (commit, push, pull,
@@ -37,6 +38,7 @@ export type PerRepoOperationResult = {
   success: boolean;
   output: string;
   error?: string;
+  error_code?: string;
 };
 
 /**
@@ -283,6 +285,7 @@ function aggregatePerRepoResults(
       operation,
       output: only.output,
       error: only.error,
+      error_code: only.error_code,
     };
   }
   const allSucceeded = perRepo.every((r) => r.success);
@@ -296,6 +299,7 @@ function aggregatePerRepoResults(
     operation,
     output: joined,
     error: firstFailure?.error,
+    error_code: firstFailure?.error_code,
     per_repo: perRepo,
   };
 }
@@ -335,6 +339,7 @@ async function fanOutAcrossRepositoryWaves(
       success: result.success,
       output: result.output,
       error: result.error,
+      error_code: result.error_code,
     })),
     operation,
   );
@@ -430,9 +435,9 @@ function useStageDispatch({
       op: (rp: string[], r: string | undefined) => Promise<GitOperationResult>,
       operation: string,
     ) => {
-      // Bug 6: key pending entries by `repo::path` so an in-flight stage in
-      // repo B isn't cleared when repo A's status update lands. The consumer
-      // `FileRow` checks membership via the same encoding.
+      // Key pending entries by `repo::path` so concurrent operations in
+      // different repositories remain scoped. The consumer `FileRow` checks
+      // membership via the same encoding.
       const buckets = repo !== undefined ? new Map([[repo, paths]]) : groupPathsByRepo(paths);
       const keys: string[] = [];
       for (const [r, rp] of buckets) for (const p of rp) keys.push(pendingKey(r, p));
@@ -443,13 +448,13 @@ function useStageDispatch({
       });
       try {
         return await runPerRepo(paths, repo, operation, op);
-      } catch (err) {
+      } finally {
         setPendingStageFiles((prev) => {
+          if (prev.size === 0) return prev;
           const next = new Set(prev);
           for (const k of keys) next.delete(k);
           return next;
         });
-        throw err;
       }
     },
     [runPerRepo, setPendingStageFiles, groupPathsByRepo],
@@ -475,50 +480,6 @@ function useStageDispatch({
     [gitOps.discard, runPerRepo],
   );
   return { stageAll, unstageAll, commit, stageFile, unstageFile, discard };
-}
-
-/**
- * Bug 6: clears pending stage markers per-repo, not globally. Each repo's
- * status streams in independently as agentctl finishes per-repo ops; if we
- * cleared the whole pending Set on any allFiles change, an in-flight stage
- * in repo B would lose its spinner the moment repo A finished. Detects which
- * repos' status entry changed since the last render and only drops the
- * corresponding `${repo}::${path}` keys.
- */
-function usePerRepoPendingClear(
-  statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>,
-  allFiles: FileInfo[],
-  setPendingStageFiles: React.Dispatch<React.SetStateAction<Set<string>>>,
-) {
-  const prevStatusRef = useRef<Map<string, unknown>>(new Map());
-  useEffect(() => {
-    const next = new Map<string, unknown>();
-    const refreshed: string[] = [];
-    for (const { repository_name, status } of statusByRepo) {
-      next.set(repository_name, status);
-      if (prevStatusRef.current.get(repository_name) !== status) {
-        refreshed.push(repository_name);
-      }
-    }
-    // Single-repo / legacy path: gitStatus changed and there's no per-repo
-    // entry to track. Clear all pending — original behavior, safe because
-    // there's only one in-flight op at a time in single-repo.
-    const isLegacySingleRepo = statusByRepo.length === 0;
-    prevStatusRef.current = next;
-    if (refreshed.length === 0 && !isLegacySingleRepo) return;
-    setPendingStageFiles((prev) => {
-      if (prev.size === 0) return prev;
-      if (isLegacySingleRepo) return new Set();
-      const out = new Set<string>();
-      for (const key of prev) {
-        // key shape is `${repo}::${path}`; first "::" splits repo from path.
-        const sep = key.indexOf("::");
-        const repo = sep === -1 ? "" : key.slice(0, sep);
-        if (!refreshed.includes(repo)) out.add(key);
-      }
-      return out;
-    });
-  }, [allFiles, statusByRepo, setPendingStageFiles]);
 }
 
 type RemoteOpsArgs = {
@@ -626,8 +587,10 @@ function useFileDerivations(
       allFilesCount: allFiles.length,
     });
   }, [statusByRepo, gitStatus, allFiles]);
-  const unstagedFiles = useMemo(() => allFiles.filter((f) => !f.staged), [allFiles]);
-  const stagedFiles = useMemo(() => allFiles.filter((f) => f.staged), [allFiles]);
+  const { stagedFiles, unstagedFiles } = useMemo(
+    () => splitFilesByChangeLayer(allFiles),
+    [allFiles],
+  );
   const repoForPath = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of allFiles) {
@@ -674,8 +637,6 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     repoNamesForControls,
     perRepoStatus,
   } = useFileDerivations(statusByRepo, gitStatus);
-  usePerRepoPendingClear(statusByRepo, allFiles, setPendingStageFiles);
-
   const stageOps = useStageDispatch({
     gitOps,
     repoForPath,

@@ -79,6 +79,11 @@ features:
   # Operator-granted task coordination. Off in every profile so grants never
   # extend task authority unless an installation explicitly enables it.
   KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY:
+  # High-risk Office per-agent session identity experiment: keys an Office
+  # task's session on the run's own agent instead of the runner seat. Off in
+  # every profile until the companion (task_id, agent_profile_id) unique-index
+  # fix has shipped, since pre-existing duplicate rows would otherwise be exposed.
+  KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
     prod: "false"
     dev:  "false"
     e2e:  "false"

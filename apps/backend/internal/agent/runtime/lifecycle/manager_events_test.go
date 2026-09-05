@@ -1666,6 +1666,58 @@ func TestHandleAgentEvent_DelayedCompleteCannotFinishReplacementPrompt(t *testin
 	}
 }
 
+func TestHandleAgentEvent_UnnumberedCompleteCannotReleasePendingPrompt(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+	mgr.executionStore.MarkPromptDispatched(execution.ID, generation)
+	execution.dispatchedPromptPending.Store(true)
+
+	if mgr.handleCompleteEvent(execution, &agentctl.AgentEvent{
+		Type:      streams.EventTypeComplete,
+		SessionID: execution.SessionID,
+		Data:      map[string]any{"stop_reason": "end_turn"},
+	}) {
+		t.Fatal("unnumbered completion was accepted while a numbered prompt was pending")
+	}
+	select {
+	case signal := <-execution.promptDoneCh:
+		t.Fatalf("unnumbered completion released pending prompt: %+v", signal)
+	default:
+	}
+	if !execution.dispatchedPromptPending.Load() {
+		t.Fatal("unnumbered completion cleared the pending prompt gate")
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject == events.AgentReady {
+			t.Fatal("unnumbered completion published AgentReady for pending prompt")
+		}
+	}
+
+	if !mgr.handleCompleteEvent(execution, &agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		SessionID:        execution.SessionID,
+		PromptGeneration: generation,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	}) {
+		t.Fatal("numbered completion was rejected after unnumbered completion")
+	}
+	select {
+	case signal := <-execution.promptDoneCh:
+		if signal.PromptGeneration != generation {
+			t.Fatalf("completion generation = %d, want %d", signal.PromptGeneration, generation)
+		}
+	default:
+		t.Fatal("numbered completion did not signal the pending prompt")
+	}
+}
+
 func TestHandleAgentEvent_ForegroundIdlePreservesPromptGeneration(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-foreground-idle", "task-1", "session-1")
@@ -2065,7 +2117,7 @@ func TestHandleCompleteEventMarkState_ErrorDoesNotRemoveExecution(t *testing.T) 
 		Data:  map[string]interface{}{"is_error": true},
 	}
 
-	mgr.handleCompleteEventMarkState(execution, errorEvent, true)
+	mgr.handleCompleteEventMarkState(execution, errorEvent, true, nil)
 
 	// Execution must still be in the store so the orchestrator can clean it up
 	if _, found := mgr.executionStore.Get("exec-1"); !found {
@@ -2085,7 +2137,7 @@ func TestHandleCompleteEventMarkState_SuccessKeepsExecution(t *testing.T) {
 		Type: "complete",
 	}
 
-	mgr.handleCompleteEventMarkState(execution, successEvent, false)
+	mgr.handleCompleteEventMarkState(execution, successEvent, false, nil)
 
 	got, found := mgr.executionStore.Get("exec-1")
 	if !found {

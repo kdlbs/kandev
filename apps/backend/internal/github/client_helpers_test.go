@@ -2,10 +2,28 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 )
+
+func assertPRCommentHTMLURL(t *testing.T, comment PRComment, want string) {
+	t.Helper()
+	encoded, err := json.Marshal(comment)
+	if err != nil {
+		t.Fatalf("marshal PR comment: %v", err)
+	}
+	var payload struct {
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("unmarshal PR comment: %v", err)
+	}
+	if payload.HTMLURL != want {
+		t.Errorf("html_url = %q, want %q", payload.HTMLURL, want)
+	}
+}
 
 // TestNewPRStatus_MarksOutcomeFieldsPopulatedNotClosureAttribution covers
 // AC-10: newPRStatus (the single convergence point for REST and gh CLI
@@ -374,23 +392,14 @@ func TestConvertRawCheckRunsEmpty(t *testing.T) {
 }
 
 func TestConvertRawComments(t *testing.T) {
-	now := time.Now()
-	raw := []ghComment{
-		{
-			ID:        1,
-			Path:      "main.go",
-			Line:      42,
-			Side:      "RIGHT",
-			Body:      "Looks good",
-			CreatedAt: now,
-			UpdatedAt: now,
-			User: struct {
-				Login     string `json:"login"`
-				AvatarURL string `json:"avatar_url"`
-				Type      string `json:"type"`
-			}{Login: "alice", AvatarURL: "https://avatar.example.com/alice", Type: "User"},
-		},
+	var rawComment ghComment
+	if err := json.Unmarshal([]byte(`{"id":1,"path":"main.go","line":42,"side":"RIGHT","body":"Looks good",
+		"created_at":"2026-01-05T12:00:00Z","updated_at":"2026-01-05T12:00:00Z",
+		"html_url":"https://github.com/acme/widget/pull/42#discussion_r1",
+		"user":{"login":"alice","avatar_url":"https://avatar.example.com/alice","type":"User"}}`), &rawComment); err != nil {
+		t.Fatalf("decode raw comment: %v", err)
 	}
+	raw := []ghComment{rawComment}
 
 	comments := convertRawComments(raw)
 
@@ -412,6 +421,7 @@ func TestConvertRawComments(t *testing.T) {
 	if comments[0].AuthorIsBot {
 		t.Error("expected non-bot comment")
 	}
+	assertPRCommentHTMLURL(t, comments[0], "https://github.com/acme/widget/pull/42#discussion_r1")
 }
 
 func TestConvertRawIssueComments(t *testing.T) {

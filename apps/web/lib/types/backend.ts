@@ -25,6 +25,8 @@ import type {
   TaskState,
   ToolStatus,
   UserSettings,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowProfileSessionEndPolicy,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
@@ -108,6 +110,8 @@ export type TaskEventPayload = {
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  primary_agent_name?: string | null;
+  primary_agent_profile_id?: string | null;
   // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
   // absent/null when no session is running.
   foreground_activity?: ForegroundActivity | null;
@@ -116,6 +120,8 @@ export type TaskEventPayload = {
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
   updated_at?: string;
+  created_at?: string;
+  labels?: string | string[] | null;
   is_ephemeral: boolean;
   /** Task origin (e.g. "manual", "automation_run"). */
   origin?: string;
@@ -273,6 +279,8 @@ export type StepPayload = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+  profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
@@ -298,6 +306,15 @@ export type OfficeInboxItemNotificationPayload = {
   body: string;
 };
 
+export type FileChangeFacet = {
+  status: "modified" | "added" | "deleted" | "untracked" | "renamed";
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+  diff?: string;
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+};
+
 export type FileInfo = {
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
@@ -307,6 +324,8 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  staged_change?: FileChangeFacet;
+  unstaged_change?: FileChangeFacet;
 };
 
 // Executor and environment payload types (extracted to reduce file size)
@@ -348,6 +367,12 @@ export type UserSettingsUpdatedPayload = Omit<
   user_id: string;
   workspace_id: string;
   repository_ids: string[];
+};
+
+export type SessionHostnameResolvedPayload = {
+  ip: string;
+  hostname: string;
+  resolved_at: string | null;
 };
 
 // Session runtime payload types (extracted to reduce file size)
@@ -469,6 +494,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
       "user.agent_profile_recent_use.updated",
       AgentProfileRecentUseApiRecord
     >;
+    "auth.session.hostname.resolved": BackendMessage<
+      "auth.session.hostname.resolved",
+      SessionHostnameResolvedPayload
+    >;
 
     "secrets.created": BackendMessage<"secrets.created", SecretListItem>;
     "secrets.updated": BackendMessage<"secrets.updated", SecretListItem>;
@@ -501,6 +530,7 @@ export type {
   TaskSessionStateChangedPayload,
   TaskSessionActivityChangedPayload,
   TaskSessionCancellationChangedPayload,
+  SessionPendingActionChangedPayload,
   TaskSessionNotificationPayload,
   TaskSessionAgentctlPayload,
   TurnEventPayload,

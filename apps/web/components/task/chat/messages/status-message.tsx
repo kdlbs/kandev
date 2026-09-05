@@ -14,6 +14,8 @@ import type { StatusMetadata } from "@/components/task/chat/types";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
+const UNKNOWN_TASK_KEY = "task:unknown";
+
 interface ErrorMetadata extends StatusMetadata {
   error?: string;
   text?: string;
@@ -31,6 +33,9 @@ interface ErrorMetadata extends StatusMetadata {
   executor_type?: string;
   executor_profile_id?: string;
   remediation?: string[];
+  original_branch?: string;
+  new_branch?: string;
+  base_branch?: string;
 }
 
 function getStatusStyle(isError: boolean, isWarning: boolean) {
@@ -181,11 +186,12 @@ function modelSelectionReasonLabel(reason: string | undefined): string {
   };
   return reason
     ? t(keyByReason[reason] ?? "task:modelSelectionReasonUnknown", { reason })
-    : t("task:unknown");
+    : t(UNKNOWN_TASK_KEY);
 }
 
 function ModelSelectionWarningDetails({ metadata }: { metadata: ErrorMetadata }) {
-  const requested = metadata.requested_model || t("task:unknown");
+  const unknown = t(UNKNOWN_TASK_KEY);
+  const requested = metadata.requested_model || unknown;
   const effective = metadata.effective_model || t("task:modelSelectionProviderDefault");
   const remediation = Array.isArray(metadata.remediation) ? metadata.remediation : [];
   const remediationKey: Record<string, string> = {
@@ -239,6 +245,41 @@ function ModelSelectionWarningDetails({ metadata }: { metadata: ErrorMetadata })
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+function BranchRecreatedWarning({ metadata }: { metadata: ErrorMetadata }) {
+  const { t } = useTranslation();
+  const unknown = t(UNKNOWN_TASK_KEY);
+  const originalBranch = metadata.original_branch || unknown;
+  const newBranch = metadata.new_branch || unknown;
+  const baseBranch = metadata.base_branch || unknown;
+
+  return (
+    <div
+      className="flex items-start gap-3 rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"
+      data-testid="branch-recreated-warning"
+    >
+      <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+      <div className="min-w-0 space-y-2 text-muted-foreground">
+        <p className="font-medium text-amber-600 dark:text-amber-400">
+          {t("task:branchRecreatedWarning")}
+        </p>
+        <div className="grid gap-1">
+          <p>
+            {t("task:branchRecreatedOriginal")}: <code>{originalBranch}</code>
+          </p>
+          <p>
+            {t("task:branchRecreatedNew")}: <code>{newBranch}</code>
+          </p>
+          <p>
+            {t("task:branchRecreatedBase")}: <code>{baseBranch}</code>
+          </p>
+        </div>
+        <p>{t("task:branchRecreatedConversation")}</p>
+        <p>{t("task:branchRecreatedCodeNotRecovered")}</p>
+      </div>
     </div>
   );
 }
@@ -336,6 +377,9 @@ export const StatusMessage = memo(function StatusMessage({ comment }: { comment:
   const [isExpanded, setIsExpanded] = useState(false);
   const { metadata, progress, statusLine, message, isError, isWarning } =
     parseStatusMetadata(comment);
+  if (metadata?.kind === "branch_recreated") {
+    return <BranchRecreatedWarning metadata={metadata} />;
+  }
   const { hasExpandableContent, errorDetails } = computeExpandableContent(isError, metadata);
   const isSimpleStatus =
     !isError && !isWarning && progress === null && !statusLine && !metadata?.message;

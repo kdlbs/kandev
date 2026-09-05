@@ -195,6 +195,10 @@ export class OfficeApiClient {
     return res.project ?? (res as unknown as Record<string, unknown>);
   }
 
+  async listProjects(wsId: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/workspaces/${wsId}/projects`);
+  }
+
   // --- Labels ---
 
   async addLabel(wsId: string, taskId: string, name: string): Promise<Record<string, unknown>> {
@@ -483,6 +487,58 @@ export class OfficeApiClient {
 
   async applyIncomingSync(wsId: string): Promise<Record<string, unknown>> {
     return this.request("POST", `/workspaces/${wsId}/config/sync/import-fs`, undefined);
+  }
+
+  // --- Config Sync (provider) ---
+  // Covers internal/office/configsync's HTTP surface: a per-workspace
+  // GitHub/GitLab source config, forced sync, and removal. Distinct from the
+  // filesystem <-> DB diff surface above.
+
+  // getConfigSyncConfig returns null on a 204 (no config yet for this
+  // workspace) rather than calling res.json() on an empty body.
+  async getConfigSyncConfig(wsId: string): Promise<Record<string, unknown> | null> {
+    const res = await fetch(`${this.baseUrl}/api/v1/office/workspaces/${wsId}/config-sync/config`);
+    if (res.status === 204) return null;
+    if (!res.ok) {
+      throw new Error(
+        `Office API GET config-sync/config failed (${res.status}): ${await res.text()}`,
+      );
+    }
+    return res.json();
+  }
+
+  async setConfigSyncConfig(
+    wsId: string,
+    payload: {
+      provider: "github" | "gitlab";
+      repo_owner?: string;
+      repo_name?: string;
+      project_path?: string;
+      branch?: string;
+      path?: string;
+      interval_seconds?: number;
+      poll_enabled?: boolean;
+    },
+  ): Promise<Record<string, unknown>> {
+    return this.request("POST", `/workspaces/${wsId}/config-sync/config`, payload);
+  }
+
+  async deleteConfigSyncConfig(wsId: string): Promise<void> {
+    await this.request("DELETE", `/workspaces/${wsId}/config-sync/config`);
+  }
+
+  async forceConfigSync(wsId: string): Promise<{
+    config: Record<string, unknown>;
+    result?: {
+      created: string[] | null;
+      updated: string[] | null;
+      deleted: string[] | null;
+      warnings: string[] | null;
+      unchanged: boolean;
+    };
+    error?: string;
+  }> {
+    return this.request("POST", `/workspaces/${wsId}/config-sync/sync`, undefined);
   }
 
   // --- Routines ---

@@ -275,6 +275,11 @@ type RuntimeConfig struct {
 	// final child env after adapter merge; the inference executor strips
 	// them from the one-shot probe/inference subprocess env.
 	StripEnv []string
+	// NamespacesMCPToolsByServer is true for clients that add the MCP server
+	// name to every tool before presenting it to the model. The per-instance
+	// Kandev MCP server removes that presentation suffix before the client adds
+	// it back, so the model sees the canonical tool name.
+	NamespacesMCPToolsByServer bool
 }
 
 // MountTemplate defines a mount with template variables.
