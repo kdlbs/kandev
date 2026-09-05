@@ -1,8 +1,10 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useRouter } from "@/lib/routing/client-router";
+import { canvasHref, type Canvas } from "@/lib/api/domains/canvas-api";
 import { SessionMobileLayout, SessionTabletLayout } from "./mobile";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
@@ -10,6 +12,7 @@ import type { Layout } from "react-resizable-panels";
 import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
+import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from "@/hooks/use-session-layout-state";
@@ -21,6 +24,7 @@ const DockviewDesktopLayout = dynamic(
 );
 
 type TaskLayoutProps = {
+  taskId?: string | null;
   workspaceId: string | null;
   workflowId: string | null;
   sessionId?: string | null;
@@ -42,9 +46,11 @@ type TaskLayoutProps = {
   remoteStatusError?: string | null;
   initialLayout?: string | null;
   isArchived?: boolean;
+  taskCanvases?: Canvas[];
 };
 
 export const TaskLayout = memo(function TaskLayout({
+  taskId = null,
   workspaceId,
   workflowId,
   sessionId = null,
@@ -65,8 +71,15 @@ export const TaskLayout = memo(function TaskLayout({
   remoteStatusError,
   initialLayout,
   isArchived,
+  taskCanvases = [],
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
+  useTaskCanvasLifecycleActivation({ taskId, workspaceId, isMobile });
+  const router = useRouter();
+  const onOpenCanvas = useCallback(
+    (canvasId: string) => router.push(canvasHref(canvasId)),
+    [router],
+  );
   const launchErrorContext = useTaskLaunchErrorContext();
   const activeLaunchError = launchErrorContext?.statusSummary?.active_error;
 
@@ -106,6 +119,8 @@ export const TaskLayout = memo(function TaskLayout({
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
         isArchived={isArchived}
+        taskCanvases={taskCanvases}
+        onOpenCanvas={onOpenCanvas}
       />
     );
   }

@@ -123,7 +123,11 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{}, // Auth via ANTHROPIC_API_KEY or OAuth credentials file (see RemoteAuth)
 		Env: map[string]string{
-			"MCP_TIMEOUT": "7200000",
+			// MCP_TIMEOUT also governs the CLI's first-turn MCP prewait, so
+			// it must stay at the CLI's own default; MCP_TOOL_TIMEOUT holds
+			// the long budget Kandev's blocking MCP tool calls need.
+			"MCP_TIMEOUT":      "30000",
+			"MCP_TOOL_TIMEOUT": "7200000",
 		},
 		Mounts: []MountTemplate{
 			{Source: "{workspace}", Target: "/workspace"},

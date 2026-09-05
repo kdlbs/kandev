@@ -192,6 +192,8 @@ const INERT_FRESH_BRANCH_AND_NOREPO = {
   setCurrentLocalBranchLoading: NOOP,
   noRepository: false,
   setNoRepository: NOOP,
+  preferLocalExecutor: false,
+  setPreferLocalExecutor: NOOP,
   workspacePath: "",
   setWorkspacePath: NOOP,
 } as const;

@@ -1,7 +1,7 @@
 "use client";
 
 import type { AgentProfileOption } from "@/lib/state/slices";
-import type { DialogFormState } from "@/components/task-create-dialog-types";
+import type { AgentCompatState, DialogFormState } from "@/components/task-create-dialog-types";
 import { CreateEditSelectors } from "@/components/task-create-dialog-form-body";
 import { AgentSelector, ExecutorProfileSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
@@ -22,7 +22,9 @@ type CreateModeSelectorsProps = {
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   workflowAgentLocked: boolean;
-  noCompatibleAgent: boolean;
+  agentCompatState: AgentCompatState;
+  selectedAgentProfileName: string | null;
+  effectiveWorkflowName: string | null;
   executorProfileName: string | null;
 };
 
@@ -46,7 +48,9 @@ export function CreateModeSelectors(props: CreateModeSelectorsProps) {
       onExecutorProfileChange={props.onExecutorProfileChange}
       executorsLoading={props.executorsLoading}
       workflowAgentLocked={props.workflowAgentLocked}
-      noCompatibleAgent={props.noCompatibleAgent}
+      agentCompatState={props.agentCompatState}
+      selectedAgentProfileName={props.selectedAgentProfileName}
+      effectiveWorkflowName={props.effectiveWorkflowName}
       executorProfileName={props.executorProfileName}
       AgentSelectorComponent={AgentSelector}
       ExecutorProfileSelectorComponent={ExecutorProfileSelector}

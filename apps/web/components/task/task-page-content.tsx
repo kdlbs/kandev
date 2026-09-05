@@ -20,6 +20,8 @@ import { fetchTask } from "@/lib/api";
 import { linkToTaskOverview } from "@/lib/links";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useTaskCanvasesForTask } from "@/hooks/domains/task/use-task-canvases";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import type { Layout } from "react-resizable-panels";
 import {
@@ -336,6 +338,7 @@ export function TaskPageContent({
   const [isMounted, setIsMounted] = useState(false);
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
   const { isMobile } = useResponsiveBreakpoint();
+  const canvasesEnabled = useFeature("canvases");
   const connectionStatus = useAppStore((state) => state.connection.status);
 
   const {
@@ -348,6 +351,7 @@ export function TaskPageContent({
     ensureSession,
     onTaskUnarchived,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
+  const taskCanvases = useTaskCanvasesForTask(task, isMobile, canvasesEnabled);
   useExternalVcsFileLinkHydration(task, repositories);
 
   const workflowSteps = useWorkflowStepsMapped();
@@ -396,6 +400,7 @@ export function TaskPageContent({
       officeTaskHref={officeTaskHref}
       ensureSession={ensureSession}
       onTaskUnarchived={onTaskUnarchived}
+      taskCanvases={taskCanvases}
     />
   );
 }
