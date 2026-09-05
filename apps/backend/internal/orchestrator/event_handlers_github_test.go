@@ -1313,6 +1313,157 @@ func TestListTasksNeedingPRWatch(t *testing.T) {
 			t.Errorf("secondary entry mis-resolved: %+v", back)
 		}
 	})
+
+	// Task 02: canonical PR-watch identity is task/repository/branch, not
+	// session_id. Two active sessions resolving to the SAME (task,
+	// repository, branch) target must collapse to a single TaskBranchInfo
+	// emission, so the poller performs one GitHub lookup per canonical
+	// target per cycle regardless of how many sessions are attached to it.
+	t.Run("dedupes multiple sessions on the same task/repo/branch", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+
+		// Second session on the SAME task, sharing the task's one
+		// environment (task_environments.task_id is UNIQUE) and worktree.
+		session2 := &models.TaskSession{
+			ID: "s2", TaskID: "t1",
+			State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+		}
+		if err := testRepo.CreateTaskSession(ctx, session2); err != nil {
+			t.Fatalf("failed to create session s2: %v", err)
+		}
+
+		repoObj := &models.Repository{ID: "repo1", WorkspaceID: "ws1", Name: "myrepo", SourceType: "provider", Provider: "github", ProviderOwner: "myorg", ProviderName: "myrepo", CreatedAt: now, UpdatedAt: now}
+		if err := testRepo.CreateRepository(ctx, repoObj); err != nil {
+			t.Fatalf("create repo: %v", err)
+		}
+		if err := testRepo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "t1", RepositoryID: "repo1", Position: 0, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatalf("link repo: %v", err)
+		}
+		if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-t1", TaskID: "t1", ExecutorType: "worktree", WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo1", WorktreeBranch: "feature-a", CreatedAt: now},
+			},
+		}); err != nil {
+			t.Fatalf("create environment: %v", err)
+		}
+		for _, sessionID := range []string{"s1", "s2"} {
+			session, err := testRepo.GetTaskSession(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("load session %s: %v", sessionID, err)
+			}
+			session.TaskEnvironmentID = "env-t1"
+			if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+				t.Fatalf("link session %s to environment: %v", sessionID, err)
+			}
+		}
+
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetGitHubService(&mockGitHubService{prWatch: nil})
+
+		tasks, err := svc.ListTasksNeedingPRWatch(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		matches := 0
+		for _, ti := range tasks {
+			if ti.TaskID == "t1" && ti.RepositoryID == "repo1" && ti.Branch == "feature-a" {
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Errorf("expected exactly 1 entry for the shared (task, repo, branch) target, got %d", matches)
+		}
+	})
+}
+
+// TestResolveBranchForRepository verifies the Task 02 fix: branch resolution
+// is scoped to a specific (task, repository) pair, independent of session
+// identity. It replaces a resolver that always used the task's PRIMARY
+// repository's checkout_branch regardless of which repository the caller
+// asked about — a real bug that could corrupt a secondary repo's
+// still-searching PR watch with the primary repo's branch name.
+func TestResolveBranchForRepository(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	t.Run("uses checkout_branch for the requested repository, not the primary", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+
+		for _, r := range []*models.Repository{
+			{ID: "repo-front", WorkspaceID: "ws1", Name: "frontend", SourceType: "provider", Provider: "github", ProviderOwner: "myorg", ProviderName: "frontend", CreatedAt: now, UpdatedAt: now},
+			{ID: "repo-back", WorkspaceID: "ws1", Name: "backend", SourceType: "provider", Provider: "github", ProviderOwner: "myorg", ProviderName: "backend", CreatedAt: now, UpdatedAt: now},
+		} {
+			if err := testRepo.CreateRepository(ctx, r); err != nil {
+				t.Fatalf("create repo %s: %v", r.ID, err)
+			}
+		}
+		links := []*models.TaskRepository{
+			{ID: "tr-front", TaskID: "t1", RepositoryID: "repo-front", Position: 0, CheckoutBranch: "main-front", CreatedAt: now, UpdatedAt: now},
+			{ID: "tr-back", TaskID: "t1", RepositoryID: "repo-back", Position: 1, CheckoutBranch: "main-back", CreatedAt: now, UpdatedAt: now},
+		}
+		for _, l := range links {
+			if err := testRepo.CreateTaskRepository(ctx, l); err != nil {
+				t.Fatalf("link %s: %v", l.ID, err)
+			}
+		}
+
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+
+		if got := svc.ResolveBranchForRepository(ctx, "t1", "repo-back"); got != "main-back" {
+			t.Errorf("expected secondary repo branch %q, got %q", "main-back", got)
+		}
+		if got := svc.ResolveBranchForRepository(ctx, "t1", "repo-front"); got != "main-front" {
+			t.Errorf("expected primary repo branch %q, got %q", "main-front", got)
+		}
+	})
+
+	t.Run("falls back to an active session worktree branch when checkout_branch is unset", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+
+		repoObj := &models.Repository{ID: "repo1", WorkspaceID: "ws1", Name: "myrepo", SourceType: "provider", Provider: "github", ProviderOwner: "myorg", ProviderName: "myrepo", CreatedAt: now, UpdatedAt: now}
+		if err := testRepo.CreateRepository(ctx, repoObj); err != nil {
+			t.Fatalf("create repo: %v", err)
+		}
+		link := &models.TaskRepository{ID: "tr-1", TaskID: "t1", RepositoryID: "repo1", Position: 0, CreatedAt: now, UpdatedAt: now}
+		if err := testRepo.CreateTaskRepository(ctx, link); err != nil {
+			t.Fatalf("link repo: %v", err)
+		}
+		if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-s1", TaskID: "t1", ExecutorType: "worktree", WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+			Repos: []*models.TaskEnvironmentRepo{
+				{ID: "wt-1", WorktreeID: "wtree-1", RepositoryID: "repo1", WorktreeBranch: "session-branch", CreatedAt: now},
+			},
+		}); err != nil {
+			t.Fatalf("create environment: %v", err)
+		}
+		session, err := testRepo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		session.TaskEnvironmentID = "env-s1"
+		if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("link session to environment: %v", err)
+		}
+
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+		if got := svc.ResolveBranchForRepository(ctx, "t1", "repo1"); got != "session-branch" {
+			t.Errorf("expected fallback branch %q, got %q", "session-branch", got)
+		}
+	})
+
+	t.Run("returns empty when nothing can be resolved", func(t *testing.T) {
+		testRepo := setupTestRepo(t)
+		seedSession(t, testRepo, "t1", "s1", "step1")
+		svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+		if got := svc.ResolveBranchForRepository(ctx, "t1", "missing-repo"); got != "" {
+			t.Errorf("expected empty branch, got %q", got)
+		}
+	})
 }
 
 // TestEnsureSessionPRWatch_MultiRepo guards the same multi-repo gap on the

@@ -220,6 +220,9 @@ func TestProjectorPendingLoaderFailureRetainsStoredState(t *testing.T) {
 }
 
 func TestProjectorPendingRefreshSurfacesExhaustedCASRetries(t *testing.T) {
+	retriesBefore := casRetriesTotal.Value()
+	exhaustionsBefore := casExhaustionsTotal.Value()
+	failuresBefore := eventHandlerFailuresTotal.Value()
 	base := newProjectorTestStore()
 	base.rows["task-cas-exhausted"] = &StoredTaskStatusSummary{
 		TaskID:      "task-cas-exhausted",
@@ -252,9 +255,19 @@ func TestProjectorPendingRefreshSurfacesExhaustedCASRetries(t *testing.T) {
 	if got := base.summary("task-cas-exhausted"); got == nil || got.PendingAction != "" {
 		t.Fatalf("stored summary after exhausted CAS retries = %+v, want unchanged", got)
 	}
+	if got := casRetriesTotal.Value() - retriesBefore; got != maxPendingPersistAttempts-1 {
+		t.Fatalf("CAS retry metric delta = %d, want %d", got, maxPendingPersistAttempts-1)
+	}
+	if got := casExhaustionsTotal.Value() - exhaustionsBefore; got != 1 {
+		t.Fatalf("CAS exhaustion metric delta = %d, want 1", got)
+	}
+	if got := eventHandlerFailuresTotal.Value() - failuresBefore; got != 1 {
+		t.Fatalf("event-handler failure metric delta = %d, want 1", got)
+	}
 }
 
 func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
+	retriesBefore := casRetriesTotal.Value()
 	base := newProjectorTestStore()
 	storedAt := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	base.rows["task-cas"] = &StoredTaskStatusSummary{
@@ -364,6 +377,9 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 	}
 	if prLoaderCalls != 2 {
 		t.Fatalf("PR loader calls = %d, want reload after rejection", prLoaderCalls)
+	}
+	if got := casRetriesTotal.Value() - retriesBefore; got != 1 {
+		t.Fatalf("CAS retry metric delta = %d, want 1", got)
 	}
 
 	err = projector.HandleEvent(context.Background(), bus.NewEvent(events.GitEvent, "test", map[string]interface{}{

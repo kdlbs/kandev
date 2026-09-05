@@ -2256,7 +2256,31 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
     }>;
   }> {
-    return this.request("GET", `/api/v1/task-sessions/${sessionId}/messages`);
+    // The production endpoint intentionally caps explicit pages at 100. E2E
+    // callers use this helper for authoritative fixture inspection, so follow
+    // the cursor explicitly instead of relying on the bounded default page.
+    const messages: Array<{
+      id: string;
+      content: string;
+      author_type: string;
+      type?: string;
+      raw_content?: string;
+      metadata?: Record<string, unknown>;
+    }> = [];
+    let after = "";
+    for (;;) {
+      const query = new URLSearchParams({ limit: "100", sort: "asc" });
+      if (after) query.set("after", after);
+      const page = await this.request<{
+        messages: typeof messages;
+        has_more?: boolean;
+        cursor?: string;
+      }>("GET", `/api/v1/task-sessions/${sessionId}/messages?${query.toString()}`);
+      messages.push(...page.messages);
+      if (!page.has_more || !page.cursor || page.cursor === after) break;
+      after = page.cursor;
+    }
+    return { messages };
   }
 
   async listSessionTurns(sessionId: string): Promise<{

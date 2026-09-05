@@ -322,6 +322,16 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 	return message, nil
 }
 
+// RehydrateMessagePayload resolves an externalized large tool-output
+// payload (see PayloadDigest) back into message.Metadata for the explicit,
+// single-message lazy-detail routes (e.g. httpGetShellOutput). Callers must
+// have already authorized access to message (typically via GetMessage), so
+// this performs no additional authorization itself. A no-op when the
+// message has no external payload.
+func (s *Service) RehydrateMessagePayload(ctx context.Context, message *models.Message) error {
+	return s.messages.RehydrateMessagePayload(ctx, message)
+}
+
 // GetMessageWithPromptIndex retrieves a message by ID with its computed
 // prompt ordinal, scoped like GetMessage. Used by the idempotent WS
 // replay/response path so a retried prompt answers with its stable index.

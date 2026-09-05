@@ -307,6 +307,48 @@ The normalized schema is intentionally incompatible with older binaries. To down
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
 
+### Upgrading past the canonical PR-watch migration
+
+A release that makes GitHub PR watches task-owned instead of session-owned (see
+[ADR-2026-08-31-task-owned-pr-watch-identity](../decisions/2026-08-31-task-owned-pr-watch-identity.md))
+runs a one-time, idempotent, transactional cleanup of `github_pr_watches`
+during SQLite startup, after the existing version-change snapshot described
+above. A failed snapshot or a failed migration aborts startup before any
+destructive change; a database that has already been migrated, or a fresh
+install, skips it entirely. The migration only ever removes duplicate rows
+for the same task/repository/branch (keeping the newest check/comment/review
+status and any discovered PR number) and rows orphaned by a deleted task or a
+detached repository; it never removes normal conversation messages, snapshots,
+or plans, and Review-task monitoring survives the originating session's
+completion.
+
+To upgrade safely:
+
+1. Take and verify a SQLite backup as described above (manual snapshot from
+   **Settings > System > Backups**, or `sqlite3` `VACUUM INTO`); the automatic
+   pre-migration snapshot is taken during the new binary's startup, so it
+   cannot be verified beforehand.
+2. Stop all backend writers before starting the new binary; do not run a
+   mixed-version fleet across the upgrade.
+3. Start exactly one instance of the new binary and let it reach a healthy
+   state. Check **System > Status** or `/health`, then spot-check a task that
+   has an open pull request and a Review-stage task whose originating session
+   already completed: both should still show a monitored PR.
+4. Optionally, after confirming health, run `kandev maintenance database`
+   (dry run first) to review and, if desired, reclaim storage from the
+   superseded rows the migration and prior duplicate polling left behind; see
+   [Database maintenance](cli.md#database-maintenance) for its full dry-run,
+   execute, compact, and rollback behavior. The maintenance command never
+   deletes ordinary human/agent conversation messages, and its own retention
+   deletes still require an explicit `--execute` plus a verified backup
+   independent of the migration's own snapshot.
+
+If startup aborts during the migration, the pre-migration snapshot in
+`backups/` is untouched and the live database was never partially modified:
+restore from that snapshot only if you need to run an older binary again,
+otherwise fix the reported cause and restart the same new binary; the
+migration is safe to retry because it is idempotent.
+
 </details>
 
 ## SQLite backups

@@ -39,5 +39,6 @@ The following specifications were added after this migration and remain in the l
 - [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 - [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
+- [Canonical PR monitoring and bounded task storage](platform/pr-watch-and-storage-bounds.md) (draft)
 
 ## Authoring rule

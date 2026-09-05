@@ -247,6 +247,12 @@ func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Mes
 	return nil, nil
 }
 
+// RehydrateMessagePayload is a no-op for the mock repository: none of its
+// callers construct messages with an externalized PayloadDigest.
+func (m *mockRepository) RehydrateMessagePayload(ctx context.Context, message *models.Message) error {
+	return nil
+}
+
 // GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
 func (m *mockRepository) GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error) {
 	return nil, nil

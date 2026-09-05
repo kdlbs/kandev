@@ -13,6 +13,28 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
+// migrateMessagePayloadStorage adds digest-backed external storage for large
+// tool-message payloads (currently shell command stdout/stderr) so
+// task_session_messages.metadata stays bounded while preserving lazy,
+// integrity-verified detail loading. See externalizeMessagePayload (write
+// path) and RehydrateMessagePayload (explicit authorized read path) in
+// message_payload.go. task_message_payloads is content-addressed by SHA-256
+// digest, so an identical payload referenced by more than one message is
+// stored exactly once.
+func (r *Repository) migrateMessagePayloadStorage() {
+	r.migrate.Apply("task_session_messages.payload_digest", `ALTER TABLE task_session_messages ADD COLUMN payload_digest TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_session_messages.payload_size", `ALTER TABLE task_session_messages ADD COLUMN payload_size INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("idx_messages_payload_digest", `CREATE INDEX IF NOT EXISTS idx_messages_payload_digest ON task_session_messages(payload_digest)`)
+	r.migrate.Apply("task_message_payloads.table", fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS task_message_payloads (
+			digest TEXT PRIMARY KEY,
+			compressed_content %s NOT NULL,
+			uncompressed_size INTEGER NOT NULL,
+			compressed_size INTEGER NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		)`, dialect.BlobType(r.db.DriverName())))
+}
+
 // migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.
 func (r *Repository) migrateExecutorProfiles() error {
 	r.migrate.Apply("executor_profiles.mcp_policy", `ALTER TABLE executor_profiles ADD COLUMN mcp_policy TEXT DEFAULT ''`)
@@ -346,6 +368,18 @@ func (r *Repository) runMigrations() error {
 			last_seq INTEGER NOT NULL
 		)`)
 	if err := r.backfillPromptSeq(); err != nil {
+		return err
+	}
+
+	// Bounded operational payload storage (PR-watch/storage-bounds plan,
+	// wave 2): digest-backed external storage for large tool-message
+	// payloads (currently shell command stdout/stderr - see
+	// externalizeMessagePayload/RehydrateMessagePayload) and a content
+	// digest on git snapshots so content-equivalent rows become
+	// identifiable via ListDuplicateGitSnapshotCandidates for a later,
+	// explicit maintenance pass to prune.
+	r.migrateMessagePayloadStorage()
+	if err := r.migrateGitSnapshotContentDigest(); err != nil {
 		return err
 	}
 
