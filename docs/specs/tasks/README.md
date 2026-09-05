@@ -158,6 +158,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
 - [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
+- [Human Assignee](system-design/human-assignee.md)
 
 ## Migration record
 
