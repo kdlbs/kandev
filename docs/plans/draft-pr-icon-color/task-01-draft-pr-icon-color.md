@@ -46,14 +46,16 @@ existing mobile passive-indicator path.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run \
+(cd apps && pnpm --filter @kandev/web test -- --run \
   components/github/pr-task-icon-draft.test.ts \
-  components/github/pr-task-icon.test.ts
-cd apps/web && pnpm e2e:run tests/pr/pr-status-badge.spec.ts \
+  components/github/pr-task-icon.test.ts)
+(cd apps/web && pnpm e2e:run tests/pr/pr-status-badge.spec.ts \
   -- --grep "draft PR icon"
-cd apps/web && pnpm e2e:run --project mobile-chrome \
+)
+(cd apps/web && pnpm e2e:run --project mobile-chrome \
   tests/task/mobile-task-status-summary.spec.ts
-cd apps/web && pnpm run typecheck
+)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Files likely touched
