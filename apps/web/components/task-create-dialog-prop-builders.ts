@@ -11,6 +11,10 @@
 import type { TaskCreateDialogProps } from "@/components/task-create-dialog";
 import type { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
 import type { DialogFormBodyProps, DialogFormState } from "@/components/task-create-dialog-types";
+import {
+  resolveTaskCreateLaunchPreview,
+  type TaskCreateLaunchPreview,
+} from "@/components/task-create-dialog-launch-preview";
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
@@ -25,12 +29,27 @@ export function localRepositoryCreationEnabled(isCreateMode: boolean, repoLocked
   return isCreateMode && !repoLocked;
 }
 
+export function resolveDialogLaunchPreview(
+  isCreateMode: boolean,
+  effectiveWorkflowId: string | null,
+  fetchedSteps: DialogFormState["fetchedSteps"],
+  snapshots: DialogFormBodyProps["snapshots"],
+): TaskCreateLaunchPreview | null {
+  if (!isCreateMode) return null;
+  return resolveTaskCreateLaunchPreview({
+    effectiveWorkflowId,
+    fetchedSteps,
+    snapshotSteps: effectiveWorkflowId ? snapshots[effectiveWorkflowId]?.steps : undefined,
+  });
+}
+
 export function buildDialogFormBodyProps(
   setup: ReturnType<typeof useTaskCreateDialogSetup>,
   props: TaskCreateDialogProps,
 ): DialogFormBodyProps {
   const { fs, computed, handlers } = setup;
   const repoLocked = !!props.lockedFields?.repository;
+  const effectiveWorkflowId = computed.effectiveWorkflowId ?? null;
   return {
     isSessionMode: setup.isSessionMode,
     isCreateMode: setup.isCreateMode,
@@ -54,7 +73,13 @@ export function buildDialogFormBodyProps(
     isCreatingTask: fs.isCreatingTask,
     workflows: setup.workflows,
     snapshots: setup.snapshots,
-    effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
+    effectiveWorkflowId,
+    launchPreview: resolveDialogLaunchPreview(
+      setup.isCreateMode,
+      effectiveWorkflowId,
+      fs.fetchedSteps,
+      setup.snapshots,
+    ),
     fs,
     editDependencies: setup.editDependencies,
     handleKeyDown: setup.handleKeyDown,

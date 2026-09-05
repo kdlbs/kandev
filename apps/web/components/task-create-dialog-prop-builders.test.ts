@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { DialogFormState } from "./task-create-dialog-types";
+import type { DialogFormBodyProps, DialogFormState, StepType } from "./task-create-dialog-types";
 import {
   computeHasAllBranches,
   localRepositoryCreationEnabled,
+  resolveDialogLaunchPreview,
   resolveWorkflowName,
 } from "./task-create-dialog-prop-builders";
 
@@ -100,5 +101,29 @@ describe("resolveWorkflowName", () => {
   it("returns null when no workflow is effective or the id is unknown", () => {
     expect(resolveWorkflowName(workflows, null)).toBeNull();
     expect(resolveWorkflowName(workflows, "wf-missing")).toBeNull();
+  });
+});
+
+describe("resolveDialogLaunchPreview", () => {
+  it("projects the selected workflow snapshot only for create mode", () => {
+    const steps: StepType[] = [
+      {
+        id: "step-1",
+        title: "In Progress",
+        position: 0,
+        is_start_step: true,
+        prompt: "Run {{task_prompt}}",
+      },
+    ];
+    const snapshots = {
+      "workflow-1": { steps },
+    } as unknown as DialogFormBodyProps["snapshots"];
+
+    expect(resolveDialogLaunchPreview(true, "workflow-1", null, snapshots)).toEqual({
+      stepId: "step-1",
+      stepName: "In Progress",
+      stepPrompt: "Run {{task_prompt}}",
+    });
+    expect(resolveDialogLaunchPreview(false, "workflow-1", null, snapshots)).toBeNull();
   });
 });
