@@ -39,6 +39,7 @@ func provideLifecycleManager(
 	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 	recoveryDeadlineStart time.Time,
 	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
+	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
@@ -199,6 +200,13 @@ func provideLifecycleManager(
 	if workspaceInfoProvider != nil {
 		lifecycleMgr.SetWorkspaceInfoProvider(workspaceInfoProvider)
 	}
+	// AC-EXECUTORS-SURVIVAL-005.3: wire the durable passthrough-mode lookup
+	// before Start so the startup recovery guard can exclude a confirmed
+	// passthrough session from guarding instead of treating every recovered
+	// session as guardable.
+	if passthroughSessionProvider != nil {
+		lifecycleMgr.SetPassthroughLookup(passthroughLookupFromSessionProvider(passthroughSessionProvider))
+	}
 	// Kill-path #4 (design 01 "Kill paths that must change together"):
 	// StopAgentWithReason needs the capability state to decide survivable
 	// detach versus terminating stop on backend shutdown.
@@ -212,6 +220,23 @@ func provideLifecycleManager(
 		zap.Int("runtimes", len(executorRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
 	return lifecycleMgr, nil
+}
+
+// passthroughLookupFromSessionProvider adapts a durable session reader into
+// the lifecycle.PassthroughLookup closure consumed by
+// Manager.SetPassthroughLookup (AC-EXECUTORS-SURVIVAL-005.3). A failed or
+// empty read answers ok=false so the caller treats the session's mode as
+// unknown and falls back to guarding it -- the safe default documented on
+// Manager.passthroughLookup: guarding a passthrough session by mistake only
+// costs one refused launch, never excluding a real recovery candidate.
+func passthroughLookupFromSessionProvider(provider lifecycle.PassthroughSessionProvider) lifecycle.PassthroughLookup {
+	return func(ctx context.Context, sessionID string) (bool, bool) {
+		session, err := provider.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			return false, false
+		}
+		return session.IsPassthrough, true
+	}
 }
 
 type lifecycleSecretStores struct {

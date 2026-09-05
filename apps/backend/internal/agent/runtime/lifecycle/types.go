@@ -1241,6 +1241,14 @@ type WorkspaceInfoProvider interface {
 	GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnvironmentID string) (*WorkspaceInfo, error)
 }
 
+// PassthroughSessionProvider reads a task session's durable passthrough-mode
+// snapshot (TaskSession.IsPassthrough) so backend startup composition can
+// build the PassthroughLookup used by SetPassthroughLookup
+// (AC-EXECUTORS-SURVIVAL-005.3).
+type PassthroughSessionProvider interface {
+	GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error)
+}
+
 // RecoveredExecution contains info about an execution recovered from a runtime.
 type RecoveredExecution struct {
 	ExecutionID        string

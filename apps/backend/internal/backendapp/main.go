@@ -592,6 +592,7 @@ func startAgentInfrastructure(
 		mcpScopeResolver.ScopePrincipal,
 		recoveryDeadlineStart,
 		services.Task,
+		services.Task,
 		repos.Task,
 	)
 	if err != nil {
