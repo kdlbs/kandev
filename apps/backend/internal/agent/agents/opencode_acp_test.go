@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,6 +24,65 @@ func TestOpenCodeACPUsesManagedRuntime(t *testing.T) {
 	}
 	if got, wantInstall := a.InstallScript(), "npm install -g opencode-ai"; got != wantInstall {
 		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
+	}
+}
+
+func TestOpenCodeACPApplyFilesystemPolicyRendersNativePermissions(t *testing.T) {
+	env := map[string]string{"NPM_CONFIG_CACHE": "/tmp/cache"}
+	err := NewOpenCodeACP().ApplyFilesystemPolicy(env, FilesystemPolicy{
+		Name: "kandev_task_git_metadata",
+		Rules: []FilesystemPolicyRule{
+			{Path: "/workspace/.git", Access: FilesystemAccessWrite},
+			{Path: "/workspace/.git/worktrees", Access: FilesystemAccessDeny},
+			{Path: "/workspace/.git/objects", Access: FilesystemAccessRead},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyFilesystemPolicy() error = %v", err)
+	}
+	var config struct {
+		Permission map[string]map[string]string `json:"permission"`
+	}
+	if err := json.Unmarshal([]byte(env["OPENCODE_CONFIG_CONTENT"]), &config); err != nil {
+		t.Fatalf("decode OPENCODE_CONFIG_CONTENT: %v", err)
+	}
+	if got := config.Permission["edit"]["/workspace/.git/**"]; got != "allow" {
+		t.Errorf("edit GitDir permission = %q, want allow", got)
+	}
+	if got := config.Permission["read"]["/workspace/.git/objects/**"]; got != "allow" {
+		t.Errorf("read objects permission = %q, want allow", got)
+	}
+	for _, action := range []string{"external_directory", "read", "edit"} {
+		if got := config.Permission[action]["/workspace/.git/worktrees/**"]; got != "deny" {
+			t.Errorf("%s worktrees permission = %q, want deny", action, got)
+		}
+	}
+	if got := env["NPM_CONFIG_CACHE"]; got != "/tmp/cache" {
+		t.Errorf("unrelated environment value = %q, want preserved", got)
+	}
+}
+
+func TestOpenCodeACPApplyFilesystemPolicyFailsClosed(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy FilesystemPolicy
+	}{
+		{name: "missing name", policy: FilesystemPolicy{}},
+		{name: "unsupported access", policy: FilesystemPolicy{
+			Name:  "kandev_task_git_metadata",
+			Rules: []FilesystemPolicyRule{{Path: "/workspace/.git", Access: FilesystemAccess("ask")}},
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := map[string]string{"OPENCODE_CONFIG_CONTENT": `{"permission":{"edit":{"*":"allow"}}}`}
+			if err := NewOpenCodeACP().ApplyFilesystemPolicy(env, tc.policy); err == nil {
+				t.Fatal("ApplyFilesystemPolicy() error = nil, want fail-closed rejection")
+			}
+			if got := env["OPENCODE_CONFIG_CONTENT"]; got != `{"permission":{"edit":{"*":"allow"}}}` {
+				t.Errorf("failed policy replaced existing config: %q", got)
+			}
+		})
 	}
 }
 

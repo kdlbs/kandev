@@ -3,6 +3,10 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -19,10 +23,12 @@ var opencodeACPLogoDark []byte
 const opencodeACPPackage = "opencode-ai"
 
 var (
-	_ Agent                  = (*OpenCodeACP)(nil)
-	_ PassthroughAgent       = (*OpenCodeACP)(nil)
-	_ InferenceAgent         = (*OpenCodeACP)(nil)
-	_ ManagedNPMRuntimeAgent = (*OpenCodeACP)(nil)
+	_ Agent                            = (*OpenCodeACP)(nil)
+	_ PassthroughAgent                 = (*OpenCodeACP)(nil)
+	_ InferenceAgent                   = (*OpenCodeACP)(nil)
+	_ ManagedNPMRuntimeAgent           = (*OpenCodeACP)(nil)
+	_ FilesystemPolicyAgent            = (*OpenCodeACP)(nil)
+	_ FilesystemPolicyEnvironmentAgent = (*OpenCodeACP)(nil)
 )
 
 // OpenCodeACP is the ACP protocol variant of OpenCode.
@@ -168,6 +174,60 @@ func (a *OpenCodeACP) BillingType() usage.BillingType { return defaultBillingTyp
 
 func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
+}
+
+// ApplyFilesystemPolicy renders the server-authored Git metadata policy using
+// OpenCode's native permission configuration. Inline config has the highest
+// runtime precedence, so project or user config cannot widen these rules.
+func (a *OpenCodeACP) ApplyFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error {
+	if env == nil {
+		return errors.New("filesystem policy environment is unavailable")
+	}
+	if policy.Name != "kandev_task_git_metadata" {
+		return fmt.Errorf("unsupported filesystem policy %q", policy.Name)
+	}
+	rules := map[string]map[string]string{
+		"external_directory": {},
+		"read":               {},
+		"edit":               {},
+	}
+	for _, rule := range policy.Rules {
+		path := strings.TrimSpace(rule.Path)
+		if path == "" || path == ":minimal" {
+			continue
+		}
+		pattern := opencodeFilesystemPattern(path)
+		switch rule.Access {
+		case FilesystemAccessRead:
+			rules["read"][pattern] = "allow"
+		case FilesystemAccessWrite:
+			rules["edit"][pattern] = "allow"
+		case FilesystemAccessDeny:
+			for _, action := range []string{"external_directory", "read", "edit"} {
+				rules[action][pattern] = "deny"
+			}
+		default:
+			return fmt.Errorf("unsupported filesystem access %q", rule.Access)
+		}
+	}
+	encoded, err := json.Marshal(map[string]any{"permission": rules})
+	if err != nil {
+		return fmt.Errorf("encode OpenCode filesystem policy: %w", err)
+	}
+	env["OPENCODE_CONFIG_CONTENT"] = string(encoded)
+	return nil
+}
+
+func (a *OpenCodeACP) FilesystemPolicyEnvironmentKeys() []string {
+	return []string{"OPENCODE_CONFIG_CONTENT"}
+}
+
+func opencodeFilesystemPattern(path string) string {
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		return "/*"
+	}
+	return path + "/**"
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.
