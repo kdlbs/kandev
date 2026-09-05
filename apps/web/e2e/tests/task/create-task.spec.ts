@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar), so run
 // with the office feature disabled.
@@ -776,3 +777,129 @@ async function getTaskIdFromPage(page: import("@playwright/test").Page): Promise
   if (!match) throw new Error(`Cannot extract task ID from URL: ${url}`);
   return match[1];
 }
+
+test.describe("Task creation agent compatibility", () => {
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.1
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.2
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  test("replaces the selected agent with a compatible one when the executor changes", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    await backend.restart({ KANDEV_MOCK_PROVIDERS: "codex-acp" });
+    const scenario = await seedIncompatibleAgentScenario(
+      apiClient,
+      testPage,
+      seedData.agentProfileId,
+      {
+        executor: "E2E Docker Replace Agent",
+        dockerProfile: "Docker Codex Only",
+        compatibleProfile: "Codex Compatible",
+      },
+    );
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByTestId("task-title-input").fill("Replace incompatible agent");
+      await dialog.getByTestId("task-description-input").fill("executor switch after agent pick");
+
+      // Make sure the seeded agent is the selection while the default executor
+      // still accepts it. The dialog usually restores it on its own; clicking
+      // an already-selected option would toggle it off, so only pick it when
+      // something else is selected.
+      const agentSelector = dialog.getByTestId("agent-profile-selector");
+      if (!(await agentSelector.textContent())?.includes(scenario.seedProfileName)) {
+        await agentSelector.click();
+        await testPage
+          .getByRole("listbox")
+          .getByRole("option")
+          .filter({ hasText: scenario.seedProfileName })
+          .filter({ hasNotText: scenario.secondAgentDisplayName })
+          .first()
+          .click();
+      }
+      await expect(agentSelector).toContainText(scenario.seedProfileName);
+      await expect(agentSelector).not.toContainText(scenario.secondAgentDisplayName);
+
+      await testPage.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: /Docker Codex Only/i }).click();
+
+      // The mocked alias also ships a default profile, so the replacement can
+      // be either Codex profile; what matters is that it is no longer the seed.
+      await expect(agentSelector).toContainText(scenario.secondAgentDisplayName);
+      await expect(agentSelector).not.toContainText(scenario.seedProfileName);
+      await expect(dialog.getByTestId("agent-profile-empty-state")).toHaveCount(0);
+      await expect(dialog.getByTestId("agent-profile-incompatible-note")).toHaveCount(0);
+      await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+        timeout: START_ENABLED_TIMEOUT,
+      });
+    } finally {
+      await scenario.cleanup();
+      await backend.restart();
+    }
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.5
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.7
+  test("names the workflow-locked agent when the executor lacks its credentials", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    await backend.restart({ KANDEV_MOCK_PROVIDERS: "codex-acp" });
+    const scenario = await seedIncompatibleAgentScenario(
+      apiClient,
+      testPage,
+      seedData.agentProfileId,
+      {
+        executor: "E2E Docker Locked Agent",
+        dockerProfile: "Docker Locked Auth",
+        compatibleProfile: "Codex Unlocked",
+      },
+    );
+    const workflow = await seedLockedWorkflow(
+      apiClient,
+      seedData.workspaceId,
+      seedData.workflowId,
+      "Locked Agent",
+      seedData.agentProfileId,
+    );
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Locked Agent");
+      await dialog.getByTestId("task-title-input").fill("Locked agent task");
+      await dialog.getByTestId("task-description-input").fill("workflow-locked incompatible agent");
+
+      await testPage.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: /Docker Locked Auth/i }).click();
+
+      const note = dialog.getByTestId("agent-profile-incompatible-note");
+      await expect(note).toContainText("Locked Agent");
+      await expect(note).toContainText(scenario.seedProfileName);
+      await expect(note).toContainText("Docker Locked Auth");
+      await expect(dialog.getByRole("link", { name: "Configure credentials" })).toHaveAttribute(
+        "href",
+        `/settings/executors/${scenario.dockerProfileId}`,
+      );
+      await expect(dialog.getByTestId("agent-profile-empty-state")).toHaveCount(0);
+      await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeDisabled();
+    } finally {
+      await workflow.cleanup();
+      await scenario.cleanup();
+      await backend.restart();
+    }
+  });
+});

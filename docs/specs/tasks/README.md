@@ -86,6 +86,7 @@ signals, and task-scoped scheduling contracts.
 - [Subtask re-parenting by drag and drop](requirements/subtask-reparenting-drag-drop.md)
 - [Task Subtree Controls](requirements/subtree-controls.md)
 - [Create Task Escape Dismissal](requirements/task-create-escape-dismissal.md)
+- [Task Create Agent Compatibility Recovery](requirements/task-create-agent-executor-compatibility.md)
 - [Task Create Executor Default](requirements/task-create-executor-default.md)
 - [Task Create Launch Preview](requirements/task-create-launch-preview.md)
 - [Task Create Workflow Memory](requirements/task-create-workflow-memory.md)
@@ -160,6 +161,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
 - [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
+- [Task Create Agent Compatibility Recovery](system-design/task-create-agent-executor-compatibility.md)
 
 ## Migration record
 

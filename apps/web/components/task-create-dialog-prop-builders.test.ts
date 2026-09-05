@@ -4,6 +4,7 @@ import {
   computeHasAllBranches,
   localRepositoryCreationEnabled,
   resolveDialogLaunchPreview,
+  resolveWorkflowName,
 } from "./task-create-dialog-prop-builders";
 
 const WORKFLOW_ID = "workflow-1";
@@ -136,5 +137,21 @@ describe("resolveDialogLaunchPreview", () => {
       stepId: "auto-start",
       stepName: IN_PROGRESS,
     });
+  });
+});
+
+describe("resolveWorkflowName", () => {
+  const workflows = [
+    { id: "wf-dev", name: "Development" },
+    { id: "wf-ops", name: "Operations" },
+  ];
+
+  it("returns the name of the effective workflow", () => {
+    expect(resolveWorkflowName(workflows, "wf-dev")).toBe("Development");
+  });
+
+  it("returns null when no workflow is effective or the id is unknown", () => {
+    expect(resolveWorkflowName(workflows, null)).toBeNull();
+    expect(resolveWorkflowName(workflows, "wf-missing")).toBeNull();
   });
 });
