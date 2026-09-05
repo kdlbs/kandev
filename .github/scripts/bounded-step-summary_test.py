@@ -117,6 +117,39 @@ class BoundedStepSummaryTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("UnicodeDecodeError", result.stderr)
 
+    def test_impossibly_small_max_bytes_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "generated-summary.md"
+            output = tmp_path / "github-step-summary.md"
+            source.write_text("oversized summary", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SCRIPT),
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                    "--diagnostics-label",
+                    "backend-test-results-1",
+                    "--diagnostics-url",
+                    "https://github.example.test/kdlbs/kandev/actions/runs/123#artifacts",
+                    "--max-bytes",
+                    "1",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "max bytes is too small for the truncation notice",
+                result.stderr,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
