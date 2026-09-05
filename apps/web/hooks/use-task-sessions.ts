@@ -158,20 +158,12 @@ export function useTaskSessions(taskId: string | null) {
     previousConnectionStatusRef.current = connectionStatus;
     if (!taskId) return;
     if (connectionStatus !== "connected" || previous === "connected") return;
-    if (!isLoaded) {
-      if (isLoading) void loadSessions(true);
-      return;
-    }
     void loadSessions(true);
   }, [connectionStatus, isLoaded, isLoading, loadSessions, taskId]);
 
   useForegroundRefresh(
     () => {
       if (!taskId) return;
-      if (!isLoaded) {
-        if (isLoading) void loadSessions(true);
-        return;
-      }
       void loadSessions(true);
     },
     Boolean(taskId),

@@ -953,6 +953,10 @@ func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, 
 	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
+func (w *orchestratorWrapper) SteerRecordedMessage(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerRecordedMessage(ctx, taskID, sessionID, prompt, model, planMode, attachments)
+}
+
 // subagentContextAdapter adapts the task service to the
 // orchestrator.SubagentContextRecorder interface.
 type subagentContextAdapter struct {

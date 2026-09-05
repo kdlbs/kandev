@@ -2233,9 +2233,38 @@ type TaskPlan struct {
 	CreatedBy                      string     `json:"created_by"` // "agent" or "user"
 	CreatedAt                      time.Time  `json:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at"`
+	CommentsRevision               int64      `json:"comments_revision"`
 	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
 	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
 	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
+}
+
+// TaskPlanComment is pending user feedback attached to the current task plan.
+type TaskPlanComment struct {
+	ID           string    `json:"id"`
+	TaskID       string    `json:"task_id"`
+	PlanID       string    `json:"plan_id"`
+	Body         string    `json:"body"`
+	SelectedText string    `json:"selected_text"`
+	AnchorFrom   int       `json:"anchor_from"`
+	AnchorTo     int       `json:"anchor_to"`
+	Version      int64     `json:"version"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// TaskPlanCommentSnapshot is the authoritative pending-comment collection for a plan.
+type TaskPlanCommentSnapshot struct {
+	TaskID   string             `json:"task_id" db:"task_id"`
+	PlanID   string             `json:"plan_id" db:"plan_id"`
+	Revision int64              `json:"revision" db:"revision"`
+	Comments []*TaskPlanComment `json:"comments"`
+}
+
+// TaskPlanCommentRef identifies the exact pending-comment version a delivery includes.
+type TaskPlanCommentRef struct {
+	ID      string `json:"id"`
+	Version int64  `json:"version"`
 }
 
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.

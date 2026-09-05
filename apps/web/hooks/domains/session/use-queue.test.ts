@@ -98,17 +98,20 @@ function resetMockState() {
   };
 }
 
-describe("useQueue", () => {
-  beforeEach(() => {
-    resetMockState();
-    setDocumentVisibility("visible");
-    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
-  });
+function setupQueueTest() {
+  resetMockState();
+  setDocumentVisibility("visible");
+  queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+}
 
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-  });
+function cleanupQueueTest() {
+  cleanup();
+  vi.clearAllMocks();
+}
+
+describe("useQueue", () => {
+  beforeEach(setupQueueTest);
+  afterEach(cleanupQueueTest);
 
   it("refetches the queue snapshot when the WebSocket reconnects", async () => {
     mockState.connection.status = "disconnected";
@@ -175,6 +178,11 @@ describe("useQueue", () => {
 
     expect(queueApiMock.getQueueStatus).not.toHaveBeenCalled();
   });
+});
+
+describe("useQueue payload forwarding", () => {
+  beforeEach(setupQueueTest);
+  afterEach(cleanupQueueTest);
 
   it("queues structured references with busy-agent messages", async () => {
     queueApiMock.queueMessage.mockResolvedValue(entry());
@@ -199,6 +207,50 @@ describe("useQueue", () => {
       attachments: undefined,
       entity_references: [reference],
     });
+  });
+
+  it("forwards task plan comment admission fields", async () => {
+    queueApiMock.queueMessage.mockResolvedValue(entry());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.queueMessage.mockClear();
+
+    await act(async () => {
+      await result.current.queue({
+        taskId: TASK_ID,
+        content: "",
+        clientQueueId: "client-queue-1",
+        planMode: true,
+        planCommentRefs: [{ id: "comment-1", version: 2 }],
+        requirePrimarySession: true,
+      } as never);
+    });
+
+    expect(queueApiMock.queueMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_queue_id: "client-queue-1",
+        plan_comment_refs: [{ id: "comment-1", version: 2 }],
+        require_primary_session: true,
+      }),
+    );
+  });
+
+  it("keeps an accepted queue admission successful when reconciliation fails", async () => {
+    queueApiMock.queueMessage.mockResolvedValue(entry({ id: "accepted" }));
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockRejectedValueOnce(new Error("snapshot unavailable"));
+
+    await expect(
+      act(async () => {
+        await result.current.queue({
+          taskId: TASK_ID,
+          content: "",
+          clientQueueId: "accepted",
+          planCommentRefs: [{ id: "comment-1", version: 2 }],
+        } as never);
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("replaces queued reference metadata with an explicit empty array", async () => {

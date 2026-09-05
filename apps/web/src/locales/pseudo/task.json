@@ -1959,5 +1959,18 @@
   "uploadedTo": "Ũƥĺōàďēď ţō {{path}}",
   "failedToUploadFile": "Ƒàĩĺēď ţō ũƥĺōàď ƒĩĺē",
   "uploadPartiallyFailed_one": "{{count}} ƒĩĺē ƒàĩĺēď ţō ũƥĺōàď",
-  "uploadPartiallyFailed_other": "{{count}} ƒĩĺēś ƒàĩĺēď ţō ũƥĺōàď"
+  "uploadPartiallyFailed_other": "{{count}} ƒĩĺēś ƒàĩĺēď ţō ũƥĺōàď",
+  "failedToLoadPlanComments": "Ćōũĺď ńōţ ĺōàď ƥĺàń ćōḿḿēńţś. Ţŕŷ àĝàĩń.",
+  "failedToSavePlanComment": "Ćōũĺď ńōţ śàvē ţĥĩś ƥĺàń ćōḿḿēńţ. Ţŕŷ àĝàĩń.",
+  "failedToDeletePlanComment": "Ćōũĺď ńōţ ďēĺēţē ţĥĩś ƥĺàń ćōḿḿēńţ. Ţŕŷ àĝàĩń.",
+  "failedToRunPlanComment": "Ćōũĺď ńōţ ŕũń ţĥĩś ƥĺàń ćōḿḿēńţ. Ţŕŷ àĝàĩń.",
+  "noPrimarySessionForPlanComment": "Ńō ƥŕĩḿàŕŷ śēśśĩōń ĩś àvàĩĺàƀĺē. Śţàŕţ à śēśśĩōń ōŕ ḿàķē ōńē ƥŕĩḿàŕŷ ţō ũśē Ŕũń.",
+  "primarySessionUnavailableForPlanComment": "Ţĥē ƥŕĩḿàŕŷ śēśśĩōń ćàńńōţ àććēƥţ ĩńƥũţ. Śţàŕţ ōŕ ćĥōōśē àń àvàĩĺàƀĺē ƥŕĩḿàŕŷ śēśśĩōń.",
+  "planCommentNotReadyToRun": "Ţĥĩś ƥĺàń ćōḿḿēńţ ĩś śţĩĺĺ ƀēĩńĝ śàvēď. Ţŕŷ Ŕũń àĝàĩń.",
+  "planCommentsChangedRetry": "Ţĥē ƥĺàń ćōḿḿēńţś ćĥàńĝēď. Ŕēvĩēŵ ţĥēḿ àńď śēńď àĝàĩń.",
+  "primarySessionChangedRetry": "Ţĥē ƥŕĩḿàŕŷ śēśśĩōń ćĥàńĝēď. Ţŕŷ Ŕũń àĝàĩń.",
+  "restoringSavedPlanComments": "Ŕēśţōŕĩńĝ śàvēď ƥĺàń ćōḿḿēńţś...",
+  "planCommentMigrationFailed": "Śōḿē śàvēď ƥĺàń ćōḿḿēńţś ćōũĺď ńōţ ƀē ŕēśţōŕēď.",
+  "planCommentMigrationNeedsPlan": "Ćŕēàţē ōŕ ŕēśţōŕē à ƥĺàń ţō ŕēćōvēŕ śàvēď ćōḿḿēńţś.",
+  "planCommentMigrationPending": "Śàvēď ƥĺàń ćōḿḿēńţś àŕē śţĩĺĺ ƀēĩńĝ ŕēśţōŕēď. Ŕēţŕŷ ƀēƒōŕē śēńďĩńĝ."
 }

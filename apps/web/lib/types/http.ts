@@ -836,6 +836,7 @@ export type MessageType =
 
 export type MessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  client_queue_id?: string;
 };
 
 export type Message = {

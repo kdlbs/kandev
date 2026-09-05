@@ -18,9 +18,13 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -51,6 +55,15 @@ type OrchestratorService interface {
 
 type taskTitleSessionClaimer interface {
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
+type atomicQueuedPromptCoordinator interface {
+	MaxQueuedPromptsPerSession() int
+	NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string)
+}
+
+type recordedMessageSteerer interface {
+	SteerRecordedMessage(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -413,18 +426,45 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 // WS handlers
 
 type wsAddMessageRequest struct {
-	TaskID            string                 `json:"task_id"`
-	TaskSessionID     string                 `json:"session_id"`
-	MessageID         string                 `json:"message_id,omitempty"`
-	ClientMessageID   string                 `json:"client_message_id,omitempty"`
-	Content           string                 `json:"content"`
-	AuthorID          string                 `json:"author_id,omitempty"`
-	Model             string                 `json:"model,omitempty"`
-	PlanMode          bool                   `json:"plan_mode,omitempty"`
-	HasReviewComments bool                   `json:"has_review_comments,omitempty"`
-	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
-	ContextFiles      []v1.ContextFileMeta   `json:"context_files,omitempty"`
-	EntityReferences  []v1.EntityReference   `json:"entity_references,omitempty"`
+	TaskID                string                      `json:"task_id"`
+	TaskSessionID         string                      `json:"session_id"`
+	MessageID             string                      `json:"message_id,omitempty"`
+	ClientMessageID       string                      `json:"client_message_id,omitempty"`
+	Content               string                      `json:"content"`
+	AuthorID              string                      `json:"author_id,omitempty"`
+	Model                 string                      `json:"model,omitempty"`
+	PlanMode              bool                        `json:"plan_mode,omitempty"`
+	HasReviewComments     bool                        `json:"has_review_comments,omitempty"`
+	Attachments           []v1.MessageAttachment      `json:"attachments,omitempty"`
+	ContextFiles          []v1.ContextFileMeta        `json:"context_files,omitempty"`
+	EntityReferences      []v1.EntityReference        `json:"entity_references,omitempty"`
+	PlanCommentRefs       []models.TaskPlanCommentRef `json:"plan_comment_refs,omitempty"`
+	RequirePrimarySession bool                        `json:"require_primary_session,omitempty"`
+}
+
+type addMessageReplayIdentity struct {
+	TaskID                string                      `json:"task_id"`
+	TaskSessionID         string                      `json:"session_id"`
+	Content               string                      `json:"content"`
+	AuthorID              string                      `json:"author_id"`
+	Model                 string                      `json:"model"`
+	PlanMode              bool                        `json:"plan_mode"`
+	HasReviewComments     bool                        `json:"has_review_comments"`
+	Attachments           []v1.MessageAttachment      `json:"attachments"`
+	ContextFiles          []v1.ContextFileMeta        `json:"context_files"`
+	EntityReferences      []v1.EntityReference        `json:"entity_references"`
+	PlanCommentRefs       []models.TaskPlanCommentRef `json:"plan_comment_refs"`
+	RequirePrimarySession bool                        `json:"require_primary_session"`
+}
+
+func addMessageRequestFingerprint(req wsAddMessageRequest) (string, error) {
+	return plancomments.Fingerprint(addMessageReplayIdentity{
+		TaskID: req.TaskID, TaskSessionID: req.TaskSessionID, Content: req.Content,
+		AuthorID: req.AuthorID, Model: req.Model, PlanMode: req.PlanMode,
+		HasReviewComments: req.HasReviewComments, Attachments: req.Attachments,
+		ContextFiles: req.ContextFiles, EntityReferences: req.EntityReferences,
+		PlanCommentRefs: req.PlanCommentRefs, RequirePrimarySession: req.RequirePrimarySession,
+	})
 }
 
 // wsAddMessage handles an incoming add-message WebSocket action, persisting the user message and dispatching the turn and orchestrator flow.
@@ -443,6 +483,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if errMsg := validateAddMessageRequest(req); errMsg != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
+	requestFingerprint, err := addMessageRequestFingerprint(req)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to identify message request", nil)
+	}
 	unlockMessageID := h.lockMessageID(req.ClientMessageID)
 	defer unlockMessageID()
 
@@ -459,6 +503,12 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			// longer the persisted message's session.
 			if (existing.TaskID != "" && existing.TaskID != req.TaskID) ||
 				existing.AuthorType != models.MessageAuthorUser {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
+			}
+			storedFingerprint, _ := existing.Metadata[plancomments.MetadataClientMessageFingerprint].(string)
+			if (storedFingerprint != "" && storedFingerprint != requestFingerprint) ||
+				(storedFingerprint == "" && len(req.PlanCommentRefs) > 0) ||
+				!plancomments.MetadataRefsMatch(existing.Metadata, req.PlanCommentRefs) {
 				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
 			}
 			apiMsg := existing.ToAPI()
@@ -494,6 +544,17 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		req.EntityReferences = references
 	}
+	if len(req.PlanCommentRefs) > 0 {
+		if err := h.service.ValidatePlanCommentMessage(
+			ctx, req.TaskID, req.TaskSessionID, req.Content, req.PlanCommentRefs, req.RequirePrimarySession,
+		); err != nil {
+			if response := planCommentMessageError(msg, err); response != nil {
+				return response, nil
+			}
+			h.logger.Error("failed to validate plan comment message", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to validate plan comments", nil)
+		}
+	}
 
 	// Transition task from REVIEW → IN_PROGRESS if needed
 	task, err := h.ensureTaskInProgress(ctx, req.TaskID)
@@ -512,6 +573,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// first turn. dispatchPromptAsync no longer calls ProcessOnTurnStart;
 	// it forwards the (now correctly-wrapped) prompt to the agent.
 	if h.orchestrator != nil {
+		submittedSessionID := req.TaskSessionID
 		var turnStartErr error
 		turnStartResult, turnStartErr = h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID)
 		if turnStartErr != nil {
@@ -528,6 +590,12 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resolve prompt session", nil)
+		}
+		if req.RequirePrimarySession && sessionResp.Session.ID != submittedSessionID {
+			return planCommentMessageError(msg, &plancommenttx.PrimarySessionChangedError{
+				SessionID: sessionResp.Session.ID,
+				State:     sessionResp.Session.State,
+			}), nil
 		}
 		req.TaskSessionID = sessionResp.Session.ID
 	}
@@ -568,6 +636,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
+	if len(req.PlanCommentRefs) > 0 {
+		req.Content = plancomments.WithPlaceholder(req.Content)
+	}
 	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
 	var trustedPromptContext string
 	storedContent, trustedPromptContext = h.prepareDirectPrompt(
@@ -575,7 +646,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	)
 	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 	titleOwner := false
-	hasMessageContent := req.Content != "" || len(req.Attachments) > 0
+	hasMessageContent := req.Content != "" || len(req.Attachments) > 0 || len(req.PlanCommentRefs) > 0
 	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
 		ctx, msg, task, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
 	)
@@ -593,29 +664,88 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		)
 	}
 	req.Content = storedContent
-	if err := h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments); err != nil {
+	planCommentAttachmentClaim := len(req.PlanCommentRefs) > 0 && len(req.Attachments) > 0
+	if planCommentAttachmentClaim {
+		err = h.service.ClaimDirectMessageAttachments(
+			ctx, req.TaskID, req.TaskSessionID, req.ClientMessageID, req.Attachments,
+		)
+	} else {
+		err = h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments)
+	}
+	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
+	messageMetadata := meta.ToMap()
+	if req.ClientMessageID != "" {
+		if messageMetadata == nil {
+			messageMetadata = make(map[string]interface{})
+		}
+		messageMetadata[plancomments.MetadataClientMessageFingerprint] = requestFingerprint
+	}
 	createRequest := &service.CreateMessageRequest{
-		TaskSessionID: req.TaskSessionID,
-		TaskID:        req.TaskID,
-		Content:       storedContent,
-		AuthorType:    "user",
-		AuthorID:      req.AuthorID,
-		Metadata:      meta.ToMap(),
+		TaskSessionID:         req.TaskSessionID,
+		TaskID:                req.TaskID,
+		Content:               storedContent,
+		AuthorType:            string(models.MessageAuthorUser),
+		AuthorID:              req.AuthorID,
+		Metadata:              messageMetadata,
+		PlanCommentRefs:       req.PlanCommentRefs,
+		RequirePrimarySession: req.RequirePrimarySession,
 	}
 	var message *models.Message
-	if req.ClientMessageID != "" {
+	atomicQueuedPlanComments := turnStartResult.Queued && len(req.PlanCommentRefs) > 0
+	switch {
+	case atomicQueuedPlanComments:
+		coordinator, ok := h.orchestrator.(atomicQueuedPromptCoordinator)
+		if !ok {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queued prompt admission is unavailable", nil)
+		}
+		queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
+		for key, value := range createRequest.Metadata {
+			queueMetadata[key] = value
+		}
+		queueMetadata["user_message_recorded"] = true
+		queued := &messagequeue.QueuedMessage{
+			ID: req.ClientMessageID, SessionID: req.TaskSessionID, TaskID: req.TaskID,
+			Content: storedContent, Model: req.Model, PlanMode: req.PlanMode,
+			Attachments: queuedMessageAttachments(req.Attachments), Metadata: queueMetadata,
+			QueuedBy: messagequeue.QueuedByUser,
+		}
+		message, err = h.service.CreateQueuedMessageIdempotent(
+			ctx, req.ClientMessageID, createRequest, queued, coordinator.MaxQueuedPromptsPerSession(),
+		)
+		if err == nil {
+			coordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
+		}
+	case req.ClientMessageID != "":
 		message, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
-	} else {
+	default:
 		message, err = h.service.CreateMessage(ctx, createRequest)
 	}
 	if err != nil {
+		if planCommentAttachmentClaim {
+			if restoreErr := h.service.RestoreDirectMessageAttachments(
+				ctx, req.TaskID, req.TaskSessionID, req.ClientMessageID, req.Attachments,
+			); restoreErr != nil {
+				h.logger.Error("failed to restore rejected plan comment attachments", zap.Error(restoreErr))
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to restore attachments", nil)
+			}
+		}
+		if response := planCommentMessageError(msg, err); response != nil {
+			return response, nil
+		}
+		if errors.Is(err, messagequeue.ErrQueueFull) {
+			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode, "Queue is full", nil)
+		}
+		if errors.Is(err, messagequeue.ErrQueueIDConflict) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
+		}
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
-	if turnStartResult.Queued {
+	req.Content = message.Content
+	if turnStartResult.Queued && !atomicQueuedPlanComments {
 		if err := h.orchestrator.QueueUserPrompt(
 			ctx,
 			req.TaskID,
@@ -752,16 +882,77 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 		return "task_id is required"
 	}
 	// Content can be empty if there are attachments (image-only messages)
-	if req.Content == "" && len(req.Attachments) == 0 {
+	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 {
 		return "content or attachments are required"
+	}
+	seenPlanComments := make(map[string]struct{}, len(req.PlanCommentRefs))
+	for _, ref := range req.PlanCommentRefs {
+		if ref.ID == "" || ref.Version <= 0 {
+			return "plan_comment_refs are invalid"
+		}
+		if _, duplicate := seenPlanComments[ref.ID]; duplicate {
+			return "plan_comment_refs contain duplicates"
+		}
+		seenPlanComments[ref.ID] = struct{}{}
 	}
 	if len(req.ClientMessageID) > 128 {
 		return "client_message_id is too long"
+	}
+	if len(req.PlanCommentRefs) > 0 && req.ClientMessageID == "" {
+		return "client_message_id is required with plan comments"
+	}
+	if len(req.PlanCommentRefs) > 0 && plancomments.ContainsReservedPlaceholder(req.Content) {
+		return "content contains a reserved plan comment marker"
 	}
 	if err := validateAttachments(req.Attachments); err != nil {
 		return err.Error()
 	}
 	return ""
+}
+
+func queuedMessageAttachments(attachments []v1.MessageAttachment) []messagequeue.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	queued := make([]messagequeue.MessageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		queued = append(queued, messagequeue.MessageAttachment{
+			Type: attachment.Type, AttachmentID: attachment.AttachmentID, Data: attachment.Data,
+			MimeType: attachment.MimeType, Name: attachment.Name, SizeBytes: attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+		})
+	}
+	return queued
+}
+
+func planCommentMessageError(msg *ws.Message, err error) *ws.Message {
+	var commentsChanged *plancommenttx.CommentsChangedError
+	if errors.As(err, &commentsChanged) {
+		details := map[string]interface{}{}
+		if commentsChanged.Snapshot != nil {
+			details["snapshot"] = dto.TaskPlanCommentSnapshotFromModel(commentsChanged.Snapshot)
+		}
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodePlanCommentsChanged, "Task plan comments changed", details)
+		return response
+	}
+	var primaryChanged *plancommenttx.PrimarySessionChangedError
+	if errors.As(err, &primaryChanged) {
+		details := map[string]interface{}{
+			"primary_session_id":    primaryChanged.SessionID,
+			"primary_session_state": primaryChanged.State,
+		}
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodePrimarySessionChanged, "Primary session changed", details)
+		return response
+	}
+	if errors.Is(err, repoerrors.ErrTaskSessionMismatch) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session does not belong to task", nil)
+		return response
+	}
+	if errors.Is(err, service.ErrMessageIDConflict) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
+		return response
+	}
+	return nil
 }
 
 // checkSessionStateForMessage loads the session and returns an error WS message if the
@@ -878,7 +1069,12 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 ) {
-	_, err := h.orchestrator.SteerTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	var err error
+	if steerer, ok := h.orchestrator.(recordedMessageSteerer); ok {
+		_, err = steerer.SteerRecordedMessage(ctx, taskID, sessionID, content, model, planMode, attachments)
+	} else {
+		_, err = h.orchestrator.SteerTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	}
 	if err == nil {
 		return
 	}

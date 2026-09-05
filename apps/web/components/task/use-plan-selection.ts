@@ -7,22 +7,24 @@ type PlanSelectionCommentState = Pick<
   "comments" | "setEditingCommentId"
 >;
 
-/** Own the transient plan-comment selection for the currently active session. */
+/** Own transient plan-comment selection for the currently open task. */
 export function usePlanSelection(
-  activeSessionId: string | null | undefined,
+  taskId: string | null | undefined,
+  planId: string | null | undefined,
   commentState: PlanSelectionCommentState,
 ) {
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
-  const previousSessionIdRef = useRef(activeSessionId);
+  const ownerIdentity = `${taskId ?? ""}:${planId ?? ""}`;
+  const previousOwnerIdentityRef = useRef(ownerIdentity);
 
   useEffect(() => {
-    if (previousSessionIdRef.current === activeSessionId) return;
-    previousSessionIdRef.current = activeSessionId;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- session identity owns this transient editor state
+    if (previousOwnerIdentityRef.current === ownerIdentity) return;
+    previousOwnerIdentityRef.current = ownerIdentity;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- task identity owns this transient editor state
     setTextSelection(null);
     commentState.setEditingCommentId(null);
     window.getSelection()?.removeAllRanges();
-  }, [activeSessionId, commentState.setEditingCommentId]);
+  }, [ownerIdentity, commentState.setEditingCommentId]);
 
   const handleCommentHighlightClick = useCallback(
     (id: string, position: { x: number; y: number }) => {

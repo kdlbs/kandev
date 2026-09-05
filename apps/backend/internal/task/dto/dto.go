@@ -1139,6 +1139,7 @@ type TaskPlanDTO struct {
 	CreatedBy                      string     `json:"created_by"`
 	CreatedAt                      time.Time  `json:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at"`
+	CommentsRevision               int64      `json:"comments_revision"`
 	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
 	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
 	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
@@ -1157,10 +1158,53 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 		CreatedBy:                      plan.CreatedBy,
 		CreatedAt:                      plan.CreatedAt,
 		UpdatedAt:                      plan.UpdatedAt,
+		CommentsRevision:               plan.CommentsRevision,
 		ImplementationStartedAt:        plan.ImplementationStartedAt,
 		ImplementationStartedSessionID: plan.ImplementationStartedSessionID,
 		ImplementationStartedBy:        plan.ImplementationStartedBy,
 	}
+}
+
+// TaskPlanCommentDTO is pending feedback attached to a task's current plan.
+type TaskPlanCommentDTO struct {
+	ID           string    `json:"id"`
+	TaskID       string    `json:"task_id"`
+	PlanID       string    `json:"plan_id"`
+	Body         string    `json:"body"`
+	SelectedText string    `json:"selected_text"`
+	AnchorFrom   int       `json:"anchor_from"`
+	AnchorTo     int       `json:"anchor_to"`
+	Version      int64     `json:"version"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// TaskPlanCommentSnapshotDTO is a complete, versioned replacement snapshot.
+type TaskPlanCommentSnapshotDTO struct {
+	TaskID   string                `json:"task_id"`
+	PlanID   string                `json:"plan_id"`
+	Revision int64                 `json:"revision"`
+	Comments []*TaskPlanCommentDTO `json:"comments"`
+}
+
+// TaskPlanCommentSnapshotFromModel converts the authoritative repository snapshot.
+func TaskPlanCommentSnapshotFromModel(snapshot *models.TaskPlanCommentSnapshot) *TaskPlanCommentSnapshotDTO {
+	if snapshot == nil {
+		return nil
+	}
+	out := &TaskPlanCommentSnapshotDTO{
+		TaskID: snapshot.TaskID, PlanID: snapshot.PlanID, Revision: snapshot.Revision,
+		Comments: make([]*TaskPlanCommentDTO, 0, len(snapshot.Comments)),
+	}
+	for _, comment := range snapshot.Comments {
+		out.Comments = append(out.Comments, &TaskPlanCommentDTO{
+			ID: comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
+			Body: comment.Body, SelectedText: comment.SelectedText,
+			AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo, Version: comment.Version,
+			CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,
+		})
+	}
+	return out
 }
 
 // TaskPlanRevisionDTO represents a plan revision for API responses.

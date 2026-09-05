@@ -73,6 +73,14 @@ function senderKindOf(entry: QueuedMessage): SenderKind {
  * backend rows and are never mergeable. */
 export function canMergeEntry(entry: QueuedMessage): boolean {
   if (entry.queued_by === "server") return false;
+  if (
+    entry.metadata &&
+    ("plan_comment_refs" in entry.metadata ||
+      "plan_comment_request_fingerprint" in entry.metadata ||
+      "client_queue_id" in entry.metadata)
+  ) {
+    return false;
+  }
   const kind = senderKindOf(entry);
   return kind === "user" || kind === "agent";
 }

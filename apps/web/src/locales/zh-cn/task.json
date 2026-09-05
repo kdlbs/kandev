@@ -1959,5 +1959,18 @@
   "uploadedTo": "已上传至 {{path}}",
   "failedToUploadFile": "上传文件失败",
   "uploadPartiallyFailed_one": "{{count}} 个文件上传失败",
-  "uploadPartiallyFailed_other": "{{count}} 个文件上传失败"
+  "uploadPartiallyFailed_other": "{{count}} 个文件上传失败",
+  "failedToLoadPlanComments": "无法加载计划评论。请重试。",
+  "failedToSavePlanComment": "无法保存此计划评论。请重试。",
+  "failedToDeletePlanComment": "无法删除此计划评论。请重试。",
+  "failedToRunPlanComment": "无法运行此计划评论。请重试。",
+  "noPrimarySessionForPlanComment": "没有可用的主会话。请启动一个会话或将某个会话设为主会话后再运行。",
+  "primarySessionUnavailableForPlanComment": "主会话无法接收输入。请启动或选择一个可用的主会话。",
+  "planCommentNotReadyToRun": "此计划评论仍在保存。请再次运行。",
+  "planCommentsChangedRetry": "计划评论已更改。请检查后重新发送。",
+  "primarySessionChangedRetry": "主会话已更改。请再次运行。",
+  "restoringSavedPlanComments": "正在恢复已保存的计划评论...",
+  "planCommentMigrationFailed": "无法恢复部分已保存的计划评论。",
+  "planCommentMigrationNeedsPlan": "请创建或恢复计划，以恢复已保存的评论。",
+  "planCommentMigrationPending": "仍在恢复已保存的计划评论。请重试后再发送。"
 }

@@ -123,9 +123,339 @@ func (r *Repository) ClaimMessageAttachments(ctx context.Context, ids []string, 
 	return nil
 }
 
+// ClaimQueuedMessageAttachments marks only newly staged rows with queueID.
+// Existing claims for the same task/session remain usable but are not adopted,
+// so a failed admission cannot roll back another accepted message's claim.
+func (r *Repository) ClaimQueuedMessageAttachments(
+	ctx context.Context,
+	ids []string,
+	ownerID, workspaceID, taskID, sessionID, queueID string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if queueID == "" {
+		return models.ErrAttachmentClaimConflict
+	}
+	if len(ids) > models.MaxMessageAttachmentCount {
+		return models.ErrTooManyAttachments
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin queued attachment claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC()
+	selection, err := r.selectQueuedAttachmentsForClaim(
+		ctx, tx, ids, ownerID, workspaceID, taskID, sessionID, queueID, now,
+	)
+	if err != nil {
+		return err
+	}
+	if selection.selectedSize > models.MaxMessageAttachmentBytes {
+		return models.ErrAttachmentTotalTooLarge
+	}
+	if err := r.markQueuedAttachmentsClaimed(
+		ctx, tx, selection.claimIDs, ownerID, workspaceID, taskID, sessionID, queueID, now,
+	); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit queued attachment claim: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) selectQueuedAttachmentsForClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ids []string,
+	ownerID, workspaceID, taskID, sessionID, queueID string,
+	now time.Time,
+) (attachmentClaimSelection, error) {
+	selection := attachmentClaimSelection{}
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if !recordUniqueAttachmentID(seen, id) {
+			return attachmentClaimSelection{}, models.ErrAttachmentClaimConflict
+		}
+		attachment, err := loadAttachmentForClaim(ctx, tx, id)
+		if err != nil {
+			return attachmentClaimSelection{}, err
+		}
+		if attachment.OwnerID != ownerID || attachment.WorkspaceID != workspaceID {
+			return attachmentClaimSelection{}, models.ErrAttachmentClaimConflict
+		}
+		if err := addQueuedAttachmentToClaim(&selection, attachment, id, taskID, sessionID, queueID, now); err != nil {
+			return attachmentClaimSelection{}, err
+		}
+	}
+	return selection, nil
+}
+
+func addQueuedAttachmentToClaim(
+	selection *attachmentClaimSelection,
+	attachment *models.TaskMessageAttachment,
+	id, taskID, sessionID, queueID string,
+	now time.Time,
+) error {
+	if attachment.State == models.AttachmentStateStaged {
+		return addStagedAttachmentToClaim(selection, attachment, id, now)
+	}
+	if attachment.State != models.AttachmentStateClaimed ||
+		attachment.TaskID != taskID ||
+		(attachment.SessionID != "" && attachment.SessionID != sessionID) ||
+		attachment.MessageID != "" ||
+		(attachment.QueueID != "" && attachment.QueueID != queueID) {
+		return models.ErrAttachmentClaimConflict
+	}
+	return nil
+}
+
+func (r *Repository) markQueuedAttachmentsClaimed(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ids []string,
+	ownerID, workspaceID, taskID, sessionID, queueID string,
+	now time.Time,
+) error {
+	for _, id := range ids {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments
+			SET task_id = ?, session_id = ?, queue_id = ?, state = ?, updated_at = ?
+			WHERE id = ? AND owner_id = ? AND workspace_id = ? AND state = ?
+		`), taskID, sessionID, queueID, models.AttachmentStateClaimed, now,
+			id, ownerID, workspaceID, models.AttachmentStateStaged)
+		if err != nil {
+			return fmt.Errorf("claim queued attachment: %w", err)
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return models.ErrAttachmentClaimConflict
+		}
+	}
+	return nil
+}
+
+// RestoreQueuedMessageAttachments returns only rows provisionally claimed by
+// this queue admission to staged state. A pre-existing claim has no queueID and
+// is deliberately untouched.
+func (r *Repository) RestoreQueuedMessageAttachments(
+	ctx context.Context,
+	ids []string,
+	ownerID, taskID, sessionID, queueID string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin queued attachment restore: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments
+			SET task_id = '', session_id = '', message_id = '', queue_id = '', state = ?, updated_at = ?
+			WHERE id = ? AND owner_id = ? AND task_id = ? AND session_id = ?
+			  AND queue_id = ? AND state = ?
+		`), models.AttachmentStateStaged, now, id, ownerID, taskID, sessionID,
+			queueID, models.AttachmentStateClaimed); err != nil {
+			return fmt.Errorf("restore queued attachment: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit queued attachment restore: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) ClaimDirectMessageAttachments(
+	ctx context.Context,
+	ids []string,
+	ownerID, workspaceID, taskID, sessionID, messageID string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if messageID == "" || len(ids) > models.MaxMessageAttachmentCount {
+		return models.ErrAttachmentClaimConflict
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin direct attachment claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	selection, err := r.selectDirectAttachmentsForClaim(
+		ctx, tx, ids, ownerID, workspaceID, taskID, sessionID, messageID, now,
+	)
+	if err != nil {
+		return err
+	}
+	if selection.selectedSize > models.MaxMessageAttachmentBytes {
+		return models.ErrAttachmentTotalTooLarge
+	}
+	if err := r.markDirectAttachmentsClaimed(
+		ctx, tx, selection.claimIDs, ownerID, workspaceID, taskID, sessionID, messageID, now,
+	); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit direct attachment claim: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) selectDirectAttachmentsForClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ids []string,
+	ownerID, workspaceID, taskID, sessionID, messageID string,
+	now time.Time,
+) (attachmentClaimSelection, error) {
+	selection := attachmentClaimSelection{}
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if !recordUniqueAttachmentID(seen, id) {
+			return attachmentClaimSelection{}, models.ErrAttachmentClaimConflict
+		}
+		attachment, err := loadAttachmentForClaim(ctx, tx, id)
+		if err != nil {
+			return attachmentClaimSelection{}, err
+		}
+		if attachment.OwnerID != ownerID || attachment.WorkspaceID != workspaceID {
+			return attachmentClaimSelection{}, models.ErrAttachmentClaimConflict
+		}
+		if err := addDirectAttachmentToClaim(&selection, attachment, id, taskID, sessionID, messageID, now); err != nil {
+			return attachmentClaimSelection{}, err
+		}
+	}
+	return selection, nil
+}
+
+func addDirectAttachmentToClaim(
+	selection *attachmentClaimSelection,
+	attachment *models.TaskMessageAttachment,
+	id, taskID, sessionID, messageID string,
+	now time.Time,
+) error {
+	if attachment.State == models.AttachmentStateStaged {
+		return addStagedAttachmentToClaim(selection, attachment, id, now)
+	}
+	if attachment.State != models.AttachmentStateClaimed ||
+		attachment.TaskID != taskID ||
+		(attachment.SessionID != "" && attachment.SessionID != sessionID) ||
+		attachment.QueueID != "" ||
+		(attachment.MessageID != "" && attachment.MessageID != messageID) {
+		return models.ErrAttachmentClaimConflict
+	}
+	return nil
+}
+
+func (r *Repository) markDirectAttachmentsClaimed(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ids []string,
+	ownerID, workspaceID, taskID, sessionID, messageID string,
+	now time.Time,
+) error {
+	for _, id := range ids {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments
+			SET task_id = ?, session_id = ?, message_id = ?, state = ?, updated_at = ?
+			WHERE id = ? AND owner_id = ? AND workspace_id = ? AND state = ?
+		`), taskID, sessionID, messageID, models.AttachmentStateClaimed, now,
+			id, ownerID, workspaceID, models.AttachmentStateStaged)
+		if err != nil {
+			return fmt.Errorf("claim direct attachment: %w", err)
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return models.ErrAttachmentClaimConflict
+		}
+	}
+	return nil
+}
+
+func (r *Repository) RestoreDirectMessageAttachments(
+	ctx context.Context,
+	ids []string,
+	ownerID, taskID, sessionID, messageID string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin direct attachment restore: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments
+			SET task_id = '', session_id = '', message_id = '', queue_id = '', state = ?, updated_at = ?
+			WHERE id = ? AND owner_id = ? AND task_id = ? AND session_id = ?
+			  AND message_id = ? AND state = ?
+			  AND NOT EXISTS (SELECT 1 FROM task_session_messages WHERE task_session_messages.id = ?)
+		`), models.AttachmentStateStaged, now, id, ownerID, taskID, sessionID,
+			messageID, models.AttachmentStateClaimed, messageID); err != nil {
+			return fmt.Errorf("restore direct attachment: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit direct attachment restore: %w", err)
+	}
+	return nil
+}
+
 type attachmentClaimSelection struct {
 	claimIDs     []string
 	selectedSize int64
+}
+
+func recordUniqueAttachmentID(seen map[string]struct{}, id string) bool {
+	if _, exists := seen[id]; exists {
+		return false
+	}
+	seen[id] = struct{}{}
+	return true
+}
+
+func loadAttachmentForClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	id string,
+) (*models.TaskMessageAttachment, error) {
+	attachment := &models.TaskMessageAttachment{}
+	err := tx.GetContext(ctx, attachment, tx.Rebind(`
+		SELECT `+attachmentSelectColumns+` FROM task_message_attachments WHERE id = ?
+	`), id)
+	if errorsIsNoRows(err) {
+		return nil, models.ErrAttachmentNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load attachment for claim: %w", err)
+	}
+	return attachment, nil
+}
+
+func addStagedAttachmentToClaim(
+	selection *attachmentClaimSelection,
+	attachment *models.TaskMessageAttachment,
+	id string,
+	now time.Time,
+) error {
+	if !attachment.ExpiresAt.IsZero() && !attachment.ExpiresAt.After(now) {
+		return models.ErrAttachmentClaimConflict
+	}
+	if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+		return models.ErrAttachmentTooLarge
+	}
+	selection.selectedSize += attachment.SizeBytes
+	selection.claimIDs = append(selection.claimIDs, id)
+	return nil
 }
 
 func (r *Repository) selectAttachmentsForClaim(ctx context.Context, tx *sqlx.Tx, ids []string, ownerID, workspaceID, taskID, sessionID string, now time.Time) (attachmentClaimSelection, error) {

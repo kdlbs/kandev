@@ -114,6 +114,7 @@ function panelState(overrides = {}) {
     clearEphemeral: vi.fn(),
     addContextFile: vi.fn(),
     planModeEnabled: false,
+    planCommentMigration: { status: "complete", isReady: true, isBlocking: false, retry: vi.fn() },
     ...overrides,
   } as never;
 }
@@ -127,6 +128,12 @@ describe("resolveInputPlaceholder", () => {
 });
 
 describe("useSubmitHandler", () => {
+  it("reports accepted delivery", async () => {
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await expect(result.current.handleSubmit({ message: "hello" })).resolves.toBe(true);
+  });
+
   it("shows a toast when sending fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     handleSendMessageMock.mockRejectedValueOnce(new Error("WebSocket request timed out"));
@@ -201,6 +208,59 @@ describe("useSubmitHandler plan mode", () => {
     expect(onSend).toHaveBeenCalledWith({ message: "plan-mode instruction" });
     expect(handleSendMessageMock).not.toHaveBeenCalled();
     expect(toastMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSubmitHandler task plan comments", () => {
+  it("blocks delivery while legacy comments still need migration", async () => {
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          planCommentMigration: {
+            status: "failed",
+            isReady: false,
+            isBlocking: true,
+            retry: vi.fn(),
+          },
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await expect(result.current.handleSubmit({ message: "Keep my draft" })).resolves.toBe(false);
+    });
+
+    expect(handleSendMessageMock).not.toHaveBeenCalled();
+    expect(toastMock).toHaveBeenCalledWith({
+      title: "Message not sent",
+      description: "Saved plan comments are still being restored. Retry before sending.",
+      variant: "error",
+    });
+  });
+
+  it("submits displayed IDs and versions without clearing the shared snapshot locally", async () => {
+    const clearSessionPlanComments = vi.fn();
+    const comment = {
+      id: "plan-comment-1",
+      taskId: "task-1",
+      planId: "plan-1",
+      version: 3,
+      text: "Split this step.",
+      selectedText: "Large step",
+    };
+    const { result } = renderHook(() =>
+      useSubmitHandler(panelState({ planComments: [comment], clearSessionPlanComments })),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "Please continue." });
+    });
+
+    expect(handleSendMessageMock).toHaveBeenCalledWith({
+      message: "Please continue.",
+      planCommentRefs: [{ id: "plan-comment-1", version: 3 }],
+    });
+    expect(clearSessionPlanComments).not.toHaveBeenCalled();
   });
 });
 

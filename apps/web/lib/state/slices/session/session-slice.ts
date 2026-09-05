@@ -316,6 +316,11 @@ export const defaultSessionState: SessionSliceState = {
     loadingByTaskId: {},
     loadedByTaskId: {},
     savingByTaskId: {},
+    commentsByTaskId: {},
+    commentsLoadingByTaskId: {},
+    commentsLoadedByTaskId: {},
+    commentsErrorByTaskId: {},
+    commentsMigrationStatusByTaskId: {},
     revisionsByTaskId: {},
     revisionsLoadingByTaskId: {},
     revisionsLoadedByTaskId: {},
@@ -458,6 +463,62 @@ function buildMessageActions(set: ImmerSet) {
     setMessagesLoading: buildSetMessagesLoading(set),
   };
 }
+
+function reconcilePlanCommentIdentity(
+  taskPlans: SessionSlice["taskPlans"],
+  taskId: string,
+  nextPlanId: string | null,
+) {
+  const previousPlan = taskPlans.byTaskId[taskId];
+  const previousPlanId = previousPlan?.id ?? null;
+  if (previousPlan !== undefined && previousPlanId === nextPlanId) return;
+  if (previousPlanId !== nextPlanId) {
+    taskPlans.commentsMigrationStatusByTaskId[taskId] = "idle";
+  }
+  const snapshot = taskPlans.commentsByTaskId[taskId];
+  if (nextPlanId !== null && snapshot?.plan_id === nextPlanId) return;
+  delete taskPlans.commentsByTaskId[taskId];
+  taskPlans.commentsLoadingByTaskId[taskId] = false;
+  taskPlans.commentsLoadedByTaskId[taskId] = nextPlanId === null;
+  delete taskPlans.commentsErrorByTaskId[taskId];
+}
+
+function buildTaskPlanCommentActions(set: ImmerSet) {
+  return {
+    setTaskPlanComments: (
+      taskId: string,
+      snapshot: Parameters<SessionSlice["setTaskPlanComments"]>[1],
+    ) =>
+      set((draft) => {
+        if (snapshot.task_id !== taskId) return;
+        const currentPlan = draft.taskPlans.byTaskId[taskId];
+        if (currentPlan !== undefined && currentPlan?.id !== snapshot.plan_id) return;
+        const current = draft.taskPlans.commentsByTaskId[taskId];
+        if (current?.plan_id === snapshot.plan_id && current.revision > snapshot.revision) return;
+        draft.taskPlans.commentsByTaskId[taskId] = snapshot;
+        draft.taskPlans.commentsLoadingByTaskId[taskId] = false;
+        draft.taskPlans.commentsLoadedByTaskId[taskId] = true;
+        delete draft.taskPlans.commentsErrorByTaskId[taskId];
+      }),
+    setTaskPlanCommentsLoading: (taskId: string, loading: boolean) =>
+      set((draft) => {
+        draft.taskPlans.commentsLoadingByTaskId[taskId] = loading;
+      }),
+    setTaskPlanCommentsError: (taskId: string, error?: string) =>
+      set((draft) => {
+        if (error) draft.taskPlans.commentsErrorByTaskId[taskId] = error;
+        else delete draft.taskPlans.commentsErrorByTaskId[taskId];
+      }),
+    setTaskPlanCommentMigrationStatus: (
+      taskId: string,
+      status: Parameters<SessionSlice["setTaskPlanCommentMigrationStatus"]>[1],
+    ) =>
+      set((draft) => {
+        draft.taskPlans.commentsMigrationStatusByTaskId[taskId] = status;
+      }),
+  };
+}
+
 /** Create the task-plan store actions (set, loading, saving, clear, seen, revisions, preview, compare) backed by the given Immer setter and getter. */
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
@@ -465,6 +526,7 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
       const shouldHydrateLastSeen = get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] === undefined;
       const storedLastSeen = shouldHydrateLastSeen ? getPlanLastSeen(taskId) : null;
       set((draft) => {
+        reconcilePlanCommentIdentity(draft.taskPlans, taskId, plan?.id ?? null);
         draft.taskPlans.byTaskId[taskId] = plan;
         draft.taskPlans.loadingByTaskId[taskId] = false;
         draft.taskPlans.loadedByTaskId[taskId] = true;
@@ -481,6 +543,7 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
       set((draft) => {
         draft.taskPlans.savingByTaskId[taskId] = saving;
       }),
+    ...buildTaskPlanCommentActions(set),
     clearTaskPlan: (taskId: string) => {
       setPlanLastSeen(taskId, null);
       set((draft) => {
@@ -496,6 +559,11 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
         delete draft.taskPlans.loadingByTaskId[taskId];
         delete draft.taskPlans.loadedByTaskId[taskId];
         delete draft.taskPlans.savingByTaskId[taskId];
+        delete draft.taskPlans.commentsByTaskId[taskId];
+        delete draft.taskPlans.commentsLoadingByTaskId[taskId];
+        delete draft.taskPlans.commentsLoadedByTaskId[taskId];
+        delete draft.taskPlans.commentsErrorByTaskId[taskId];
+        delete draft.taskPlans.commentsMigrationStatusByTaskId[taskId];
         delete draft.taskPlans.revisionsByTaskId[taskId];
         delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
         delete draft.taskPlans.revisionsLoadedByTaskId[taskId];

@@ -9,6 +9,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { cn } from "@/lib/utils";
 import { floatingBounds, placeFloatingRect } from "@/components/task/floating-selection-position";
 import { useTranslation } from "react-i18next";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@kandev/ui/drawer";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 
 type SelectionPosition = {
   x: number;
@@ -18,17 +26,18 @@ type SelectionPosition = {
 type PlanSelectionPopoverProps = {
   selectedText: string;
   position: SelectionPosition;
-  onAdd: (comment: string, selectedText: string) => boolean | void;
-  onAddAndRun?: (comment: string, selectedText: string) => boolean | void;
+  onAdd: (comment: string, selectedText: string) => boolean | void | Promise<boolean | void>;
+  onAddAndRun?: (comment: string, selectedText: string) => boolean | void | Promise<boolean | void>;
   onClose: () => void;
   editingComment?: string;
-  onDelete?: () => void;
+  onDelete?: () => boolean | void | Promise<boolean | void>;
   testId?: string;
   inputTestId?: string;
   addButtonTestId?: string;
   runButtonTestId?: string;
   portalContainer?: HTMLElement | null;
   errorMessage?: string | null;
+  runDisabledReason?: string | null;
 };
 
 const POPOVER_WIDTH = 340;
@@ -99,28 +108,40 @@ function usePopoverDismiss(
 function usePopoverComposer(
   comment: string,
   selectedText: string,
-  onAdd: (comment: string, selectedText: string) => boolean | void,
+  onAdd: (comment: string, selectedText: string) => boolean | void | Promise<boolean | void>,
   onClose: () => void,
-  onAddAndRun?: (comment: string, selectedText: string) => boolean | void,
+  onAddAndRun?: (comment: string, selectedText: string) => boolean | void | Promise<boolean | void>,
 ) {
-  const handleSubmit = useCallback(() => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const handleSubmit = useCallback(async () => {
     if (!comment.trim()) return;
-    if (onAdd(comment.trim(), selectedText) !== false) onClose();
+    setIsSubmitting(true);
+    try {
+      if ((await onAdd(comment.trim(), selectedText)) !== false) onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
   }, [comment, onAdd, selectedText, onClose]);
 
-  const handleSubmitAndRun = useCallback(() => {
+  const handleSubmitAndRun = useCallback(async () => {
     if (!comment.trim() || !onAddAndRun) return;
-    if (onAddAndRun(comment.trim(), selectedText) !== false) onClose();
+    setIsSubmitting(true);
+    try {
+      if ((await onAddAndRun(comment.trim(), selectedText)) !== false) onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
   }, [comment, onAddAndRun, selectedText, onClose]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.repeat) return;
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         if (e.shiftKey && onAddAndRun) {
-          handleSubmitAndRun();
+          void handleSubmitAndRun();
         } else {
-          handleSubmit();
+          void handleSubmit();
         }
       }
     },
@@ -131,10 +152,121 @@ function usePopoverComposer(
     handleSubmit,
     handleSubmitAndRun,
     handleKeyDown,
-    isDisabled: !comment.trim(),
+    isDisabled: !comment.trim() || isSubmitting,
+    isSubmitting,
     previewText:
       selectedText.length > 80 ? selectedText.slice(0, 80).trim() + "\u2026" : selectedText,
   };
+}
+
+function useCommentDelete(onDelete: PlanSelectionPopoverProps["onDelete"], onClose: () => void) {
+  const [isDeleting, setIsDeleting] = useState(false);
+  const deleteComment = useCallback(async () => {
+    if (!onDelete) return;
+    setIsDeleting(true);
+    try {
+      if ((await onDelete()) !== false) onClose();
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [onClose, onDelete]);
+  return { isDeleting, deleteComment: onDelete ? deleteComment : undefined };
+}
+
+function CommentMutationMessages({
+  errorMessage,
+  runDisabledReason,
+  canRun,
+  className,
+}: {
+  errorMessage?: string | null;
+  runDisabledReason?: string | null;
+  canRun: boolean;
+  className: string;
+}) {
+  return (
+    <>
+      {errorMessage ? (
+        <p role="alert" className={cn(className, "text-destructive")}>
+          {errorMessage}
+        </p>
+      ) : null}
+      {runDisabledReason && canRun ? (
+        <p className={cn(className, "text-muted-foreground")}>{runDisabledReason}</p>
+      ) : null}
+    </>
+  );
+}
+
+function PlanCommentDrawerHeader({
+  editingComment,
+  selectedText,
+}: {
+  editingComment?: string;
+  selectedText: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DrawerHeader className="shrink-0 px-4 pb-3 text-left">
+      <DrawerTitle>{editingComment ? t("task:editComment") : t("task:comment")}</DrawerTitle>
+      <DrawerDescription className="line-clamp-2 text-pretty italic">
+        &ldquo;{selectedText}&rdquo;
+      </DrawerDescription>
+    </DrawerHeader>
+  );
+}
+
+function DeleteCommentButton({ onDelete, disabled }: { onDelete?: () => void; disabled: boolean }) {
+  const { t } = useTranslation();
+  if (!onDelete) return null;
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={onDelete}
+      disabled={disabled}
+      aria-label={t("task:deleteComment")}
+      className="h-6 px-1.5 text-muted-foreground hover:text-destructive cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11"
+    >
+      <IconTrash className="h-3 w-3" />
+    </Button>
+  );
+}
+
+function RunCommentButton({
+  onSubmitAndRun,
+  isDisabled,
+  runButtonTestId,
+  runDisabledReason,
+}: {
+  onSubmitAndRun?: () => void;
+  isDisabled: boolean;
+  runButtonTestId?: string;
+  runDisabledReason?: string | null;
+}) {
+  const { t } = useTranslation();
+  if (!onSubmitAndRun) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex" tabIndex={runDisabledReason ? 0 : undefined}>
+          <Button
+            size="sm"
+            onClick={onSubmitAndRun}
+            disabled={isDisabled || !!runDisabledReason}
+            data-testid={runButtonTestId}
+            className="h-7 gap-1 rounded-l-none text-xs cursor-pointer [@media(pointer:coarse)]:h-11"
+          >
+            <IconPlayerPlay className="h-3 w-3" />
+            {t("task:run")}
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p>{runDisabledReason || t("task:saveAndSendToAgent")}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function PopoverActions({
@@ -145,6 +277,8 @@ function PopoverActions({
   onDelete,
   addButtonTestId,
   runButtonTestId,
+  runDisabledReason,
+  mutationPending,
 }: {
   isEditing: boolean;
   isDisabled: boolean;
@@ -153,8 +287,11 @@ function PopoverActions({
   onDelete?: () => void;
   addButtonTestId?: string;
   runButtonTestId?: string;
+  runDisabledReason?: string | null;
+  mutationPending: boolean;
 }) {
   const { t } = useTranslation();
+  const splitAction = Boolean(onSubmitAndRun && !isEditing);
   return (
     <div className="mt-2 flex items-center justify-between">
       <div className="flex items-center gap-2">
@@ -162,17 +299,10 @@ function PopoverActions({
           {isEditing ? t("task:cmdEnterToUpdate") : t("task:cmdEnterToAdd")}
           {onSubmitAndRun && !isEditing ? t("task:shiftEnterToRun") : ""}
         </span>
-        {isEditing && onDelete && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onDelete}
-            aria-label={t("task:deleteComment")}
-            className="h-6 px-1.5 text-muted-foreground hover:text-destructive cursor-pointer"
-          >
-            <IconTrash className="h-3 w-3" />
-          </Button>
-        )}
+        <DeleteCommentButton
+          onDelete={isEditing ? onDelete : undefined}
+          disabled={mutationPending}
+        />
       </div>
       <TooltipProvider delayDuration={400}>
         <div className="inline-flex">
@@ -180,11 +310,14 @@ function PopoverActions({
             <TooltipTrigger asChild>
               <Button
                 size="sm"
-                variant={onSubmitAndRun && !isEditing ? "outline" : "default"}
+                variant={splitAction ? "outline" : "default"}
                 onClick={onSubmit}
                 disabled={isDisabled}
                 data-testid={addButtonTestId}
-                className={`h-7 gap-1 text-xs cursor-pointer ${onSubmitAndRun && !isEditing ? "rounded-r-none border-r-0" : ""}`}
+                className={cn(
+                  "h-7 gap-1 text-xs cursor-pointer [@media(pointer:coarse)]:h-11",
+                  splitAction && "rounded-r-none border-r-0",
+                )}
               >
                 <IconPlus className="h-3 w-3" />
                 {isEditing ? t("task:update") : t("task:add")}
@@ -194,32 +327,19 @@ function PopoverActions({
               <p>{isEditing ? t("task:updateComment") : t("task:saveCommentForReview")}</p>
             </TooltipContent>
           </Tooltip>
-          {onSubmitAndRun && !isEditing && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="sm"
-                  onClick={onSubmitAndRun}
-                  disabled={isDisabled}
-                  data-testid={runButtonTestId}
-                  className="h-7 gap-1 rounded-l-none text-xs cursor-pointer"
-                >
-                  <IconPlayerPlay className="h-3 w-3" />
-                  {t("task:run")}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>{t("task:saveAndSendToAgent")}</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
+          <RunCommentButton
+            onSubmitAndRun={splitAction ? onSubmitAndRun : undefined}
+            isDisabled={isDisabled}
+            runButtonTestId={runButtonTestId}
+            runDisabledReason={runDisabledReason}
+          />
         </div>
       </TooltipProvider>
     </div>
   );
 }
 
-export function PlanSelectionPopover({
+function DesktopPlanSelectionPopover({
   selectedText,
   position,
   onAdd,
@@ -233,19 +353,21 @@ export function PlanSelectionPopover({
   runButtonTestId,
   portalContainer,
   errorMessage,
+  runDisabledReason,
 }: PlanSelectionPopoverProps) {
   const { t } = useTranslation();
   const [comment, setComment] = useState(editingComment || "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const { offset, onMouseDown } = useDrag();
+  const { isDeleting, deleteComment } = useCommentDelete(onDelete, onClose);
 
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
   usePopoverDismiss(onClose, popoverRef);
   const effectiveOnAddAndRun = editingComment ? undefined : onAddAndRun;
-  const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, previewText } =
+  const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, isSubmitting, previewText } =
     usePopoverComposer(comment, selectedText, onAdd, onClose, effectiveOnAddAndRun);
   const portalRect = portalContainer?.getBoundingClientRect();
   const { left, top } = placeFloatingRect({
@@ -256,13 +378,6 @@ export function PlanSelectionPopover({
     bounds: floatingBounds(portalRect),
     margin: MARGIN,
   });
-
-  const handleDelete = onDelete
-    ? () => {
-        onDelete();
-        onClose();
-      }
-    : undefined;
 
   return createPortal(
     <div
@@ -294,26 +409,138 @@ export function PlanSelectionPopover({
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={handleKeyDown}
+          disabled={isSubmitting || isDeleting}
           placeholder={t("task:addYourCommentOrInstruction")}
           className="min-h-[60px] resize-none text-sm border-border/50 focus:border-primary/50"
           data-testid={inputTestId}
         />
-        {errorMessage ? (
-          <p role="alert" className="mt-2 text-xs text-destructive">
-            {errorMessage}
-          </p>
-        ) : null}
+        <CommentMutationMessages
+          errorMessage={errorMessage}
+          runDisabledReason={runDisabledReason}
+          canRun={Boolean(effectiveOnAddAndRun)}
+          className="mt-2 text-xs"
+        />
         <PopoverActions
           isEditing={!!editingComment}
-          isDisabled={isDisabled}
-          onSubmit={handleSubmit}
-          onSubmitAndRun={effectiveOnAddAndRun ? handleSubmitAndRun : undefined}
-          onDelete={handleDelete}
+          isDisabled={isDisabled || isDeleting}
+          onSubmit={() => void handleSubmit()}
+          onSubmitAndRun={effectiveOnAddAndRun ? () => void handleSubmitAndRun() : undefined}
+          onDelete={deleteComment ? () => void deleteComment() : undefined}
           addButtonTestId={addButtonTestId}
           runButtonTestId={runButtonTestId}
+          runDisabledReason={runDisabledReason}
+          mutationPending={isSubmitting || isDeleting}
         />
       </div>
     </div>,
     portalContainer ?? document.body,
+  );
+}
+
+function PlanSelectionDrawer({
+  selectedText,
+  onAdd,
+  onAddAndRun,
+  onClose,
+  editingComment,
+  onDelete,
+  testId,
+  inputTestId,
+  addButtonTestId,
+  runButtonTestId,
+  errorMessage,
+  runDisabledReason,
+}: PlanSelectionPopoverProps) {
+  const { t } = useTranslation();
+  const [comment, setComment] = useState(editingComment || "");
+  const effectiveOnAddAndRun = editingComment ? undefined : onAddAndRun;
+  const { isDeleting, deleteComment } = useCommentDelete(onDelete, onClose);
+  const { handleSubmit, handleSubmitAndRun, handleKeyDown, isDisabled, isSubmitting } =
+    usePopoverComposer(comment, selectedText, onAdd, onClose, effectiveOnAddAndRun);
+  const disabled = isDisabled || isDeleting;
+
+  return (
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent
+        className="z-[60] max-h-[82dvh] pb-[calc(1rem+env(safe-area-inset-bottom))]"
+        data-testid={testId ?? "plan-comment-drawer"}
+      >
+        <PlanCommentDrawerHeader editingComment={editingComment} selectedText={selectedText} />
+        <div className="min-h-0 overflow-y-auto px-4 pb-2">
+          <Textarea
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isSubmitting || isDeleting}
+            placeholder={t("task:addYourCommentOrInstruction")}
+            className="mb-3 min-h-20 resize-none text-sm border-border/50 focus:border-primary/50"
+            data-testid={inputTestId}
+            autoFocus
+          />
+          <CommentMutationMessages
+            errorMessage={errorMessage}
+            runDisabledReason={runDisabledReason}
+            canRun={Boolean(effectiveOnAddAndRun)}
+            className="mb-3 text-xs"
+          />
+          <div className="flex items-center justify-between gap-3">
+            {editingComment && deleteComment ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => void deleteComment()}
+                disabled={isDeleting || isSubmitting}
+                aria-label={t("task:deleteComment")}
+                className="min-h-11 min-w-11 cursor-pointer px-3 text-muted-foreground hover:text-destructive"
+              >
+                <IconTrash className="h-4 w-4" />
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="inline-flex">
+              <Button
+                type="button"
+                size="sm"
+                variant={effectiveOnAddAndRun ? "outline" : "default"}
+                onClick={() => void handleSubmit()}
+                disabled={disabled}
+                data-testid={addButtonTestId}
+                className={cn(
+                  "min-h-11 cursor-pointer gap-1.5 px-4 active:scale-[0.96]",
+                  effectiveOnAddAndRun && "rounded-r-none border-r-0",
+                )}
+              >
+                <IconPlus className="h-4 w-4" />
+                {editingComment ? t("task:update") : t("task:add")}
+              </Button>
+              {effectiveOnAddAndRun ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void handleSubmitAndRun()}
+                  disabled={disabled || !!runDisabledReason}
+                  data-testid={runButtonTestId}
+                  className="min-h-11 cursor-pointer gap-1.5 rounded-l-none px-4 active:scale-[0.96]"
+                >
+                  <IconPlayerPlay className="h-4 w-4" />
+                  {t("task:run")}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+export function PlanSelectionPopover(props: PlanSelectionPopoverProps) {
+  const useDrawer = useTouchDrawer();
+  return useDrawer ? (
+    <PlanSelectionDrawer {...props} />
+  ) : (
+    <DesktopPlanSelectionPopover {...props} />
   );
 }

@@ -56,6 +56,41 @@ describe("buildContextItems agent-message comments", () => {
   });
 });
 
+describe("buildContextItems task plan comments", () => {
+  it("opens the Plan but cannot remove shared comments from a session composer", () => {
+    const addPlan = vi.fn();
+    const clear = vi.fn();
+    const items = buildContextItems({
+      planContextEnabled: false,
+      contextFiles: [],
+      resolvedSessionId: "session-secondary",
+      removeContextFile: vi.fn(),
+      unpinFile: vi.fn(),
+      addPlan,
+      promptsMap: new Map(),
+      pendingCommentsByFile: {},
+      handleRemoveCommentFile: vi.fn(),
+      handleRemoveComment: vi.fn(),
+      planComments: [{ id: "comment-1", version: 1 }],
+      handleClearPlanComments: clear,
+      pendingPRFeedback: [],
+      handleRemovePRFeedback: vi.fn(),
+      handleClearPRFeedback: vi.fn(),
+      walkthroughComments: [],
+      handleRemoveWalkthroughComment: vi.fn(),
+      handleClearWalkthroughComments: vi.fn(),
+      messageComments: [],
+      handleClearMessageComments: vi.fn(),
+      taskId: "task-1",
+    } as never);
+
+    const item = items.find((candidate) => candidate.kind === "plan-comment");
+    expect(item).toMatchObject({ kind: "plan-comment", label: "1 plan comment", onOpen: addPlan });
+    expect(item?.onRemove).toBeUndefined();
+    expect(clear).not.toHaveBeenCalled();
+  });
+});
+
 describe("buildContextItems file and directory context", () => {
   function buildItems(contextFiles: never[]) {
     return buildContextItems({

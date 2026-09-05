@@ -143,6 +143,125 @@ func TestClaimMessageAttachments_RejectsExpiredStagedDescriptor(t *testing.T) {
 	}
 }
 
+func TestQueuedAttachmentClaimRestorePreservesRetryableDescriptor(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-attachments")
+	now := time.Now().UTC()
+	attachment := &models.TaskMessageAttachment{
+		ID: "attachment-queue-retry", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
+		Name: "notes.txt", MimeType: "text/plain", Kind: "resource", DeliveryMode: "path",
+		SizeBytes: 16, StorageKey: "attachment-queue-retry", State: models.AttachmentStateStaged,
+		ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}
+	requireNoError(t, repo.CreateMessageAttachment(ctx, attachment))
+	requireNoError(t, repo.ClaimQueuedMessageAttachments(
+		ctx, []string{attachment.ID}, "owner-1", "workspace-attachments", "task-1", "session-1", "queue-1",
+	))
+
+	claimed, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	requireNoError(t, err)
+	if claimed.State != models.AttachmentStateClaimed || claimed.QueueID != "queue-1" {
+		t.Fatalf("claimed attachment = %+v", claimed)
+	}
+	requireNoError(t, repo.RestoreQueuedMessageAttachments(
+		ctx, []string{attachment.ID}, "owner-1", "task-1", "session-1", "queue-1",
+	))
+	restored, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	requireNoError(t, err)
+	if restored.State != models.AttachmentStateStaged || restored.TaskID != "" || restored.SessionID != "" || restored.QueueID != "" {
+		t.Fatalf("restored attachment = %+v", restored)
+	}
+}
+
+func TestQueuedAttachmentRestoreDoesNotTouchPreexistingClaim(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-attachments")
+	now := time.Now().UTC()
+	attachment := &models.TaskMessageAttachment{
+		ID: "attachment-preclaimed", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
+		TaskID: "task-1", SessionID: "session-1", Name: "notes.txt", MimeType: "text/plain",
+		Kind: "resource", DeliveryMode: "path", SizeBytes: 16, StorageKey: "attachment-preclaimed",
+		State: models.AttachmentStateClaimed, ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}
+	requireNoError(t, repo.CreateMessageAttachment(ctx, attachment))
+	requireNoError(t, repo.ClaimQueuedMessageAttachments(
+		ctx, []string{attachment.ID}, "owner-1", "workspace-attachments", "task-1", "session-1", "queue-1",
+	))
+	requireNoError(t, repo.RestoreQueuedMessageAttachments(
+		ctx, []string{attachment.ID}, "owner-1", "task-1", "session-1", "queue-1",
+	))
+
+	got, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	requireNoError(t, err)
+	if got.State != models.AttachmentStateClaimed || got.TaskID != "task-1" || got.SessionID != "session-1" || got.QueueID != "" {
+		t.Fatalf("preexisting claim changed = %+v", got)
+	}
+}
+
+func TestDirectAttachmentClaimRestorePreservesRetryableDescriptor(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-attachments")
+	now := time.Now().UTC()
+	attachment := &models.TaskMessageAttachment{
+		ID: "attachment-direct-retry", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
+		Name: "notes.txt", MimeType: "text/plain", Kind: "resource", DeliveryMode: "path",
+		SizeBytes: 16, StorageKey: "attachment-direct-retry", State: models.AttachmentStateStaged,
+		ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}
+	requireNoError(t, repo.CreateMessageAttachment(ctx, attachment))
+	requireNoError(t, repo.ClaimDirectMessageAttachments(
+		ctx, []string{attachment.ID}, "owner-1", "workspace-attachments", "task-1", "session-1", "message-1",
+	))
+	claimed, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	requireNoError(t, err)
+	if claimed.State != models.AttachmentStateClaimed || claimed.MessageID != "message-1" {
+		t.Fatalf("claimed attachment = %+v", claimed)
+	}
+	requireNoError(t, repo.RestoreDirectMessageAttachments(
+		ctx, []string{attachment.ID}, "owner-1", "task-1", "session-1", "message-1",
+	))
+	restored, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	requireNoError(t, err)
+	if restored.State != models.AttachmentStateStaged || restored.TaskID != "" || restored.SessionID != "" || restored.MessageID != "" {
+		t.Fatalf("restored attachment = %+v", restored)
+	}
+}
+
+func TestDirectAttachmentRestoreDoesNotTouchPreexistingClaim(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-attachments")
+	now := time.Now().UTC()
+	attachment := &models.TaskMessageAttachment{
+		ID: "attachment-direct-preclaimed", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
+		TaskID: "task-1", SessionID: "session-1", Name: "notes.txt", MimeType: "text/plain",
+		Kind: "resource", DeliveryMode: "path", SizeBytes: 16, StorageKey: "attachment-direct-preclaimed",
+		State: models.AttachmentStateClaimed, ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}
+	requireNoError(t, repo.CreateMessageAttachment(ctx, attachment))
+	requireNoError(t, repo.ClaimDirectMessageAttachments(
+		ctx, []string{attachment.ID}, "owner-1", "workspace-attachments", "task-1", "session-1", "message-1",
+	))
+	requireNoError(t, repo.RestoreDirectMessageAttachments(
+		ctx, []string{attachment.ID}, "owner-1", "task-1", "session-1", "message-1",
+	))
+	got, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	requireNoError(t, err)
+	if got.State != models.AttachmentStateClaimed || got.MessageID != "" {
+		t.Fatalf("preexisting claim changed = %+v", got)
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeleteClaimedMessageAttachments_RemovesOnlyMatchingClaims(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

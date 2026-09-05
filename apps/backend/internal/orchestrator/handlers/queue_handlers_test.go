@@ -86,9 +86,25 @@ type fakeReferenceSubmissionValidator struct {
 }
 
 type recordingQueueAttachmentClaimer struct {
-	claims   []string
-	releases []string
-	claimErr error
+	claims       []string
+	releases     []string
+	restores     []string
+	claimQueueID string
+	claimErr     error
+}
+
+func (f *recordingQueueAttachmentClaimer) ClaimQueuedMessageAttachments(_ context.Context, _, _, queueID string, attachments []v1.MessageAttachment) error {
+	f.claimQueueID = queueID
+	return f.ClaimMessageAttachments(context.Background(), "", "", attachments)
+}
+
+func (f *recordingQueueAttachmentClaimer) RestoreQueuedMessageAttachments(_ context.Context, _, _, _ string, attachments []v1.MessageAttachment) error {
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" {
+			f.restores = append(f.restores, attachment.AttachmentID)
+		}
+	}
+	return nil
 }
 
 func (f *recordingQueueAttachmentClaimer) ClaimMessageAttachments(_ context.Context, _ string, _ string, attachments []v1.MessageAttachment) error {

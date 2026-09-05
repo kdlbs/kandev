@@ -1,5 +1,6 @@
 import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { Message, TaskPlanCommentRef } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 // i18n-exempt: precondition diagnostic for a programmer error; callers branch
@@ -154,7 +155,104 @@ export type QueueMessageParams = {
   context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entity_references?: EntityReference[];
   user_id?: string;
+  client_queue_id?: string;
+  plan_comment_refs?: TaskPlanCommentRef[];
+  require_primary_session?: boolean;
 };
+
+function isUncertainQueueTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("websocket request timed out") || message === "websocket connection closed"
+  );
+}
+
+async function findAcceptedQueueAdmission(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  params: QueueMessageParams & { client_queue_id: string },
+): Promise<QueuedMessage | undefined> {
+  try {
+    const status = await client.request<QueueStatus>("message.queue.get", {
+      session_id: params.session_id,
+    });
+    const queued = status.entries?.find((entry) => entry.id === params.client_queue_id);
+    if (queued) return queued;
+  } catch {
+    // Continue to transcript reconciliation in case the queue already drained.
+  }
+  try {
+    let before: string | undefined;
+    const seenCursors = new Set<string>();
+    do {
+      const response = await client.request<{
+        messages?: Message[];
+        has_more?: boolean;
+        cursor?: string;
+      }>(
+        "message.list",
+        {
+          session_id: params.session_id,
+          limit: 100,
+          sort: "desc",
+          ...(before ? { before } : {}),
+        },
+        5000,
+      );
+      const recorded = response.messages?.find(
+        (message) => message.metadata?.client_queue_id === params.client_queue_id,
+      );
+      if (recorded) {
+        return {
+          id: params.client_queue_id,
+          session_id: params.session_id,
+          task_id: params.task_id,
+          content: recorded.content,
+          model: params.model,
+          plan_mode: params.plan_mode ?? false,
+          attachments: params.attachments,
+          metadata: recorded.metadata,
+          queued_at: recorded.created_at,
+        };
+      }
+      const cursor = response.cursor;
+      if (!response.has_more || !cursor || seenCursors.has(cursor)) return undefined;
+      seenCursors.add(cursor);
+      before = cursor;
+    } while (before);
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function waitForQueueConnection(client: NonNullable<ReturnType<typeof getWebSocketClient>>) {
+  const getStatus = client.getStatus?.bind(client);
+  if (!getStatus || getStatus() === "connected") return true;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (getStatus() === "connected") return true;
+  }
+  return false;
+}
+
+async function reconcileUncertainQueueAdmission(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  params: QueueMessageParams & { client_queue_id: string },
+  originalError: unknown,
+) {
+  const accepted = await findAcceptedQueueAdmission(client, params);
+  if (accepted) return accepted;
+  if (!(await waitForQueueConnection(client))) throw originalError;
+  try {
+    return await client.request<QueuedMessage>("message.queue.add", params);
+  } catch (retryError) {
+    const acceptedAfterRetry = await findAcceptedQueueAdmission(client, params);
+    if (acceptedAfterRetry) return acceptedAfterRetry;
+    throw retryError;
+  }
+}
 
 /** Append a new entry to the session's FIFO queue. Throws QueueFullError on overflow. */
 export async function queueMessage(params: QueueMessageParams): Promise<QueuedMessage> {
@@ -165,6 +263,17 @@ export async function queueMessage(params: QueueMessageParams): Promise<QueuedMe
   try {
     return await client.request<QueuedMessage>("message.queue.add", params);
   } catch (err) {
+    if (params.client_queue_id && isUncertainQueueTransportError(err)) {
+      try {
+        return await reconcileUncertainQueueAdmission(
+          client,
+          params as QueueMessageParams & { client_queue_id: string },
+          err,
+        );
+      } catch (reconcileError) {
+        rethrowQueueError(reconcileError);
+      }
+    }
     rethrowQueueError(err);
   }
 }

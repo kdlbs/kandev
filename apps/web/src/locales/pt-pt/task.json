@@ -1959,5 +1959,18 @@
   "uploadedTo": "Carregado para {{path}}",
   "failedToUploadFile": "Falha ao carregar o ficheiro",
   "uploadPartiallyFailed_one": "Falha ao carregar {{count}} ficheiro",
-  "uploadPartiallyFailed_other": "Falha ao carregar {{count}} ficheiros"
+  "uploadPartiallyFailed_other": "Falha ao carregar {{count}} ficheiros",
+  "failedToLoadPlanComments": "Não foi possível carregar os comentários do plano. Tente novamente.",
+  "failedToSavePlanComment": "Não foi possível guardar este comentário do plano. Tente novamente.",
+  "failedToDeletePlanComment": "Não foi possível eliminar este comentário do plano. Tente novamente.",
+  "failedToRunPlanComment": "Não foi possível executar este comentário do plano. Tente novamente.",
+  "noPrimarySessionForPlanComment": "Não há nenhuma sessão principal disponível. Inicie uma sessão ou defina uma como principal para usar Executar.",
+  "primarySessionUnavailableForPlanComment": "A sessão principal não pode receber mensagens. Inicie ou escolha uma sessão principal disponível.",
+  "planCommentNotReadyToRun": "Este comentário do plano ainda está a ser guardado. Tente executar novamente.",
+  "planCommentsChangedRetry": "Os comentários do plano foram alterados. Reveja-os e envie novamente.",
+  "primarySessionChangedRetry": "A sessão principal foi alterada. Tente executar novamente.",
+  "restoringSavedPlanComments": "A restaurar comentários do plano guardados...",
+  "planCommentMigrationFailed": "Não foi possível restaurar alguns comentários do plano guardados.",
+  "planCommentMigrationNeedsPlan": "Crie ou restaure um plano para recuperar os comentários guardados.",
+  "planCommentMigrationPending": "Os comentários do plano guardados ainda estão a ser restaurados. Tente novamente antes de enviar."
 }

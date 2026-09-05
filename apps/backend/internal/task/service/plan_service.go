@@ -329,6 +329,7 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	if headState == planHeadFound {
 		plan.ID = headPlan.ID
 		plan.CreatedAt = headPlan.CreatedAt
+		plan.CommentsRevision = headPlan.CommentsRevision
 	}
 
 	latest, latestState := s.readLatestRevision(readCtx, req.TaskID)
@@ -782,6 +783,7 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 	if headState == planHeadFound {
 		plan.ID = headPlan.ID
 		plan.CreatedAt = headPlan.CreatedAt
+		plan.CommentsRevision = headPlan.CommentsRevision
 	}
 
 	targetID := target.ID
@@ -832,13 +834,14 @@ func (s *PlanService) publishPlanEvent(ctx context.Context, eventType string, pl
 		return
 	}
 	payload := map[string]interface{}{
-		"id":         plan.ID,
-		"task_id":    plan.TaskID,
-		"title":      plan.Title,
-		"content":    plan.Content,
-		"created_by": plan.CreatedBy,
-		"created_at": plan.CreatedAt,
-		"updated_at": plan.UpdatedAt,
+		"id":                       plan.ID,
+		rvFieldTaskID:              plan.TaskID,
+		wtFieldTitle:               plan.Title,
+		"content":                  plan.Content,
+		"created_by":               plan.CreatedBy,
+		wtFieldCreatedAt:           plan.CreatedAt,
+		sessionEventFieldUpdatedAt: plan.UpdatedAt,
+		"comments_revision":        plan.CommentsRevision,
 	}
 	if plan.ImplementationStartedAt != nil {
 		payload["implementation_started_at"] = *plan.ImplementationStartedAt

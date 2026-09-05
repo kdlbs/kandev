@@ -1,5 +1,5 @@
 ---
-status: active
+status: deprecated
 system: ui
 created: 2026-09-02
 owners:
@@ -7,6 +7,11 @@ owners:
 ---
 
 # Plan Comment Drafts Requirements
+
+> Superseded on 2026-09-02 by the task-owned
+> [Task Plan Comments requirements](../../tasks/requirements/plan-comments.md).
+> This document records the temporary session-scoped repair and is no longer
+> the product contract.
 
 ## Overview
 

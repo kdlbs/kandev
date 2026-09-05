@@ -23,6 +23,7 @@ const CONTEXT_DIRECTORY_PATH = "src/components";
 const storeState = vi.hoisted(() => ({
   current: {
     taskSessions: { items: {} as Record<string, unknown> },
+    queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: addMessageMock,
   },
 }));

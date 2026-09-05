@@ -17,6 +17,7 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
@@ -268,6 +269,20 @@ type AttachmentRepository interface {
 	DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error)
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
+// QueueAttachmentAdmissionRepository scopes provisional attachment claims to
+// one caller-owned queue admission so rollback can restore only that attempt.
+type QueueAttachmentAdmissionRepository interface {
+	ClaimQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID, queueID string) error
+	RestoreQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID, queueID string) error
+}
+
+// MessageAttachmentAdmissionRepository scopes provisional claims to one
+// caller-owned direct-message admission.
+type MessageAttachmentAdmissionRepository interface {
+	ClaimDirectMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID, messageID string) error
+	RestoreDirectMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID, messageID string) error
 }
 
 // TurnRepository handles conversation turn persistence.
@@ -602,6 +617,10 @@ type PlanRepository interface {
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error)
 	DeleteTaskPlan(ctx context.Context, taskID string) error
+	ListTaskPlanComments(ctx context.Context, taskID string) (*models.TaskPlanCommentSnapshot, error)
+	CreateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment) (*models.TaskPlanCommentSnapshot, error)
+	UpdateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
+	DeleteTaskPlanComment(ctx context.Context, taskID, planID, commentID string, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
 
 	// Revision history
 	InsertTaskPlanRevision(ctx context.Context, rev *models.TaskPlanRevision) error

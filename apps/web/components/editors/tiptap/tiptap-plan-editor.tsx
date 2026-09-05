@@ -352,6 +352,7 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   const onCommentDeletedRef = useRef(onCommentDeleted);
   const onEditorReadyRef = useRef(onEditorReady);
   const serializedMarkdownRef = useRef<string | null>(null);
+  const reportedProjectionOrphansRef = useRef(new Set<string>());
   const [isReady, setIsReady] = useState(false);
 
   const slash = useSlashMenu();
@@ -361,22 +362,20 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
 
   useEffect(() => {
     onChangeRef.current = onChange;
-  }, [onChange]);
-  useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange;
-  }, [onSelectionChange]);
-  useEffect(() => {
     onCommentClickRef.current = onCommentClick;
-  }, [onCommentClick]);
-  useEffect(() => {
     onCommentDeletedRef.current = onCommentDeleted;
-  }, [onCommentDeleted]);
-  useEffect(() => {
     onEditorReadyRef.current = onEditorReady;
-  }, [onEditorReady]);
+  }, [onChange, onCommentClick, onCommentDeleted, onEditorReady, onSelectionChange]);
 
   const stableOrphanHandler = useCallback((ids: string[]) => {
-    onCommentDeletedRef.current?.(ids);
+    const fresh = ids.filter((id) => !reportedProjectionOrphansRef.current.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) reportedProjectionOrphansRef.current.add(id);
+    onCommentDeletedRef.current?.(fresh);
+  }, []);
+  const clearProjectedOrphans = useCallback((ids: string[]) => {
+    for (const id of ids) reportedProjectionOrphansRef.current.delete(id);
   }, []);
 
   /* eslint-disable react-hooks/refs -- stableOrphanHandler reads ref for deferred access, not during render */
@@ -432,11 +431,11 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   useEffect(() => {
     if (!editor || !isReady) return;
     try {
-      rehydrateCommentMarks(editor, comments);
+      rehydrateCommentMarks(editor, comments, stableOrphanHandler, clearProjectedOrphans);
     } catch {
       /* editor may be transitional */
     }
-  }, [comments, editor, isReady]);
+  }, [clearProjectedOrphans, comments, editor, isReady, stableOrphanHandler]);
 
   return { editor, editorRef, onSelectionChangeRef, onCommentClickRef, isReady, slash };
 }

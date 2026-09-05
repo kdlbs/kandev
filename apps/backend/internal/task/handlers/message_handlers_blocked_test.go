@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,11 +38,13 @@ type messageAddSwitchRepo struct {
 	// falls back and writes an error message) can append while a test reads.
 	messagesMu        sync.Mutex
 	messages          []*models.Message
+	queuedMessage     *messagequeue.QueuedMessage
 	turns             []*models.Turn
 	idempotentMessage *models.Message
 	getCalls          map[string]int
 	failReload        bool
 	taskGetCalls      int
+	preflightErr      error
 }
 
 func (r *messageAddSwitchRepo) messageCount() int {
@@ -112,6 +115,7 @@ type firstTurnCaptureOrchestrator struct {
 	started          chan capturedFirstTurn
 	turnStartResult  orchestrator.ProcessOnTurnStartResult
 	queuedPromptCall *queuedPromptCall
+	queuedNotified   bool
 }
 
 type queuedPromptCall struct {
@@ -150,6 +154,12 @@ func (o *firstTurnCaptureOrchestrator) ProcessOnTurnStart(context.Context, strin
 func (o *firstTurnCaptureOrchestrator) QueueUserPrompt(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, _ map[string]interface{}, userMessageRecorded bool) error {
 	o.queuedPromptCall = &queuedPromptCall{taskID: taskID, sessionID: sessionID, prompt: prompt, userMessageRecorded: userMessageRecorded}
 	return nil
+}
+
+func (*firstTurnCaptureOrchestrator) MaxQueuedPromptsPerSession() int { return 10 }
+
+func (o *firstTurnCaptureOrchestrator) NotifyQueuedUserPrompt(context.Context, string, string) {
+	o.queuedNotified = true
 }
 
 func (o *firstTurnCaptureOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
@@ -525,6 +535,7 @@ type switchingTurnStartOrchestrator struct {
 	startedSession   string
 	switchPrimary    bool
 	started          chan struct{}
+	turnStartCalls   int
 }
 
 func (o *switchingTurnStartOrchestrator) PromptTask(
@@ -568,6 +579,7 @@ func (o *switchingTurnStartOrchestrator) StartCreatedSession(
 }
 
 func (o *switchingTurnStartOrchestrator) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	o.turnStartCalls++
 	o.repo.sessions["s1"].State = models.TaskSessionStateCompleted
 	if o.switchPrimary {
 		o.repo.primaryID = "s2"
@@ -696,6 +708,48 @@ func TestWSAddMessage_QueuesPromptWhenOnTurnStartQueuesTask(t *testing.T) {
 	assert.Equal(t, "wait for admission", orch.queuedPromptCall.prompt)
 	assert.True(t, orch.queuedPromptCall.userMessageRecorded)
 	assert.Len(t, repo.messages, 1, "the initiating user message is persisted once")
+}
+
+func TestWSAddMessage_AtomicallyQueuesPlanCommentsWhenOnTurnStartQueuesTask(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"t1": {ID: "t1", State: v1.TaskStateInProgress, UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, UpdatedAt: now},
+		},
+		primaryID: "s1",
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &firstTurnCaptureOrchestrator{
+		turnStartResult: orchestrator.ProcessOnTurnStartResult{Queued: true},
+	}
+	h := NewMessageHandlers(svc, orch, log)
+
+	req, err := ws.NewRequest("req-queued-comments", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "content": "wait for admission",
+		"client_message_id":       "message-queued-comments",
+		"plan_comment_refs":       []map[string]interface{}{{"id": "comment-handler", "version": 3}},
+		"require_primary_session": true,
+	})
+	require.NoError(t, err)
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type, string(resp.Payload))
+	require.Nil(t, orch.queuedPromptCall, "atomic admission must not perform a second queue write")
+	require.True(t, orch.queuedNotified)
+	require.NotNil(t, repo.queuedMessage)
+	assert.Equal(t, "message-queued-comments", repo.queuedMessage.ID)
+	assert.Equal(t, repo.firstMessageContent(), repo.queuedMessage.Content)
 }
 
 func TestWSAddMessageRetryAcceptsMessagePersistedAfterSessionSwitch(t *testing.T) {
