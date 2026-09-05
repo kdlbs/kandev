@@ -17,6 +17,10 @@ type Capability string
 const (
 	CapabilityInspect     Capability = "inspect"
 	CapabilityOrchestrate Capability = "orchestrate"
+	// CapabilityExecute authorizes the Host to issue a narrowly scoped
+	// execution lease. It never authorizes an agent-visible credential or an
+	// arbitrary command.
+	CapabilityExecute Capability = "execute"
 )
 
 type Basis string

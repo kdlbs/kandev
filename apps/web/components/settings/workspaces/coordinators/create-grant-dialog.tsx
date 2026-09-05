@@ -35,6 +35,8 @@ type GrantFormFieldsProps = {
   setCapInsp: (v: boolean) => void;
   capOrch: boolean;
   setCapOrch: (v: boolean) => void;
+  capExecute: boolean;
+  setCapExecute: (v: boolean) => void;
   note: string;
   setNote: (v: string) => void;
   scopeId: string;
@@ -107,6 +109,15 @@ function GrantFormFields(props: GrantFormFieldsProps) {
           />
           <Label htmlFor="cap-orchestrate">orchestrate</Label>
         </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="cap-execute"
+            checked={props.capExecute}
+            onCheckedChange={(v) => props.setCapExecute(v === true)}
+            data-testid="grant-cap-execute"
+          />
+          <Label htmlFor="cap-execute">{t("workspaces:capabilityExecute")}</Label>
+        </div>
         <p className="text-xs text-muted-foreground">{t("workspaces:capabilitiesDescription")}</p>
       </div>
       <div className="space-y-2">
@@ -133,6 +144,7 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
   const [scopeId, setScopeId] = useState("");
   const [capInsp, setCapInsp] = useState(false);
   const [capOrch, setCapOrch] = useState(false);
+  const [capExecute, setCapExecute] = useState(false);
   const [note, setNote] = useState("");
 
   const handleSubmit = async () => {
@@ -140,7 +152,7 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
       toast.error(t("workspaces:coordinatorTaskIdRequired"));
       return;
     }
-    if (!capInsp && !capOrch) {
+    if (!capInsp && !capOrch && !capExecute) {
       toast.error(t("workspaces:capabilitiesRequired"));
       return;
     }
@@ -148,6 +160,7 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
     const caps: string[] = [];
     if (capInsp) caps.push("inspect");
     if (capOrch) caps.push("orchestrate");
+    if (capExecute) caps.push("execute");
 
     const body: CreateGrantRequest = {
       coordinator_task_id: coordinatorTaskId,
@@ -166,6 +179,7 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
       setScopeKind("workspace");
       setCapInsp(false);
       setCapOrch(false);
+      setCapExecute(false);
       setNote("");
       onCreated();
     } catch {
@@ -197,6 +211,8 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
             setCapInsp={setCapInsp}
             capOrch={capOrch}
             setCapOrch={setCapOrch}
+            capExecute={capExecute}
+            setCapExecute={setCapExecute}
             note={note}
             setNote={setNote}
           />

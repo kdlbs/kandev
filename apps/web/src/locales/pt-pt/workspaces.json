@@ -167,6 +167,7 @@
   "workflow": "Fluxo de Trabalho",
   "selectWorkflow": "Selecionar fluxo de trabalho",
   "capabilities": "Capacidades",
+  "capabilityExecute": "concessão de execução",
   "capabilitiesDescription": "Inspecionar permite ler documentos e relações; Orquestrar permite parar, interromper e anexar fontes de área de trabalho.",
   "grantNote": "Nota (opcional)",
   "grantNotePlaceholder": "Motivo para esta concessão",

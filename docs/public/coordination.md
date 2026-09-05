@@ -336,6 +336,9 @@ without being the direct parent of every task it manages.
 - **Inspect**: read documents, relations, and metadata on any task in scope.
 - **Orchestrate**: stop, interrupt (deliver urgent messages), and attach
   workspace sources on any task in scope.
+- **Execution lease**: lets the Host, not the coordinator agent, perform one
+  short-lived, exact repository operation after it validates the grant,
+  workspace, task, branch, and expected commit.
 
 Coordinator authority is additive: a coordinator retains its existing
 parent/child capabilities and gains these on top.
@@ -346,6 +349,10 @@ parent/child capabilities and gains these on top.
 - **Cross-workspace authority**: a grant is strictly scoped to one workspace.
 - **Mutating the grant system**: no MCP or API tool can create, revoke, or
   modify a coordinator grant.
+- **Credentials or arbitrary commands**: an execution lease is never exposed
+  to an agent as a token, shell command, filesystem path, or provider
+  credential. Force pushes, rebases, history rewrites, and cross-workspace
+  actions remain unavailable.
 
 ### Creating and managing grants
 

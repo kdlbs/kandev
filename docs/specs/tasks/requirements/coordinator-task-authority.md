@@ -31,8 +31,9 @@ Names, titles, agent profiles, prompt text, and Office roles never confer it.
   over a scope. Grant mutation is operator-only; no agent-callable tool can
   create or revoke grants.
 - **Capability:** `inspect` (relation/document reads beyond the relation
-  guard) or `orchestrate` (stop, interrupt delivery, workspace-source
-  attach). Destructive and credential operations are not grantable.
+  guard), `orchestrate` (stop, interrupt delivery, workspace-source attach),
+  or `execute` (a Host-only mediated execution lease). Destructive and
+  credential operations are not grantable.
 - **Scope:** `workspace` or `workflow`. Cross-workspace authority is
   impossible by construction.
 
@@ -115,6 +116,25 @@ backing task rotation and plugin reinstalls do not change identity.
   the current backing task/session pair, and shall prevent two active
   principals in a workspace from claiming the same backing task or session.
 
+### REQ-TASKS-COORDINATOR-AUTHORITY-004: Host-mediated execution leases
+
+**Intent:** An operator can authorize a Coordinator to request a bounded Host
+operation without allowing peer prompt text to become user authorization.
+
+#### Acceptance criteria
+
+- **AC-TASKS-COORDINATOR-AUTHORITY-004.1:** When an operator grants `execute`
+  to an authenticated Coordinator principal, the system shall expose it only
+  as a Host-mediated lease capability, never as an agent credential or
+  arbitrary command permission.
+- **AC-TASKS-COORDINATOR-AUTHORITY-004.2:** When the Host consumes a lease,
+  it shall require exact grant, principal, workspace, target task, repository,
+  branch, expected head, and fixed operation matches, and shall deny expiry,
+  revocation, replay, and every mismatch before mutation.
+- **AC-TASKS-COORDINATOR-AUTHORITY-004.3:** When the Host issues or consumes a
+  lease, it shall record an auditable receipt without credentials, source
+  paths, or task prompt content.
+
 ## Out of scope
 
 - Destructive operations (`delete_task`, `archive_task`) and
@@ -122,3 +142,5 @@ backing task rotation and plugin reinstalls do not change identity.
 - Grant creation, revocation, and listing use an operator-only HTTP surface;
   no agent-callable (MCP) tool mutates grants.
 - Cross-workspace authority and task-ID-based grant fallback.
+- Executor transport implementation. It is a separately reviewed Host
+  delivery and must consume only the mediated receipt contract.

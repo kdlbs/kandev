@@ -167,6 +167,7 @@
   "workflow": "工作流",
   "selectWorkflow": "選择工作流",
   "capabilities": "能力",
+  "capabilityExecute": "執行租約",
   "capabilitiesDescription": "檢查允許讀取文檔和關系；協調允許停止、中断和附加工作區來源。",
   "grantNote": "備註（可選）",
   "grantNotePlaceholder": "授權原因",

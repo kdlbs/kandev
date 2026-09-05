@@ -210,6 +210,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-24-unified-fork-approval-label | [Use One Maintainer Approval Label for Contributor PR Automation](2026-08-24-unified-fork-approval-label.md) | accepted | infra, workflow, security | 2026-08-24 |
 | 2026-08-24-explicit-coordinator-task-authority | [Explicit, revocable coordinator task authority](2026-08-24-explicit-coordinator-task-authority.md) | accepted | backend, security | 2026-08-24 |
 | 2026-08-25-required-worktree-refresh-fails-closed | [Required Worktree Refresh Fails Closed](2026-08-25-required-worktree-refresh-fails-closed.md) | accepted | backend, security, operations | 2026-08-25 |
+| 2026-09-05-host-mediated-execution-leases | [Host-mediated execution leases](2026-09-05-host-mediated-execution-leases.md) | accepted | backend, security, protocol | 2026-09-05 |
 | 2026-08-26-quick-chat-tab-order | [Store Quick Chat Tab Order as a User Preference](2026-08-26-quick-chat-tab-order.md) | accepted | backend, frontend, protocol | 2026-08-26 |
 | 2026-08-26-quick-chat-agent-titles | [Apply Agent-Generated Titles to Quick Chat](2026-08-26-quick-chat-agent-titles.md) | accepted | backend, frontend, protocol | 2026-08-26 |
 | 2026-08-27-bounded-agent-profile-recency | [Store Agent Profile Recency in Bounded Context Rows](2026-08-27-bounded-agent-profile-recency.md) | accepted | backend, frontend, protocol | 2026-08-27 |

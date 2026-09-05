@@ -281,7 +281,7 @@ func (h *CoordinatorGrantHandlers) validateCreateGrantRequest(c *gin.Context, wo
 	}
 	caps := parseCapabilities(req.Capabilities)
 	if len(caps) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "capabilities must include at least one of: inspect, orchestrate"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "capabilities must include at least one of: inspect, orchestrate, execute"})
 		return nil, "", false
 	}
 	sid := req.ScopeID
@@ -432,7 +432,7 @@ func parseCapabilities(raw string) []string {
 	var result []string
 	for _, s := range strings.Split(raw, ",") {
 		s = strings.TrimSpace(s)
-		if (s == "inspect" || s == "orchestrate") && !seen[s] {
+		if (s == "inspect" || s == "orchestrate" || s == "execute") && !seen[s] {
 			result = append(result, s)
 			seen[s] = true
 		}

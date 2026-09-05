@@ -126,6 +126,25 @@ tab and command-palette entry hidden while off. With the flag off the
 authority short-circuits to the legacy relation checks; the empty grant table
 is the second layer of default-off.
 
+## Host-mediated execution lease contract
+
+The `execute` capability is a parent authorization for a Host-only, one-time
+execution lease. The common scope contract is
+`coordinator.HostExecutionLeaseScope`: durable grant/principal/workspace/target
+task/repository ids, branch, expected Git object id, and one fixed operation.
+`HostExecutionLease.ValidateFor` denies by default on expiry, revocation,
+malformed scope, or any field mismatch. Its permitted operations are
+fast-forward push, index update, and fast-forward merge. It represents neither
+a command line nor a credential.
+
+The Host owns issuance, durable receipt persistence, replay consumption, and
+the mutation transaction. Before issuance and consumption it resolves the
+authenticated plugin principal and active grant using the existing authority,
+then records the outcome through `CoordinatorAuditEvent`. No task agent, MCP
+prompt, command prefix, or serialized lease can prove authority. The executor
+transport is a separately reviewed Host delivery. See
+[ADR 2026-09-05](../../../decisions/2026-09-05-host-mediated-execution-leases.md).
+
 ## Failure and recovery
 
 - Store error during authorize: fail-closed deny, error surfaced to caller;
@@ -158,3 +177,4 @@ Legacy denial byte-parity is asserted at the MCP call sites
 | REQ-TASKS-COORDINATOR-AUTHORITY-001 | Data model, Authorization flow step 6 |
 | REQ-TASKS-COORDINATOR-AUTHORITY-002 | Authorization flow, Repository contract |
 | REQ-TASKS-COORDINATOR-AUTHORITY-003 | Data model, Repository contract and typed errors |
+| REQ-TASKS-COORDINATOR-AUTHORITY-004 | Host-mediated execution lease contract |
