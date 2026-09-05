@@ -1,6 +1,7 @@
 package process
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"testing"
@@ -79,6 +80,34 @@ func TestSendErrorEventWithProviderErrorReleasesOnStop(t *testing.T) {
 	parkThenAssertRelease(t,
 		func() { m.SendErrorEventWithProviderError("boom", 1, nil) },
 		func() { close(stopCh) },
+	)
+}
+
+// TestSendErrorEventWithProviderErrorReleasesOnRealManagerStop pins the same
+// release guarantee driven through the real Manager.Stop path, not a
+// hand-closed stopCh standing in for it: a full channel must still park a
+// send in flight when Stop is called on a started manager, and Stop's own
+// teardown (closeAdapterAndStdin closing stopCh) must release it and return
+// within a bounded time, not hang waiting on the parked goroutine.
+func TestSendErrorEventWithProviderErrorReleasesOnRealManagerStop(t *testing.T) {
+	m := &Manager{
+		updatesCh: make(chan adapter.AgentEvent, 1),
+		logger:    newTestLogger(t),
+	}
+	m.stopCh = make(chan struct{})
+	m.stopChSnapshot.Store(m.stopCh)
+	m.status.Store(StatusRunning)
+	m.updatesCh <- adapter.AgentEvent{Type: adapter.EventTypeComplete}
+
+	parkThenAssertRelease(t,
+		func() { m.SendErrorEventWithProviderError("boom", 1, nil) },
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := m.Stop(ctx); err != nil {
+				t.Errorf("Stop: %v", err)
+			}
+		},
 	)
 }
 
