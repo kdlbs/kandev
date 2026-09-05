@@ -444,41 +444,16 @@ func BuildBoundedContinuation(input ContinuationInput) Continuation {
 // every user message; splitting the limit guarantees both survive.
 const conversationUserBudget = continuationFieldLimit / 2
 
-// sanitizeSlack overshoots a tail budget before the first cut so a
-// credential straddling the cut boundary still has its leading fragment
-// present when Sanitize runs, instead of only the fragment past the cut
-// (which matches no redaction rule). It must exceed the length of any single
-// credential token Sanitize's rules match.
-const sanitizeSlack = 512
-
 // sanitizedTail returns the newest `budget` bytes of raw with credentials
-// redacted. It first takes a window that overshoots budget by sanitizeSlack
-// so a credential straddling the tail-cut boundary is complete when Sanitize
-// runs, instead of arriving as a bare suffix that matches no redaction rule.
-//
-// Sanitize can grow its input (e.g. "/Users/henry/" -> "/Users/<redacted>/")
-// and then truncates its OWN result from the head once it exceeds
-// routingerr.MaxRawExcerptBytes, which would chop the newest bytes this
-// function exists to keep. So the window is capped at MaxRawExcerptBytes to
-// bound the growth, and if Sanitize's result still hits that cap (redactions
-// grew it enough to trigger the head truncation anyway), the window is
-// shrunk and retried until Sanitize returns an untruncated result — at which
-// point its output is known to be the true, un-clipped tail, and the
-// caller's own budget cut below is safe to apply.
+// redacted. It sanitizes the entire input before cutting to budget, rather
+// than cutting a window and sanitizing that: the credential rules have no
+// maximum matched length, so cutting first could split a marker from a value
+// long enough to cross any fixed window boundary, leaving the split-off
+// remainder — which matches no redaction rule on its own — in cleartext.
+// Sanitizing first means the cut below only ever removes already-redacted
+// bytes.
 func sanitizedTail(raw string, budget int) string {
-	window := budget + sanitizeSlack
-	if window > routingerr.MaxRawExcerptBytes {
-		window = routingerr.MaxRawExcerptBytes
-	}
-	for window > 0 {
-		part := boundedTailN(raw, window)
-		sanitized := routingerr.Sanitize(part)
-		if len(sanitized) < routingerr.MaxRawExcerptBytes {
-			return boundedTailN(sanitized, budget)
-		}
-		window -= sanitizeSlack
-	}
-	return ""
+	return boundedTailN(routingerr.SanitizeFullUnbounded(raw), budget)
 }
 
 // boundedConversation bounds user messages and the agent conversation on
@@ -564,11 +539,10 @@ func bounded(value string) string {
 
 // boundedTailN truncates to limit bytes keeping the tail, on a rune
 // boundary, so a multi-byte character is never split into invalid UTF-8. The
-// result is also run through strings.ToValidUTF8: the rune-boundary cut above
-// only repairs the leading edge it introduces, so a value whose trailing
-// edge was already invalid (e.g. routingerr.Sanitize's own bare-byte-slice
-// truncation once its redactions grow the string past MaxRawExcerptBytes)
-// would otherwise carry that broken tail straight through.
+// result is also run through strings.ToValidUTF8, so a value whose trailing
+// edge was already invalid before this call does not carry that broken tail
+// straight through: the rune-boundary cut above only repairs the leading
+// edge it introduces.
 func boundedTailN(value string, limit int) string {
 	value = strings.TrimSpace(value)
 	if len(value) > limit {

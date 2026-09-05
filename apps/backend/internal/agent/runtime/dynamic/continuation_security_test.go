@@ -149,6 +149,46 @@ func rawSecretSuffix(s string) string {
 	return ""
 }
 
+// longKeyedSecretValue is longer than the fixed 512-byte look-behind slack
+// sanitizedTail used before it was replaced with a sanitize-then-cut
+// approach, and alternates characters with '.' so no substring of it is 32
+// bytes of contiguous alnum — long enough to defeat Sanitize's generic
+// catch-all rule. If a tail-cut boundary ever separates this value from its
+// "token=" key marker, nothing else would redact the leftover fragment.
+var longKeyedSecretValue = strings.Repeat("Zx.", 220)
+
+// longSecretRotations are every phase-alignment of a 9-byte window over
+// longKeyedSecretValue's 3-byte repeating unit, so a leaked fragment is
+// caught regardless of which byte offset within the value the tail cut
+// happened to preserve.
+var longSecretRotations = []string{"Zx.Zx.Zx.", "x.Zx.Zx.Z", ".Zx.Zx.Zx"}
+
+// TestContinuationRedactsLongSecretStraddlingTailCut is the R3-A regression:
+// sanitizedTail used to cut raw input to a fixed budget+512-byte window
+// before sanitizing it, so a credential value longer than that slack could
+// have its "token=" key marker fall outside the window while a tail
+// fragment of the value remained inside it — a fragment with no visible key
+// and no long-enough alnum run, so no rule ever redacted it. Swept across
+// alignments since the exact point where the boundary falls inside the
+// value depends on the surrounding padding length.
+func TestContinuationRedactsLongSecretStraddlingTailCut(t *testing.T) {
+	secret := "token=" + longKeyedSecretValue
+	for tailLen := 1700; tailLen <= 2550; tailLen += 25 {
+		tail := strings.Repeat("z", tailLen)
+		userMessage := strings.Repeat("ab ", 800) + secret + " " + tail
+
+		continuation := BuildBoundedContinuation(ContinuationInput{
+			UserMessages: []string{userMessage},
+		})
+
+		for _, rotation := range longSecretRotations {
+			if strings.Contains(continuation.Conversation, rotation) {
+				t.Fatalf("tailLen=%d: Conversation retained a fragment of the long secret: %q", tailLen, continuation.Conversation)
+			}
+		}
+	}
+}
+
 // TestContinuationWithFailureSanitizesFallbackReason covers the fallback-loop
 // path (conductor.go's continuationWithFailure), which sets FailureReason
 // directly from a classified launch error rather than through

@@ -38,10 +38,15 @@ func TestBoundedTruncatesOnRuneBoundary(t *testing.T) {
 }
 
 // TestBoundedConversationRetainsNewestContent is the defect-C regression:
-// Conversation must keep the tail (most recent turns), not the head.
+// Conversation must keep the tail (most recent turns), not the head. The
+// filler is space-separated 4-character words rather than one long run: a
+// single contiguous run of 32+ alnum characters would match Sanitize's
+// generic catch-all and collapse to a few bytes before the tail-budget cut
+// ever applies, which would pass both markers through by accident and defeat
+// the length pressure this test depends on.
 func TestBoundedConversationRetainsNewestContent(t *testing.T) {
-	oldest := "OLDEST-MARKER " + strings.Repeat("a", continuationFieldLimit)
-	newest := strings.Repeat("b", continuationFieldLimit) + " NEWEST-MARKER"
+	oldest := "OLDEST-MARKER " + strings.Repeat("aaaa ", continuationFieldLimit/5+10)
+	newest := strings.Repeat("bbbb ", continuationFieldLimit/5+10) + " NEWEST-MARKER"
 
 	continuation := BuildBoundedContinuation(ContinuationInput{
 		Conversation: oldest + "\n" + newest,

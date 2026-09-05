@@ -179,6 +179,18 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 			mustHave:    []string{"token: ***}"},
 		},
 		{
+			name:        "bare value containing a comma is fully consumed",
+			in:          "password=abc,def",
+			mustNotHave: []string{"abc", "def"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "bare value containing a semicolon is fully consumed",
+			in:          "token=abc;def",
+			mustNotHave: []string{"abc", "def"},
+			mustHave:    []string{"token: ***"},
+		},
+		{
 			name:        "max_tokens numeric value is not redacted",
 			in:          "max_tokens: 8192 > 4096, which is the maximum allowed for this model",
 			mustNotHave: []string{"***"},
@@ -455,6 +467,18 @@ func TestSanitizeCredentials_RedactsCredentialPatterns(t *testing.T) {
 			in:          "token=hunter2}",
 			mustNotHave: []string{"hunter2"},
 			mustHave:    []string{"token: ***}"},
+		},
+		{
+			name:        "bare value containing a comma is fully consumed",
+			in:          "password=abc,def",
+			mustNotHave: []string{"abc", "def"},
+			mustHave:    []string{"password: ***"},
+		},
+		{
+			name:        "bare value containing a semicolon is fully consumed",
+			in:          "token=abc;def",
+			mustNotHave: []string{"abc", "def"},
+			mustHave:    []string{"token: ***"},
 		},
 	}
 	for _, c := range cases {

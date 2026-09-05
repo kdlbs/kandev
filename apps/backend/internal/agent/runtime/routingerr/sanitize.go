@@ -137,11 +137,15 @@ func redactAssignments(s string) string {
 	return b.String()
 }
 
-// delimiterBytes stop a bare (unquoted) value: a closing brace/bracket/paren,
-// angle bracket, comma, or semicolon. A value directly followed by one of
-// these, as in `{"password": "***"}` after an earlier redaction pass, must
-// not consume it so repeated redaction stays idempotent.
-const delimiterBytes = "}])>,;"
+// delimiterBytes stop a bare (unquoted) value: a closing brace, bracket,
+// paren, or angle bracket. A value directly followed by one of these, as in
+// `{"password": "***"}` after an earlier redaction pass, must not consume it
+// so repeated redaction stays idempotent. Comma and semicolon are
+// deliberately excluded: unlike a container terminator, either can appear
+// inside a single legitimate credential value (e.g. a connection string), so
+// treating them as delimiters would truncate the value and leave its
+// remainder in cleartext.
+const delimiterBytes = "}])>"
 
 func isSpaceByte(c byte) bool {
 	switch c {
@@ -195,8 +199,7 @@ func scanBare(s string) int {
 // scanQuoted consumes a quoted value starting at s[0], honoring backslash
 // escapes so an escaped quote does not end the string early. It returns
 // ok=false if no closing quote is found before a newline or the end of s, so
-// the caller falls back to bare scanning (matching how an unterminated quote
-// was already handled before this function existed).
+// the caller falls back to bare scanning.
 //
 // A closing quote only ends the value if what follows is a delimiter or the
 // end of the string. Otherwise the quote did not actually terminate the
@@ -260,10 +263,21 @@ func scanContinuation(s string) int {
 	return i
 }
 
-func applyRedactions(s string, rules []redaction) string {
+// applyRedactionsUnbounded runs rules over the entire input with no output
+// cap, so every credential's key marker is guaranteed to stay attached to its
+// full value regardless of length. The credential rules have no maximum
+// matched length, so any caller that instead cut its input to a fixed window
+// before redacting could split a marker from a value long enough to cross
+// the window boundary, leaving the split-off remainder unredacted.
+func applyRedactionsUnbounded(s string, rules []redaction) string {
 	for _, r := range rules {
 		s = r(s)
 	}
+	return s
+}
+
+func applyRedactions(s string, rules []redaction) string {
+	s = applyRedactionsUnbounded(s, rules)
 	if len(s) > MaxRawExcerptBytes {
 		s = s[:MaxRawExcerptBytes]
 	}
@@ -288,6 +302,15 @@ func Sanitize(s string) string {
 // idempotent for the same reason Sanitize is.
 func SanitizeCredentials(s string) string {
 	return applyRedactions(s, credentialRedactions)
+}
+
+// SanitizeFullUnbounded applies the same rule set as Sanitize but without the
+// MaxRawExcerptBytes output cap. Use this only when the caller will apply its
+// own tail truncation afterward (see dynamic.sanitizedTail): sanitizing
+// before cutting, rather than cutting a window and sanitizing that, is what
+// guarantees a credential is never split from its key marker by the cut.
+func SanitizeFullUnbounded(s string) string {
+	return applyRedactionsUnbounded(s, redactions)
 }
 
 type sanitizedError struct {
