@@ -48,10 +48,13 @@ func applyDynamicRouteAction(
 		return nil, err
 	}
 	// expectedState is the session lifecycle state last confirmed under this
-	// in-memory copy. Every full-row write below is conditioned on it, so a
-	// terminal transition (e.g. cancellation) that lands concurrently with
-	// route selection or successor launch is detected instead of clobbered by
-	// a whole-row write built from this stale snapshot.
+	// in-memory copy. The selection and error writes below are conditioned on
+	// it, so a terminal transition (e.g. cancellation) that lands
+	// concurrently with route selection is detected instead of clobbered by a
+	// whole-row write built from this stale snapshot. The post-launch
+	// recovery write is different: the launch attempt itself can mutate
+	// state, so that write re-reads and gates on the state current at
+	// recovery time instead (see recoverDynamicRouteAction).
 	expectedState := session.State
 	if err := repairDynamicRouteAfterLaunchFailure(
 		ctx, session, request.ExpectedGeneration, resolver.MarkRouteRecoveryActionRequired,
@@ -72,7 +75,7 @@ func applyDynamicRouteAction(
 	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {
 		return routeActionResult(ctx, repo, session), nil
 	}
-	return finishDynamicRouteAction(ctx, repo, resolver, session.ID, decision.Generation, expectedState, launchSuccessor)
+	return finishDynamicRouteAction(ctx, repo, resolver, session.ID, decision.Generation, launchSuccessor)
 }
 
 func loadDynamicRouteActionSession(
@@ -180,7 +183,6 @@ func finishDynamicRouteAction(
 	resolver *agentruntime.ProfileExecutionResolver,
 	sessionID string,
 	expectedGeneration int64,
-	expectedState models.TaskSessionState,
 	launchSuccessor func(context.Context, string) error,
 ) (*orchestrator.RouteActionResult, error) {
 	if launchSuccessor == nil {
@@ -191,7 +193,7 @@ func finishDynamicRouteAction(
 		return routeActionResult(ctx, repo, session), nil
 	}
 	if err := launchSuccessor(ctx, sessionID); err != nil {
-		return recoverDynamicRouteAction(ctx, repo, resolver, sessionID, expectedGeneration, expectedState, err)
+		return recoverDynamicRouteAction(ctx, repo, resolver, sessionID, expectedGeneration, err)
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -201,18 +203,20 @@ func finishDynamicRouteAction(
 }
 
 // recoverDynamicRouteAction records why a successor launch failed after a
-// route action was accepted. expectedState is the session state confirmed
-// immediately before the launch attempt started: gating the write on it,
-// rather than on the state this function just reloaded, is what lets a
-// cancellation that lands during the launch attempt win over this recovery
-// write instead of being resurrected by it.
+// route action was accepted. The launcher itself may mutate session state
+// before failing (a real launch failure resets the row to CREATED ahead of
+// the launch attempt), so the write here is gated on a fresh reload rather
+// than on any state captured before launchSuccessor ran: a stale pre-launch
+// snapshot would never match the launcher's own mutation and this recovery
+// write would be silently dropped. A reloaded state of CANCELLED means a
+// concurrent cancellation has already terminated the session, and that must
+// win over resurrecting it into WAITING_FOR_INPUT.
 func recoverDynamicRouteAction(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
 	resolver *agentruntime.ProfileExecutionResolver,
 	sessionID string,
 	expectedGeneration int64,
-	expectedState models.TaskSessionState,
 	launchErr error,
 ) (*orchestrator.RouteActionResult, error) {
 	if resolver != nil {
@@ -225,12 +229,16 @@ func recoverDynamicRouteAction(
 	if session.RouteGeneration != expectedGeneration {
 		return routeActionResult(ctx, repo, session), nil
 	}
+	if session.State == models.TaskSessionStateCancelled {
+		return routeActionResult(ctx, repo, session), nil
+	}
+	reloadedState := session.State
 	session.RouteState = "action_required"
 	session.RouteReason = orchestrator.RouteActionLaunchFailedReason
 	session.State = models.TaskSessionStateWaitingForInput
 	session.ErrorMessage = launchErr.Error()
 	session.DownstreamACPSessionID = ""
-	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, reloadedState)
 	if err != nil {
 		return nil, routeActionPersistenceError(ctx, repo, session, err)
 	}

@@ -61,17 +61,13 @@ func seedDynamicRoutingCancelRaceSession(t *testing.T, repo *sqliterepo.Reposito
 // cancellation has already committed CANCELLED to the row. Before the fix,
 // recoverDynamicRouteAction reloaded the row, unconditionally overwrote State
 // with WAITING_FOR_INPUT, and whole-row-wrote it back — resurrecting a
-// session a concurrent cancel had just terminated. The fix conditions that
-// write on the state confirmed before the launch attempt started, so a
-// cancellation landing during the attempt wins.
+// session a concurrent cancel had just terminated. The fix refuses to
+// resurrect a reloaded CANCELLED state at all, so a cancellation landing
+// during the launch attempt wins.
 func TestRecoverDynamicRouteActionDoesNotResurrectCancelledSession(t *testing.T) {
 	ctx := context.Background()
 	repo := newDynamicRoutingCancelRaceRepo(t)
 	seedDynamicRoutingCancelRaceSession(t, repo, "session-1", models.TaskSessionStateRunning)
-
-	// expectedState is what applyDynamicRouteAction would have captured from
-	// its own load, before finishDynamicRouteAction's launch attempt began.
-	expectedState := models.TaskSessionStateRunning
 
 	// Simulate a concurrent cancellation committing while the successor
 	// launch (which recoverDynamicRouteAction is about to react to) was still
@@ -81,7 +77,7 @@ func TestRecoverDynamicRouteActionDoesNotResurrectCancelledSession(t *testing.T)
 	cancelled.State = models.TaskSessionStateCancelled
 	require.NoError(t, repo.UpdateTaskSession(ctx, cancelled))
 
-	result, err := recoverDynamicRouteAction(ctx, repo, "session-1", expectedState, errors.New("launch failed"))
+	result, err := recoverDynamicRouteAction(ctx, repo, "session-1", errors.New("launch failed"))
 	require.NoError(t, err)
 	require.Equal(t, "session-1", result.SessionID)
 
@@ -98,7 +94,7 @@ func TestRecoverDynamicRouteActionWritesWhenStateUnchanged(t *testing.T) {
 	repo := newDynamicRoutingCancelRaceRepo(t)
 	seedDynamicRoutingCancelRaceSession(t, repo, "session-1", models.TaskSessionStateRunning)
 
-	result, err := recoverDynamicRouteAction(ctx, repo, "session-1", models.TaskSessionStateRunning, errors.New("launch failed"))
+	result, err := recoverDynamicRouteAction(ctx, repo, "session-1", errors.New("launch failed"))
 	require.NoError(t, err)
 	require.Equal(t, "session-1", result.SessionID)
 
@@ -106,4 +102,41 @@ func TestRecoverDynamicRouteActionWritesWhenStateUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateWaitingForInput, persisted.State)
 	require.Equal(t, "action_required", persisted.RouteState)
+}
+
+// TestFinishDynamicRouteActionRecoversAfterLauncherMutatesState proves F5:
+// the real launch-failure path does not gate the recovery write on a
+// pre-launch snapshot. orchestrator.relaunchDynamicTaskAfterFailure resets
+// the session row to CREATED before attempting the successor launch, then
+// fails; a CAS built from the state captured before that launch attempt
+// would never match CREATED and would silently drop the recovery write,
+// stranding the session with no error surfaced. finishDynamicRouteAction
+// must still land WAITING_FOR_INPUT/action_required with the launch error.
+func TestFinishDynamicRouteActionRecoversAfterLauncherMutatesState(t *testing.T) {
+	ctx := context.Background()
+	repo := newDynamicRoutingCancelRaceRepo(t)
+	seedDynamicRoutingCancelRaceSession(t, repo, "session-1", models.TaskSessionStateRunning)
+
+	launchErr := errors.New("successor launch failed")
+	launcher := func(ctx context.Context, sessionID string) error {
+		// Mirrors internal/orchestrator/dynamic_launch.go's
+		// relaunchDynamicTaskAfterFailure, which resets state to CREATED
+		// before attempting (and, here, failing) the successor launch.
+		if err := repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateCreated, ""); err != nil {
+			return err
+		}
+		return launchErr
+	}
+
+	result, err := finishDynamicRouteAction(ctx, repo, "session-1", launcher)
+	require.NoError(t, err)
+	require.Equal(t, "session-1", result.SessionID)
+	require.Equal(t, "action_required", result.State)
+
+	persisted, err := repo.GetTaskSession(ctx, "session-1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, persisted.State)
+	require.Equal(t, "action_required", persisted.RouteState)
+	require.Equal(t, "route_action_launch_failed", persisted.RouteReason)
+	require.Equal(t, launchErr.Error(), persisted.ErrorMessage)
 }
