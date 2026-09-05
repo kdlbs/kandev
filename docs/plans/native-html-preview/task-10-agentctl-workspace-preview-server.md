@@ -96,11 +96,14 @@ Implemented the agentctl-owned workspace preview server.
 - Added MIME handling, no-store responses, GET and HEAD support, containment
   checks, traversal rejection, symlink escape protection, and teardown cleanup.
 - Added focused tests for publishing, disk assets, replacement, bounds,
-  eviction, traversal, symlinks, and shutdown.
+  eviction, traversal, symlinks, shutdown, concurrent publish/read,
+  per-repository roots and ports, and HEAD/405 method handling.
 
 Verification:
 
 - `go test ./internal/agentctl/server/api` passed.
 - `go test -race ./internal/agentctl/server/api` passed.
+- The API package passed 462 tests under the race detector, including the
+  deterministic concurrent publish/read and per-root method coverage.
 - `rtk make -C apps/backend test` passed with task-host internal config
   overrides cleared.

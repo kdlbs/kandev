@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -20,6 +21,9 @@ type WorkspacePreviewRequest = agentctltypes.WorkspacePreviewRequest
 // WorkspacePreviewResponse identifies the live agentctl preview server and
 // the published entry document.
 type WorkspacePreviewResponse = agentctltypes.WorkspacePreviewResponse
+
+// WorkspacePreviewHTTPError is returned when agentctl rejects a publish.
+type WorkspacePreviewHTTPError = agentctltypes.WorkspacePreviewHTTPError
 
 // PublishWorkspacePreview publishes one current HTML editor buffer.
 func (c *Client) PublishWorkspacePreview(ctx context.Context, payload WorkspacePreviewRequest) (WorkspacePreviewResponse, error) {
@@ -40,16 +44,13 @@ func (c *Client) PublishWorkspacePreview(ctx context.Context, payload WorkspaceP
 		return WorkspacePreviewResponse{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return WorkspacePreviewResponse{}, &WorkspacePreviewHTTPError{Status: resp.StatusCode}
+	}
 	responseBody, err := readResponseBody(resp)
 	if err != nil {
 		return WorkspacePreviewResponse{}, fmt.Errorf("read workspace preview response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return WorkspacePreviewResponse{}, fmt.Errorf(
-			"workspace preview publish failed with status %d: %s",
-			resp.StatusCode,
-			truncateBody(responseBody),
-		)
 	}
 	var result WorkspacePreviewResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {

@@ -76,6 +76,10 @@ listener and no direct browser-to-agentctl connection.
 - A task-session handler authorizes the requested session and validates the
   request. It also makes sure that agentctl is ready. Then it forwards the
   request through the existing agentctl client.
+- The agentctl client preserves non-success status codes in a typed error
+  without retaining the response body. The task-session handler maps agentctl
+  validation, size, and availability responses to 400, 413, and 503; other
+  upstream failures and malformed success responses become 502.
 - The backend does not store HTML or proxy asset bytes itself.
 - The response contains the agentctl port, scoped entry path, and version needed
   to construct a session port-proxy URL.
@@ -279,14 +283,17 @@ continue to cover browser routing.
 
 ## Verification strategy
 
-- Agentctl unit tests cover server start, reuse, and shutdown. They also cover
-  overlays, disk assets, MIME types, no-store headers, path traversal, symlink
-  escape, and missing files.
+- Agentctl unit tests cover server start, reuse, shutdown, concurrent
+  publish/read, per-root ports, GET/HEAD/405 method handling, overlays, disk
+  assets, MIME types, no-store headers, path traversal, symlink escape, and
+  missing files.
 - Backend handler and client tests cover session authorization, agentctl
-  readiness, payload bounds, forwarding, errors, and response validation.
+  readiness, payload bounds, forwarding, typed 400/413/503 propagation,
+  malformed requests, unavailable sessions, malformed responses, and response
+  validation.
 - Frontend API and component tests cover unsaved-buffer publication, Browser
   panel reuse, versioned URLs, trusted-code copy, errors, retry, source-state
-  preservation, and mobile identity reset.
+  preservation, mobile identity reset, and stale publish completion guards.
 - Desktop Chromium E2E proves that an unsaved document runs native JavaScript
   and loads relative CSS, JavaScript, and images. It also proves use of a native
   browser API and refresh after a second publish.

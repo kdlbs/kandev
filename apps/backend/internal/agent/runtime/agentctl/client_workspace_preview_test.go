@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,5 +60,61 @@ func TestPublishWorkspacePreviewRejectsOversizedContentBeforeNetwork(t *testing.
 	}
 	if called {
 		t.Fatal("PublishWorkspacePreview sent oversized content to agentctl")
+	}
+}
+
+func TestPublishWorkspacePreviewPreservesRemoteStatusWithoutResponseBody(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte("source content must not escape the client error"))
+			}))
+			t.Cleanup(srv.Close)
+			host, port := splitTestServerHostPort(t, srv)
+			client := NewClient(host, port, newTestLogger())
+
+			_, err := client.PublishWorkspacePreview(context.Background(), WorkspacePreviewRequest{
+				Path:    "index.html",
+				Content: "<body>current</body>",
+			})
+			if err == nil {
+				t.Fatal("PublishWorkspacePreview returned nil error")
+			}
+			var statusErr interface {
+				error
+				StatusCode() int
+			}
+			if !errors.As(err, &statusErr) {
+				t.Fatalf("error = %v, want typed status error", err)
+			}
+			if statusErr.StatusCode() != status {
+				t.Fatalf("status = %d, want %d", statusErr.StatusCode(), status)
+			}
+			if strings.Contains(err.Error(), "source content must not escape") {
+				t.Fatalf("error exposed upstream response body: %v", err)
+			}
+		})
+	}
+}
+
+func TestPublishWorkspacePreviewRejectsMalformedSuccessResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not-json"))
+	}))
+	t.Cleanup(srv.Close)
+	host, port := splitTestServerHostPort(t, srv)
+	client := NewClient(host, port, newTestLogger())
+
+	_, err := client.PublishWorkspacePreview(context.Background(), WorkspacePreviewRequest{
+		Path:    "index.html",
+		Content: "<body>current</body>",
+	})
+	if err == nil {
+		t.Fatal("PublishWorkspacePreview accepted malformed success response")
+	}
+	if strings.Contains(err.Error(), "not-json") {
+		t.Fatalf("error exposed malformed response body: %v", err)
 	}
 }

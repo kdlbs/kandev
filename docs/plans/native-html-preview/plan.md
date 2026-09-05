@@ -161,9 +161,14 @@ licenses, and PR CI. Every review thread must have a disposition before merge.
 
 ## Verification results
 
-- Agentctl API tests and race tests passed.
+- Agentctl API tests and race tests passed, including deterministic concurrent
+  publish/read, per-root ports, and HEAD/405 method coverage.
 - Full backend tests passed with the task-host internal config overrides cleared.
-- Focused frontend tests passed: 10 files and 64 tests.
+- Focused frontend tests passed: 13 files and 69 tests, including stale
+  session completion guards.
+- Agentctl client and task-handler tests passed for typed 400/413/503
+  propagation, malformed responses, oversized requests, and unavailable
+  sessions. The unused lifecycle forwarding layer was removed.
 - Web typecheck, lint, i18n checks, i18n ratchet, license generation, and Vite
   E2E build passed.
 - Public-doc validation passed: 61 tests and 43 published pages.

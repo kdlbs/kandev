@@ -75,11 +75,31 @@ func (h *ProcessHandlers) httpPublishWorkspacePreview(c *gin.Context) {
 		Content: req.Content,
 	})
 	if err != nil {
-		h.logger.Warn("failed to publish workspace preview", zap.Error(err), zap.String("session_id", sessionID))
-		c.JSON(http.StatusBadGateway, gin.H{"error": "workspace preview publish failed"})
+		h.respondWorkspacePreviewPublishError(c, sessionID, err)
 		return
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *ProcessHandlers) respondWorkspacePreviewPublishError(c *gin.Context, sessionID string, err error) {
+	status := http.StatusBadGateway
+	message := "workspace preview publish failed"
+	var statusErr *agentctltypes.WorkspacePreviewHTTPError
+	if errors.As(err, &statusErr) {
+		switch statusErr.StatusCode() {
+		case http.StatusBadRequest:
+			status = http.StatusBadRequest
+			message = "invalid workspace preview request"
+		case http.StatusRequestEntityTooLarge:
+			status = http.StatusRequestEntityTooLarge
+			message = "workspace preview content exceeds 5 MiB"
+		case http.StatusServiceUnavailable:
+			status = http.StatusServiceUnavailable
+			message = "workspace preview unavailable"
+		}
+	}
+	h.logger.Warn("failed to publish workspace preview", zap.Error(err), zap.String("session_id", sessionID))
+	c.JSON(status, gin.H{"error": message})
 }
 
 // workspacePreviewClient resolves the session's agentctl client, responding

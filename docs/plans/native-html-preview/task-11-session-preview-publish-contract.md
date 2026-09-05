@@ -86,16 +86,23 @@ Task 10 defines the agentctl route and response contract.
 
 ## Results
 
-Implemented the authorized session publish path.
+Implemented the authorized session publish path and stable upstream status
+mapping.
 
-- Added agentctl client and lifecycle forwarding for current HTML buffers.
+- Added the agentctl client for current HTML buffers. Non-success agentctl
+  responses now use a typed status error without retaining response content.
 - Added session authorization, readiness, body bounds, validation, and stable
-  error mapping in the task-session handler.
+  400/413/503 error mapping in the task-session handler. Unexpected upstream
+  failures and malformed success responses remain 502.
 - Added the frontend process API and versioned session port-proxy URL builder.
-- Added backend and frontend success, authorization, limit, and failure tests.
+- Removed the unused lifecycle forwarding layer so the handler has one client
+  acquisition path.
+- Added backend and frontend success, authorization, malformed/oversized,
+  unavailable, invalid-response, status-propagation, limit, and failure tests.
 
 Verification:
 
 - `go test ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/task/handlers` passed.
+- Focused agentctl and task-handler race coverage passed: 15 tests.
 - `pnpm exec vitest run lib/api/domains/process-api.test.ts` passed.
 - `pnpm run typecheck` passed.

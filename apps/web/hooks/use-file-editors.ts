@@ -316,6 +316,7 @@ function useFileEditorEffects({
 }
 
 type FileEditorActionsParams = {
+  activeSessionId: string | null;
   activeSessionIdRef: React.MutableRefObject<string | null>;
   setFileState: (path: string, state: FileEditorState) => void;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
@@ -509,6 +510,7 @@ function useMarkdownPreviewAction({
 }
 
 function useFileEditorActions({
+  activeSessionId,
   activeSessionIdRef,
   setFileState,
   updateFileState,
@@ -540,6 +542,7 @@ function useFileEditorActions({
   });
 
   const openFileInHtmlPreview = useFileHtmlPreview({
+    activeSessionId,
     activeSessionIdRef,
     setPublishingHtmlPreview,
     openBrowserPanel,
@@ -618,6 +621,7 @@ export function useFileEditors() {
     deleteFileAction,
     applyRemoteUpdate,
   } = useFileEditorActions({
+    activeSessionId,
     activeSessionIdRef,
     setFileState,
     updateFileState,

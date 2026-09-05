@@ -111,6 +111,9 @@ Browser-panel and mobile focused-viewer flows.
   the shared Browser panel with versioned refresh URLs.
 - Mobile publishes the current buffer into a full-height iframe with a
   touch-sized control, trust warning, Show code, retry, and identity reset.
+- Desktop task-center and file-editor publication now invalidate requests on
+  session replacement and unmount, so stale success, error, and cleanup
+  callbacks cannot affect the replacement session.
 - Markdown preview and explicit development-server behavior remain unchanged.
 - Removed the preview-specific runtime, worker, direct QuickJS dependency, and
   direct parse5 dependency. Markdown keeps its transitive parse5 dependency.
@@ -118,7 +121,8 @@ Browser-panel and mobile focused-viewer flows.
 
 Verification:
 
-- Focused Vitest suite passed: 10 files and 64 tests.
+- Focused Vitest suite passed: 13 files and 69 tests, including deferred
+  stale-session success/error coverage for task-center and file-editor hooks.
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and
   `pnpm run i18n:ratchet` passed.
 - `pnpm --filter @kandev/web licenses:gen` completed successfully.
