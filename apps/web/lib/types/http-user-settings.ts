@@ -44,6 +44,64 @@ export type SidebarTaskPrefsApi = {
   subtask_order_by_parent_id: Record<string, string[]>;
 };
 
+export type SidebarTaskColorDimension =
+  | "workflow_step"
+  | "repository"
+  | "workflow"
+  | "executor_profile"
+  | "task_state"
+  | "priority"
+  | "origin";
+
+export type FixedAutomaticTaskColor =
+  | "gray"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "cyan"
+  | "blue"
+  | "indigo"
+  | "purple"
+  | "pink";
+
+export type SidebarTaskColorRepositoryTarget =
+  | { kind: "workspace"; workspace_id: string; repository_id: string }
+  | {
+      kind: "provider";
+      provider_id: string;
+      host: string;
+      scope: string;
+      provider_repository_id: string;
+    }
+  | { kind: "local"; path: string };
+
+export type SidebarTaskColorRule = {
+  id: string;
+  enabled: boolean;
+  condition: {
+    dimension: SidebarTaskColorDimension;
+    value: unknown;
+    label: string;
+  };
+  output: { kind: "fixed"; color: FixedAutomaticTaskColor } | { kind: "workflow_step" };
+};
+
+export type SidebarTaskColorAutomation = {
+  enabled: boolean;
+  rules: SidebarTaskColorRule[];
+};
+
+/** User-settings wire alias kept explicit for API and boot-payload callers. */
+export type SidebarTaskColorAutomationApi = SidebarTaskColorAutomation;
+
+export type SidebarTaskColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink";
+export type SidebarTaskColorsApi = Record<string, SidebarTaskColor | null>;
+export type SidebarTaskColorPatchApi = {
+  colors: SidebarTaskColorsApi;
+  if_missing: boolean;
+};
+
 export type ThreadTaskScopeApi = {
   mode: "all" | "selected";
   task_ids: string[];
@@ -132,6 +190,8 @@ export type UserSettings = {
   thread_active_view_id?: string;
   thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
+  sidebar_task_color_automation?: SidebarTaskColorAutomationApi;
+  sidebar_task_colors?: SidebarTaskColorsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown;
   jira_task_presets?: unknown;
@@ -203,6 +263,8 @@ export type UserSettingsUpdatePayload = {
   thread_active_view_id?: string;
   thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
+  sidebar_task_color_automation?: SidebarTaskColorAutomationApi;
+  sidebar_task_color_patch?: SidebarTaskColorPatchApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown[] | null;
   jira_task_presets?: unknown[] | null;

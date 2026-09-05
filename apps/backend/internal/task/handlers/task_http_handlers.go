@@ -279,6 +279,7 @@ func buildTaskDTOsWithSessionInfo(
 			sessionCount,
 			si.reviewStatus,
 			si.executorID,
+			si.executorProfileID,
 			si.executorType,
 			si.executorName,
 			si.agentName,
@@ -311,15 +312,16 @@ func buildTaskDTOsWithSessionInfo(
 }
 
 type sessionInfoFields struct {
-	sessionID        *string
-	reviewStatus     models.ReviewStatus
-	sessionState     *string
-	executorID       *string
-	executorType     *string
-	executorName     *string
-	agentName        *string
-	agentProfileID   *string
-	workingDirectory *string
+	sessionID         *string
+	reviewStatus      models.ReviewStatus
+	sessionState      *string
+	executorID        *string
+	executorProfileID *string
+	executorType      *string
+	executorName      *string
+	agentName         *string
+	agentProfileID    *string
+	workingDirectory  *string
 }
 
 func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
@@ -339,6 +341,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 	if info.ExecutorID != "" {
 		val := info.ExecutorID
 		si.executorID = &val
+	}
+	if info.ExecutorProfileID != "" {
+		val := info.ExecutorProfileID
+		si.executorProfileID = &val
 	}
 	if info.ExecutorSnapshot != nil {
 		if t, ok := info.ExecutorSnapshot["executor_type"].(string); ok && t != "" {
