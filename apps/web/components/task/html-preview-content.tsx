@@ -128,7 +128,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         if (generationRef.current === generation) setState({ status: "ready", snapshot });
       },
       (error: unknown) => {
-        if (generationRef.current !== generation) return;
+        if (generationRef.current !== generation || isSupersededPreviewError(error)) return;
         const code = error instanceof PreviewRuntimeError ? error.code : "runtime-error";
         setState({ status: "failed", code });
       },
@@ -149,7 +149,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         if (generationRef.current === generation) setState({ status: "ready", snapshot });
       },
       (error: unknown) => {
-        if (generationRef.current !== generation) return;
+        if (generationRef.current !== generation || isSupersededPreviewError(error)) return;
         const code = error instanceof PreviewRuntimeError ? error.code : "runtime-error";
         setState({ status: "failed", code });
       },
@@ -206,4 +206,8 @@ function getPreviewFailureMessage(
   if (code === "unsupported-capability") return translate("task:htmlPreviewUnsupportedCapability");
   if (code === "budget-exceeded") return translate("task:htmlPreviewBudgetExceeded");
   return translate("task:htmlPreviewRuntimeError");
+}
+
+function isSupersededPreviewError(error: unknown): boolean {
+  return error instanceof PreviewRuntimeError && error.code === "superseded";
 }

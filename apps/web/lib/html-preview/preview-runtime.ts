@@ -83,6 +83,7 @@ class PreviewRuntimeClientImpl implements PreviewRuntimeClient {
     request: { type: "load"; source: string } | { type: "dispatch"; event: PreviewEvent },
   ): Promise<PreviewSnapshot> {
     if (this.disposed) return Promise.reject(new PreviewRuntimeError("disposed"));
+    this.supersedePending();
     const generation = ++this.generation;
     if (!this.worker) return Promise.reject(new PreviewRuntimeError("initialization-failed"));
     const message = {
@@ -116,6 +117,13 @@ class PreviewRuntimeClientImpl implements PreviewRuntimeClient {
 
   private failPending(code: PreviewRuntimeError["code"]): void {
     const error = new PreviewRuntimeError(code);
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+
+  private supersedePending(): void {
+    if (!this.pending.size) return;
+    const error = new PreviewRuntimeError("superseded");
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
   }

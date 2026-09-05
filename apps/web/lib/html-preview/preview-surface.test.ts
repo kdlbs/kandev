@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderPreviewSnapshot } from "./preview-surface";
+import { renderPreviewSnapshot, rewritePreviewBlobUrls } from "./preview-surface";
 import type { PreviewEvent, PreviewSnapshot } from "./preview-runtime-types";
 
 const snapshot: PreviewSnapshot = {
@@ -142,5 +142,72 @@ describe("preview surface", () => {
     host.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(onEvent).toHaveBeenCalledWith({ type: "click", nodeId: "button" });
+  });
+});
+
+describe("preview surface interaction safety", () => {
+  it("does not cancel native text editing key events", () => {
+    const host = document.createElement("div");
+    const inputSnapshot: PreviewSnapshot = {
+      ...snapshot,
+      root: {
+        ...snapshot.root,
+        children: [
+          {
+            id: "input",
+            tagName: "input",
+            attributes: { id: "input" },
+            styles: {},
+            children: [],
+            eventTypes: ["keydown"],
+          },
+        ],
+      },
+    };
+    const onEvent = vi.fn<(event: PreviewEvent) => void>();
+    document.body.append(host);
+    renderPreviewSnapshot(host, inputSnapshot, onEvent);
+
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "a" });
+    expect(host.querySelector("input")?.dispatchEvent(event)).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(onEvent).toHaveBeenCalledWith({ type: "keydown", nodeId: "input", key: "a" });
+  });
+
+  it("prevents native form submission while leaving other defaults available", () => {
+    const host = document.createElement("div");
+    const formSnapshot: PreviewSnapshot = {
+      ...snapshot,
+      root: {
+        ...snapshot.root,
+        children: [
+          {
+            id: "form",
+            tagName: "form",
+            attributes: { id: "form" },
+            styles: {},
+            children: [],
+            eventTypes: ["submit"],
+          },
+        ],
+      },
+    };
+    document.body.append(host);
+    renderPreviewSnapshot(host, formSnapshot, vi.fn());
+
+    const event = new SubmitEvent("submit", { bubbles: true, cancelable: true });
+    expect(host.querySelector("form")?.dispatchEvent(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("rewrites longer blob tokens before their shorter prefixes", () => {
+    const resourceUrls = new Map([
+      ["blob:preview-runtime-1", "blob-url-1"],
+      ["blob:preview-runtime-10", "blob-url-10"],
+    ]);
+
+    expect(rewritePreviewBlobUrls("url(blob:preview-runtime-10)", resourceUrls)).toBe(
+      "url(blob-url-10)",
+    );
   });
 });

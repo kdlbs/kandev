@@ -220,10 +220,7 @@ export class PreviewRuntimeVmHost {
         if (toString(this.context, type).toLowerCase() !== "domcontentloaded")
           return this.context.undefined;
         if (this.context.typeof(callback) !== "function") return this.context.undefined;
-        const retained = callback.dup();
-        this.documentReadyHandlers.push(this.own(retained));
-        if (this.documentReadyHandlers.length > this.options.maxEventQueue)
-          throw new Error(PREVIEW_BUDGET_ERROR);
+        this.addDocumentReadyHandler(callback);
         return this.context.undefined;
       },
     );
@@ -247,7 +244,7 @@ export class PreviewRuntimeVmHost {
     addMethod(this.context, this.own, windowHandle, "addEventListener", (_this, type, callback) => {
       if (toString(this.context, type).toLowerCase() !== "load") return this.context.undefined;
       if (this.context.typeof(callback) === "function") {
-        this.documentReadyHandlers.push(this.own(callback.dup()));
+        this.addDocumentReadyHandler(callback);
       }
       return this.context.undefined;
     });
@@ -468,9 +465,18 @@ export class PreviewRuntimeVmHost {
     callback: QuickJSHandle,
   ): void {
     const handlers = node.eventHandlers.get(type) ?? [];
+    if (handlers.length >= this.options.maxEventQueue) {
+      this.releaseHandle(callback);
+      throw new Error(PREVIEW_BUDGET_ERROR);
+    }
     handlers.push(this.own(callback));
     node.eventHandlers.set(type, handlers);
-    if (handlers.length > this.options.maxEventQueue) throw new Error(PREVIEW_BUDGET_ERROR);
+  }
+
+  private addDocumentReadyHandler(callback: QuickJSHandle): void {
+    if (this.documentReadyHandlers.length >= this.options.maxEventQueue)
+      throw new Error(PREVIEW_BUDGET_ERROR);
+    this.documentReadyHandlers.push(this.own(callback.dup()));
   }
 
   private clearTimer(id: number): void {
