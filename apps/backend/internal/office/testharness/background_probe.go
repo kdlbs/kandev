@@ -42,6 +42,16 @@ func (p *ScriptedBackgroundProbe) Script(sessionID string, results []executor.Pr
 	p.calls[sessionID] = 0
 }
 
+// CallCount returns how many times Probe has been called for sessionID
+// since its last Script call (0 if never scripted). Lets the Playwright
+// suite assert a minimum number of samples were actually taken (AC-73)
+// instead of only checking the affordance's current visibility.
+func (p *ScriptedBackgroundProbe) CallCount(sessionID string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls[sessionID]
+}
+
 // Probe returns sessionID's next scripted result, holding at the last
 // element once the sequence is exhausted (mirrors spyBackgroundProbe.Probe).
 func (p *ScriptedBackgroundProbe) Probe(_ context.Context, sessionID string) (executor.ProbeResult, error) {

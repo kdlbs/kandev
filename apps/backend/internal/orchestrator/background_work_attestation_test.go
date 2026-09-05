@@ -1,10 +1,14 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // A terminal, Detached=true background-shell tool_call_update is the
@@ -83,12 +87,38 @@ func TestHandleAgentStreamEvent_TurnStartedClearsObservedDetachedLaunch(t *testi
 // ordered stream consumer. Dispatching the attestation frame immediately
 // before a same-turn frame must leave the attestation visible — this pins
 // the ordering an implementation on a separate queue or goroutine would lose.
+// Checking ObservedDetachedLaunch alone would pass identically under a
+// separate-queue/goroutine implementation that loses the attestation before
+// it is actually consumed, so this also dispatches the "complete" event on
+// the same handleAgentStreamEvent path immediately after (no intervening
+// turn_started) and asserts the attestation was consumed: the probe fired
+// and the session parked.
 func TestObservedDetachedLaunch_VisibleImmediatelyAfterAttestation(t *testing.T) {
-	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	const taskID = "task-ordering"
 	const sessionID = "session-ordering"
+	repo := setupTestRepo(t)
+	seedSession(t, repo, taskID, sessionID, "step1")
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("load seeded session: %v", err)
+	}
+	// STARTING (not RUNNING): handleCompleteStreamEvent defers the
+	// running->waiting transition to a later READY event when the session is
+	// still RUNNING at complete time, mirroring
+	// parked_projection_turn_finished_ordering_test.go's seeding choice.
+	session.State = models.TaskSessionStateStarting
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("seed STARTING state: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	probe := &spyBackgroundProbe{results: []executor.ProbeResult{executor.ProbeResultLive}}
+	svc.SetBackgroundProbe(probe)
 
 	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
-		TaskID: "task-1", SessionID: sessionID, ExecutionID: "exec-1",
+		TaskID: taskID, SessionID: sessionID, ExecutionID: "exec-1",
 		Data: &lifecycle.AgentStreamEventData{
 			Type:       "tool_update",
 			ToolCallID: "tool-1",
@@ -101,6 +131,18 @@ func TestObservedDetachedLaunch_VisibleImmediatelyAfterAttestation(t *testing.T)
 	// turn that is settling.
 	if !svc.ObservedDetachedLaunch(sessionID) {
 		t.Fatalf("expected the attestation to be visible for the settling turn")
+	}
+
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{Type: agentEventComplete},
+	})
+
+	if probe.callCount() == 0 {
+		t.Fatalf("expected the background probe to have been called at turn-settle")
+	}
+	if parked, _ := svc.ParkedSnapshot(sessionID); !parked {
+		t.Fatalf("expected the session to be parked after the attested turn settled with a live probe result")
 	}
 }
 

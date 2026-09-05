@@ -142,11 +142,16 @@ func TestHandleCompleteStreamEvent_TurnCompletedPrecedesParkedEvent(t *testing.T
 		name         string
 		attested     bool
 		probeResults []executor.ProbeResult
+		// wantParkedEvent is true only when the case actually transitions
+		// parked from false to true — the projection only publishes on
+		// change (D8), so "un-parked"/"unknown probe" legitimately publish
+		// nothing (parked stays false throughout) and are not a regression.
+		wantParkedEvent bool
 	}{
-		{"parked", true, []executor.ProbeResult{executor.ProbeResultLive}},
-		{"un-parked (probe settled)", true, []executor.ProbeResult{executor.ProbeResultSettled}},
-		{"unknown probe", true, []executor.ProbeResult{executor.ProbeResultUnknown}},
-		{"no recogniser (never attested)", false, nil},
+		{"parked", true, []executor.ProbeResult{executor.ProbeResultLive}, true},
+		{"un-parked (probe settled)", true, []executor.ProbeResult{executor.ProbeResultSettled}, false},
+		{"unknown probe", true, []executor.ProbeResult{executor.ProbeResultUnknown}, false},
+		{"no recogniser (never attested)", false, nil, false},
 	}
 
 	for _, tc := range cases {
@@ -162,11 +167,20 @@ func TestHandleCompleteStreamEvent_TurnCompletedPrecedesParkedEvent(t *testing.T
 				t.Fatalf("expected events.TurnCompleted published exactly once, got %d", turnCount)
 			}
 			parkedIdx := firstParkedEventIndex(recorder)
-			if parkedIdx == -1 {
-				// Some outcomes never touch the projection at all (e.g. no
-				// attestation means the probe is never called, AC-40a) — there
-				// is nothing to order the turn-completion signal against.
+			if !tc.wantParkedEvent {
+				// Nothing transitions parked to true in this case, so the
+				// projection publishes no event (D8: publish only on
+				// change) — there is nothing to order the turn-completion
+				// signal against.
+				if parkedIdx != -1 {
+					t.Fatalf("case %q should never publish a parked-projection event, got one at index %d", tc.name, parkedIdx)
+				}
 				return
+			}
+			// A regression that stopped publishing the parked-projection
+			// event entirely must fail this test, not silently no-op.
+			if parkedIdx == -1 {
+				t.Fatalf("expected a parked-projection event to be published for case %q, got none", tc.name)
 			}
 			if turnIdx >= parkedIdx {
 				t.Fatalf("events.TurnCompleted (index %d) must precede the parked-projection event (index %d)", turnIdx, parkedIdx)

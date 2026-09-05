@@ -108,6 +108,7 @@ func RegisterRoutes(
 		probe := NewScriptedBackgroundProbe()
 		orchestratorSvc.SetBackgroundProbe(probe)
 		g.POST("/background-probe", scriptBackgroundProbeHandler(probe))
+		g.GET("/background-probe/:session_id/calls", backgroundProbeCallCountHandler(probe))
 	}
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
@@ -868,5 +869,20 @@ func scriptBackgroundProbeHandler(probe *ScriptedBackgroundProbe) gin.HandlerFun
 		}
 		probe.Script(req.SessionID, results)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+// backgroundProbeCallCountHandler reads back how many times the scripted
+// probe has been called for a session (AC-73) — lets the Playwright suite
+// assert a minimum sample count was actually reached instead of only
+// checking the affordance's current visibility.
+func backgroundProbeCallCountHandler(probe *ScriptedBackgroundProbe) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sessionID := c.Param("session_id")
+		if sessionID == "" {
+			errJSON(c, http.StatusBadRequest, "session_id is required")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"calls": probe.CallCount(sessionID)})
 	}
 }

@@ -34,15 +34,33 @@ func TestParkedProjectionDoesNotReferenceBackgroundPromptHandoffFlag(t *testing.
 	}
 }
 
-// parkedProjectionSourceFiles lists every non-test file this task (task-05)
-// and task-06 add for the parked/task-level projection. Listed explicitly —
-// do not glob the package — per F2's disposition in
-// docs/plans/disambiguate-waiting/plan.md.
+// parkedProjectionSourceFiles lists every non-test file this feature touches
+// on the parked-projection/probe path. Listed explicitly — do not glob the
+// package — per F2's disposition in docs/plans/disambiguate-waiting/plan.md.
+// A new file this feature adds on this path must be appended here rather
+// than exempted (round-3 code review found this list incomplete twice).
 var parkedProjectionSourceFiles = []string{
 	"parked_projection.go",
 	"background_probe.go",
 	"background_probe_config.go",
 	"background_work_attestation.go",
+	"event_handlers_streaming.go",
+	"service.go",
+	"executor/executor.go",
+	"../task/dto/dto.go",
 	"../task/dto/parked_projection.go",
+	"../task/service/service.go",
+	"../task/service/service_events.go",
 	"../task/service/parked_projection.go",
+	"../task/handlers/message_handlers.go",
+	"../task/handlers/task_handlers.go",
+	"../task/handlers/task_http_handlers.go",
+	"../task/handlers/task_ws_handlers.go",
+	"../task/handlers/workflow_handlers.go",
+	"../agentctl/server/process/probe/probe.go",
+	"../agentctl/server/process/probe/processtable_darwin.go",
+	"../agentctl/server/process/probe/processtable_linux.go",
+	"../agentctl/server/process/probe/processtable_other.go",
+	"../agent/runtime/agentctl/background_probe.go",
+	"../agentctl/server/api/agent.go",
 }

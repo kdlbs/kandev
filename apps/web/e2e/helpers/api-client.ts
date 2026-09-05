@@ -1377,6 +1377,20 @@ export class ApiClient {
   }
 
   /**
+   * Reads back how many times the scripted BackgroundProbe has been called
+   * for a session since its last scriptBackgroundProbe call (AC-73) — lets a
+   * test assert a minimum sample count was actually reached instead of only
+   * checking the affordance's current visibility.
+   */
+  async backgroundProbeCallCount(sessionId: string): Promise<number> {
+    const { calls } = await this.request<{ calls: number }>(
+      "GET",
+      `/api/v1/_test/background-probe/${sessionId}/calls`,
+    );
+    return calls;
+  }
+
+  /**
    * Seeds a message via the e2e harness. `metadata` lands on the message row;
    * `turnMetadata` is persisted on the ensured turn so specs can exercise the
    * metadata dialog's `turn_metadata` field. `authorType` defaults to agent;

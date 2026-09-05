@@ -32,12 +32,43 @@
  * registered under a "claude-acp" profile, then uses that profile for every
  * task created below.
  */
+import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
 const PARKED_PROBE_INTERVAL = "1s";
 const PARKED_FIXTURE_SCRIPT = "/parked-fixture 3s";
+const AC73_MIN_LIVE_SAMPLES = 3;
+
+/** Polls the scripted probe's call count for sessionId up to minSamples,
+ * asserting at every sample the affordance is visible and neither
+ * waiting-for-input nor turn-finished ever renders (AC-73: "at every sample
+ * point", not just once at the start or end). */
+async function expectAffordanceHoldsAcrossLiveSamples(
+  apiClient: ApiClient,
+  parkedRow: Locator,
+  sessionId: string,
+  minSamples: number,
+): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  let calls = 0;
+  while (calls < minSamples) {
+    calls = await apiClient.backgroundProbeCallCount(sessionId);
+    await expect(parkedRow.getByTestId("task-state-background-running")).toBeVisible({
+      timeout: 2_000,
+    });
+    await expect(parkedRow.getByTestId("task-state-waiting-for-input")).toHaveCount(0);
+    await expect(parkedRow.getByTestId("task-state-turn-finished")).toHaveCount(0);
+    if (calls >= minSamples) break;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `expected at least ${minSamples} live probe samples for ${sessionId}, got ${calls}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
 
 async function waitForSessionState(
   apiClient: ApiClient,
@@ -154,14 +185,18 @@ test.describe("Parked on background work", () => {
     const parkedRow = session.sidebarTaskItem("Parked Turn");
     await expect(parkedRow).toBeVisible({ timeout: 15_000 });
 
-    // Core regression (AC-73): the synchronous settle sample already reads
-    // "live" (scripted before settle), so the affordance must render at
-    // settle and hold — the script never advances past "live" until the
-    // test flips it below.
-    await expect(parkedRow.getByTestId("task-state-background-running")).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(parkedRow.getByTestId("task-state-turn-finished")).toHaveCount(0);
+    // Core regression (AC-73): the probe returns "live" for at least three
+    // consecutive samples (the synchronous settle sample plus periodic
+    // KANDEV_PARKED_PROBE_INTERVAL=1s samples) — the affordance must be
+    // visible, and neither task-state-waiting-for-input nor
+    // task-state-turn-finished may ever render, at every one of those
+    // samples, not just once at the start.
+    await expectAffordanceHoldsAcrossLiveSamples(
+      apiClient,
+      parkedRow,
+      sessionId,
+      AC73_MIN_LIVE_SAMPLES,
+    );
 
     // AC-62: the next periodic sample (KANDEV_PARKED_PROBE_INTERVAL=1s) reads
     // "settled" and clears the affordance; the row updates from the live
