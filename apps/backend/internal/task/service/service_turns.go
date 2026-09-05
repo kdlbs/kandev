@@ -1004,7 +1004,8 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 			branchTemplate = taskRepository.BranchPolicyBranchTemplate
 		}
 		spec := lifecycle.WorkspaceRepositorySpec{
-			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
+			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath,
+			RepositoryURL: repository.RemoteURL, RepoName: projection.repoName,
 			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,

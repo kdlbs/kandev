@@ -13,6 +13,8 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/common/codexconfig"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/models"
@@ -63,6 +65,12 @@ type GitMetadataAttestation struct {
 // call this immediately before ConfigureAgent/Start, so lifecycle renders from
 // final executor-side proof rather than host paths or derived .git paths.
 func (s *Server) handleWorkspaceGitMetadataAttestation(c *gin.Context) {
+	if err := validateTargetFilesystemPolicyConfig(s.cfg); err != nil {
+		s.logger.Warn("workspace Git metadata policy configuration attestation failed",
+			zap.String("failure_code", "git_metadata_target_config_conflict"))
+		c.JSON(http.StatusUnprocessableEntity, GitMetadataAttestationResponse{Error: "workspace Git metadata validation failed"})
+		return
+	}
 	checkouts, err := attestWorkspaceGitMetadata(c.Request.Context(), s.procMgr.WorkspaceSourceRoots())
 	if err != nil {
 		s.logger.Warn("workspace Git metadata attestation failed", zap.Error(err))
@@ -70,6 +78,42 @@ func (s *Server) handleWorkspaceGitMetadataAttestation(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, GitMetadataAttestationResponse{Attested: true, Checkouts: checkouts})
+}
+
+func validateTargetFilesystemPolicyConfig(cfg *config.InstanceConfig) error {
+	if cfg == nil || (cfg.AgentType != "codex-acp" && cfg.AgentType != "codex") {
+		return nil
+	}
+	env := make(map[string]string, len(cfg.AgentEnv))
+	for _, entry := range cfg.AgentEnv {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	if err := codexconfig.ValidateJSON(env["CODEX_CONFIG"]); err != nil {
+		return err
+	}
+	codexHome := env["CODEX_HOME"]
+	if codexHome == "" {
+		home := env["HOME"]
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil || home == "" {
+				return errors.New("unable to validate Codex sandbox configuration")
+			}
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	contents, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("unable to validate Codex sandbox configuration")
+	}
+	return codexconfig.ValidateTOML(contents)
 }
 
 // RemoveMaterializedRepositoryRequest identifies a previously materialized,

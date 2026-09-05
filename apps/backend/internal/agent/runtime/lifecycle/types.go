@@ -877,6 +877,7 @@ type WorkspaceFolderSpec struct {
 type WorkspaceRepositorySpec struct {
 	RepositoryID           string
 	RepositoryPath         string
+	RepositoryURL          string
 	RepoName               string
 	BaseBranch             string
 	DefaultBranch          string

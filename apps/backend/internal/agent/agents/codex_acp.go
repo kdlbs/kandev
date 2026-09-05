@@ -10,10 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pelletier/go-toml/v2"
-
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/common/codexconfig"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -299,14 +298,7 @@ func rejectLegacyCodexSandbox(env map[string]string) error {
 	if err != nil {
 		return errors.New("unable to validate Codex sandbox configuration")
 	}
-	config := make(map[string]any)
-	if err := toml.Unmarshal(contents, &config); err != nil {
-		return errors.New("unable to validate Codex sandbox configuration")
-	}
-	if hasLegacyCodexSandbox(config) {
-		return errors.New("legacy Codex sandbox configuration conflicts with task filesystem policy")
-	}
-	return nil
+	return codexconfig.ValidateTOML(contents)
 }
 
 func codexConfigFromEnvironment(env map[string]string) (map[string]any, error) {
@@ -329,9 +321,7 @@ func codexConfigFromEnvironment(env map[string]string) (map[string]any, error) {
 }
 
 func hasLegacyCodexSandbox(config map[string]any) bool {
-	_, sandboxMode := config["sandbox_mode"]
-	_, workspaceWrite := config["sandbox_workspace_write"]
-	return sandboxMode || workspaceWrite
+	return codexconfig.HasLegacySandbox(config)
 }
 
 func mergeCodexConfig(base, overlay map[string]any) {

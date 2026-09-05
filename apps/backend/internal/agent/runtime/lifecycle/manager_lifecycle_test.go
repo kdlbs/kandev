@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"runtime"
 	"testing"
 	"time"
 
@@ -142,6 +143,55 @@ func TestManager_RemoveExecution(t *testing.T) {
 
 	// Remove non-existent should not panic
 	mgr.RemoveExecution("non-existent")
+}
+
+func TestManagerRemoveExecutionSerializesGitMetadataRevocation(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:                     "execution-with-git-policy",
+		SessionID:              "session-with-git-policy",
+		GitMetadataProjections: []*worktree.GitMetadataProjection{{Version: 1}},
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	execution.promptLifecycleMu.Lock()
+	removed := make(chan struct{})
+	go func() {
+		mgr.RemoveExecution(execution.ID)
+		close(removed)
+	}()
+
+	deadline := time.After(time.Second)
+	for {
+		if _, exists := mgr.executionStore.Get(execution.ID); !exists {
+			break
+		}
+		select {
+		case <-deadline:
+			execution.promptLifecycleMu.Unlock()
+			t.Fatal("RemoveExecution did not revoke execution lookup authority")
+		default:
+			runtime.Gosched()
+		}
+	}
+	select {
+	case <-removed:
+		execution.promptLifecycleMu.Unlock()
+		t.Fatal("RemoveExecution completed while Git metadata policy lock was held")
+	case <-time.After(100 * time.Millisecond):
+	}
+	execution.promptLifecycleMu.Unlock()
+
+	select {
+	case <-removed:
+	case <-time.After(time.Second):
+		t.Fatal("RemoveExecution did not complete after Git metadata policy lock was released")
+	}
+	if execution.GitMetadataProjections != nil {
+		t.Fatalf("Git metadata projections = %#v, want revoked", execution.GitMetadataProjections)
+	}
 }
 
 func TestManager_CleanupStaleExecution_StopsRuntimeInstance(t *testing.T) {

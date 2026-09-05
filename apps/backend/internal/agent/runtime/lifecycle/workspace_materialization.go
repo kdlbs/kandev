@@ -59,6 +59,69 @@ func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceReposit
 	return projection, nil
 }
 
+// remoteWorkspaceProjectionFromWorkspaceInfo rebuilds the same durable remote
+// repository projection used by a normal launch. Lazy recovery starts from
+// persisted workspace information instead of a LaunchRequest, but must retain
+// identical destination, branch, and contribution semantics.
+func remoteWorkspaceProjectionFromWorkspaceInfo(info *WorkspaceInfo, req *ExecutorCreateRequest) ([]WorkspaceRepositoryMaterialization, error) {
+	if info == nil {
+		return nil, fmt.Errorf("workspace info is required")
+	}
+	specs := make([]RepoLaunchSpec, 0, len(info.WorkspaceRepositories))
+	for index, repository := range info.WorkspaceRepositories {
+		spec := RepoLaunchSpec{
+			RepositoryID:   repository.RepositoryID,
+			RepositoryPath: repository.RepositoryPath,
+			RepositoryURL:  repository.RepositoryURL,
+			RepoName:       repository.RepoName,
+			BaseBranch:     repository.BaseBranch,
+			DefaultBranch:  repository.DefaultBranch,
+			CheckoutBranch: repository.CheckoutBranch,
+			BranchSlug:     repository.BranchSlug,
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if req != nil {
+			if contribution, ok := req.RemoteContributions[key]; ok {
+				value := contribution
+				spec.RemoteContribution = &value
+			}
+			if destination, ok := req.ContributionDestinations[key]; ok {
+				value := destination
+				spec.ContributionDestination = &value
+			}
+		}
+		specs = append(specs, spec)
+	}
+	return remoteWorkspaceProjectionFromLaunch(&LaunchRequest{Repositories: specs})
+}
+
+// reconstructRemoteWorkspaceRepositories materializes and reconciles every
+// durable sibling before clone metadata is attested. Normal launch and lazy
+// recovery both use this stage so neither can install policy for only the
+// primary checkout.
+func reconstructRemoteWorkspaceRepositories(
+	ctx context.Context,
+	runtime ExecutorBackend,
+	instance *ExecutorInstance,
+	repositories []WorkspaceRepositoryMaterialization,
+) error {
+	if runtime == nil || !runtime.RequiresCloneURL() || len(repositories) == 0 {
+		return nil
+	}
+	if instance == nil || instance.Client == nil || instance.WorkspacePath == "" {
+		return fmt.Errorf("remote workspace reconciliation is unavailable")
+	}
+	roots := remoteWorkspaceSourceRoots(instance.WorkspacePath, repositories)
+	if err := materializeWorkspaceRepositories(ctx, instance.Client, repositories, roots); err != nil {
+		return err
+	}
+	instance.WorkspaceSourceRoots = roots
+	return nil
+}
+
 // remoteWorkspaceSourceRoots returns only executor-visible, server-derived
 // directories. Repository destinations have already been sanitized by the
 // durable projection builder, so no host checkout path can enter agentctl.

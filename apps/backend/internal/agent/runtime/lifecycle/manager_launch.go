@@ -1731,11 +1731,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 1 && execInstance != nil && execInstance.Client != nil {
 		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree)
 		if projectionErr == nil {
-			roots := remoteWorkspaceSourceRoots(execInstance.WorkspacePath, projection)
-			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection, roots)
-			if projectionErr == nil {
-				execInstance.WorkspaceSourceRoots = roots
-			}
+			projectionErr = reconstructRemoteWorkspaceRepositories(ctx, rt, execInstance, projection)
 		}
 		if projectionErr != nil {
 			rollbackErr := stopRuntimeInstanceAndRelease(context.WithoutCancel(ctx), rt, execInstance, true)
@@ -1753,6 +1749,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}
+	m.logGitMetadataPolicyInstalled(req.TaskID, req.TaskEnvironmentID, req.ExecutorType, workspaceRepositorySpecsFromLaunch(&reqWithWorktree), execReq, rt)
 
 	// Remote executors (Docker, Sprites) clone the workspace inside the
 	// container, so the worktree path's host-side copy_files never ran.

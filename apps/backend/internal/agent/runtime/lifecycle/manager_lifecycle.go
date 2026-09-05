@@ -382,17 +382,26 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 // For stale/dead executions, use CleanupStaleExecutionBySessionID instead.
 func (m *Manager) RemoveExecution(executionID string) {
 	m.releaseActivity(executionActivityKey(executionID))
-	if execution, ok := m.executionStore.Get(executionID); ok {
+	execution, ok := m.executionStore.Get(executionID)
+	if ok {
 		m.closeStreamCoalescer(execution)
 		m.cleanupPassthroughMCPConfig(execution)
 		m.setRuntimeInterest(execution.SessionID, false)
+	}
+	// Revoke public lookup authority before waiting for prompt lifecycle
+	// synchronization. Stop paths may already be waiting to publish an event
+	// behind this mutex; removing first prevents a new policy lookup from
+	// discovering the execution while revocation is pending.
+	m.executionStore.Remove(executionID)
+	if ok {
 		// The executor has already been stopped by every legitimate removal
 		// path. Drop the ephemeral metadata grant before losing lifecycle
 		// ownership so stale execution pointers cannot be reused as policy
 		// authority after task cleanup or a later attachment.
+		execution.promptLifecycleMu.Lock()
 		execution.GitMetadataProjections = nil
+		execution.promptLifecycleMu.Unlock()
 	}
-	m.executionStore.Remove(executionID)
 	m.logger.Debug("removed execution from tracking",
 		zap.String("execution_id", executionID))
 }

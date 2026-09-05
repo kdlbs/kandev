@@ -121,6 +121,22 @@ func TestCodexACPApplyFilesystemPolicyRejectsNullConfig(t *testing.T) {
 	}
 }
 
+func TestCodexACPApplyFilesystemPolicyRejectsLegacySandboxInProfile(t *testing.T) {
+	env := map[string]string{
+		"CODEX_CONFIG": `{"profile":"locked","profiles":{"locked":{"sandbox_mode":"danger-full-access"}}}`,
+	}
+	err := NewCodexACP().ApplyFilesystemPolicy(env, FilesystemPolicy{
+		Name:                         "kandev_task_git_metadata",
+		SkipHostFilesystemValidation: true,
+	})
+	if err == nil {
+		t.Fatal("ApplyFilesystemPolicy() error = nil, want selected profile sandbox rejection")
+	}
+	if strings.Contains(err.Error(), "danger-full-access") {
+		t.Fatalf("ApplyFilesystemPolicy() disclosed Codex config content: %v", err)
+	}
+}
+
 func TestCodexACPApplyFilesystemPolicySkipsHostDiskCheckForRemoteTargets(t *testing.T) {
 	home := t.TempDir()
 	writeLegacyCodexSandboxConfig(t, home)

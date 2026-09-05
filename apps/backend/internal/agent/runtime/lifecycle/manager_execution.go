@@ -664,10 +664,21 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
+	if rt.RequiresCloneURL() {
+		remoteRepositories, projectionErr := remoteWorkspaceProjectionFromWorkspaceInfo(info, preparation.request)
+		if projectionErr == nil {
+			projectionErr = reconstructRemoteWorkspaceRepositories(launchCtx, rt, runtimeInstance, remoteRepositories)
+		}
+		if projectionErr != nil {
+			_ = rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, false)
+			return nil, fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr)
+		}
+	}
 	if err := installAttestedCloneGitMetadataPolicy(launchCtx, preparation.request, runtimeInstance); err != nil {
 		_ = rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, false)
 		return nil, fmt.Errorf("install clone Git metadata policy: %w", err)
 	}
+	m.logGitMetadataPolicyInstalled(taskID, info.TaskEnvironmentID, info.ExecutorType, info.WorkspaceRepositories, preparation.request, rt)
 
 	execution := m.initializeCreatedExecution(ctx, taskID, info, executionID, rt, runtimeInstance, preparation)
 
@@ -727,6 +738,13 @@ func (m *Manager) prepareExecutionGitMetadata(info *WorkspaceInfo, rt ExecutorBa
 	}
 	if rt.RequiresCloneURL() {
 		req.GitMetadataRequirement = cloneGitMetadataRequirement(len(info.WorkspaceRepositories) > 0)
+		return nil
+	}
+	// Local and legacy local_pc executions operate directly in regular
+	// checkouts. Only Worktree executions need an explicit linked-worktree Git
+	// metadata projection; treating an in-place checkout as a linked worktree
+	// passes the same path as checkout and source, which must be rejected.
+	if info.ExecutorType != string(models.ExecutorTypeWorktree) {
 		return nil
 	}
 	if len(info.WorkspaceRepositories) == 0 {
