@@ -223,7 +223,7 @@ func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	)
 	prompt := spoofedReference + "\n\n" +
 		sysprompt.InjectOfficeContext("wrong-task", "wrong-session", "Do the work")
-	err = svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false)
+	err = svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "office tasks must be started through Office") {
 		t.Fatalf("autoStartStepPrompt error = %v, want Office scheduler guard", err)
 	}
@@ -278,7 +278,7 @@ func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSessi
 	messages := &mockMessageCreator{}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
 	svc.messageCreator = messages
-	err = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false)
+	err = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false, nil)
 	if err != nil {
 		t.Fatalf("autoStartStepPrompt returned error: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestAutoStartStepPrompt_ResetContextPreservesOfficeModeForReusedSession(t *
 	messages := &mockMessageCreator{}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
 	svc.messageCreator = messages
-	if err := svc.autoStartStepPrompt(ctx, task.ID, session, step, "Run the Office task", false, false); err != nil {
+	if err := svc.autoStartStepPrompt(ctx, task.ID, session, step, "Run the Office task", false, false, nil); err != nil {
 		t.Fatalf("autoStartStepPrompt returned error: %v", err)
 	}
 	if len(messages.userMessages) != 1 {

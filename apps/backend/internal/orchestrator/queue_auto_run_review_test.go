@@ -76,6 +76,7 @@ func TestAutoStartStepPrompt_LeavesHandoffQueuedWhenAutoRunPaused(t *testing.T) 
 		autoStart,
 		false,
 		false,
+		nil,
 	)
 	require.NoError(t, err)
 

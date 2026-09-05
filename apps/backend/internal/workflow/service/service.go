@@ -601,8 +601,9 @@ func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs [
 
 // CreateStepTransition creates a new step transition history entry. metadata
 // is optional (nil for a plain move) and carries the ADR 0015 consumed-signal
-// shape ({"signal_source", "signal_summary"}) when a completion signal drove
-// the transition.
+// shape ({"signal_source", "signal_summary"}, plus "signal_handoff" and
+// "signal_blockers" when the signal carried a non-blank value for either)
+// when a completion signal drove the transition.
 func (s *Service) CreateStepTransition(ctx context.Context, sessionID string, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error {
 	history := &models.SessionStepHistory{
 		SessionID: sessionID,
