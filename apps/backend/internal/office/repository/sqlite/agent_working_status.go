@@ -1,9 +1,7 @@
-// Office agent "working" status transitions (DR-14).
+// Office agent "working" status transitions.
 //
-// AgentStatusWorking has existed in the status vocabulary, the transition
-// table, and the dashboard chip since Office shipped, but nothing ever
-// wrote it: every agent read "idle" permanently, including mid-run. These
-// two methods are the only production writers of that status.
+// MarkAgentWorking and ClearAgentWorking are the only production writers of
+// AgentStatusWorking.
 //
 // Both are compare-and-swap by design. An unconditional UPDATE would let a
 // late-arriving reset clobber a status set by a concurrent, higher-priority

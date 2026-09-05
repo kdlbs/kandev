@@ -1,11 +1,4 @@
-// Agent "working" status lifecycle (DR-14).
-//
-// Office defines AgentStatusWorking, allows idle <-> working in the
-// transition table, and renders a pulsing "Working" chip for it, but until
-// this file nothing ever set it. Every agent read "idle" permanently, so a
-// stalled workspace and a busy one looked identical, and the dashboard's
-// "running" counter (countAgentsByStatus in office/dashboard) was pinned
-// to zero.
+// Agent "working" status lifecycle.
 //
 // The status is set at the launch boundary and cleared on every terminal
 // path. Writing "working" gates nothing: isAgentActive
