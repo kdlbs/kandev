@@ -109,6 +109,85 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 	}
 }
 
+// TestProcessOnChildrenCompleted_StillIdempotentOnRedelivery is the AC-EO-16
+// pin for docs/specs/workflow-evaluate-only-operation-marking: this trigger
+// passes no OperationID through the engine and keeps bracketing its own
+// marker by hand (childCompletionAlreadyApplied / markChildCompletionApplied),
+// unchanged by that spec's EvaluateOnly deferred-mark contract.
+//
+// step_done also declares an OnChildrenCompleted action (unlike the sibling
+// TransitionsParentWhenAllActiveChildrenTerminal test's terminal step_done,
+// which has none) so the marker check is load-bearing: without it, the
+// unchanged, still-all-terminal child rows would let a redelivery re-evaluate
+// step_done's own trigger and advance the parent a second time, to
+// step_final. A mutation that deletes childCompletionAlreadyApplied's guard
+// makes this test observe exactly that second move.
+func TestProcessOnChildrenCompleted_StillIdempotentOnRedelivery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_wait"] = &wfmodels.WorkflowStep{
+		ID: "step_wait", WorkflowID: "wf1", Name: "Wait for Subtasks", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{{Type: wfmodels.GenericActionMoveToNext}},
+		},
+	}
+	stepGetter.steps["step_done"] = &wfmodels.WorkflowStep{
+		ID: "step_done", WorkflowID: "wf1", Name: "Done", Position: 1,
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{{Type: wfmodels.GenericActionMoveToNext}},
+		},
+	}
+	stepGetter.steps["step_final"] = &wfmodels.WorkflowStep{ID: "step_final", WorkflowID: "wf1", Name: "Final", Position: 2}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	seedMockTaskState(svc.taskRepo.(*mockTaskRepo), "parent", v1.TaskStateInProgress)
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterDone <- struct{}{}:
+		default:
+		}
+	}
+
+	now := time.Now().UTC()
+	requireCreateTask(t, repo, &models.Task{
+		ID: "child-complete", WorkflowID: "wf1", Title: "Complete child",
+		State: v1.TaskStateCompleted, ParentID: "parent", CreatedAt: now, UpdatedAt: now,
+	})
+
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); !transitioned {
+		t.Fatalf("expected the first delivery to transition the parent")
+	}
+	waitForChildrenCompletedOnEnter(t, onEnterDone)
+
+	rows, err := repo.ListChildCompletionRows(ctx, "parent")
+	if err != nil {
+		t.Fatalf("list child completion rows: %v", err)
+	}
+	operationID := childCompletionOperationID("parent", rows)
+	applied, err := svc.workflowStore.IsOperationApplied(ctx, operationID)
+	if err != nil || !applied {
+		t.Fatalf("IsOperationApplied = %v, %v, want true, nil (on_children_completed marks its own "+
+			"operation id through its own bracket, unaffected by this spec's EvaluateOnly change)", applied, err)
+	}
+
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
+		t.Fatalf("expected redelivery of the same completion to be idempotent (no second transition)")
+	}
+	parent, err := repo.GetTask(ctx, "parent")
+	if err != nil {
+		t.Fatalf("load parent after redelivery: %v", err)
+	}
+	if parent.WorkflowStepID != "step_done" {
+		t.Fatalf("WorkflowStepID = %q after redelivery, want step_done unchanged (a broken guard would "+
+			"re-fire step_done's own OnChildrenCompleted action and advance to step_final)", parent.WorkflowStepID)
+	}
+}
+
 func TestProcessOnChildrenCompleted_TreatsTerminalStepAsCompleted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

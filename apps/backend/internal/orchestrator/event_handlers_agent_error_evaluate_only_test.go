@@ -552,6 +552,159 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationExactlyOneCommit
 	}
 }
 
+// agentErrorBlockingCommitRepo blocks the first
+// UpdateTaskWithWorkflowStepAdmission call (the transition commit) until the
+// test releases it, and counts GetTaskSession calls the same way
+// agentErrorCountingGetTaskSessionRepo does. It embeds the concrete
+// *sqliterepo.Repository, not the narrower sessionExecutorStore interface,
+// for the same reason agentErrorCountingGetTaskSessionRepo does: the commit
+// path type-asserts s.repo against workflowMoveAdmissionRepository, and an
+// interface embed would silently drop that capability.
+type agentErrorBlockingCommitRepo struct {
+	*sqliterepo.Repository
+
+	sessionMu    sync.Mutex
+	sessionCalls int
+
+	commitMu    sync.Mutex
+	commitCalls int
+	entered     chan struct{}
+	release     chan struct{}
+}
+
+func (r *agentErrorBlockingCommitRepo) GetTaskSession(
+	ctx context.Context, sessionID string,
+) (*models.TaskSession, error) {
+	r.sessionMu.Lock()
+	r.sessionCalls++
+	r.sessionMu.Unlock()
+	return r.Repository.GetTaskSession(ctx, sessionID)
+}
+
+func (r *agentErrorBlockingCommitRepo) sessionCallCount() int {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	return r.sessionCalls
+}
+
+func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmission(
+	ctx context.Context, task *models.Task, targetStepID string, limit int,
+) (bool, error) {
+	r.commitMu.Lock()
+	r.commitCalls++
+	first := r.commitCalls == 1
+	r.commitMu.Unlock()
+	if first {
+		close(r.entered)
+		<-r.release
+	}
+	return r.Repository.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit)
+}
+
+// TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThroughCommit
+// is the AC-EO-13 lock-SPAN case the sibling
+// ConcurrentSameOperationExactlyOneCommits test cannot see: that test blocks
+// the first dispatch inside engine evaluation (clear_decisions), which is
+// *before* the caller's own commit call, so it proves the lock covers
+// load -> engine-call but says nothing about whether the lock is still held
+// once HandleTrigger has returned and the caller is committing and marking.
+// This test blocks the first dispatch inside its own commit call instead — a
+// strictly later point in the sequence — and re-asserts that the second
+// dispatch's state load still has not run. A lock released as soon as
+// HandleTrigger returns (before the caller's commit and mark) would let the
+// second dispatch's GetTaskSession call run here, which this test's
+// sessionCallCount assertion below would catch.
+func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThroughCommit(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{
+			{Type: wfmodels.GenericActionMoveToStep, Config: map[string]interface{}{"step_id": "step2"}},
+		}},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1}
+
+	blockingRepo := &agentErrorBlockingCommitRepo{Repository: repo, entered: make(chan struct{}), release: make(chan struct{})}
+	svc, logs := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.repo = blockingRepo })
+
+	data := watcher.AgentEventData{TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", ErrorMessage: "boom"}
+	operationID := agentErrorOperationID("s1", "exec-1")
+
+	firstDone := make(chan struct{})
+	go func() {
+		svc.dispatchKanbanAgentErrorTrigger(ctx, data)
+		close(firstDone)
+	}()
+
+	select {
+	case <-blockingRepo.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the first dispatch to enter its commit call")
+	}
+
+	secondDone := make(chan struct{})
+	go func() {
+		svc.dispatchKanbanAgentErrorTrigger(ctx, data)
+		close(secondDone)
+	}()
+
+	waitForAgentErrorLockRefs(t, svc, operationID, 2)
+	select {
+	case <-secondDone:
+		t.Fatal("second dispatch returned before the first released the operation-id lock")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// AC-EO-13: the lock must still be held here — the first dispatch is
+	// blocked *inside its own commit call*, strictly after HandleTrigger has
+	// already returned. If the lock's span were narrowed to end as soon as
+	// HandleTrigger returns (i.e. released before the commit and mark), the
+	// second dispatch's own state load could run concurrently with the
+	// first's pending commit, which this assertion would catch.
+	if got := blockingRepo.sessionCallCount(); got != 1 {
+		t.Fatalf("GetTaskSession calls = %d, want 1 while the first dispatch is still inside its own commit call", got)
+	}
+	operationApplied, err := svc.workflowStore.IsOperationApplied(ctx, operationID)
+	if err != nil || operationApplied {
+		t.Fatalf("IsOperationApplied = %v, %v, want false, nil (the first dispatch has not committed or marked yet)", operationApplied, err)
+	}
+
+	close(blockingRepo.release)
+
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the first dispatch to finish")
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the second dispatch to finish")
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if task.WorkflowStepID != "step2" {
+		t.Fatalf("WorkflowStepID = %q, want step2", task.WorkflowStepID)
+	}
+
+	blockingRepo.commitMu.Lock()
+	commitCalls := blockingRepo.commitCalls
+	blockingRepo.commitMu.Unlock()
+	if commitCalls != 1 {
+		t.Fatalf("commit calls = %d, want 1 (the lock held through commit must serialize the second delivery into an idempotent no-op)", commitCalls)
+	}
+	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
+		t.Fatalf("got %d dispatch INFO records, want 1 (the serialized second delivery must be idempotent)", len(got))
+	}
+}
+
 // TestLockAgentErrorOperationKeepsEntryUntilWaitersExit is the direct
 // ref-counting unit test for the lock helper itself, mirroring
 // TestLockChildCompletionOperationKeepsEntryUntilWaitersExit.
