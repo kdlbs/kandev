@@ -47,7 +47,7 @@ The upgrade does enforce an origin policy for browser clients:
 - Different loopback names or addresses are accepted when both origin and request hosts are loopback, such as `localhost` and `127.0.0.1` on different ports.
 - Origins must be well-formed `http` or `https` origins with no path, query, fragment, or user information. Other cross-site origins are rejected.
 
-When proxying, preserve a request host that matches the public page's origin and forward WebSocket upgrades. Do not rely on the ignored token parameter for access control.
+When proxying, preserve a request host that matches the public page's origin and forward WebSocket upgrades. The origin policy ignores `?token=` when deciding whether to accept an origin, but the authentication layer still accepts it as a PAT fallback when authentication is enabled. Prefer the bearer header where the client supports it, and do not treat a query PAT as a substitute for TLS or the origin policy.
 
 ## Wire envelope
 
@@ -685,9 +685,9 @@ These registrations back Kandev's agent/MCP bridge. The subset registered in a p
 
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.
 
-### Global broadcasts
+### Shared broadcaster notifications
 
-Their normal live event path broadcasts to every connected client, which must filter by IDs in the payload. Session subscribe/focus hydration can also send selected state actions directly to the requesting client.
+Their normal live event path uses a shared broadcaster. With authentication disabled, or when an event has no workspace context, it sends the event to every connected client. With authentication enabled and workspace reach resolves successfully, workspace-carrying events are narrowed to the permitted readers. The regular workspace broadcaster currently falls back to global delivery if both reach and owner resolution fail; only selected sensitive event paths use the fail-closed variant. Do not rely on notification fan-out as a tenant-isolation boundary while this experimental limitation remains. Session subscribe/focus hydration can also send selected state actions directly to the requesting client.
 
 ```text
 workspace.created
@@ -843,7 +843,7 @@ File changes are batched for up to 100 ms and flushed immediately at 50 entries.
 | subscribed run      | `run.event.appended`              | Future events only; there is no replay cursor.                                                                                                                                                                                                                               |
 | metrics subscribers | `system.metrics.updated`          | Live resource snapshot; collection interest follows subscribers.                                                                                                                                                                                                             |
 
-Routing is an efficiency mechanism, not the access-control boundary. With authentication enabled, the server resolves the caller's identity and filters workspace subscriptions and fan-out by reach; domain authorization still decides which actions the caller may perform. With authentication disabled, the synthetic administrator retains the original single-user reach.
+Routing is an efficiency mechanism, not the access-control boundary. With authentication enabled, the server resolves the caller's identity, checks workspace subscriptions, and normally filters workspace fan-out by reach; domain authorization still decides which actions the caller may perform. Because ordinary fan-out can fall back to global delivery on resolution errors as described above, use authorized read requests as the source of truth. With authentication disabled, the synthetic administrator retains the original single-user reach.
 
 </details>
 

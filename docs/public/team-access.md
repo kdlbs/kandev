@@ -109,6 +109,8 @@ Two role tiers combine. Your **org role** is on your account; your **workspace r
 
 An admin is a **management role, not a reach role**. An admin reaches a workspace because they are in a unit above it, exactly like any member, and never reaches anything in someone else's personal unit.
 
+With Organizations enabled, the current Users API is not fully tenant-scoped: an org admin can list accounts and change role or status outside their organization. The workspace reach rules above still apply, but do not treat `org.members.manage` as a hard tenant boundary yet. See [Organizations](organizations.md#current-limits).
+
 **Workspace roles**
 
 | Role | Read board & transcripts | Edit tasks | Prompt / stop agents | Terminal, shell, previews | Manage members, secrets, settings, delete |

@@ -1,14 +1,14 @@
 ---
 title: "Organizations"
-description: "Run one Kandev server for several independent teams or customers, with a hard boundary between them."
+description: "Evaluate experimental multi-organization scoping on one Kandev server, including its current isolation gaps."
 status: experimental
 ---
 
 # Organizations
 
-An organization is a **tenant**: a boundary above users. Two organizations on the same Kandev server cannot see each other's workspaces, tasks, sessions, secrets or accounts, and no role on either side can cross it.
+An organization is an experimental **tenant identifier** above users. Normal authorized request paths use it to scope workspaces, tasks, sessions, and secrets. The current implementation is not yet a hard boundary between mutually untrusting tenants: user administration and install-wide system operations have cross-organization gaps, and ordinary WebSocket notification fan-out can fail open on resolution errors. See [Current limits](#current-limits).
 
-Use organizations when one server serves groups that must stay separate: two teams that should not read each other's code, an agency and its clients, or a hosted deployment. If everyone on your server is one team, you do not need this. Use [Team Access](team-access.md) instead, which is about sharing *within* one organization.
+Use organizations to evaluate tenant-aware behavior or organize trusted groups on one server. If groups must be isolated from one another, run separate Kandev instances until the current gaps are closed. If everyone on your server is one team, use [Team Access](team-access.md) instead, which is about sharing *within* one organization.
 
 Organizations are an **experimental runtime feature** and are disabled in every shipped profile. They require experimental [authentication](authentication.md); enabling organizations with authentication off is refused at startup, because a tenant boundary with nobody to belong to it is not a boundary.
 
@@ -18,7 +18,7 @@ Organizations are an **experimental runtime feature** and are disabled in every 
 2. Enable **Organizations** in `Settings > System > Feature Toggles` and restart.
 3. Everything you already had lands in one default organization; the first admin becomes the instance operator.
 4. Create further organizations in `Settings > Access Control > Organizations` and give each one its first administrator.
-5. From then on, each organization administers itself.
+5. Review the current isolation gaps before adding organizations that do not trust one another.
 
 ## Enabling
 
@@ -42,10 +42,10 @@ Nothing becomes visible to anyone new. The migration is idempotent, so a second 
 
 | Tier | Manages | Can read your workspaces? |
 |---|---|---|
-| **Instance operator** | Organizations, feature toggles, instance configuration | **No** |
-| **Organization admin** | Users, invites, settings and shared configuration inside one organization | Only what team access already grants them |
+| **Instance operator** | Organization lifecycle and first administrators | **No** |
+| **Organization admin** | Users, invites, settings and shared configuration; current user and system routes have install-wide gaps | Only what team access already grants them |
 
-The operator tier is an *administration* tier, not a visibility one. An operator creates, suspends and deletes organizations, and holds no permission inside any of them, including their own. Their access to their own workspaces comes from being an ordinary member of their own organization, exactly like everyone else.
+The operator tier is an *administration* tier, not a visibility one. An operator creates, suspends and deletes organizations. The operator bit by itself grants no permission inside an organization; access to the operator's own workspaces comes from that account's organization and team membership, exactly like everyone else. Install-wide backup, database, storage, and feature-toggle operations are not yet restricted to this tier; org admins currently retain them.
 
 ## Managing organizations
 
@@ -55,7 +55,7 @@ The operator tier is an *administration* tier, not a visibility one. An operator
 
 ### Creating one
 
-Create the organization, then give it a first administrator. That second step is not optional bookkeeping: an ordinary admin can only create accounts inside their own tenant, so a brand-new organization has no way to get its first user. This operator-only path is what breaks that circularity, and after it the organization is self-sufficient.
+Create the organization, then give it a first administrator. That second step is not optional bookkeeping: direct account creation inherits the creating admin's organization, so a brand-new organization has no way to get its first user. This operator-only path breaks that circularity. The new admin can then create accounts in that organization, subject to the user-management gaps below.
 
 ![A dialog titled "First administrator for Acme Corp" with display name, email and password fields, explaining that an administrator can only create accounts in their own organization so a new organization needs its first one created here.](../screenshots/tenancy-first-admin.png)
 
@@ -91,14 +91,14 @@ Two organizations on one server. Ana is in Acme; her team's board is shared with
 
 ![Acme's kanban board seen by Bruno Costa, showing three Acme tasks.](../screenshots/tenancy-acme-board.png)
 
-Gary is an administrator of Globex on the **same server**. He sees his own organization and nothing else. Acme's org-visible workspace is not merely hidden from him, it does not exist as far as his session is concerned.
+Gary is an administrator of Globex on the **same server**. In workspace and task views, he sees his own organization. Acme's org-visible workspace is not merely hidden from him; guarded domain reads return not found. This example does not cover the Users, System, or WebSocket notification gaps listed below.
 
 ![Globex's kanban board seen by Gary Vasquez, showing only the Globex Secret Project workspace and one Globex task.](../screenshots/tenancy-globex-board.png)
 
-## How the boundary is enforced
+## How normal domain access is scoped
 
-- **Your organization comes from your account, never from the request.** No route, payload, header or WebSocket frame may name an organization, so no request can move a caller between tenants. There is no organization switcher, and one person belongs to exactly one organization; someone who needs two uses two accounts.
-- **The tenant check runs before any role.** It is not a permission that a role can outrank: a workspace in another organization is unreachable by an org admin, by the instance operator, and even by a stale membership row.
+- **Your organization comes from your account, never from the request.** Guarded domain routes do not accept an organization selector that moves the caller between tenants. There is no organization switcher, and one person belongs to exactly one organization; someone who needs two uses two accounts.
+- **The tenant check runs before any workspace role.** For guarded workspace reads and actions, a workspace in another organization is unreachable by an org admin, by the instance operator, and even by a stale membership row.
 - **It fails closed.** An account somehow carrying no organization reaches nothing while the feature is on, rather than matching everything.
 - **New accounts inherit their creator's organization.** Admin-created users and invite links both carry the minting admin's organization, so accepting an invite can never place someone in a tenant the inviter cannot see.
 - **Email is unique across the whole server**, not per organization. One address is one person, which is why signing in needs no organization picker.
@@ -107,6 +107,8 @@ Gary is an administrator of Globex on the **same server**. He sees his own organ
 
 These are real and worth knowing before you put two untrusting groups on one server.
 
+- **Do not use one instance as a hard boundary between untrusted tenants yet.** The org-admin Users API currently lists accounts across organizations and accepts cross-org role or status changes. Install-wide backup, database, storage, and runtime-feature mutations also use the org-admin settings scope rather than the instance-operator tier, so an org admin can affect other tenants or download a backup containing their data.
+- **Ordinary WebSocket notification fan-out is not fail-closed.** Workspace-aware delivery normally narrows recipients by reach, but its regular path falls back to global delivery if reach and owner resolution both fail. Selected sensitive notifications use a fail-closed path; the general notification stream does not yet provide a hard tenant boundary. See [WebSocket API](websocket-api.md#emitted-notifications-and-recipients).
 - **Secrets are scoped per organization, but not encrypted per organization.**
   Reads are org-scoped, so one organization cannot fetch another's secret
   through the API. At rest, every secret on the instance is sealed under a
@@ -117,7 +119,7 @@ These are real and worth knowing before you put two untrusting groups on one ser
 - **Executors and agent profiles are still instance-wide.** They are shared configuration, and a shared agent profile means a shared provider credential.
 - **No per-organization billing, quotas or usage metering.** Suspension is the only lever.
 - **No per-organization export or backup.** Backups are instance-wide and contain every organization.
-- **No cross-organization anything**, by design: no shared workspaces, no moving a user or workspace between organizations, no cross-organization search.
+- **No supported cross-organization collaboration**, by design: no shared workspaces, no moving a user or workspace between organizations, and no cross-organization search.
 - **Users cannot be moved between organizations.** Moving a person would leave their workspaces behind in the old tenant.
 
 ## Turning it off
