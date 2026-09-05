@@ -46,6 +46,10 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
             'test-results-${{ matrix.shard }}.json"',
             generate,
         )
+        self.assertIn(
+            'INPUT_MODULEDIRECTORY="$GITHUB_WORKSPACE/apps/backend"',
+            generate,
+        )
         self.assertIn('INPUT_OMIT="successful"', generate)
         self.assertIn(
             'node ".github/vendor/go-test-action/dist/index.js"',
