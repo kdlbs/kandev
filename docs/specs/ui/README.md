@@ -159,6 +159,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [File Tree Keyboard Scope](system-design/file-tree-keyboard-scope.md)
 - [File Tree Chat](system-design/file-tree-chat-context.md)
 - [MCP results](system-design/kandev-mcp-tool-results.md)
+- [Message queue row controls](system-design/message-queue-row-controls.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
