@@ -45,21 +45,35 @@ func TestTakeTaskMetadataKeyIfDestinationStep_MatchClaimsAndReturns(t *testing.T
 }
 
 // TestTakeTaskMetadataKeyIfDestinationStep_WrongStepLeavesTokenInPlace
-// covers AC-001.5: a token naming a different step is left untouched so a
-// later entry into the step it does name can still receive it.
+// covers AC-001.5 against the race it actually guards: a caller can only ever
+// hold a stamp read alongside a stepID before the claim attempt runs, so the
+// regression case is a token that was REPLACED, naming a different
+// destination, between that read and the claim — not merely "no token for
+// this step ever existed". Seed a token for step-b, overwrite it with a fresh
+// one for step-c (simulating a transition that landed in between), then claim
+// with the original step-b/stamp-1 pair: the mismatch must leave the step-c
+// replacement untouched so a later entry into step-c can still receive it.
 func TestTakeTaskMetadataKeyIfDestinationStep_WrongStepLeavesTokenInPlace(t *testing.T) {
 	repo := newRepoForMetadataCASTests(t)
 	seedMetadataCASTask(t, repo, map[string]interface{}{
 		models.MetaKeyStepHandoffCarry: models.StepHandoffCarryToken{
-			Handoff: "for step C",
-			StepID:  "step-c",
-			Stamp:   "stamp-2",
+			Handoff: "for step B",
+			StepID:  "step-b",
+			Stamp:   "stamp-1",
 		},
 	})
 	ctx := context.Background()
 
+	if err := repo.SetTaskMetadataKey(ctx, casTaskID, models.MetaKeyStepHandoffCarry, models.StepHandoffCarryToken{
+		Handoff: "for step C",
+		StepID:  "step-c",
+		Stamp:   "stamp-2",
+	}); err != nil {
+		t.Fatalf("simulate replacement to a different destination step: %v", err)
+	}
+
 	raw, ok, err := repo.TakeTaskMetadataKeyIfDestinationStep(
-		ctx, casTaskID, models.MetaKeyStepHandoffCarry, "step-b", "stamp-2",
+		ctx, casTaskID, models.MetaKeyStepHandoffCarry, "step-b", "stamp-1",
 	)
 	if err != nil {
 		t.Fatalf("TakeTaskMetadataKeyIfDestinationStep: %v", err)
@@ -70,11 +84,11 @@ func TestTakeTaskMetadataKeyIfDestinationStep_WrongStepLeavesTokenInPlace(t *tes
 
 	stored, found := metadataValue(t, repo, models.MetaKeyStepHandoffCarry)
 	if !found {
-		t.Fatal("token naming another step must remain in place")
+		t.Fatal("the step-c replacement must remain in place")
 	}
 	storedMap, _ := stored.(map[string]interface{})
-	if storedMap["step_id"] != "step-c" {
-		t.Fatalf("stored token = %#v, want step-c untouched", stored)
+	if storedMap["step_id"] != "step-c" || storedMap["stamp"] != "stamp-2" {
+		t.Fatalf("stored token = %#v, want the step-c replacement untouched", stored)
 	}
 }
 
