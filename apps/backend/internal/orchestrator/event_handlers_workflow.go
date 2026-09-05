@@ -4120,15 +4120,17 @@ func (s *Service) autoStartStepPrompt(
 		// the lifecycle manager no longer has (e.g. the post-resume agent
 		// process failed to start and runAgentProcessAsync removed it). The
 		// session's stored AgentExecutionID is now stale. Recover by clearing
-		// it and routing through StartCreatedSession for a fresh launch — the
-		// prompt is baked into LaunchPreparedSession so we don't lose it.
+		// it and relaunching fresh through the composed-prompt seam — recordedPrompt
+		// and dispatchPrompt are already fully composed for this step entry
+		// (handoff included), so the fallback must not let StartCreatedSession
+		// recompose them from the destination step's own template.
 		if errors.Is(err, executor.ErrExecutionNotFound) {
 			s.logger.Warn("auto-start: PromptTask hit missing execution; falling back to fresh launch",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
 			return s.fallbackFreshLaunchOnMissingExecution(
-				ctx, taskID, sessionID, recordedPrompt, planMode, takenMsg, attachments, references,
+				ctx, taskID, sessionID, recordedPrompt, true, dispatchPrompt, planMode, takenMsg, attachments, references,
 			)
 		}
 
@@ -4181,12 +4183,21 @@ func (s *Service) autoStartStepPrompt(
 // fallbackFreshLaunchOnMissingExecution recovers from a PromptTask that returned
 // ErrExecutionNotFound — the session's stored AgentExecutionID points at an
 // execution the lifecycle manager doesn't have, so the resume path is dead.
-// Clear the stale ID, flip state to CREATED, and route through StartCreatedSession
-// (which uses LaunchPreparedSession with the prompt baked in — bypassing resume).
-// On further failure, the queued message is restored so a manual retry recovers it.
+// Clear the stale ID, flip state to CREATED, and relaunch with prompt.
+// promptAlreadyComposed routes the relaunch through the composed-prompt seam
+// (startCreatedSessionWithComposedPrompt, with retryPrompt as its raw dispatch
+// value) instead of the public StartCreatedSession, so a caller that already
+// composed prompt itself (e.g. appending a claimed step handoff) is not
+// recomposed from the destination step's own template — which discards
+// everything it was passed when that template lacks {{task_prompt}}. Callers
+// that have not composed the prompt pass promptAlreadyComposed=false and an
+// empty retryPrompt. On further failure, the queued message is restored so a
+// manual retry recovers it.
 func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
+	promptAlreadyComposed bool,
+	retryPrompt string,
 	planMode bool,
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
@@ -4218,14 +4229,23 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 
-	if _, err := s.StartCreatedSession(
-		ctx, taskID, sessionID, fresh.AgentProfileID,
-		prompt, true, planMode, true, attachments, references,
-	); err != nil {
+	var launchErr error
+	if promptAlreadyComposed {
+		_, launchErr = s.startCreatedSessionWithComposedPrompt(
+			ctx, taskID, sessionID, fresh.AgentProfileID,
+			prompt, retryPrompt, true, planMode, true, attachments, references,
+		)
+	} else {
+		_, launchErr = s.StartCreatedSession(
+			ctx, taskID, sessionID, fresh.AgentProfileID,
+			prompt, true, planMode, true, attachments, references,
+		)
+	}
+	if launchErr != nil {
 		s.logger.Error("auto-start fallback: fresh launch failed",
-			zap.String("session_id", sessionID), zap.Error(err))
+			zap.String("session_id", sessionID), zap.Error(launchErr))
 		requeue()
-		return err
+		return launchErr
 	}
 	return nil
 }

@@ -4955,7 +4955,7 @@ func (s *Service) handlePromptDispatchFailure(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
 		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
-			ctx, taskID, sessionID, prompt, planMode, nil, attachments, nil,
+			ctx, taskID, sessionID, prompt, false, "", planMode, nil, attachments, nil,
 		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {
