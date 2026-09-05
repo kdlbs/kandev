@@ -15,16 +15,20 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/system/jobs"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
+	"go.uber.org/zap"
 )
 
 const workspaceDependenciesProviderName = "workspace_dependencies"
@@ -40,6 +44,7 @@ func provideStorageComposition(
 	cfg *config.Config,
 	pool *db.Pool,
 	tracker *jobs.Tracker,
+	eventBus bus.EventBus,
 	lifecycleMgr *lifecycle.Manager,
 	worktreeMgr *worktree.Manager,
 	taskSvc *taskservice.Service,
@@ -61,9 +66,11 @@ func provideStorageComposition(
 	if err := tempArtifacts.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact registry", err)
 	}
+	scanner := filescan.NewLimiter(4)
 	tempProvider := tempartifacts.NewProvider(tempartifacts.ProviderConfig{
 		Registry: tempArtifacts, Store: store, HomeDir: cfg.ResolvedHomeDir(),
 		TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
+		Scanner:  scanner,
 	})
 	if err := tempProvider.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact quarantine", err)
@@ -72,7 +79,7 @@ func provideStorageComposition(
 	taskSvc.SetTaskResourceCleanupActivityGate(&taskCleanupActivityGate{coordinator: coordinator})
 	goCache := gocache.New(gocache.Config{
 		HomeDir: cfg.ResolvedHomeDir(), TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
-		Settings: settings, Store: store,
+		Settings: settings, Store: store, Scanner: scanner,
 	})
 	lifecycleMgr.SetActivityCoordinator(coordinator)
 	lifecycleMgr.SetManagedGoCacheEnvironmentProvider(goCache)
@@ -81,7 +88,7 @@ func provideStorageComposition(
 	}
 
 	inventory := &storageInventory{reader: pool.Reader(), worktrees: worktreeMgr, lifecycle: lifecycleMgr}
-	workspaceFactory := newWorkspaceFactory(cfg, store, inventory, worktreeMgr)
+	workspaceFactory := newWorkspaceFactory(cfg, store, inventory, worktreeMgr, scanner)
 	dockerClient := &lazyStorageDocker{provider: lifecycleMgr.DockerClientProvider(), activity: coordinator}
 	dockerProvider := dockerstore.NewProvider(
 		dockerClient, &containerInventory{reader: pool.Reader()}, settings,
@@ -91,7 +98,22 @@ func provideStorageComposition(
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
 		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider,
 	}
-	cachedOverview := storagepkg.NewOverviewCache(overview)
+	cachedOverview := storagepkg.NewOverviewCacheWithOptions(overview, storagepkg.OverviewCacheOptions{
+		Publisher: func(update storagepkg.StorageAnalysisUpdated) {
+			if eventBus == nil {
+				return
+			}
+			if err := eventBus.Publish(
+				context.Background(), events.SystemStorageAnalysisUpdated,
+				bus.NewEvent(events.SystemStorageAnalysisUpdated, "storage-analysis", update),
+			); err != nil {
+				logError("publish storage analysis update", err)
+			}
+		},
+		Observer: func(completion storagepkg.StorageAnalysisCompletion) {
+			logStorageAnalysisCompletion(log, completion)
+		},
+	})
 	quarantine := &workspaceQuarantineController{
 		settings: settings, store: store, factory: workspaceFactory, homeDir: cfg.ResolvedHomeDir(),
 		activity: coordinator, temporary: tempProvider,
@@ -172,6 +194,7 @@ func newWorkspaceFactory(
 	store *storagepkg.Store,
 	inventory workspaces.InventorySource,
 	pruner workspaces.WorktreePruner,
+	scanner *filescan.Limiter,
 ) workspaceFactory {
 	return func(current storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
 		return workspaces.New(workspaces.Config{
@@ -180,6 +203,7 @@ func newWorkspaceFactory(
 			Inventory: inventory, Store: store, Pruner: pruner,
 			GracePeriod: time.Duration(current.OrphanGraceHours) * time.Hour,
 			Retention:   time.Duration(current.QuarantineRetentionHours) * time.Hour,
+			Scanner:     scanner,
 		})
 	}
 }
@@ -203,10 +227,25 @@ type storageOverview struct {
 }
 
 func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, error) {
+	return o.summary(ctx, nil)
+}
+
+func (o *storageOverview) SummaryWithProgress(
+	ctx context.Context,
+	notify storagepkg.OverviewProgressCallback,
+) (storagepkg.Summary, error) {
+	return o.summary(ctx, notify)
+}
+
+func (o *storageOverview) summary(
+	ctx context.Context,
+	notify storagepkg.OverviewProgressCallback,
+) (storagepkg.Summary, error) {
 	settings, err := o.settings.GetSettings(ctx)
 	if err != nil {
 		return storagepkg.Summary{}, err
 	}
+	reporter := newStorageProgressReporter(notify)
 	var (
 		workspaceSummary  workspaces.Analysis
 		workspaceErr      error
@@ -232,26 +271,42 @@ func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, erro
 	}
 	go func() {
 		defer measurements.Done()
-		workspaceSummary, workspaceErr = workspaceAnalyze(ctx, settings)
+		reporter.start(storagepkg.StorageSourceWorkspaces)
+		workspaceSummary, workspaceErr = o.analyzeWorkspaces(ctx, settings, workspaceAnalyze, reporter)
+		reporter.complete(storagepkg.StorageSourceWorkspaces, summaryValue(workspaceSummary, workspaceErr), workspaceErr)
 	}()
 	go func() {
 		defer measurements.Done()
-		goCacheSummary, goCacheErr = goCacheAnalyze(ctx)
+		reporter.start(storagepkg.StorageSourceGoCache)
+		goCacheSummary, goCacheErr = o.analyzeGoCache(ctx, goCacheAnalyze, reporter)
+		reporter.complete(storagepkg.StorageSourceGoCache, summaryValue(goCacheSummary, goCacheErr), goCacheErr)
 	}()
 	go func() {
 		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceQuarantine)
 		quarantineSummary, quarantineErr = o.quarantine.SummarizeQuarantine(ctx)
+		reporter.complete(storagepkg.StorageSourceQuarantine, summaryValue(quarantineSummary, quarantineErr), quarantineErr)
 	}()
 	go func() {
 		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDocker)
 		dockerSummary = o.docker.Analyze(ctx)
+		reporter.complete(storagepkg.StorageSourceDocker, dockerSummaryMap(dockerSummary), nil)
 	}()
 	if o.tempArtifacts != nil {
 		measurements.Add(1)
 		go func() {
 			defer measurements.Done()
-			tempSummary, tempErr = o.tempArtifacts.Analyze(ctx)
+			reporter.start(storagepkg.StorageSourceTemporaryArtifacts)
+			tempSummary, tempErr = o.analyzeTemporaryArtifacts(ctx, reporter)
+			reporter.complete(
+				storagepkg.StorageSourceTemporaryArtifacts,
+				summaryValue(tempSummary, tempErr), tempErr,
+			)
 		}()
+	} else {
+		reporter.start(storagepkg.StorageSourceTemporaryArtifacts)
+		reporter.complete(storagepkg.StorageSourceTemporaryArtifacts, tempSummary, nil)
 	}
 	measurements.Wait()
 	return storagepkg.Summary{
@@ -259,14 +314,181 @@ func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, erro
 		GoCache:            summaryValue(goCacheSummary, goCacheErr),
 		Quarantine:         summaryValue(quarantineSummary, quarantineErr),
 		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
-		Docker: map[string]any{
-			"available": dockerSummary.Available, "build_cache_bytes": dockerSummary.BuildCacheBytes,
-			"image_layer_bytes":  dockerSummary.ImageLayerBytes,
-			"unused_image_bytes": dockerSummary.UnusedImageBytes, "warnings": dockerSummary.Warnings,
-			"managed_container_count": dockerSummary.ManagedContainerCount,
-			"managed_container_bytes": dockerSummary.ManagedContainerBytes,
-		},
+		Docker:             dockerSummaryMap(dockerSummary),
 	}, nil
+}
+
+type workspaceProgressAnalyzer interface {
+	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (workspaces.Analysis, error)
+}
+
+type goCacheProgressAnalyzer interface {
+	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (gocache.Analysis, error)
+}
+
+type temporaryArtifactsProgressAnalyzer interface {
+	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (tempartifacts.Analysis, error)
+}
+
+func (o *storageOverview) analyzeWorkspaces(
+	ctx context.Context,
+	settings storagepkg.StorageMaintenanceSettings,
+	fallback func(context.Context, storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error),
+	reporter *storageProgressReporter,
+) (workspaces.Analysis, error) {
+	if o.workspaceAnalyze != nil {
+		return fallback(ctx, settings)
+	}
+	provider := o.workspaceFactory(settings)
+	if progressive, ok := any(provider).(workspaceProgressAnalyzer); ok {
+		return progressive.AnalyzeWithProgress(ctx, reporter.filesystem(storagepkg.StorageSourceWorkspaces))
+	}
+	return fallback(ctx, settings)
+}
+
+func (o *storageOverview) analyzeGoCache(
+	ctx context.Context,
+	fallback func(context.Context) (gocache.Analysis, error),
+	reporter *storageProgressReporter,
+) (gocache.Analysis, error) {
+	if o.goCacheAnalyze != nil {
+		return fallback(ctx)
+	}
+	if progressive, ok := any(o.goCache).(goCacheProgressAnalyzer); ok {
+		return progressive.AnalyzeWithProgress(ctx, reporter.filesystem(storagepkg.StorageSourceGoCache))
+	}
+	return fallback(ctx)
+}
+
+func (o *storageOverview) analyzeTemporaryArtifacts(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+) (tempartifacts.Analysis, error) {
+	if progressive, ok := any(o.tempArtifacts).(temporaryArtifactsProgressAnalyzer); ok {
+		return progressive.AnalyzeWithProgress(ctx, reporter.filesystem(storagepkg.StorageSourceTemporaryArtifacts))
+	}
+	return o.tempArtifacts.Analyze(ctx)
+}
+
+func dockerSummaryMap(summary dockerstore.Analysis) map[string]any {
+	return map[string]any{
+		"available": summary.Available, "build_cache_bytes": summary.BuildCacheBytes,
+		"image_layer_bytes":  summary.ImageLayerBytes,
+		"unused_image_bytes": summary.UnusedImageBytes, "warnings": summary.Warnings,
+		"managed_container_count": summary.ManagedContainerCount,
+		"managed_container_bytes": summary.ManagedContainerBytes,
+	}
+}
+
+type storageProgressReporter struct {
+	notify           storagepkg.OverviewProgressCallback
+	mu               sync.Mutex
+	sourceStarted    map[string]time.Time
+	sourcePartitions map[string]int
+	activeWalkers    int
+	maxActiveWalkers int
+}
+
+func newStorageProgressReporter(notify storagepkg.OverviewProgressCallback) *storageProgressReporter {
+	return &storageProgressReporter{
+		notify: notify, sourceStarted: make(map[string]time.Time),
+		sourcePartitions: make(map[string]int),
+	}
+}
+
+func (r *storageProgressReporter) send(progress storagepkg.OverviewProgress) {
+	if r.notify == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.notify(progress)
+}
+
+func (r *storageProgressReporter) start(source string) {
+	r.mu.Lock()
+	r.sourceStarted[source] = time.Now()
+	r.mu.Unlock()
+	r.send(storagepkg.OverviewProgress{Source: source, State: storagepkg.SourceStateScanning})
+}
+
+func (r *storageProgressReporter) complete(source string, value any, err error) {
+	r.mu.Lock()
+	duration := time.Duration(0)
+	if started, ok := r.sourceStarted[source]; ok {
+		duration = time.Since(started)
+	}
+	r.mu.Unlock()
+	state := storagepkg.SourceStateReady
+	if err != nil {
+		state = storagepkg.SourceStateFailed
+	}
+	r.send(storagepkg.OverviewProgress{
+		Source: source, State: state, Value: value, Err: err, Duration: duration,
+	})
+}
+
+func (r *storageProgressReporter) filesystem(source string) func(filescan.Progress) {
+	return func(progress filescan.Progress) {
+		r.mu.Lock()
+		if progress.Phase == filescan.PartitionStarted {
+			r.activeWalkers++
+			if r.activeWalkers > r.maxActiveWalkers {
+				r.maxActiveWalkers = r.activeWalkers
+			}
+		}
+		if progress.Phase == filescan.PartitionCompleted && r.activeWalkers > 0 {
+			r.activeWalkers--
+		}
+		if progress.TotalPartitions > r.sourcePartitions[source] {
+			r.sourcePartitions[source] = progress.TotalPartitions
+		}
+		partitionCount := 0
+		for _, count := range r.sourcePartitions {
+			partitionCount += count
+		}
+		maxActiveWalkers := r.maxActiveWalkers
+		r.mu.Unlock()
+		completed, total := progress.CompletedPartitions, progress.TotalPartitions
+		if progress.Phase == filescan.RootCompleted {
+			completed, total = progress.CompletedRoots, progress.TotalRoots
+		}
+		var totalItems *int
+		if total > 0 {
+			totalItems = &total
+		}
+		r.send(storagepkg.OverviewProgress{
+			Source: source, State: storagepkg.SourceStateScanning,
+			CompletedItems: completed, TotalItems: totalItems, BytesScanned: progress.BytesScanned,
+			PartitionCount: partitionCount, MaxActiveWalkers: maxActiveWalkers,
+		})
+	}
+}
+
+func logStorageAnalysisCompletion(
+	log *logger.Logger,
+	completion storagepkg.StorageAnalysisCompletion,
+) {
+	if log == nil {
+		return
+	}
+	outcomes := make(map[string]string, len(completion.SourceStates))
+	durations := make(map[string]int64, len(completion.SourceDurations))
+	for source, state := range completion.SourceStates {
+		outcomes[source] = string(state)
+	}
+	for source, duration := range completion.SourceDurations {
+		durations[source] = duration.Milliseconds()
+	}
+	log.Info("system.storage.analysis.completed",
+		zap.Uint64("generation", completion.Generation),
+		zap.Duration("duration", completion.Duration),
+		zap.Any("source_durations_ms", durations),
+		zap.Any("source_outcomes", outcomes),
+		zap.Int("partition_count", completion.PartitionCount),
+		zap.Int("max_active_walkers", completion.MaxActiveWalkers),
+		zap.Bool("succeeded", completion.Succeeded),
+	)
 }
 
 func (o *storageOverview) Capabilities(

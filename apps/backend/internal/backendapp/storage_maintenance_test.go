@@ -93,6 +93,53 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 	}
 }
 
+func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
+	settings, _ := newStorageMaintenanceStores(t)
+	docker := dockerstore.NewProvider(
+		&overviewDockerClient{}, overviewContainerInventory{}, settings,
+	)
+	events := make(chan storagepkg.OverviewProgress, 16)
+	overview := &storageOverview{
+		settings:   settings,
+		quarantine: failingQuarantineSummarizer{err: errors.New("quarantine unavailable")},
+		workspaceAnalyze: func(context.Context, storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error) {
+			return workspaces.Analysis{TotalBytes: 10}, nil
+		},
+		goCacheAnalyze: func(context.Context) (gocache.Analysis, error) {
+			return gocache.Analysis{SizeBytes: 20}, nil
+		},
+		docker: docker,
+	}
+
+	if _, err := overview.SummaryWithProgress(context.Background(), func(progress storagepkg.OverviewProgress) {
+		events <- progress
+	}); err != nil {
+		t.Fatalf("SummaryWithProgress: %v", err)
+	}
+	seen := make(map[string]map[storagepkg.SourceStateName]bool)
+	for len(events) > 0 {
+		progress := <-events
+		if seen[progress.Source] == nil {
+			seen[progress.Source] = make(map[storagepkg.SourceStateName]bool)
+		}
+		seen[progress.Source][progress.State] = true
+	}
+	for _, source := range []string{
+		storagepkg.StorageSourceWorkspaces,
+		storagepkg.StorageSourceGoCache,
+		storagepkg.StorageSourceQuarantine,
+		storagepkg.StorageSourceTemporaryArtifacts,
+		storagepkg.StorageSourceDocker,
+	} {
+		if !seen[source][storagepkg.SourceStateScanning] {
+			t.Fatalf("source %q did not report scanning progress: %#v", source, seen[source])
+		}
+	}
+	if !seen[storagepkg.StorageSourceQuarantine][storagepkg.SourceStateFailed] {
+		t.Fatalf("quarantine source did not report failure: %#v", seen[storagepkg.StorageSourceQuarantine])
+	}
+}
+
 func TestStorageCleanupProvidersIncludeWorkspaceDependencyCleanup(t *testing.T) {
 	settings, store := newStorageMaintenanceStores(t)
 	home := t.TempDir()
