@@ -131,7 +131,8 @@ function useSentinelObserver(opts: {
           !entry.isIntersecting ||
           !hasMore ||
           blocked ||
-          (isLoadingMore && !joinInFlightWhileLoading)
+          (isLoadingMore && !joinInFlightWhileLoading) ||
+          !isCurrentSentinelGeometryEligible(opts.refs)
         ) {
           return;
         }

@@ -1091,6 +1091,7 @@ type InitialScrollApplyParams = {
   isVisibleRef: React.RefObject<boolean>;
   isNearBottomRef: React.RefObject<boolean>;
   envSwitchPlacementToken: number | null;
+  hasUnreadDivider: boolean;
   isProgrammaticScrollLocked: () => boolean;
   phase: "provisional" | "final";
 };
@@ -1124,11 +1125,13 @@ function isCurrentEnvSwitchPlacement(
 function hasCompetingInitialScrollOwner(params: {
   hasPendingLayoutRestore: boolean;
   hasExplicitScrollTarget: boolean;
+  hasUnreadDivider: boolean;
   isProgrammaticScrollLocked: () => boolean;
 }): boolean {
   return (
     params.hasPendingLayoutRestore ||
     params.hasExplicitScrollTarget ||
+    params.hasUnreadDivider ||
     params.isProgrammaticScrollLocked()
   );
 }
@@ -1190,6 +1193,7 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
     isVisibleRef,
     isNearBottomRef,
     envSwitchPlacementToken,
+    hasUnreadDivider,
     isProgrammaticScrollLocked,
     phase,
   } = params;
@@ -1210,6 +1214,7 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
     hasCompetingInitialScrollOwner({
       hasPendingLayoutRestore,
       hasExplicitScrollTarget,
+      hasUnreadDivider,
       isProgrammaticScrollLocked,
     })
   ) {
@@ -1348,6 +1353,7 @@ function useInitialScrollPosition({
         isVisibleRef,
         isNearBottomRef,
         envSwitchPlacementToken,
+        hasUnreadDivider,
         isProgrammaticScrollLocked,
         phase,
       });

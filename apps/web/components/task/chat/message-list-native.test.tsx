@@ -518,6 +518,55 @@ describe("useNativeScrollManagement transcript pagination", () => {
     }
   });
 
+  it("leaves final placement to an unread-divider target when refresh settles", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const metrics = { scrollHeight: 900, scrollTop: 210, clientHeight: 400 };
+    mockDockviewState.pendingChatInitialPlacement = { sessionId: "session-b", token: 10 };
+    try {
+      const { rerender } = render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+          metrics={metrics}
+          sessionId="session-b"
+          enabled
+          historyRefreshPending
+        />,
+      );
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      expect(metrics.scrollTop).toBe(900);
+      expect(mockDockviewState.pendingChatInitialPlacement).toEqual({
+        sessionId: "session-b",
+        token: 10,
+      });
+
+      metrics.scrollTop = 480;
+      rerender(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage("settled-message")]}
+          metrics={metrics}
+          sessionId="session-b"
+          enabled
+          hasUnreadDivider
+        />,
+      );
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      expect(metrics.scrollTop).toBe(480);
+      expect(mockDockviewState.pendingChatInitialPlacement).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.13
   it("does not defer a same-env session placement without an env-switch token", () => {
     const metrics = { scrollHeight: 900, scrollTop: 125, clientHeight: 400 };

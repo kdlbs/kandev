@@ -790,6 +790,24 @@ describe("useLazyLoadSentinel — stale view handoff", () => {
 
     expect(loadB).not.toHaveBeenCalled();
   });
+
+  it("rejects a queued positive intersection when current geometry is ineligible", () => {
+    const scrollRef = makeScrollRef();
+    let geometryEligible = true;
+    const loadMore = vi.fn(async () => 20);
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        isCurrentGeometryEligible: () => geometryEligible,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    geometryEligible = false;
+    fire(records[0], true, node);
+
+    expect(loadMore).not.toHaveBeenCalled();
+  });
 });
 
 describe("useLazyLoadSentinel — stale observers", () => {

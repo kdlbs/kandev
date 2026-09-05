@@ -2,10 +2,12 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { waitForStableActiveSession } from "../../helpers/session-store";
 import { routeMainWebSocketWithMessageListResponseHold } from "../../helpers/ws-response-hold";
+import { watchOlderMessageRequests } from "./message-pagination-helpers";
 
 const MOBILE_END_TOLERANCE_PX = 10;
 
@@ -136,6 +138,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await waitForSessionDone(apiClient, taskB.id, taskB.session_id, "mobile task B should finish");
 
     const refreshHold = await routeMainWebSocketWithMessageListResponseHold(testPage);
+    const olderRequests = watchOlderMessageRequests(testPage, taskA.session_id);
     await testPage.goto(`/t/${taskA.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -172,6 +175,13 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
         list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
       )
       .toBeLessThan(MOBILE_END_TOLERANCE_PX);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "observe mobile pagination after first refresh release",
+    );
+    expect(olderRequests).toHaveLength(0);
 
     const targetScrollTop = await list.evaluate((element) => {
       element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
@@ -205,6 +215,13 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
         Math.abs((await list.evaluate((element) => element.scrollTop)) - targetScrollTop),
       )
       .toBeLessThanOrEqual(20);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "observe mobile pagination after second refresh release",
+    );
+    expect(olderRequests).toHaveLength(0);
 
     const documentWidth = await testPage.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,
