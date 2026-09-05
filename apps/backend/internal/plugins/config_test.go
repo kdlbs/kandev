@@ -176,6 +176,39 @@ func TestValidateConfigSchema(t *testing.T) {
 	}
 }
 
+func TestValidateConfigSchemaEnforcesNumericBounds(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			"interval": map[string]any{
+				"type":    "integer",
+				"minimum": 1,
+				"maximum": 300,
+			},
+		},
+	}
+	for _, tc := range []struct {
+		name    string
+		value   any
+		wantErr bool
+	}{
+		{name: "below minimum", value: float64(0), wantErr: true},
+		{name: "minimum", value: float64(1)},
+		{name: "within range", value: float64(90)},
+		{name: "maximum", value: float64(300)},
+		{name: "above maximum", value: float64(301), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateConfigSchema("test-plugin", map[string]any{"interval": tc.value}, schema)
+			if tc.wantErr && !errors.Is(err, ErrConfigInvalid) {
+				t.Fatalf("error = %v, want ErrConfigInvalid", err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateConfigSchemaNilSchemaIsPermissive(t *testing.T) {
 	if err := validateConfigSchema("test-plugin", map[string]any{"anything": 1}, nil); err != nil {
 		t.Fatalf("nil schema should accept anything, got %v", err)
