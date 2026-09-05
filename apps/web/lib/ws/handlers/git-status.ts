@@ -125,22 +125,36 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   commits_reset: (store, event) => {
-    if (isDebug()) debug("commits_reset", { sessionId: event.session_id });
+    if (isDebug())
+      debug("commits_reset", {
+        sessionId: event.session_id,
+        repositoryName: event.reset.repository_name ?? null,
+      });
     // Trigger a refetch without clearing the visible commits — the Changes
     // panel would otherwise flicker through its empty state ("Your changed
     // files will appear here") while the refetch is in flight, because
     // useSessionCommits returns `commits ?? []` and the panel's hasAnything
     // gate flips to false the moment commits goes undefined.
     store.getState().bumpSessionCommitsRefetch(event.session_id);
+    store
+      .getState()
+      .bumpSessionGitCheckoutGeneration(event.session_id, event.reset.repository_name);
     // Invalidate cumulative diff cache when commits are reset
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
 
   branch_switched: (store, event) => {
-    if (isDebug()) debug("branch_switched", { sessionId: event.session_id });
+    if (isDebug())
+      debug("branch_switched", {
+        sessionId: event.session_id,
+        repositoryName: event.branch_switch.repository_name ?? null,
+      });
     // Stale-while-revalidate (see commits_reset above): refetch with the new
     // base commit but keep the old list visible until the new one arrives.
     store.getState().bumpSessionCommitsRefetch(event.session_id);
+    store
+      .getState()
+      .bumpSessionGitCheckoutGeneration(event.session_id, event.branch_switch.repository_name);
     // Invalidate cumulative diff cache when branch switches
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },

@@ -178,6 +178,11 @@ export type SessionCommitsState = {
   refetchTrigger: Record<string, number>;
 };
 
+/** Checkout generations keyed by environment and repository scope. */
+export type GitCheckoutGenerationState = {
+  byEnvironmentId: Record<string, Record<string, number>>;
+};
+
 export type ContextWindowEntry = {
   size: number;
   used: number;
@@ -441,6 +446,7 @@ export type SessionRuntimeSliceState = {
   /** Maps sessionId → environmentId for workspace state sharing. */
   environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;
+  gitCheckoutGeneration: GitCheckoutGenerationState;
   contextWindow: ContextWindowState;
   agents: AgentState;
   availableCommands: AvailableCommandsState;
@@ -493,6 +499,8 @@ export type SessionRuntimeSliceActions = {
   // Signal a refetch without clearing the visible list — see
   // SessionCommitsState.refetchTrigger.
   bumpSessionCommitsRefetch: (sessionId: string) => void;
+  /** Bump only the affected repository's checkout generation. */
+  bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) => void;
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;

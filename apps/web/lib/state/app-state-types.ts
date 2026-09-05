@@ -139,6 +139,7 @@ export type AppState = KanbanSlice & {
   gitStatus: (typeof defaultSessionRuntimeState)["gitStatus"];
   environmentIdBySessionId: (typeof defaultSessionRuntimeState)["environmentIdBySessionId"];
   sessionCommits: (typeof defaultSessionRuntimeState)["sessionCommits"];
+  gitCheckoutGeneration: (typeof defaultSessionRuntimeState)["gitCheckoutGeneration"];
   contextWindow: (typeof defaultSessionRuntimeState)["contextWindow"];
   agents: (typeof defaultSessionRuntimeState)["agents"];
   availableCommands: (typeof defaultSessionRuntimeState)["availableCommands"];
@@ -490,6 +491,7 @@ export type AppState = KanbanSlice & {
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
   clearSessionCommits: (sessionId: string) => void;
   bumpSessionCommitsRefetch: (sessionId: string) => void;
+  bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   clearContextWindow: (sessionId: string) => void;
   bumpAgentProfilesVersion: () => void;

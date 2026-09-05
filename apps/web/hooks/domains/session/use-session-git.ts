@@ -1,7 +1,14 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-git-status";
+/* eslint-disable max-lines */
+
+import { useState, useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import {
+  useSessionGitPendingCheckoutGenerations,
+  useSessionGitPendingScope,
+  useSessionGitStatus,
+  useSessionGitStatusByRepo,
+} from "./use-session-git-status";
 import { useSessionCommits } from "./use-session-commits";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useGitOperations } from "@/hooks/use-git-operations";
@@ -26,6 +33,17 @@ import { deriveComparisonValues, deriveSessionGitValues } from "./use-session-gi
 import { useScopedStageOperations } from "./use-scoped-stage-operations";
 import { normalizeGitStatusFiles } from "@/lib/state/slices/session-runtime/git-status-normalizer";
 import { splitFilesByChangeLayer } from "./git-change-facets";
+import {
+  clearPendingFileOperations,
+  pendingKey,
+  pendingKeysForFailedRepositories,
+  usePendingFileOperationRepositoryScope,
+  usePendingFileOperationScope,
+  usePerRepoPendingClear,
+  type PendingFileOperationOwner,
+} from "./use-session-git-pending";
+
+export { pendingKey } from "./use-session-git-pending";
 
 /**
  * Per-repo result emitted by frontend-side fan-outs (commit, push, pull,
@@ -248,18 +266,9 @@ type StageDispatchArgs = {
   reposInFiles: string[];
   stagedFiles: FileInfo[];
   setPendingStageFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
+  pendingFileOperations: MutableRefObject<Map<string, PendingFileOperationOwner>>;
+  pendingScopeIdentity: string;
 };
-
-/**
- * Encodes a (repo, path) pair as a single Set entry. We need a per-repo key
- * because two repos can have files at the same relative path (README.md,
- * .gitignore, etc.) and a flat path-only Set would conflate them. The
- * separator "::" keeps the key trivially parseable for debugging — repo
- * names don't contain "::".
- */
-export function pendingKey(repo: string | undefined, path: string): string {
-  return `${repo ?? ""}::${path}`;
-}
 
 /**
  * Aggregates a list of per-repo results into a single GitOperationResult.
@@ -357,7 +366,10 @@ function useStageDispatch({
   reposInFiles,
   stagedFiles,
   setPendingStageFiles,
+  pendingFileOperations,
+  pendingScopeIdentity,
 }: StageDispatchArgs) {
+  const nextPendingRequestId = useRef(0);
   const groupPathsByRepo = useCallback(
     (paths: string[]): Map<string, string[]> => groupPathsByRepoName(paths, repoForPath),
     [repoForPath],
@@ -433,31 +445,48 @@ function useStageDispatch({
       paths: string[],
       repo: string | undefined,
       op: (rp: string[], r: string | undefined) => Promise<GitOperationResult>,
-      operation: string,
+      operation: PendingFileOperationOwner["operation"],
     ) => {
-      // Key pending entries by `repo::path` so concurrent operations in
-      // different repositories remain scoped. The consumer `FileRow` checks
-      // membership via the same encoding.
+      // Track the requested transition with each repo/path key so an unrelated
+      // or stale status refresh cannot clear a newer pending action.
       const buckets = repo !== undefined ? new Map([[repo, paths]]) : groupPathsByRepo(paths);
       const keys: string[] = [];
       for (const [r, rp] of buckets) for (const p of rp) keys.push(pendingKey(r, p));
+      const owner: PendingFileOperationOwner = {
+        operation,
+        requestId: ++nextPendingRequestId.current,
+        scopeIdentity: pendingScopeIdentity,
+      };
+      for (const key of keys) pendingFileOperations.current.set(key, owner);
       setPendingStageFiles((prev) => {
         const next = new Set(prev);
         for (const k of keys) next.add(k);
         return next;
       });
       try {
-        return await runPerRepo(paths, repo, operation, op);
-      } finally {
-        setPendingStageFiles((prev) => {
-          if (prev.size === 0) return prev;
-          const next = new Set(prev);
-          for (const k of keys) next.delete(k);
-          return next;
-        });
+        const result = await runPerRepo(paths, repo, operation, op);
+        if (!result.success) {
+          const failedKeys = pendingKeysForFailedRepositories(buckets, result.per_repo);
+          clearPendingFileOperations(
+            failedKeys,
+            owner,
+            pendingFileOperations,
+            setPendingStageFiles,
+          );
+        }
+        return result;
+      } catch (err) {
+        clearPendingFileOperations(keys, owner, pendingFileOperations, setPendingStageFiles);
+        throw err;
       }
     },
-    [runPerRepo, setPendingStageFiles, groupPathsByRepo],
+    [
+      runPerRepo,
+      setPendingStageFiles,
+      groupPathsByRepo,
+      pendingFileOperations,
+      pendingScopeIdentity,
+    ],
   );
   const stageFile = useCallback(
     async (paths: string[], repo?: string) =>
@@ -624,10 +653,13 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   const sid = sessionId ?? null;
   const gitStatus = useSessionGitStatus(sid);
   const statusByRepo = useSessionGitStatusByRepo(sid);
+  const pendingScopeIdentity = useSessionGitPendingScope(sid);
+  const pendingCheckoutGenerations = useSessionGitPendingCheckoutGenerations(sid);
   const { commits, loading: commitsLoading } = useSessionCommits(sid);
   const { diff: cumulativeDiff } = useCumulativeDiff(sid);
   const gitOps = useGitOperations(sid);
   const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
+  const pendingFileOperations = useRef<Map<string, PendingFileOperationOwner>>(new Map());
   const {
     allFiles,
     unstagedFiles,
@@ -637,12 +669,26 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     repoNamesForControls,
     perRepoStatus,
   } = useFileDerivations(statusByRepo, gitStatus);
+  const pendingScopeMatches = usePendingFileOperationScope(
+    pendingScopeIdentity,
+    pendingFileOperations,
+    setPendingStageFiles,
+  );
+  usePendingFileOperationRepositoryScope(
+    pendingCheckoutGenerations,
+    pendingFileOperations,
+    setPendingStageFiles,
+  );
+  usePerRepoPendingClear(statusByRepo, allFiles, setPendingStageFiles, pendingFileOperations);
+
   const stageOps = useStageDispatch({
     gitOps,
     repoForPath,
     reposInFiles,
     stagedFiles,
     setPendingStageFiles,
+    pendingFileOperations,
+    pendingScopeIdentity,
   });
   const { stageAll, unstageAll, commit, stageFile, unstageFile, discard } = stageOps;
   const derived = deriveSessionGitValues(
@@ -682,7 +728,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
 
     isLoading: gitOps.isLoading,
     loadingOperation: gitOps.loadingOperation,
-    pendingStageFiles,
+    pendingStageFiles: pendingScopeMatches ? pendingStageFiles : new Set<string>(),
 
     pull: remoteOps.pull,
     push: remoteOps.push,
