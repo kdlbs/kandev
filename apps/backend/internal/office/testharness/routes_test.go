@@ -121,7 +121,7 @@ func TestSeedCostEventPreservesOutputTokenPresence(t *testing.T) {
 		t.Fatalf("new office repo: %v", err)
 	}
 	router := gin.New()
-	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default())
+	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default(), nil)
 
 	post := func(body map[string]any) {
 		t.Helper()

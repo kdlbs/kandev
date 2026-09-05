@@ -376,8 +376,12 @@ function getPendingOrActiveTaskIcon(
     | "parkedOnBackgroundWork"
   >,
 ): IconConfig | undefined {
-  const { hasPendingClarification, foregroundActivity, hasPendingPermission, parkedOnBackgroundWork } =
-    options;
+  const {
+    hasPendingClarification,
+    foregroundActivity,
+    hasPendingPermission,
+    parkedOnBackgroundWork,
+  } = options;
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return PENDING_PERMISSION_ICON;
   }

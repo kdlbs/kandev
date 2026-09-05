@@ -486,14 +486,14 @@ func TestParkedProjectionOrdering_ProbeCallSitesFollowTurnCompletion(t *testing.
 	}
 	body := text[fnStart : fnStart+fnEnd]
 
-	completeIdx := strings.Index(body, "s.completeTurnForTaskSession(")
-	waitingIdx := strings.Index(body, "s.setSessionWaitingForInput(")
+	completeIdx := strings.Index(body, "s.completeTurnForStreamEvent(")
+	waitingIdx := strings.Index(body, "s.setSessionWaitingForInputIfRequested(")
 	if completeIdx < 0 || waitingIdx < 0 {
-		t.Fatalf("expected both calls in handleCompleteStreamEvent; completeTurnForTaskSession=%d setSessionWaitingForInput=%d", completeIdx, waitingIdx)
+		t.Fatalf("expected both calls in handleCompleteStreamEvent; completeTurnForStreamEvent=%d setSessionWaitingForInputIfRequested=%d", completeIdx, waitingIdx)
 	}
 	if completeIdx >= waitingIdx {
-		t.Fatal("completeTurnForTaskSession (which triggers session.turn_finished) must run before " +
-			"setSessionWaitingForInput (which triggers the parked-projection probe via " +
+		t.Fatal("completeTurnForStreamEvent (which triggers session.turn_finished) must run before " +
+			"setSessionWaitingForInputIfRequested (which triggers the parked-projection probe via " +
 			"onSessionStateChangedForParkedProjection) — F7 ordering regressed")
 	}
 

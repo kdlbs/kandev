@@ -24,16 +24,46 @@ import (
 // turn-completion signal fires exactly once and before the parked probe,
 // regardless of outcome — is observable at this seam.
 type fakeOrderingTurnService struct {
-	bus         *recordingEventBus
-	turnID      string
-	activeGiven bool
+	bus       *recordingEventBus
+	turnID    string
+	completed bool
 }
 
 func (f *fakeOrderingTurnService) StartTurn(context.Context, string) (*models.Turn, error) {
 	return nil, nil
 }
 
+func (f *fakeOrderingTurnService) ReserveTurn(
+	context.Context,
+	string,
+	*models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	panic("fakeOrderingTurnService: ReserveTurn should not be called by ordering tests")
+}
+
+func (f *fakeOrderingTurnService) PublishReservedTurn(context.Context, *models.Turn) error {
+	panic("fakeOrderingTurnService: PublishReservedTurn should not be called by ordering tests")
+}
+
+func (f *fakeOrderingTurnService) RollbackReservedTurn(context.Context, string, string) (bool, error) {
+	panic("fakeOrderingTurnService: RollbackReservedTurn should not be called by ordering tests")
+}
+
+func (f *fakeOrderingTurnService) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeOrderingTurnService) PatchTurnMetadata(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+) error {
+	panic("fakeOrderingTurnService: PatchTurnMetadata should not be called by ordering tests")
+}
+
 func (f *fakeOrderingTurnService) CompleteTurn(ctx context.Context, turnID string) error {
+	f.completed = true
 	_ = f.bus.Publish(ctx, events.TurnCompleted, bus.NewEvent(events.TurnCompleted, "task-service", map[string]interface{}{
 		"id": turnID,
 	}))
@@ -44,17 +74,27 @@ func (f *fakeOrderingTurnService) GetTurn(context.Context, string) (*models.Turn
 	return nil, nil
 }
 
+// GetActiveTurn mirrors a repo-backed turn service: the turn stays active
+// across any number of lookups until CompleteTurn actually closes it. An
+// earlier revision cleared it on the first read instead, which happened to
+// match handleCompleteStreamEvent's old single-lookup call pattern but broke
+// once currentTurnIDForSession added an earlier GetActiveTurn probe ahead of
+// the completion call — the probe silently "consumed" the turn before
+// completion could see it.
 func (f *fakeOrderingTurnService) GetActiveTurn(_ context.Context, sessionID string) (*models.Turn, error) {
-	if f.activeGiven {
+	if f.completed {
 		return nil, nil
 	}
-	f.activeGiven = true
 	return &models.Turn{ID: f.turnID, TaskSessionID: sessionID}, nil
 }
 
 func (f *fakeOrderingTurnService) UpdateTurn(context.Context, *models.Turn) error { return nil }
 
 func (f *fakeOrderingTurnService) AbandonOpenTurns(context.Context, string) error { return nil }
+
+func (f *fakeOrderingTurnService) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return nil
+}
 
 // turnCompletedIndex returns the index of the first events.TurnCompleted
 // publication on bus, and how many were published in total.

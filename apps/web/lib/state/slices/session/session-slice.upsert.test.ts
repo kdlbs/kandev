@@ -207,9 +207,11 @@ describe("parked-on-background-work revision ordering", () => {
       );
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ parked_on_background_work: false, revision: 1, parked_epoch: 100 }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ parked_on_background_work: false, revision: 1, parked_epoch: 100 })],
+        {},
+      );
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.parked_on_background_work).toBe(true);
@@ -227,9 +229,11 @@ describe("parked-on-background-work revision ordering", () => {
       );
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ parked_on_background_work: false, revision: 99, parked_epoch: 100 }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ parked_on_background_work: false, revision: 99, parked_epoch: 100 })],
+        {},
+      );
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.parked_on_background_work).toBe(true);
@@ -611,9 +615,12 @@ describe("queue actions", () => {
       }),
     );
 
-    store
-      .getState()
-      .setQueueEntries(SESSION_ID, [makeEntry()], { count: 1, max: 10, mergeEnabled: true });
+    store.getState().setQueueEntries(SESSION_ID, [makeEntry()], {
+      count: 1,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+    });
     store.getState().removeQueueEntry(SESSION_ID, "missing-entry");
     store.getState().setQueueLoading(SESSION_ID, true);
     store.getState().clearQueueStatus(SESSION_ID);

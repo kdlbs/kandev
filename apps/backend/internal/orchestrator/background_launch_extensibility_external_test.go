@@ -77,6 +77,29 @@ func (extAgentManager) CancelAgent(context.Context, string) error { return nil }
 func (extAgentManager) RespondToPermissionBySessionID(context.Context, string, string, string, bool) error {
 	return nil
 }
+func (extAgentManager) CancelPermissionBySessionID(
+	context.Context,
+	string,
+	string,
+	string,
+) (*streams.PermissionCancelResponse, error) {
+	return nil, nil
+}
+func (extAgentManager) ListPendingPermissionsBySessionID(
+	context.Context,
+	string,
+) ([]streams.PendingAgentPermission, error) {
+	return nil, nil
+}
+func (extAgentManager) ResolvePermissionBySessionID(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+) (*streams.PermissionResolveResponse, error) {
+	return nil, nil
+}
 func (extAgentManager) ProbeBackgroundWorkloads(context.Context, string) (client.ProbeResult, error) {
 	return client.ProbeResultUnknown, nil
 }
@@ -137,6 +160,48 @@ func (extAgentManager) GetGitStatusFresh(context.Context, string) (*client.GitSt
 func (extAgentManager) WaitForAgentctlReady(context.Context, string) error { return nil }
 
 var _ executor.AgentManagerClient = extAgentManager{}
+
+// noopExtTurnService is a no-op stub satisfying orchestrator.TurnService.
+// This test seeds its repo with no turns and never dispatches a prompt, so
+// "no active/reservable turn" is the true state for every method here, not
+// merely a convenient stub — Start's startup reconciliation just needs a
+// non-nil TurnService to proceed.
+type noopExtTurnService struct{}
+
+func (noopExtTurnService) StartTurn(context.Context, string) (*models.Turn, error) {
+	return nil, nil
+}
+func (noopExtTurnService) ReserveTurn(
+	context.Context,
+	string,
+	*models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	return nil, nil
+}
+func (noopExtTurnService) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return nil
+}
+func (noopExtTurnService) PublishReservedTurn(context.Context, *models.Turn) error { return nil }
+func (noopExtTurnService) RollbackReservedTurn(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+func (noopExtTurnService) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
+	return 0, nil
+}
+func (noopExtTurnService) CompleteTurn(context.Context, string) error { return nil }
+func (noopExtTurnService) GetTurn(context.Context, string) (*models.Turn, error) {
+	return nil, nil
+}
+func (noopExtTurnService) GetActiveTurn(context.Context, string) (*models.Turn, error) {
+	return nil, nil
+}
+func (noopExtTurnService) UpdateTurn(context.Context, *models.Turn) error { return nil }
+func (noopExtTurnService) PatchTurnMetadata(context.Context, string, string, map[string]interface{}) error {
+	return nil
+}
+func (noopExtTurnService) AbandonOpenTurns(context.Context, string) error { return nil }
+
+var _ orchestrator.TurnService = noopExtTurnService{}
 
 // extTaskRepo is a minimal in-memory scheduler.TaskRepository.
 type extTaskRepo struct {
@@ -306,6 +371,7 @@ func TestSecondRegisteredRecognizer_DetachedLaunchParksThroughSettle_ByConstruct
 	)
 	svc.SetWorkflowStepGetter(extStepGetter{})
 	svc.SetBackgroundProbe(constantProbe{result: executor.ProbeResultLive})
+	svc.SetTurnService(noopExtTurnService{})
 
 	t.Cleanup(func() { _ = svc.Stop() })
 	if err := svc.Start(context.Background()); err != nil {
