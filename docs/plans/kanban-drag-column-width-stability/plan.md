@@ -64,7 +64,7 @@ The E2E test must fail on the current padding behavior. It must continue through
 | `AC-UI-ADAPTIVE-KANBAN-001.2` | `kanban-grid-template.test.ts` keeps the distributed `minmax(280px, 1fr)` template. |
 | `AC-UI-ADAPTIVE-KANBAN-001.3` | The existing Chromium scenario proves contained horizontal lane scrolling. |
 | `AC-UI-ADAPTIVE-KANBAN-001.4` | The existing Chromium scenario completes drag cancellation and a successful task move. |
-| `AC-UI-ADAPTIVE-KANBAN-001.9` | The Chromium scenario compares the same column before and during drag and verifies reserve after overflowing tracks. |
+| `AC-UI-ADAPTIVE-KANBAN-001.9` | The Chromium scenario compares every rendered desktop column before and during drag and verifies reserve after overflowing tracks. |
 
 ## E2E tests
 
@@ -80,9 +80,10 @@ No new mobile test is required because this correction changes only `AdaptiveDes
 
 ## Verification results
 
-- The focused component suite passed with 10 tests before the review fix.
-- The Chromium production-build scenario passed with one test before the review fix.
-- The review fix adds explicit coverage for overflow-track scroll range.
+- The focused component suite passed with 10 tests.
+- The Chromium production-build scenario passed with two tests, including overflow-track scroll range.
+- Scoped ESLint, web type checking, and the i18n ratchet passed.
+- Specification tests and lint passed, and `git diff --check` passed.
 - Scoped ESLint, web type checking, and the i18n ratchet passed.
 
 ## Risks

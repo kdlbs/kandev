@@ -39,7 +39,7 @@ Move the desktop drag end reserve after the overflowing grid tracks. Add browser
 ## Acceptance
 
 - The regression test fails because the current drag padding changes a column from 362.66px to 280px.
-- A drag with an unchanged rendered step set keeps the source column width within one CSS pixel.
+- A drag with an unchanged rendered step set keeps every rendered desktop column within one CSS pixel.
 - A board wider than the viewport retains the full drag reserve after its overflowing tracks.
 - The focused scenario still restores auto-hidden destinations and moves a task into one destination.
 
@@ -85,4 +85,6 @@ None.
 - Replaced the drag-only grid end padding with a trailing spacer after the lane grid.
 - Added component coverage for the spacer and the absence of padding.
 - Added Chromium geometry and overflow-track scroll-range assertions.
-- Initial focused unit and production-build Chromium checks passed before review feedback.
+- Focused component tests passed with 10 tests.
+- Production-build Chromium tests passed with two tests, including overflow-track scroll range and all-column width stability.
+- Scoped ESLint, web type checking, i18n ratchet, specification tests, specification lint, and diff checks passed.

@@ -64,7 +64,7 @@ The existing mobile auto-hide E2E scenario covers the nearest mobile surface. It
 ## Test strategy
 
 - Component tests assert that drag state uses a trailing spacer and does not use end padding.
-- The Chromium Kanban E2E scenario compares column width before and during drag.
+- The Chromium Kanban E2E scenario compares every rendered desktop column before and during drag.
 - The same Chromium scenario covers a board whose minimum track width exceeds the viewport and verifies the added scroll range.
 - The same E2E scenario proves temporary destinations, cancellation, and a successful drop.
 - The existing `mobile-chrome` scenario continues to prove mobile drag destinations and document-width containment.

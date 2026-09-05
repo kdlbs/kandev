@@ -28,6 +28,12 @@ async function beginPointerDrag(page: Page, card: Locator) {
   await page.mouse.move(x + 20, y, { steps: 4 });
 }
 
+async function renderedColumnWidths(page: Page) {
+  return page
+    .locator("[data-kanban-step-id]")
+    .evaluateAll((columns) => columns.map((column) => column.getBoundingClientRect().width));
+}
+
 test("auto-hides empty columns without changing drag destinations", async ({
   testPage,
   apiClient,
@@ -60,13 +66,15 @@ test("auto-hides empty columns without changing drag destinations", async ({
   await expect(kanban.columnByStepId(manuallyHiddenStep.id)).toBeVisible();
 
   // @covers AC-UI-ADAPTIVE-KANBAN-001.9
-  const sourceColumn = kanban.columnByStepId(sourceStep.id);
-  const sourceWidthBeforeDrag = (await sourceColumn.boundingBox())?.width;
-  if (sourceWidthBeforeDrag == null) throw new Error("drag source has no layout width");
+  const widthsBeforeDrag = await renderedColumnWidths(testPage);
+  expect(widthsBeforeDrag.length).toBe(3);
   await beginPointerDrag(testPage, kanban.taskCard(task.id));
-  const sourceWidthDuringDrag = (await sourceColumn.boundingBox())?.width;
-  if (sourceWidthDuringDrag == null) throw new Error("drag source has no layout width");
-  expect(Math.abs(sourceWidthDuringDrag - sourceWidthBeforeDrag)).toBeLessThanOrEqual(1);
+  await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(1);
+  const widthsDuringDrag = await renderedColumnWidths(testPage);
+  expect(widthsDuringDrag).toHaveLength(widthsBeforeDrag.length);
+  widthsDuringDrag.forEach((width, index) => {
+    expect(Math.abs(width - widthsBeforeDrag[index])).toBeLessThanOrEqual(1);
+  });
   await testPage.keyboard.press("Escape");
   await testPage.mouse.up();
 
