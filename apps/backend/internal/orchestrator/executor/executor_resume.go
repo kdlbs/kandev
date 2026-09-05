@@ -194,6 +194,10 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	if destination, found, err := models.LoadContributionDestination(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load contribution destination for task repository %q: %w", tr.ID, err)
 	} else if found {
+		destination.HeadBranch = info.CheckoutBranch
+		if err := destination.Validate(); err != nil {
+			return nil, fmt.Errorf("bind contribution destination for task repository %q: %w", tr.ID, err)
+		}
 		info.ContributionDestination = &destination
 	}
 	if target, found, err := models.LoadComparisonTarget(tr.Metadata); err != nil {
@@ -1774,6 +1778,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 	}
 	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID && req.ContributionDestination == nil {
 		if destination, found, err := models.LoadContributionDestination(primaryTaskRepo.Metadata); err == nil && found {
+			destination.HeadBranch = req.CheckoutBranch
 			req.ContributionDestination = &destination
 		}
 	}

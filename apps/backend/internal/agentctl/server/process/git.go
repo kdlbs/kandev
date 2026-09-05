@@ -39,10 +39,11 @@ type GitOperationResult struct {
 
 // GitOperator executes git operations in a workspace directory.
 type GitOperator struct {
-	workDir          string
-	logger           *logger.Logger
-	workspaceTracker *WorkspaceTracker
-	environment      func() []string
+	workDir                string
+	logger                 *logger.Logger
+	workspaceTracker       *WorkspaceTracker
+	environment            func() []string
+	managedPushEnvironment func() []string
 	// repoName is the multi-repo subpath this operator runs in (e.g. "kandev").
 	// Empty for the workspace-root operator. Stamped on emitted commit
 	// notifications so the frontend can group commits per repo.
@@ -73,6 +74,7 @@ func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *Worksp
 		logger:                 log.WithFields(zap.String("component", "git-operator")),
 		workspaceTracker:       workspaceTracker,
 		environment:            os.Environ,
+		managedPushEnvironment: os.Environ,
 		prCreateRetryAttempts:  3,
 		prCreateRetryBaseDelay: 2 * time.Second,
 	}
@@ -92,6 +94,12 @@ func (g *GitOperator) setEnvironmentProvider(provider func() []string) {
 	}
 }
 
+func (g *GitOperator) setManagedPushEnvironmentProvider(provider func() []string) {
+	if provider != nil {
+		g.managedPushEnvironment = provider
+	}
+}
+
 func (g *GitOperator) setRemoteContribution(binding *models.RemoteContribution) {
 	if binding == nil {
 		return
@@ -108,7 +116,7 @@ func (g *GitOperator) setContributionDestination(destination *models.Contributio
 	if destination == nil {
 		return
 	}
-	if err := destination.Validate(); err != nil {
+	if err := destination.ValidateForPublication(); err != nil {
 		g.contributionDestinationErr = fmt.Errorf("invalid contribution destination: %w", err)
 		return
 	}
@@ -162,6 +170,24 @@ func (g *GitOperator) validateContributionDestinationRemote(ctx context.Context)
 	return nil
 }
 
+func (g *GitOperator) contributionDestinationRefspec(ctx context.Context) (string, string, error) {
+	if g.contributionDestination == nil {
+		return "", "", errors.New("contribution destination is not configured")
+	}
+	headBranch := g.contributionDestination.HeadBranch
+	if !securityutil.IsValidBranchName(headBranch) {
+		return "", "", errors.New("contribution destination task branch is missing or invalid")
+	}
+	branch, err := g.getCurrentBranch(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	if branch != headBranch {
+		return "", "", fmt.Errorf("current branch %q does not match task branch %q", branch, headBranch)
+	}
+	return branch, "HEAD:refs/heads/" + headBranch, nil
+}
+
 func (g *GitOperator) environmentValues() []string {
 	if g.environment == nil {
 		return os.Environ()
@@ -183,105 +209,108 @@ func (g *GitOperator) environmentValue(key string) string {
 // runGitCommand executes a git command in the workDir with defense-in-depth validation.
 // Validates both flags and branch/ref arguments to prevent command injection.
 func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string, error) {
-	// Validate that user-controlled arguments don't introduce command injection risks
-	// Even though exec.CommandContext doesn't use a shell, we must prevent argument
-	// injection where malicious input like "--help" or "--exec=..." could be passed
-	// as what appears to be a file/branch name but is interpreted as a flag by git.
-	skipNextArg := false
-	afterDoubleDash := false // Track if we've seen "--" separator
-	for i, arg := range args {
-		// Skip git subcommand (first argument)
-		if i == 0 {
+	return g.runGitCommandWithEnvironment(ctx, g.environment, nil, args...)
+}
+
+func (g *GitOperator) runManagedPushGitCommand(ctx context.Context, args ...string) (string, error) {
+	if err := g.validateManagedPushTransport(ctx); err != nil {
+		return "", err
+	}
+	return g.runGitCommandWithEnvironment(
+		ctx,
+		g.managedPushEnvironmentValues,
+		[]string{"-c", "core.hooksPath=" + os.DevNull},
+		args...,
+	)
+}
+
+// validateManagedPushTransport rejects repository-local configuration that can
+// redirect a managed publication to an unvalidated transport or run a helper
+// with the private destination credential scope.
+func (g *GitOperator) validateManagedPushTransport(ctx context.Context) error {
+	output, err := g.runGitCommand(ctx, "config", "--local", "--list")
+	if err != nil {
+		return fmt.Errorf("inspect managed push transport configuration: %w", err)
+	}
+	for _, entry := range strings.Split(output, "\n") {
+		key, _, _ := strings.Cut(entry, "=")
+		if managedPushTransportConfigKey(key) {
+			return fmt.Errorf("repository-controlled transport configuration %q is not allowed for managed publication", key)
+		}
+	}
+	return nil
+}
+
+func managedPushTransportConfigKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "include.path" || managedPushConfigKeyWithSuffix(key, "includeif.", ".path") {
+		return true
+	}
+	if managedPushConfigKeyWithSuffixes(key, "url.", ".insteadof", ".pushinsteadof") {
+		return true
+	}
+	if key == "core.sshcommand" || key == "core.gitproxy" || key == "credential.helper" {
+		return true
+	}
+	return managedPushConfigKeyWithSuffixes(key, "remote.", ".receivepack", ".uploadpack") ||
+		managedPushConfigKeyWithSuffixes(key, "http.", ".proxy", ".extraheader") ||
+		managedPushConfigKeyWithSuffix(key, "credential.", ".helper")
+}
+
+func managedPushConfigKeyWithSuffix(key, prefix, suffix string) bool {
+	return strings.HasPrefix(key, prefix) && strings.HasSuffix(key, suffix)
+}
+
+func managedPushConfigKeyWithSuffixes(key, prefix string, suffixes ...string) bool {
+	if !strings.HasPrefix(key, prefix) {
+		return false
+	}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(key, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *GitOperator) managedPushEnvironmentValues() []string {
+	unsafePrefixes := []string{
+		"GIT_SSH=", "GIT_SSH_COMMAND=", "GIT_PROXY_COMMAND=", "GIT_ASKPASS=", "SSH_ASKPASS=",
+		"GIT_CONFIG_GLOBAL=", "GIT_CONFIG_SYSTEM=", "GIT_CONFIG_NOSYSTEM=",
+		"GIT_CONFIG_PARAMETERS=",
+		"GIT_CONFIG_COUNT=", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_",
+	}
+	env := filterGitEnv(g.managedPushEnvironment())
+	filtered := make([]string, 0, len(env)+2)
+	for _, assignment := range env {
+		if hasEnvironmentPrefix(assignment, unsafePrefixes) {
 			continue
 		}
+		filtered = append(filtered, assignment)
+	}
+	return append(filtered, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+}
 
-		// Skip if this argument is a value for a previous flag
-		if skipNextArg {
-			skipNextArg = false
-			continue
+func hasEnvironmentPrefix(assignment string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if len(assignment) >= len(prefix) && strings.EqualFold(assignment[:len(prefix)], prefix) {
+			return true
 		}
+	}
+	return false
+}
 
-		// After "--", all arguments are file paths - no validation needed
-		if afterDoubleDash {
-			continue
-		}
-
-		if strings.HasPrefix(arg, contributionLeaseFlagPrefix) {
-			if err := validateContributionLeaseFlag(arg); err != nil {
-				return "", err
-			}
-			continue
-		}
-
-		// Validate flags against whitelist
-		if strings.HasPrefix(arg, "-") {
-			if !securityutil.IsKnownSafeGitFlag(arg) {
-				return "", fmt.Errorf("potentially unsafe flag: %s", arg)
-			}
-			// Special handling for "--" separator
-			if arg == "--" {
-				afterDoubleDash = true
-				continue
-			}
-			// Flags that take a value in the next argument
-			if arg == "-m" || arg == "--format" {
-				skipNextArg = true
-			}
-			continue
-		}
-
-		// Skip known safe git literals (HEAD, origin, etc.)
-		if securityutil.IsKnownSafeGitLiteral(arg) {
-			continue
-		}
-
-		// Skip commit SHAs (validated elsewhere via validateCommitSHA)
-		if securityutil.LooksLikeCommitSHA(arg) {
-			continue
-		}
-
-		// Contribution pushes use an explicit, non-force refspec. Validate the
-		// branch portion before allowing the colon-bearing argument through.
-		if strings.HasPrefix(arg, "HEAD:refs/heads/") {
-			if !securityutil.IsValidBranchName(strings.TrimPrefix(arg, "HEAD:refs/heads/")) {
-				return "", ErrInvalidBranchName
-			}
-			continue
-		}
-
-		// Empty-remote publication uses an immutable commit-to-branch refspec.
-		// Validate it before the generic slash-bearing reference check.
-		if source, destination, ok := strings.Cut(arg, ":refs/heads/"); ok {
-			if securityutil.LooksLikeCommitSHA(source) &&
-				securityutil.IsValidBranchName(destination) {
-				continue
-			}
-		}
-
-		// Validate branch references (e.g., "origin/branch", "upstream/main")
-		// This provides defense-in-depth even though branches are validated at call sites
-		if strings.Contains(arg, "/") {
-			if err := securityutil.ValidateBranchReference(arg); err != nil {
-				return "", err
-			}
-			continue
-		}
-
-		// Validate standalone branch names
-		if securityutil.IsValidBranchName(arg) {
-			// Standalone arg that matches branch name pattern - validated and safe
-			continue
-		}
-		// If we reach here, it's a non-branch argument (file path, etc.)
-		// which we don't validate as strictly
+func (g *GitOperator) runGitCommandWithEnvironment(
+	ctx context.Context, environment func() []string, gitGlobalArgs []string, args ...string,
+) (string, error) {
+	if err := validateGitCommandArgs(args); err != nil {
+		return "", err
 	}
 
-	// All args validated: flags in securityutil.IsKnownSafeGitFlag whitelist, branch names via securityutil.IsValidBranchName
-	// regex, commit SHAs via securityutil.LooksLikeCommitSHA pattern, args after "--" separator skipped.
-	// This defense-in-depth validation prevents injection of arbitrary commands.
-	cmd := subproc.NewGitCommand(ctx, args...)
+	commandArgs := append(append([]string(nil), gitGlobalArgs...), args...)
+	cmd := subproc.NewGitCommand(ctx, commandArgs...)
 	cmd.Dir = g.workDir
-	cmd.Env = filterGitEnv(g.environmentValues())
+	cmd.Env = filterGitEnv(environment())
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -308,6 +337,65 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 	}
 
 	return output, nil
+}
+
+func validateGitCommandArgs(args []string) error {
+	skipNextArg := false
+	afterDoubleDash := false
+	for i, arg := range args {
+		if i == 0 {
+			continue
+		}
+		if skipNextArg {
+			skipNextArg = false
+			continue
+		}
+		if afterDoubleDash {
+			continue
+		}
+		skip, after, err := validateGitCommandArg(arg)
+		if err != nil {
+			return err
+		}
+		skipNextArg = skip
+		afterDoubleDash = after
+	}
+	return nil
+}
+
+func validateGitCommandArg(arg string) (skipNext, afterDoubleDash bool, err error) {
+	if strings.HasPrefix(arg, contributionLeaseFlagPrefix) {
+		return false, false, validateContributionLeaseFlag(arg)
+	}
+	if strings.HasPrefix(arg, "-") {
+		if !securityutil.IsKnownSafeGitFlag(arg) {
+			return false, false, fmt.Errorf("potentially unsafe flag: %s", arg)
+		}
+		return arg == "-m" || arg == "--format", arg == "--", nil
+	}
+	return false, false, validateGitReferenceArg(arg)
+}
+
+func validateGitReferenceArg(arg string) error {
+	if securityutil.IsKnownSafeGitLiteral(arg) || securityutil.LooksLikeCommitSHA(arg) {
+		return nil
+	}
+	if strings.HasPrefix(arg, "HEAD:refs/heads/") {
+		if !securityutil.IsValidBranchName(strings.TrimPrefix(arg, "HEAD:refs/heads/")) {
+			return ErrInvalidBranchName
+		}
+		return nil
+	}
+	if source, destination, ok := strings.Cut(arg, ":refs/heads/"); ok &&
+		securityutil.LooksLikeCommitSHA(source) && securityutil.IsValidBranchName(destination) {
+		return nil
+	}
+	if strings.Contains(arg, "/") {
+		return securityutil.ValidateBranchReference(arg)
+	}
+	// Standalone branch names and non-reference values are admitted here. The
+	// command-specific callers validate semantic values before this boundary.
+	return nil
 }
 
 // filterGitEnv removes GIT_DIR and GIT_WORK_TREE from the environment.
@@ -520,7 +608,11 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 	refspec := branch
 	if g.contributionDestination != nil {
 		remote = g.contributionDestination.ContributionRemoteName()
-		refspec = branch
+		branch, refspec, err = g.contributionDestinationRefspec(ctx)
+		if err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
 		shouldSetUpstream = setUpstream
 	} else if g.remoteContribution != nil {
 		remote = g.remoteContribution.ContributionRemoteName()
@@ -538,7 +630,12 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 
 	args = append(args, remote, refspec)
 
-	output, err := g.runGitCommand(ctx, args...)
+	var output string
+	if g.contributionDestination != nil {
+		output, err = g.runManagedPushGitCommand(ctx, args...)
+	} else {
+		output, err = g.runGitCommand(ctx, args...)
+	}
 	result.Output = output
 
 	if err != nil {
@@ -581,12 +678,12 @@ func (g *GitOperator) PushPreflight(ctx context.Context) (*GitOperationResult, e
 			result.Error = err.Error()
 			return result, nil
 		}
-		branch, err := g.getCurrentBranch(ctx)
+		branch, refspec, err := g.contributionDestinationRefspec(ctx)
 		if err != nil {
 			result.Error = err.Error()
 			return result, nil
 		}
-		output, err := g.runGitCommand(ctx, "push", "--dry-run", g.contributionDestination.ContributionRemoteName(), branch)
+		output, err := g.runManagedPushGitCommand(ctx, "push", "--dry-run", g.contributionDestination.ContributionRemoteName(), refspec)
 		result.Output = output
 		if err != nil {
 			result.Error = err.Error()
@@ -1382,12 +1479,12 @@ func (g *GitOperator) createManagedContributionPR(
 		result.Error = err.Error()
 		return result, nil
 	}
-	branch, err := g.getCurrentBranch(ctx)
+	branch, refspec, err := g.contributionDestinationRefspec(ctx)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
 		return result, nil
 	}
-	output, err := g.runGitCommand(ctx, "push", g.contributionDestination.ContributionRemoteName(), "HEAD:refs/heads/"+branch)
+	output, err := g.runManagedPushGitCommand(ctx, "push", g.contributionDestination.ContributionRemoteName(), refspec)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to push contribution destination: %s", g.sanitizePRFailure(output, title, body))
 		result.Output = g.sanitizeGitPushOutput(output)

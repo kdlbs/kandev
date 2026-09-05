@@ -208,7 +208,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetComparisonTargetObserver(taskSvc)
 		githubSvc.SetPromptResolver(promptSvc)
-		taskSvc.SetContributionDestinationPreparer(&githubContributionDestinationPreparer{service: githubSvc, taskSvc: taskSvc})
+		taskSvc.SetContributionDestinationPreparer(&githubContributionDestinationPreparer{
+			service: githubSvc, taskSvc: taskSvc, repo: repos.Task,
+		})
 		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task, provider: githubSvc}); brokerErr != nil {
 			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
 		}
@@ -370,8 +372,174 @@ func reserveBuiltinMentionIdentities(
 }
 
 type githubContributionDestinationPreparer struct {
-	service *github.Service
-	taskSvc *taskservice.Service
+	service githubContributionDestinationService
+	taskSvc contributorForkRepositoryUpdater
+	repo    contributorForkTaskRepository
+}
+
+type contributorForkRepositoryUpdater interface {
+	UpdateRepository(
+		context.Context, string, *taskservice.UpdateRepositoryRequest,
+	) (*taskmodels.Repository, error)
+}
+
+type githubContributionDestinationService interface {
+	DescribeTaskGitCredentialPolicy(context.Context, string) (github.TaskGitCredentialPolicy, error)
+	ResolveContributionForkForWorkspace(
+		context.Context, string, string, string, bool,
+	) (github.ContributionForkResolution, error)
+}
+
+type contributorForkTaskRepository interface {
+	GetTask(context.Context, string) (*taskmodels.Task, error)
+	GetRepository(context.Context, string) (*taskmodels.Repository, error)
+	ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error)
+	BindTaskRepositoryContributionDestination(
+		context.Context, string, string, string, *taskmodels.ContributionDestination,
+	) (*taskmodels.TaskRepository, bool, error)
+}
+
+// PrepareContributorForkLease is the launch-time path for an ordinary task
+// that predates, or was created outside, the dedicated Improve Kandev flow.
+// The implementation is intentionally separate from creation-time fork
+// creation: it may reuse a confirmed existing fork but never creates one.
+func (p *githubContributionDestinationPreparer) PrepareContributorForkLease(
+	ctx context.Context, workspaceID, taskID string,
+) error {
+	if p == nil || p.service == nil || p.repo == nil || workspaceID == "" || taskID == "" {
+		return nil
+	}
+	task, err := p.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load contributor publication task: %w", err)
+	}
+	if task == nil || task.ID != taskID || task.WorkspaceID != workspaceID {
+		return errors.New("contributor publication task does not belong to workspace")
+	}
+	policy, err := p.service.DescribeTaskGitCredentialPolicy(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("resolve contributor publication credential policy: %w", err)
+	}
+	if policy.Mode != github.TaskGitCredentialsModeManaged {
+		return nil
+	}
+	attachments, err := p.repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("list contributor publication repositories: %w", err)
+	}
+	for _, attachment := range attachments {
+		if err := p.prepareExistingContributorFork(ctx, workspaceID, taskID, attachment); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *githubContributionDestinationPreparer) prepareExistingContributorFork(
+	ctx context.Context, workspaceID, taskID string, attachment *taskmodels.TaskRepository,
+) error {
+	if attachment == nil || attachment.TaskID != taskID || attachment.RepositoryID == "" {
+		return nil
+	}
+	bound, err := hasContributorPublicationBinding(attachment.Metadata)
+	if err != nil {
+		return err
+	}
+	if bound {
+		return nil
+	}
+	repository, err := p.canonicalContributorRepository(ctx, workspaceID, attachment.RepositoryID)
+	if err != nil {
+		return err
+	}
+	if repository == nil {
+		return nil
+	}
+	destination, err := p.resolveExistingContributorFork(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if destination == nil {
+		return nil
+	}
+	canonicalProviderID := strings.TrimSpace(destination.SourceRepository.ProviderID)
+	if err := p.reconcileContributorProviderID(ctx, repository, canonicalProviderID); err != nil {
+		return err
+	}
+	if _, _, err := p.repo.BindTaskRepositoryContributionDestination(
+		ctx, attachment.ID, taskID, attachment.RepositoryID, destination,
+	); err != nil {
+		return fmt.Errorf("persist contributor publication destination: %w", err)
+	}
+	return nil
+}
+
+func (p *githubContributionDestinationPreparer) canonicalContributorRepository(
+	ctx context.Context, workspaceID, repositoryID string,
+) (*taskmodels.Repository, error) {
+	repository, err := p.repo.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("load contributor publication repository: %w", err)
+	}
+	if repository == nil || repository.WorkspaceID != workspaceID ||
+		!isCanonicalKandevRepositoryInput(nil, repository) {
+		return nil, nil
+	}
+	return repository, nil
+}
+
+func hasContributorPublicationBinding(metadata map[string]interface{}) (bool, error) {
+	if _, ok, err := taskmodels.LoadRemoteContribution(metadata); err != nil {
+		return false, fmt.Errorf("load remote contribution for contributor publication: %w", err)
+	} else if ok {
+		return true, nil
+	}
+	if _, ok, err := taskmodels.LoadContributionDestination(metadata); err != nil {
+		return false, fmt.Errorf("load contributor publication destination: %w", err)
+	} else if ok {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (p *githubContributionDestinationPreparer) resolveExistingContributorFork(
+	ctx context.Context, workspaceID string,
+) (*taskmodels.ContributionDestination, error) {
+	resolution, err := p.service.ResolveContributionForkForWorkspace(
+		ctx, workspaceID, canonicalKandevOwner, canonicalKandevName, false,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("verify existing contributor publication fork: %w", err)
+	}
+	if resolution.Destination == nil {
+		return nil, nil
+	}
+	destination := resolution.Destination
+	if err := destination.Validate(); err != nil {
+		return nil, fmt.Errorf("validate contributor publication destination: %w", err)
+	}
+	if destination.CredentialBinding == nil {
+		return nil, errors.New("contributor publication destination credential binding is missing")
+	}
+	if err := destination.CredentialBinding.Validate(); err != nil {
+		return nil, fmt.Errorf("validate contributor publication credential binding: %w", err)
+	}
+	return destination, nil
+}
+
+func (p *githubContributionDestinationPreparer) reconcileContributorProviderID(
+	ctx context.Context, repository *taskmodels.Repository, canonicalProviderID string,
+) error {
+	if repository.ProviderRepoID != "" {
+		if !strings.EqualFold(repository.ProviderRepoID, canonicalProviderID) {
+			return errors.New("contributor publication canonical provider identity changed")
+		}
+		return nil
+	}
+	if p.taskSvc == nil {
+		return errors.New("contributor publication canonical provider identity is unavailable")
+	}
+	return p.reconcileProviderRepoID(ctx, repository, canonicalProviderID)
 }
 
 func (p *githubContributionDestinationPreparer) PrepareContributionDestination(
@@ -416,13 +584,15 @@ func (p *githubContributionDestinationPreparer) prepareRepository(
 	if err != nil {
 		return fmt.Errorf("prepare Improve Kandev contribution destination: %w", err)
 	}
-	if resolution.Repository == nil || resolution.Repository.ID <= 0 {
-		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID is missing")
-	}
-	providerRepoID := strconv.FormatInt(resolution.Repository.ID, 10)
 	destination := resolution.Destination
-	if destination != nil && strings.TrimSpace(destination.SourceRepository.ProviderID) != providerRepoID {
-		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID is inconsistent")
+	providerRepoID := ""
+	if destination != nil {
+		providerRepoID = strings.TrimSpace(destination.SourceRepository.ProviderID)
+	} else if resolution.Repository != nil && resolution.Repository.ID > 0 {
+		providerRepoID = strconv.FormatInt(resolution.Repository.ID, 10)
+	}
+	if providerRepoID == "" {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID is missing")
 	}
 	if err := p.reconcileProviderRepoID(ctx, repositoryAt(repositories, index), providerRepoID); err != nil {
 		return err
@@ -441,11 +611,11 @@ func (p *githubContributionDestinationPreparer) reconcileProviderRepoID(
 		return nil
 	}
 	if repository.ProviderRepoID != "" && !strings.EqualFold(repository.ProviderRepoID, providerRepoID) {
-		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID changed")
+		return fmt.Errorf("prepare contribution destination: canonical provider ID changed")
 	}
 	if repository.ProviderRepoID == "" && p.taskSvc != nil {
 		if _, err := p.taskSvc.UpdateRepository(ctx, repository.ID, &taskservice.UpdateRepositoryRequest{ProviderRepoID: &providerRepoID}); err != nil {
-			return fmt.Errorf("backfill Improve Kandev canonical provider ID: %w", err)
+			return fmt.Errorf("backfill contribution canonical provider ID: %w", err)
 		}
 		repository.ProviderRepoID = providerRepoID
 	}

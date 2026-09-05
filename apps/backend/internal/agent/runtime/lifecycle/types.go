@@ -923,6 +923,9 @@ type LaunchRequest struct {
 	TaskDescription    string              // Task description to send via ACP prompt
 	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                map[string]string   // Additional env vars
+	// ManagedGitPushEnv is private to agentctl's managed Git operator and is
+	// never included in the agent or task-shell environment.
+	ManagedGitPushEnv map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist.
 	ApprovedSecretEnvKeys []string

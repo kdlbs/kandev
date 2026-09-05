@@ -46,6 +46,24 @@ func TestContributionDestinationRoundTripsThroughMetadata(t *testing.T) {
 	}
 }
 
+func TestContributionDestinationPublicationRequiresExactTaskBranch(t *testing.T) {
+	destination := testContributionDestination()
+	if err := destination.Validate(); err != nil {
+		t.Fatalf("persisted destination Validate() = %v", err)
+	}
+	if err := destination.ValidateForPublication(); err == nil {
+		t.Fatal("ValidateForPublication() accepted an unbound branch")
+	}
+	destination.HeadBranch = "feature/task-owned"
+	if err := destination.ValidateForPublication(); err != nil {
+		t.Fatalf("ValidateForPublication() = %v", err)
+	}
+	destination.HeadBranch = "--force"
+	if err := destination.ValidateForPublication(); err == nil {
+		t.Fatal("ValidateForPublication() accepted an unsafe ref")
+	}
+}
+
 func TestContributionDestinationCredentialBindingValidation(t *testing.T) {
 	cases := []struct {
 		name    string

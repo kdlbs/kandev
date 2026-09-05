@@ -1562,6 +1562,12 @@ func (s *Service) SetTaskGitCredentialPolicyResolver(resolver executor.TaskGitCr
 	s.executor.SetTaskGitCredentialPolicyResolver(resolver)
 }
 
+// SetContributorForkLeasePreparer configures provider-verified contributor
+// publication preparation before a managed session is persisted.
+func (s *Service) SetContributorForkLeasePreparer(preparer executor.ContributorForkLeasePreparer) {
+	s.executor.SetContributorForkLeasePreparer(preparer)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.
