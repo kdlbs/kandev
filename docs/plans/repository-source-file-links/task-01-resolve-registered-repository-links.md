@@ -118,10 +118,12 @@ None.
 - Added identity-qualified repository source aliases and a fail-closed Markdown file-target
   resolver. Direct workspace links, external URLs, source selectors, traversal rejection, and
   unmatched host paths remain covered by focused unit tests.
+- Hardened drive-letter normalization, task-membership filtering, and inert handling for contained
+  targets that the resolver does not recognize as openable files.
 - Added transcript-scoped alias context for Kanban and Office chat hosts, including the active
   workspace fallback used while task projections hydrate. Existing desktop and phone file-open
   actions receive only task-workspace-relative paths.
 - Extended the attached-source desktop and mobile E2E scenarios to cite the registered source
   checkout and assert active-worktree content in the native file surfaces.
-- Verification passed: 48 focused Vitest tests, targeted ESLint with zero warnings, Prettier
+- Verification passed: 50 focused Vitest tests, targeted ESLint with zero warnings, Prettier
   checks, TypeScript typecheck, Chromium desktop E2E, and `mobile-chrome` E2E.

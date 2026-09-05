@@ -30,9 +30,14 @@ export type ResolveMarkdownFileTargetOptions = {
 
 const WEB_TLD_EXTENSIONS = new Set(["ai", "app", "cloud", "co", "com", "dev", "io", "net", "org"]);
 
+function isWindowsDriveAbsolutePath(path: string): boolean {
+  return /^\/?[A-Za-z]:[\\/](?![\\/])/.test(path);
+}
+
 function normalizePath(path: string): string {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/");
-  if (normalized === "/") return normalized;
+  let normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/");
+  if (/^\/[A-Za-z]:\//.test(normalized)) normalized = normalized.slice(1);
+  if (normalized === "/" || /^[A-Za-z]:\/$/.test(normalized)) return normalized;
   return normalized.replace(/\/$/, "");
 }
 
@@ -43,14 +48,19 @@ function normalizeOptionalPath(path: string | null | undefined): string | null {
 }
 
 function isPathInside(path: string, root: string): boolean {
-  if (root === "/") return path.startsWith("/");
-  return path === root || path.startsWith(`${root}/`);
+  const windowsPath = isWindowsDriveAbsolutePath(path);
+  const windowsRoot = isWindowsDriveAbsolutePath(root);
+  const comparablePath = windowsPath || windowsRoot ? path.toLowerCase() : path;
+  const comparableRoot = windowsPath || windowsRoot ? root.toLowerCase() : root;
+  if (comparableRoot === "/") return comparablePath.startsWith("/");
+  const rootPrefix = comparableRoot.endsWith("/") ? comparableRoot : `${comparableRoot}/`;
+  return comparablePath === comparableRoot || comparablePath.startsWith(rootPrefix);
 }
 
 function relativePathFromRoot(path: string, root: string): string | null {
   if (!isPathInside(path, root)) return null;
-  if (path === root) return "";
-  return path.slice(root.length + (root === "/" ? 0 : 1));
+  if (path.length === root.length) return "";
+  return path.slice(root.length + (root.endsWith("/") ? 0 : 1));
 }
 
 function uniqueNormalizedPaths(paths: readonly (string | null | undefined)[]): string[] {
@@ -79,11 +89,6 @@ export function buildMarkdownFileRootAliases({
 
   const aliases: MarkdownFileRootAlias[] = [];
   const repositoryIds = new Set(taskRepositoryIds.filter(Boolean));
-  if (repositoryIds.size > 0) {
-    for (const worktree of sessionWorktrees) {
-      if (worktree.repositoryId) repositoryIds.add(worktree.repositoryId);
-    }
-  }
   for (const repositoryId of repositoryIds) {
     const sourceRoots = uniqueNormalizedPaths(
       repositories
@@ -121,6 +126,10 @@ function isExternalHref(href: string): boolean {
   return /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//");
 }
 
+function isAbsoluteFileSystemPath(path: string): boolean {
+  return path.startsWith("/") || isWindowsDriveAbsolutePath(path);
+}
+
 function stripHashAndQuery(href: string): string {
   return href.split(/[?#]/, 1)[0] ?? "";
 }
@@ -142,8 +151,19 @@ function hasParentTraversal(path: string): boolean {
   return path.split("/").includes("..");
 }
 
+function isInvalidFilePath(path: string): boolean {
+  return !path || path.startsWith("~/") || hasParentTraversal(path);
+}
+
+function blockedAbsolutePath(path: string): { kind: "blocked" } | null {
+  return isAbsoluteFileSystemPath(path) ? { kind: "blocked" } : null;
+}
+
 function looksLikeHostAbsolutePath(path: string): boolean {
-  return /^\/(?:[A-Za-z]:|Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path);
+  return (
+    isWindowsDriveAbsolutePath(path) ||
+    /^\/(?:Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path)
+  );
 }
 
 function firstAbsoluteSegment(path: string): string | null {
@@ -181,7 +201,7 @@ function resolveAliasTarget(
     .replace(/^\/+|\/+$/g, "");
   const suffix = mostSpecific[0].suffix;
   const target = targetRoot && suffix ? `${targetRoot}/${suffix}` : targetRoot || suffix;
-  return createFileTarget(target);
+  return createFileTarget(target) ?? { kind: "blocked" };
 }
 
 function resolveAbsoluteTarget(
@@ -195,7 +215,7 @@ function resolveAbsoluteTarget(
   if (normalizedWorkspaceRoot) {
     const relativePath = relativePathFromRoot(normalizedPath, normalizedWorkspaceRoot);
     if (relativePath !== null) {
-      return createFileTarget(relativePath);
+      return createFileTarget(relativePath) ?? { kind: "blocked" };
     }
   }
 
@@ -213,25 +233,42 @@ function resolveAbsoluteTarget(
   return createFileTarget(normalizedPath.replace(/^\/+/, ""));
 }
 
+type ParsedMarkdownFileHref =
+  | { kind: "path"; path: string; isAbsolute: boolean }
+  | { kind: "blocked" }
+  | null;
+
+function parseMarkdownFileHref(href: string): ParsedMarkdownFileHref {
+  const decodedPath = decodeHrefPath(href);
+  if (!decodedPath) return blockedAbsolutePath(href);
+
+  const isWindowsPath = isWindowsDriveAbsolutePath(decodedPath);
+  if (!isWindowsPath && isExternalHref(href)) return null;
+
+  const path = normalizePath(decodedPath);
+  if (isInvalidFilePath(path)) return blockedAbsolutePath(path);
+
+  return {
+    kind: "path",
+    path,
+    isAbsolute: isAbsoluteFileSystemPath(path),
+  };
+}
+
 /** Resolves an href to a task-workspace-relative file target or a blocked host path. */
 export function resolveMarkdownFileTarget(
   href: string | undefined,
   { workspaceRoot, fileRootAliases = [] }: ResolveMarkdownFileTargetOptions = {},
 ): MarkdownFileTarget | null {
-  if (!href || href.startsWith("#") || isExternalHref(href)) return null;
+  if (!href || href.startsWith("#")) return null;
 
-  const decodedPath = decodeHrefPath(href);
-  if (!decodedPath) return href.startsWith("/") ? { kind: "blocked" } : null;
-  const path = normalizePath(decodedPath);
-  if (!path || path.startsWith("~/") || hasParentTraversal(path)) {
-    return path.startsWith("/") ? { kind: "blocked" } : null;
+  const parsedHref = parseMarkdownFileHref(href);
+  if (!parsedHref || parsedHref.kind === "blocked") return parsedHref;
+  if (parsedHref.isAbsolute) {
+    return resolveAbsoluteTarget(parsedHref.path, workspaceRoot ?? null, fileRootAliases);
   }
 
-  if (path.startsWith("/")) {
-    return resolveAbsoluteTarget(path, workspaceRoot ?? null, fileRootAliases);
-  }
-
-  const normalizedPath = path.replace(/^\.\//, "");
+  const normalizedPath = parsedHref.path.replace(/^\.\//, "");
   if (normalizedPath.startsWith("../")) return null;
   return createFileTarget(normalizedPath);
 }

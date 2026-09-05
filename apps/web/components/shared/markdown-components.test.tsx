@@ -210,9 +210,11 @@ describe("markdownComponents", () => {
   it("does not open Windows drive-letter absolute file links", () => {
     render(<Markdown>{"[hosts](/C:/Windows/System32/drivers/etc/hosts)"}</Markdown>);
 
-    fireEvent.click(screen.getByRole("link", { name: "hosts" }));
+    const link = screen.getByRole("link", { name: "hosts" });
+    fireEvent.click(link);
 
     expect(openFile).not.toHaveBeenCalled();
+    expect(link.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("does not treat bare domains as relative file links", () => {
@@ -260,6 +262,7 @@ describe("markdownComponents registered source links", () => {
     const link = screen.getByRole("link", { name: "secret" });
     expect(fireEvent.click(link)).toBe(false);
     expect(openFile).not.toHaveBeenCalled();
+    expect(link.getAttribute("aria-disabled")).toBe("true");
   });
 });
 

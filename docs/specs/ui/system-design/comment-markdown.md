@@ -80,7 +80,8 @@ The shared resolver performs these steps in order:
    navigation targets.
 2. Decode the path once, remove query/fragment data used only by Markdown navigation, normalize
    supported path separators, strip a supported trailing source-location selector, and reject
-   malformed encoding, home-relative syntax, or parent traversal.
+   malformed encoding, home-relative syntax, or parent traversal. Windows drive roots accept an
+   optional leading slash and use case-insensitive containment after normalization.
 3. Resolve an absolute path already beneath the effective workspace root directly to a
    workspace-relative target. This remains the preferred path for single- and multi-repository
    tasks.
@@ -108,6 +109,8 @@ same-named repositories or an unrelated sibling directory from becoming accident
 - An absolute host path that matches neither the active workspace root nor an eligible repository
   alias is non-actionable. Its anchor prevents same-origin `/home/...`, `/Users/...`, drive-path,
   or equivalent filesystem navigation and does not call the workspace file service.
+- An absolute path contained by a trusted root but not recognized as an openable file is also
+  non-actionable, so a directory or extensionless target cannot fall through to browser navigation.
 - A missing repository cache, worktree projection, task link, or identity match fails closed. A
   later state update can make the link actionable without rewriting stored message content.
 - External HTTP, HTTPS, mail, issue, and application links keep their existing navigation behavior.
@@ -137,7 +140,7 @@ mapping and prove the same file content is opened from the active workspace.
 
 - Pure unit coverage builds eligible aliases for single- and multi-repository sessions and rejects
   missing task membership, mismatched repository IDs, paths outside the active workspace, ambiguous
-  roots, and traversal.
+  roots, stale worktrees, traversal, unsupported contained targets, and unmatched Windows paths.
 - Shared Markdown component coverage reproduces a registered source checkout link with a trailing
   line selector, asserts the workspace-relative open target, and asserts an unrelated host path is
   inert.

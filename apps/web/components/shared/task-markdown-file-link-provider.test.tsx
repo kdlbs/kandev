@@ -59,8 +59,9 @@ vi.mock("@/hooks/domains/session/use-session-worktrees", () => ({
 }));
 
 vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
-  useRepositories: () => ({
-    repositories: storeState.repositories.itemsByWorkspaceId[WORKSPACE_ID],
+  useRepositories: (workspaceId?: string | null) => ({
+    repositories:
+      workspaceId === WORKSPACE_ID ? storeState.repositories.itemsByWorkspaceId[WORKSPACE_ID] : [],
   }),
 }));
 

@@ -12,6 +12,18 @@ const primarySourceRoot = "/home/jcfs/projects/kandev";
 const siblingSourceRoot = "/home/jcfs/projects/plugin";
 const singleRepositoryId = "repo-1";
 const singleSourceRoot = "/home/jcfs/projects/kandev";
+const aliases: MarkdownFileRootAlias[] = [
+  {
+    repositoryId: primaryRepositoryId,
+    sourceRoot: primarySourceRoot,
+    workspaceRelativeRoot: "kandev",
+  },
+  {
+    repositoryId: siblingRepositoryId,
+    sourceRoot: siblingSourceRoot,
+    workspaceRelativeRoot: "plugin",
+  },
+];
 
 describe("buildMarkdownFileRootAliases", () => {
   it("maps task-linked repositories to their active worktree roots", () => {
@@ -59,7 +71,7 @@ describe("buildMarkdownFileRootAliases", () => {
     ]);
   });
 
-  it("uses session worktree identities when the task projection is stale", () => {
+  it("does not authorize session worktrees absent from the task repository set", () => {
     expect(
       buildMarkdownFileRootAliases({
         workspaceRoot,
@@ -78,11 +90,6 @@ describe("buildMarkdownFileRootAliases", () => {
         repositoryId: primaryRepositoryId,
         sourceRoot: primarySourceRoot,
         workspaceRelativeRoot: "kandev",
-      },
-      {
-        repositoryId: siblingRepositoryId,
-        sourceRoot: siblingSourceRoot,
-        workspaceRelativeRoot: "plugin",
       },
     ]);
   });
@@ -146,20 +153,7 @@ describe("buildMarkdownFileRootAliases fail-closed cases", () => {
   });
 });
 
-describe("resolveMarkdownFileTarget", () => {
-  const aliases: MarkdownFileRootAlias[] = [
-    {
-      repositoryId: primaryRepositoryId,
-      sourceRoot: primarySourceRoot,
-      workspaceRelativeRoot: "kandev",
-    },
-    {
-      repositoryId: siblingRepositoryId,
-      sourceRoot: siblingSourceRoot,
-      workspaceRelativeRoot: "plugin",
-    },
-  ];
-
+describe("resolveMarkdownFileTarget mapped paths", () => {
   it("resolves active workspace paths before repository aliases", () => {
     expect(
       resolveMarkdownFileTarget(`${workspaceRoot}/kandev/docs/README.md:12:4`, {
@@ -178,6 +172,53 @@ describe("resolveMarkdownFileTarget", () => {
     ).toEqual({ kind: "file", path: "plugin/ui/bundle.js" });
   });
 
+  it("maps Windows workspace and registered source paths case-insensitively", () => {
+    const windowsWorkspaceRoot = String.raw`C:\Users\Me\worktree`;
+    const windowsAliases: MarkdownFileRootAlias[] = [
+      {
+        repositoryId: siblingRepositoryId,
+        sourceRoot: String.raw`C:\Users\Me\source`,
+        workspaceRelativeRoot: "plugin",
+      },
+    ];
+
+    expect(
+      resolveMarkdownFileTarget(String.raw`c:\users\me\worktree\src\file.ts:4`, {
+        workspaceRoot: windowsWorkspaceRoot,
+      }),
+    ).toEqual({ kind: "file", path: "src/file.ts" });
+    expect(
+      resolveMarkdownFileTarget("/c:/users/me/source/ui/bundle.js:61", {
+        workspaceRoot: windowsWorkspaceRoot,
+        fileRootAliases: windowsAliases,
+      }),
+    ).toEqual({ kind: "file", path: "plugin/ui/bundle.js" });
+    expect(
+      resolveMarkdownFileTarget(String.raw`C:\Windows\System32\kernel32.dll`, {
+        workspaceRoot: windowsWorkspaceRoot,
+        fileRootAliases: windowsAliases,
+      }),
+    ).toEqual({ kind: "blocked" });
+    expect(resolveMarkdownFileTarget("c://example.com/file.ts")).toBeNull();
+  });
+
+  it("blocks contained paths that cannot be opened as files", () => {
+    expect(
+      resolveMarkdownFileTarget(`${workspaceRoot}/LICENSE`, {
+        workspaceRoot,
+        fileRootAliases: aliases,
+      }),
+    ).toEqual({ kind: "blocked" });
+    expect(
+      resolveMarkdownFileTarget(`${siblingSourceRoot}/Makefile`, {
+        workspaceRoot,
+        fileRootAliases: aliases,
+      }),
+    ).toEqual({ kind: "blocked" });
+  });
+});
+
+describe("resolveMarkdownFileTarget safety boundaries", () => {
   it("rejects traversal and ambiguous aliases", () => {
     expect(
       resolveMarkdownFileTarget(`${siblingSourceRoot}/../kandev/secret.md`, {

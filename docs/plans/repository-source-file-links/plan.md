@@ -125,7 +125,8 @@ unmatched host paths, and unchanged external URLs.
 
 ## Verification results
 
-- Unit: four focused Vitest files passed, 48 tests total.
+- Unit: four focused Vitest files passed, 50 tests total, including Windows drive paths, strict
+  task-repository membership, and contained non-openable targets.
 - Static checks: targeted ESLint passed with `--max-warnings=0`; targeted Prettier checks passed;
   `pnpm run typecheck` passed.
 - Desktop: the attached-source Chromium scenario passed and proved a registered checkout link
