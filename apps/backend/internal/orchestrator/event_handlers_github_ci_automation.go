@@ -854,11 +854,12 @@ func ciAutomationQueueRemovalBelongsToCurrentHead(pr *github.TaskPR, state *gith
 		return false
 	}
 	attemptHead := strings.TrimSpace(state.LastQueueAttemptHeadSHA)
-	// A removal-only observation establishes a current-head baseline. The
-	// removal event ID and head binding prevent a stale event from spending a
-	// repair round after automation is enabled; a merge signature is not
-	// required because Kandev may have missed the active queue entry.
-	return attemptHead != "" && attemptHead == strings.TrimSpace(pr.HeadSHA)
+	// A removal-only observation can establish a passive same-head baseline,
+	// but it does not prove which pull-request head produced the removal. Auto-
+	// fix therefore requires the merge signature written by an attempted or
+	// adopted queue entry in addition to the matching durable head.
+	return attemptHead != "" && attemptHead == strings.TrimSpace(pr.HeadSHA) &&
+		strings.TrimSpace(state.LastMergeSignature) != ""
 }
 
 func ciAutomationHasActiveMergeQueueEntry(pr *github.TaskPR) bool {

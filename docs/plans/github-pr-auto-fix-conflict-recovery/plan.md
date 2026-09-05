@@ -31,10 +31,11 @@ user outcome last.
 include `TaskPR.MergeableState == "dirty"`, so an ordinary conflict produces an
 empty delta and no prompt.
 
-`ciAutomationQueueRemovalBelongsToCurrentHead` also requires a non-empty
-`last_merge_signature`. A removal-only poll records the current-head baseline,
-but it has no signature. The evaluator therefore rejects a retained actionable
-removal when Kandev missed the active queue entry.
+`ciAutomationQueueRemovalBelongsToCurrentHead` must distinguish a passive
+removal-only baseline from queue-attempt evidence. The evaluator therefore
+requires a matching `last_queue_attempt_head_sha` and non-empty
+`last_merge_signature`; it rejects a retained actionable removal when Kandev
+missed the active queue entry and cannot prove its head.
 
 ## Scope
 
@@ -43,8 +44,8 @@ removal when Kandev missed the active queue entry.
 - Add ordinary merge conflicts to the current auto-fix checkpoint and prompt.
 - Deduplicate stable conflicts across polls and restarts.
 - Re-arm conflict repair after resolution, a new head, or a target change.
-- Accept failed-check queue removals from a durable removal-only current-head
-  baseline.
+- Accept failed-check queue removals only when durable attempted or adopted
+  queue evidence matches the current head.
 - Preserve queue-removal event deduplication and same-head requeue protection.
 - Update localized help and public GitHub automation documentation.
 - Prove the behavior through backend tests and responsive E2E tests.
@@ -73,9 +74,10 @@ through the existing sanitized `{{pr.feedback}}` snapshot.
 
 ### Merge-queue removal eligibility
 
-Change `ciAutomationQueueRemovalBelongsToCurrentHead` to accept a non-empty
-`last_queue_attempt_head_sha` that equals the current pull-request head. Do not
-require `last_merge_signature` for auto-fix.
+Change `ciAutomationQueueRemovalBelongsToCurrentHead` to require a non-empty
+`last_queue_attempt_head_sha` that equals the current pull-request head and a
+non-empty `last_merge_signature`. A passive removal-only baseline must fail
+closed for auto-fix.
 
 Keep `last_queue_fix_event_id` as the repair deduplication identity. Keep the
 existing same-head auto-merge guard and merge-attempt journal unchanged.
@@ -105,8 +107,8 @@ round. Repeat the same snapshot and assert that no duplicate round appears.
   orchestrator tests for conflict delta creation, prompt rendering, stable-state
   deduplication, prompt-free clearing, and re-arming.
 - `AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-002.1`, `.3`, `.7`, and `.9`:
-  update the queue-recovery test to start from a removal-only current-head
-  baseline and prove one failed-check repair round.
+  prove one failed-check repair round with durable queue-attempt evidence and
+  reject a retained removal first observed after a head change.
 - `AC-INTEGRATIONS-GITHUB-PR-AUTO-FIX-CONFLICTS-001.9`: assert the shared help
   content in the existing desktop and mobile automation E2E files.
 - `AC-UI-CI-PR-AUTOMATION-001.8` and
@@ -115,7 +117,7 @@ round. Repeat the same snapshot and assert that no duplicate round appears.
 
 The first failing backend regressions are
 `TestHandleTaskPRCIAutomationAutoFixesConflict` and
-`TestCIAutomationMergeQueueRecoveryAcceptsRemovalOnlyBaseline`.
+`TestCIAutomationMergeQueueRecoveryRequiresAttemptEvidence`.
 
 ## E2E tests
 
@@ -141,7 +143,7 @@ unchanged.
 
 Passed:
 
-- `go test -tags fts5 ./internal/orchestrator -run 'Test(CIAutomationConflictSignal|HandleTaskPRCIAutomationAutoFixesConflict|CIAutomationMergeQueueRecoveryAcceptsRemovalOnlyBaseline|CIAutomationMergeQueueRecoveryQueuesOneRepairPerRemoval)$'` from `apps/backend`.
+- `go test -tags fts5 ./internal/orchestrator -run 'Test(CIAutomationConflictSignal|HandleTaskPRCIAutomationAutoFixesConflict|CIAutomationMergeQueueRecoveryRequiresAttemptEvidence|CIAutomationMergeQueueRecoveryQueuesOneRepairPerRemoval)$'` from `apps/backend`.
 - `go test -tags fts5 ./internal/orchestrator -run 'TestCIAutomation(ConflictSignal|RenderSnapshotIncludesConflict)|TestHandleTaskPRCIAutomationAutoFixesConflict' -count=1` from `apps/backend`.
 - `pnpm run i18n:check` from `apps/web`.
 - `node --test scripts/validate-public-docs.test.mjs` and `node scripts/validate-public-docs.mjs` from the repository root.
@@ -152,7 +154,8 @@ Passed:
 ## Risks
 
 - A stale removal event can appear after the active queue entry disappears.
-  The current-head baseline and event ID bound repair to one retained event.
+  Auto-fix requires durable queue-attempt evidence and fails closed when the
+  retained event cannot be associated with the current head.
 - GitHub can report mergeability as unknown during recomputation. Only `dirty`
   starts conflict repair, and unknown state must not clear prior deduplication.
 - A conflict and failed checks can appear in one evaluation. The combined

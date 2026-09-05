@@ -96,7 +96,7 @@ func TestCIAutomationMergeQueueRecoveryClassifiesReviewedReasons(t *testing.T) {
 	}
 }
 
-func TestCIAutomationMergeQueueRecoveryAcceptsRemovalOnlyBaseline(t *testing.T) {
+func TestCIAutomationMergeQueueRecoveryRequiresAttemptEvidence(t *testing.T) {
 	pr := &github.TaskPR{HeadSHA: "head-a"}
 	tests := []struct {
 		name  string
@@ -105,9 +105,9 @@ func TestCIAutomationMergeQueueRecoveryAcceptsRemovalOnlyBaseline(t *testing.T) 
 	}{
 		{name: "no state", state: nil, want: false},
 		{
-			name:  "removal-only baseline",
+			name:  "removal-only baseline fails closed",
 			state: &github.TaskCIPRAutomationState{LastQueueAttemptHeadSHA: "head-a"},
-			want:  true,
+			want:  false,
 		},
 		{
 			name:  "empty attempt head fails closed",
@@ -129,6 +129,42 @@ func TestCIAutomationMergeQueueRecoveryAcceptsRemovalOnlyBaseline(t *testing.T) 
 				t.Fatalf("queue removal evidence = %v, want %v for state %+v", got, tt.want, tt.state)
 			}
 		})
+	}
+}
+
+func TestCIAutomationMergeQueueRecoveryRejectsRemovalObservedAfterHeadChange(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mergeQueueRecoveryGitHubService{mockGitHubService: &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID: "task-1", AutoFixEnabled: true, EffectiveAutoFixPrompt: "Repair the PR\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{},
+	}}
+	svc.SetGitHubService(ghSvc)
+	pr := &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		State: "open", ChecksState: "success", HeadSHA: "head-b",
+		MergeQueueLastRemovalID: "removal-a", MergeQueueLastRemovalBeforeSHA: "head-a",
+		MergeQueueLastRemovalReason: "CHECKS_FAILED",
+	}
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("stale queue recovery evaluation: %v", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session-1"); got.Count != 0 {
+		t.Fatalf("stale removal queued an auto-fix prompt: %+v", got)
+	}
+	if len(ghSvc.fixAttempts) != 0 {
+		t.Fatalf("stale removal consumed an auto-fix round: %+v", ghSvc.fixAttempts)
+	}
+	if ghSvc.ciPRState == nil || ghSvc.ciPRState.LastQueueAttemptHeadSHA != "head-b" {
+		t.Fatalf("expected passive baseline to be recorded for merge retry guarding, got %+v", ghSvc.ciPRState)
+	}
+	if ghSvc.ciPRState.LastMergeSignature != "" {
+		t.Fatalf("passive baseline became merge-attempt evidence: %+v", ghSvc.ciPRState)
 	}
 }
 
@@ -184,6 +220,7 @@ func TestCIAutomationMergeQueueRecoveryQueuesOneRepairPerRemoval(t *testing.T) {
 	ghSvc.ciPRState = &github.TaskCIPRAutomationState{
 		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
 		LastQueueAttemptHeadSHA: "head-a",
+		LastMergeSignature:      "merge-a",
 	}
 	svc.SetGitHubService(ghSvc)
 	pr := &github.TaskPR{

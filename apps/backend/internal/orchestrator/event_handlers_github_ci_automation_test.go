@@ -541,10 +541,12 @@ func TestHandleTaskPRCIAutomationAutoFixesConflict(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
+	firstSessionID := "session-1"
 	ghSvc.ciPRState = &github.TaskCIPRAutomationState{
 		LastFixSignature:      ghSvc.fixAttempts[0].Signature,
 		LastFixCheckpointJSON: ghSvc.fixAttempts[0].CheckpointJSON,
 		LastFixEnqueuedAt:     &now,
+		LastFixSessionID:      &firstSessionID,
 	}
 	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
 		t.Fatalf("handle duplicate conflict auto-fix: %v", err)
@@ -559,6 +561,30 @@ func TestHandleTaskPRCIAutomationAutoFixesConflict(t *testing.T) {
 	}
 	if len(ghSvc.fixCheckpointRefresh) != 1 {
 		t.Fatalf("expected conflict checkpoint clear without a round, got %+v", ghSvc.fixCheckpointRefresh)
+	}
+	if ghSvc.ciPRState.LastFixSessionID == nil || *ghSvc.ciPRState.LastFixSessionID != "session-1" {
+		t.Fatalf("conflict clear lost the pinned session: %+v", ghSvc.ciPRState)
+	}
+	if ghSvc.ciPRState.LastFixEnqueuedAt != nil {
+		t.Fatalf("conflict clear retained an active dispatch timestamp: %+v", ghSvc.ciPRState.LastFixEnqueuedAt)
+	}
+
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-2", TaskID: "task-1", State: models.TaskSessionStateRunning,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create newer session: %v", err)
+	}
+	pr.HeadSHA = "head-b"
+	pr.MergeableState = "dirty"
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle reappeared conflict: %v", err)
+	}
+	if len(ghSvc.fixAttempts) != 2 || ghSvc.fixAttempts[1].SessionID != "session-1" {
+		t.Fatalf("reappeared conflict moved sessions: attempts=%+v", ghSvc.fixAttempts)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session-2"); got.Count != 0 {
+		t.Fatalf("newer session received pinned conflict repair: %+v", got)
 	}
 }
 

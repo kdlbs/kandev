@@ -81,10 +81,13 @@ commit. The saved prompt remains hidden system context.
 The same evaluator can include an ordinary conflict item and a queue-removal
 item in one delta. The dispatcher sends one combined round for that evaluation.
 
-For failed-check queue removals, current-head ownership accepts the durable
-removal-only baseline from `recordTaskPRMergeQueueObservation`. It does not
-require `last_merge_signature`. The removal event ID remains the deduplication
-identity, and same-head automatic requeue protection remains unchanged.
+For failed-check queue removals, current-head ownership requires both a
+matching durable `last_queue_attempt_head_sha` and a non-empty
+`last_merge_signature` written by an attempted or adopted queue entry. A
+passive removal-only baseline does not prove which pull-request head produced
+the removal, so it cannot start an auto-fix round. The removal event ID remains
+the deduplication identity, and same-head automatic requeue protection remains
+unchanged.
 
 ## Control help
 

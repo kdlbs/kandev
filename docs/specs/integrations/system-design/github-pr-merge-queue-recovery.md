@@ -134,10 +134,13 @@ actionable, belongs to the current head, and has not been checkpointed, the
 evaluator accepts one repair round. Enabling the option while the pull request
 is still queued only arms this behavior for a later removal.
 
-Current-head ownership can come from an observed active attempt or the durable
-removal-only baseline. Auto-fix does not require `last_merge_signature`. That
-signature proves a submitted or adopted merge attempt, but it is not evidence
-that the retained removal event is stale.
+Auto-fix current-head ownership requires durable evidence from an observed
+active attempt or a submitted merge attempt. Both the recorded
+`last_queue_attempt_head_sha` and a non-empty `last_merge_signature` must be
+present before a retained removal can start a repair round. A removal-only
+baseline is still useful for the same-head automatic requeue guard, but it does
+not prove which head produced the removal and therefore fails closed for
+auto-fix.
 
 ## Requeue flow
 
