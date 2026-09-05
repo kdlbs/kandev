@@ -35,6 +35,18 @@ type InstanceCredentialSource interface {
 	// established after a rotation must observe a later one, not the
 	// already-closed channel from before it connected.
 	Invalidated() <-chan struct{}
+	// AcceptsFullWithInvalidation atomically reports whether token is the
+	// current highest-numbered rotation's credential and, when accepted,
+	// the invalidation channel for that exact generation. A caller that
+	// holds a connection open past the check (a stream) must capture the
+	// channel from this same call rather than calling AcceptsFull followed
+	// by a separate Invalidated(): a rotation landing between two
+	// independent lock acquisitions could authenticate against the
+	// generation it just superseded while handing back the channel for the
+	// generation that replaced it, which never closes for the rotation that
+	// actually invalidated the accepted credential
+	// (AC-EXECUTORS-CONTROL-OWNERSHIP-002.2).
+	AcceptsFullWithInvalidation(token string) (bool, <-chan struct{})
 }
 
 // credentialState is the two-phase credential rotation machinery of design
@@ -95,6 +107,16 @@ func (c *credentialState) AcceptsFull(token string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return tokenEqual(token, c.latest)
+}
+
+// AcceptsFullWithInvalidation implements InstanceCredentialSource.
+func (c *credentialState) AcceptsFullWithInvalidation(token string) (bool, <-chan struct{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !tokenEqual(token, c.latest) {
+		return false, nil
+	}
+	return true, c.invalidated
 }
 
 // AcceptsAdoptionOnly reports whether token authenticates a further

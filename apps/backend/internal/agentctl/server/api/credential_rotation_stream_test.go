@@ -29,6 +29,13 @@ func newFakeCredentialSource(accepted string) *fakeCredentialSource {
 func (f *fakeCredentialSource) AcceptsFull(token string) bool { return token == f.accepted }
 func (f *fakeCredentialSource) Invalidated() <-chan struct{}  { return f.invalidated }
 
+func (f *fakeCredentialSource) AcceptsFullWithInvalidation(token string) (bool, <-chan struct{}) {
+	if token != f.accepted {
+		return false, nil
+	}
+	return true, f.invalidated
+}
+
 // TestInstanceAuthAcceptsCurrentCredentialRejectsSuperseded pins
 // AC-EXECUTORS-CONTROL-OWNERSHIP-002.6: when a credentialSource is wired,
 // instanceAuth authenticates every per-instance request dynamically against
@@ -149,6 +156,71 @@ func TestAgentStreamTerminatesWhenCredentialRotates(t *testing.T) {
 
 	if _, _, err := source.Rotate("initial-token"); err != nil {
 		t.Fatalf("Rotate: %v", err)
+	}
+
+	assertConnectionClosedByServer(t, conn, 2*time.Second)
+}
+
+// TestAgentStreamTerminatesWhenCredentialRotatesBetweenAcceptAndCapture pins
+// Review round 5 finding 1: instanceAuth's accept check and a stream
+// handler's own invalidation-channel capture used to be two independent lock
+// acquisitions, so a rotation landing in the gap between them could
+// authenticate a request against the generation it just superseded while
+// handing the handler a channel for the generation that replaced it -- a
+// channel that never closes for the rotation that actually invalidated the
+// accepted credential. afterInstanceAuthAccepted deterministically lands a
+// rotation in exactly that gap; the fix (atomic AcceptsFullWithInvalidation,
+// captured by the middleware and read by the handler from gin context) must
+// still close the stream.
+func TestAgentStreamTerminatesWhenCredentialRotatesBetweenAcceptAndCapture(t *testing.T) {
+	source := newCredentialState("initial-token")
+	s := newTestServer(t)
+	s.SetCredentialSource(source)
+	httpServer := httptest.NewServer(s.router)
+	defer httpServer.Close()
+
+	afterInstanceAuthAccepted = func() {
+		afterInstanceAuthAccepted = nil
+		if _, _, err := source.Rotate("initial-token"); err != nil {
+			t.Errorf("Rotate in accept/capture gap: %v", err)
+		}
+	}
+	t.Cleanup(func() { afterInstanceAuthAccepted = nil })
+
+	conn := dialTestWSWithAuth(t, httpServer, "initial-token")
+	defer func() { _ = conn.Close() }()
+
+	assertConnectionClosedByServer(t, conn, 2*time.Second)
+}
+
+// TestWorkspaceStreamTerminatesWhenCredentialRotatesBetweenAcceptAndCapture
+// mirrors TestAgentStreamTerminatesWhenCredentialRotatesBetweenAcceptAndCapture
+// for the workspace stream's own credentialInvalidatedFromContext read.
+func TestWorkspaceStreamTerminatesWhenCredentialRotatesBetweenAcceptAndCapture(t *testing.T) {
+	source := newCredentialState("initial-token")
+	s := newTestServer(t)
+	s.SetCredentialSource(source)
+	httpServer := httptest.NewServer(s.router)
+	defer httpServer.Close()
+
+	afterInstanceAuthAccepted = func() {
+		afterInstanceAuthAccepted = nil
+		if _, _, err := source.Rotate("initial-token"); err != nil {
+			t.Errorf("Rotate in accept/capture gap: %v", err)
+		}
+	}
+	t.Cleanup(func() { afterInstanceAuthAccepted = nil })
+
+	conn := dialTestWorkspaceStreamWithAuth(t, httpServer, "initial-token")
+	defer func() { _ = conn.Close() }()
+
+	// The handler unconditionally sends a "connected" message as its first
+	// frame before the forwarding loop (and its invalidation check) ever
+	// runs; consume it before asserting closure, exactly like
+	// TestWorkspaceStreamTerminatesWhenCredentialRotates does.
+	var connected types.WorkspaceStreamMessage
+	if err := conn.ReadJSON(&connected); err != nil {
+		t.Fatalf("reading connected message: %v", err)
 	}
 
 	assertConnectionClosedByServer(t, conn, 2*time.Second)

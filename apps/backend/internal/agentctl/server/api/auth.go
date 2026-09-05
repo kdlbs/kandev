@@ -17,6 +17,25 @@ const (
 	errInvalidAuthToken  = "invalid auth token"
 )
 
+// credentialInvalidatedContextKey is the gin context key instanceAuth uses to
+// hand a stream handler the invalidation channel for the exact credential
+// generation that authenticated the request. A stream handler must read it
+// from here rather than calling credentialSource.Invalidated() itself: that
+// would be a second, independent lock acquisition, and a rotation landing
+// between the two could authenticate the request against the generation it
+// just superseded while handing the handler a channel for the generation
+// that replaced it -- a channel that never closes for the rotation that
+// actually invalidated the accepted credential (AC-EXECUTORS-CONTROL-
+// OWNERSHIP-002.2).
+const credentialInvalidatedContextKey = "credentialInvalidated"
+
+// afterInstanceAuthAccepted is invoked, if non-nil, immediately after
+// instanceAuth accepts a credentialSource-backed request and captures its
+// invalidation channel, before the request is allowed to proceed. It exists
+// solely so a test can deterministically land a concurrent rotation in this
+// exact window; always nil in production.
+var afterInstanceAuthAccepted func()
+
 // bearerTokenAuth returns a gin middleware that validates a Bearer token
 // on every request except the exempted paths (e.g., /health).
 // If expectedToken is empty, authentication is disabled (no-op middleware).
@@ -80,10 +99,7 @@ func (s *Server) instanceAuth(staticToken string, exemptPaths ...string) gin.Han
 			return
 		}
 
-		accept := func(token string) bool { return tokenEqual(token, staticToken) }
-		if s.credentialSource != nil {
-			accept = s.credentialSource.AcceptsFull
-		} else if staticToken == "" {
+		if s.credentialSource == nil && staticToken == "" {
 			c.Next()
 			return
 		}
@@ -93,12 +109,41 @@ func (s *Server) instanceAuth(staticToken string, exemptPaths ...string) gin.Han
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{errKey: errMissingAuthHeader})
 			return
 		}
-		if !accept(token) {
+
+		if s.credentialSource != nil {
+			accepted, invalidated := s.credentialSource.AcceptsFullWithInvalidation(token)
+			if !accepted {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{errKey: errInvalidAuthToken})
+				return
+			}
+			if afterInstanceAuthAccepted != nil {
+				afterInstanceAuthAccepted()
+			}
+			c.Set(credentialInvalidatedContextKey, invalidated)
+			c.Next()
+			return
+		}
+
+		if !tokenEqual(token, staticToken) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{errKey: errInvalidAuthToken})
 			return
 		}
 		c.Next()
 	}
+}
+
+// credentialInvalidatedFromContext reads the invalidation channel instanceAuth
+// captured atomically with its accept check (see credentialInvalidatedContextKey).
+// Returns nil when no credentialSource is wired -- the caller's watcher
+// goroutine is then correctly skipped, matching legacy no-control-server
+// behavior.
+func credentialInvalidatedFromContext(c *gin.Context) <-chan struct{} {
+	v, ok := c.Get(credentialInvalidatedContextKey)
+	if !ok {
+		return nil
+	}
+	ch, _ := v.(<-chan struct{})
+	return ch
 }
 
 // extractBearerToken extracts the token from the Authorization header.

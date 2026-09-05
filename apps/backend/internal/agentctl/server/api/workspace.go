@@ -92,27 +92,26 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	}
 	go s.handleWorkspaceStreamInput(stream, shellWriter, done)
 
-	s.forwardWorkspaceStream(stream, sub, shellOutputCh, done)
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: the invalidation channel comes
+	// from instanceAuth's context value, captured atomically with this
+	// request's own accept check -- not a fresh Invalidated() call here,
+	// which would be a second, independent lock acquisition racing a
+	// concurrent rotation.
+	s.forwardWorkspaceStream(stream, sub, shellOutputCh, done, credentialInvalidatedFromContext(c))
 }
 
 // forwardWorkspaceStream forwards workspace events and shell output to the
-// WebSocket until the client goes away or the handler shuts down.
+// WebSocket until the client goes away or the handler shuts down. invalidated
+// is nil when credentialSource is unset, which never fires in a select --
+// legacy behavior for every existing test constructing a Server without a
+// control server alongside it.
 func (s *Server) forwardWorkspaceStream(
 	stream *workspaceStreamConn,
 	sub types.WorkspaceStreamSubscriber,
 	shellOutputCh chan []byte,
 	done <-chan struct{},
+	invalidated <-chan struct{},
 ) {
-	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
-	// control server's credential rotates while it is open, so a prior
-	// holder cannot keep consuming an instance's events past the moment its
-	// credential is superseded. nil when credentialSource is unset, which
-	// never fires in a select -- legacy behavior for every existing test
-	// constructing a Server without a control server alongside it.
-	var invalidated <-chan struct{}
-	if s.credentialSource != nil {
-		invalidated = s.credentialSource.Invalidated()
-	}
 	for {
 		select {
 		case <-done:

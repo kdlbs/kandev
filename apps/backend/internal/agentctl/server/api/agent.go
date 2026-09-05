@@ -152,9 +152,11 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
 	// control server's credential rotates while it is open, so a prior
 	// holder cannot keep consuming an instance's events past the moment its
-	// credential is superseded.
-	if s.credentialSource != nil {
-		invalidated := s.credentialSource.Invalidated()
+	// credential is superseded. The channel comes from instanceAuth's
+	// context value, captured atomically with the request's own accept
+	// check -- not a fresh Invalidated() call here, which would be a second,
+	// independent lock acquisition racing a concurrent rotation.
+	if invalidated := credentialInvalidatedFromContext(c); invalidated != nil {
 		go func() {
 			select {
 			case <-invalidated:
