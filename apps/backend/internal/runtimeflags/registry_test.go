@@ -507,6 +507,13 @@ func TestDefinitionsIncludeAgentSurvivalMetadata(t *testing.T) {
 	if def.Available == nil {
 		t.Fatal("Available probe missing; AC-EXECUTORS-SURVIVAL-005.4 requires the platform-unsupported state to be reportable")
 	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("profiles.FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["agent_survival"]; got != "false" {
+		t.Fatalf("profiles.yaml agent_survival default = %q, want %q (AC-EXECUTORS-SURVIVAL-005.2: off by default)", got, "false")
+	}
 }
 
 // TestAgentSurvivalAvailabilityMatchesPlatformScope pins the platform-scope
