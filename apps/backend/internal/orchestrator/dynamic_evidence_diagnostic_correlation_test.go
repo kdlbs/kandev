@@ -180,3 +180,34 @@ func TestDynamicAttemptEvidenceContainmentSatisfiedByGatewaySubstring(t *testing
 		t.Fatal("gateway diagnostic contained in the terminal message was not pre-result safe")
 	}
 }
+
+// TestDynamicAttemptEvidenceContainmentRequiresMatchingCode pins the other
+// half of AC.23's rule alongside the containment tests above: text
+// containment alone is not sufficient, the diagnostic and the terminal
+// failure must also classify to the same code. routingerr's rule order tries
+// overloadedRe before gatewayServerFailureRe, so a diagnostic classifying
+// provider_unavailable can be a literal substring of a terminal message that
+// additionally mentions "529 ... overloaded" and therefore classifies
+// provider_overloaded instead. Containment holds; the codes diverge; the fence
+// must stay closed.
+func TestDynamicAttemptEvidenceContainmentRequiresMatchingCode(t *testing.T) {
+	var service Service
+	const diagnostic = "API Error: 500 Internal Server Error"
+	const terminal = "API Error: 500 Internal Server Error was retried automatically, but the provider also reported 529 overloaded upstream; giving up."
+
+	service.beginPromptAttempt("session-1", "execution-1", 1, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, diagnostic)
+
+	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 1,
+		ErrorMessage:     terminal,
+	})
+	if !got.OutputObserved {
+		t.Fatal("a terminal failure classifying to a different code than the recorded diagnostic was treated as matching on containment alone")
+	}
+	if service.promptAttemptPreResultSafe(got) {
+		t.Fatal("a code-divergent diagnostic/terminal pair was incorrectly treated as pre-result safe")
+	}
+}

@@ -10,17 +10,16 @@ import (
 const MaxProviderMessageBytes = 2048
 
 var (
-	providerMessageURLPattern        = regexp.MustCompile(`https?://[^\s]+`)
-	providerMessageIdentifierPattern = regexp.MustCompile(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
+	providerMessageURLPattern        = regexp.MustCompile(`(?i)https?://[^\s]+`)
+	providerMessageIdentifierPattern = regexp.MustCompile(`(?i)\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
 )
 
 // SanitizeProviderMessage strips URLs, redacts workspace/session/run
 // identifiers, collapses internal whitespace, and trims trailing punctuation
 // from a raw provider-supplied error string, bounding it to
 // MaxProviderMessageBytes. It is the single sanitized-projection transform
-// AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.19 requires the ACP transport layer
-// and the recovery-evidence layer to observe identically, so both call this
-// rather than each keeping their own copy.
+// the ACP transport layer and the recovery-evidence layer must observe
+// identically, so both call this rather than each keeping their own copy.
 func SanitizeProviderMessage(message string) string {
 	message = providerMessageURLPattern.ReplaceAllString(message, "")
 	message = providerMessageIdentifierPattern.ReplaceAllString(message, "[redacted]")
