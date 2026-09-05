@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -138,5 +139,214 @@ func TestStopUnreconstructableRecoveredInstanceFallsBackWithoutRetrySupport(t *t
 
 	if mock.stopInstanceCalls != 1 {
 		t.Fatalf("StopInstance calls = %d, want 1 via the plain fallback path", mock.stopInstanceCalls)
+	}
+}
+
+// TestStopUnreconstructableRecoveredInstanceRetainsGuardOnBoundedRetryFailure
+// pins AC-EXECUTORS-SURVIVAL-002.16: when the bounded-retry stop path
+// exhausts its retries, the session's recovery guard must be retained for
+// the rest of this backend's lifetime -- not left for ReleaseAllExceptRetained
+// to release, which would let a fresh launch race the still-live instance.
+func TestStopUnreconstructableRecoveredInstanceRetainsGuardOnBoundedRetryFailure(t *testing.T) {
+	backend := &recoveryStoppingExecutor{name: executor.NameStandalone, stopWithRetryErr: errors.New("boom")}
+	mgr := newRecoveryStopTestManager(t, backend)
+	mgr.recoveryGuard.AcquireOrObserve("session-1")
+
+	ri := &ExecutorInstance{
+		InstanceID:           "exec-1",
+		SessionID:            "session-1",
+		RuntimeName:          executor.NameStandalone,
+		StandaloneInstanceID: "standalone-1",
+	}
+	mgr.stopUnreconstructableRecoveredInstance(context.Background(), ri)
+
+	if err := mgr.recoveryGuard.CheckLaunchAllowed("session-1"); !errors.Is(err, ErrSessionUnstoppableAgent) {
+		t.Fatalf("CheckLaunchAllowed = %v, want ErrSessionUnstoppableAgent", err)
+	}
+	mgr.recoveryGuard.ReleaseAllExceptRetained()
+	if err := mgr.recoveryGuard.CheckLaunchAllowed("session-1"); !errors.Is(err, ErrSessionUnstoppableAgent) {
+		t.Fatalf("guard must survive ReleaseAllExceptRetained, got %v", err)
+	}
+}
+
+// TestStopUnreconstructableRecoveredInstanceReleasesGuardOnBoundedRetrySuccess
+// pins the success counterpart: once the bounded-retry stop actually
+// succeeds, the session's guard must not be left retained -- a session whose
+// live instance really did stop is not the AC-EXECUTORS-SURVIVAL-002.16 case.
+func TestStopUnreconstructableRecoveredInstanceReleasesGuardOnBoundedRetrySuccess(t *testing.T) {
+	backend := &recoveryStoppingExecutor{name: executor.NameStandalone}
+	mgr := newRecoveryStopTestManager(t, backend)
+	mgr.recoveryGuard.AcquireOrObserve("session-1")
+
+	ri := &ExecutorInstance{
+		InstanceID:           "exec-1",
+		SessionID:            "session-1",
+		RuntimeName:          executor.NameStandalone,
+		StandaloneInstanceID: "standalone-1",
+	}
+	mgr.stopUnreconstructableRecoveredInstance(context.Background(), ri)
+
+	if err := mgr.recoveryGuard.CheckLaunchAllowed("session-1"); err != nil {
+		t.Fatalf("CheckLaunchAllowed = %v, want nil (guard released on stop success)", err)
+	}
+}
+
+// TestStopUnreconstructableRecoveredInstanceRetainsGuardWhenPlainStopInstanceFails
+// pins AC-EXECUTORS-SURVIVAL-002.16 on the non-standalone fallback path too:
+// a Docker/Sprites/SSH/Kubernetes instance that could not be stopped via the
+// plain StopInstance call must retain its guard exactly like the
+// bounded-retry path does.
+func TestStopUnreconstructableRecoveredInstanceRetainsGuardWhenPlainStopInstanceFails(t *testing.T) {
+	mock := &MockExecutor{name: executor.NameDocker, stopInstanceErr: errors.New("boom")}
+	mgr := newRecoveryStopTestManager(t, mock)
+	mgr.recoveryGuard.AcquireOrObserve("session-1")
+
+	ri := &ExecutorInstance{InstanceID: "exec-1", SessionID: "session-1", RuntimeName: executor.NameDocker}
+	mgr.stopUnreconstructableRecoveredInstance(context.Background(), ri)
+
+	if err := mgr.recoveryGuard.CheckLaunchAllowed("session-1"); !errors.Is(err, ErrSessionUnstoppableAgent) {
+		t.Fatalf("CheckLaunchAllowed = %v, want ErrSessionUnstoppableAgent", err)
+	}
+}
+
+// TestStopUnreconstructableRecoveredInstanceRetainsGuardWhenNoBackendForRuntime
+// pins AC-EXECUTORS-SURVIVAL-002.16 on the defensive no-backend branch: an
+// instance whose runtime has no registered backend at all was never even
+// attempted to stop, so it must be treated the same as a failed stop --
+// retained, not silently left for a bulk release to clear.
+func TestStopUnreconstructableRecoveredInstanceRetainsGuardWhenNoBackendForRuntime(t *testing.T) {
+	backend := &recoveryStoppingExecutor{name: executor.NameStandalone}
+	mgr := newRecoveryStopTestManager(t, backend)
+	mgr.recoveryGuard.AcquireOrObserve("session-1")
+
+	ri := &ExecutorInstance{InstanceID: "exec-1", SessionID: "session-1", RuntimeName: executor.NameDocker}
+	mgr.stopUnreconstructableRecoveredInstance(context.Background(), ri)
+
+	if err := mgr.recoveryGuard.CheckLaunchAllowed("session-1"); !errors.Is(err, ErrSessionUnstoppableAgent) {
+		t.Fatalf("CheckLaunchAllowed = %v, want ErrSessionUnstoppableAgent", err)
+	}
+}
+
+// blockingUnreconstructableStopper is a minimal ExecutorBackend + recoveryStopper
+// whose stopWithRetry blocks one named instance until the test releases it,
+// so a Manager.Start test can observe whether other recovered records are
+// reconstructed while that stop is still in flight.
+type blockingUnreconstructableStopper struct {
+	name        executor.Name
+	recovered   []*ExecutorInstance
+	blockedInst string
+	started     chan struct{}
+	unblock     chan struct{}
+}
+
+func (e *blockingUnreconstructableStopper) Name() executor.Name               { return e.name }
+func (e *blockingUnreconstructableStopper) HealthCheck(context.Context) error { return nil }
+func (e *blockingUnreconstructableStopper) CreateInstance(context.Context, *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	return nil, nil
+}
+func (e *blockingUnreconstructableStopper) StopInstance(context.Context, *ExecutorInstance, bool) error {
+	return nil
+}
+func (e *blockingUnreconstructableStopper) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
+	return e.recovered, nil
+}
+func (e *blockingUnreconstructableStopper) GetInteractiveRunner() *process.InteractiveRunner {
+	return nil
+}
+func (e *blockingUnreconstructableStopper) RequiresCloneURL() bool          { return false }
+func (e *blockingUnreconstructableStopper) ShouldApplyPreferredShell() bool { return false }
+func (e *blockingUnreconstructableStopper) IsAlwaysResumable() bool         { return false }
+func (e *blockingUnreconstructableStopper) stopWithRetry(_ context.Context, instanceID string) error {
+	if instanceID == e.blockedInst {
+		close(e.started)
+		<-e.unblock
+	}
+	return nil
+}
+
+// TestManagerStartDoesNotBlockOtherRecordsOnOneUnreconstructableStop pins
+// AC-EXECUTORS-SURVIVAL-002.11 ("no such instance's outcome shall depend on
+// another's"): one recovered record whose not-re-tracked stop is still
+// retrying must not prevent a different record in the same pass from being
+// fully reconstructed and published. Manager.Start dispatches
+// stopUnreconstructableRecoveredInstance on its own goroutine
+// (dispatchUnreconstructableStop) rather than blocking the shared consumer
+// loop inline.
+func TestManagerStartDoesNotBlockOtherRecordsOnOneUnreconstructableStop(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &blockingUnreconstructableStopper{
+		name: executor.NameStandalone,
+		recovered: []*ExecutorInstance{
+			{
+				InstanceID:           "exec-blocked",
+				TaskID:               "", // empty TaskID triggers the AC-002.4 refusal path
+				SessionID:            "session-blocked",
+				RuntimeName:          executor.NameStandalone,
+				StandaloneInstanceID: "standalone-blocked",
+			},
+			{
+				InstanceID:           "exec-fine",
+				TaskID:               "task-fine",
+				SessionID:            "session-fine",
+				AgentProfileID:       recoveryTestAgentProfileID,
+				RuntimeName:          executor.NameStandalone,
+				StandaloneInstanceID: "standalone-fine",
+			},
+		},
+		blockedInst: "standalone-blocked",
+		started:     make(chan struct{}),
+		unblock:     make(chan struct{}),
+	}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	registerRecoveryTestAgentProfile(t, mgr)
+	mgr.SetExecutorRunningWriter(&listingWriter{rows: []*models.ExecutorRunning{
+		{SessionID: "session-blocked"},
+		{SessionID: "session-fine"},
+	}})
+
+	done := make(chan error, 1)
+	go func() { done <- mgr.Start(context.Background()) }()
+
+	select {
+	case <-backend.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the blocked instance's stop to begin")
+	}
+
+	// session-blocked's stop stays in flight (backend.unblock is not closed
+	// yet) for this entire poll window: on the pre-fix synchronous dispatch,
+	// session-fine could never reach the store until after that stop
+	// resolved, so this loop would exhaust its deadline and fail. It only
+	// succeeds here because dispatchUnreconstructableStop runs the stop on
+	// its own goroutine, letting the shared consumer loop reconstruct
+	// session-fine independently.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := mgr.executionStore.GetBySessionID("session-fine"); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("session-fine was not re-tracked while session-blocked's stop was still in flight")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	close(backend.unblock)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Start to finish after unblocking the stop")
+	}
+
+	if err := mgr.recoveryGuard.CheckLaunchAllowed("session-blocked"); err != nil {
+		t.Fatalf("expected session-blocked's guard released once its stop succeeded, got %v", err)
 	}
 }
