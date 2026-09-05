@@ -4,7 +4,7 @@ import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { consumeSessionTabUserActivationIntent } from "./session-tab-activation-intent";
-import { resolveSessionTabSyncTarget } from "./dockview-session-tabs";
+import { clearHiddenSessionPanel, resolveSessionTabSyncTarget } from "./dockview-session-tabs";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -153,6 +153,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
         newSessionId: target.sessionId,
       });
     }
+    clearHiddenSessionPanel(api, target.sessionId);
     state.setActiveSession(target.taskId, target.sessionId);
   });
   return {

@@ -596,10 +596,6 @@ export function runAutoSessionTabEffect(
     return;
   }
 
-  // Selecting a hidden session through the reopen menu (or another explicit
-  // session-selection path) restores its panel and clears the hide intent.
-  refs.hiddenSessionIdsRef.current.delete(effectiveSessionId);
-
   if (
     shouldSkipPanelEnsure(
       api,

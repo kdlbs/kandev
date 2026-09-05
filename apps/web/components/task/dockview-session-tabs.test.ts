@@ -646,6 +646,8 @@ describe("runAutoSessionTabEffect sibling visibility", () => {
     const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, hiddenSessionId]);
     const refs = makeAutoSessionRefs();
     refs.hiddenSessionIdsRef.current.add(hiddenSessionId);
+    // The reopen menu clears the hide intent before selecting the session.
+    refs.hiddenSessionIdsRef.current.delete(hiddenSessionId);
 
     withDockviewState({ api, preMaximizeLayout: null }, () => {
       runAutoSessionTabEffect(hiddenSessionId, appStore as never, refs as never);
