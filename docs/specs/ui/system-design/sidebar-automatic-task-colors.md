@@ -280,6 +280,8 @@ Tombstones remain while legacy import support exists. A later cleanup can remove
 
 Each disclosure has a label, summary, chevron, stable content ID, and `aria-expanded`. Disclosure state is transient and starts collapsed.
 
+Sort, Group by, and Task row each own their bottom separator. The shared disclosure padding gives each collapsed toggle the same bottom inset before that separator. Automatic colors follows Task row without adding a second adjacent separator.
+
 The Sort summary shows the selected field and direction. Its expanded content keeps the current `SortPicker`.
 
 The Group by summary shows the selected group. Its expanded content keeps the current `GroupPicker`.
@@ -287,13 +289,15 @@ The Group by summary shows the selected group. Its expanded content keeps the cu
 The Automatic colors summary shows Off or an enabled-rule count. Its expanded content contains:
 
 - a global enable switch
-- concise precedence and scope text
+- concise precedence, scope, and evaluation-timing text
 - ordered rule cards
 - an Add rule action
 
+The timing text states that rules apply to existing and new sidebar tasks and reevaluate when task facts or rule settings change. Desktop adds a keyboard-focusable, pointer-hoverable help icon with the complete list of triggers. The drawer keeps the concise timing text visible and does not add a nested help surface or require hover.
+
 A rule card shows the condition, target, output color, enabled state, reorder control, and remove action. The first matching rule is visually first.
 
-The workflow-step rule offers Use step color. Other rule types use a fixed safe color.
+The workflow-step rule offers Use step color. Other rule types use a fixed safe color. Dimension and origin options use localized human-readable labels. A fixed output selection renders the swatch supplied by its selected option exactly once.
 
 Add rule creates a disabled task-state rule with no target and a fixed blue output. The user can change each field before enabling it.
 
@@ -315,7 +319,7 @@ Desktop and mobile share rule state, normalization, matching, catalog data, and 
 
 Desktop and mobile also share the server-backed manual-color hook. The existing menus, markers, drawer, touch targets, and scroll ownership do not change.
 
-Touch summary rows, reorder controls, and standalone actions have a 44 CSS pixel active dimension. No action depends on hover.
+Touch summary rows, reorder controls, and standalone actions have a 44 CSS pixel active dimension. No action depends on hover. Desktop timing help supports both hover and keyboard focus; the same essential timing guidance is visible in the drawer.
 
 ## Failure behavior
 
@@ -359,11 +363,11 @@ Projection tests cover desktop, mobile, and archived task facts. They also cover
 
 Catalog tests cover search, refresh generations, source errors, duplicate identities, plugin reload, and unavailable stored targets.
 
-Component tests cover disclosure summaries, global copy, rule editing, reorder, automatic-source copy, and desktop or mobile picker composition.
+Component tests cover disclosure summaries and separators, global and timing copy, localized condition labels, single output swatches, rule editing, reorder, automatic-source copy, and desktop or mobile picker composition.
 
-Desktop Playwright coverage proves manual-color migration and persistence across browser contexts. It also proves rule precedence, repository search, and live recoloring.
+Desktop Playwright coverage proves manual-color migration and persistence across browser contexts. It also proves rule precedence, repository search, live recoloring, readable condition options, single output swatches, aligned disclosure spacing, and hover help.
 
-Mobile Playwright coverage proves server-backed manual colors through the drawer. It also proves touch targets, internal scrolling, and no horizontal overflow.
+Mobile Playwright coverage proves server-backed manual colors through the drawer. It also proves visible timing guidance, touch targets, internal scrolling, and no horizontal overflow.
 
 ## Related decisions and designs
 

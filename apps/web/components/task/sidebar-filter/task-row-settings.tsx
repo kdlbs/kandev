@@ -325,7 +325,7 @@ export function TaskRowSettings({
         </span>
       }
       testId="task-row-settings"
-      className="border-t"
+      className="border-b"
       contentClassName="space-y-2 pt-1"
     >
       <TaskRowDetailsSection value={value} sort={sort} onChange={onChange} />

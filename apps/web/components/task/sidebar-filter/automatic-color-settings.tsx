@@ -1,10 +1,10 @@
 "use client";
 
-import { IconPalette, IconPlus } from "@tabler/icons-react";
+import { IconInfoCircle, IconPalette, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
 import { MAX_AUTOMATIC_TASK_COLOR_RULES } from "@/lib/task-color-automation-settings";
 import { SidebarSettingsDisclosure } from "./sidebar-settings-disclosure";
 import { AutomaticColorRuleList } from "./automatic-color-rule-list";
@@ -38,7 +38,7 @@ export function AutomaticColorSettings({ isDrawerLayout }: Props) {
       testId="automatic-color-settings"
       expanded={controller.expanded}
       onExpandedChange={controller.setExpanded}
-      className={cn("border-t", isDrawerLayout && "pt-2")}
+      className={isDrawerLayout ? "pt-2" : undefined}
       contentClassName="space-y-2 pt-1"
     >
       <AutomaticColorSettingsBody controller={controller} isDrawerLayout={isDrawerLayout} t={t} />
@@ -63,7 +63,10 @@ function AutomaticColorSettingsBody({
       <div className="rounded-md border border-border/60 p-2" aria-busy={controller.saving}>
         <div className="flex min-h-11 items-center gap-2">
           <div className="min-w-0 flex-1">
-            <span className="block text-xs font-medium">{t("task:automaticColorsEnabled")}</span>
+            <span className="flex items-center gap-1 text-xs font-medium">
+              {t("task:automaticColorsEnabled")}
+              {!isDrawerLayout && <AutomaticColorsTimingHelp t={t} />}
+            </span>
             <span className="block text-[11px] text-muted-foreground">
               {t("task:automaticColorsPersonalGlobal")}
             </span>
@@ -77,6 +80,12 @@ function AutomaticColorSettingsBody({
             />
           </label>
         </div>
+        <p
+          className="px-1 pt-1 text-[11px] text-muted-foreground"
+          data-testid="automatic-colors-timing"
+        >
+          {t("task:automaticColorsTiming")}
+        </p>
         <p className="px-1 pt-1 text-[11px] text-muted-foreground">
           {t("task:automaticColorsPrecedence")}
         </p>
@@ -117,6 +126,28 @@ function AutomaticColorSettingsBody({
         <AutomaticColorRules controller={controller} isDrawerLayout={isDrawerLayout} t={t} />
       )}
     </>
+  );
+}
+
+function AutomaticColorsTimingHelp({
+  t,
+}: {
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={t("task:automaticColorsHelpLabel")}
+          className="relative inline-flex size-5 shrink-0 cursor-help items-center justify-center text-muted-foreground outline-none after:absolute after:-inset-2 hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="automatic-colors-help"
+        >
+          <IconInfoCircle className="size-3.5" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[280px]">{t("task:automaticColorsHelp")}</TooltipContent>
+    </Tooltip>
   );
 }
 

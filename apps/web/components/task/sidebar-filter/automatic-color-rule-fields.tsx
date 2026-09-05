@@ -202,7 +202,6 @@ export function AutomaticColorOutputField({
   onChange: (rule: SidebarTaskColorRule) => void;
   t: Translate;
 }) {
-  const marker = outputMarker(rule);
   return (
     <label className="block min-w-0">
       <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
@@ -229,10 +228,7 @@ export function AutomaticColorOutputField({
           data-testid={`automatic-color-output-${rule.id}`}
           aria-label={t("task:automaticColorsOutput")}
         >
-          <span className="flex min-w-0 items-center gap-2">
-            <ColorSwatch marker={marker} />
-            <SelectValue />
-          </span>
+          <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {rule.condition.dimension === "workflow_step" && (
@@ -316,12 +312,6 @@ export function isCompleteRule(
   return rule.output.kind === "workflow_step"
     ? rule.condition.dimension === "workflow_step"
     : FIXED_AUTOMATIC_TASK_COLORS.includes(rule.output.color);
-}
-
-function outputMarker(rule: SidebarTaskColorRule): TaskMarkerPresentation {
-  return rule.output.kind === "workflow_step"
-    ? fixedAutomaticTaskColor("gray")
-    : fixedAutomaticTaskColor(rule.output.color);
 }
 
 function ColorSwatch({ marker }: { marker: TaskMarkerPresentation }) {

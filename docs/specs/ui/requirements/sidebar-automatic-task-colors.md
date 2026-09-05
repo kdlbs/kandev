@@ -35,6 +35,7 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.3:** Expanding or collapsing a summary shall not create or change a saved-view draft.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.4:** The editor shall show Automatic colors after Task row. It shall identify the setting as personal and global across sidebar views and workspaces.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.5:** The Automatic colors summary shall show whether automation is off or how many rules are enabled.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.6:** The collapsed Sort, Group by, and Task row summaries shall use the same bottom inset before their separator.
 
 ### REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002: Ordered personal color rules
 
@@ -59,6 +60,9 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.13:** An incomplete rule shall be disabled, shall match no task, and shall remain editable.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.14:** An origin rule shall offer Kanban as the value for a task that has no stored origin.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.15:** A task-state rule shall offer every raw task state. It shall not use the broader state groups from sidebar filters.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.16:** Condition selectors shall show localized human-readable labels for each supported dimension and origin value.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.17:** A fixed-color output selector shall show one color swatch for its current selection.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.18:** The editor shall explain that rules apply to existing and new sidebar tasks and reevaluate when relevant task facts or rule settings change. Desktop shall provide detailed timing help on pointer hover and keyboard focus. Phone and tablet shall provide equivalent visible guidance without requiring hover.
 
 ### REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003: Repository rule targets
 

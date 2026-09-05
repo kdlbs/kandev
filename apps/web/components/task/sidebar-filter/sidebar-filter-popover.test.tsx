@@ -75,6 +75,23 @@ describe("SidebarFilterPopover task-row editor", () => {
     expect(state.updateSidebarDraft).not.toHaveBeenCalled();
   });
 
+  it("gives each collapsed view setting the same bottom separator", () => {
+    render(
+      <SidebarFilterPopover
+        trigger={<button type="button">Open</button>}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    for (const testId of ["sidebar-sort-settings", "sidebar-group-settings", "task-row-settings"]) {
+      expect(screen.getByTestId(testId).className.split(" ")).toContain("border-b");
+    }
+    expect(screen.getByTestId("automatic-color-settings").className.split(" ")).not.toContain(
+      "border-t",
+    );
+  });
+
   it("describes every group-by and right-side option", () => {
     const renderEditor = () =>
       render(
