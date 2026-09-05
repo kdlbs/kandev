@@ -24,7 +24,7 @@ func TestKandevBranchCheckoutPostlude_HasInvariantSteps(t *testing.T) {
 		`[ {{worktree.branch}} != {{repository.branch}} ]`,
 		`cd {{workspace.path}}`,
 		`git rev-parse --verify {{worktree.branch}}`,
-		`git fetch --depth=1 origin {{worktree.branch}}`,
+		`git fetch --no-tags origin {{worktree.branch}}`,
 		`git checkout -b {{worktree.branch}} origin/{{worktree.branch}}`,
 		`git checkout -b {{worktree.branch}}`,
 		`|| true`,
@@ -40,6 +40,13 @@ func TestKandevBranchCheckoutPostlude_HasInvariantSteps(t *testing.T) {
 		strings.Contains(postlude, `"{{repository.branch}}"`) ||
 		strings.Contains(postlude, `"{{workspace.path}}`) {
 		t.Errorf("postlude must not double-quote data placeholders:\n%s", postlude)
+	}
+	// A depth-limited fetch grafts a history-less tip into the workspace, which
+	// leaves the session branch with no merge-base against the base branch and
+	// breaks the diff panel and the pull-request flow. Nothing unshallows a
+	// workspace afterwards, so the graft is permanent — verify it stays gone.
+	if strings.Contains(shellCodeOnly(postlude), "--depth") {
+		t.Errorf("postlude must not fetch with --depth (it permanently grafts a shallow tip):\n%s", postlude)
 	}
 	// The destructive `-B branch origin/branch` form orphaned local commits on
 	// resume — verify it does NOT come back.
@@ -234,4 +241,114 @@ func TestDefaultPrepareScript_SSHMaterializesPrimaryWorkspace(t *testing.T) {
 	if strings.Contains(script, "git checkout -B {{worktree.branch}} origin/{{worktree.branch}}") {
 		t.Fatal("SSH default prepare script must leave feature-branch selection to the postlude")
 	}
+}
+
+// TestKandevBranchCheckoutPostlude_PreservesHistoryForRemoteBranch is the
+// regression for the shallow graft. When the session branch already exists on
+// origin (resume, re-run, or a fresh sandbox provisioned for an existing task)
+// the postlude fetches it. A depth-limited fetch there wrote .git/shallow even
+// into a full clone, after which the session branch had no common ancestor
+// with the base branch: "git merge-base" fails and "git diff <base>...HEAD" is
+// meaningless. Those are exactly what the diff panel and the pull-request flow
+// run, and nothing in the backend ever unshallows a workspace afterwards.
+func TestKandevBranchCheckoutPostlude_PreservesHistoryForRemoteBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	const (
+		baseBranch    = "main"
+		featureBranch = "feature/from-remote"
+	)
+
+	workspace, originDir := setupPostludeRepo(t, baseBranch)
+	seedOriginBranch(t, originDir, featureBranch)
+
+	script := strings.NewReplacer(
+		"{{workspace.path}}", workspace,
+		"{{worktree.branch}}", featureBranch,
+		"{{repository.branch}}", baseBranch,
+	).Replace(KandevBranchCheckoutPostlude())
+
+	if out, err := exec.Command("bash", "-e", "-c", script).CombinedOutput(); err != nil {
+		t.Fatalf("bash -e postlude failed: %v\n%s", err, out)
+	}
+
+	shallow := strings.TrimSpace(string(runIn(t, workspace, "git", "rev-parse", "--is-shallow-repository")))
+	if shallow != "false" {
+		t.Errorf("workspace is shallow after the postlude (--is-shallow-repository = %q)", shallow)
+	}
+
+	mergeBase := exec.Command("git", "merge-base", baseBranch, "HEAD")
+	mergeBase.Dir = workspace
+	out, err := mergeBase.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git merge-base %s HEAD failed after the postlude: %v\n%s", baseBranch, err, out)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		t.Fatalf("git merge-base %s HEAD returned no commit", baseBranch)
+	}
+}
+
+// TestDefaultPrepareScript_SpritesMaterializesWithoutTruncatingHistory pins the
+// properties the Sprites default regressed on: it must not clone into a
+// directory kandev may already have written into, it must not truncate the
+// history the pull-request flow needs, and it must never print the clone URL,
+// which carries an injected access token, into the streamed prepare output.
+func TestDefaultPrepareScript_SpritesMaterializesWithoutTruncatingHistory(t *testing.T) {
+	script := DefaultPrepareScript("sprites")
+	if script == "" {
+		t.Fatal(`DefaultPrepareScript("sprites") returned empty`)
+	}
+
+	for _, want := range []string{
+		"{{workspace.path}}",
+		"{{repository.clone_url}}",
+		"{{repository.branch}}",
+		"{{repository.setup_script}}",
+		"{{kandev.agentctl.install}}",
+		"{{kandev.agentctl.start}}",
+		"git init",
+		"fetch --filter=blob:none --no-tags",
+		"remote.origin.url",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("Sprites default prepare script missing %q", want)
+		}
+	}
+
+	// Each of these shipped in the default and each broke a real launch path.
+	forbidden := map[string]string{
+		"--depth":            "truncated history breaks merge-base and pull-request diffs",
+		"git clone":          "the workspace is not guaranteed to be empty when prepare runs",
+		"ssh-keyscan":        "all transports are HTTPS + token; a DNS blip killed the launch under set -e",
+		"printf 'Cloning %s": "leaked the token-bearing clone URL into the streamed task output",
+		"pnpm-linux-x64":     "a hardcoded version ignores each repository's packageManager pin",
+	}
+	code := shellCodeOnly(script)
+	for bad, why := range forbidden {
+		if strings.Contains(code, bad) {
+			t.Errorf("Sprites default prepare script must not contain %q: %s", bad, why)
+		}
+	}
+}
+
+// shellCodeOnly drops whole-line "#" comments so a forbidden-substring check
+// tests what the script RUNS rather than what its comments say about it. The
+// comments deliberately name the constructs that were removed (--depth,
+// git clone, ssh-keyscan), and matching those would make the check assert the
+// opposite of its intent.
+func shellCodeOnly(script string) string {
+	lines := strings.Split(script, "\n")
+	code := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		code = append(code, line)
+	}
+	return strings.Join(code, "\n")
 }
