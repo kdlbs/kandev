@@ -7,7 +7,7 @@ import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
-import { TaskChatPanel } from "../task-chat-panel";
+import { TaskChatPanel, type PendingMessageScrollTarget } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
 import { SessionMobileReviewDialog } from "./session-mobile-review-dialog";
@@ -100,15 +100,17 @@ function MobileChatPanelContent({
   isPassthroughMode,
   effectiveSessionId,
   onOpenFile,
-  scrollToMessageId,
+  scrollTarget,
   onScrollTargetConsumed,
+  isVisible,
 }: {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
   onOpenFile: (path: string, repo?: string) => void;
-  scrollToMessageId: string | null;
+  scrollTarget: PendingMessageScrollTarget | null;
   onScrollTargetConsumed: (messageId: string) => void;
+  isVisible: boolean;
 }) {
   const { t } = useTranslation();
   if (!activeTaskId) {
@@ -136,7 +138,8 @@ function MobileChatPanelContent({
           sessionId={effectiveSessionId}
           taskId={effectiveSessionId ? activeTaskId : null}
           onOpenFile={onOpenFile}
-          pendingScrollToMessageId={scrollToMessageId}
+          pendingScrollTarget={scrollTarget}
+          isVisible={isVisible}
           onPendingScrollConsumed={onScrollTargetConsumed}
         />
       )}
@@ -158,7 +161,7 @@ type MobilePanelAreaProps = {
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void;
   onNavigateToPrompt: (messageId: string) => void;
   onScrollTargetConsumed?: (messageId: string) => void;
-  mobileScrollTarget: string | null;
+  mobileScrollTarget: PendingMessageScrollTarget | null;
   topNavHeight: string;
   bottomNavHeight: string;
   reviews: readonly ReviewItemSummary[];
@@ -219,8 +222,9 @@ export function MobilePanelArea({
             isPassthroughMode={isPassthroughMode}
             effectiveSessionId={effectiveSessionId}
             onOpenFile={handleOpenFileFromChat}
-            scrollToMessageId={mobileScrollTarget}
+            scrollTarget={mobileScrollTarget}
             onScrollTargetConsumed={onScrollTargetConsumed}
+            isVisible
           />
         </div>
       )}
@@ -609,16 +613,34 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
-  const [mobileScrollTarget, setMobileScrollTarget] = useState<string | null>(null);
+  const [mobileScrollTarget, setMobileScrollTarget] = useState<PendingMessageScrollTarget | null>(
+    null,
+  );
+  const mobileScrollTokenRef = useRef(0);
   useEffect(() => {
+    mobileScrollTokenRef.current += 1;
     setMobileScrollTarget(null);
   }, [effectiveSessionId]);
-  const handleNavigateToPrompt = useCallback(
-    (messageId: string) => {
-      setMobileScrollTarget(messageId);
-      handlePanelChangeAndClearSheet("chat");
+  const handlePanelChangeAndClearTarget = useCallback(
+    (panel: MobileSessionPanel) => {
+      setMobileScrollTarget(null);
+      handlePanelChangeAndClearSheet(panel);
     },
     [handlePanelChangeAndClearSheet],
+  );
+  const handleNavigateToPrompt = useCallback(
+    (messageId: string) => {
+      if (!effectiveSessionId) return;
+      const token = ++mobileScrollTokenRef.current;
+      setMobileScrollTarget({
+        sessionId: effectiveSessionId,
+        messageId,
+        token,
+        hostPanelId: "mobile-chat",
+      });
+      handlePanelChangeAndClearSheet("chat");
+    },
+    [effectiveSessionId, handlePanelChangeAndClearSheet],
   );
   const handleMobileScrollTargetConsumed = useCallback(() => {
     setMobileScrollTarget(null);
@@ -628,8 +650,14 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
       activeTaskId,
       effectiveSessionId,
       currentMobilePanel,
-      handlePanelChangeAndClearSheet,
+      handlePanelChangeAndClearSheet: handlePanelChangeAndClearTarget,
     });
+  useLayoutEffect(() => {
+    if (currentMobilePanel !== "chat" || effectiveMobilePanel !== "chat") {
+      mobileScrollTokenRef.current += 1;
+      setMobileScrollTarget(null);
+    }
+  }, [currentMobilePanel, effectiveMobilePanel]);
   return (
     <div className="h-dvh relative bg-background" data-testid="mobile-task-layout">
       <MobileTopBarSticky
@@ -651,7 +679,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
         handleOpenFile={handleOpenFile}
-        handlePanelChangeAndClearSheet={handlePanelChangeAndClearSheet}
+        handlePanelChangeAndClearSheet={handlePanelChangeAndClearTarget}
         onNavigateToPrompt={handleNavigateToPrompt}
         onScrollTargetConsumed={handleMobileScrollTargetConsumed}
         mobileScrollTarget={mobileScrollTarget}
