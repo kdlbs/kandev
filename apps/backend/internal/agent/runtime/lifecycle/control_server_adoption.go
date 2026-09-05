@@ -114,6 +114,34 @@ func isAlreadyAbsentShutdownError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "connection refused")
 }
 
+// withAdoptionRetry executes fn up to retries+1 times, each attempt bounded
+// by its own per-attempt timeout derived from ctx rather than ctx's own
+// (possibly absent) deadline -- the same bounded-per-attempt shape as
+// shutdownControlServerWithRetry and StandaloneExecutor.listInstancesWithRetry
+// (AC-EXECUTORS-SURVIVAL-002.13). A zero timeout or negative retry count
+// falls back to the AC's own two-second/two-retry default.
+func withAdoptionRetry[T any](ctx context.Context, timeout time.Duration, retries int, fn func(context.Context) (T, error)) (T, error) {
+	if timeout <= 0 {
+		timeout = defaultRecoveryReadTimeout
+	}
+	if retries < 0 {
+		retries = defaultRecoveryReadRetries
+	}
+
+	var lastErr error
+	var zero T
+	for attempt := 0; attempt <= retries; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+		result, err := fn(attemptCtx)
+		cancel()
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+	}
+	return zero, lastErr
+}
+
 // AdoptionControlClient is the subset of agentctl.ControlClient's ownership
 // surface the adoption orchestration drives, narrowed so the decision below
 // is testable without a real HTTP round trip.
@@ -247,7 +275,7 @@ func AttemptAdoptControlServer(
 	// at the first real contact with the recorded control endpoint --
 	// regardless of which gate below ultimately refuses or accepts adoption.
 	contactedAt := time.Now()
-	identity, err := client.GetIdentity(ctx)
+	identity, err := withAdoptionRetry(ctx, recoveryReadTimeout, recoveryReadRetries, client.GetIdentity)
 	if err != nil {
 		return AdoptionOutcome{Reason: AdoptionReasonNoServer}
 	}
@@ -262,7 +290,7 @@ func AttemptAdoptControlServer(
 	}
 
 	client.SetAuthToken(credential)
-	rotated, err := client.RotateCredential(ctx)
+	rotated, err := withAdoptionRetry(ctx, recoveryReadTimeout, recoveryReadRetries, client.RotateCredential)
 	if err != nil {
 		return AdoptionOutcome{Reason: AdoptionReasonAuthenticationFailed, ContactedAt: contactedAt}
 	}
@@ -297,7 +325,9 @@ func AttemptAdoptControlServer(
 	// idempotent replay (AC-002.10) recovers it, and the superseded
 	// credential merely stays adoption-only-acceptable a little longer than
 	// necessary in the meantime.
-	if err := client.ConfirmCredentialRotation(ctx, rotated.RotationID); err != nil {
+	if _, err := withAdoptionRetry(ctx, recoveryReadTimeout, recoveryReadRetries, func(c context.Context) (struct{}, error) {
+		return struct{}{}, client.ConfirmCredentialRotation(c, rotated.RotationID)
+	}); err != nil {
 		log.Warn("control server credential rotation stored durably but confirmation call failed",
 			zap.String("endpoint", record.Endpoint), zap.Error(err))
 	}

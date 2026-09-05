@@ -188,6 +188,46 @@ func TestAttemptAdoptControlServerUnreachableSpawnsFresh(t *testing.T) {
 	}
 }
 
+// blockingIdentityControlClient's GetIdentity blocks until its call's own
+// context is done, for proving a stalled control server cannot hold
+// AttemptAdoptControlServer open past its configured per-attempt timeout.
+type blockingIdentityControlClient struct {
+	fakeAdoptionControlClient
+	identityCalls int
+}
+
+func (c *blockingIdentityControlClient) GetIdentity(ctx context.Context) (*agentctl.IdentityInfo, error) {
+	c.identityCalls++
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestAttemptAdoptControlServerGetIdentityBoundedByConfiguredTimeout pins
+// Review round 5 finding 2: a stalled control server's GetIdentity call must
+// not hold AttemptAdoptControlServer open past the configured
+// recoveryReadTimeout -- it must not fall back to the HTTP client's own much
+// larger internal timeout (or block forever on an undeadlined context).
+func TestAttemptAdoptControlServerGetIdentityBoundedByConfiguredTimeout(t *testing.T) {
+	client := &blockingIdentityControlClient{}
+	store, _ := adoptionFixture(t, validRecord(), &client.fakeAdoptionControlClient)
+	factory := func(string) (AdoptionControlClient, error) { return client, nil }
+
+	start := time.Now()
+	outcome := AttemptAdoptControlServer(context.Background(), store, newInMemorySecretStore(), factory,
+		testHomeDir, RequiredSurvivalCapabilities, 20*time.Millisecond, 0, newAdoptionTestLogger(t))
+	elapsed := time.Since(start)
+
+	if outcome.Adopted || outcome.Reason != AdoptionReasonNoServer {
+		t.Fatalf("outcome = %+v, want unadopted no_server (a timed-out identity read never answered)", outcome)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("AttemptAdoptControlServer took %v, want bounded by the configured 20ms per-attempt timeout, not an unbounded block", elapsed)
+	}
+	if client.identityCalls == 0 {
+		t.Fatal("expected GetIdentity to have been attempted at least once")
+	}
+}
+
 // TestAttemptAdoptControlServerHomeMismatchRefusesWithoutStop pins AC-001.4:
 // a home-directory mismatch is refused, and -- critically -- ShutdownControlServer
 // is never called, because a process this installation cannot prove is its
