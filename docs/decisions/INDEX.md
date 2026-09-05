@@ -20,7 +20,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0012 | [Service-only UI self-update](0012-service-only-self-update.md)                                                                     | accepted   | backend, frontend, cli      | 2026-05-29 |
 | 0013 | [Multi-branch task support — N (repo, branch) pairs per task](0013-multi-branch-tasks.md)                                           | accepted   | backend, frontend           | 2026-06-01 |
 | 0014 | [Per-CLI MCP server injection for passthrough mode](0014-passthrough-mcp-injection-strategies.md)                                   | accepted   | backend                     | 2026-05-29 |
-| 0015 | [Explicit completion signal for auto-advance](0015-explicit-completion-signal-for-auto-advance.md)                                  | proposed (amended 2026-08-14) | backend, frontend | 2026-06-04 |
+| 0015 | [Explicit completion signal for auto-advance](0015-explicit-completion-signal-for-auto-advance.md)                                  | proposed (amended 2026-08-14, 2026-09-05) | backend, frontend | 2026-06-04 |
 | 0016 | [Read-only absolute file paths](0016-observed-external-file-reads.md)                                                               | accepted   | backend                     | 2026-06-14 |
 | 0017 | [Resource metrics sampling](0017-resource-metrics-sampling.md)                                                                      | accepted   | backend, frontend, protocol | 2026-06-14 |
 | 0018 | [Runtime settings overrides](0018-runtime-settings-overrides.md)                                                                    | accepted (amended 2026-08-11) | backend, frontend, cli | 2026-06-14 |
