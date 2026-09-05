@@ -181,6 +181,7 @@ describe("repository source changes", () => {
     const setUseRemote = vi.fn();
     const setExecutorId = vi.fn();
     const setExecutorProfileId = vi.fn();
+    const setPreferLocalExecutor = vi.fn();
     const setWorkspacePath = vi.fn();
     const fs = {
       noRepository: true,
@@ -192,6 +193,7 @@ describe("repository source changes", () => {
       setUseRemote,
       setExecutorId,
       setExecutorProfileId,
+      setPreferLocalExecutor,
       setWorkspacePath,
     } as unknown as DialogFormState;
     const { result } = renderHook(() => useDialogHandlers(fs, []));

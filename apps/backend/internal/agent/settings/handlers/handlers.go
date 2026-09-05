@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -54,34 +55,40 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadca
 
 func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
+	// Agents, agent profiles and the runtimes behind them are org configuration:
+	// org.config.manage is the scope that names exactly this surface. Reads stay
+	// open to any identity; every mutation is gated. h.interlock is a
+	// concurrent-edit guard, not an authorization check, so it does not stand in
+	// for this.
+	cfg := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
-	api.POST("/agents", h.interlock, h.httpCreateAgent)
-	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
+	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
+	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
-	api.PATCH("/agents/tui/:id/mcp", h.interlock, h.httpUpdateCustomTUIAgentMCP)
+	api.PATCH("/agents/tui/:id/mcp", cfg, h.interlock, h.httpUpdateCustomTUIAgentMCP)
 	api.GET("/agents/:id", h.httpGetAgent)
-	api.PATCH("/agents/:id", h.interlock, h.httpUpdateAgent)
-	api.DELETE("/agents/:id", h.interlock, h.httpDeleteAgent)
-	api.POST("/agents/:id/profiles", h.interlock, h.httpCreateProfile)
+	api.PATCH("/agents/:id", cfg, h.interlock, h.httpUpdateAgent)
+	api.DELETE("/agents/:id", cfg, h.interlock, h.httpDeleteAgent)
+	api.POST("/agents/:id/profiles", cfg, h.interlock, h.httpCreateProfile)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-models/:agentName/resolve", h.httpResolveAgentModelConfig)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
-	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
+	api.POST("/agent-install/:agentName", cfg, h.interlock, h.httpInstallAgent)
 	api.GET("/agent-update/status", h.httpListAgentUpdateStatuses)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
-	api.POST("/agent-update/:agentName", h.interlock, h.httpUpdateAgentRuntime)
+	api.POST("/agent-update/:agentName", cfg, h.interlock, h.httpUpdateAgentRuntime)
 	api.GET("/agent-update/jobs", h.httpListAgentUpdateJobs)
 	api.GET("/agent-update/jobs/:id", h.httpGetAgentUpdateJob)
-	api.PATCH("/agent-profiles/:id", h.interlock, h.httpUpdateProfile)
-	api.DELETE("/agent-profiles/:id", h.interlock, h.httpDeleteProfile)
-	api.POST("/agent-profiles/:id/duplicate", h.interlock, h.httpDuplicateProfile)
+	api.PATCH("/agent-profiles/:id", cfg, h.interlock, h.httpUpdateProfile)
+	api.DELETE("/agent-profiles/:id", cfg, h.interlock, h.httpDeleteProfile)
+	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
-	api.POST("/agent-profiles/:id/mcp-config", h.interlock, h.httpUpdateProfileMcpConfig)
+	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {

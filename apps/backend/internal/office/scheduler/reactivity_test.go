@@ -40,7 +40,8 @@ func newReactivityTestRepo(t *testing.T) *officesqlite.Repository {
 			workspace_id TEXT DEFAULT '',
 			workflow_step_id TEXT DEFAULT '',
 			parent_id TEXT DEFAULT '',
-			state TEXT DEFAULT ''
+			state TEXT DEFAULT '',
+			assignee_user_id TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		t.Fatalf("create tasks table: %v", err)

@@ -66,7 +66,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if session.IsPassthrough {
 			capabilities = nil
 		}
-		return mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil), nil
+		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
 	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -78,10 +78,10 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// state). Keep the legacy kanban profile in that narrow case; production
 		// task launches resolve the persisted task above and therefore still get
 		// the exact office/autopilot capability set.
-		return mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil), nil
+		return e.withCanvasCapability(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
 	}
 	if task.Origin == models.TaskOriginAutomationRun {
-		return mcpprofile.NewAutomation(), nil
+		return e.withCanvasCapability(mcpprofile.NewAutomation()), nil
 	}
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
@@ -107,7 +107,14 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 			capabilities = append(capabilities, mcpprofile.CapabilityHandoffTask)
 		}
 	}
-	return mcpprofile.New(surface, capabilities, nil), nil
+	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+}
+
+func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
+	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
+		return profile.WithCapability(mcpprofile.CapabilityCanvas)
+	}
+	return profile
 }
 
 // AgentHasHandoffPermission reports whether the agent profile has the

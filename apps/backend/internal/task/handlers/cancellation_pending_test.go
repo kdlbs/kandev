@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kandev/kandev/internal/task/repository"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,6 +38,9 @@ type messageOrchestratorWithCancellation struct {
 }
 
 type cancellationListRepo struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	mockRepository
 	sessionsByTask []*models.TaskSession
 	pendingActions map[string]models.TaskPendingAction

@@ -9,6 +9,8 @@ export const defaultFeatureFlags = {
   // overwrites this with the backend's effective values after startup.
   office: false,
   auth: false,
+  canvases: false,
+  multiTenancy: false,
   dynamicAgentRouting: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,

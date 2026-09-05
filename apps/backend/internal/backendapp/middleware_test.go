@@ -67,7 +67,7 @@ func TestCORSMiddlewareAllowsInterimSettingsInterlockHeader(t *testing.T) {
 	req.Host = "localhost:38429"
 	req.Header.Set("Origin", "http://localhost:37429")
 	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	req.Header.Set("Access-Control-Request-Headers", "X-Kandev-Interim-Settings-Interlock")
+	req.Header.Set("Access-Control-Request-Headers", "X-Kandev-Interim-Settings-Interlock, If-Match")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -76,6 +76,12 @@ func TestCORSMiddlewareAllowsInterimSettingsInterlockHeader(t *testing.T) {
 	}
 	if !strings.Contains(rec.Header().Get("Access-Control-Allow-Headers"), "X-Kandev-Interim-Settings-Interlock") {
 		t.Fatalf("Access-Control-Allow-Headers = %q, want interim settings interlock header", rec.Header().Get("Access-Control-Allow-Headers"))
+	}
+	if !strings.Contains(rec.Header().Get("Access-Control-Allow-Headers"), "If-Match") {
+		t.Fatalf("Access-Control-Allow-Headers = %q, want If-Match", rec.Header().Get("Access-Control-Allow-Headers"))
+	}
+	if !strings.Contains(rec.Header().Get("Access-Control-Allow-Headers"), "Last-Event-ID") {
+		t.Fatalf("Access-Control-Allow-Headers = %q, want Last-Event-ID", rec.Header().Get("Access-Control-Allow-Headers"))
 	}
 }
 

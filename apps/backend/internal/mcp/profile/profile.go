@@ -27,6 +27,7 @@ const (
 	CapabilityTaskTitle      Capability = "task-title"
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
+	CapabilityCanvas         Capability = "canvas-authoring"
 	CapabilityHandoffTask    Capability = "handoff-task"
 )
 

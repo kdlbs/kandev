@@ -137,7 +137,9 @@ function CreateModeAgentSelectors(props: DialogFormBodyProps) {
       onAgentProfileChange={props.onAgentProfileChange}
       onExecutorProfileChange={props.onExecutorProfileChange}
       workflowAgentLocked={props.workflowAgentLocked}
-      noCompatibleAgent={props.noCompatibleAgent}
+      agentCompatState={props.agentCompatState}
+      selectedAgentProfileName={props.selectedAgentProfileName}
+      effectiveWorkflowName={props.effectiveWorkflowName}
       executorProfileName={props.executorProfileName}
     />
   );
@@ -195,6 +197,8 @@ function DialogFormBody(props: DialogFormBodyProps) {
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}
+        priority={props.fs.priority}
+        onPriorityChange={props.fs.setPriority}
         dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
       />
       {props.isEditMode && (

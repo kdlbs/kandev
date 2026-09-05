@@ -749,7 +749,7 @@ func parseHandoffEntries(raw, deliveryTaskID string) (entries []handoffEntryReco
 	if trimmed == "" {
 		return nil, false, ""
 	}
-	if trimmed == "null" {
+	if trimmed == jsonNullLiteral {
 		// A genuinely absent handoffs key is reported by handoffsRawValue as
 		// "" (handled above), so a literal "null" here means the key is
 		// *present* with an explicit null value — one of AC-27's exhaustive

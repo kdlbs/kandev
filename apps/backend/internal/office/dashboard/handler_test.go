@@ -140,6 +140,7 @@ func newTestDeps(t *testing.T) *testDeps {
 			parent_id TEXT DEFAULT '',
 			project_id TEXT DEFAULT '',
 			assignee_agent_profile_id TEXT DEFAULT '',
+			assignee_user_id TEXT NOT NULL DEFAULT '',
 			labels TEXT DEFAULT '[]',
 			metadata TEXT DEFAULT '{}',
 			identifier TEXT DEFAULT '',

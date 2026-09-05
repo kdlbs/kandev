@@ -178,6 +178,18 @@ type TaskCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// HumanAssigneeWriter applies a human assignee on behalf of the calling user.
+//
+// Both the authorization (the caller needs task.write on the workspace) and
+// the validation (the assignee must be able to reach it) are owned by the task
+// service. Office delegates the whole write rather than reimplementing either,
+// which also covers a gap specific to this route: PATCH /office/tasks/:id
+// carries no `:wsId`, so the office workspace-scope middleware does not gate
+// it.
+type HumanAssigneeWriter interface {
+	SetHumanAssignee(ctx context.Context, taskID, userID string) error
+}
+
 // TaskDetacher applies the canonical task hierarchy/workspace detachment and
 // publishes the task lifecycle and Office refresh events.
 type TaskDetacher interface {
@@ -384,6 +396,7 @@ type DashboardService struct {
 	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver      RunResolver                     // optional; nil means status-change activity rows have no run_id
+	assigneeWriter   HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget    ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	// officeSessionIdentity gates RecordAgentDecision's use of the caller's
 	// own session id. Defaults false (zero value); set via
@@ -570,6 +583,14 @@ func (s *DashboardService) LogTaskStateChange(
 // a task is moved to "cancelled".
 func (s *DashboardService) SetTaskCanceller(c TaskCanceller) {
 	s.taskCanceller = c
+}
+
+// SetHumanAssigneeWriter wires the human-assignee write seam. It is optional
+// only in the sense that office can be constructed without it; when it is
+// absent the mutation is refused rather than applied unauthorized, because
+// this route is not otherwise workspace-gated.
+func (s *DashboardService) SetHumanAssigneeWriter(w HumanAssigneeWriter) {
+	s.assigneeWriter = w
 }
 
 // SetTaskDetacher wires the canonical task detachment operation used when the

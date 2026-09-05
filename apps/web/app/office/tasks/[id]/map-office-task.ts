@@ -46,6 +46,7 @@ export function mapOfficeTaskToTask(
       typeof l === "string" ? { name: l, color: "#6b7280" } : l,
     ),
     assigneeAgentProfileId: raw.assigneeAgentProfileId,
+    assigneeUserId: raw.assigneeUserId,
     parentId: raw.parentId,
     projectId: raw.projectId,
     blockedBy: extra.blockedBy ?? [],
