@@ -11,7 +11,10 @@ import {
   type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
-import type { QueueStatusChangedPayload } from "@/lib/types/backend";
+import type {
+  QueueStatusChangedPayload,
+  TaskSessionActivityChangedPayload,
+} from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
@@ -617,8 +620,7 @@ function handleWorkspaceSourcesUpdated(
 
 function handleForegroundActivityMessage(
   store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
 ): void {
   applyForegroundActivity(store, payload);
 }

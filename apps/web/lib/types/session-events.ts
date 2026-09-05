@@ -87,8 +87,9 @@ export type TaskSessionStateChangedPayload = {
 export type TaskSessionActivityChangedPayload = {
   task_id: string;
   session_id: string;
-  foreground_activity: ForegroundActivity | null;
-  active_subagent_count: number;
+  /** Foreground fields are omitted by parked-only activity events. */
+  foreground_activity?: ForegroundActivity | null;
+  active_subagent_count?: number;
   /** True when a send right now would steer the running turn; see http.ts. */
   supports_steering?: boolean;
   /** Session-level parked-on-background-work projection; see http.ts's TaskSession. */

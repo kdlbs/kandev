@@ -19,13 +19,8 @@ type BackgroundProbe interface {
 // ProbeBackgroundWorkloads is Service's production BackgroundProbe
 // implementation.
 //
-// F6 (round-5, security). The spec's original claim that this path
-// inherits an authorization boundary from RespondToPermissionBySessionID's
-// precedent is false in the tree — that call has no guard
-// (RespondToPermissionBySessionID never calls CheckSessionAccess). This
-// applies an explicit authorizeSession check before the call ever reaches
-// the executor/lifecycle.Manager/agentctl chain, rather than assuming one
-// is inherited.
+// Check session access before the call reaches the executor, lifecycle
+// manager, or agent control chain.
 //
 // The configured probe budget bounds the call via context.WithTimeout —
 // applied here, around this call, never baked into the transport itself.

@@ -6,6 +6,7 @@ import {
   type ForegroundActivity,
   type TaskSession,
 } from "@/lib/types/http";
+import type { TaskSessionActivityChangedPayload } from "@/lib/types/session-events";
 
 /**
  * `session.activity_changed` carries two distinct payload shapes on the same
@@ -19,8 +20,7 @@ import {
  * carries it.
  */
 function pickForegroundActivity(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
   existing: TaskSession,
 ): ForegroundActivity | null | undefined {
   return payload.foreground_activity !== undefined
@@ -29,8 +29,7 @@ function pickForegroundActivity(
 }
 
 function pickParkedOnBackgroundWork(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
   existing: TaskSession,
 ): boolean | undefined {
   return payload.parked_on_background_work !== undefined
@@ -39,31 +38,30 @@ function pickParkedOnBackgroundWork(
 }
 
 function pickParkedRevision(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
   existing: TaskSession,
 ): number | undefined {
   return payload.revision !== undefined ? payload.revision : existing.revision;
 }
 
 function pickParkedEpoch(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
   existing: TaskSession,
 ): number | undefined {
   return payload.parked_epoch !== undefined ? payload.parked_epoch : existing.parked_epoch;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
+function pickActiveSubagentCount(
+  payload: TaskSessionActivityChangedPayload,
+  existing: TaskSession,
+): number {
   return payload.active_subagent_count !== undefined
     ? payload.active_subagent_count
     : (existing.active_subagent_count ?? 0);
 }
 
 function pickSupportsSteering(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
   existing: TaskSession,
 ): boolean | undefined {
   return payload.supports_steering !== undefined
@@ -78,8 +76,7 @@ function pickSupportsSteering(
  *  seeds it first). */
 export function applyForegroundActivity(
   store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
 ): void {
   if (!payload?.task_id || !payload?.session_id) return;
   const taskId = toTaskId(payload.task_id);

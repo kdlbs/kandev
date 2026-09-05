@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/disambiguate-waiting/spec.md
 created: 2026-09-04
-status: in-progress
+status: implemented
 ---
 
 # Implementation Plan: Waiting Attribution (parked-on-background-work)

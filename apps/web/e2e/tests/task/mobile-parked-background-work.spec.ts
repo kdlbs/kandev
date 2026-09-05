@@ -66,6 +66,7 @@ async function createParkedTask(
   seedData: { workspaceId: string; repositoryId: string; workflowId: string; startStepId: string },
   agentProfileId: string,
   title: string,
+  beforeSettle?: (taskId: string, sessionId: string) => Promise<void>,
 ): Promise<{ taskId: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(seedData.workspaceId, title, agentProfileId, {
     description: PARKED_FIXTURE_SCRIPT,
@@ -74,8 +75,14 @@ async function createParkedTask(
     workflow_step_id: seedData.startStepId,
   });
 
-  const sessionId = await waitForFirstSessionId(apiClient, task.id);
+  // The create response already carries the session id in the normal launch
+  // path. Use it immediately so slow session-list hydration cannot consume
+  // the fixture's settle window; retain polling for older API responses.
+  const sessionId = task.session_id ?? (await waitForFirstSessionId(apiClient, task.id));
   await apiClient.scriptBackgroundProbe(sessionId, ["live"]);
+  if (beforeSettle) {
+    await beforeSettle(task.id, sessionId);
+  }
 
   await waitForSessionState(
     apiClient,
@@ -117,16 +124,22 @@ test.describe("mobile: parked on background work", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const { taskId, sessionId } = await createParkedTask(
+    let parkedSession: SessionPage | undefined;
+    const { sessionId } = await createParkedTask(
       apiClient,
       seedData,
       claudeAcpProfileId,
       "Parked Switcher Turn",
+      async (parkedTaskId) => {
+        await testPage.goto(`/t/${parkedTaskId}`);
+        parkedSession = new SessionPage(testPage);
+        await parkedSession.waitForLoad();
+      },
     );
 
-    await testPage.goto(`/t/${taskId}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    if (!parkedSession) {
+      throw new Error("parked session page should be initialized before settling");
+    }
 
     const layout = testPage.locator("[data-testid='mobile-task-layout']:visible");
     const pill = layout.getByTestId("mobile-sessions-pill");
@@ -147,7 +160,22 @@ test.describe("mobile: parked on background work", () => {
       metadata: { status: "pending" },
     });
 
-    await expect(row.locator(".tabler-icon-message-question")).toBeVisible({ timeout: 10_000 });
-    await expect(row.locator(".tabler-icon-loader-2")).toHaveCount(0);
+    // The harness creates a new turn when the foreground turn has already
+    // settled. Reload once so the turn list and message list are hydrated from
+    // the same snapshot before checking the current-turn precedence rule.
+    await testPage.reload();
+    const refreshedSession = new SessionPage(testPage);
+    await refreshedSession.waitForLoad();
+    const refreshedLayout = testPage.locator("[data-testid='mobile-task-layout']:visible");
+    const refreshedPill = refreshedLayout.getByTestId("mobile-sessions-pill");
+    await expect(refreshedPill).toBeVisible({ timeout: 30_000 });
+    await refreshedPill.tap();
+    const refreshedSheet = testPage.getByRole("dialog", { name: "Sessions" });
+    await expect(refreshedSheet).toBeVisible({ timeout: 5_000 });
+    const refreshedRow = refreshedSheet.getByTestId(`mobile-session-row-${sessionId}`);
+    await expect(refreshedRow.locator(".tabler-icon-message-question")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(refreshedRow.locator(".tabler-icon-loader-2")).toHaveCount(0);
   });
 });

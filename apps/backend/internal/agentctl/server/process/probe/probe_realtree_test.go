@@ -124,14 +124,42 @@ func TestProbeRealTree_TruncationBoundary(t *testing.T) {
 		t.Skip("probe: only Linux's ~10ms resolution gives this construction a non-flaky truncation margin")
 	}
 
-	startRealChild(t, false)
-	turnStart := time.Now()
-
-	got, err := ProbeBackgroundWorkloads(os.Getpid(), turnStart)
-	if err != nil {
-		t.Fatalf("probe: %v", err)
+	reader := platformProcessTableReader()
+	for attempt := 0; attempt < 10; attempt++ {
+		child := startRealChild(t, false)
+		table, err := reader.ReadProcessTable()
+		if err != nil {
+			t.Fatalf("read process table: %v", err)
+		}
+		var childStart time.Time
+		for _, entry := range table {
+			if entry.PID == child.Process.Pid {
+				childStart = entry.StartTime
+				break
+			}
+		}
+		if childStart.IsZero() {
+			continue
+		}
+		// Derive the raw turn start from the observed OS start time. This
+		// removes scheduler timing from the assertion while keeping the raw
+		// value after the child and the truncated values in one bucket.
+		turnStart := childStart.Add(time.Nanosecond)
+		if childStart.Truncate(reader.Resolution()) != turnStart.Truncate(reader.Resolution()) {
+			continue
+		}
+		// Keep the observed snapshot fixed for the assertion. A second Linux
+		// /proc/uptime read can shift the wall-clock anchor by a few
+		// microseconds and move a tick-aligned child across the bucket.
+		fixedReader := fakeProcessTableReader{resolution: reader.Resolution(), table: table}
+		got, err := probeWithReader(fixedReader, os.Getpid(), turnStart)
+		if err != nil {
+			t.Fatalf("probe: %v", err)
+		}
+		if got != ResultLive {
+			t.Errorf("got %q, want %q", got, ResultLive)
+		}
+		return
 	}
-	if got != ResultLive {
-		t.Errorf("got %q, want %q", got, ResultLive)
-	}
+	t.Fatal("could not place a real child and turn start in the same Linux clock-tick bucket")
 }

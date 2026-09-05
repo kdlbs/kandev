@@ -25,6 +25,10 @@ type parkedSessionState struct {
 	// loopCancel stops this session's periodic sampling goroutine (AC-53).
 	// Non-nil only while parked is true and a loop is running for it.
 	loopCancel context.CancelFunc
+	// loopToken identifies the worker that owns loopCancel. A worker clears
+	// both fields on exit only when it still owns the slot, so a newer loop
+	// cannot be cleared by an older worker finishing late.
+	loopToken *struct{}
 }
 
 // taskParkedState is the task-level parked_on_background_work OR-aggregate
@@ -37,6 +41,14 @@ type taskParkedState struct {
 	revision uint64
 }
 
+type parkedProjectionTransition struct {
+	parked       bool
+	revision     uint64
+	taskParked   bool
+	taskRevision uint64
+	taskChanged  bool
+}
+
 // serviceBackgroundProbeAdapter is the production BackgroundProbe: it
 // forwards to Service.ProbeBackgroundWorkloads (the F6-guarded, budget-bound
 // port from task-04). A distinct type keeps *Service from needing its own
@@ -46,6 +58,14 @@ type serviceBackgroundProbeAdapter struct{ s *Service }
 
 func (a serviceBackgroundProbeAdapter) Probe(ctx context.Context, sessionID string) (executor.ProbeResult, error) {
 	return a.s.ProbeBackgroundWorkloads(ctx, sessionID)
+}
+
+func (s *Service) parkedProbeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	budget := s.backgroundProbeConfig.Budget
+	if budget <= 0 {
+		budget = defaultParkedProbeBudget
+	}
+	return context.WithTimeout(ctx, budget)
 }
 
 // SetBackgroundProbe overrides the BackgroundProbe port. Test-only seam: the
@@ -201,10 +221,16 @@ func (s *Service) settleParkedProjectionSync(ctx context.Context, taskID, sessio
 	}
 
 	s.parkedMu.Lock()
-	dispatchRevision := s.parkedStateLocked(sessionID).revision
+	stateAtDispatch, hadState := s.parkedStates[sessionID]
+	dispatchRevision := uint64(0)
+	if stateAtDispatch != nil {
+		dispatchRevision = stateAtDispatch.revision
+	}
 	s.parkedMu.Unlock()
 
-	result, err := probe.Probe(ctx, sessionID)
+	probeCtx, cancel := s.parkedProbeContext(ctx)
+	defer cancel()
+	result, err := probe.Probe(probeCtx, sessionID)
 	if err != nil {
 		s.logger.Warn("background probe failed during turn-settle",
 			zap.String("task_id", taskID),
@@ -212,39 +238,62 @@ func (s *Service) settleParkedProjectionSync(ctx context.Context, taskID, sessio
 			zap.Error(err))
 	}
 
-	session, sessErr := s.repo.GetTaskSession(ctx, sessionID)
+	session, sessErr := s.repo.GetTaskSession(probeCtx, sessionID)
 	if sessErr != nil || session == nil {
 		// The session is gone or unreadable by the time the probe returned;
 		// there is nothing current to apply this sample against.
 		return
 	}
 
-	s.parkedMu.Lock()
-	st, ok := s.parkedStates[sessionID]
-	if !ok || st.revision != dispatchRevision {
-		s.parkedMu.Unlock()
-		return
-	}
-	parked, revision, changed := recomputeParkedLocked(st, attested, result, true, session.State)
-	var taskParked, taskChanged bool
-	var taskRevision uint64
-	if changed {
-		taskParked, taskRevision, taskChanged = s.recomputeTaskParkedLocked(taskID, sessionID, parked)
-	}
-	s.parkedMu.Unlock()
-
+	transition, changed := s.applySettledParkedSample(
+		taskID,
+		sessionID,
+		result,
+		session.State,
+		hadState,
+		dispatchRevision,
+	)
 	if !changed {
 		return
 	}
-	s.publishParkedTransition(ctx, taskID, sessionID, parked, revision)
-	if taskChanged {
-		s.publishTaskParkedTransition(ctx, taskID, taskParked, taskRevision)
+	s.publishParkedTransition(ctx, taskID, sessionID, transition.parked, transition.revision)
+	if transition.taskChanged {
+		s.publishTaskParkedTransition(ctx, taskID, transition.taskParked, transition.taskRevision)
 	}
-	if parked {
+	if transition.parked {
 		s.maybeStartParkedSamplingLoop(taskID, sessionID)
 	} else {
 		s.stopParkedSamplingLoopFor(sessionID)
 	}
+}
+
+func (s *Service) applySettledParkedSample(
+	taskID, sessionID string,
+	sample executor.ProbeResult,
+	state models.TaskSessionState,
+	hadState bool,
+	dispatchRevision uint64,
+) (parkedProjectionTransition, bool) {
+	s.parkedMu.Lock()
+	defer s.parkedMu.Unlock()
+
+	st, ok := s.parkedStates[sessionID]
+	if !ok {
+		if hadState || sample != executor.ProbeResultLive || state != models.TaskSessionStateWaitingForInput {
+			return parkedProjectionTransition{}, false
+		}
+		st = s.parkedStateLocked(sessionID)
+	} else if hadState && st.revision != dispatchRevision {
+		return parkedProjectionTransition{}, false
+	}
+
+	parked, revision, changed := recomputeParkedLocked(st, true, sample, true, state)
+	transition := parkedProjectionTransition{parked: parked, revision: revision}
+	if !changed {
+		return transition, false
+	}
+	transition.taskParked, transition.taskRevision, transition.taskChanged = s.recomputeTaskParkedLocked(taskID, sessionID, parked)
+	return transition, true
 }
 
 // clearParkedOnSessionStateLeft is D8's session-state term: when a session
@@ -256,8 +305,54 @@ func (s *Service) clearParkedOnSessionStateLeft(ctx context.Context, taskID, ses
 	if sessionID == "" {
 		return
 	}
+	if newState == "" {
+		s.clearParkedProjectionOnSessionDeleted(ctx, taskID, sessionID)
+		return
+	}
 	attested := s.ObservedDetachedLaunch(sessionID)
 	s.applyParkedTransition(ctx, taskID, sessionID, attested, "", false, newState)
+}
+
+// clearParkedProjectionOnSessionDeleted removes all session-level projection
+// state after the repository row is deleted. The task-level state keeps its
+// last revision as a tombstone so a later session on the same task cannot
+// publish an event with a revision lower than the deletion update.
+func (s *Service) clearParkedProjectionOnSessionDeleted(ctx context.Context, taskID, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.clearObservedDetachedLaunch(sessionID)
+
+	s.parkedMu.Lock()
+	st := s.parkedStates[sessionID]
+	var cancel context.CancelFunc
+	if st != nil {
+		cancel = st.loopCancel
+		delete(s.parkedStates, sessionID)
+	}
+
+	var taskParked bool
+	var taskRevision uint64
+	var taskChanged bool
+	if taskID != "" {
+		if tst := s.taskParkedStates[taskID]; tst != nil {
+			delete(tst.sessions, sessionID)
+			newParked := len(tst.sessions) > 0
+			if newParked != tst.parked {
+				tst.parked = newParked
+				tst.revision++
+				taskParked, taskRevision, taskChanged = newParked, tst.revision, true
+			}
+		}
+	}
+	s.parkedMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if taskChanged {
+		s.publishTaskParkedTransition(ctx, taskID, taskParked, taskRevision)
+	}
 }
 
 // onSessionStateChangedForParkedProjection is the single dispatcher wired
@@ -294,7 +389,14 @@ func (s *Service) applyParkedTransition(
 	state models.TaskSessionState,
 ) {
 	s.parkedMu.Lock()
-	st := s.parkedStateLocked(sessionID)
+	st := s.parkedStates[sessionID]
+	if st == nil && (!attested || !hasSample || sample != executor.ProbeResultLive || state != models.TaskSessionStateWaitingForInput) {
+		s.parkedMu.Unlock()
+		return
+	}
+	if st == nil {
+		st = s.parkedStateLocked(sessionID)
+	}
 	parked, revision, changed := recomputeParkedLocked(st, attested, sample, hasSample, state)
 	var taskParked, taskChanged bool
 	var taskRevision uint64
@@ -314,7 +416,26 @@ func (s *Service) applyParkedTransition(
 		s.maybeStartParkedSamplingLoop(taskID, sessionID)
 	} else {
 		s.stopParkedSamplingLoopFor(sessionID)
+		if state == "" || isTerminalSessionState(state) {
+			s.pruneParkedTerminalState(taskID, sessionID)
+		}
 	}
+}
+
+// pruneParkedTerminalState drops session state after a terminal or deleted
+// session has stopped sampling. Task state remains as a revision tombstone to
+// preserve event ordering if the task later receives another session.
+func (s *Service) pruneParkedTerminalState(taskID, sessionID string) {
+	s.parkedMu.Lock()
+	if st := s.parkedStates[sessionID]; st != nil && !st.parked && st.loopCancel == nil {
+		delete(s.parkedStates, sessionID)
+	}
+	if taskID != "" {
+		if tst := s.taskParkedStates[taskID]; tst != nil {
+			delete(tst.sessions, sessionID)
+		}
+	}
+	s.parkedMu.Unlock()
 }
 
 // publishParkedTransition emits task_session.activity_changed (wire:
@@ -389,17 +510,35 @@ func (s *Service) maybeStartParkedSamplingLoop(taskID, sessionID string) {
 		return
 	}
 	rootCtx := s.parkedLoopCtx
+	loopCtx, cancel := context.WithCancel(rootCtx)
+	// Add while parkedLoopMu is held. Service.Stop takes the same mutex before
+	// waiting, so it cannot observe a zero count and return before this worker
+	// is registered.
+	s.parkedLoopWorkers.Add(1)
 	s.parkedLoopMu.Unlock()
 
-	loopCtx, cancel := context.WithCancel(rootCtx)
 	st.loopCancel = cancel
+	st.loopToken = &struct{}{}
+	loopToken := st.loopToken
 	s.parkedMu.Unlock()
 
-	s.parkedLoopWorkers.Add(1)
 	go func() {
 		defer s.parkedLoopWorkers.Done()
+		defer s.releaseParkedSamplingLoopSlot(sessionID, loopToken, cancel)
 		s.runParkedSamplingLoop(loopCtx, taskID, sessionID, interval)
 	}()
+}
+
+func (s *Service) releaseParkedSamplingLoopSlot(sessionID string, loopToken *struct{}, cancel context.CancelFunc) {
+	s.parkedMu.Lock()
+	if st := s.parkedStates[sessionID]; st != nil && st.loopToken == loopToken {
+		st.loopToken = nil
+		st.loopCancel = nil
+	}
+	s.parkedMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // stopParkedSamplingLoopFor cancels sessionID's sampling goroutine, if any.
@@ -411,6 +550,7 @@ func (s *Service) stopParkedSamplingLoopFor(sessionID string) {
 	if st != nil {
 		cancel = st.loopCancel
 		st.loopCancel = nil
+		st.loopToken = nil
 	}
 	s.parkedMu.Unlock()
 	if cancel != nil {
@@ -470,7 +610,9 @@ func (s *Service) sampleParkedSessionTick(ctx context.Context, taskID, sessionID
 	if probe == nil {
 		return false
 	}
-	result, err := probe.Probe(ctx, sessionID)
+	probeCtx, cancel := s.parkedProbeContext(ctx)
+	defer cancel()
+	result, err := probe.Probe(probeCtx, sessionID)
 	if err != nil {
 		s.logger.Warn("background probe failed during periodic sampling",
 			zap.String("task_id", taskID),
@@ -478,7 +620,7 @@ func (s *Service) sampleParkedSessionTick(ctx context.Context, taskID, sessionID
 			zap.Error(err))
 	}
 
-	session, sessErr := s.repo.GetTaskSession(ctx, sessionID)
+	session, sessErr := s.repo.GetTaskSession(probeCtx, sessionID)
 	if sessErr != nil || session == nil {
 		// The session is gone: stop looping and clear the projection rather
 		// than keep sampling a deleted session (AC-53).

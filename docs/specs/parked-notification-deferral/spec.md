@@ -103,16 +103,18 @@ behaviour in this spec may depend on it.**
 ## Data model
 
 No schema migration. The parent's `parkedState` record (backend process memory, per session)
-gains two fields, and nothing else in the system changes:
+gains four fields; no other system changes:
 
 ```
 parkedState  (extended by this spec)
   …                            all fields defined in disambiguate-waiting
-  deferred_turn_id      string     nullable; the withheld turn_finished occurrence
+  deferred_turn_id      string     nullable; withheld turn_finished occurrence
   deferred_since        timestamp  nullable
+  delivery_state        string     nullable; pending or in_flight
+  delivery_attempt_id   string     nullable; delivery claim token
 ```
 
-Both are process-local, never persisted, and gone after a backend restart — the parent's
+These fields are process-local and lost on restart — the parent's
 *Persistence guarantees* already covers the rest of the record and applies to these too. After a
 restart a previously withheld notification is **dropped**, not delivered: the turn it belonged to
 is over, the projection is not reconstructed, and re-deriving it would ping about work nobody can
@@ -307,12 +309,11 @@ subscriptions are unchanged — only the dispatch instant moves.
   delivered immediately, failing toward notifying. This matches `handleSemanticOccurrence`
   (`internal/notifications/service/service.go:191-194`), which already returns early on an empty
   occurrence ID.
-- **Two callers, one session.** A sample-driven exit and a session-state-driven exit can be
-  evaluated concurrently. The deferral record's read-decide-clear is one critical section, so the
-  loser observes the record already cleared and does nothing. The record is cleared *before* the
-  dispatch, so a delivering exit that then fails to dispatch does not leave a second exit able to
-  re-deliver — the notification is lost rather than duplicated, which is the direction the
-  occurrence dedup would enforce anyway.
+- **Two callers.** A sample-driven exit and a session-state-driven exit can race. Under
+  one lock, the winner changes `pending` to `in_flight` with a unique token; the loser exits. The
+  winner dispatches outside the lock. Success clears only a matching token; failure restores
+  `pending` and keeps the turn ID for retry. Provider occurrence dedup is a backstop if a provider
+  accepted a request before reporting an error.
 
 ### D9-N — Defaults and boundary values for this spec
 

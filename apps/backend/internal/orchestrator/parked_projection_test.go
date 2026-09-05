@@ -433,6 +433,94 @@ func TestMaybeStartParkedSamplingLoop_ZeroIntervalNeverStarts(t *testing.T) {
 	}
 }
 
+func TestApplyParkedTransition_NoOpFalse_DoesNotRetainState(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	svc, _, _ := newParkedTestService(t, repo)
+
+	svc.applyParkedTransition(context.Background(), "task-1", "sess-1", false, executor.ProbeResultUnknown, false, models.TaskSessionStateRunning)
+
+	svc.parkedMu.Lock()
+	_, sessionTracked := svc.parkedStates["sess-1"]
+	_, taskTracked := svc.taskParkedStates["task-1"]
+	svc.parkedMu.Unlock()
+	if sessionTracked || taskTracked {
+		t.Fatalf("no-op false transition retained state: session=%v task=%v", sessionTracked, taskTracked)
+	}
+}
+
+func TestClearParkedOnSessionStateLeft_DeletedSessionCleansProjection(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
+	svc, _, probe := newParkedTestService(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive}
+	svc.setObservedDetachedLaunch("sess-1")
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	if parked, _ := svc.ParkedSnapshot("sess-1"); !parked {
+		t.Fatal("precondition: session should be parked before deletion")
+	}
+
+	svc.clearParkedOnSessionStateLeft(context.Background(), "task-1", "sess-1", "")
+
+	if parked, revision := svc.ParkedSnapshot("sess-1"); parked || revision != 0 {
+		t.Fatalf("ParkedSnapshot after deletion = (%v, %d), want (false, 0)", parked, revision)
+	}
+	if parked, _ := svc.TaskParkedSnapshot("task-1"); parked {
+		t.Fatal("task projection stayed parked after deleting its only parked session")
+	}
+	svc.parkedMu.Lock()
+	_, sessionTracked := svc.parkedStates["sess-1"]
+	svc.parkedMu.Unlock()
+	if sessionTracked {
+		t.Fatal("deleted session remained in parkedStates")
+	}
+}
+
+func TestParkedSamplingLoop_SelfTerminationReleasesSlotAndCanRestart(t *testing.T) {
+	repo := newParkedTestRepo(&models.TaskSession{ID: "sess-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput})
+	svc, _, probe := newParkedTestService(t, repo)
+	probe.results = []executor.ProbeResult{executor.ProbeResultLive, executor.ProbeResultSettled, executor.ProbeResultLive}
+	svc.backgroundProbeConfig.Interval = time.Millisecond
+	svc.setObservedDetachedLaunch("sess-1")
+
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.parkedMu.Lock()
+		st := svc.parkedStates["sess-1"]
+		slotReleased := st == nil || st.loopCancel == nil
+		svc.parkedMu.Unlock()
+		if probe.callCount() >= 2 && slotReleased {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if n := probe.callCount(); n < 2 {
+		t.Fatalf("probe called %d times, want at least 2 (initial live sample + settling tick)", n)
+	}
+	svc.parkedMu.Lock()
+	st := svc.parkedStates["sess-1"]
+	slotReleased := st == nil || st.loopCancel == nil
+	svc.parkedMu.Unlock()
+	if !slotReleased {
+		t.Fatal("self-terminating sampling loop did not release its loop slot")
+	}
+
+	// A later live sample must be able to start a new loop for the same session.
+	svc.settleParkedProjectionSync(context.Background(), "task-1", "sess-1")
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.parkedMu.Lock()
+		st = svc.parkedStates["sess-1"]
+		loopRestarted := st != nil && st.loopCancel != nil
+		svc.parkedMu.Unlock()
+		if probe.callCount() >= 3 && loopRestarted {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("sampling loop did not restart after re-parking; calls=%d", probe.callCount())
+}
+
 // AC-53 end to end: a real ticker-driven loop stops itself once the probe
 // reports a non-live result, and Service.Stop drains the goroutine cleanly.
 func TestParkedSamplingLoop_RealTicker_StopsOnSettled(t *testing.T) {
@@ -476,9 +564,9 @@ func TestParkedProjectionOrdering_ProbeCallSitesFollowTurnCompletion(t *testing.
 	}
 	text := string(src)
 
-	fnStart := strings.Index(text, "func (s *Service) handleCompleteStreamEvent(")
+	fnStart := strings.Index(text, "func (s *Service) handleCompleteStreamEventWithGuardRelease(")
 	if fnStart < 0 {
-		t.Fatal("handleCompleteStreamEvent not found")
+		t.Fatal("handleCompleteStreamEventWithGuardRelease not found")
 	}
 	fnEnd := strings.Index(text[fnStart:], "\nfunc ")
 	if fnEnd < 0 {
@@ -487,9 +575,9 @@ func TestParkedProjectionOrdering_ProbeCallSitesFollowTurnCompletion(t *testing.
 	body := text[fnStart : fnStart+fnEnd]
 
 	completeIdx := strings.Index(body, "s.completeTurnForStreamEvent(")
-	waitingIdx := strings.Index(body, "s.setSessionWaitingForInputIfRequested(")
+	waitingIdx := strings.Index(body, "s.setSessionWaitingForInputIfRequestedWithHook(")
 	if completeIdx < 0 || waitingIdx < 0 {
-		t.Fatalf("expected both calls in handleCompleteStreamEvent; completeTurnForStreamEvent=%d setSessionWaitingForInputIfRequested=%d", completeIdx, waitingIdx)
+		t.Fatalf("expected both calls in handleCompleteStreamEventWithGuardRelease; completeTurnForStreamEvent=%d setSessionWaitingForInputIfRequestedWithHook=%d", completeIdx, waitingIdx)
 	}
 	if completeIdx >= waitingIdx {
 		t.Fatal("completeTurnForStreamEvent (which triggers session.turn_finished) must run before " +

@@ -113,6 +113,7 @@ async function createParkedTask(
   seedData: { workspaceId: string; repositoryId: string; workflowId: string; startStepId: string },
   agentProfileId: string,
   title: string,
+  beforeSettle?: (taskId: string) => Promise<void>,
 ): Promise<{ taskId: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(seedData.workspaceId, title, agentProfileId, {
     description: PARKED_FIXTURE_SCRIPT,
@@ -121,8 +122,12 @@ async function createParkedTask(
     workflow_step_id: seedData.startStepId,
   });
 
-  const sessionId = await waitForFirstSessionId(apiClient, task.id);
+  // The create response already carries the session id in the normal launch
+  // path. Use it immediately so slow session-list hydration cannot consume
+  // the fixture's settle window; retain polling for older API responses.
+  const sessionId = task.session_id ?? (await waitForFirstSessionId(apiClient, task.id));
   await apiClient.scriptBackgroundProbe(sessionId, ["live"]);
+  if (beforeSettle) await beforeSettle(task.id);
 
   await waitForSessionState(
     apiClient,
@@ -215,17 +220,33 @@ test.describe("Parked on background work", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const { taskId } = await createParkedTask(
+    // Keep the sidebar mounted before the parked task settles. This lets the
+    // test observe the task.updated projection instead of depending on a
+    // boot payload assembled during the settle race.
+    const navTask = await apiClient.createTask(seedData.workspaceId, "Resume Nav Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage.goto(`/t/${navTask.id}`);
+    const navSession = new SessionPage(testPage);
+    await navSession.waitForLoad();
+    await expect(navSession.sidebar).toBeVisible({ timeout: 10_000 });
+
+    let parkedSession: SessionPage | undefined;
+    await createParkedTask(
       apiClient,
       seedData,
       claudeAcpProfileId,
       "Parked Resume Turn",
+      async (parkedTaskId) => {
+        await testPage.goto(`/t/${parkedTaskId}`);
+        parkedSession = new SessionPage(testPage);
+        await parkedSession.waitForLoad();
+        await expect(parkedSession.sidebar).toBeVisible({ timeout: 10_000 });
+      },
     );
-
-    await testPage.goto(`/t/${taskId}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.sidebar).toBeVisible({ timeout: 10_000 });
+    const session = parkedSession;
+    if (!session) throw new Error("parked task page was not mounted before settle");
 
     const parkedRow = session.sidebarTaskItem("Parked Resume Turn");
     await expect(parkedRow.getByTestId("task-state-background-running")).toBeVisible({
