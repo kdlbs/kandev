@@ -663,6 +663,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 		"error_message": data.ErrorMessage,
 	})
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
+		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return nil
 	}
 	// Office failure path (v1): every agent error is terminal. The

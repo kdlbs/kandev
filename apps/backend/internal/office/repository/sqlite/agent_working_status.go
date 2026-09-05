@@ -65,6 +65,29 @@ func (r *Repository) ClearAgentWorking(ctx context.Context, id, runID string) (b
 	return rowsChanged(res)
 }
 
+// ReconcileAgentWorkingStatus clears working rows whose owner is no longer
+// an in-flight run. This repairs the gap left when a terminal run commit
+// succeeds but the following display-state update does not.
+func (r *Repository) ReconcileAgentWorkingStatus(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET status = 'idle', working_run_id = '', updated_at = ?
+		WHERE status = 'working' AND `+agentInstanceFilter+`
+		  AND (
+			working_run_id = ''
+			OR NOT EXISTS (
+				SELECT 1 FROM runs
+				WHERE runs.id = agent_profiles.working_run_id
+				  AND runs.status = 'claimed'
+			)
+		  )
+	`), time.Now().UTC())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func rowsChanged(res sql.Result) (bool, error) {
 	rows, err := res.RowsAffected()
 	if err != nil {

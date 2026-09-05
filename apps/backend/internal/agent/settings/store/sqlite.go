@@ -1138,7 +1138,19 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			cli_passthrough = ?, enabled = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
 			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
-			status = ?, pause_reason = ?, last_run_finished_at = ?,
+			status = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN status
+				ELSE ?
+			END,
+			pause_reason = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN pause_reason
+				ELSE ?
+			END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' THEN working_run_id
+				ELSE ''
+			END,
+			last_run_finished_at = ?,
 			max_concurrent_sessions = ?, cooldown_sec = ?, skip_idle_runs = ?,
 			consecutive_failures = ?, failure_threshold = ?,
 			executor_preference = ?,
@@ -1152,7 +1164,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.Enabled), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
-		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
+		enrich.status, enrich.status, enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
 		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
 		profile.ConsecutiveFailures, enrich.failureThreshold,
 		enrich.executorPreference,

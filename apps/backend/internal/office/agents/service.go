@@ -83,7 +83,7 @@ var validRoles = map[models.AgentRole]bool{
 
 // allowedTransitions defines which status transitions are valid.
 var allowedTransitions = map[models.AgentStatus][]models.AgentStatus{
-	models.AgentStatusIdle:            {models.AgentStatusWorking, models.AgentStatusPaused, models.AgentStatusStopped, models.AgentStatusPendingApproval},
+	models.AgentStatusIdle:            {models.AgentStatusPaused, models.AgentStatusStopped, models.AgentStatusPendingApproval},
 	models.AgentStatusWorking:         {models.AgentStatusIdle, models.AgentStatusPaused, models.AgentStatusStopped},
 	models.AgentStatusPaused:          {models.AgentStatusIdle, models.AgentStatusStopped},
 	models.AgentStatusStopped:         {models.AgentStatusIdle},
