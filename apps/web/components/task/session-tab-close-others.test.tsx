@@ -114,10 +114,10 @@ function renderSoleSessionTab() {
 }
 
 describe("SessionTab Close Others", () => {
-  it("does not expose Hide when it is the sole visible session panel", () => {
+  it("keeps Hide available when it is the sole visible session panel", () => {
     renderSoleSessionTab();
 
-    expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Hide" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Close Others" })).not.toBeNull();
   });
 

@@ -210,7 +210,7 @@ function useSessionTabActions(
     handleStop,
     handleResume,
     handleDelete,
-    hideSessionPanel: visibleSessionCount > 1 ? hideCurrentSessionPanel : undefined,
+    hideSessionPanel: hideCurrentSessionPanel,
     handleCloseOthers,
     visibleSessionCount,
   };

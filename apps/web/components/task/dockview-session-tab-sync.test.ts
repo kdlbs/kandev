@@ -358,6 +358,17 @@ describe("setupSessionTabSync explicit activation", () => {
     expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
   });
 
+  it("skips a stale remaining panel and activates the next valid successor", () => {
+    const harness = makeDefaultSessionTabSyncHarness();
+
+    startSessionTabSync(harness);
+    harness.api.panels.splice(0, 1);
+    harness.api.panels.unshift({ id: "session:stale", api: { setActive: vi.fn() } });
+    harness.fireActivePanelChange("files");
+
+    expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+  });
+
   it("does not pin a previous task's remaining session after a non-session successor", () => {
     const harness = makeSessionTabSyncHarness({
       activeTaskId: TASK_ID,

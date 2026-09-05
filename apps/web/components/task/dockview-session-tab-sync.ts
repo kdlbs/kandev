@@ -63,8 +63,8 @@ function handleNonSessionSuccessor(
   const isActiveSessionPanelGone =
     state.tasks.activeSessionId && !api.getPanel(`session:${state.tasks.activeSessionId}`);
   if (!panel.id.startsWith("session:") && isActiveSessionPanelGone) {
-    const remainingSessionPanel = api.panels.find((p) => p.id.startsWith("session:"));
-    if (remainingSessionPanel) {
+    const remainingSessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
+    for (const remainingSessionPanel of remainingSessionPanels) {
       const target = resolveSessionTabSyncTarget({
         panelId: remainingSessionPanel.id,
         activeTaskId: state.tasks.activeTaskId,
@@ -72,7 +72,7 @@ function handleNonSessionSuccessor(
         taskSessionsById: state.taskSessions.items,
         environmentIdBySessionId: state.environmentIdBySessionId,
       });
-      if (!target) return false;
+      if (!target) continue;
       if (isDebug()) {
         debug("setupSessionTabSync: activating remaining session panel", {
           remainingPanelId: remainingSessionPanel.id,
