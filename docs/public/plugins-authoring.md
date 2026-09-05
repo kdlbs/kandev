@@ -515,7 +515,7 @@ subscription vocabulary and wildcard rules are in the
 | Config                | GetConfig                                                                      | None                                                                        | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                           |
 | Secrets               | RevealSecret, GetSecret, SetSecret, DeleteSecret                               | secrets: true                                                               | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                         |
 | Tasks                 | Tasks().List, Tasks().Get                                                      | api_read: tasks                                                             | Typed DTOs and opaque pagination cursor                                                                                                                                                     |
-| Tasks writes          | Tasks().Create, Tasks().Update, Tasks().Move                                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire. Update rejects a workflow step change; Move is the only path that moves a task between steps                         |
+| Tasks writes          | Tasks().Create, Tasks().Update, Tasks().Move                                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire. Create and Update support priority. Update rejects a workflow step change; Move is the only path that moves a task between steps                         |
 | Sessions              | Sessions().List, Sessions().CodeStats                                          | api_read: sessions                                                          | Typed session and computed code-stat records                                                                                                                                                |
 | Workspaces            | Workspaces().List                                                              | api_read: workspaces                                                        | Instance-visible workspaces                                                                                                                                                                 |
 | Workflows             | Workflows().List, Workflows().ListSteps                                        | api_read: workflows                                                         | List steps by workflow id                                                                                                                                                                   |
@@ -849,7 +849,16 @@ session or resumes/starts it when appropriate, returning `queued`, `sent`, or
 Task writes use Kandev's first-party service layer, so normal task events and
 browser updates occur. Kandev stamps the source as `plugin:<id>` and reserves
 the `metadata.source` key; plugin metadata is stored under that source. `.Update`
-writes only title, description, and state: it rejects a workflow step change.
+writes title, description, state, and priority: it rejects a workflow step
+change. Priority accepts only `critical`, `high`, `medium`, or `low`; omitted
+priority on `.Create` defaults to `medium`.
+
+The read-side `Task.Labels` field remains available only as deprecated API v1
+compatibility for plugins built against Kandev v0.93.0. New plugins should keep
+provider-specific labels or tracker annotations in plugin-owned task state and
+render them through task UI slots. `.Create` and `.Update` do not write Kandev
+task labels.
+
 Moving a task between workflow steps goes through `.Move` instead, which routes
 through the same path the board's own drag-and-drop move uses (validation, WIP
 admission, `task.moved` publication, auto-start gates, queue reconciliation),

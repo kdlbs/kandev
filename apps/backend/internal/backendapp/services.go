@@ -1213,6 +1213,7 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		Metadata:       metadata,
 		Repositories:   repositories,
 		PlanMode:       in.PlanMode,
+		Priority:       in.Priority,
 		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
@@ -1335,6 +1336,7 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 	req := &taskservice.UpdateTaskRequest{
 		Title:       in.Title,
 		Description: in.Description,
+		Priority:    in.Priority,
 	}
 	if in.State != nil {
 		// v1.TaskState is a string type, so the cast can't fail — validate the
