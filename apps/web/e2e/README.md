@@ -248,8 +248,9 @@ Dispatch the workflow with `fail_on_flaky=true` to set
 existing two-retry policy while the summary makes retry groups visible.
 
 Container-backed CI jobs also cache the browser directory used by the host
-runner. Each job first resolves the `runtime-latest` convenience tag to a
-sha256 image digest. The cache key includes the runner OS, the Playwright
+runner. The workflow resolves the `runtime-latest` convenience tag once to a
+sha256 image digest and shares that immutable reference with every container
+shard. The cache key includes the runner OS, the Playwright
 `v1.61.1-noble` browser source, that digest, and a run-specific primary-key
 suffix. Its stable restore prefix selects the newest compatible entry without
 making a rejected cache entry win forever. A verified exact or prefix match
