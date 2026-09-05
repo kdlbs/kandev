@@ -23,8 +23,15 @@ type fakeTurnOutcomeBackend struct {
 	fetchErr error
 	ackErr   error
 
-	fetchCalls []string
-	ackedCalls []ackedTurnOutcome
+	// eventBus, when set by the test, lets ackTurnOutcome record how many
+	// events had already been published at ack time -- a monotonic counter
+	// proving AC-EXECUTORS-SURVIVAL-004.6's apply-before-ack ordering rather
+	// than merely that both happened.
+	eventBus *MockEventBus
+
+	fetchCalls           []string
+	ackedCalls           []ackedTurnOutcome
+	publishedCountsAtAck []int
 }
 
 func (f *fakeTurnOutcomeBackend) fetchTurnOutcomeWithRetry(_ context.Context, instanceID string) (*agentctl.TurnOutcome, error) {
@@ -34,6 +41,9 @@ func (f *fakeTurnOutcomeBackend) fetchTurnOutcomeWithRetry(_ context.Context, in
 
 func (f *fakeTurnOutcomeBackend) ackTurnOutcome(_ context.Context, instanceID string, turnID int64) error {
 	f.ackedCalls = append(f.ackedCalls, ackedTurnOutcome{instanceID: instanceID, turnID: turnID})
+	if f.eventBus != nil {
+		f.publishedCountsAtAck = append(f.publishedCountsAtAck, len(f.eventBus.PublishedEvents))
+	}
 	return f.ackErr
 }
 
@@ -147,6 +157,7 @@ func TestApplyRecoveredTurnOutcomeAppliesAndAcks(t *testing.T) {
 	}
 	backend := &fakeTurnOutcomeBackend{MockExecutor: &MockExecutor{name: executor.NameStandalone}, outcome: outcome}
 	mgr, eventBus := newTurnOutcomeTestManager(t, backend)
+	backend.eventBus = eventBus
 	execution := createTestExecution("exec-1", "task-1", "session-1")
 	if err := mgr.executionStore.Add(execution); err != nil {
 		t.Fatalf("add execution: %v", err)
@@ -166,6 +177,18 @@ func TestApplyRecoveredTurnOutcomeAppliesAndAcks(t *testing.T) {
 	}
 	if !execution.isRecoveryDuplicateEvent(&streams.AgentEvent{ControlTurnID: 9}) {
 		t.Fatal("expected the applied turn ID (9) to be recorded so a live redelivery is recognized")
+	}
+	// AC-EXECUTORS-SURVIVAL-004.6: the outcome must be applied (here, the
+	// agent.ready publish above) before it is acknowledged -- not merely
+	// that both eventually happen. The published-event count observed at
+	// ack time is a monotonic witness of that ordering: it can only be
+	// nonzero if the apply's publish already ran.
+	if len(backend.publishedCountsAtAck) != 1 {
+		t.Fatalf("publishedCountsAtAck = %v, want exactly 1 ack observed", backend.publishedCountsAtAck)
+	}
+	if backend.publishedCountsAtAck[0] < 1 {
+		t.Fatalf("published event count at ack time = %d, want >= 1 (apply's publish must precede ack)",
+			backend.publishedCountsAtAck[0])
 	}
 }
 
