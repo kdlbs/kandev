@@ -195,15 +195,17 @@ func TestStandaloneGitMetadataPreflightRejectsLegacyCodexSandbox(t *testing.T) {
 
 func TestStandaloneGitMetadataPreflightRejectsAgentWithoutFilesystemPolicy(t *testing.T) {
 	projection := newLinkedGitMetadataProjection(t)
-	req := &ExecutorCreateRequest{
-		WorkspacePath:          projection.CheckoutPath,
-		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
-		AgentConfig:            agents.NewClaudeACP(),
-	}
+	for _, agent := range []agents.Agent{agents.NewClaudeACP(), agents.NewOpenCodeACP()} {
+		req := &ExecutorCreateRequest{
+			WorkspacePath:          projection.CheckoutPath,
+			GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+			AgentConfig:            agent,
+		}
 
-	err := preflightGitMetadataProjection(context.Background(), &StandaloneExecutor{}, req)
-	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
-		t.Fatalf("preflightGitMetadataProjection() error = %v, want %q", err, gitMetadataProjectionUnsupported)
+		err := preflightGitMetadataProjection(context.Background(), &StandaloneExecutor{}, req)
+		if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+			t.Errorf("%s preflightGitMetadataProjection() error = %v, want %q", agent.ID(), err, gitMetadataProjectionUnsupported)
+		}
 	}
 }
 
