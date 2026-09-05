@@ -183,19 +183,24 @@ func TestRequestTaskChanges_TwoRoundsQueueDistinctRuns(t *testing.T) {
 	q := &stubApprovalQueuer{}
 	deps.svc.SetApprovalReactivityQueuer(q)
 
-	if _, err := deps.svc.RequestTaskChanges(context.Background(),
-		models.DeciderTypeAgent, "agent-rev", "ch2", "round one"); err != nil {
+	first, err := deps.svc.RequestTaskChanges(context.Background(),
+		models.DeciderTypeAgent, "agent-rev", "ch2", "round one")
+	if err != nil {
 		t.Fatalf("first request: %v", err)
 	}
-	if _, err := deps.svc.RequestTaskChanges(context.Background(),
-		models.DeciderTypeAgent, "agent-rev", "ch2", "round two"); err != nil {
+	second, err := deps.svc.RequestTaskChanges(context.Background(),
+		models.DeciderTypeAgent, "agent-rev", "ch2", "round two")
+	if err != nil {
 		t.Fatalf("second request: %v", err)
 	}
 	if len(q.runs) != 2 {
 		t.Fatalf("runs = %d, want 2: %#v", len(q.runs), q.runs)
 	}
-	if q.runs[0].IdempotencyKey == q.runs[1].IdempotencyKey {
-		t.Fatalf("expected distinct idempotency keys, got %q twice", q.runs[0].IdempotencyKey)
+	if want := "decision:" + first.ID; q.runs[0].IdempotencyKey != want {
+		t.Errorf("runs[0].IdempotencyKey = %q, want %q", q.runs[0].IdempotencyKey, want)
+	}
+	if want := "decision:" + second.ID; q.runs[1].IdempotencyKey != want {
+		t.Errorf("runs[1].IdempotencyKey = %q, want %q", q.runs[1].IdempotencyKey, want)
 	}
 }
 
