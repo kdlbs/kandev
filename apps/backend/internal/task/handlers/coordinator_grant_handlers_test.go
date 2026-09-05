@@ -69,9 +69,9 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 	}
 }
 
-// Reviewer-requested contract coverage: grant mutation routes must never be
+// Reviewer-requested contract coverage: grant and audit routes must never be
 // reachable by an anonymous or non-admin caller.
-func TestCoordinatorGrantMutationRoutesRequireAdmin(t *testing.T) {
+func TestCoordinatorGrantRoutesRequireAdmin(t *testing.T) {
 	_, repo, svc := newRepositoryHTTPTestRouterWithService(t)
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	if err != nil {
@@ -94,17 +94,30 @@ func TestCoordinatorGrantMutationRoutesRequireAdmin(t *testing.T) {
 				})
 				RegisterCoordinatorGrantRoutes(handler, repo, svc, log)
 			}
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/coordinator-grants", nil)
-			response := httptest.NewRecorder()
-
-			handler.ServeHTTP(response, request)
-
 			want := http.StatusUnauthorized
 			if identity != nil {
 				want = http.StatusForbidden
 			}
-			if response.Code != want {
-				t.Fatalf("status = %d, want %d; body = %s", response.Code, want, response.Body.String())
+			for _, route := range []struct {
+				method string
+				path   string
+			}{
+				{method: http.MethodGet, path: "/api/v1/workspaces/ws-1/coordinator-grants"},
+				{method: http.MethodGet, path: "/api/v1/tasks/task-1/coordinator-grants"},
+				{method: http.MethodGet, path: "/api/v1/workspaces/ws-1/coordinator-audit"},
+				{method: http.MethodPost, path: "/api/v1/workspaces/ws-1/coordinator-grants"},
+				{method: http.MethodDelete, path: "/api/v1/coordinator-grants/grant-1"},
+			} {
+				t.Run(route.method+" "+route.path, func(t *testing.T) {
+					request := httptest.NewRequest(route.method, route.path, nil)
+					response := httptest.NewRecorder()
+
+					handler.ServeHTTP(response, request)
+
+					if response.Code != want {
+						t.Fatalf("status = %d, want %d; body = %s", response.Code, want, response.Body.String())
+					}
+				})
 			}
 		})
 	}

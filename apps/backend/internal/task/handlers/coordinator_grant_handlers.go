@@ -63,14 +63,12 @@ func RegisterCoordinatorGrantRoutes(
 }
 
 func (h *CoordinatorGrantHandlers) registerHTTP(router *gin.Engine) {
-	api := router.Group("/api/v1")
-	// Read-only listing endpoints are accessible to all workspace members.
-	api.GET("/workspaces/:id/coordinator-grants", h.httpListWorkspaceCoordinatorGrants)
-	api.GET("/tasks/:id/coordinator-grants", h.httpListTaskCoordinatorGrants)
-	api.GET("/workspaces/:id/coordinator-audit", h.httpListWorkspaceCoordinatorAudit)
-
-	// Mutation endpoints (create, revoke) require admin privileges.
+	// Grant and audit state is operator-only because it exposes task authority,
+	// principals, and execution decisions.
 	admin := router.Group("/api/v1", authn.RequireAdmin())
+	admin.GET("/workspaces/:id/coordinator-grants", h.httpListWorkspaceCoordinatorGrants)
+	admin.GET("/tasks/:id/coordinator-grants", h.httpListTaskCoordinatorGrants)
+	admin.GET("/workspaces/:id/coordinator-audit", h.httpListWorkspaceCoordinatorAudit)
 	admin.POST("/workspaces/:id/coordinator-grants", h.httpCreateWorkspaceCoordinatorGrant)
 	admin.DELETE("/coordinator-grants/:id", h.httpRevokeCoordinatorGrant)
 }
