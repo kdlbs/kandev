@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-09-05T16:12:55.993Z",
+  "assets": [
+    {
+      "name": "task-create-workflow-selector-desktop",
+      "type": "screenshot",
+      "format": "png",
+      "file": "task-create-workflow-selector-desktop.png",
+      "caption": "Task creation opens with the workflow selector available on desktop."
+    },
+    {
+      "name": "task-create-workflow-selector-mobile",
+      "type": "screenshot",
+      "format": "png",
+      "file": "task-create-workflow-selector-mobile.png",
+      "caption": "Task creation opens with the workflow selector available on mobile."
+    }
+  ]
+}
