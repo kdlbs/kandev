@@ -33,6 +33,7 @@ export type SessionTabMenuActions = {
   handleSetPrimary: () => void;
   handleStop: () => void;
   handleResume: () => void;
+  hideSessionPanel?: () => void;
   handleCloseOthers?: () => void;
 };
 
@@ -124,6 +125,7 @@ export function DeleteSessionPopover({
 }
 
 export function SessionContextMenuItems({
+  contentRef,
   sessionState,
   isPrimary,
   canShare,
@@ -135,6 +137,7 @@ export function SessionContextMenuItems({
   onHandoffProfile,
   onStartRename,
 }: {
+  contentRef?: RefObject<HTMLDivElement | null>;
   sessionState: TaskSessionState | null;
   isPrimary: boolean;
   canShare: boolean;
@@ -149,7 +152,7 @@ export function SessionContextMenuItems({
 }) {
   const { t } = useTranslation();
   return (
-    <ContextMenuContent>
+    <ContextMenuContent ref={contentRef}>
       <ContextMenuItem className="cursor-pointer" onSelect={onStartRename}>
         {t("task:rename2")}
       </ContextMenuItem>
@@ -169,6 +172,11 @@ export function SessionContextMenuItems({
       {sessionState && isResumable(sessionState) && (
         <ContextMenuItem className="cursor-pointer" onSelect={actions.handleResume}>
           {t("task:resume")}
+        </ContextMenuItem>
+      )}
+      {typeof actions.hideSessionPanel === "function" && (
+        <ContextMenuItem className="cursor-pointer" onSelect={actions.hideSessionPanel}>
+          {t("task:hide")}
         </ContextMenuItem>
       )}
       {sessionState && isDeletable(sessionState) && (

@@ -14,6 +14,7 @@ import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { markSessionTabUserActivationIntent } from "@/components/task/session-tab-activation-intent";
+import { clearHiddenSessionPanel } from "@/components/task/dockview-session-tabs";
 import { useSessionPendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -111,6 +112,7 @@ export function SessionReopenMenuItems({
       // Reopening a session within the same task = same env, so the env switch
       // action no-ops naturally. We just create the chat panel.
       markSessionTabUserActivationIntent(sessionId);
+      clearHiddenSessionPanel(api, sessionId);
       addSessionPanel(api, groupId ?? centerGroupId, sessionId, label);
     },
     [api, centerGroupId],

@@ -1,6 +1,14 @@
 "use client";
 
-import { useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import {
+  memo,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -68,28 +76,26 @@ export function ActionConfirmPopover({
   const confirmedRef = useRef(false);
   const confirmIsDisabled = disabled || confirmDisabled;
 
-  // Intentionally runs on every render: an anchor can disappear through live
-  // data without changing the confirmation's open state, so each render must
-  // re-check the guard before the shell can invoke a stale action.
   useLayoutEffect(() => {
-    // Keep a confirmed close marked until Radix finishes close-autofocus. An
-    // early reset can refocus this anchor while a following popover is opening.
     if (!open) return;
     if (isConnected(anchorRef.current)) return;
     onCancel?.();
     onOpenChange(false);
   });
 
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) {
-      confirmedRef.current = false;
-      onOpenChange(true);
-      return;
-    }
-    closeActionConfirm(confirmedRef, onCancel, onOpenChange);
-  };
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (nextOpen) {
+        confirmedRef.current = false;
+        onOpenChange(true);
+        return;
+      }
+      closeActionConfirm(confirmedRef, onCancel, onOpenChange);
+    },
+    [onCancel, onOpenChange],
+  );
 
-  const handleConfirm = () => {
+  const handleConfirm = useCallback(() => {
     if (confirmIsDisabled) return;
     if (!isConnected(anchorRef.current)) {
       handleOpenChange(false);
@@ -102,7 +108,9 @@ export function ActionConfirmPopover({
         .then(onConfirm)
         .catch(() => undefined);
     });
-  };
+  }, [anchorRef, confirmIsDisabled, handleOpenChange, onConfirm]);
+
+  const handleCancel = useCallback(() => handleOpenChange(false), [handleOpenChange]);
 
   return (
     <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
@@ -127,7 +135,7 @@ export function ActionConfirmPopover({
         focusBoundaryRef={focusBoundaryRef}
         confirmedRef={confirmedRef}
         anchorRef={anchorRef}
-        onCancel={() => handleOpenChange(false)}
+        onCancel={handleCancel}
         onConfirm={handleConfirm}
       />
     </Popover>
@@ -157,7 +165,7 @@ type ActionConfirmPopoverContentProps = {
   onConfirm: () => void;
 };
 
-function ActionConfirmPopoverContent({
+const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
   size,
   titleId,
   descriptionId,
@@ -190,15 +198,25 @@ function ActionConfirmPopoverContent({
       align="end"
       sideOffset={8}
       className={cn("gap-3 p-3", size === "wide" ? "w-72 max-w-[calc(100vw-1rem)]" : "w-64")}
-      onOpenAutoFocus={(event) => {
-        event.preventDefault();
-        cancelRef.current?.focus();
-      }}
+      onOpenAutoFocus={(event) => preventAndFocusCancel(event, cancelRef)}
       onFocusOutside={(event) => {
+        // Ignore stale focus events from the closing context-menu portal.
+        if (isClosingRadixMenuContent(event.target, focusBoundaryRef))
+          return event.preventDefault();
+        // A replaced boundary fails contains(), so the live trigger ref stays correct.
         if (focusBoundaryRef?.current?.contains(event.target as Node)) event.preventDefault();
       }}
       onInteractOutside={(event) => {
         const target = event.target as Node;
+        // Ignore stale interaction events from the closing context-menu portal.
+        if (isClosingRadixMenuContent(target, focusBoundaryRef)) return event.preventDefault();
+        // If the interaction target is no longer in the DOM (e.g., the context
+        // menu content was just removed), it's a stale event from a preceding
+        // close — prevent it from closing the popover.
+        if (!target.isConnected) {
+          event.preventDefault();
+          return;
+        }
         if (anchorRef.current?.contains(target) || focusBoundaryRef?.current?.contains(target)) {
           event.preventDefault();
         }
@@ -249,6 +267,11 @@ function ActionConfirmPopoverContent({
       </div>
     </PopoverContent>
   );
+});
+
+function preventAndFocusCancel(event: Event, cancelRef: RefObject<HTMLButtonElement | null>) {
+  event.preventDefault();
+  cancelRef.current?.focus();
 }
 
 function closeActionConfirm(
@@ -262,4 +285,15 @@ function closeActionConfirm(
 
 function isConnected(element: HTMLElement | null): element is HTMLElement {
   return element !== null && element.isConnected;
+}
+
+function isClosingRadixMenuContent(
+  target: EventTarget | null,
+  boundaryRef?: RefObject<HTMLElement | null>,
+): boolean {
+  return (
+    target instanceof Element &&
+    target.closest('[data-radix-menu-content][data-state="closed"]') !== null &&
+    boundaryRef?.current?.contains(target) === true
+  );
 }
