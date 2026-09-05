@@ -2,6 +2,7 @@ package tempartifacts
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -40,5 +41,30 @@ func TestAnalyzeUsesConfiguredBoundedScanner(t *testing.T) {
 	}
 	if completed.Load() != 1 {
 		t.Fatalf("completed roots = %d, want one artifact root", completed.Load())
+	}
+}
+
+func TestAnalyzePropagatesCanceledScan(t *testing.T) {
+	root := t.TempDir()
+	artifacts := newFakeArtifactStore()
+	registry := NewRegistry(Config{
+		Store: artifacts, TempRoot: root, OwnerPID: 1234,
+		NewID: func() string { return "artifact-1" }, NewToken: func() string { return "token-1" },
+	})
+	lease, err := registry.Create(context.Background(), storage.TemporaryArtifactKindImproveBundle, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	provider := NewProvider(ProviderConfig{
+		Registry: registry, Store: newFakeQuarantineStore(), HomeDir: t.TempDir(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := provider.Analyze(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Analyze error = %v, want context.Canceled", err)
+	}
+	if err := lease.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 }

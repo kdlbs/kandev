@@ -77,6 +77,24 @@ func TestOverviewCachePreservesSourceFailureOnSuccessfulScan(t *testing.T) {
 	}
 }
 
+func TestOverviewCachePreservesCountersOnTerminalProgress(t *testing.T) {
+	cache := NewOverviewCache(terminalProgressOverview{})
+	if _, err := cache.Get(context.Background()); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	read, err := cache.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	progress := read.Analysis.Progress.Sources[StorageSourceWorkspaces]
+	if progress.CompletedItems != 7 || progress.BytesScanned != 42 {
+		t.Fatalf("terminal progress = %#v, want counters preserved", progress)
+	}
+	if progress.TotalItems == nil || *progress.TotalItems != 9 {
+		t.Fatalf("terminal total_items = %v, want 9", progress.TotalItems)
+	}
+}
+
 func TestOverviewCacheReadKeepsExpiredSnapshotWhileRefreshing(t *testing.T) {
 	now := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)
 	provider := newProgressiveOverview()
@@ -313,4 +331,33 @@ func (o *progressiveOverview) setSourceFailure(err error) {
 
 func intPointer(value int) *int {
 	return &value
+}
+
+type terminalProgressOverview struct{}
+
+func (terminalProgressOverview) Summary(context.Context) (Summary, error) {
+	return Summary{Workspaces: 1}, nil
+}
+
+func (terminalProgressOverview) SummaryWithProgress(
+	_ context.Context,
+	notify OverviewProgressCallback,
+) (Summary, error) {
+	notify(OverviewProgress{
+		Source: StorageSourceWorkspaces, State: SourceStateScanning,
+		CompletedItems: 7, TotalItems: intPointer(9), BytesScanned: 42,
+	})
+	notify(OverviewProgress{Source: StorageSourceWorkspaces, State: SourceStateReady, Value: 1})
+	return Summary{Workspaces: 1}, nil
+}
+
+func (terminalProgressOverview) Capabilities(context.Context, StorageMaintenanceSettings) Capabilities {
+	return Capabilities{}
+}
+
+func (terminalProgressOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
+	return Capabilities{}
 }

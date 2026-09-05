@@ -308,12 +308,18 @@ func (c *OverviewCache) updateSourceProgressLocked(
 			flight.sourceStarted[progress.Source] = now
 		}
 	}
-	source.CompletedItems = progress.CompletedItems
+	if progress.CompletedItems > source.CompletedItems {
+		source.CompletedItems = progress.CompletedItems
+	}
 	if progress.TotalItems != nil {
 		total := *progress.TotalItems
-		source.TotalItems = &total
+		if source.TotalItems == nil || total > *source.TotalItems {
+			source.TotalItems = &total
+		}
 	}
-	source.BytesScanned = progress.BytesScanned
+	if progress.BytesScanned > source.BytesScanned {
+		source.BytesScanned = progress.BytesScanned
+	}
 	if progress.Err != nil {
 		errorText := progress.Err.Error()
 		source.Error = &errorText

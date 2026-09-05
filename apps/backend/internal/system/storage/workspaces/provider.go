@@ -43,10 +43,11 @@ func New(config Config) *Provider {
 }
 
 type candidate struct {
-	path     string
-	owner    OwnershipMarker
-	size     int64
-	measured bool
+	path              string
+	owner             OwnershipMarker
+	size              int64
+	measured          bool
+	measurementFailed bool
 }
 
 func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
@@ -74,6 +75,7 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 				analysis.Warnings,
 				fmt.Sprintf("measure workspace %s: %v", roots[index].path, measurement.Err),
 			)
+			roots[index].measurementFailed = true
 			continue
 		}
 		roots[index].size = measurement.Bytes
@@ -161,6 +163,9 @@ func (p *Provider) eligibleCandidates(
 	cutoff := p.config.Now().Add(-p.config.GracePeriod)
 	candidates := make([]candidate, 0)
 	for _, root := range roots {
+		if root.measurementFailed {
+			continue
+		}
 		if _, keep := protected[root.path]; keep {
 			continue
 		}

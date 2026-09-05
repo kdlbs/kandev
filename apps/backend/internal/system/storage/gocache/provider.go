@@ -125,13 +125,20 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	if scanner == nil {
 		scanner = filescan.NewLimiter(4)
 	}
-	measurements := scanner.Measure(ctx, []filescan.Root{
+	measurementRoots := []filescan.Root{
 		{
 			Path: cachePath, MissingOK: true, SymlinkPolicy: filescan.RejectSymlinks,
 			Exclude: func(path string, _ fs.DirEntry) bool { return path == markerPath(cachePath) },
 		},
-	}, p.config.OnProgress)
-	if len(measurements) != 1 {
+	}
+	unmanagedPath, hasUnmanagedPath := defaultGoCachePath()
+	if hasUnmanagedPath && unmanagedPath != cachePath {
+		measurementRoots = append(measurementRoots, filescan.Root{
+			Path: unmanagedPath, MissingOK: true, SymlinkPolicy: filescan.SkipSymlinks,
+		})
+	}
+	measurements := scanner.Measure(ctx, measurementRoots, p.config.OnProgress)
+	if len(measurements) != len(measurementRoots) {
 		return Analysis{}, errors.New("go-cache scanner returned an invalid result")
 	}
 	if err := measurements[0].Err; err != nil {
@@ -140,21 +147,14 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	analysis := Analysis{
 		Path: cachePath, SizeBytes: measurements[0].Bytes, Owned: owned, Enabled: settings.GoCache.Enabled,
 	}
-	unmanagedPath, ok := defaultGoCachePath()
-	if !ok || unmanagedPath == cachePath {
+	if !hasUnmanagedPath || unmanagedPath == cachePath {
 		return analysis, nil
 	}
-	measurements = scanner.Measure(ctx, []filescan.Root{{
-		Path: unmanagedPath, MissingOK: true, SymlinkPolicy: filescan.SkipSymlinks,
-	}}, p.config.OnProgress)
-	if len(measurements) != 1 {
-		return Analysis{}, errors.New("go-cache scanner returned an invalid result")
-	}
-	if err := measurements[0].Err; err != nil {
+	if err := measurements[1].Err; err != nil {
 		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
 	}
 	analysis.UnmanagedPath = unmanagedPath
-	analysis.UnmanagedSizeBytes = measurements[0].Bytes
+	analysis.UnmanagedSizeBytes = measurements[1].Bytes
 	return analysis, nil
 }
 

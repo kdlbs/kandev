@@ -81,6 +81,7 @@ type partitionResult struct {
 
 type progressTracker struct {
 	mu                  sync.Mutex
+	notifyMu            sync.Mutex
 	completedPartitions int
 	completedRoots      int
 	bytesScanned        int64
@@ -289,10 +290,17 @@ func walkPartition(ctx context.Context, root Root, path string) (int64, error) {
 }
 
 func (t *progressTracker) partitionStarted(item partition) {
-	t.emit(Progress{Phase: PartitionStarted, RootIndex: item.rootIndex, PartitionIndex: item.partitionIndex})
+	t.mu.Lock()
+	event := t.progressLocked(Progress{
+		Phase: PartitionStarted, RootIndex: item.rootIndex, PartitionIndex: item.partitionIndex,
+	})
+	t.mu.Unlock()
+	t.emitEvent(event)
 }
 
 func (t *progressTracker) partitionCompleted(item partition, bytes int64, err error) {
+	t.notifyMu.Lock()
+	defer t.notifyMu.Unlock()
 	t.mu.Lock()
 	t.completedPartitions++
 	if err == nil {
@@ -306,14 +314,23 @@ func (t *progressTracker) partitionCompleted(item partition, bytes int64, err er
 	if rootDone {
 		t.completedRoots++
 	}
+	var rootEvent *Progress
+	if rootDone {
+		event := t.progressLocked(Progress{
+			Phase: RootCompleted, RootIndex: item.rootIndex, PartitionIndex: item.partitionIndex,
+		})
+		rootEvent = &event
+	}
 	t.mu.Unlock()
 	t.emitEvent(event)
-	if rootDone {
-		t.emit(Progress{Phase: RootCompleted, RootIndex: item.rootIndex, PartitionIndex: item.partitionIndex})
+	if rootEvent != nil {
+		t.emitEvent(*rootEvent)
 	}
 }
 
 func (t *progressTracker) completeRoot(rootIndex int) {
+	t.notifyMu.Lock()
+	defer t.notifyMu.Unlock()
 	t.mu.Lock()
 	t.completedRoots++
 	event := t.progressLocked(Progress{Phase: RootCompleted, RootIndex: rootIndex})
@@ -328,13 +345,6 @@ func (t *progressTracker) progressLocked(event Progress) Progress {
 	event.TotalRoots = t.totalRoots
 	event.BytesScanned = t.bytesScanned
 	return event
-}
-
-func (t *progressTracker) emit(event Progress) {
-	t.mu.Lock()
-	event = t.progressLocked(event)
-	t.mu.Unlock()
-	t.emitEvent(event)
 }
 
 func (t *progressTracker) emitEvent(event Progress) {

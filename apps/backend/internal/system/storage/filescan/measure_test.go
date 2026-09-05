@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestMeasureUsesBoundedConcurrentPartitionsAndIndexedResults(t *testing.T) {
@@ -137,6 +139,67 @@ func TestMeasureRejectsSymlinkAndSupportsMissingRoots(t *testing.T) {
 	}
 	if !errors.Is(results[0].Err, context.Canceled) {
 		t.Fatalf("cancelled measurement error = %v, want context.Canceled", results[0].Err)
+	}
+}
+
+func TestProgressTrackerNotifiesInSnapshotOrder(t *testing.T) {
+	var (
+		events                []Progress
+		eventsMu              sync.Mutex
+		firstCallbackStarted  = make(chan struct{})
+		secondCallbackStarted = make(chan struct{})
+		done                  = make(chan struct{}, 2)
+	)
+	tracker := &progressTracker{
+		rootPartitions:  []int{2},
+		rootCompleted:   []int{0},
+		totalPartitions: 2,
+		totalRoots:      1,
+		notify: func(event Progress) {
+			if event.Phase != PartitionCompleted {
+				return
+			}
+			if event.PartitionIndex == 0 {
+				close(firstCallbackStarted)
+				select {
+				case <-secondCallbackStarted:
+				case <-time.After(250 * time.Millisecond):
+				}
+			}
+			if event.PartitionIndex == 1 {
+				close(secondCallbackStarted)
+			}
+			eventsMu.Lock()
+			events = append(events, event)
+			eventsMu.Unlock()
+		},
+	}
+
+	go func() {
+		tracker.partitionCompleted(partition{rootIndex: 0, partitionIndex: 0}, 1, nil)
+		done <- struct{}{}
+	}()
+	select {
+	case <-firstCallbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first progress callback did not start")
+	}
+	go func() {
+		tracker.partitionCompleted(partition{rootIndex: 0, partitionIndex: 1}, 1, nil)
+		done <- struct{}{}
+	}()
+	for range 2 {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("partition completion did not finish")
+		}
+	}
+
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	if len(events) != 2 || events[0].PartitionIndex != 0 || events[1].PartitionIndex != 1 {
+		t.Fatalf("progress events = %#v, want partition order 0 then 1", events)
 	}
 }
 

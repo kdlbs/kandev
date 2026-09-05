@@ -20,6 +20,7 @@ import (
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 )
@@ -137,6 +138,29 @@ func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
 	}
 	if !seen[storagepkg.StorageSourceQuarantine][storagepkg.SourceStateFailed] {
 		t.Fatalf("quarantine source did not report failure: %#v", seen[storagepkg.StorageSourceQuarantine])
+	}
+}
+
+func TestStorageProgressReporterCompletionPreservesFilesystemCounters(t *testing.T) {
+	var events []storagepkg.OverviewProgress
+	reporter := newStorageProgressReporter(func(progress storagepkg.OverviewProgress) {
+		events = append(events, progress)
+	})
+	reporter.filesystem(storagepkg.StorageSourceWorkspaces)(filescan.Progress{
+		Phase: filescan.PartitionCompleted, CompletedPartitions: 2, TotalPartitions: 3,
+		BytesScanned: 42,
+	})
+	reporter.complete(storagepkg.StorageSourceWorkspaces, map[string]any{"total_bytes": int64(42)}, nil)
+
+	if len(events) != 2 {
+		t.Fatalf("progress event count = %d, want 2", len(events))
+	}
+	completion := events[1]
+	if completion.CompletedItems != 2 || completion.BytesScanned != 42 {
+		t.Fatalf("completion progress = %#v, want filesystem counters", completion)
+	}
+	if completion.TotalItems == nil || *completion.TotalItems != 3 {
+		t.Fatalf("completion total_items = %v, want 3", completion.TotalItems)
 	}
 }
 

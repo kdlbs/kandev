@@ -261,6 +261,10 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	for index, artifact := range inspectable {
 		measurement := measurements[index]
 		if measurement.Err != nil {
+			if errors.Is(measurement.Err, context.Canceled) ||
+				errors.Is(measurement.Err, context.DeadlineExceeded) {
+				return analysis, measurement.Err
+			}
 			analysis.SkippedCount++
 			analysis.Warnings = append(
 				analysis.Warnings,
