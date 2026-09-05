@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/task/statussummary"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -1716,9 +1717,10 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 }
 
 type httpMoveTaskRequest struct {
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
-	Position       int    `json:"position"`
+	WorkflowID     string                     `json:"workflow_id"`
+	WorkflowStepID string                     `json:"workflow_step_id"`
+	Position       int                        `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
 func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
@@ -1734,7 +1736,11 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	result, err := h.service.MoveTaskWithOptions(
 		c.Request.Context(), c.Param("id"),
 		body.WorkflowID, body.WorkflowStepID, body.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
+		service.MoveTaskOptions{
+			AllowActivePrimarySession: true,
+			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
+			EntryOptions:              body.EntryOptions,
+		},
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
@@ -1742,7 +1748,9 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	}
 
 	response := dto.MoveTaskResponse{
-		Task: dto.FromTask(result.Task),
+		Task:         dto.FromTask(result.Task),
+		MoveID:       result.MoveID,
+		EntryOptions: result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

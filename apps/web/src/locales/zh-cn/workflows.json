@@ -211,6 +211,7 @@
   "workflowPromptCollapsedHint": "可选；展开以添加共享的步骤入口说明",
   "workflowPromptSetHint": "已配置；展开以编辑",
   "workflowInstructionsCollapsed": "工作流说明",
+  "workflowMoveInstructionsCollapsed": "一次性移动说明",
   "stepPrompt": "步骤提示词",
   "stepPromptHelp": "为此步骤中的智能体提供自定义指令。使用 {{taskPrompt}} 可插入任务描述。",
   "stepPromptPlaceholderExample": "使用 OAuth2 实现用户身份验证",

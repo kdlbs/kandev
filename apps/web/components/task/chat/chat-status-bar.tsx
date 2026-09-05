@@ -10,12 +10,10 @@
  * indicators, so nothing here participates in composing or sending a message.
  */
 
-import { IconArrowRight } from "@tabler/icons-react";
-import { useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { ReactNode } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
@@ -107,7 +105,7 @@ export type ChatStatusBarProps = {
   sessionId: string | null;
   sessionState: string | null;
   nextStepName: string | null;
-  onProceed: () => void;
+  onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isAgentBusy: boolean;
   isMoving: boolean;
   queueChip?: ReactNode;
@@ -134,7 +132,6 @@ export function ChatStatusBar({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarProps) {
-  const { t } = useTranslation();
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
   const autopilot = useTaskAutopilot(taskId);
@@ -200,23 +197,13 @@ export function ChatStatusBar({
         </div>
       )}
       {showProceed && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={`${showRightControls ? "" : "ml-auto "}h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary`}
-              onClick={onProceed}
-              disabled={isMoving}
-              data-testid="proceed-next-step"
-            >
-              {nextStepName}
-              <IconArrowRight className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("task:moveTaskToTheNextWorkflow")}</TooltipContent>
-        </Tooltip>
+        <WorkflowMoveProceedButton
+          nextStepName={nextStepName}
+          onProceed={onProceed}
+          isMoving={isMoving}
+          className={`${showRightControls ? "" : "ml-auto "}h-6`}
+          testId="proceed-next-step"
+        />
       )}
     </div>
   );

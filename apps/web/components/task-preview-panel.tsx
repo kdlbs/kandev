@@ -7,7 +7,11 @@ import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ens
 import type { Task } from "./kanban-card";
 import { PreviewSessionTabs } from "./task/preview-session-tabs";
 import { TaskMoveErrorBanner } from "./task/task-move-error-banner";
-import { MinimalWorkflowStepper, type WorkflowStepperStep } from "./task/workflow-step-disclosure";
+import {
+  MinimalWorkflowStepper,
+  type DisclosureMove,
+  type WorkflowStepperStep,
+} from "./task/workflow-step-disclosure";
 import { useTranslation } from "react-i18next";
 
 interface TaskPreviewPanelProps {
@@ -22,7 +26,7 @@ interface TaskPreviewPanelProps {
   taskWorkflowId?: string | null;
   isArchived?: boolean;
   movingToStepId?: string | null;
-  onMoveStep?: (stepId: string) => Promise<boolean>;
+  onMoveStep?: DisclosureMove;
   onDisclosureOpenChange?: (open: boolean) => void;
   moveError?: unknown;
 }
@@ -36,7 +40,7 @@ interface PreviewPanelHeaderProps {
   taskWorkflowId: string | null;
   isArchived: boolean;
   movingToStepId: string | null;
-  onMoveStep?: (stepId: string) => Promise<boolean>;
+  onMoveStep?: DisclosureMove;
   onDisclosureOpenChange?: (open: boolean) => void;
 }
 

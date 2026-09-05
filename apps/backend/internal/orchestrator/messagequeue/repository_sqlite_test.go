@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jmoiron/sqlx"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -876,6 +877,42 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	got, err = repo.TakePendingMove(ctx, "s1")
 	if err != nil || got != nil {
 		t.Errorf("expected empty after take, got %+v err=%v", got, err)
+	}
+}
+
+func TestSQLiteRepository_PendingMoveEntryOptions(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	// A move without one-shot options round-trips as nil so pre-existing rows
+	// and ordinary moves decode back to an option-less move.
+	plain := &PendingMove{MoveID: "m-plain", TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A"}
+	if err := repo.SetPendingMove(ctx, "s-plain", plain); err != nil {
+		t.Fatalf("set plain: %v", err)
+	}
+	if got, err := repo.GetPendingMove(ctx, "s-plain"); err != nil || got == nil || got.EntryOptions != nil {
+		t.Fatalf("expected nil entry options, got %+v err=%v", got, err)
+	}
+
+	// A move with options round-trips every field through both Get and Take.
+	opts := &workflowmove.EntryOptions{ResetContext: true, Instructions: "carry on", SkipStepPrompt: true}
+	move := &PendingMove{MoveID: "m-opts", TaskID: "t2", WorkflowID: "w1", WorkflowStepID: "step-B", EntryOptions: opts}
+	if err := repo.SetPendingMove(ctx, "s-opts", move); err != nil {
+		t.Fatalf("set opts: %v", err)
+	}
+	got, err := repo.GetPendingMove(ctx, "s-opts")
+	if err != nil || got == nil || got.EntryOptions == nil {
+		t.Fatalf("expected entry options via get, got %+v err=%v", got, err)
+	}
+	if !got.EntryOptions.ResetContext || got.EntryOptions.Instructions != "carry on" || !got.EntryOptions.SkipStepPrompt {
+		t.Errorf("entry options not preserved via get: %+v", got.EntryOptions)
+	}
+	taken, err := repo.TakePendingMove(ctx, "s-opts")
+	if err != nil || taken == nil || taken.EntryOptions == nil {
+		t.Fatalf("expected entry options via take, got %+v err=%v", taken, err)
+	}
+	if !taken.EntryOptions.SkipStepPrompt || taken.EntryOptions.Instructions != "carry on" {
+		t.Errorf("entry options not preserved via take: %+v", taken.EntryOptions)
 	}
 }
 

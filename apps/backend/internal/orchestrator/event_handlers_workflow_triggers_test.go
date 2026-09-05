@@ -1054,6 +1054,87 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 	})
 
+	// A workflow-driven reset (durable reset_agent_context action or a one-time
+	// move override) must surface the same "Context reset" chat divider that the
+	// manual toolbar reset button emits, so the user sees the context was cleared.
+	t.Run("workflow reset emits the context reset divider", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-reset")
+
+		svc := createTestServiceWithAgent(
+			repo,
+			newMockStepGetter(),
+			newMockTaskRepo(),
+			&mockAgentManager{repoForExecutionLookup: repo},
+		)
+		messages := &mockMessageCreator{}
+		svc.messageCreator = messages
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Review Step",
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterResetAgentContext},
+			}},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
+
+		dividers := 0
+		for _, m := range messages.sessionMessages {
+			if m.content != contextResetMessage {
+				continue
+			}
+			if m.messageType != string(v1.MessageTypeStatus) {
+				t.Fatalf("context reset divider must be a status message, got %q", m.messageType)
+			}
+			dividers++
+		}
+		if dividers != 1 {
+			t.Fatalf("expected exactly one context reset divider, got %d", dividers)
+		}
+	})
+
+	// A CREATED session has no prior conversation, so resetAgentContext skips the
+	// actual reset; the divider must be suppressed to match the manual path,
+	// which cannot even reach a CREATED session (it requires WAITING_FOR_INPUT).
+	t.Run("workflow reset on a CREATED session emits no divider", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateCreated
+		session.AgentExecutionID = "exec-created"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-created")
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestServiceWithAgent(
+			repo,
+			newMockStepGetter(),
+			newMockTaskRepo(),
+			&mockAgentManager{repoForExecutionLookup: repo},
+		)
+		messages := &mockMessageCreator{}
+		svc.messageCreator = messages
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work",
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterResetAgentContext},
+			}},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
+
+		for _, m := range messages.sessionMessages {
+			if m.content == contextResetMessage {
+				t.Fatal("a never-prompted CREATED session must not emit a context reset divider")
+			}
+		}
+	})
+
 	// Same skip for passthrough: the CLI has no conversation to reset before
 	// its first prompt either.
 	t.Run("reset_agent_context skipped for CREATED passthrough session", func(t *testing.T) {

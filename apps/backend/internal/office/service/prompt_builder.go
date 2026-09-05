@@ -9,9 +9,22 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// RunPayloadOneTimeInstructionsKey names the run-payload field carrying a
+// workflow move's one-shot instructions. The orchestrator's office auto-start
+// path writes it (officeRunPayloadOneTimeInstructionsKey); the two packages
+// intentionally avoid importing each other, so the key is duplicated as a
+// literal on both sides.
+const RunPayloadOneTimeInstructionsKey = "one_time_instructions"
+
 // PromptContext holds the data needed to build a run prompt.
 type PromptContext struct {
 	Reason string
+
+	// OneTimeInstructions carries a workflow move's one-shot instructions for
+	// this run only. When set, BuildPrompt appends it after the per-reason
+	// prompt body. Office runs build their prompt from a template rather than
+	// the durable step, so move instructions ride on the run payload.
+	OneTimeInstructions string
 
 	// Task fields
 	TaskID          string
@@ -105,8 +118,19 @@ func BuildPrompt(pc *PromptContext) string {
 	default:
 		prompt = fmt.Sprintf("You have been woken for reason: %s.", pc.Reason)
 	}
+	prompt = appendOneTimeInstructions(prompt, pc.OneTimeInstructions)
 	prompt = appendHandoffSection(prompt, pc.HandoffContext)
 	return appendRuntimeContext(prompt, pc)
+}
+
+// appendOneTimeInstructions appends a workflow move's one-shot instructions to
+// the run prompt. Empty or whitespace-only input leaves the prompt unchanged.
+func appendOneTimeInstructions(prompt, instructions string) string {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return prompt
+	}
+	return prompt + "\n\n## One-time workflow move instructions\n\n" + instructions
 }
 
 // appendHandoffSection renders the office task-handoffs context block

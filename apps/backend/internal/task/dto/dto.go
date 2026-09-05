@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -1135,8 +1136,10 @@ type StepActionDTO struct {
 
 // MoveTaskResponse includes the task and the target workflow step info
 type MoveTaskResponse struct {
-	Task         TaskDTO         `json:"task"`
-	WorkflowStep WorkflowStepDTO `json:"workflow_step"`
+	Task         TaskDTO                    `json:"task"`
+	WorkflowStep WorkflowStepDTO            `json:"workflow_step"`
+	MoveID       string                     `json:"move_id,omitempty"`
+	EntryOptions *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
 // Session Workflow Review DTOs

@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -24,6 +25,7 @@ const (
 	moveConflictCodeDifferentWorkspace = "task_move_different_workspace"
 	moveConflictCodeWorkflowStep       = "task_move_workflow_step"
 	moveConflictCodeWIPLimit           = "task_move_wip_limit"
+	moveConflictCodePending            = "task_move_pending"
 )
 
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
@@ -173,9 +175,29 @@ func isMoveConflict(err error) bool {
 	return moveConflictCode(err) != ""
 }
 
+// moveEntryOptionsWSError classifies one-shot move-entry validation and
+// conflict failures for the WebSocket move handler, returning a stable
+// error code and the safe error message (which never carries option values).
+func moveEntryOptionsWSError(err error) (string, string, bool) {
+	switch {
+	case errors.Is(err, workflowmove.ErrMoveConflict):
+		return ws.ErrorCodeConflict, err.Error(), true
+	case errors.Is(err, workflowmove.ErrConflictingInstructions),
+		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange),
+		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported),
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable):
+		return ws.ErrorCodeValidation, err.Error(), true
+	default:
+		return "", "", false
+	}
+}
+
 func moveConflictCode(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, workflowmove.ErrMoveConflict) {
+		return moveConflictCodePending
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
@@ -205,6 +227,12 @@ func isValidationError(err error) bool {
 		return true
 	}
 	if errors.Is(err, service.ErrExternalIDInvalid) {
+		return true
+	}
+	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())

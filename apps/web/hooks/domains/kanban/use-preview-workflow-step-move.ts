@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { WorkflowStepperStep } from "@/components/task/workflow-step-disclosure";
+import type {
+  DisclosureMove,
+  WorkflowStepperStep,
+} from "@/components/task/workflow-step-disclosure";
 import { useWorkflowStepsById } from "./use-workflow-steps-by-id";
 import { usePresentationToken, useWorkflowStepMove } from "./use-workflow-step-move";
 
@@ -11,7 +14,7 @@ export type PreviewStepMove = {
   taskWorkflowId: string | null;
   isArchived: boolean;
   movingToStepId: string | null;
-  handleMove: (stepId: string) => Promise<boolean>;
+  handleMove: DisclosureMove;
   moveError: unknown;
   handleDisclosureOpenChange: (open: boolean) => void;
   isDisclosureOpen: () => boolean;
