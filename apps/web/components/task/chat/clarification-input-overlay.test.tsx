@@ -380,6 +380,29 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     expect(screen.queryByTestId(TESTID_SUBMIT_ERROR)).toBeNull();
   });
 
+  it("restores Retry, Skip, and local Escape dismissal after a retryable 503", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "clarification response is temporarily unavailable",
+          code: "temporarily_unavailable",
+        }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const { onDismiss, scopeRef } = renderOverlay([
+      clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await vi.waitFor(() => expect(screen.getByTestId(TESTID_SUBMIT_ERROR)).toBeTruthy());
+
+    expect(screen.getByTestId("clarification-retry")).toBeTruthy();
+    expect((screen.getByTestId("clarification-skip") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
   it("uses response-neutral copy when a Skip request fails", async () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
     renderOverlay([clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })]);

@@ -234,3 +234,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-01-server-owned-saved-prompt-expansion | [Keep Saved-Prompt Expansion Server-Owned](2026-09-01-server-owned-saved-prompt-expansion.md) | accepted | backend, frontend, protocol, security | 2026-09-01 |
 | 2026-09-01-passthrough-initial-prompt-turn-boundary | [Keep Passthrough Initial Prompt State in Lifecycle](2026-09-01-passthrough-initial-prompt-turn-boundary.md) | accepted | backend, workflow | 2026-09-01 |
 | 2026-09-02-automation-self-archive | [Permit Automation Self-Archive as Terminal Completion](2026-09-02-automation-self-archive.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-09-02 |
+| 2026-09-05-bounded-clarification-response-path | [Bound Clarification Responses with Indexed Lookup](2026-09-05-bounded-clarification-response-path.md) | accepted | backend, frontend, protocol | 2026-09-05 |

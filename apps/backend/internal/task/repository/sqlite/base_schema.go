@@ -164,6 +164,14 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	if _, err := r.db.Exec(pendingIndex); err != nil {
 		return err
 	}
+	lookupIndex := dialect.PendingIDLookupIndexDDL(
+		driver,
+		"idx_messages_metadata_pending_id_lookup",
+		"task_session_messages",
+	)
+	if _, err := r.db.Exec(lookupIndex); err != nil {
+		return err
+	}
 	return nil
 }
 

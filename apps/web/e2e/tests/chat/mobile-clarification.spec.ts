@@ -182,9 +182,12 @@ test.describe("Mobile clarification multiline answer", () => {
       attempt += 1;
       if (attempt === 1) {
         await route.fulfill({
-          status: 500,
+          status: 503,
           contentType: "application/json",
-          body: JSON.stringify({ error: "temporary failure" }),
+          body: JSON.stringify({
+            error: "clarification response is temporarily unavailable",
+            code: "temporarily_unavailable",
+          }),
         });
         return;
       }
@@ -194,10 +197,16 @@ test.describe("Mobile clarification multiline answer", () => {
     await session.clarificationOption("PostgreSQL").tap();
     const retry = testPage.getByTestId("clarification-retry");
     await expect(retry).toBeVisible();
+    await expect(session.clarificationSkip()).toBeEnabled();
     const retryBox = await retry.boundingBox();
     if (!retryBox) throw new Error("expected mobile clarification Retry to have a bounding box");
     expect(retryBox.height).toBeGreaterThanOrEqual(44);
     expect(retryBox.width).toBeGreaterThanOrEqual(44);
+
+    await session.clarificationCollapseToggle().tap();
+    await expect(session.clarificationOverlay()).toBeHidden();
+    await session.clarificationCollapseToggle().tap();
+    await expect(session.clarificationOverlay()).toBeVisible();
 
     const settled = waitForSessionSettled(ws, sessionId);
     await retry.tap();

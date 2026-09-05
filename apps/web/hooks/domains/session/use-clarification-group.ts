@@ -15,6 +15,7 @@ type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
 // A 409 this client does not recognize is treated as an error rather than
 // risked as a silent success.
 const CLARIFICATION_CONFLICT_NOT_ACTIVE = "not_active";
+const CLARIFICATION_RESPONSE_TIMEOUT_MS = 40_000;
 
 // The bundle status the backend can report on a resolved response (R10).
 // Upstream's claim cannot produce a cancelled winner, so a loss only ever
@@ -109,38 +110,42 @@ async function postClarification(
   body: Record<string, unknown>,
 ): Promise<ClarificationRespondResult> {
   const { apiBaseUrl } = getBackendConfig();
-  let res: Response;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CLARIFICATION_RESPONSE_TIMEOUT_MS);
   try {
-    res = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
+    const res = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
+    if (res.status === 409) return await classifyConflictResult(res);
+    if (!res.ok) {
+      console.error("Clarification request failed:", res.status, res.statusText);
+      return { state: "error" };
+    }
+    try {
+      const parsed = (await res.json()) as {
+        claimed?: boolean;
+        status?: ResolvedStatus;
+        response?: { answers?: ClarificationAnswer[] } | null;
+      };
+      return {
+        state: "ok",
+        claimed: parsed.claimed,
+        status: parsed.status,
+        answers: parsed.response?.answers,
+      };
+    } catch (err) {
+      console.error("Clarification response body parse failed:", err);
+      return { state: "ok" };
+    }
   } catch (err) {
     console.error("Clarification request failed:", err);
     return { state: "error" };
-  }
-  if (res.status === 409) return await classifyConflictResult(res);
-  if (!res.ok) {
-    console.error("Clarification request failed:", res.status, res.statusText);
-    return { state: "error" };
-  }
-  try {
-    const parsed = (await res.json()) as {
-      claimed?: boolean;
-      status?: ResolvedStatus;
-      response?: { answers?: ClarificationAnswer[] } | null;
-    };
-    return {
-      state: "ok",
-      claimed: parsed.claimed,
-      status: parsed.status,
-      answers: parsed.response?.answers,
-    };
-  } catch (err) {
-    console.error("Clarification response body parse failed:", err);
-    return { state: "ok" };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
