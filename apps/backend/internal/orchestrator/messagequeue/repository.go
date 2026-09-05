@@ -61,6 +61,11 @@ type Repository interface {
 	// ListBySession returns all entries for a session ordered by position ascending.
 	ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error)
 
+	// DisposeExact removes only entries whose immutable ID and opaque snapshot
+	// claim still match. It returns one outcome per requested claim plus visible
+	// queue counts from the same atomic session mutation.
+	DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error)
+
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)
 
@@ -76,8 +81,9 @@ type Repository interface {
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
 	// ReserveHead returns the lowest-position entry. Ordinary entries are
-	// atomically deleted, matching TakeHead. Durable lifecycle entries remain
-	// stored until AcknowledgeByID is called after executor acceptance.
+	// atomically deleted, matching TakeHead. Durable lifecycle and canonical
+	// routine entries remain stored until AcknowledgeByID is called after
+	// executor acceptance.
 	ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
 	// GetAutoRun returns the durable per-session automatic-drain policy. Missing
@@ -98,7 +104,7 @@ type Repository interface {
 	ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error)
 
 	// AcknowledgeByID is an internal dispatch operation that removes a reserved
-	// entry regardless of its server-owned queued_by identity.
+	// durable entry regardless of its server-owned queued_by identity.
 	AcknowledgeByID(ctx context.Context, sessionID, entryID string) error
 
 	// TakeByID atomically returns and deletes the entry identified by entryID

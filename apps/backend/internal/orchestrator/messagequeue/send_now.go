@@ -43,8 +43,8 @@ var (
 
 // SendNowClaim is the durable handoff for an interrupt-and-replace dispatch.
 // Sources are retained in FIFO order so every ordinary entry can be restored
-// at its original position and every durable lifecycle row can be acknowledged
-// only after the replacement prompt is accepted.
+// at its original position and every durable lifecycle or routine row can be
+// acknowledged only after the replacement prompt is accepted.
 type SendNowClaim struct {
 	Sources           []QueuedMessage  `json:"sources"`
 	Dispatch          QueuedMessage    `json:"dispatch"`

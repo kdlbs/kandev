@@ -300,7 +300,7 @@ func (r *sqliteRepository) RequeuePreservingFIFO(ctx context.Context, msg *Queue
 	coalesceKey := metadataString(msg.Metadata, MetadataCoalesceKey)
 	var existingID string
 	if coalesceKey != "" {
-		existing, findErr := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+		existing, findErr := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey, true)
 		if findErr != nil {
 			return findErr
 		}
@@ -559,7 +559,7 @@ func (r *sqliteRepository) InsertOrReplaceByCoalesceKey(ctx context.Context, msg
 		return nil, false, err
 	}
 
-	existing, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+	existing, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey, !msg.IsRoutineWake())
 	if err != nil {
 		return nil, false, err
 	}
@@ -575,6 +575,16 @@ func (r *sqliteRepository) InsertOrReplaceByCoalesceKey(ctx context.Context, msg
 	}
 	if !allowInsert {
 		return nil, false, ErrEntryNotFound
+	}
+	if msg.IsRoutineWake() {
+		reserved, err := r.hasReservedCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+		if err != nil {
+			return nil, false, err
+		}
+		if reserved {
+			msg.Metadata[MetadataRoutinePostRunRequeue] = true
+			maxPerSession = 0
+		}
 	}
 	if err := r.insertCoalesced(ctx, tx, msg, maxPerSession); err != nil {
 		return nil, false, err
@@ -631,7 +641,7 @@ func (r *sqliteRepository) InsertOrReplaceLifecycleByCoalesceKey(ctx context.Con
 		return nil, false, ErrLifecycleCancelled
 	}
 
-	existing, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+	existing, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey, true)
 	if err != nil {
 		return nil, false, err
 	}
@@ -795,6 +805,29 @@ func (r *sqliteRepository) replaceCoalesced(ctx context.Context, tx *sqlx.Tx, ex
 	if msg.QueuedAt.IsZero() {
 		msg.QueuedAt = time.Now().UTC()
 	}
+	if existing.IsRoutineWake() && msg.IsRoutineWake() {
+		merged := mergeRoutineWakeMetadata(existing.Metadata, msg.Metadata)
+		metadataJSON, err := marshalMetadata(merged)
+		if err != nil {
+			return nil, err
+		}
+		res, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE queued_messages SET metadata_json = ?
+			WHERE id = ? AND session_id = ? AND queued_by = ?
+		`), metadataJSON, existing.ID, msg.SessionID, msg.QueuedBy)
+		if err != nil {
+			return nil, fmt.Errorf("merge routine wake receipt: %w", err)
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("merge routine wake receipt rows affected: %w", err)
+		}
+		if rows == 0 {
+			return nil, ErrEntryNotFound
+		}
+		existing.Metadata = merged
+		return existing, nil
+	}
 	attachmentsJSON, err := marshalAttachments(msg.Attachments)
 	if err != nil {
 		return nil, err
@@ -908,6 +941,81 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 		out = append(out, *msg)
 	}
 	return out, rows.Err()
+}
+
+// DisposeExact removes only unchanged exact entries in one locked transaction.
+func (r *sqliteRepository) DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin exact queue disposition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	ordered, byID, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]*QueuedMessage, 0, len(ordered))
+	for _, stored := range ordered {
+		visible = append(visible, stored.message)
+	}
+	result := &QueueDispositionResult{
+		BeforeCount: visibleQueueCount(visible),
+		Outcomes:    make([]QueueDispositionOutcome, 0, len(claims)),
+	}
+	for _, claim := range claims {
+		stored, found := byID[claim.ID]
+		status, disposeErr := r.disposeExactStoredClaim(ctx, tx, sessionID, claim, stored, found)
+		if disposeErr != nil {
+			return nil, disposeErr
+		}
+		result.Outcomes = append(result.Outcomes, QueueDispositionOutcome{ID: claim.ID, Status: status})
+	}
+	remaining, _, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	visible = visible[:0]
+	for _, stored := range remaining {
+		visible = append(visible, stored.message)
+	}
+	result.AfterCount = visibleQueueCount(visible)
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *sqliteRepository) disposeExactStoredClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	claim QueueEntryClaim,
+	stored storedQueueEntry,
+	found bool,
+) (QueueDispositionStatus, error) {
+	if !found {
+		return QueueDispositionNotFound, nil
+	}
+	if stored.message.IsReservedInFlight() || queueSnapshotClaim(stored.message) != claim.Claim {
+		return QueueDispositionChanged, nil
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), claim.ID, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("dispose exact queue entry: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if affected == 1 {
+		return QueueDispositionRemoved, nil
+	}
+	return QueueDispositionChanged, nil
 }
 
 // CountBySession returns the number of entries for a session.
@@ -1174,15 +1282,15 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 	if err != nil {
 		return nil, true, fmt.Errorf("reserve head: %w", err)
 	}
-	if msg.IsDurableLifecycle() {
-		reserved, err := r.reserveLifecycleHead(ctx, tx, msg, storedMetadataJSON)
+	if msg.IsDurableQueueDelivery() {
+		reserved, err := r.reserveDurableHead(ctx, tx, msg, storedMetadataJSON)
 		return reserved, true, err
 	}
 	reserved, err := r.reserveOrdinaryHead(ctx, tx, msg)
 	return reserved, true, err
 }
 
-func (r *sqliteRepository) reserveLifecycleHead(
+func (r *sqliteRepository) reserveDurableHead(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	msg *QueuedMessage,
@@ -1201,11 +1309,11 @@ func (r *sqliteRepository) reserveLifecycleHead(
 		WHERE id = ? AND session_id = ? AND metadata_json = ?
 	`), reservedJSON, msg.ID, msg.SessionID, storedMetadataJSON)
 	if err != nil {
-		return nil, fmt.Errorf("mark lifecycle reservation in flight: %w", err)
+		return nil, fmt.Errorf("mark durable queue reservation in flight: %w", err)
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return nil, fmt.Errorf("mark lifecycle reservation rows affected: %w", err)
+		return nil, fmt.Errorf("mark durable queue reservation rows affected: %w", err)
 	}
 	if affected == 0 {
 		return nil, nil
@@ -1213,7 +1321,7 @@ func (r *sqliteRepository) reserveLifecycleHead(
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	msg.reservedLifecycleDelivery = true
+	msg.reservedQueueDelivery = true
 	return msg, nil
 }
 
@@ -1564,7 +1672,7 @@ func (r *sqliteRepository) applySQLiteSendNowClaim(
 ) error {
 	for _, source := range sources {
 		storedEntry := storedByID[source.ID]
-		if source.IsDurableLifecycle() {
+		if source.IsDurableQueueDelivery() {
 			if err := r.reserveSQLiteSendNowSource(ctx, tx, sessionID, source, storedEntry); err != nil {
 				return err
 			}
@@ -1577,7 +1685,7 @@ func (r *sqliteRepository) applySQLiteSendNowClaim(
 	return nil
 }
 
-// reserveSQLiteSendNowSource marks a durable lifecycle source as in flight.
+// reserveSQLiteSendNowSource marks a durable lifecycle or routine source as in flight.
 func (r *sqliteRepository) reserveSQLiteSendNowSource(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -1594,7 +1702,7 @@ func (r *sqliteRepository) reserveSQLiteSendNowSource(
 		WHERE id = ? AND session_id = ? AND metadata_json = ?
 	`), metadataJSON, source.ID, sessionID, stored.raw)
 	if err != nil {
-		return fmt.Errorf("reserve send-now lifecycle entry: %w", err)
+		return fmt.Errorf("reserve send-now durable entry: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -1647,12 +1755,12 @@ func validateSQLiteSendNowRestore(
 		}
 		entry, ok := stored[source.ID]
 		if !ok {
-			if source.IsDurableLifecycle() {
+			if source.IsDurableQueueDelivery() {
 				return ErrSendNowClaimChanged
 			}
 			continue
 		}
-		if entry.message.IsReservedInFlight() && !source.IsDurableLifecycle() {
+		if entry.message.IsReservedInFlight() && !source.IsDurableQueueDelivery() {
 			return ErrSendNowClaimChanged
 		}
 	}
@@ -1671,7 +1779,7 @@ func (r *sqliteRepository) restoreSQLiteSendNowSource(
 	if !ok {
 		return r.insertSQLiteSendNowSource(ctx, tx, source)
 	}
-	if !source.IsDurableLifecycle() || !entry.message.IsReservedInFlight() {
+	if !source.IsDurableQueueDelivery() || !entry.message.IsReservedInFlight() {
 		return nil
 	}
 	metadataJSON, err := marshalMetadata(restoreSendNowMetadata(entry.message.Metadata, source.Metadata))
@@ -1683,7 +1791,7 @@ func (r *sqliteRepository) restoreSQLiteSendNowSource(
 		WHERE id = ? AND session_id = ? AND metadata_json = ?
 	`), metadataJSON, source.ID, sessionID, entry.raw)
 	if err != nil {
-		return fmt.Errorf("clear send-now lifecycle reservation: %w", err)
+		return fmt.Errorf("clear send-now durable reservation: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -1722,7 +1830,7 @@ func validateSQLiteSendNowAcknowledge(claim *SendNowClaim, sessionID string, sto
 		if source.SessionID != sessionID {
 			return ErrSendNowClaimChanged
 		}
-		if !source.IsDurableLifecycle() {
+		if !source.IsDurableQueueDelivery() {
 			continue
 		}
 		if entry, ok := stored[source.ID]; ok && !entry.message.IsReservedInFlight() {
@@ -1740,7 +1848,7 @@ func (r *sqliteRepository) acknowledgeSQLiteSendNowSource(
 	source QueuedMessage,
 	stored map[string]storedQueueEntry,
 ) error {
-	if !source.IsDurableLifecycle() {
+	if !source.IsDurableQueueDelivery() {
 		return nil
 	}
 	entry, ok := stored[source.ID]
@@ -1751,7 +1859,7 @@ func (r *sqliteRepository) acknowledgeSQLiteSendNowSource(
 		DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?
 	`), source.ID, sessionID, entry.raw)
 	if err != nil {
-		return fmt.Errorf("acknowledge send-now lifecycle entry: %w", err)
+		return fmt.Errorf("acknowledge send-now durable entry: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -2658,7 +2766,7 @@ func (r *sqliteRepository) scanTailWithRawJSON(ctx context.Context, tx *sqlx.Tx,
 }
 
 // findCoalesced locates the entry matching the session, owner, and coalesce key inside a transaction.
-func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessionID, queuedBy, coalesceKey string) (*QueuedMessage, error) {
+func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessionID, queuedBy, coalesceKey string, includeReserved bool) (*QueuedMessage, error) {
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
@@ -2675,7 +2783,8 @@ func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessi
 		if err != nil {
 			return nil, err
 		}
-		if metadataString(msg.Metadata, MetadataCoalesceKey) == coalesceKey {
+		if metadataString(msg.Metadata, MetadataCoalesceKey) == coalesceKey &&
+			(includeReserved || !msg.IsReservedInFlight()) {
 			return msg, nil
 		}
 	}
@@ -2683,6 +2792,29 @@ func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessi
 		return nil, err
 	}
 	return nil, nil
+}
+
+func (r *sqliteRepository) hasReservedCoalesced(ctx context.Context, tx *sqlx.Tx, sessionID, queuedBy, coalesceKey string) (bool, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ? AND queued_by = ?
+	`), sessionID, queuedBy)
+	if err != nil {
+		return false, fmt.Errorf("scan reserved coalesced queued: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		msg, err := scanQueuedRow(rows)
+		if err != nil {
+			return false, err
+		}
+		if msg.IsReservedInFlight() && metadataString(msg.Metadata, MetadataCoalesceKey) == coalesceKey {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // scanQueuedRow scans a single queued_messages row from any sqlx-compatible row source.
