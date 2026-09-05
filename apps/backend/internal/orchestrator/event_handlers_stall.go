@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -18,6 +19,12 @@ const (
 	metaKeyActionVisibility     = "action_visibility"
 	actionVisibilityRunning     = "running"
 	neverStartedNoticeContent   = "Agent produced no output since start."
+	// neverStartedStopTimeout bounds the detached runtime teardown started by
+	// stopNeverStartedExecution. A forced stop skips the graceful agentctl
+	// call, so nothing downstream (e.g. the Docker backend's cleanup context)
+	// applies its own bound in that path - an unresponsive daemon would
+	// otherwise hang the teardown goroutine indefinitely.
+	neverStartedStopTimeout = 30 * time.Second
 )
 
 // errAgentNeverStarted is the launch-failure error recorded when a stalled
@@ -125,34 +132,43 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 // stopNeverStartedExecution tears down the process behind a never-started
 // stall. It runs after the session and task have already been recorded
 // FAILED, so a teardown failure never changes that recorded state: FAILED and
-// its launch-failure message stay authoritative either way. The stop uses a
-// context detached from the caller's via context.WithoutCancel so a cancelled
-// request cannot abandon the teardown midway. lifecycle.ErrExecutionNotFound
-// means nothing is running and is treated as success; any other failure is
-// logged and left for a later stop to retry against the still-registered
-// execution.
+// its launch-failure message stay authoritative either way.
 //
-// It claims teardown ownership directly via claimExecutionTeardown rather
-// than through Executor's RegisterExecutionStopOwner callback: that callback
-// TryLocks the same per-session cancelInFlight guard handleAgentStalled
-// already holds for this whole call, so it would always fail to reentrantly
-// acquire it and silently no-op. claimExecutionTeardown's own contract is to
-// be called while already holding that guard.
+// Teardown ownership is claimed synchronously, while handleAgentStalled still
+// holds the per-session cancelInFlight guard, via claimExecutionTeardown
+// directly rather than through Executor's RegisterExecutionStopOwner
+// callback: that callback TryLocks the same guard, so it would always fail to
+// reentrantly acquire it and silently no-op. claimExecutionTeardown's own
+// contract is to be called while already holding that guard.
+//
+// The actual stop runs detached and bounded (mirroring Executor.scheduleStop)
+// rather than inline: handleAgentStalled's caller is the synchronous event
+// bus, so a stop that blocked here would hold the cancelInFlight guard for
+// its whole duration - blocking the user's own Stop/Cancel/Delete for this
+// exact session, plus the event bus's dispatch lock. A forced stop skips the
+// graceful agentctl call, so the runtime backend applies no bound of its own;
+// neverStartedStopTimeout is this call's only protection against a hung
+// daemon. lifecycle.ErrExecutionNotFound means nothing is running and is
+// treated as success; any other failure is logged and left for a later stop
+// to retry against the still-registered execution.
 func (s *Service) stopNeverStartedExecution(ctx context.Context, payload lifecycle.AgentStalledPayload) {
 	if payload.AgentExecutionID == "" || s.agentManager == nil {
 		return
 	}
 	s.claimExecutionTeardown(payload.SessionID, payload.AgentExecutionID, executionTeardownIntentForce)
-	stopCtx := context.WithoutCancel(ctx)
-	err := s.agentManager.StopAgentWithReason(stopCtx, payload.AgentExecutionID, "agent never started before stall", true)
-	if err == nil || errors.Is(err, lifecycle.ErrExecutionNotFound) {
-		return
-	}
-	s.logger.Warn("failed to tear down never-started execution after stall",
-		zap.String("task_id", payload.TaskID),
-		zap.String("session_id", payload.SessionID),
-		zap.String("execution_id", payload.AgentExecutionID),
-		zap.Error(err))
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), neverStartedStopTimeout)
+	go func() {
+		defer cancel()
+		err := s.agentManager.StopAgentWithReason(stopCtx, payload.AgentExecutionID, "agent never started before stall", true)
+		if err == nil || errors.Is(err, lifecycle.ErrExecutionNotFound) {
+			return
+		}
+		s.logger.Warn("failed to tear down never-started execution after stall",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("execution_id", payload.AgentExecutionID),
+			zap.Error(err))
+	}()
 }
 
 func stallNoticeContent(payload lifecycle.AgentStalledPayload) string {

@@ -5,11 +5,27 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// waitForStopAgentCall blocks until ch delivers the detached
+// stopNeverStartedExecution goroutine's StopAgentWithReason call, or fails
+// the test after a bounded wait. Never poll or sleep for this: the call is
+// intentionally off handleAgentStalled's own goroutine.
+func waitForStopAgentCall(t *testing.T, ch <-chan stopAgentCall) stopAgentCall {
+	t.Helper()
+	select {
+	case call := <-ch:
+		return call
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the detached StopAgentWithReason call")
+		return stopAgentCall{}
+	}
+}
 
 func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 	ctx := context.Background()
@@ -228,9 +244,14 @@ func TestHandleAgentStalled_NeverStartedStopsExecution(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-1", "session-1", "step-1")
+	stopCalls := make(chan stopAgentCall, 1)
 	agentMgr := &mockAgentManager{
 		repoForExecutionLookup:   repo,
 		currentPromptExecutionID: "execution-1",
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, reason string, force bool) error {
+			stopCalls <- stopAgentCall{ExecutionID: executionID, Reason: reason, Force: force}
+			return nil
+		},
 	}
 	agentMgr.currentPromptGeneration.Store(7)
 	agentMgr.currentPromptActivityEpoch.Store(1)
@@ -257,17 +278,19 @@ func TestHandleAgentStalled_NeverStartedStopsExecution(t *testing.T) {
 		NeverStarted:     true,
 	})
 
-	agentMgr.mu.Lock()
-	stopCalls := agentMgr.stopAgentWithReasonArgs
-	agentMgr.mu.Unlock()
-	if len(stopCalls) != 1 {
-		t.Fatalf("StopAgentWithReason calls = %d, want 1", len(stopCalls))
+	call := waitForStopAgentCall(t, stopCalls)
+	if call.ExecutionID != "execution-1" {
+		t.Fatalf("stopped execution = %q, want execution-1", call.ExecutionID)
 	}
-	if stopCalls[0].ExecutionID != "execution-1" {
-		t.Fatalf("stopped execution = %q, want execution-1", stopCalls[0].ExecutionID)
-	}
-	if !stopCalls[0].Force {
+	if !call.Force {
 		t.Fatal("teardown stop was not forced")
+	}
+
+	agentMgr.mu.Lock()
+	callCount := len(agentMgr.stopAgentWithReasonArgs)
+	agentMgr.mu.Unlock()
+	if callCount != 1 {
+		t.Fatalf("StopAgentWithReason calls = %d, want 1", callCount)
 	}
 
 	after, err := repo.GetTaskSession(ctx, "session-1")
@@ -277,6 +300,74 @@ func TestHandleAgentStalled_NeverStartedStopsExecution(t *testing.T) {
 	if after.State != models.TaskSessionStateFailed {
 		t.Fatalf("session state = %q, want FAILED", after.State)
 	}
+}
+
+// TestHandleAgentStalled_NeverStartedStopRunsDetachedFromGuard covers R3-F1:
+// stopNeverStartedExecution must not block handleAgentStalled's return on the
+// runtime teardown. handleAgentStalled holds the per-session cancelInFlight
+// guard for its own duration (released via defer on return), and that guard
+// also serializes the user's own Stop/Cancel/Delete for this session - so if
+// the teardown ran inline here, an unresponsive runtime backend would hold
+// that guard, the synchronous event bus's dispatch lock, and the
+// waitForPromptDone goroutine for as long as the backend stayed hung.
+func TestHandleAgentStalled_NeverStartedStopRunsDetachedFromGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	stopStarted := make(chan struct{})
+	stopRelease := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			close(stopStarted)
+			<-stopRelease
+			return nil
+		},
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	handlerDone := make(chan struct{})
+	go func() {
+		svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+			AgentExecutionID: "execution-1",
+			TaskID:           "task-1",
+			SessionID:        "session-1",
+			PromptGeneration: 7,
+			ActivityEpoch:    1,
+			NeverStarted:     true,
+		})
+		close(handlerDone)
+	}()
+
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		close(stopRelease)
+		t.Fatal("handleAgentStalled blocked on runtime teardown instead of returning once it was scheduled")
+	}
+
+	select {
+	case <-stopStarted:
+	case <-time.After(2 * time.Second):
+		close(stopRelease)
+		t.Fatal("StopAgentWithReason was never invoked")
+	}
+	close(stopRelease)
 }
 
 // TestHandleAgentStalled_NeverStartedClaimsTeardownOwnershipBeforeStop covers
@@ -334,10 +425,14 @@ func TestHandleAgentStalled_NeverStartedKeepsFailedStateWhenStopFails(t *testing
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-1", "session-1", "step-1")
+	stopAttempted := make(chan struct{})
 	agentMgr := &mockAgentManager{
 		repoForExecutionLookup:   repo,
 		currentPromptExecutionID: "execution-1",
-		stopAgentWithReasonErr:   errors.New("agentctl unreachable"),
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			defer close(stopAttempted)
+			return errors.New("agentctl unreachable")
+		},
 	}
 	agentMgr.currentPromptGeneration.Store(7)
 	agentMgr.currentPromptActivityEpoch.Store(1)
@@ -363,6 +458,12 @@ func TestHandleAgentStalled_NeverStartedKeepsFailedStateWhenStopFails(t *testing
 		ActivityEpoch:    1,
 		NeverStarted:     true,
 	})
+
+	select {
+	case <-stopAttempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the detached teardown attempt")
+	}
 
 	after, err := repo.GetTaskSession(ctx, "session-1")
 	if err != nil {
