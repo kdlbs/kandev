@@ -1,6 +1,6 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { promptEditorText } from "../../helpers/settings-prompt-editor";
+import { promptEditorText, replacePromptEditor } from "../../helpers/settings-prompt-editor";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { dwell } from "../../helpers/causal-waits";
 
@@ -13,6 +13,54 @@ async function maxRingSpread(locator: Locator): Promise<number> {
 }
 
 test.describe("Workflow settings", () => {
+  // @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1 through .4
+  test("warns when a step prompt has no automatic start", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Prompt Guidance");
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
+      is_start_step: true,
+    });
+    await apiClient.updateWorkflowStep(reviewStep.id, { prompt: "Review the changes" });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Prompt Guidance");
+    const panel = await page.selectStep(card, "Review");
+    const warning = panel.getByTestId("workflow-step-prompt-auto-start-warning");
+
+    await expect(warning).toContainText(
+      "This prompt does not start the agent by itself. Start the agent manually, or enable Auto-start agent.",
+    );
+    await expect(
+      panel.getByText(
+        "A step prompt replaces the task description unless it contains {{task_prompt}}.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    if (prCapture.capturing) {
+      await warning.scrollIntoViewIfNeeded();
+    }
+    await prCapture.screenshot("desktop-step-prompt-auto-start-warning", {
+      caption: "Step prompt guidance explains the automatic-start trigger.",
+    });
+
+    await page.setAutoStart(card, "Review", true);
+    await expect(warning).toBeHidden();
+    await page.setAutoStart(card, "Review", false);
+    await expect(warning).toBeVisible();
+
+    await replacePromptEditor(
+      testPage,
+      panel.getByTestId(`workflow-step-prompt-${reviewStep.id}`),
+      "",
+    );
+    await expect(warning).toBeHidden();
+  });
+
   test("hides system-only templates from the add workflow dialog", async ({
     testPage,
     seedData,

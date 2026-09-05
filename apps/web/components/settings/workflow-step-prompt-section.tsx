@@ -3,9 +3,11 @@
 import type { WorkflowStep } from "@/lib/types/http";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { Label } from "@kandev/ui/label";
 import { SettingsPromptEditor } from "./settings-prompt-editor";
 import {
+  hasOnEnterAction,
   HelpTip,
   stepPromptPlaceholders,
   PROMPT_TEMPLATES,
@@ -28,6 +30,7 @@ export function StepPromptSection({
 }) {
   const { t } = useTranslation();
   const placeholders = useMemo(() => stepPromptPlaceholders(t), [t]);
+  const showAutoStartWarning = localPrompt !== "" && !hasOnEnterAction(step, "auto_start_agent");
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
@@ -72,6 +75,21 @@ export function StepPromptSection({
         isDirty={!savedStep || localPrompt !== (savedStep.prompt ?? "")}
         dirtyLevel="container"
       />
+      {showAutoStartWarning && (
+        <div
+          role="status"
+          className="flex min-w-0 items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-100"
+          data-testid="workflow-step-prompt-auto-start-warning"
+        >
+          <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 text-pretty">{t("workflows:stepPromptAutoStartWarning")}</span>
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground/60">
+        {t("workflows:stepPromptTaskDescriptionHint", {
+          taskPrompt: "{{task_prompt}}",
+        })}
+      </p>
       <p className="text-[11px] text-muted-foreground/60">
         {t("workflows:stepPromptUsageHint", {
           open: "{{",
