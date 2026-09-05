@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
 // fakeCredentialSource is a minimal InstanceCredentialSource test double: it
@@ -96,6 +99,27 @@ func dialTestWSWithAuth(t *testing.T, server *httptest.Server, token string) *we
 	return conn
 }
 
+// assertConnectionClosedByServer reads from conn and requires the read to
+// fail with something other than a deadline timeout. A bare "err == nil
+// means still open" check cannot tell a deliberate server-side close apart
+// from an untouched connection that simply outlived `within`: both produce
+// a non-nil error from ReadMessage, but only the timeout case means the
+// fencing mechanism never fired. Confirmed empirically: an identical dial
+// with no rotation at all still errors with "i/o timeout" once `within`
+// elapses, which a bare nil check would have accepted as proof of closure.
+func assertConnectionClosedByServer(t *testing.T, conn *websocket.Conn, within time.Duration) {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(within))
+	_, _, err := conn.ReadMessage()
+	if err == nil {
+		t.Fatal("ReadMessage after credential rotation = nil error, want the server to have closed the connection")
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		t.Fatalf("ReadMessage after credential rotation timed out waiting for the server to close (%v), want the server to close immediately", err)
+	}
+}
+
 // TestAgentStreamTerminatesWhenCredentialRotates pins
 // AC-EXECUTORS-CONTROL-OWNERSHIP-002.2 end to end: a live /agent/stream
 // connection authenticated under the current credential must be terminated
@@ -127,8 +151,68 @@ func TestAgentStreamTerminatesWhenCredentialRotates(t *testing.T) {
 		t.Fatalf("Rotate: %v", err)
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, _, err := conn.ReadMessage(); err == nil {
-		t.Fatal("ReadMessage after credential rotation = nil error, want the server to have closed the connection")
+	assertConnectionClosedByServer(t, conn, 2*time.Second)
+}
+
+// dialTestWorkspaceStreamWithAuth connects a WebSocket client to the test
+// server's /api/v1/workspace/stream endpoint carrying an Authorization
+// header, mirroring dialTestWSWithAuth for the agent stream.
+func dialTestWorkspaceStreamWithAuth(t *testing.T, server *httptest.Server, token string) *websocket.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/workspace/stream"
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+token)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("failed to dial WebSocket: %v", err)
 	}
+	return conn
+}
+
+// TestWorkspaceStreamTerminatesWhenCredentialRotates mirrors
+// TestAgentStreamTerminatesWhenCredentialRotates for the workspace stream's
+// own select-on-Invalidated arm (workspace.go forwardWorkspaceStream,
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2). Both streams sit behind the same
+// instanceAuth middleware group (server.go) but are forwarded by two
+// separate goroutines with two separate select statements, so proving one
+// terminates on rotation says nothing about the other.
+func TestWorkspaceStreamTerminatesWhenCredentialRotates(t *testing.T) {
+	source := newCredentialState("initial-token")
+	s := newTestServer(t)
+	s.SetCredentialSource(source)
+	httpServer := httptest.NewServer(s.router)
+	defer httpServer.Close()
+
+	conn := dialTestWorkspaceStreamWithAuth(t, httpServer, "initial-token")
+	defer func() { _ = conn.Close() }()
+
+	// The handler sends a "connected" message immediately on upgrade, then
+	// answers a client ping with a pong -- together they prove the
+	// connection and its forwarding goroutine are live under the current
+	// credential before rotating, so a failure after rotation can't be
+	// blamed on a connection that never worked.
+	var connected types.WorkspaceStreamMessage
+	if err := conn.ReadJSON(&connected); err != nil {
+		t.Fatalf("reading connected message: %v", err)
+	}
+	if connected.Type != types.WorkspaceMessageTypeConnected {
+		t.Fatalf("first message type = %q, want %q", connected.Type, types.WorkspaceMessageTypeConnected)
+	}
+
+	if err := conn.WriteJSON(types.NewWorkspacePing()); err != nil {
+		t.Fatalf("writing ping: %v", err)
+	}
+	var pong types.WorkspaceStreamMessage
+	if err := conn.ReadJSON(&pong); err != nil {
+		t.Fatalf("pre-rotation ping/pong: %v", err)
+	}
+	if pong.Type != types.WorkspaceMessageTypePong {
+		t.Fatalf("pre-rotation response type = %q, want %q", pong.Type, types.WorkspaceMessageTypePong)
+	}
+
+	if _, _, err := source.Rotate("initial-token"); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+
+	assertConnectionClosedByServer(t, conn, 2*time.Second)
 }
