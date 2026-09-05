@@ -204,6 +204,64 @@ func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_CountWorktreeBranchOwnersCountsPhysicalRepositoryClaimants(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repoPath := filepath.Join(t.TempDir(), "repo")
+
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('workspace', 'workspace', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	for _, repoID := range []string{"repo-owner-a", "repo-owner-b"} {
+		if _, err := store.db.ExecContext(ctx, `
+			INSERT INTO repositories (
+				id, workspace_id, name, local_path, created_at, updated_at
+			) VALUES (?, 'workspace', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, repoID, repoID, repoPath); err != nil {
+			t.Fatalf("seed repository %s: %v", repoID, err)
+		}
+	}
+	for _, seed := range []struct {
+		sessionID string
+		taskID    string
+		repoID    string
+		wtID      string
+	}{
+		{"session-claimant-a", "task-claimant-a", "repo-owner-a", "wt-claimant-a"},
+		{"session-claimant-b", "task-claimant-b", "repo-owner-b", "wt-claimant-b"},
+	} {
+		store.seedSessionWithEnvironment(t, seed.sessionID, seed.taskID)
+		if err := store.CreateWorktree(ctx, &Worktree{
+			ID:             seed.wtID,
+			SessionID:      seed.sessionID,
+			RepositoryID:   seed.repoID,
+			RepositoryPath: repoPath,
+			Path:           filepath.Join(t.TempDir(), seed.wtID),
+			Branch:         "feature/shared",
+			BranchOwner:    BranchOwnerManaged,
+			IntegrationRef: "main",
+			Status:         StatusDeleted,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			DeletedAt:      &now,
+		}); err != nil {
+			t.Fatalf("create %s: %v", seed.wtID, err)
+		}
+	}
+
+	got, err := store.CountWorktreeBranchOwners(ctx, repoPath, "feature/shared")
+	if err != nil {
+		t.Fatalf("count branch owners: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("branch owners = %d, want 2", got)
+	}
+}
+
 func TestSQLiteStore_IgnoresInventoryOnlyRows(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

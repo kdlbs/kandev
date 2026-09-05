@@ -12,7 +12,7 @@ owners:
 
 ## Purpose and boundaries
 
-This design record preserves the technical source for the capability mapped to REQ-TASKS-RUNTIME-CLEANUP-001 while the task system completes its migration.
+This design owns the technical contract for REQ-TASKS-RUNTIME-CLEANUP-001.
 
 ## Requirement mapping
 
@@ -23,6 +23,9 @@ This design record preserves the technical source for the capability mapped to R
 ## Migrated design source
 
 Decision: [ADR-2026-08-08-task-owned-worktree-lifetime](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
+
+Branch retention amendment:
+[ADR-2026-08-30-compact-integrated-managed-branches](../../../decisions/2026-08-30-compact-integrated-managed-branches.md)
 
 ## Why
 
@@ -139,22 +142,19 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 
 ## Archive cleanup disposition
 
-Direct and cascade archive use the same cleanup disposition. A caller-specific
-Boolean must not change it:
+Direct and cascade archive share one disposition: stop runtimes, remove the
+physical worktree and mark its row deleted, but preserve the environment rows
+and recovery metadata. Duplicate snapshots cannot change that disposition.
+Unarchive reuses a retained branch or its exact compacted head; delete remains a
+separate operation that may remove owner rows.
 
-- Stop the task runtimes and remove executor-specific runtime resources.
-- Remove the physical worktree directory and mark its repository row deleted.
-- Preserve the owning `task_environments` row, every
-  `task_environment_repos` row (including worktree ID, path, branch, and slug),
-  and the local Git branch ref.
-
-If a worktree appears in both snapshots, every pass uses this disposition and
-must not delete a branch preserved earlier.
-
-Unarchive keeps the preserved environment link. If its repository row is not
-live, normal preparation reactivates it and uses the preserved local branch
-before remote or pull-request recovery. Delete remains separate and may remove
-owner rows after capturing its cleanup snapshot.
+Archive makes the first compaction attempt. Storage maintenance later selects
+at most 100 managed, deleted rows for still-archived tasks, without scanning
+branch names. The worktree manager alone owns safety policy and rechecks archive
+state before `git update-ref -d refs/heads/<branch> <expected-head-sha>`.
+Recovery and completion are separate: interrupted rows stay selectable until
+the completion timestamp. A post-delete live race restores the exact ref by
+zero-OID compare-and-set.
 
 ## Data Model
 
@@ -396,8 +396,8 @@ The durable cleanup job wraps that resource lifecycle:
   not classified as orphaned.
 - Historical worktree rows for archived tasks remain available to unarchive branch
   recovery even after their on-disk directories are removed.
-- Archive cleanup preserves the task environment owner and the local branch ref.
-  Cleanup retries and duplicate teardown passes keep the same disposition.
+- Archive cleanup preserves the task environment owner and exact branch recovery
+  state. Cleanup retries keep the same disposition.
 - Orphaned OS processes without any durable `executors_running` row are outside
   normal cleanup guarantees; they may be handled by an explicit operator recovery
   tool, but automatic task cleanup must not rely on process-name scanning.
@@ -524,8 +524,7 @@ The durable cleanup job wraps that resource lifecycle:
   unarchived, **THEN** its historical worktree branch metadata remains available
   for local/remote recovery.
 - **GIVEN** a direct or cascade archive removes a task worktree, **WHEN** the
-  remote branch is also absent, **THEN** the task environment, repository row,
-  and local branch ref remain available for normal resume preparation.
+  remote branch is absent, **THEN** exact local recovery state remains available.
 - **GIVEN** an unarchived task environment whose worktree repository row is
   deleted, failed, or tombstoned, **WHEN** its session resumes, **THEN** the
   executor selects normal worktree preparation and recreates or reactivates the

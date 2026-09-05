@@ -540,6 +540,12 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 		row.WorktreePath = incoming.WorktreePath
 		row.WorktreeBranch = incoming.WorktreeBranch
 	}
+	if incoming.WorktreeBranchOwner != "" || incoming.WorktreeID == "" {
+		row.WorktreeBranchOwner = incoming.WorktreeBranchOwner
+	}
+	if incoming.WorktreeIntegrationRef != "" || incoming.WorktreeID == "" || replacePhysical {
+		row.WorktreeIntegrationRef = incoming.WorktreeIntegrationRef
+	}
 	row.Position = position
 	row.ErrorMessage = incoming.ErrorMessage
 	// A later successful transition can recreate a slot that an earlier
@@ -549,14 +555,20 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	if replacePhysical {
 		row.Status = worktreeRepoStatusActive
 		row.DeletedAt = nil
+		row.WorktreeRecoveryHeadSHA = ""
+		row.WorktreeBranchCompactedAt = nil
 	}
 	row.UpdatedAt = time.Now().UTC()
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+			worktree_branch_owner = ?, worktree_integration_ref = ?,
+			worktree_recovery_head_sha = ?, worktree_branch_compacted_at = ?,
 			position = ?, error_message = ?, status = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`), row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorktreeBranch,
+		row.WorktreeBranchOwner, row.WorktreeIntegrationRef,
+		row.WorktreeRecoveryHeadSHA, row.WorktreeBranchCompactedAt,
 		row.Position, row.ErrorMessage, row.Status, row.DeletedAt, row.UpdatedAt, row.ID)
 	return err
 }
@@ -788,11 +800,15 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
+			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_branch_compacted_at,
 			position, error_message, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
+		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
 	); err != nil {
 		return err
@@ -819,11 +835,15 @@ func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.T
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
+			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
+			worktree_branch_compacted_at,
 			position, error_message, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
+		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
 	)
 	return err
@@ -835,6 +855,10 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 		SELECT id, task_environment_id, repository_id,
 			COALESCE(branch_slug, ''),
 			worktree_id, worktree_path, worktree_branch,
+			COALESCE(worktree_branch_owner, 'unknown'),
+			COALESCE(worktree_integration_ref, ''),
+			COALESCE(worktree_recovery_head_sha, ''),
+			worktree_branch_compacted_at,
 			position, error_message, COALESCE(status, ''),
 			created_at, updated_at, merged_at, deleted_at
 		FROM task_environment_repos
@@ -849,11 +873,13 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 	var out []*models.TaskEnvironmentRepo
 	for rows.Next() {
 		repo := &models.TaskEnvironmentRepo{}
-		var mergedAt, deletedAt sql.NullTime
+		var compactedAt, mergedAt, deletedAt sql.NullTime
 		if err := rows.Scan(
 			&repo.ID, &repo.TaskEnvironmentID, &repo.RepositoryID,
 			&repo.BranchSlug,
 			&repo.WorktreeID, &repo.WorktreePath, &repo.WorktreeBranch,
+			&repo.WorktreeBranchOwner, &repo.WorktreeIntegrationRef, &repo.WorktreeRecoveryHeadSHA,
+			&compactedAt,
 			&repo.Position, &repo.ErrorMessage, &repo.Status,
 			&repo.CreatedAt, &repo.UpdatedAt, &mergedAt, &deletedAt,
 		); err != nil {
@@ -862,6 +888,10 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 		if mergedAt.Valid {
 			t := mergedAt.Time
 			repo.MergedAt = &t
+		}
+		if compactedAt.Valid {
+			t := compactedAt.Time
+			repo.WorktreeBranchCompactedAt = &t
 		}
 		if deletedAt.Valid {
 			t := deletedAt.Time
@@ -880,11 +910,15 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 		UPDATE task_environment_repos SET
 			branch_slug = ?,
 			worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+			worktree_branch_owner = ?, worktree_integration_ref = ?, worktree_recovery_head_sha = ?,
+			worktree_branch_compacted_at = ?,
 			position = ?, error_message = ?, status = ?,
 			merged_at = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`),
 		repo.BranchSlug, repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
+		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
+		repo.WorktreeBranchCompactedAt,
 		repo.Position, repo.ErrorMessage, repo.Status,
 		repo.MergedAt, repo.DeletedAt, repo.UpdatedAt,
 		repo.ID,

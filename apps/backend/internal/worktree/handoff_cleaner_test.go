@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // newCleanerWithTasksRoot constructs a HandoffCleaner whose managed
@@ -140,6 +141,47 @@ func TestCleanupMultiRepoRoot_RejectsPathOutsideManagedRoot(t *testing.T) {
 	err := c.CleanupMultiRepoRoot(context.Background(), "/somewhere/else", []string{"wt-1"})
 	if err == nil {
 		t.Error("multi-repo root outside managed root must be rejected")
+	}
+}
+
+func TestCleanupMultiRepoRoot_PreservesRootWhenChildIsShared(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateRunning)
+	seedReferenceCleanupSession(t, store, "task-borrower", "session-borrower", models.TaskSessionStateRunning)
+	if err := store.linkSessionToEnvironment(ctx, "session-borrower", "env-owner"); err != nil {
+		t.Fatalf("link borrower session: %v", err)
+	}
+
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	root := filepath.Dir(wt.Path)
+	cleaner := NewHandoffCleaner(mgr, newTestLogger())
+
+	if err := cleaner.CleanupMultiRepoRoot(ctx, root, []string{wt.ID}); err == nil {
+		t.Fatal("cleanup should remain retryable while a shared child is retained")
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("shared child was removed: %v", err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("multi-repo root was removed despite retained child: %v", err)
+	}
+}
+
+func TestCleanupMultiRepoRoot_RemovesRootWhenOnlyBranchIsRetained(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-branch", "session-branch", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-branch", "session-branch")
+	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "unintegrated branch")
+	root := filepath.Dir(wt.Path)
+	cleaner := NewHandoffCleaner(mgr, newTestLogger())
+
+	if err := cleaner.CleanupMultiRepoRoot(ctx, root, []string{wt.ID}); err != nil {
+		t.Fatalf("cleanup should remove root after removing child: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("multi-repo root remains after child removal, stat error = %v", err)
 	}
 }
 

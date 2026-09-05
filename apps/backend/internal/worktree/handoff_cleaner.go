@@ -60,10 +60,8 @@ func (c *HandoffCleaner) CleanupPlainFolder(_ context.Context, path string) erro
 // the existing Manager.RemoveByID, which already runs its own
 // repository-scoped lock + git-worktree-remove + cleanup script.
 //
-// removeBranch is FALSE: handoffs cleanup releases the materialized
-// workspace; the branch the agent created is left intact so any
-// pushed PR / remote ref survives. Operators clean up branches via
-// the existing branch-cleanup tooling.
+// Terminal handoff cleanup uses the manager's metadata-aware compaction: only
+// unambiguously managed, fully integrated local refs are removed.
 func (c *HandoffCleaner) CleanupSingleRepoWorktree(ctx context.Context, worktreeID string) error {
 	if c.manager == nil {
 		return errors.New("worktree manager not configured")
@@ -72,7 +70,8 @@ func (c *HandoffCleaner) CleanupSingleRepoWorktree(ctx context.Context, worktree
 		return errors.New("worktree id is required")
 	}
 	c.logger.Info("cleanup single-repo worktree", zap.String("worktree_id", worktreeID))
-	return c.manager.RemoveByID(ctx, worktreeID, false)
+	_, err := c.manager.RemoveByIDWithReceipt(ctx, worktreeID)
+	return err
 }
 
 // CleanupMultiRepoRoot removes every per-repo worktree under a
@@ -80,24 +79,41 @@ func (c *HandoffCleaner) CleanupSingleRepoWorktree(ctx context.Context, worktree
 // root path is validated against the managed-roots set first; if the
 // guard fails the per-repo removals are also skipped.
 func (c *HandoffCleaner) CleanupMultiRepoRoot(ctx context.Context, rootPath string, worktreeIDs []string) error {
+	if c.manager == nil {
+		return errors.New("worktree manager not configured")
+	}
 	if rootPath == "" {
 		return errors.New("multi-repo root path is required")
 	}
 	if err := c.requireManagedRoot(rootPath); err != nil {
 		return err
 	}
+	receipt := newBranchCleanupReceipt()
+	var cleanupErrs []error
+	seen := make(map[string]struct{}, len(worktreeIDs))
 	for _, id := range worktreeIDs {
 		if id == "" {
 			continue
 		}
-		if err := c.manager.RemoveByID(ctx, id, false); err != nil {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		childReceipt, err := c.manager.RemoveByIDWithReceipt(ctx, id)
+		receipt.merge(childReceipt)
+		if err != nil {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("remove multi-repo worktree %s: %w", id, err))
 			c.logger.Warn("multi-repo worktree remove failed",
 				zap.String("worktree_id", id), zap.Error(err))
-			// Continue removing the rest; the root removal at the end
-			// will reclaim any straggler files. We deliberately do not
-			// abort: a partial cleanup is preferable to leaving the
-			// whole tree behind.
 		}
+		if childReceipt.RetainedReasons[RetainedActiveReference] > 0 {
+			cleanupErrs = append(cleanupErrs,
+				fmt.Errorf("multi-repo worktree %s retained by an active reference", id))
+		}
+	}
+	c.logger.Info("multi-repo worktree cleanup receipt", receipt.reasonFields()...)
+	if len(cleanupErrs) > 0 {
+		return errors.Join(cleanupErrs...)
 	}
 	if err := os.RemoveAll(rootPath); err != nil {
 		return fmt.Errorf("remove multi-repo root %s: %w", rootPath, err)

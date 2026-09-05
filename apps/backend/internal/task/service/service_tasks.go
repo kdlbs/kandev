@@ -3774,12 +3774,36 @@ func (s *Service) cleanupTaskEnvironment(
 	if !current {
 		return nil
 	}
-	if err := s.teardownEnvironmentResources(ctx, cleanup.env); err != nil {
+	_, archiveBatch := s.worktreeCleanup.(WorktreeArchiveBatchCleaner)
+	_, deleteBatch := s.worktreeCleanup.(WorktreeBatchCleaner)
+	needsArchiveBatch := false
+	if cleanup.env.ExecutorType == string(models.ExecutorTypeWorktree) {
+		for _, repo := range cleanup.env.Repos {
+			if repo != nil && repo.WorktreeID != "" && repo.Status != "deleted" {
+				needsArchiveBatch = true
+				break
+			}
+		}
+	}
+	if cleanup.preserveBranches && !archiveBatch && needsArchiveBatch {
+		if err := s.teardownEnvironmentRuntimeResources(ctx, cleanup.env); err != nil {
+			return []error{fmt.Errorf("teardown task environment %s runtime resources: %w", cleanup.env.ID, err)}
+		}
+		return []error{fmt.Errorf("archive cleanup requires a worktree archive batch cleaner")}
+	}
+	batchHandlesWorktrees := (cleanup.preserveBranches && archiveBatch) || (!cleanup.preserveBranches && deleteBatch)
+	var teardownErr error
+	if batchHandlesWorktrees {
+		teardownErr = s.teardownEnvironmentRuntimeResources(ctx, cleanup.env)
+	} else {
+		teardownErr = s.teardownEnvironmentResources(ctx, cleanup.env)
+	}
+	if teardownErr != nil {
 		s.logger.Warn("failed to teardown task environment during task cleanup",
 			zap.String("task_id", taskID),
 			zap.String("env_id", cleanup.env.ID),
-			zap.Error(err))
-		return []error{fmt.Errorf("teardown task environment %s: %w", cleanup.env.ID, err)}
+			zap.Error(teardownErr))
+		return []error{fmt.Errorf("teardown task environment %s: %w", cleanup.env.ID, teardownErr)}
 	}
 	if cleanup.deleteRow {
 		if cause := context.Cause(ctx); cause != nil {

@@ -72,8 +72,8 @@ var (
 	ErrInvalidRepoName = errors.New("repo name has no usable characters after sanitization")
 
 	// ErrBranchUnrecoverable is returned by recreate when the worktree's
-	// branch no longer exists locally (archive deletes it via `git branch
-	// -D`) and could not be fetched from origin either. Callers can treat
+	// branch no longer exists locally, has no exact managed recovery head,
+	// and could not be fetched from origin either. Callers can treat
 	// this as "prior work is gone" and fall back to a fresh worktree.
 	ErrBranchUnrecoverable = errors.New("worktree branch no longer exists locally or on origin")
 

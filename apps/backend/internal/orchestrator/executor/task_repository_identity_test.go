@@ -22,8 +22,10 @@ func TestTopLevelLaunchRepoSpecCarriesExactTaskRepositoryID(t *testing.T) {
 		RepositoryID:     "repository-1",
 		TaskRepositoryID: "task-repository-1",
 		RepositoryPath:   "/repo",
+		IntegrationRef:   "develop",
 	})
 
 	require.True(t, ok)
 	require.Equal(t, "task-repository-1", spec.TaskRepositoryID)
+	require.Equal(t, "develop", spec.IntegrationRef)
 }
