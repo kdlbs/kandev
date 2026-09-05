@@ -13,7 +13,9 @@ import (
 
 // newLivenessTestManager builds a Manager whose registered standalone
 // backend talks to a real fake control server, so enumeration-based liveness
-// classification exercises the actual HTTP round trip.
+// classification exercises the actual HTTP round trip. The capability is
+// enabled by default since these tests exercise the enumeration-scope
+// classification path; a test of the disabled path overrides it explicitly.
 func newLivenessTestManager(t *testing.T, control *standaloneControlServer) *Manager {
 	t.Helper()
 	log := newTestLogger()
@@ -23,6 +25,7 @@ func newLivenessTestManager(t *testing.T, control *standaloneControlServer) *Man
 		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
 		ExecutorFallbackWarn, "", log,
 	)
+	mgr.SetAgentSurvivalEnabled(true)
 	cleanupManagerStopCh(t, mgr)
 	return mgr
 }
@@ -125,6 +128,29 @@ func TestManagerClassifyStandaloneLivenessAbsentOwnRecordIsDead(t *testing.T) {
 	got := mgr.classifyStandaloneLiveness(row, scope)
 	if got != models.ProcessLivenessDead {
 		t.Fatalf("classifyStandaloneLiveness = %v, want Dead for an own record absent from the enumeration", got)
+	}
+}
+
+// TestManagerClassifyStandaloneLivenessCapabilityDisabledFallsBackToProcessProbe
+// pins Review round 5 finding 3: when agentSurvivalEnabled is false, an
+// enumeration scope must never be consulted -- classification always falls
+// back to the process-identifier probe, exactly as it did before the
+// standalone control server's enumeration-based liveness existed. Without
+// this gate, an inherited row absent from a reachable enumeration would
+// classify Unknown even though its process is provably dead.
+func TestManagerClassifyStandaloneLivenessCapabilityDisabledFallsBackToProcessProbe(t *testing.T) {
+	mgr := newLivenessTestManager(t, newStandaloneControlServer(t, true))
+	mgr.SetAgentSurvivalEnabled(false)
+	row := &models.ExecutorRunning{
+		SessionID: "session-inherited-disabled", Runtime: agentruntime.RuntimeStandalone, LocalPID: spawnAndReapPID(t),
+	}
+	// Reachable and would report the row absent -- if consulted, this would
+	// wrongly yield Unknown (inherited-absent) instead of Dead.
+	scope := &standaloneLivenessScope{reachable: true, liveBySession: map[string]struct{}{}}
+
+	got := mgr.classifyStandaloneLiveness(row, scope)
+	if got != models.ProcessLivenessDead {
+		t.Fatalf("classifyStandaloneLiveness with capability disabled = %v, want Dead via process-identifier fallback", got)
 	}
 }
 

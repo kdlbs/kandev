@@ -65,6 +65,10 @@ func (m *Manager) NewStandaloneLivenessScope(ctx context.Context) interface{} {
 //
 //   - non-standalone runtime: unchanged, delegates to RowProcessLiveness
 //     (Unknown -- never probed by a local process check).
+//   - agent survival capability disabled: unchanged, delegates to
+//     RowProcessLiveness -- an enumeration scope is never consulted when the
+//     capability that makes a standalone control server outlive this
+//     backend isn't itself enabled.
 //   - scope nil or unreachable ("nothing answered"): falls back to today's
 //     process-identifier probe, so a genuinely dead row is still repaired on
 //     the common case of a first start with no survivor.
@@ -84,6 +88,9 @@ func (m *Manager) classifyStandaloneLiveness(row *models.ExecutorRunning, scope 
 		return models.ProcessLivenessUnknown
 	}
 	if !isLocalRuntime(row.Runtime) {
+		return RowProcessLiveness(row)
+	}
+	if !m.agentSurvivalEnabled {
 		return RowProcessLiveness(row)
 	}
 	if scope == nil || !scope.reachable {
