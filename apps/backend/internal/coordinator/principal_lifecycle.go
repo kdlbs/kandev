@@ -29,6 +29,13 @@ type PrincipalLifecycleStore interface {
 	RebindWorkspaceAgentPrincipal(ctx context.Context, id, taskID, sessionID string, updatedAt time.Time) error
 }
 
+// PrincipalClaimStore atomically binds a previously unbound principal to the
+// first validated task session. Implementations must reject claims after the
+// binding has been filled, revoked, or moved to another task.
+type PrincipalClaimStore interface {
+	ClaimWorkspaceAgentPrincipal(ctx context.Context, id, taskID, sessionID string, updatedAt time.Time) error
+}
+
 // EnsureTaskPrincipal creates the server-owned principal for taskID when it is
 // first seen, and updates only its server-authored session binding thereafter.
 // A revoked principal is never resurrected implicitly; explicit operator
@@ -37,9 +44,14 @@ func EnsureTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, wor
 	if store == nil || workspaceID == "" || taskID == "" {
 		return nil, fmt.Errorf("ensure task principal: workspace and task are required")
 	}
-	if active, err := store.GetActiveWorkspaceAgentPrincipalForTask(ctx, workspaceID, taskID); err != nil {
+	active, err := store.GetActiveWorkspaceAgentPrincipalForTask(ctx, workspaceID, taskID)
+	if err != nil {
 		return nil, err
-	} else if active != nil {
+	}
+	if active != nil {
+		if active.BackingSessionID == "" && sessionID != "" {
+			return claimUnboundTaskPrincipal(ctx, store, active, taskID, sessionID)
+		}
 		if active.BackingSessionID != sessionID {
 			return nil, fmt.Errorf("ensure task principal: task is bound to another session")
 		}
@@ -61,6 +73,20 @@ func EnsureTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, wor
 	}
 	principal.BackingTaskID = taskID
 	principal.BackingSessionID = sessionID
+	return principal, nil
+}
+
+func claimUnboundTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, principal *models.WorkspaceAgentPrincipal, taskID, sessionID string) (*models.WorkspaceAgentPrincipal, error) {
+	claimer, ok := store.(PrincipalClaimStore)
+	if !ok {
+		return nil, fmt.Errorf("ensure task principal: unbound principal cannot be claimed")
+	}
+	boundAt := time.Now().UTC()
+	if err := claimer.ClaimWorkspaceAgentPrincipal(ctx, principal.ID, taskID, sessionID, boundAt); err != nil {
+		return nil, err
+	}
+	principal.BackingSessionID = sessionID
+	principal.UpdatedAt = boundAt
 	return principal, nil
 }
 

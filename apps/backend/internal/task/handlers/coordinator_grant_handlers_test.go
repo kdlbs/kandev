@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -104,6 +105,13 @@ func TestCreateCoordinatorGrantRegistersNormalTaskPrincipal(t *testing.T) {
 	}
 	if principal == nil || principal.BackingTaskID != "normal-task" {
 		t.Fatalf("principal = %#v, want a principal bound to normal-task", principal)
+	}
+	claimed, err := coordinator.EnsureTaskPrincipal(ctx, repo, "ws-1", "normal-task", "session-1")
+	if err != nil || claimed == nil || claimed.BackingSessionID != "session-1" {
+		t.Fatalf("first session claim = %#v, %v; want session-1", claimed, err)
+	}
+	if _, err := coordinator.EnsureTaskPrincipal(ctx, repo, "ws-1", "normal-task", "session-2"); err == nil {
+		t.Fatal("second session claim succeeded, want denial")
 	}
 }
 

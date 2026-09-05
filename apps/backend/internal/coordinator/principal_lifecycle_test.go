@@ -108,6 +108,58 @@ func TestEnsureTaskPrincipalPassesWorkspaceAndTaskToActiveLookup(t *testing.T) {
 	}
 }
 
+func TestEnsureTaskPrincipalClaimsUnboundPrincipalOnce(t *testing.T) {
+	store := &claimingPrincipalStore{principal: &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "workspace-1", BackingTaskID: "task-1",
+	}}
+
+	principal, err := EnsureTaskPrincipal(context.Background(), store, "workspace-1", "task-1", "session-1")
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if principal == nil || principal.BackingSessionID != "session-1" {
+		t.Fatalf("claimed principal = %#v, want session-1", principal)
+	}
+
+	if _, err := EnsureTaskPrincipal(context.Background(), store, "workspace-1", "task-1", "session-2"); err == nil {
+		t.Fatal("second session claim succeeded, want denial")
+	}
+	if store.claims != 1 {
+		t.Fatalf("claims = %d, want exactly one", store.claims)
+	}
+}
+
+type claimingPrincipalStore struct {
+	principal *models.WorkspaceAgentPrincipal
+	claims    int
+}
+
+func (s *claimingPrincipalStore) GetActiveWorkspaceAgentPrincipalForTask(context.Context, string, string) (*models.WorkspaceAgentPrincipal, error) {
+	return s.principal, nil
+}
+
+func (s *claimingPrincipalStore) GetWorkspaceAgentPrincipalByContext(context.Context, string, string, string) (*models.WorkspaceAgentPrincipal, error) {
+	return nil, repoerrors.ErrWorkspaceAgentPrincipalNotFound
+}
+
+func (s *claimingPrincipalStore) CreateWorkspaceAgentPrincipal(context.Context, *models.WorkspaceAgentPrincipal) error {
+	return errors.New("unexpected create")
+}
+
+func (s *claimingPrincipalStore) RebindWorkspaceAgentPrincipal(context.Context, string, string, string, time.Time) error {
+	return errors.New("unexpected rebind")
+}
+
+func (s *claimingPrincipalStore) ClaimWorkspaceAgentPrincipal(_ context.Context, id, taskID, sessionID string, updatedAt time.Time) error {
+	if s.principal == nil || s.principal.ID != id || s.principal.BackingTaskID != taskID || s.principal.BackingSessionID != "" {
+		return repoerrors.ErrWorkspaceAgentPrincipalConflict
+	}
+	s.principal.BackingSessionID = sessionID
+	s.principal.UpdatedAt = updatedAt
+	s.claims++
+	return nil
+}
+
 type recordingPrincipalStore struct {
 	workspaceID string
 	taskID      string

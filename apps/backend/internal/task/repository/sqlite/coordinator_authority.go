@@ -95,6 +95,24 @@ func (r *Repository) RebindWorkspaceAgentPrincipal(ctx context.Context, id, task
 	return nil
 }
 
+// ClaimWorkspaceAgentPrincipal binds only an unbound active principal. The
+// predicate makes first-session ownership a single-winner database operation.
+func (r *Repository) ClaimWorkspaceAgentPrincipal(ctx context.Context, id, taskID, sessionID string, updatedAt time.Time) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE workspace_agent_principals SET backing_session_id = ?, updated_at = ? WHERE id = ? AND backing_task_id = ? AND backing_session_id = '' AND revoked_at IS NULL`), sessionID, updatedAt, id, taskID)
+	if isPrincipalConflictViolation(err) {
+		return repoerrors.ErrWorkspaceAgentPrincipalConflict
+	}
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed == 0 {
+		return repoerrors.ErrWorkspaceAgentPrincipalConflict
+	}
+	return nil
+}
+
 func (r *Repository) RevokeWorkspaceAgentPrincipal(ctx context.Context, id string, revokedAt time.Time) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE workspace_agent_principals SET revoked_at = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`), revokedAt, revokedAt, id)
 	if err != nil {

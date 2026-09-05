@@ -270,6 +270,50 @@ func TestWorkspaceAgentPrincipalRepositoryRebindsAndRevokesImmediately(t *testin
 	}
 }
 
+func TestWorkspaceAgentPrincipalClaimHasSingleWinner(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	createUsageEventsTestTask(t, repo, "coordinator")
+	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		BackingTaskID: "coordinator", CreatedAt: now,
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, principal); err != nil {
+		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
+	}
+
+	results := make(chan error, 2)
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		go func(sessionID string) {
+			results <- repo.ClaimWorkspaceAgentPrincipal(ctx, principal.ID, "coordinator", sessionID, now.Add(time.Minute))
+		}(sessionID)
+	}
+
+	var successes, conflicts int
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, repoerrors.ErrWorkspaceAgentPrincipalConflict):
+			conflicts++
+		default:
+			t.Fatalf("claim error = %v, want success or conflict", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("claim results = successes %d, conflicts %d; want one each", successes, conflicts)
+	}
+	active, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "coordinator")
+	if err != nil || active == nil || (active.BackingSessionID != "session-a" && active.BackingSessionID != "session-b") {
+		t.Fatalf("active principal = %#v, %v; want one winning session", active, err)
+	}
+}
+
 func TestListActiveWorkspaceAgentPrincipalGrantsExcludesLegacyTaskBoundRows(t *testing.T) {
 	repo := newUsageEventsTestRepo(t)
 	ctx := context.Background()
