@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for the prebuilt desktop E2E image path."""
+"""Contract tests for the E2E workflow and prebuilt images."""
 
 import hashlib
 import os
@@ -15,6 +15,15 @@ IMAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-base-image.yml"
 E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "e2e-tests.yml"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 IMAGE_DIGEST_RESOLVER = REPO_ROOT / ".github" / "scripts" / "resolve-image-digest.sh"
+VALID_IMAGE_INDEX = (
+    b'{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json",'
+    b'"digest":"sha256:' + b"1" * 64 + b'","size":2}]}'
+)
+VALID_IMAGE_MANIFEST = (
+    b'{"schemaVersion":2,"config":{"mediaType":"application/vnd.oci.image.config.v1+json",'
+    b'"digest":"sha256:' + b"0" * 64 + b'","size":2},"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip",'
+    b'"digest":"sha256:' + b"2" * 64 + b'","size":2}]}'
+)
 
 
 def job_block(workflow: str, job: str, next_job: str) -> str:
@@ -26,7 +35,7 @@ def job_block(workflow: str, job: str, next_job: str) -> str:
     return remainder.partition(f"\n  {next_job}:\n")[0]
 
 
-class DesktopE2EWorkflowContractTest(unittest.TestCase):
+class E2EWorkflowContractTest(unittest.TestCase):
     def run_image_digest_resolver(
         self,
         *,
@@ -284,7 +293,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
         resolver = IMAGE_DIGEST_RESOLVER.read_text(encoding="utf-8")
         self.assertIn('imagetools inspect --raw "$image"', resolver)
-        manifest = b'{"schemaVersion":2,"config":{},"layers":[]}'
+        manifest = VALID_IMAGE_MANIFEST
 
         result, attempts = self.run_image_digest_resolver(
             manifest=manifest, failures_before_success=0
@@ -298,7 +307,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
 
     def test_image_digest_resolver_retries_transient_registry_failures(self) -> None:
         self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
-        manifest = b'{"schemaVersion":2,"manifests":[]}'
+        manifest = VALID_IMAGE_INDEX
 
         result, attempts = self.run_image_digest_resolver(
             manifest=manifest, failures_before_success=2
@@ -310,7 +319,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("transient registry failure", result.stderr)
 
     def test_image_digest_resolver_times_out_stalled_registry_lookup(self) -> None:
-        manifest = b'{"schemaVersion":2,"manifests":[]}'
+        manifest = VALID_IMAGE_INDEX
 
         result, attempts = self.run_image_digest_resolver(
             manifest=manifest,
@@ -325,7 +334,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
 
     def test_image_digest_resolver_retries_invalid_manifest_then_succeeds(self) -> None:
         self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
-        manifest = b'{"schemaVersion":2,"manifests":[]}'
+        manifest = VALID_IMAGE_INDEX
 
         result, attempts = self.run_image_digest_resolver(
             manifest=manifest,
@@ -347,10 +356,17 @@ cat "${FAKE_DOCKER_MANIFEST}"
             ("malformed", b"not-json"),
             ("wrong-schema", b'{"schemaVersion":1}'),
             ("schema-only", b'{"schemaVersion":2}'),
+            ("empty-index", b'{"schemaVersion":2,"manifests":[]}'),
+            ("missing-descriptor-fields", b'{"schemaVersion":2,"manifests":[{}]}'),
+            (
+                "empty-layers",
+                b'{"schemaVersion":2,"config":{"mediaType":"application/vnd.oci.image.config.v1+json",'
+                b'"digest":"sha256:' + b"0" * 64 + b'","size":2},"layers":[]}',
+            ),
         ):
             with self.subTest(name=name):
                 result, attempts = self.run_image_digest_resolver(
-                    manifest=b'{"schemaVersion":2,"manifests":[]}',
+                    manifest=VALID_IMAGE_INDEX,
                     failures_before_success=0,
                     invalid_manifest=invalid_manifest,
                     invalid_responses_before_success=5,
@@ -365,7 +381,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
 
         result, attempts = self.run_image_digest_resolver(
-            manifest=b'{"schemaVersion":2,"manifests":[]}', failures_before_success=5
+            manifest=VALID_IMAGE_INDEX, failures_before_success=5
         )
 
         self.assertNotEqual(result.returncode, 0)

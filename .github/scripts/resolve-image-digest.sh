@@ -24,10 +24,18 @@ for attempt in 1 2 3 4 5; do
   if (( inspect_status == 0 )) \
     && [[ -s "$manifest_file" ]] \
     && jq -e '
+      def descriptor:
+        type == "object"
+        and (.mediaType? | type == "string")
+        and (.digest? | if type == "string" then test("^sha256:[0-9a-f]{64}$") else false end)
+        and (.size? | if type == "number" then . >= 0 and . == floor else false end);
       .schemaVersion == 2
       and (
-        (.manifests? | type == "array")
-        or ((.config? | type == "object") and (.layers? | type == "array"))
+        (.manifests? | if type == "array" then length > 0 and all(.[]; descriptor) else false end)
+        or (
+          (.config? | descriptor)
+          and (.layers? | if type == "array" then length > 0 and all(.[]; descriptor) else false end)
+        )
       )
     ' "$manifest_file" > /dev/null; then
     printf 'sha256:%s\n' "$(sha256sum "$manifest_file" | cut -d ' ' -f 1)"
