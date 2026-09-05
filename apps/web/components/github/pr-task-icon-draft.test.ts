@@ -41,6 +41,13 @@ describe("draft PR task status", () => {
     expect(getPRStatusColor(draftPR())).toBe("text-muted-foreground");
   });
 
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.20
+  it("stays muted when checks fail", () => {
+    expect(getPRStatusColor({ ...draftPR(), checks_state: "failure" })).toBe(
+      "text-muted-foreground",
+    );
+  });
+
   it("identifies the draft without claiming it is ready to merge", () => {
     const summary = derivePRTaskStatusSummary(draftPR(), false);
     expect(summary.rows.at(-1)).toEqual({ kind: "merge", status: "draft", tone: "muted" });

@@ -724,4 +724,48 @@ test.describe("PR status badge", () => {
       "Resolve the failing API checks",
     );
   });
+
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.20
+  test("keeps a draft PR icon muted when CI fails", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(120_000);
+
+    const taskTitle = "Draft PR with failing CI";
+    const { task } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      taskTitle,
+    );
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 2968,
+      pr_url: "https://github.com/testorg/testrepo/pull/2968",
+      pr_title: taskTitle,
+      head_branch: "feat/draft-with-failing-ci",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "failure",
+      mergeable_state: "draft",
+    });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      checks_state: "failure",
+      mergeable_state: "draft",
+    });
+
+    const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible({ timeout: 15_000 });
+    await expect(icon).toHaveClass(/text-muted-foreground/);
+    await expect(icon).not.toHaveClass(/text-red-500/);
+  });
 });
