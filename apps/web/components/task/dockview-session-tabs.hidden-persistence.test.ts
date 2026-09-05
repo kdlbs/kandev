@@ -106,4 +106,52 @@ describe("hidden session tab state", () => {
 
     expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
   });
+
+  it("preserves hidden markers when switching tasks in one environment", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    let activeTaskId = "task-A";
+    const appStore = {
+      getState: () => ({
+        tasks: { activeTaskId },
+        taskSessionsByTask: {
+          itemsByTaskId: {
+            "task-A": [{ id: ACTIVE_SESSION_ID }, { id: HIDDEN_SESSION_ID }],
+            "task-B": [{ id: "session-task-b" }],
+          },
+        },
+      }),
+    };
+    const refs = makeRefs();
+
+    runInEnvironment(api, "env-shared", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      hideSessionPanel(api, HIDDEN_SESSION_ID);
+      activeTaskId = "task-B";
+      runAutoSessionTabEffect("session-task-b", appStore as never, refs as never);
+      activeTaskId = "task-A";
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+    expect(refs.hiddenSessionIdsRef.current.has(HIDDEN_SESSION_ID)).toBe(true);
+  });
+
+  it("keeps an automatically selected hidden fallback closed", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAppStore();
+    const refs = makeRefs();
+
+    runInEnvironment(api, "env-fallback", () => {
+      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      const hiddenPanel = api.getPanel(`session:${HIDDEN_SESSION_ID}`);
+      expect(hiddenPanel).not.toBeNull();
+      if (hiddenPanel) api.removePanel(hiddenPanel);
+      refs.hiddenSessionIdsRef.current.add(HIDDEN_SESSION_ID);
+
+      runAutoSessionTabEffect(HIDDEN_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+    expect(refs.hiddenSessionIdsRef.current.has(HIDDEN_SESSION_ID)).toBe(true);
+  });
 });

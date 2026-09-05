@@ -40,6 +40,30 @@ function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
   return hiddenSessionIds;
 }
 
+function allKnownSessionIds(appStore: ReturnType<typeof useAppStoreApi>): Set<string> {
+  const sessionsByTask = appStore.getState().taskSessionsByTask.itemsByTaskId;
+  return new Set(Object.values(sessionsByTask).flatMap((sessions) => sessions.map((s) => s.id)));
+}
+
+function shouldSkipHiddenEffectiveSession(
+  effectiveSessionId: string,
+  hiddenSessionIds: Set<string>,
+): boolean {
+  if (!hiddenSessionIds.has(effectiveSessionId)) return false;
+  if (isDebug()) {
+    debug("useAutoSessionTab: skip ensure (effective session explicitly hidden)", {
+      effectiveSessionId,
+    });
+  }
+  return true;
+}
+
+function pruneHiddenSessionIds(hiddenSessionIds: Set<string>, knownSessionIds: Set<string>): void {
+  for (const hiddenSessionId of hiddenSessionIds) {
+    if (!knownSessionIds.has(hiddenSessionId)) hiddenSessionIds.delete(hiddenSessionId);
+  }
+}
+
 /** Hide a session tab without changing its persisted session lifecycle. */
 export function hideSessionPanel(api: DockviewApi, sessionId: string): void {
   const hiddenSessionIds = hiddenSessionIdsFor(api);
@@ -583,12 +607,10 @@ export function runAutoSessionTabEffect(
     effectiveSessionId ?? "",
   );
 
-  const currentSessionIdSet = new Set(currentSessionIds);
-  for (const hiddenSessionId of refs.hiddenSessionIdsRef.current) {
-    if (!currentSessionIdSet.has(hiddenSessionId)) {
-      refs.hiddenSessionIdsRef.current.delete(hiddenSessionId);
-    }
-  }
+  // Keep hide intent for sessions belonging to inactive tasks that share this
+  // environment. Prune only sessions that are gone from the whole store, not
+  // merely absent from the currently selected task.
+  pruneHiddenSessionIds(refs.hiddenSessionIdsRef.current, allKnownSessionIds(appStore));
 
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
@@ -604,6 +626,12 @@ export function runAutoSessionTabEffect(
       refs.sessionTabCreatedRef.current,
     )
   ) {
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
+    return;
+  }
+
+  // Explicit reopen clears the marker before this effect runs.
+  if (shouldSkipHiddenEffectiveSession(effectiveSessionId, refs.hiddenSessionIdsRef.current)) {
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }
