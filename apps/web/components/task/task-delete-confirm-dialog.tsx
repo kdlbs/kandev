@@ -15,7 +15,11 @@ import {
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
-import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import {
+  getCleanupSummary,
+  getBulkCleanupSummary,
+  hasWorktreeExecutor,
+} from "./task-cleanup-summary";
 import { TaskCleanupConsequences } from "./task-cleanup-consequences";
 import { StillWorkingWarning } from "./task-still-working-warning";
 import {
@@ -42,9 +46,107 @@ type TaskDeleteConfirmDialogProps = {
   executorType?: string | null;
   /** Executor types of the tasks being deleted (bulk). */
   executorTypes?: Array<string | null | undefined>;
-  onConfirm: (opts: { cascade: boolean }) => void;
+  onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
   confirmTestId?: string;
 };
+
+type DiscardWorktreeChangesOptionProps = {
+  enabled: boolean;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+};
+
+function DiscardWorktreeChangesOption({
+  enabled,
+  checked,
+  disabled,
+  onCheckedChange,
+}: DiscardWorktreeChangesOptionProps) {
+  if (!enabled) return null;
+  const { t } = useTranslation();
+  return (
+    <label className="flex min-h-11 cursor-pointer items-start gap-2 text-sm">
+      <Checkbox
+        checked={checked}
+        onCheckedChange={(value) => onCheckedChange(value === true)}
+        disabled={disabled}
+        data-testid="delete-discard-worktree-checkbox"
+      />
+      <span>
+        {t("task:discardWorktreeChanges")}
+        <span className="block text-sm text-muted-foreground">
+          {t("task:discardWorktreeChangesDescription")}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+type CascadeOptionProps = {
+  count: number;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+};
+
+function CascadeOption({ count, checked, disabled, onCheckedChange }: CascadeOptionProps) {
+  const { t } = useTranslation();
+  return (
+    <label className="flex min-h-11 cursor-pointer items-start gap-2 text-sm">
+      <Checkbox
+        checked={checked}
+        onCheckedChange={(value) => onCheckedChange(value === true)}
+        disabled={disabled}
+        data-testid="delete-cascade-checkbox"
+      />
+      <span>
+        {t("task:alsoDeleteSubtasks", { count })}
+        <span className="block text-sm text-muted-foreground">
+          {t("task:subtasksBecomeRootTasksUnlessYou")}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+type TaskDeleteActionProps = {
+  isDeleting?: boolean;
+  disabled: boolean;
+  confirmTestId?: string;
+  cascade: boolean;
+  discardWorktreeChanges: boolean;
+  onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
+  onClose: () => void;
+};
+
+function TaskDeleteAction({
+  isDeleting,
+  disabled,
+  confirmTestId,
+  cascade,
+  discardWorktreeChanges,
+  onConfirm,
+  onClose,
+}: TaskDeleteActionProps) {
+  const { t } = useTranslation();
+  return (
+    <AlertDialogAction
+      variant="destructive"
+      disabled={disabled}
+      className={TASK_CONFIRM_ACTION_CLASS}
+      data-testid={confirmTestId}
+      onClick={() => {
+        if (isDeleting) return;
+        onConfirm({ cascade, discardWorktreeChanges });
+        onClose();
+      }}
+    >
+      {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
+      {t("task:delete")}
+    </AlertDialogAction>
+  );
+}
 
 export function TaskDeleteConfirmDialog({
   open,
@@ -74,11 +176,19 @@ export function TaskDeleteConfirmDialog({
     : getCleanupSummary(executorType);
 
   const [cascade, setCascade] = useState(false);
+  const [discardWorktreeChanges, setDiscardWorktreeChanges] = useState(false);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
   const storeInFlight = useTaskInFlight(taskId, taskIds, open);
+  const hasWorktree = isBulkOperation
+    ? (executorTypes ?? []).some((type) => hasWorktreeExecutor(type))
+    : hasWorktreeExecutor(executorType);
+  const requiresDiscardConsent = hasWorktree || subtaskCount > 0;
 
   const handleOpenChange = (next: boolean) => {
-    if (!next) setCascade(false);
+    if (!next) {
+      setCascade(false);
+      setDiscardWorktreeChanges(false);
+    }
     onOpenChange(next);
   };
 
@@ -98,41 +208,34 @@ export function TaskDeleteConfirmDialog({
           {(isInFlight || storeInFlight) && (
             <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
           )}
+          <DiscardWorktreeChangesOption
+            enabled={requiresDiscardConsent}
+            checked={discardWorktreeChanges}
+            onCheckedChange={setDiscardWorktreeChanges}
+            disabled={isDeleting}
+          />
           {subtaskCount > 0 && (
-            <label className="flex cursor-pointer items-start gap-2 text-sm">
-              <Checkbox
-                checked={cascade}
-                onCheckedChange={(v) => setCascade(v === true)}
-                disabled={isDeleting}
-                data-testid="delete-cascade-checkbox"
-              />
-              <span>
-                {t("task:alsoDeleteSubtasks", { count: subtaskCount })}
-                <span className="block text-sm text-muted-foreground">
-                  {t("task:subtasksBecomeRootTasksUnlessYou")}
-                </span>
-              </span>
-            </label>
+            <CascadeOption
+              count={subtaskCount}
+              checked={cascade}
+              onCheckedChange={setCascade}
+              disabled={isDeleting}
+            />
           )}
         </div>
         <AlertDialogFooter className={TASK_CONFIRM_FOOTER_CLASS}>
           <AlertDialogCancel className={TASK_CONFIRM_ACTION_CLASS}>
             {t("common:cancel")}
           </AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            disabled={isDeleting}
-            className={TASK_CONFIRM_ACTION_CLASS}
-            data-testid={confirmTestId}
-            onClick={() => {
-              if (isDeleting) return;
-              onConfirm({ cascade });
-              handleOpenChange(false);
-            }}
-          >
-            {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {t("task:delete")}
-          </AlertDialogAction>
+          <TaskDeleteAction
+            disabled={isDeleting || (requiresDiscardConsent && !discardWorktreeChanges)}
+            isDeleting={isDeleting}
+            confirmTestId={confirmTestId}
+            cascade={cascade}
+            discardWorktreeChanges={discardWorktreeChanges}
+            onConfirm={onConfirm}
+            onClose={() => handleOpenChange(false)}
+          />
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

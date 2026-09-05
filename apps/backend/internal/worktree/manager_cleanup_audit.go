@@ -12,6 +12,10 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
+// ErrDirtyWorktreeCleanup identifies the expected refusal when cleanup reaches
+// a checkout that contains local changes without explicit discard consent.
+var ErrDirtyWorktreeCleanup = errors.New("worktree cleanup refused because worktree contains local changes")
+
 type worktreeCleanupAudit struct {
 	branchRef    string
 	branchOID    string
@@ -22,7 +26,7 @@ type worktreeCleanupAudit struct {
 }
 
 func (m *Manager) auditWorktreeCleanup(
-	ctx context.Context, wt *Worktree, removeBranch bool,
+	ctx context.Context, wt *Worktree, removeBranch bool, options WorktreeCleanupOptions,
 ) (audit worktreeCleanupAudit, err error) {
 	if wt == nil || wt.RepositoryPath == "" || wt.Path == "" {
 		return worktreeCleanupAudit{}, errors.New("worktree cleanup requires repository and worktree paths")
@@ -61,7 +65,7 @@ func (m *Manager) auditWorktreeCleanup(
 		return worktreeCleanupAudit{}, fmt.Errorf("worktree cleanup path is not registered to the recorded branch: %s", wt.Path)
 	}
 	deleteBranch, err := m.auditCleanupBranchDisposition(
-		ctx, wt, branchRef, branchOID, pathPresent, removeBranch,
+		ctx, wt, branchRef, branchOID, pathPresent, removeBranch, options,
 	)
 	if err != nil {
 		return worktreeCleanupAudit{}, err
@@ -79,11 +83,12 @@ func (m *Manager) auditCleanupBranchDisposition(
 	branchOID string,
 	pathPresent bool,
 	removeBranch bool,
+	options WorktreeCleanupOptions,
 ) (bool, error) {
 	if !removeBranch || branchRef == "" || branchOID == "" {
 		return false, nil
 	}
-	if pathPresent {
+	if pathPresent && !options.DiscardWorktreeChanges {
 		return m.verifyCleanRedundantCheckout(ctx, wt, branchRef)
 	}
 	return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)
@@ -172,7 +177,7 @@ func (m *Manager) verifyCleanRedundantCheckout(
 		return false, fmt.Errorf("inspect worktree changes before cleanup: %w", err)
 	}
 	if strings.TrimSpace(status) != "" {
-		return false, fmt.Errorf("worktree cleanup refused because %q contains uncommitted or untracked work", wt.Path)
+		return false, fmt.Errorf("%w: %q contains uncommitted or untracked work", ErrDirtyWorktreeCleanup, wt.Path)
 	}
 	return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)
 }

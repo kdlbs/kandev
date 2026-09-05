@@ -193,7 +193,7 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 		return err
 	}
 	m.enrichCleanupWorktreeFromCache(wt)
-	return m.removeWorktree(ctx, wt, removeBranch)
+	return m.removeWorktree(ctx, wt, removeBranch, WorktreeCleanupOptions{})
 }
 
 func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
@@ -271,7 +271,12 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 }
 
 // removeWorktree performs the actual removal of a worktree.
-func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool) error {
+func (m *Manager) removeWorktree(
+	ctx context.Context,
+	wt *Worktree,
+	removeBranch bool,
+	options WorktreeCleanupOptions,
+) error {
 	if wt == nil {
 		return errors.New("worktree cleanup requires a worktree")
 	}
@@ -320,7 +325,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		return nil
 	}
 
-	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch)
+	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch, options)
 	if err != nil {
 		return fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
 	}
@@ -506,16 +511,32 @@ func (m *Manager) managedScriptEnvironment(ctx context.Context) map[string]strin
 
 // CleanupWorktrees removes provided worktrees without re-fetching from the store.
 func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) error {
-	return m.cleanupWorktrees(ctx, worktrees, true)
+	return m.cleanupWorktrees(ctx, worktrees, true, WorktreeCleanupOptions{})
+}
+
+// CleanupWorktreesWithOptions removes worktrees while retaining all cleanup
+// identity and branch-safety audits. Discard consent only changes the clean
+// checkout gate.
+func (m *Manager) CleanupWorktreesWithOptions(
+	ctx context.Context,
+	worktrees []*Worktree,
+	options WorktreeCleanupOptions,
+) error {
+	return m.cleanupWorktrees(ctx, worktrees, true, options)
 }
 
 // CleanupWorktreesPreservingBranches removes provided worktrees while retaining
 // their local branch refs for later archive recovery.
 func (m *Manager) CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*Worktree) error {
-	return m.cleanupWorktrees(ctx, worktrees, false)
+	return m.cleanupWorktrees(ctx, worktrees, false, WorktreeCleanupOptions{})
 }
 
-func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, removeBranch bool) error {
+func (m *Manager) cleanupWorktrees(
+	ctx context.Context,
+	worktrees []*Worktree,
+	removeBranch bool,
+	options WorktreeCleanupOptions,
+) error {
 	if len(worktrees) == 0 {
 		return nil
 	}
@@ -532,7 +553,7 @@ func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, r
 			continue
 		}
 		m.enrichCleanupWorktreeFromCache(wt)
-		if err := m.removeWorktree(ctx, wt, removeBranch); err != nil {
+		if err := m.removeWorktree(ctx, wt, removeBranch, options); err != nil {
 			m.logger.Warn("failed to remove worktree during batch cleanup",
 				zap.String("task_id", wt.TaskID),
 				zap.String("worktree_id", wt.ID),

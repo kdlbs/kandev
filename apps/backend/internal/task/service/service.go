@@ -61,11 +61,33 @@ type WorktreeCleanupIdentityProvider interface {
 	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
 }
 
+// WorktreeDirtyInspector reports local changes before a task deletion mutates
+// task rows or persists a cleanup job.
+type WorktreeDirtyInspector interface {
+	InspectDirtyWorktrees(ctx context.Context, worktrees []*worktree.Worktree) ([]worktree.DirtyWorktree, error)
+}
+
 // WorktreeBatchCleaner extends WorktreeProvider with batch cleanup.
 type WorktreeBatchCleaner interface {
 	WorktreeProvider
 	// CleanupWorktrees removes multiple worktrees in a single operation.
 	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
+}
+
+// WorktreeBatchCleanerWithOptions is the consent-aware cleanup extension. The
+// legacy batch method remains available for archive and non-consented cleanup.
+type WorktreeBatchCleanerWithOptions interface {
+	WorktreeBatchCleaner
+	CleanupWorktreesWithOptions(
+		ctx context.Context,
+		worktrees []*worktree.Worktree,
+		options worktree.WorktreeCleanupOptions,
+	) error
+}
+
+// DeleteTaskOptions controls destructive task deletion behavior.
+type DeleteTaskOptions struct {
+	DiscardWorktreeChanges bool
 }
 
 // WorktreeArchiveBatchCleaner removes archived task worktrees without deleting
