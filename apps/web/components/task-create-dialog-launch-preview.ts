@@ -67,5 +67,5 @@ export function resolveTaskCreateLaunchPreview({
 }
 
 export function composeLaunchPreviewPrompt(stepPrompt: string, taskPrompt: string): string {
-  return stepPrompt.replace(TASK_PROMPT_TOKEN, taskPrompt);
+  return stepPrompt.replace(TASK_PROMPT_TOKEN, () => taskPrompt);
 }

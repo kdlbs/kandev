@@ -134,6 +134,12 @@ describe("composeLaunchPreviewPrompt", () => {
     ).toBe("Start Review the change then {{task_prompt}} for {task_id} and @saved");
   });
 
+  it("inserts replacement-pattern text literally", () => {
+    expect(
+      composeLaunchPreviewPrompt("Start {{task_prompt}} then {{task_prompt}}", "$& and $$"),
+    ).toBe("Start $& and $$ then {{task_prompt}}");
+  });
+
   it("uses the complete step prompt when it has no task prompt token", () => {
     expect(composeLaunchPreviewPrompt("Run the saved instructions for {task_id}", "Ignored")).toBe(
       "Run the saved instructions for {task_id}",
