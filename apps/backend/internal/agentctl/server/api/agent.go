@@ -149,6 +149,21 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
+	// control server's credential rotates while it is open, so a prior
+	// holder cannot keep consuming an instance's events past the moment its
+	// credential is superseded.
+	if s.credentialSource != nil {
+		invalidated := s.credentialSource.Invalidated()
+		go func() {
+			select {
+			case <-invalidated:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
+
 	// Use a mutex for writing to the WebSocket
 	var writeMu sync.Mutex
 	writeMessage := func(data []byte) error {

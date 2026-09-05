@@ -103,9 +103,21 @@ func (s *Server) forwardWorkspaceStream(
 	shellOutputCh chan []byte,
 	done <-chan struct{},
 ) {
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
+	// control server's credential rotates while it is open, so a prior
+	// holder cannot keep consuming an instance's events past the moment its
+	// credential is superseded. nil when credentialSource is unset, which
+	// never fires in a select -- legacy behavior for every existing test
+	// constructing a Server without a control server alongside it.
+	var invalidated <-chan struct{}
+	if s.credentialSource != nil {
+		invalidated = s.credentialSource.Invalidated()
+	}
 	for {
 		select {
 		case <-done:
+			return
+		case <-invalidated:
 			return
 		case msg, ok := <-sub:
 			if !ok {

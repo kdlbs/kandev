@@ -92,6 +92,15 @@ func (m *ControlServer) Router() http.Handler {
 	return m.router
 }
 
+// CredentialSource exposes this control server's single rotating credential
+// so a per-instance Server can authenticate its own requests and streams
+// against it instead of a static per-instance token (design 01 "Single
+// driver", AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). Wire it via
+// Server.SetCredentialSource before an instance starts accepting requests.
+func (m *ControlServer) CredentialSource() InstanceCredentialSource {
+	return m.credentials
+}
+
 // ShutdownRequested returns a channel that closes exactly once the
 // ownership-shutdown operation (AC-EXECUTORS-CONTROL-OWNERSHIP-002.9) has
 // been invoked. The run loop (cmd/agentctl/main.go) selects on this

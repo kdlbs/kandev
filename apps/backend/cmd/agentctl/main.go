@@ -210,6 +210,13 @@ func run(cfg *config.Config, log *logger.Logger) {
 	// Create instance manager
 	instMgr := instance.NewManager(cfg, log)
 
+	// Declared here and assigned below, before any instance can actually be
+	// created: the server factory closure reads controlServer.CredentialSource()
+	// lazily (at CreateInstance time, not at SetServerFactory time), so the
+	// forward reference is safe as long as controlServer is assigned before
+	// the first instance is created.
+	var controlServer *api.ControlServer
+
 	// Set the server factory to create API servers for each instance
 	instMgr.SetServerFactory(func(instCfg *config.InstanceConfig, procMgr *process.Manager, instLog *logger.Logger) http.Handler {
 		// Create MCP backend client for bidirectional communication through agent stream
@@ -229,11 +236,13 @@ func run(cfg *config.Config, log *logger.Logger) {
 		instLog.Info("MCP server enabled (channel-based)",
 			zap.String("session_id", instCfg.SessionID))
 
-		return api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog).Router()
+		srv := api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog)
+		srv.SetCredentialSource(controlServer.CredentialSource())
+		return srv.Router()
 	})
 
 	// Create control server
-	controlServer := api.NewControlServer(cfg, instMgr, log)
+	controlServer = api.NewControlServer(cfg, instMgr, log)
 	stopUnownedReaper := startUnownedReaperIfEnabled(cfg, controlServer)
 	defer stopUnownedReaper()
 

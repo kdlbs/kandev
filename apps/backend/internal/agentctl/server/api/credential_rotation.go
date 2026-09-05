@@ -19,6 +19,24 @@ var errRotationCredentialRejected = errors.New("credential not accepted for rota
 // identifier the control server never allocated.
 var errRotationIDNotIssued = errors.New("rotation identifier not issued")
 
+// InstanceCredentialSource is the narrow surface a per-instance Server
+// authenticates its own requests and streams against, so that a single
+// rotating credential -- not a static per-instance token -- is "the only
+// one that authenticates an instance operation or a stream"
+// (AC-EXECUTORS-CONTROL-OWNERSHIP-002.6, design 01 "Single driver").
+// Satisfied by *credentialState; ControlServer.CredentialSource exposes it.
+type InstanceCredentialSource interface {
+	// AcceptsFull reports whether token is the current highest-numbered
+	// rotation's credential.
+	AcceptsFull(token string) bool
+	// Invalidated returns a channel that closes the moment the next NEW
+	// rotation (not an idempotent replay) succeeds. Call it fresh per
+	// connection: the returned channel is single-shot, and a connection
+	// established after a rotation must observe a later one, not the
+	// already-closed channel from before it connected.
+	Invalidated() <-chan struct{}
+}
+
 // credentialState is the two-phase credential rotation machinery of design
 // 01's "Single driver" section. It starts holding a single fully-
 // authenticating credential (the bootstrap token) and no superseded
@@ -36,13 +54,31 @@ type credentialState struct {
 	latest      string
 	superseded  string
 	unconfirmed bool
+	// invalidated is closed and replaced with a fresh channel on every NEW
+	// rotation (AC-EXECUTORS-CONTROL-OWNERSHIP-002.2): every per-instance
+	// stream handler watching the channel it captured at connect time
+	// observes the close and terminates, so a prior holder cannot keep
+	// consuming an instance's events once its credential is superseded. An
+	// idempotent replay (AC-002.10) allocates no new rotation and therefore
+	// does not invalidate anything -- nothing established since the last
+	// real rotation could have used a credential the replay superseded.
+	invalidated chan struct{}
 }
+
+var _ InstanceCredentialSource = (*credentialState)(nil)
 
 // newCredentialState seeds the machinery with the control server's initial
 // (bootstrap-minted) credential. No rotation has happened yet, so there is
 // no superseded credential and nothing to confirm.
 func newCredentialState(initial string) *credentialState {
-	return &credentialState{latest: initial}
+	return &credentialState{latest: initial, invalidated: make(chan struct{})}
+}
+
+// Invalidated implements InstanceCredentialSource.
+func (c *credentialState) Invalidated() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.invalidated
 }
 
 // Latest returns the credential that authenticates every operation.
@@ -96,6 +132,8 @@ func (c *credentialState) Rotate(presented string) (rotationID int64, replacemen
 	c.latest = replacement
 	c.rotationID++
 	c.unconfirmed = true
+	close(c.invalidated)
+	c.invalidated = make(chan struct{})
 	return c.rotationID, c.latest, nil
 }
 
@@ -154,7 +192,7 @@ func controlCredentialAuth(creds *credentialState, adoptionOnlyPaths map[string]
 
 		token := extractBearerToken(c.Request)
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{errKey: "missing or invalid Authorization header"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{errKey: errMissingAuthHeader})
 			return
 		}
 
@@ -165,7 +203,7 @@ func controlCredentialAuth(creds *credentialState, adoptionOnlyPaths map[string]
 			ok = creds.AcceptsFull(token)
 		}
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{errKey: "invalid auth token"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{errKey: errInvalidAuthToken})
 			return
 		}
 
