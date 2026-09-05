@@ -168,7 +168,7 @@
   "selectWorkflow": "Select workflow",
   "capabilities": "Capabilities",
   "capabilityExecute": "execution lease",
-  "capabilitiesDescription": "Inspect allows reading documents and relations; orchestrate allows stopping, interrupting, and attaching workspace sources.",
+  "capabilitiesDescription": "Inspect allows reading documents and relations; orchestrate allows stopping, interrupting, and attaching workspace sources; execution leases let the Host run one bounded repository operation.",
   "grantNote": "Note (optional)",
   "grantNotePlaceholder": "Reason for this grant",
   "capabilitiesRequired": "Select at least one capability.",

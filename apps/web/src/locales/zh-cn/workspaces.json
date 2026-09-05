@@ -168,7 +168,7 @@
   "selectWorkflow": "选择工作流",
   "capabilities": "能力",
   "capabilityExecute": "执行租约",
-  "capabilitiesDescription": "检查允许读取文档和关系；协调允许停止、中断和附加工作区来源。",
+  "capabilitiesDescription": "检查允许读取文档和关系；协调允许停止、中断和附加工作区来源；执行租约允许主机运行一项受限的仓库操作。",
   "grantNote": "备注（可选）",
   "grantNotePlaceholder": "授权原因",
   "capabilitiesRequired": "请至少选择一项能力。",
