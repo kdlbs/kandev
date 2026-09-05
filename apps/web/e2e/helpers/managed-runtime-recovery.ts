@@ -4,8 +4,9 @@ import type { BackendContext } from "../fixtures/backend";
 import type { ApiClient } from "./api-client";
 import type { AgentProfile } from "../../lib/types/http-agents";
 
-export const MANAGED_RUNTIME_PACKAGE_SPEC = "opencode-ai@1.18.18";
+export const MANAGED_RUNTIME_PACKAGE_SPEC = "@agentclientprotocol/codex-acp@1.6.0";
 export const MANAGED_RUNTIME_CACHE_ROOT = "/tmp/kandev-managed-npm-cache";
+const MANAGED_RUNTIME_AGENT_NAME = "codex-acp";
 
 export function managedRuntimeExecutionCacheKey(
   packageSpec = MANAGED_RUNTIME_PACKAGE_SPEC,
@@ -14,7 +15,7 @@ export function managedRuntimeExecutionCacheKey(
 }
 
 /**
- * The real managed OpenCode agent is enabled only for this container-backed
+ * The real managed Codex ACP agent is enabled only for this container-backed
  * test. Its command runs through the image's npx wrapper, while the wrapper
  * starts the Linux mock ACP binary on the online retry.
  */
@@ -32,12 +33,12 @@ export async function prepareManagedRuntimeProfile(
         async () => {
           const { agents } = await apiClient.listAgents();
           observedAgents = agents.map((agent) => `${agent.id}:${agent.name}`).join(", ");
-          agentId = agents.find((agent) => agent.name === "opencode-acp")?.id ?? "";
+          agentId = agents.find((agent) => agent.name === MANAGED_RUNTIME_AGENT_NAME)?.id ?? "";
           return agentId;
         },
         {
           timeout: 30_000,
-          message: "OpenCode managed runtime should be registered for container recovery",
+          message: "Codex managed runtime should be registered for container recovery",
         },
       )
       .not.toBe("");

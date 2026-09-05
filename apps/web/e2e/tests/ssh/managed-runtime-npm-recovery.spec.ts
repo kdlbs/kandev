@@ -50,7 +50,7 @@ test.describe("SSH executor - managed npm runtime recovery", () => {
         `${MANAGED_RUNTIME_CACHE_ROOT}/online-invocations`,
       );
       expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([MANAGED_RUNTIME_PACKAGE_SPEC]);
-      expect(MANAGED_RUNTIME_PACKAGE_SPEC).toBe("opencode-ai@1.18.18");
+      expect(MANAGED_RUNTIME_PACKAGE_SPEC).toBe("@agentclientprotocol/codex-acp@1.6.0");
 
       await testPage.goto(`/t/${task.id}`);
       const page = new SessionPage(testPage);
