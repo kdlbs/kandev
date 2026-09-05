@@ -1,7 +1,7 @@
 ---
 id: "04-responsive-html-preview-e2e"
 title: "Prove responsive HTML preview flows"
-status: done
+status: cancelled
 wave: 3
 depends_on:
   - "02-responsive-html-preview"
@@ -24,81 +24,51 @@ system_design:
 
 ## Summary
 
-Add browser-level evidence that HTML preview works from the current buffer and
-keeps untrusted active content inert. Prove the same user outcome in the
-focused mobile file viewer and verify mobile geometry.
+This work order proved the static-only browser flow and asserted that scripts
+did not execute. Those assertions contradict the approved script-capable
+contract and are superseded by Task 09.
 
 ## In scope
 
-- Desktop Chromium coverage for source, unsaved edit, preview, isolation,
-  return to source, and same-session refresh restoration.
-- Mobile Chrome coverage for focused viewer entry, preview, return to source,
-  touch-target size, and document overflow containment.
-- Browser assertions that scripts and meta-refresh navigation remain blocked
-  inside the frame.
-- Rebuild the production Vite bundle before E2E execution.
+- Existing desktop and mobile fixtures may be reused after the runtime-backed
+  flow is implemented.
 
 ## Out of scope
 
-- Other browser engines or executor types.
-- Review-diff, relative-asset, remote-network, or Browser-panel tests.
-- Broad E2E suite execution.
+- Treating a passing static-only browser test as evidence for script execution
+  or network isolation.
 
 ## Acceptance
 
-- Desktop Chromium proves the current unsaved buffer is rendered and source
-  state survives the full preview cycle and page refresh.
-- Mobile Chrome completes the same preview cycle with a 44-pixel action and no
-  document-level horizontal overflow.
-- The browser test proves scripts do not execute and navigation attempts do not
-  make requests from the opaque frame.
+- Cancelled. The old test proves the wrong behavior.
 
 ## Verification
 
-```bash
-make build-web
-cd apps/web
-pnpm e2e:raw --project=chromium tests/chat/html-preview.spec.ts
-pnpm e2e:raw --project=mobile-chrome tests/task/mobile-html-preview.spec.ts
-```
+Not applicable. Use [Task 09](task-09-script-capable-preview-e2e.md).
 
 ## Files likely touched
 
 - `apps/web/e2e/tests/chat/html-preview.spec.ts`
 - `apps/web/e2e/tests/task/mobile-html-preview.spec.ts`
-- `apps/web/e2e/pages/session-page.ts`
 
 ## Dependencies
 
-- Task 02 supplies the responsive HTML preview behavior and stable accessible
-  selectors.
+Replaced by Task 09 after Tasks 06 and 07.
 
 ## Risks
 
-- Happy DOM component tests cannot prove browser sandbox enforcement, so this
-  work order must keep the browser-level script and navigation assertions.
-- Preview restoration waits on normal workspace and file-tab hydration and must
-  use deterministic visible state rather than fixed sleeps.
+Negative-only tests can pass while the required inline script capability is
+missing.
 
 ## Parallelism
 
-`parallel-safe` with Task 03 after Task 02.
+`sequential`
 
 ## Inputs
 
-- All acceptance criteria in `REQ-UI-NATIVE-HTML-PREVIEW-001`.
-- The responsive contract and verification strategy in the system design.
-- Existing Markdown preview desktop E2E and mobile file-viewer E2E patterns.
+- The superseded static browser scenarios.
+- The runtime-backed verification strategy in the system design.
 
 ## Results
 
-Added deterministic Chromium and mobile-Chrome coverage for the desktop and
-focused mobile preview flows. Rebuilt the production web bundle and required
-E2E backend artifacts before running the managed browser tests. Verification
-passed:
-
-```text
-make build-web
-pnpm e2e:run --host --no-build --project=chromium tests/chat/html-preview.spec.ts
-pnpm e2e:run --host --no-build --project=mobile-chrome tests/task/mobile-html-preview.spec.ts
-```
+Cancelled after review. Its previous results remain historical only.

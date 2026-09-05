@@ -12,12 +12,29 @@ const UNSAVED_HTML = `<!doctype html>
 <html>
   <head>
     <meta http-equiv="refresh" content="0;url=${BLOCKED_NAVIGATION_URL}">
+    <style>@import "${BLOCKED_NAVIGATION_URL}/theme.css"; body { background: url("${BLOCKED_NAVIGATION_URL}/background.png"); }</style>
   </head>
   <body>
     <h1>Unsaved HTML preview</h1>
+    <button id="increment">Increment</button>
+    <output id="value">0</output>
+    <p><a id="relative-link" href="relative-target.html">Relative link</a></p>
+    <p><a id="remote-link" href="${BLOCKED_NAVIGATION_URL}/link">Remote link</a></p>
+    <form id="form" action="${BLOCKED_NAVIGATION_URL}/submit"><button type="submit">Submit</button></form>
+    <img id="remote-image">
     <script>
+      const output = document.getElementById("value");
+      let count = 0;
       document.body.dataset.inlineScript = "ran";
-      location.replace("${BLOCKED_NAVIGATION_URL}");
+      document.getElementById("increment").addEventListener("click", () => {
+        count += 1;
+        output.textContent = String(count);
+      });
+      document.getElementById("remote-image").setAttribute("src", "${BLOCKED_NAVIGATION_URL}/image.png");
+      document.getElementById("form").setAttribute("action", "${BLOCKED_NAVIGATION_URL}/submit");
+      location.replace("${BLOCKED_NAVIGATION_URL}/location");
+      history.pushState({}, "", "${BLOCKED_NAVIGATION_URL}/history");
+      try { window.open("${BLOCKED_NAVIGATION_URL}/popup"); } catch { document.body.dataset.popup = "blocked"; }
     </script>
   </body>
 </html>`;
@@ -49,18 +66,16 @@ async function seedTaskWithSession(
 test.describe("HTML preview", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
-  test("renders the current buffer in an isolated preview frame", async ({
+  test("renders the current buffer in an isolated runtime surface", async ({
     testPage,
     apiClient,
     seedData,
     backend,
     prCapture,
   }) => {
-    const navigationRequests: string[] = [];
+    const blockedRequests: string[] = [];
     testPage.on("request", (request) => {
-      if (request.isNavigationRequest() && request.url() === BLOCKED_NAVIGATION_URL) {
-        navigationRequests.push(request.url());
-      }
+      if (request.url().startsWith(BLOCKED_NAVIGATION_URL)) blockedRequests.push(request.url());
     });
 
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -82,31 +97,29 @@ test.describe("HTML preview", () => {
     await editorContent.click();
     await testPage.keyboard.press("ControlOrMeta+A");
     await testPage.keyboard.insertText(UNSAVED_HTML);
-    await expect(editorContent).toContainText("Unsaved HTML preview", {
-      timeout: 10_000,
-    });
 
-    const previewToggle = testPage.getByTestId("html-preview-toggle").first();
-    await expect(previewToggle).toBeVisible({ timeout: 10_000 });
-    await previewToggle.click();
-
+    await testPage.getByTestId("html-preview-toggle").first().click();
     const preview = testPage.getByTestId("html-preview");
     await expect(preview).toBeVisible({ timeout: 10_000 });
-    const frame = preview.getByTestId("html-preview-frame");
-    await expect(frame).toHaveAttribute("sandbox", "");
-    await expect(frame).not.toHaveAttribute("allow-same-origin");
-    await expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
-    await expect(frame).toHaveAttribute("srcdoc", /default-src 'none'/);
+    await expect(preview.getByTestId("html-preview-surface")).toBeVisible();
+    await expect(preview.locator("h1")).toHaveText("Unsaved HTML preview");
+    await expect(preview.locator('[data-inline-script="ran"]')).toBeVisible();
+    await expect(preview.locator('[data-popup="blocked"]')).toBeVisible();
+    expect(await testPage.evaluate(() => "inlineScript" in document.body.dataset)).toBe(false);
 
-    const frameDocument = frame.contentFrame();
-    await expect(
-      frameDocument.getByRole("heading", { name: "Unsaved HTML preview" }),
-    ).toBeVisible();
-    const previewFrame = await frame.elementHandle().then((handle) => handle?.contentFrame());
-    expect(
-      await previewFrame?.evaluate(() => document.body.dataset.inlineScript ?? null),
-    ).toBeNull();
-    expect(navigationRequests).toEqual([]);
+    const increment = preview.locator("#increment");
+    await expect(preview.locator("#value")).toHaveText("0");
+    await increment.click();
+    await expect(preview.locator("#value")).toHaveText("1");
+
+    await expect(preview.locator("#relative-link")).not.toHaveAttribute("href");
+    await expect(preview.locator("#remote-link")).not.toHaveAttribute("href");
+    await expect(preview.locator("#form")).not.toHaveAttribute("action");
+    await expect(preview.locator("#remote-image")).not.toHaveAttribute("src");
+    await preview.locator("#relative-link").click();
+    await preview.locator("#remote-link").click();
+    await expect(preview.locator("h1")).toHaveText("Unsaved HTML preview");
+    expect(blockedRequests).toEqual([]);
 
     await prCapture.screenshot("html-preview-desktop", {
       caption: "Unsaved HTML rendered in the desktop preview surface",
@@ -127,9 +140,7 @@ test.describe("HTML preview", () => {
     await editorTabAfter.click();
     const previewAfter = testPage.getByTestId("html-preview");
     await expect(previewAfter).toBeVisible({ timeout: 10_000 });
-    await expect(
-      previewAfter.getByTestId("html-preview-frame").contentFrame().getByText("Saved source"),
-    ).toBeVisible();
+    await expect(previewAfter.getByText("Saved source")).toBeVisible();
     await previewAfter.getByRole("button", { name: "Show code" }).click();
     await expect(testPage.locator(".monaco-editor:visible").first()).toBeVisible({
       timeout: 10_000,

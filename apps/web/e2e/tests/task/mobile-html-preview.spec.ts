@@ -12,6 +12,15 @@ const HTML_CONTENT = `<!doctype html>
 <html>
   <body>
     <h1>Mobile HTML preview</h1>
+    <button id="increment">Increment</button>
+    <output id="value">0</output>
+    <script>
+      let count = 0;
+      document.getElementById("increment").addEventListener("click", () => {
+        count += 1;
+        document.getElementById("value").textContent = String(count);
+      });
+    </script>
   </body>
 </html>`;
 
@@ -58,7 +67,7 @@ async function setupMobileHtmlPreviewTest({
 test.describe("Mobile HTML preview", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
-  test("previews HTML with a native touch target and no page overflow", async ({
+  test("previews runtime output with a native touch target and no page overflow", async ({
     testPage,
     apiClient,
     seedData,
@@ -88,12 +97,11 @@ test.describe("Mobile HTML preview", () => {
     await previewToggle.tap();
     const preview = viewer.getByTestId("html-preview");
     await expect(preview).toBeVisible();
-    await expect(preview.getByTestId("html-preview-frame")).toHaveAttribute("sandbox", "");
-    await expect(
-      preview.getByTestId("html-preview-frame").contentFrame().getByRole("heading", {
-        name: "Mobile HTML preview",
-      }),
-    ).toBeVisible();
+    await expect(preview.getByTestId("html-preview-surface")).toBeVisible();
+    await expect(preview.locator("h1")).toHaveText("Mobile HTML preview");
+    await expect(preview.locator("#value")).toHaveText("0");
+    await preview.locator("#increment").tap();
+    await expect(preview.locator("#value")).toHaveText("1");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile HTML preview");
 
     await prCapture.screenshot("html-preview-mobile", {
