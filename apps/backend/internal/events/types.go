@@ -327,7 +327,7 @@ const (
 
 // Event types for GitLab integration
 const (
-	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback (UI notification only)
+	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback
 	GitLabMRStateChanged = "gitlab.mr_state_changed" // MR state changed (merged, closed, etc.)
 	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
 	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch

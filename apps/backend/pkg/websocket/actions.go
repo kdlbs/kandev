@@ -554,12 +554,8 @@ const (
 
 // GitLab integration notifications
 const (
-	ActionGitLabTaskMRUpdated     = "gitlab.task_mr.updated"      // Notification
-	ActionGitLabMRFeedbackNotify  = "gitlab.mr_feedback.notify"   // Notification
-	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
-
+	ActionGitLabTaskMRUpdated           = "gitlab.task_mr.updated"         // Notification
 	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
-	ActionGitLabNewIssueNotify          = "gitlab.new_issue.notify"        // Notification
 )
 
 // Jira integration actions
