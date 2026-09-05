@@ -128,6 +128,69 @@ func TestWorkflowAutoStartNonEmptyPrompt(t *testing.T) {
 	}
 }
 
+// Test-only contract coverage for behavior already corrected on the current head.
+// @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.8
+func TestWorkflowAutoStartCreatedNonEmptyPromptPreservesQueuedHandoff(t *testing.T) {
+	fixture := newInitialPromptDedupFixture(t, false, false)
+	fixture.step.Prompt = "Continue with validation."
+	fixture.session.State = models.TaskSessionStateCreated
+	fixture.session.AgentProfileID = "profile-initial-prompt-dedup"
+	if err := fixture.repo.UpdateTaskSession(context.Background(), fixture.session); err != nil {
+		t.Fatalf("update created session: %v", err)
+	}
+	fixture.svc.scheduler = scheduler.NewScheduler(
+		queue.NewTaskQueue(10), fixture.svc.executor, fixture.svc.taskRepo,
+		testLogger(), scheduler.SchedulerConfig{},
+	)
+	fixture.svc.activeTurns.Store(fixture.sessionID, "turn-initial-prompt-dedup")
+	fixture.svc.messageCreator = &repositoryBackedMessageCreator{
+		mockMessageCreator: fixture.messages,
+		repo:               fixture.repo,
+	}
+
+	const handoff = "You were moved to this step with the following message: PROBE-3409"
+	if _, err := fixture.svc.messageQueue.QueueMessage(
+		context.Background(), fixture.sessionID, fixture.taskID, handoff, "",
+		messagequeue.QueuedByMoveTask, false, nil,
+	); err != nil {
+		t.Fatalf("queue handoff: %v", err)
+	}
+
+	if err := fixture.svc.autoStartStepPrompt(
+		context.Background(), fixture.taskID, fixture.session, fixture.step,
+		fixture.step.Prompt, false, true,
+	); err != nil {
+		t.Fatalf("autoStartStepPrompt returned error: %v", err)
+	}
+
+	wantVisible := fixture.step.Prompt + "\n\n" + handoff
+	persisted, err := fixture.repo.ListMessages(context.Background(), fixture.sessionID)
+	if err != nil {
+		t.Fatalf("list persisted handoff: %v", err)
+	}
+	if len(persisted) != 1 {
+		t.Fatalf("persisted messages = %d, want 1", len(persisted))
+	}
+	if got := sysprompt.StripSystemContent(persisted[0].Content); got != wantVisible {
+		t.Fatalf("stored visible prompt = %q, want %q", got, wantVisible)
+	}
+
+	descriptions := capturedExecutionDescriptionsForExecution(
+		fixture.agent, "exec-initial-prompt-dedup",
+	)
+	if len(descriptions) != 1 {
+		t.Fatalf("execution descriptions = %d, want 1", len(descriptions))
+	}
+	if got := sysprompt.StripSystemContent(descriptions[0]); got != wantVisible {
+		t.Fatalf("dispatched visible prompt = %q, want %q", got, wantVisible)
+	}
+	if status := fixture.svc.messageQueue.GetStatus(
+		context.Background(), fixture.sessionID,
+	); status.Count != 0 {
+		t.Fatalf("queued messages = %d, want 0", status.Count)
+	}
+}
+
 func TestWorkflowAutoStartPlanModeOnlyPrompt(t *testing.T) {
 	fixture := newInitialPromptDedupFixture(t, true, false)
 	fixture.step.Events.OnEnter = []wfmodels.OnEnterAction{
