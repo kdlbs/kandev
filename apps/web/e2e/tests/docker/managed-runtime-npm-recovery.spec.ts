@@ -3,7 +3,6 @@ import { dockerFileContent, dockerPathExists } from "../../helpers/docker";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import {
   MANAGED_RUNTIME_CACHE_ROOT,
-  MANAGED_RUNTIME_PACKAGE_SPEC,
   managedRuntimeExecutionCacheKey,
   prepareManagedRuntimeProfile,
   restoreE2EAgentRegistry,
@@ -20,7 +19,7 @@ test.describe("Docker executor - managed npm runtime recovery", () => {
     test.setTimeout(240_000);
     let profileId = "";
     try {
-      const profile = await prepareManagedRuntimeProfile(apiClient, backend);
+      const { profile, packageSpec } = await prepareManagedRuntimeProfile(apiClient, backend);
       profileId = profile.id;
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
@@ -38,7 +37,7 @@ test.describe("Docker executor - managed npm runtime recovery", () => {
       await waitForLatestSessionDone(apiClient, task.id, 1, "Wait for Docker managed recovery");
       const environment = await apiClient.getTaskEnvironment(task.id);
       expect(environment?.container_id).toBeTruthy();
-      const target = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/${managedRuntimeExecutionCacheKey()}`;
+      const target = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/${managedRuntimeExecutionCacheKey(packageSpec)}`;
       const sibling = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/0123456789abcdef`;
       const containerID = environment!.container_id!;
       expect(dockerPathExists(containerID, `${target}/stale-marker`)).toBe(false);
@@ -48,7 +47,7 @@ test.describe("Docker executor - managed npm runtime recovery", () => {
         containerID,
         `${MANAGED_RUNTIME_CACHE_ROOT}/online-invocations`,
       );
-      expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([MANAGED_RUNTIME_PACKAGE_SPEC]);
+      expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([packageSpec]);
 
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
