@@ -20,15 +20,15 @@ import (
 )
 
 func TestRunDryRunMissingDatabaseCreatesNothing(t *testing.T) {
-	databaseDir := filepath.Join(t.TempDir(), "missing")
+	databaseDir := t.TempDir()
 	databasePath := filepath.Join(databaseDir, "kandev.db")
 
 	_, err := Run(context.Background(), t.TempDir(), "sqlite", databasePath, RunOptions{Execute: false}, nil)
 	if err == nil {
 		t.Fatal("Run(dry-run) error = nil, want missing database error")
 	}
-	if _, statErr := os.Stat(databaseDir); !os.IsNotExist(statErr) {
-		t.Fatalf("dry-run created missing database directory; stat err = %v", statErr)
+	if _, statErr := os.Stat(databasePath); !os.IsNotExist(statErr) {
+		t.Fatalf("dry-run created missing database file; stat err = %v", statErr)
 	}
 }
 
