@@ -334,7 +334,7 @@ Related: [Tasks and workflows](tasks-and-workflows.md), [Sessions and review](se
 
 ## Coordinator task authority
 
-A A **coordinator grant** is an explicit operator-level permission that lets one
+A **coordinator grant** is an explicit operator-level permission that lets one
 task (the _coordinator_) act on unrelated tasks within a workspace or
 workflow. This is how an orchestrator task monitors and redirects its board
 without being the direct parent of every task it manages.
@@ -353,7 +353,9 @@ parent/child capabilities and gains these on top.
 
 ### What a grant does NOT enable
 
-- **Destructive operations**: `delete_task`, `archive_task`, and credential
+- **Destructive operations**: `delete_task`, `archive_task`, credential
+  access, deletion, force-push, rebase, squash, amend, and other irreversible
+  actions remain outside coordinator authority.
 - **Cross-workspace authority**: a grant is strictly scoped to one workspace.
 - **Mutating the grant system**: no MCP or API tool can create, revoke, or
   modify a coordinator grant.
@@ -368,6 +370,7 @@ Grants are managed through **Settings → Workspace → Coordinators** in the we
 UI, or through the `/api/v1/workspaces/:id/coordinator-grants` API endpoint:
 
 - **Create**: specify the coordinator task UUID, the scope (`workspace` or
+  `workflow`), and the capability list.
 - **List**: view active and revoked grants per workspace or per task.
 - **Revoke**: soft-delete the grant. Revocation takes effect on the next
   privileged call; no restart is needed.
@@ -398,6 +401,8 @@ instances.
 ### Recovery
 
 - **Revoke all grants** for a coordinator: the next privileged call falls back
+  to the default direct-parent rules.
 - **Disable the runtime flag** `features.coordinatorTaskAuthority`: the
+  grant checks stop running and legacy relation rules remain in force.
 - **Delete the grant row**: the audit trail is retained, but the grant no
   longer exists.
