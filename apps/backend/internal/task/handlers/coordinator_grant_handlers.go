@@ -31,6 +31,7 @@ type CoordinatorGrantHandlers struct {
 // coordinatorGrantRepo is the grant and audit persistence surface the handlers
 // need — a subset of the full CoordinatorAuthorityRepository.
 type coordinatorGrantRepo interface {
+	GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error)
 	CreateCoordinatorGrant(ctx context.Context, grant *models.CoordinatorGrant) error
 	GetCoordinatorGrant(ctx context.Context, id string) (*models.CoordinatorGrant, error)
 	ListCoordinatorGrants(ctx context.Context, workspaceID, coordinatorTaskID string, includeRevoked bool) ([]*models.CoordinatorGrant, error)
@@ -309,10 +310,20 @@ func (h *CoordinatorGrantHandlers) httpCreateWorkspaceCoordinatorGrant(c *gin.Co
 	if !ok {
 		return
 	}
+	principal, err := h.repo.GetActiveWorkspaceAgentPrincipalForTask(c.Request.Context(), workspaceID, req.CoordinatorTaskID)
+	if err != nil {
+		h.abortWithGrantError(c, "resolve coordinator principal", err)
+		return
+	}
+	if principal == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "coordinator task has no active principal"})
+		return
+	}
 
 	now := time.Now()
 	grant := &models.CoordinatorGrant{
 		CoordinatorTaskID: req.CoordinatorTaskID,
+		PrincipalID:       principal.ID,
 		WorkspaceID:       workspaceID,
 		ScopeKind:         req.ScopeKind,
 		ScopeID:           scopeID,

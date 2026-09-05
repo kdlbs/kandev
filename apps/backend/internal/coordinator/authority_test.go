@@ -217,6 +217,45 @@ func TestAuthorityDeniesWhenNoActivePrincipalBinding(t *testing.T) {
 	}
 }
 
+func TestAuthorityDoesNotAuditMaterializationFailureWithoutAnActiveGrant(t *testing.T) {
+	store := &memoryStore{}
+	authority := New(store, func() bool { return true })
+
+	decision, err := authority.AuditMaterializationDenied(
+		context.Background(), "actor", "session", "missing-target", "workspace", "inspect_task_documents", CapabilityInspect,
+	)
+	if err != nil {
+		t.Fatalf("AuditMaterializationDenied: %v", err)
+	}
+	if decision.AuditID != "" {
+		t.Fatalf("decision = %#v, want no audit for an ungranted caller", decision)
+	}
+	if len(store.audits) != 0 {
+		t.Fatalf("audits = %#v, want none for an ungranted caller", store.audits)
+	}
+}
+
+func TestAuthorityAuditsMaterializationFailureWithTheActivePrincipal(t *testing.T) {
+	store := &memoryStore{
+		principal: &models.WorkspaceAgentPrincipal{
+			ID: "principal-1", WorkspaceID: "workspace", PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+			BackingTaskID: "actor", BackingSessionID: "session",
+		},
+		grants: []*models.CoordinatorGrant{{ID: "grant-1", PrincipalID: "principal-1", WorkspaceID: "workspace"}},
+	}
+	authority := New(store, func() bool { return true })
+
+	decision, err := authority.AuditMaterializationDenied(
+		context.Background(), "actor", "session", "missing-target", "workspace", "inspect_task_documents", CapabilityInspect,
+	)
+	if err != nil {
+		t.Fatalf("AuditMaterializationDenied: %v", err)
+	}
+	if decision.AuditID == "" || len(store.audits) != 1 || store.audits[0].PrincipalID != "principal-1" {
+		t.Fatalf("decision/audits = %#v / %#v, want principal-attributed audit", decision, store.audits)
+	}
+}
+
 // A store failure must deny the action and surface the error; the caller maps
 // it to the same opaque denial message as any other non-parent refusal.
 func TestAuthorityFailsClosedOnStoreError(t *testing.T) {

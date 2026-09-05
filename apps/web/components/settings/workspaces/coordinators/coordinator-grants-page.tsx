@@ -74,11 +74,11 @@ export function CoordinatorGrantsPage({ workspaceId }: Props) {
     fetchData();
   }, [fetchData]);
 
+  const handleRevoke = useRevokeGrant(fetchData);
+
   if (!flagEnabled) {
     return null;
   }
-
-  const handleRevoke = useRevokeGrant(fetchData);
 
   return (
     <div className="space-y-6" data-testid="coordinator-grants-page">

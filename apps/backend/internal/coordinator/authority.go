@@ -173,11 +173,19 @@ func (a *Authority) auditDenied(ctx context.Context, request Request, principalI
 // bypasses audit" problem (Finding 2). Returns a denied Decision with an audit
 // ID when the store succeeds, or a zero Decision on store error.
 func (a *Authority) AuditMaterializationDenied(ctx context.Context, actorTaskID, callerSessionID, targetTaskID, workspaceID, action string, capability Capability) (Decision, error) {
-	if a == nil || a.store == nil {
+	if a == nil || a.store == nil || !a.enabled() || actorTaskID == "" || workspaceID == "" {
+		return Decision{Basis: BasisDenied}, nil
+	}
+	principal, err := a.activePrincipalForMaterializationAudit(ctx, workspaceID, actorTaskID, callerSessionID)
+	if err != nil {
+		return Decision{Basis: BasisDenied}, err
+	}
+	if principal == nil {
 		return Decision{Basis: BasisDenied}, nil
 	}
 	event := &models.CoordinatorAuditEvent{
 		ID:             uuid.NewString(),
+		PrincipalID:    principal.ID,
 		ActorTaskID:    actorTaskID,
 		ActorSessionID: callerSessionID,
 		TargetTaskID:   targetTaskID,
@@ -193,6 +201,18 @@ func (a *Authority) AuditMaterializationDenied(ctx context.Context, actorTaskID,
 		return Decision{Basis: BasisDenied}, err
 	}
 	return Decision{Basis: BasisDenied, AuditID: event.ID}, nil
+}
+
+func (a *Authority) activePrincipalForMaterializationAudit(ctx context.Context, workspaceID, actorTaskID, callerSessionID string) (*models.WorkspaceAgentPrincipal, error) {
+	principal, err := a.store.GetActiveWorkspaceAgentPrincipalForTask(ctx, workspaceID, actorTaskID)
+	if err != nil || principal == nil || principal.RevokedAt != nil || principal.PluginInstallationID == "" || principal.LogicalKey == "" || principal.BackingSessionID == "" || principal.BackingSessionID != callerSessionID {
+		return principal, err
+	}
+	grants, err := a.store.ListActiveWorkspaceAgentPrincipalGrants(ctx, principal.ID, workspaceID)
+	if err != nil || len(grants) == 0 {
+		return nil, err
+	}
+	return principal, nil
 }
 
 func matchingGrant(grants []*models.CoordinatorGrant, request Request) (*models.CoordinatorGrant, string) {
