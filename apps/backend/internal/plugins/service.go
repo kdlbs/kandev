@@ -89,6 +89,7 @@ type Service struct {
 
 	pluginsDir       string
 	store            store.Store
+	approvals        *approvalLedger
 	registry         *Registry
 	state            *state.Store
 	userState        *state.UserStore
@@ -588,6 +589,7 @@ func (s *Service) Shutdown() {
 // operate under (the same directory store.FSStore persists records in).
 func (s *Service) SetPluginsDir(dir string) {
 	s.pluginsDir = dir
+	s.approvals = newApprovalLedger(dir)
 }
 
 // RevealSecret resolves the cleartext value of the secret reference ref via

@@ -180,6 +180,12 @@ curated React, UI, and app-store surface.
 - capabilities.auth is the highest-risk capability. A webhook response may
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
+- Plugin installations also carry a host-minted opaque installation identity
+  and a generic capability-approval ledger. That ledger records approval
+  history, exact approval revisions, and revocation tombstones for the host
+  boundary, but there is no public mutation UI in this release. Future exact
+  Host adapters consume the approval receipt/query surface; they do not derive
+  authority from plugin IDs, package digests, or workspace state.
 
 ## Storage decision table
 

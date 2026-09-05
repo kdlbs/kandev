@@ -44,6 +44,47 @@ func TestRegistryLoadPopulatesFromStore(t *testing.T) {
 	}
 }
 
+func TestRegistryLoadMigratesMissingInstallationIDOnce(t *testing.T) {
+	dir := t.TempDir()
+	fsStore := store.NewFSStore(dir)
+	if err := fsStore.Save(&store.Record{Manifest: *testManifest("kandev-plugin-slack"), Status: store.StatusRegistered}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	reg := NewRegistry()
+	if err := reg.Load(fsStore); err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	first, ok := reg.Get("kandev-plugin-slack")
+	if !ok {
+		t.Fatal("Get() expected record to be present after Load()")
+	}
+	if first.InstallationID == "" {
+		t.Fatal("Load() did not mint an installation id for a legacy record")
+	}
+
+	reloaded, err := fsStore.Get("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("reloaded record: %v", err)
+	}
+	if reloaded.InstallationID != first.InstallationID {
+		t.Fatalf("installation id changed across migration/save: first=%q reloaded=%q", first.InstallationID, reloaded.InstallationID)
+	}
+
+	reg2 := NewRegistry()
+	if err := reg2.Load(fsStore); err != nil {
+		t.Fatalf("second Load() unexpected error: %v", err)
+	}
+	second, ok := reg2.Get("kandev-plugin-slack")
+	if !ok {
+		t.Fatal("Get() expected record to be present after second Load()")
+	}
+	if second.InstallationID != first.InstallationID {
+		t.Fatalf("installation id was regenerated on replay: first=%q second=%q", first.InstallationID, second.InstallationID)
+	}
+}
+
 func TestRegistryGetMissingReturnsNotOK(t *testing.T) {
 	reg := NewRegistry()
 	if _, ok := reg.Get("missing"); ok {
