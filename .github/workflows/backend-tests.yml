@@ -335,7 +335,7 @@ jobs:
         shell: bash
         working-directory: ${{ github.workspace }}
         run: |
-          report_summary="${{ runner.temp }}/backend-test-summary-${{ matrix.shard }}.md"
+          report_summary="$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md"
           : > "$report_summary"
           GITHUB_STEP_SUMMARY="$report_summary" \
           INPUT_FROMJSONFILE="$GITHUB_WORKSPACE/apps/backend/test-results-${{ matrix.shard }}.json" \
@@ -349,7 +349,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           python3 .github/scripts/bounded-step-summary.py \
-            --input "${{ runner.temp }}/backend-test-summary-${{ matrix.shard }}.md" \
+            --input "$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md" \
             --output "$GITHUB_STEP_SUMMARY" \
             --diagnostics-label "backend-test-results-${{ matrix.shard }}" \
             --diagnostics-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"

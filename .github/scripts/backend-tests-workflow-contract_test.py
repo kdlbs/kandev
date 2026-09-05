@@ -25,9 +25,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         generate = step_block(workflow, "Generate test report")
         publish = step_block(workflow, "Publish bounded test report summary")
 
-        temporary_summary = (
-            "${{ runner.temp }}/backend-test-summary-${{ matrix.shard }}.md"
-        )
+        temporary_summary = "$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md"
         self.assertIn(
             "uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
             checkout,
@@ -39,6 +37,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("path: .github/vendor/go-test-action", checkout)
         self.assertIn(f'report_summary="{temporary_summary}"', generate)
+        self.assertNotIn("${{ runner.temp }}", generate)
         self.assertIn(': > "$report_summary"', generate)
         self.assertIn('GITHUB_STEP_SUMMARY="$report_summary"', generate)
         self.assertIn(

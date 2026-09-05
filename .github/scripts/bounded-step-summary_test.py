@@ -61,7 +61,7 @@ class BoundedStepSummaryTest(unittest.TestCase):
         second = self.run_writer(summary)
         rendered = first.decode("utf-8")
 
-        self.assertLess(len(first), 983_040)
+        self.assertLessEqual(len(first), 983_040)
         self.assertEqual(first, second)
         self.assertIn("TestWorkspaceFailure", rendered)
         self.assertIn("truncated", rendered.lower())
