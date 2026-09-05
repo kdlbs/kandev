@@ -30,6 +30,19 @@ function expectedInitials(name: string): string {
 }
 
 test.describe("property pickers", () => {
+  test("human assignee is hidden when authentication is disabled", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    const task = await apiClient.createTask(officeSeed.workspaceId, "Hidden Human Assignee", {
+      workflow_id: officeSeed.workflowId,
+    });
+    await gotoTaskPage(testPage, task.id, "Hidden Human Assignee");
+
+    await expect(testPage.getByText("Assigned to", { exact: true })).toHaveCount(0);
+  });
+
   test("status picker updates task status and persists", async ({
     testPage,
     apiClient,
