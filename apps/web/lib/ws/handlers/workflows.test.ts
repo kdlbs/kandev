@@ -6,11 +6,17 @@ import { registerWorkflowsHandlers } from "./workflows";
 
 type WorkflowItem = { id: string; workspaceId: string; name: string; hidden?: boolean };
 
+const MESSAGE_TIMESTAMP = "2026-01-01T00:00:00Z";
+const REVIEW_STEP_ID = "step-1";
+const REVIEW_STEP_NAME = "Review";
+const REVIEW_STEP_COLOR = "bg-blue-500";
+
 function makeStore(items: WorkflowItem[], activeId: string | null) {
   let state = {
     workflows: { items, activeId },
     workspaces: { activeId: "ws-1" },
     kanban: { workflowId: null, steps: [], tasks: [] },
+    kanbanMulti: { snapshots: {}, isLoading: false },
   } as unknown as AppState;
 
   return {
@@ -31,7 +37,7 @@ function updatedMessage(payload: WorkflowPayload): BackendMessageMap["workflow.u
     type: "notification",
     action: "workflow.updated",
     payload,
-    timestamp: "2026-01-01T00:00:00Z",
+    timestamp: MESSAGE_TIMESTAMP,
   };
 }
 
@@ -41,7 +47,7 @@ function createdMessage(payload: WorkflowPayload): BackendMessageMap["workflow.c
     type: "notification",
     action: "workflow.created",
     payload,
-    timestamp: "2026-01-01T00:00:00Z",
+    timestamp: MESSAGE_TIMESTAMP,
   };
 }
 
@@ -53,7 +59,31 @@ function stepUpdatedMessage(
     type: "notification",
     action: "workflow.step.updated",
     payload: { step },
-    timestamp: "2026-01-01T00:00:00Z",
+    timestamp: MESSAGE_TIMESTAMP,
+  };
+}
+
+function stepCreatedMessage(
+  step: BackendMessageMap["workflow.step.created"]["payload"]["step"],
+): BackendMessageMap["workflow.step.created"] {
+  return {
+    id: "msg-1",
+    type: "notification",
+    action: "workflow.step.created",
+    payload: { step },
+    timestamp: MESSAGE_TIMESTAMP,
+  };
+}
+
+function stepDeletedMessage(
+  step: BackendMessageMap["workflow.step.deleted"]["payload"]["step"],
+): BackendMessageMap["workflow.step.deleted"] {
+  return {
+    id: "msg-1",
+    type: "notification",
+    action: "workflow.step.deleted",
+    payload: { step },
+    timestamp: MESSAGE_TIMESTAMP,
   };
 }
 
@@ -183,7 +213,9 @@ describe("workflow step handlers", () => {
       ...store.getState(),
       kanban: {
         workflowId: "wf-1",
-        steps: [{ id: "step-1", title: "Review", color: "bg-blue-500", position: 1 }],
+        steps: [
+          { id: REVIEW_STEP_ID, title: REVIEW_STEP_NAME, color: REVIEW_STEP_COLOR, position: 1 },
+        ],
         tasks: [],
       },
     } as AppState);
@@ -191,12 +223,12 @@ describe("workflow step handlers", () => {
 
     handlers["workflow.step.updated"]?.(
       stepUpdatedMessage({
-        id: "step-1",
+        id: REVIEW_STEP_ID,
         workflow_id: "wf-1",
-        name: "Review",
+        name: REVIEW_STEP_NAME,
         state: "",
         position: 1,
-        color: "bg-blue-500",
+        color: REVIEW_STEP_COLOR,
         wip_limit: 2,
         pull_from_step_id: "step-0",
       }),
@@ -205,6 +237,72 @@ describe("workflow step handlers", () => {
     expect(store.getState().kanban.steps[0]).toMatchObject({
       wip_limit: 2,
       pull_from_step_id: "step-0",
+    });
+  });
+
+  it("keeps cached workflow snapshots in sync for step changes", () => {
+    const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], null);
+    const initialStep = {
+      id: REVIEW_STEP_ID,
+      title: REVIEW_STEP_NAME,
+      color: REVIEW_STEP_COLOR,
+      position: 1,
+      prompt: "Review the task",
+    };
+    store.setState({
+      ...store.getState(),
+      kanbanMulti: {
+        snapshots: {
+          "wf-1": {
+            workflowId: "wf-1",
+            workflowName: "Workflow",
+            steps: [initialStep],
+            tasks: [],
+          },
+        },
+        isLoading: false,
+      },
+    } as AppState);
+    const handlers = registerWorkflowsHandlers(store);
+
+    handlers["workflow.step.created"]?.(
+      stepCreatedMessage({
+        id: "step-2",
+        workflow_id: "wf-1",
+        name: "Done",
+        state: "done",
+        position: 2,
+        color: "bg-green-500",
+      }),
+    );
+    handlers["workflow.step.updated"]?.(
+      stepUpdatedMessage({
+        id: REVIEW_STEP_ID,
+        workflow_id: "wf-1",
+        name: REVIEW_STEP_NAME,
+        state: "review",
+        position: 1,
+        color: REVIEW_STEP_COLOR,
+        prompt: "Review the task carefully",
+      }),
+    );
+    handlers["workflow.step.deleted"]?.(
+      stepDeletedMessage({
+        id: "step-2",
+        workflow_id: "wf-1",
+        name: "Done",
+        state: "done",
+        position: 2,
+        color: "bg-green-500",
+      }),
+    );
+
+    const snapshotSteps = store.getState().kanbanMulti.snapshots["wf-1"]?.steps;
+    expect(snapshotSteps?.map((step) => step.id)).toEqual([REVIEW_STEP_ID]);
+    expect(snapshotSteps?.[0]).toMatchObject({
+      title: REVIEW_STEP_NAME,
+      position: 1,
+      prompt: "Review the task carefully",
     });
   });
 });

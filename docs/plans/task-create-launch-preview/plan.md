@@ -48,10 +48,11 @@ composition helpers. The step resolver uses the first positional step for the
 empty-description plan-mode action, mirrors `ResolveAutoStartStep` for
 nonempty descriptions, and filters fetched steps by the effective workflow ID.
 
-Extend `StepType` and `useWorkflowStepsEffect` so fetched step data retains
-`prompt` and refreshes even for the visible context workflow. Build one derived
-launch-preview model in the dialog prop assembly. Do not store derived preview
-data in form state.
+Extend `StepType` and `useWorkflowStepsEffect` so fallback-fetched step data
+retains `prompt` and workflow identity. Keep loaded workflow snapshots current
+from workflow-step WebSocket events, so the visible context does not need a
+component-level refresh request. Build one derived launch-preview model in the
+dialog prop assembly. Do not store derived preview data in form state.
 
 ### Dialog presentation
 
@@ -105,8 +106,8 @@ until task creation.
 
 ## Verification results
 
-- Targeted launch-preview, effects, prop-builder, and selector tests passed
-  (67 tests after review fixup coverage).
+- Targeted launch-preview, effects, prop-builder, selector, and workflow
+  handler tests passed (67 tests after review fixup coverage).
 - Task-create component tests passed (43 tests); focused ESLint, typecheck,
   i18n checks, pseudo-catalog sync, and public-doc validators passed.
 - Desktop and mobile focused E2E tests passed (1 each) in host mode.
@@ -118,7 +119,9 @@ until task creation.
   tests must encode the backend precedence.
 - A workflow switch can briefly expose the snapshot while a fresh fetch is in
   flight. Every fetched step must match the current effective workflow before
-  use, and a successful empty fetch is authoritative.
+  use, and a successful empty fetch is authoritative. Loaded snapshots are
+  updated by workflow-step WebSocket events for visible and non-visible
+  workflows.
 - The preview cannot show server-owned task IDs or saved-prompt expansions.
   Public copy must state this boundary without implying full runtime expansion.
 - Long workflow and step names can crowd the selector on phones. Truncation and
