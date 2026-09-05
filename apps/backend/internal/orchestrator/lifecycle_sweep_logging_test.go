@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,6 +145,78 @@ func TestReconcileTaskLifecycleTokensWarnsWhenStuck(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		close(release)
 		t.Fatal("stuck-sweep warning never logged")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sweep did not finish after release")
+	}
+}
+
+// observedTestLoggerCounting is observedTestLoggerWatching plus a threshold:
+// the returned channel closes once the message has been logged atLeast
+// times, letting a test prove a warning repeats instead of firing once.
+func observedTestLoggerCounting(t *testing.T, message string, atLeast int) (*commonlogger.Logger, <-chan struct{}) {
+	t.Helper()
+	core, _ := observer.New(zapcore.DebugLevel)
+
+	var count atomic.Int32
+	seen := make(chan struct{})
+	var once sync.Once
+	hooked := zapcore.RegisterHooks(core, func(entry zapcore.Entry) error {
+		if entry.Message == message && int(count.Add(1)) >= atLeast {
+			once.Do(func() { close(seen) })
+		}
+		return nil
+	})
+
+	log, err := commonlogger.NewFromZap(zap.New(hooked))
+	if err != nil {
+		t.Fatalf("create observed logger: %v", err)
+	}
+	return log, seen
+}
+
+// TestReconcileTaskLifecycleTokensWarnsRepeatedlyWhenStuck is the regression
+// test for the stuck-sweep warning becoming a repeating ticker instead of a
+// one-shot timer: a sweep still running after multiple
+// lifecycleSweepStuckWarningInterval periods must warn every period, not
+// just the first.
+//
+// Expected pre-fix failure: warnIfLifecycleSweepStuck uses a one-shot
+// time.Timer, so only one "startup lifecycle sweep still running" entry is
+// ever logged and this test times out waiting for a second.
+func TestReconcileTaskLifecycleTokensWarnsRepeatedlyWhenStuck(t *testing.T) {
+	prevInterval := lifecycleSweepStuckWarningInterval
+	lifecycleSweepStuckWarningInterval = 20 * time.Millisecond
+	t.Cleanup(func() { lifecycleSweepStuckWarningInterval = prevInterval })
+
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "stuck-task-repeat", "stuck-session-repeat", "step1")
+	if err := repo.SetTaskMetadataKey(ctx, "stuck-task-repeat", models.MetaKeyQueuePromotionPending, true); err != nil {
+		t.Fatalf("seed promotion token: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	log, warnedTwice := observedTestLoggerCounting(t, "startup lifecycle sweep still running", 2)
+	svc.logger = log
+
+	release := make(chan struct{})
+	svc.repo = &blockingLifecycleRepo{sessionExecutorStore: repo, release: release}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.reconcileTaskLifecycleTokens(ctx)
+	}()
+
+	select {
+	case <-warnedTwice:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("stuck-sweep warning did not repeat")
 	}
 
 	close(release)

@@ -868,6 +868,13 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
+	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
+	// background goroutine that runs reconcileTaskLifecycleTokens and
+	// reconcileDependencyLaunchesOnStartup after the watcher and scheduler
+	// have started. See startLifecycleSweepAsync / stopLifecycleSweepAsync.
+	lifecycleSweepCancel  context.CancelFunc
+	lifecycleSweepWorkers sync.WaitGroup
+
 	// unreclaimedWorkspaces holds the automation runs whose workspace removal
 	// was attempted and did not actually free the directory. Retention selects
 	// candidates by "still has a live worktree row", and a failed removal can
@@ -2566,12 +2573,6 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
-	s.reconcileTaskLifecycleTokens(ctx)
-	// Chains whose predecessor completed while the process was down: the
-	// dependencies_resolved event is in-memory and is not replayed, so without
-	// this sweep a chain stalls silently across a restart. Runs after the WIP
-	// reconciler so an admitted-by-promotion task is already eligible.
-	s.reconcileDependencyLaunchesOnStartup(ctx)
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -2591,6 +2592,21 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+
+	// Run the startup lifecycle sweep (reconcileTaskLifecycleTokens, then
+	// reconcileDependencyLaunchesOnStartup — order preserved so an
+	// admitted-by-promotion task is already eligible for the dependency
+	// sweep) in the background, now that the watcher is subscribed.
+	// Recovery it drives (recoverManualMoveLifecycle -> ... ->
+	// waitForSessionReady) polls the DB for a session state that only
+	// handleAgentBootReady sets, and that handler is wired by
+	// watcher.Start. Running the sweep before the watcher meant its own
+	// completion event was dropped on the floor, so every recovered task
+	// burned its full interactive timeout regardless of whether the
+	// underlying agent was actually healthy — see
+	// docs/specs/startup-listener-before-recovery/spec.md. Service.Stop
+	// joins this goroutine (bounded) via stopLifecycleSweepAsync.
+	s.startLifecycleSweepAsync(ctx)
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
@@ -2661,6 +2677,7 @@ func (s *Service) Stop() error {
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
 	s.stopDynamicPolicyRecovery()
+	s.stopLifecycleSweepAsync()
 
 	// Stop components in reverse order
 	var errs []error
@@ -2688,6 +2705,46 @@ func (s *Service) Stop() error {
 
 	s.logger.Info("orchestrator service stopped successfully")
 	return nil
+}
+
+// startLifecycleSweepAsync launches the startup lifecycle sweep
+// (reconcileTaskLifecycleTokens, then reconcileDependencyLaunchesOnStartup —
+// order preserved so an admitted-by-promotion task is already eligible for
+// the dependency sweep) in a background goroutine derived from ctx.
+// stopLifecycleSweepAsync cancels this context so the sweep abandons its own
+// bounded wait promptly on shutdown instead of running out its full deadline.
+func (s *Service) startLifecycleSweepAsync(ctx context.Context) {
+	sweepCtx, cancel := context.WithCancel(ctx)
+	s.lifecycleSweepCancel = cancel
+	s.lifecycleSweepWorkers.Add(1)
+	go func() {
+		defer s.lifecycleSweepWorkers.Done()
+		s.reconcileTaskLifecycleTokens(sweepCtx)
+		s.reconcileDependencyLaunchesOnStartup(sweepCtx)
+	}()
+}
+
+// stopLifecycleSweepAsync cancels the sweep's context and joins its
+// goroutine, bounded so shutdown cannot hang on a sweep still waiting out a
+// per-task resume: the resume path runs under context.WithoutCancel
+// (task_operations.go), so cancellation here bounds the sweep's own
+// dispatch loop but not an already in-flight resume, which is left to
+// finish in the background past Stop's return — the same shutdown contract
+// as the send-now workers (queue_send_now.go).
+func (s *Service) stopLifecycleSweepAsync() {
+	if s.lifecycleSweepCancel != nil {
+		s.lifecycleSweepCancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.lifecycleSweepWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(sendNowClaimRecoveryTimeout):
+		s.logger.Warn("timed out waiting for startup lifecycle sweep during shutdown")
+	}
 }
 
 // reconcileSessionsOnStartup adjusts database state for sessions that were active before restart.
