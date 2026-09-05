@@ -280,8 +280,9 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
 		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
-	hooks.AddBeforeCallTool(func(_ context.Context, _ any, request *mcp.CallToolRequest) {
+	hooks.AddBeforeCallTool(func(_ context.Context, id any, request *mcp.CallToolRequest) {
 		s.restoreCanonicalToolName(request)
+		stampTransportRequestID(request, id)
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
 		s.presentTransportToolNames(result)
