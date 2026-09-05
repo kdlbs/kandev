@@ -8,6 +8,8 @@ import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-walkthrough.yml"
+RECONCILE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-walkthrough-reconcile.yml"
+PREVIEW_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "preview-env.yml"
 REVIEW_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "opencode-code-review.yml"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 SETUP_OPENCODE_ACTION = REPO_ROOT / ".github" / "actions" / "setup-opencode" / "action.yml"
@@ -35,11 +37,25 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         if not WORKFLOW.is_file():
             raise AssertionError("PR walkthrough must have a dedicated workflow file")
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
+        cls.reconcile_workflow = (
+            RECONCILE_WORKFLOW.read_text(encoding="utf-8")
+            if RECONCILE_WORKFLOW.is_file()
+            else ""
+        )
+        cls.preview_workflow = PREVIEW_WORKFLOW.read_text(encoding="utf-8")
         cls.review_workflow = REVIEW_WORKFLOW.read_text(encoding="utf-8")
         cls.skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         cls.generation = workflow_job(cls.workflow, "pr-walkthrough-generate")
         cls.publication = workflow_job(cls.workflow, "pr-walkthrough-publish")
         cls.link = workflow_job(cls.workflow, "pr-walkthrough-link")
+        cls.reconcile = (
+            workflow_job(cls.reconcile_workflow, "pr-walkthrough-reconcile")
+            if cls.reconcile_workflow
+            else ""
+        )
+        cls.preview_deploy = workflow_job(cls.preview_workflow, "deploy-same-repo")
+        cls.preview_fork = workflow_job(cls.preview_workflow, "deploy-fork")
+        cls.preview_cleanup = workflow_job(cls.preview_workflow, "cleanup-preview")
         cls.same_repo_review = workflow_job(cls.review_workflow, "opencode-review-same-repo")
         cls.fork_review = workflow_job(cls.review_workflow, "opencode-review-fork")
 
@@ -75,6 +91,75 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(condition, self.generation)
         self.assertNotIn("safe-to-test", self.generation)
+
+    def test_reconciliation_is_limited_to_authorized_edited_events(self) -> None:
+        self.assertIn("pull_request_target:", self.reconcile_workflow)
+        self.assertIn("types: [edited]", self.reconcile_workflow)
+        for condition in (
+            "vars.PR_WALKTHROUGH_ENABLED == 'true'",
+            "github.event_name == 'pull_request_target'",
+            "github.event.action == 'edited'",
+            "github.event.pull_request.draft == false",
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            "github.event.pull_request.head.repo.full_name != github.repository",
+            "contains(github.event.pull_request.labels.*.name, 'safe-to-review')",
+            "vars.CLAUDE_REVIEW_ALLOWLIST != ''",
+            "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
+        ):
+            self.assertIn(condition, self.reconcile)
+        self.assertNotIn("safe-to-test", self.reconcile)
+
+    def test_reconciliation_uses_trusted_read_only_publication_check(self) -> None:
+        for value in (
+            "ref: ${{ github.workflow_sha }}",
+            "fetch-depth: 1",
+            "persist-credentials: false",
+            'test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"',
+            "WALKTHROUGH_BASE_URL: https://walkthrough.kandev.ai",
+            'SHORT_HEAD_SHA="${HEAD_SHA:0:12}"',
+            'PUBLIC_URL="${WALKTHROUGH_BASE_URL%/}/pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"',
+            "curl --fail",
+            'grep -Eiq \'^content-type:[[:space:]]*text/html(;|[[:space:]]|$)\'',
+            'test -s "$PUBLIC_HTML_PATH"',
+        ):
+            self.assertIn(value, self.reconcile)
+
+        for forbidden in (
+            "OPENCODE_API_KEY",
+            "CLOUDFLARE_R2",
+            "SPRITES_API_TOKEN",
+            "opencode run",
+            "go run",
+            "pull_request.head.repo.full_name }}",
+        ):
+            self.assertNotIn(forbidden, self.reconcile)
+
+        self.assertIn("contents: read", self.reconcile)
+        self.assertIn("pull-requests: write", self.reconcile)
+        self.assertIn("github.workflow_sha", self.reconcile)
+
+    def test_reconciliation_reuses_marker_required_race_safe_body_update(self) -> None:
+        for value in (
+            "concurrency:",
+            "group: pr-description-${{ github.event.pull_request.number }}",
+            "cancel-in-progress: false",
+            "for attempt in 1 2 3; do",
+            "--require-existing",
+            "pr-latest-response.json",
+            "jq -j '.body // \"\"'",
+            "cmp -- pr-body-before pr-body-latest",
+            "pr-body-expected",
+            "pr-body-verified",
+            "cmp -- pr-body-expected pr-body-verified",
+            "gh api --method PATCH",
+            "pr-verified-response.json",
+            "verify_status",
+        ):
+            self.assertIn(value, self.reconcile)
+
+        patch_position = self.reconcile.index("gh api --method PATCH")
+        public_check_position = self.reconcile.index("curl --fail")
+        self.assertLess(public_check_position, patch_position)
 
     def test_skill_explains_trusted_context_without_provider_names(self) -> None:
         self.assertNotIn("Kandev", self.skill)
@@ -365,12 +450,39 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
 
     def test_link_job_retries_transient_github_api_responses(self) -> None:
         for value in (
-            "pr_response_ok=false",
             "for attempt in 1 2 3; do",
+            'if ! gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr-response.json ||',
             "python3 -c 'import json; json.load(open(\"pr-response.json\", encoding=\"utf-8\"))'",
-            'test "$pr_response_ok" = true',
-            "patch_ok=false",
-            'test "$patch_ok" = true',
+            "pr-latest-response.json",
+            "pr-verified-response.json",
+            "sleep 2",
+        ):
+            self.assertIn(value, self.link)
+
+    def test_description_writers_compare_fresh_bodies_and_verify_after_patch(self) -> None:
+        for job in (
+            self.link,
+            self.preview_deploy,
+            self.preview_fork,
+            self.preview_cleanup,
+        ):
+            self.assertIn("concurrency:", job)
+            self.assertIn(
+                "group: pr-description-${{ github.event.pull_request.number }}",
+                job,
+            )
+            self.assertIn("cancel-in-progress: false", job)
+
+        for value in (
+            "for attempt in 1 2 3; do",
+            "pr-latest-response.json",
+            "jq -j '.body // \"\"'",
+            "cmp -- pr-body-before pr-body-latest",
+            "pr-body-expected",
+            "pr-body-verified",
+            "cmp -- pr-body-expected pr-body-verified",
+            "pr-verified-response.json",
+            "verify_status",
         ):
             self.assertIn(value, self.link)
 

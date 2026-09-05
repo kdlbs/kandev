@@ -164,6 +164,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
 - [Sidebar Task Focus](system-design/sidebar-task-focus.md)
 - [Sidebar task row](system-design/sidebar-task-row-presentation.md)
+- [PR walkthrough](system-design/pr-walkthrough.md)
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
