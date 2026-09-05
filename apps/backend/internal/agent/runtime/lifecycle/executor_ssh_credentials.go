@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -275,6 +276,25 @@ var posixSSHEnvIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // files.
 type sshFileUploader struct {
 	client *ssh.Client
+}
+
+func (u *sshFileUploader) ReadFile(_ context.Context, path string) ([]byte, error) {
+	c, err := sftp.NewClient(u.client)
+	if err != nil {
+		return nil, fmt.Errorf("sftp: new client: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	file, err := c.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("sftp: read %s: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("sftp: read %s: %w", path, err)
+	}
+	return data, nil
 }
 
 func (u *sshFileUploader) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode) error {

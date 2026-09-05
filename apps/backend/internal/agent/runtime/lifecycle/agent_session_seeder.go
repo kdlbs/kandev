@@ -186,9 +186,10 @@ func authMethodsForHost(methods []agents.RemoteAuthMethod, hostOS string) []remo
 			continue
 		}
 		selected = append(selected, remoteauth.Method{
-			Type:         method.Type,
-			SourceFiles:  sources,
-			TargetRelDir: method.TargetRelDir,
+			Type:               method.Type,
+			SourceFiles:        sources,
+			TargetRelDir:       method.TargetRelDir,
+			FileConflictPolicy: method.FileConflictPolicy,
 		})
 	}
 	return selected

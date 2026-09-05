@@ -32,6 +32,13 @@ type spriteFileUploader struct {
 	runtime *SpritesExecutor
 }
 
+func (u *spriteFileUploader) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return u.sprite.Filesystem().ReadFile(path)
+}
+
 func (u *spriteFileUploader) WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error {
 	if u.runtime == nil {
 		return u.sprite.Filesystem().WriteFileContext(ctx, path, data, mode)
