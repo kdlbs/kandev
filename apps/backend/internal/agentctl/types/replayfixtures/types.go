@@ -140,6 +140,15 @@ type Expect struct {
 	ProviderError  ProviderErrorExpectation `json:"providerError"`
 	DiagnosticCode string                   `json:"diagnosticCode"`
 	PreResultSafe  bool                     `json:"preResultSafe"`
+	// RecordedDiagnosticCode is the recovery-evidence layer's own recorded
+	// diagnostic code after replaying every frame but before the terminal
+	// prompt_error is evaluated. Empty means no diagnostic is recorded at
+	// that point — either none classified during replay, or a later
+	// unmarked chunk cleared it. Non-empty means one is still recorded,
+	// independent of whether it will go on to satisfy containment against
+	// the terminal message. Declared explicitly rather than defaulting so a
+	// fixture cannot assert PreResultSafe without also pinning why.
+	RecordedDiagnosticCode string `json:"recordedDiagnosticCode"`
 }
 
 // Fixture is one replay fixture document: one JSON file, one (Gateway, Case)

@@ -19,6 +19,7 @@
     "events": ["message_chunk:diagnostic", "message_chunk", "error"],
     "providerError": {"source": "acp_prompt", "rpcCode": -32603, "providerId": "claude-acp"},
     "diagnosticCode": "provider_overloaded",
-    "preResultSafe": false
+    "preResultSafe": false,
+    "recordedDiagnosticCode": ""
   }
 }

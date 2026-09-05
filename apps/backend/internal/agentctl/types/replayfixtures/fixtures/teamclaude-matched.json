@@ -19,6 +19,7 @@
     "events": ["message_chunk:diagnostic", "error"],
     "providerError": {"source": "acp_prompt", "rpcCode": -32603, "errorKind": "server_error", "providerId": "claude-acp", "modelId": "claude-sonnet-5"},
     "diagnosticCode": "provider_unavailable",
-    "preResultSafe": true
+    "preResultSafe": true,
+    "recordedDiagnosticCode": "provider_unavailable"
   }
 }

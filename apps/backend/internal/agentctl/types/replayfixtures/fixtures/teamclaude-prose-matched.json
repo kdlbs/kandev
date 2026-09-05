@@ -18,6 +18,7 @@
     "events": ["message_chunk:diagnostic", "error"],
     "providerError": {"source": "acp_prompt", "rpcCode": -32603, "errorKind": "server_error", "providerId": "claude-acp"},
     "diagnosticCode": "provider_unavailable",
-    "preResultSafe": false
+    "preResultSafe": false,
+    "recordedDiagnosticCode": "provider_unavailable"
   }
 }

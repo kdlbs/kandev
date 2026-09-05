@@ -18,6 +18,7 @@
     "events": ["message_chunk", "error"],
     "providerError": {"source": "acp_prompt", "rpcCode": -32603, "errorKind": "context_window_exceeded", "providerId": "claude-acp"},
     "diagnosticCode": "agent_runtime_error",
-    "preResultSafe": false
+    "preResultSafe": false,
+    "recordedDiagnosticCode": ""
   }
 }

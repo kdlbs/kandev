@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/replayfixtures"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -17,7 +18,12 @@ import (
 // frames are skipped. A message_chunk frame whose aligned token carries
 // ":diagnostic" calls observeProviderDiagnostic; every other non-prompt_error
 // frame calls observePromptAttempt with the table's fixed output/effect pair.
-func replayEvidenceLayer(service *Service, fx replayfixtures.Fixture) watcher.AgentEventData {
+// The second return value is the diagnostic code recorded after every frame
+// but before the terminal prompt_error is evaluated, read directly off the
+// evidence record rather than inferred from the fence outcome, so a fixture
+// can pin the recorded state independent of whether it happens to be
+// pre-result safe.
+func replayEvidenceLayer(service *Service, fx replayfixtures.Fixture) (watcher.AgentEventData, routingerr.Code) {
 	service.beginPromptAttempt(fx.Identity.SessionID, fx.Identity.ExecutionID, fx.Identity.PromptGeneration, false)
 
 	var promptErrorFrame replayfixtures.Frame
@@ -46,6 +52,13 @@ func replayEvidenceLayer(service *Service, fx replayfixtures.Fixture) watcher.Ag
 		}
 	}
 
+	var recorded routingerr.Code
+	if evidence, ok := service.promptAttemptForSession(fx.Identity.SessionID); ok {
+		evidence.mu.Lock()
+		recorded = evidence.providerDiagnosticCode
+		evidence.mu.Unlock()
+	}
+
 	// The transport layer never hands the evidence layer a raw terminal
 	// message: SendErrorEventWithProviderError's caller sets the event's
 	// error text to providerError.Message once a provider diagnostic exists
@@ -72,20 +85,29 @@ func replayEvidenceLayer(service *Service, fx replayfixtures.Fixture) watcher.Ag
 			ErrorKind:  fx.Expect.ProviderError.ErrorKind,
 			Message:    sanitizedMessage,
 		},
-	}
+	}, recorded
 }
 
 // TestReplayFixtureEvidenceLayer drives promptAttemptPreResultSafe from the
 // shared ACP replay fixture corpus. It does not re-run the transport and does
 // not re-derive the event sequence; it replays the fixed per-frame mapping
-// the design specifies and asserts the fence outcome the fixture declares.
+// the design specifies and asserts both outcomes provider-error-recovery-02.md
+// assigns to this layer: the recorded diagnostic code after the frames, and
+// the fence outcome. Asserting only the fence outcome would let a fixture
+// like `*-prose-output.json` pass for the wrong reason — its `PreResultSafe:
+// false` is also satisfied by containment failing on prose, so a broken
+// clearing rule would go unnoticed by that assertion alone.
 func TestReplayFixtureEvidenceLayer(t *testing.T) {
 	fixtures := replayfixtures.MustLoad()
 
 	for _, fx := range fixtures {
 		t.Run(fx.FileName, func(t *testing.T) {
 			var service Service
-			data := replayEvidenceLayer(&service, fx)
+			data, recorded := replayEvidenceLayer(&service, fx)
+
+			if string(recorded) != fx.Expect.RecordedDiagnosticCode {
+				t.Fatalf("recorded diagnostic code = %q, want %q", recorded, fx.Expect.RecordedDiagnosticCode)
+			}
 
 			got := service.promptAttemptPreResultSafe(data)
 			if got != fx.Expect.PreResultSafe {
@@ -107,11 +129,13 @@ func TestReplayFixtureEvidenceLayerIsReplayIdempotent(t *testing.T) {
 	var first, second bool
 	{
 		var service Service
-		first = service.promptAttemptPreResultSafe(replayEvidenceLayer(&service, fx))
+		data, _ := replayEvidenceLayer(&service, fx)
+		first = service.promptAttemptPreResultSafe(data)
 	}
 	{
 		var service Service
-		second = service.promptAttemptPreResultSafe(replayEvidenceLayer(&service, fx))
+		data, _ := replayEvidenceLayer(&service, fx)
+		second = service.promptAttemptPreResultSafe(data)
 	}
 	if first != second {
 		t.Fatalf("replay was not idempotent: first=%v second=%v", first, second)
