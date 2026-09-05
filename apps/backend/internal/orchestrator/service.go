@@ -372,7 +372,7 @@ type sessionExecutorStore interface {
 	// behind the completion-handoff carry token (MetaKeyStepHandoffCarry): it
 	// removes tasks.metadata[key] only when the stored object's nested
 	// step_id and stamp both equal the caller's expectations, returning the
-	// removed value's raw JSON. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
+	// removed value's raw JSON.
 	TakeTaskMetadataKeyIfDestinationStep(
 		ctx context.Context,
 		taskID, key, expectedStepID, expectedStamp string,

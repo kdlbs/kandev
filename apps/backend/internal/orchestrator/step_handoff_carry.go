@@ -9,19 +9,24 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 // drainQueuedMessageForPromptableSessionWithHandoff is a sibling of
 // drainQueuedMessageForPromptableSessionOutcome for the step-entry dispatch
-// branches whose only activity is draining a queued message (AC-001.6c). It
-// duplicates that function's guard/reserve tail instead of adding a splice
-// parameter to the shared drain chain, which has 12 production call sites
-// that are not step entries at all (AC-005.6 forbids changing their
-// behavior). The handoff is claimed only once a message is confirmed about
-// to be dispatched, and is spliced onto a LOCAL COPY of that message's
-// content — never onto the stored queue entry — so a skipped or paused
-// reservation cannot lose or double-append it on a later drain.
+// branches whose only activity is draining a queued message. It duplicates
+// that function's guard/reserve tail instead of adding a splice parameter to
+// the shared drain chain, which has 12 production call sites that are not
+// step entries at all and must keep their existing behavior unchanged. The
+// handoff is claimed only once a message is confirmed about to be
+// dispatched, and is carried on a LOCAL COPY of that message's metadata —
+// never onto the stored queue entry — so a skipped or paused reservation
+// cannot lose or double-append it on a later drain. It rides as metadata
+// rather than being spliced onto Content directly because the actual
+// dispatch still runs entity-reference expansion over Content; appending the
+// handoff here would let that expansion land after it, violating the
+// "handoff last" rule whenever the queued message itself carries references.
 func (s *Service) drainQueuedMessageForPromptableSessionWithHandoff(
 	ctx context.Context, taskID, sessionID, stepID string, once *stepHandoffOnce,
 ) bool {
@@ -50,12 +55,34 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithHandoff(
 	}
 	if queuedMsg.Content != "" || len(queuedMsg.Attachments) > 0 {
 		if handoffText := s.resolveStepHandoffText(ctx, once, taskID, stepID, true); handoffText != "" {
-			spliced := *queuedMsg
-			spliced.Content = appendStepHandoffToPrompt(queuedMsg.Content, handoffText)
-			queuedMsg = &spliced
+			queuedMsg = withStepHandoffMetadata(queuedMsg, handoffText)
 		}
 	}
 	return s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok)
+}
+
+// withStepHandoffMetadata returns a shallow copy of msg carrying handoffText
+// under messagequeue.MetadataStepHandoff, leaving the original message (and
+// its metadata map) untouched so a later drain of the same stored entry never
+// observes a handoff it was not itself claimed for.
+func withStepHandoffMetadata(msg *messagequeue.QueuedMessage, handoffText string) *messagequeue.QueuedMessage {
+	spliced := *msg
+	metadata := make(map[string]interface{}, len(msg.Metadata)+1)
+	for k, v := range msg.Metadata {
+		metadata[k] = v
+	}
+	metadata[messagequeue.MetadataStepHandoff] = handoffText
+	spliced.Metadata = metadata
+	return &spliced
+}
+
+// stepHandoffFromQueuedMetadata extracts a claimed handoff carried through a
+// queued message's metadata (see withStepHandoffMetadata / queueAutoStartPrompt),
+// so a deferred dispatch path can append it last, after entity-reference
+// expansion, instead of losing it or racing that expansion.
+func stepHandoffFromQueuedMetadata(metadata map[string]interface{}) string {
+	handoff, _ := metadata[messagequeue.MetadataStepHandoff].(string)
+	return handoff
 }
 
 // stepHandoffPromptHeading is the fixed heading the claimed handoff text is

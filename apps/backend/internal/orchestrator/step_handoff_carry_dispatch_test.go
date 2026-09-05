@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -306,6 +308,139 @@ func TestStartSessionForWorkflowStep_DeliversHandoff(t *testing.T) {
 	if _, present := carryToken(t, fixture.repo, fixture.taskID); present {
 		t.Fatal("the claimed token must be removed")
 	}
+}
+
+// TestAutoStartStepPrompt_QueueFallbackWhenRunningCarriesHandoffMetadata covers
+// AC-001.6/AC-001.8's queue-fallback half: when autoStartStepPrompt's
+// shouldQueueIfBusy branch queues instead of dispatching directly (the
+// session is already RUNNING), the handoff already claimed for this step
+// entry must ride along as queue metadata — not the raw pre-handoff prompt —
+// so a later drain (through the ordinary, non-handoff-aware drain path every
+// other queued message uses) still appends it, last, after entity-reference
+// expansion.
+func TestAutoStartStepPrompt_QueueFallbackWhenRunningCarriesHandoffMetadata(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-queue-fallback-running"
+		sessionID = "session-queue-fallback-running"
+		stepID    = "step-next"
+		autoStart = "Run the next workflow step"
+		carried   = "carried through queue fallback"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-queue-fallback")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-queue-fallback-running")
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Next"}
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true, newStepHandoffOnce())
+	require.NoError(t, err)
+	require.Empty(t, agentMgr.capturedPrompts, "a queued-because-running fallback must not dispatch directly")
+
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("the queue-fallback path must still claim the token up front, before deciding to queue")
+	}
+
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, carried, stepHandoffFromQueuedMetadata(entries[0].Metadata),
+		"the queued message metadata must carry the already-claimed handoff, not silently drop it")
+
+	// Drain through the ordinary, non-handoff-aware path every other queued
+	// message goes through in production. If the fix instead spliced the
+	// handoff onto raw Content at queue time, this would double as an
+	// ordering bug; carrying it as metadata means the generic drain path
+	// (which knows nothing about step handoffs) still appends it correctly.
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+	require.True(t, svc.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID))
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
+
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+	autoStartIdx := strings.Index(prompt, autoStart)
+	headingIdx := strings.Index(prompt, stepHandoffPromptHeading)
+	carriedIdx := strings.Index(prompt, carried)
+	require.NotEqual(t, -1, autoStartIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, headingIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, carriedIdx, "prompt = %q", prompt)
+	require.True(t, autoStartIdx < headingIdx && headingIdx < carriedIdx,
+		"the handoff must land last in the drained prompt")
+}
+
+// TestAutoStartStepPrompt_QueueFallbackPreservesEntityReferenceOrderingBeforeHandoff
+// covers the MAJOR ordering finding directly: a queue-fallback re-queues a
+// message carrying entity references (taken from an existing queued hand-off)
+// alongside the claimed step handoff. AppendEntityReferenceContext only runs
+// at actual dispatch/drain time, so the drained prompt must still show the
+// reference block before the handoff heading — proving the fix appends the
+// handoff after reference expansion rather than baking it into raw Content at
+// queue time, which would let expansion land after it.
+func TestAutoStartStepPrompt_QueueFallbackPreservesEntityReferenceOrderingBeforeHandoff(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-queue-fallback-refs"
+		sessionID = "session-queue-fallback-refs"
+		stepID    = "step-next"
+		autoStart = "Run the next workflow step"
+		queued    = "please also check the migration"
+		carried   = "watch out for the flaky test"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-queue-fallback-refs")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-queue-fallback-refs")
+
+	reference := queuedReferenceFixture()
+	_, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, sessionID, taskID, queued, "", messagequeue.QueuedByUser, false, nil,
+		map[string]interface{}{messagequeue.MetadataEntityReferences: []v1.EntityReference{reference}},
+	)
+	require.NoError(t, err)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Next"}
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true, newStepHandoffOnce())
+	require.NoError(t, err)
+	require.Empty(t, agentMgr.capturedPrompts)
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+	require.True(t, svc.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID))
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
+
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+	queuedIdx := strings.Index(prompt, queued)
+	referenceIdx := strings.Index(prompt, "Validated work-item reference snapshots")
+	headingIdx := strings.Index(prompt, stepHandoffPromptHeading)
+	carriedIdx := strings.Index(prompt, carried)
+	require.NotEqual(t, -1, queuedIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, referenceIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, headingIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, carriedIdx, "prompt = %q", prompt)
+	require.True(t, queuedIdx < referenceIdx && referenceIdx < headingIdx && headingIdx < carriedIdx,
+		"entity-reference expansion must land before the handoff, which must land last; prompt = %q", prompt)
 }
 
 // failOnceHandoffClaimRepo wraps a real repo's TakeTaskMetadataKeyIfDestinationStep

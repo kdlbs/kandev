@@ -2488,9 +2488,9 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	}
 
 	// Claimed after the actionability decision above, over content that
-	// excludes the handoff text (AC-001.6a), then appended last (AC-001.6).
-	// Queue promotion and manual auto-start dispatch once with no replacement
-	// launch, so no shared stepHandoffOnce is needed here.
+	// excludes the handoff text, then appended last. Queue promotion and
+	// manual auto-start dispatch once with no replacement launch, so no
+	// shared stepHandoffOnce is needed here.
 	handoffText, _ := s.claimStepHandoffCarryText(ctx, taskID, workflowStepID)
 	effectivePrompt = appendStepHandoffToPrompt(effectivePrompt, handoffText)
 

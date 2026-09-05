@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 func carryToken(t *testing.T, repo interface {
@@ -118,6 +119,75 @@ func TestExecuteStepTransition_OnTurnStartDoesNotTouchToken(t *testing.T) {
 	token, present := carryToken(t, repo, "t1")
 	if !present || token.StepID != "step3" || token.Handoff != "keep me" {
 		t.Fatalf("on_turn_start transition must leave the existing token untouched, got present=%v token=%+v", present, token)
+	}
+}
+
+// TestExecuteStepTransition_QueuedTransitionStillWritesHandoffCarryToken
+// covers AC-001.11's legacy-funnel half: a transition that lands the task in
+// a WIP-full queued state still commits — the task's step already changed,
+// only dispatch is deferred until a queue promotion admits it. The carry
+// token (and the audit metadata) must be captured at commit time, because
+// StartSessionForWorkflowStep claims the token at promotion and has no other
+// way to learn one was ever written.
+func TestExecuteStepTransition_QueuedTransitionStillWritesHandoffCarryToken(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "occupant",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step2",
+		Title:          "Occupant",
+		State:          "TODO",
+		Priority:       "medium",
+	}); err != nil {
+		t.Fatalf("create occupant: %v", err)
+	}
+
+	steps := newMockStepGetter()
+	fromStep := &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Source"}
+	steps.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Limited", WIPLimit: 1,
+	}
+	svc := createTestService(repo, steps, newMockTaskRepo())
+	recorder := &fakeStepHistoryRecorder{}
+	svc.stepHistoryRecorder = recorder
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:  "step1",
+		Source:  models.StepCompletionSourceAgent,
+		Summary: "did the work",
+		Handoff: "watch out for X",
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		t.Fatalf("seed pending signal: %v", err)
+	}
+
+	svc.executeStepTransition(ctx, "t1", "s1", fromStep, "step2", true)
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.WorkflowStepID != "step2" || task.WIPAdmitted || task.QueuedForStepID != "step2" {
+		t.Fatalf("queued task placement: step=%q admitted=%t queue=%q", task.WorkflowStepID, task.WIPAdmitted, task.QueuedForStepID)
+	}
+
+	token, present := carryToken(t, repo, "t1")
+	if !present {
+		t.Fatal("a queued transition must still write the carry token so a later queue promotion can claim it")
+	}
+	if token.Handoff != "watch out for X" || token.StepID != "step2" {
+		t.Fatalf("token = %+v, want handoff for step2", token)
+	}
+
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded transition even though dispatch is deferred, got %d", len(calls))
+	}
+	if calls[0].metadata["signal_handoff"] != "watch out for X" {
+		t.Errorf("metadata[signal_handoff] = %v, want 'watch out for X'", calls[0].metadata["signal_handoff"])
 	}
 }
 
