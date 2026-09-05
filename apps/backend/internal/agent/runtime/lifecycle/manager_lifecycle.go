@@ -141,6 +141,21 @@ func (m *Manager) Start(ctx context.Context) error {
 				// stale relative to what the instance actually resumed.
 				ACPSessionID: ri.ProviderSessionID,
 			}
+			// AC-EXECUTORS-SURVIVAL-002.14's declared source for task
+			// identity is the recovery-inventory record alone, never the
+			// adopted instance (buildRecoveredInstances no longer falls
+			// back to the instance's self-reported task ID). An empty
+			// value here means the record itself is authoritatively
+			// missing it: refuse to re-track, per AC-EXECUTORS-SURVIVAL-002.4,
+			// rather than trusting the instance's own claim about which
+			// task it belongs to.
+			if execution.TaskID == "" {
+				m.logger.Error("refusing to re-track recovered execution: task identity was not present in the recovery-inventory record",
+					zap.String("instance_id", execution.ID),
+					zap.String("session_id", execution.SessionID))
+				m.stopUnreconstructableRecoveredInstance(context.Background(), ri)
+				continue
+			}
 			// A recovered instance is resuming a live provider session (its
 			// ACPSessionID above comes straight from the adopted instance), so
 			// ACP session setup is already complete -- unlike a fresh launch,

@@ -600,13 +600,21 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 			agentctl.WithSessionID(sessionID),
 			agentctl.WithAuthToken(r.authToken))
 
-		taskID := inst.TaskID
+		// AC-EXECUTORS-SURVIVAL-002.14: task identity and workspace path's
+		// declared source is the recovery-inventory record, never the
+		// adopted instance -- an instance must not be able to influence what
+		// the backend believes either belongs to. A record with no TaskID
+		// (or, defensively, no record at all -- correlation should never
+		// produce a winner without one) is left empty here rather than
+		// falling back to the instance's self-reported value; the caller
+		// routes an empty TaskID to the AC-EXECUTORS-SURVIVAL-002.4 refusal
+		// path instead of tracking a session it cannot safely operate.
+		var taskID, workspacePath string
 		var metadata map[string]interface{}
 		var agentProfileID string
 		if record != nil {
-			if record.TaskID != "" {
-				taskID = record.TaskID
-			}
+			taskID = record.TaskID
+			workspacePath = record.WorktreePath
 			metadata = record.Metadata
 			// AC-EXECUTORS-SURVIVAL-002.14: agent profile identity's declared
 			// source is the recovery-inventory record's execution-profile
@@ -623,7 +631,7 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 			Client:               client,
 			StandaloneInstanceID: inst.ID,
 			StandalonePort:       inst.Port,
-			WorkspacePath:        inst.WorkspacePath,
+			WorkspacePath:        workspacePath,
 			Metadata:             metadata,
 			Env:                  inst.Env,
 			WorkspaceSourceRoots: inst.WorkspaceSourceRoots,

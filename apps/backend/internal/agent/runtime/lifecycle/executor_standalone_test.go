@@ -414,7 +414,7 @@ func TestStandaloneExecutorRecoverInstancesReTracksWinnerAndStopsOrphan(t *testi
 	exec.SetAuthToken("survival-token")
 
 	records := []*models.ExecutorRunning{
-		{SessionID: "session-1", TaskID: "task-1", AgentExecutionID: "instance-1", Metadata: map[string]interface{}{"k": "v"}},
+		{SessionID: "session-1", TaskID: "task-1", AgentExecutionID: "instance-1", WorktreePath: "/ws/1-from-record", Metadata: map[string]interface{}{"k": "v"}},
 	}
 
 	recovered, err := exec.RecoverInstances(context.Background(), records)
@@ -428,8 +428,12 @@ func TestStandaloneExecutorRecoverInstancesReTracksWinnerAndStopsOrphan(t *testi
 	if got.SessionID != "session-1" || got.TaskID != "task-1" || got.InstanceID != "instance-1" {
 		t.Fatalf("recovered instance identity = %+v", got)
 	}
-	if got.WorkspacePath != "/ws/1" {
-		t.Fatalf("WorkspacePath = %q, want the instance's live workspace path", got.WorkspacePath)
+	// AC-EXECUTORS-SURVIVAL-002.14 (Review round 3, finding 3): workspace
+	// path's declared source is the recovery-inventory record, never the
+	// adopted instance's own report (which the fixture deliberately sets to
+	// a different value, "/ws/1", to prove it is ignored).
+	if got.WorkspacePath != "/ws/1-from-record" {
+		t.Fatalf("WorkspacePath = %q, want the record's WorktreePath, not the instance's self-reported path", got.WorkspacePath)
 	}
 	if got.Metadata["k"] != "v" {
 		t.Fatalf("Metadata = %+v, want the record's persisted metadata", got.Metadata)
