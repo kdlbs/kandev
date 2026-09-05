@@ -32,6 +32,7 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
         *,
         manifest: bytes,
         failures_before_success: int,
+        attempt_timeout: str = "5s",
         stalls_before_success: int = 0,
         invalid_manifest: bytes = b"",
         invalid_responses_before_success: int = 0,
@@ -91,7 +92,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
                         invalid_responses_before_success
                     ),
                     "FAKE_DOCKER_MANIFEST": str(manifest_file),
-                    "IMAGE_RESOLVE_ATTEMPT_TIMEOUT": "0.1s",
+                    "IMAGE_RESOLVE_ATTEMPT_TIMEOUT": attempt_timeout,
                 }
             )
             result = subprocess.run(
@@ -314,12 +315,13 @@ cat "${FAKE_DOCKER_MANIFEST}"
         result, attempts = self.run_image_digest_resolver(
             manifest=manifest,
             failures_before_success=0,
+            attempt_timeout="0.5s",
             stalls_before_success=1,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(attempts, 2)
-        self.assertIn("timed out after 0.1s", result.stderr)
+        self.assertIn("timed out after 0.5s", result.stderr)
 
     def test_image_digest_resolver_retries_invalid_manifest_then_succeeds(self) -> None:
         self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
