@@ -152,11 +152,82 @@ func (r *Repository) ExpireActiveClarificationBundle(
 	return messages, nil
 }
 
+// ReattachActiveClarificationBundle clears the detached marker from one exact
+// pending bundle after a live waiter re-adopted it, so the projection and the
+// orchestrator's live-clarification guard stop treating the bundle as
+// abandoned. Only pending, currently detached rows on the session's current
+// durable turn change; a superseded, terminal, or never-detached bundle is
+// left untouched and yields no rows.
+func (r *Repository) ReattachActiveClarificationBundle(
+	ctx context.Context,
+	sessionID, pendingID string,
+) ([]*models.Message, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin clarification reattach: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	drv := r.db.DriverName()
+	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
+		return nil, err
+	}
+	updatedAt := r.nowUTC()
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = ?
+		WHERE task_session_id = ?
+		  AND type = 'clarification_request'
+		  AND COALESCE(%s, '') IN ('', 'pending')
+		  AND %s = ?
+		  AND NOT (%s)
+		  AND turn_id = (
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = task_session_messages.task_session_id
+			  AND %s
+			ORDER BY %s
+			LIMIT 1
+		  )
+		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
+		          content, requests_input, type, metadata, created_at, updated_at
+	`, clarificationReattachedMetadataExpr(drv),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id"),
+		clarificationNotDetachedPredicate(drv),
+		predicate, orderBy)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID, pendingID)
+	if err != nil {
+		return nil, fmt.Errorf("reattach active clarification messages: %w", err)
+	}
+	messages, _, err := scanMessageRows(rows, 0)
+	closeErr := rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("scan reattached clarification messages: %w", err)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close reattached clarification rows: %w", closeErr)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit clarification reattach: %w", err)
+	}
+	return messages, nil
+}
+
 func clarificationDetachedMetadataExpr(driverName string) string {
 	if dialect.IsPostgres(driverName) {
 		return "jsonb_set(metadata::jsonb, '{agent_disconnected}', 'true'::jsonb)::text"
 	}
 	return "json_set(metadata, '$.agent_disconnected', json('true'))"
+}
+
+// clarificationReattachedMetadataExpr removes the detached marker so the row
+// reads exactly like a bundle whose waiter never went away.
+func clarificationReattachedMetadataExpr(driverName string) string {
+	if dialect.IsPostgres(driverName) {
+		return "(metadata::jsonb - 'agent_disconnected')::text"
+	}
+	return "json_remove(metadata, '$.agent_disconnected')"
 }
 
 func clarificationExpiredMetadataExpr(driverName string) string {

@@ -746,14 +746,16 @@ Each returned bundle carries `pending_id`, `task_id`, `session_id`, `created_at`
 `context`, and an ordered `questions` array; each question carries `question_id`, `title`,
 `prompt`, `status`, and its `options` (`option_id`, `label`, `description`).
 
-The bundle's `pending_id` is the durable identity of the visible question group. If an agent's
-MCP transport closes or times out while `ask_user_question_kandev` is waiting, the question stays
-visible and answerable. When the agent re-sends the same JSON-RPC request (same request id on the
-same MCP connection), Kandev maps the retry to the bundle its interrupted call created: no second
-question is published, and if the person already answered, rejected, or cancelled it, the retry
-returns that recorded outcome immediately instead of waiting again. A call with a new request id
-is a new question; an identical question re-asked while the original is still pending is
-deduplicated to the pending bundle.
+The bundle's `pending_id` is the durable identity of the visible question group. If the request
+carrying an `ask_user_question_kandev` call is interrupted or times out while the call is waiting,
+the question stays visible and answerable. When the agent re-sends the same JSON-RPC request (same
+request id) within the same MCP session, Kandev maps the retry to the bundle its interrupted call
+created: no second question is published, the bundle is marked attached again if the interruption
+had detached it, and if the person already answered, rejected, or cancelled it, the retry returns
+that recorded outcome immediately instead of waiting again. A new MCP session (for example after a
+stdio agent restarts or a client drops its `Mcp-Session-Id`) starts fresh: a re-sent request id is a
+new question there. A call with a new request id is a new question; an identical question re-asked
+while the original is still pending is deduplicated to the pending bundle.
 
 After the person answers, pass the bundle's `pending_id` plus one entry per question to
 `answer_question_kandev`:

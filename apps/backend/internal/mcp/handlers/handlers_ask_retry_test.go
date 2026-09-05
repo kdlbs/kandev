@@ -20,14 +20,30 @@ import (
 
 // countingMessageCreator records how many bundles the handler asked it to
 // create; the retry tests assert it stays untouched when durable messages
-// already exist for the retry identity.
+// already exist for the retry identity. It also records bundle updates the
+// handler publishes when a retry re-adopts a detached bundle.
 type countingMessageCreator struct {
-	calls atomic.Int32
+	calls     atomic.Int32
+	mu        sync.Mutex
+	published [][]*models.Message
 }
 
 func (c *countingMessageCreator) CreateClarificationRequestMessages(context.Context, string, string, string, []clarification.Question, string) ([]string, error) {
 	c.calls.Add(1)
 	return []string{"m-created"}, nil
+}
+
+func (c *countingMessageCreator) PublishClarificationBundleUpdates(_ context.Context, messages []*models.Message) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.published = append(c.published, messages)
+	return nil
+}
+
+func (c *countingMessageCreator) publishedBatches() [][]*models.Message {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]*models.Message(nil), c.published...)
 }
 
 const retryTestKey = "conn-a/int64:7"
@@ -135,6 +151,56 @@ func TestHandleAskUserQuestion_RetryReusesDurableBundleWithoutRecreatingMessages
 	assert.Equal(t, pendingID, body.PendingID)
 	require.Len(t, body.Answers, 1)
 	assert.Equal(t, []string{"opt-blue"}, body.Answers[0].SelectedOptions)
+}
+
+// TestHandleAskUserQuestion_RetryReattachesDetachedBundle covers a retry that
+// adopts a bundle the canceller already detached (agent_disconnected=true).
+// The live waiter is back, so the durable rows must stop advertising the
+// detachment and the change must be published; otherwise the projection shows
+// a disconnected agent and the orchestrator's live-clarification guard would
+// let a queued prompt interrupt the in-flight tool call.
+func TestHandleAskUserQuestion_RetryReattachesDetachedBundle(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	taskID, sessionID, pendingID := seedRetrySession(t, ctx, svc, repo, "retry-detached")
+	seedRetryMessage(t, ctx, repo, taskID, sessionID, pendingID, "pending", nil)
+	seeded, err := repo.FindMessagesByPendingID(ctx, pendingID)
+	require.NoError(t, err)
+	require.Len(t, seeded, 1)
+	seeded[0].Metadata["agent_disconnected"] = true
+	require.NoError(t, repo.UpdateMessage(ctx, seeded[0]))
+
+	store := clarification.NewStore(time.Minute)
+	creator := &countingMessageCreator{}
+	h := NewHandlers(svc, nil, store, nil, creator, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, retryAskPayload(sessionID, taskID)))
+		require.NoError(t, err)
+	}()
+	require.Eventually(t, func() bool { return len(store.ListPending()) == 1 }, time.Second, 5*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		messages, err := repo.FindMessagesByPendingID(ctx, pendingID)
+		if err != nil || len(messages) != 1 {
+			return false
+		}
+		_, detached := messages[0].Metadata["agent_disconnected"]
+		return !detached
+	}, time.Second, 5*time.Millisecond, "the adopted bundle must no longer be marked agent_disconnected")
+	batches := creator.publishedBatches()
+	require.Len(t, batches, 1, "the reattached rows must be published once")
+	require.Len(t, batches[0], 1)
+	assert.Equal(t, seeded[0].ID, batches[0][0].ID)
+	_, stillDetached := batches[0][0].Metadata["agent_disconnected"]
+	assert.False(t, stillDetached, "published row must carry the reattached metadata")
+	assert.Equal(t, int32(0), creator.calls.Load())
+
+	require.NoError(t, store.Respond(pendingID, &clarification.Response{PendingID: pendingID, Answers: []clarification.Answer{{QuestionID: "q1", SelectedOptions: []string{"opt-red"}}}}))
+	wg.Wait()
 }
 
 func TestHandleAskUserQuestion_RetryReturnsRecordedAnswerWithoutWaiting(t *testing.T) {

@@ -105,7 +105,15 @@ func (s *Store) CreateRequest(req *Request) (string, bool) {
 		}
 	}
 
-	if req.PendingID == "" {
+	// A preset identity that is already live is joined, never replaced:
+	// overwriting the map entry would orphan its waiters on a done channel
+	// nobody closes. Exact retries carry identical questions and are caught
+	// above; this guards a client that reused a request id for another call.
+	if req.PendingID != "" {
+		if existing, ok := s.pending[req.PendingID]; ok {
+			return existing.Request.PendingID, false
+		}
+	} else {
 		req.PendingID = uuid.New().String()
 	}
 	req.CreatedAt = time.Now()

@@ -374,6 +374,52 @@ func TestCreateRequest_NoDedup_DifferentQuestions(t *testing.T) {
 	}
 }
 
+// TestCreateRequest_PresetID_NeverReplacesLiveEntry guards the retry identity
+// path: a request that presets a PendingID already held by a live entry must
+// join that entry, even when its questions differ (a client that reused a
+// JSON-RPC id for a different call). Replacing the map entry would orphan the
+// original waiter on a done channel nobody closes.
+func TestCreateRequest_PresetID_NeverReplacesLiveEntry(t *testing.T) {
+	s := NewStore(time.Minute)
+	first := &Request{PendingID: "preset-1", SessionID: "s1", Questions: []Question{{Prompt: "Q1?", Options: []Option{{ID: "o1", Label: "A"}, {ID: "o2", Label: "B"}}}}}
+	id1, isNew1 := s.CreateRequest(first)
+	if id1 != "preset-1" || !isNew1 {
+		t.Fatalf("first create = (%q, %v), want (preset-1, true)", id1, isNew1)
+	}
+	waited := make(chan error, 1)
+	entered := make(chan struct{})
+	s.onWaitEntered = func(string) { close(entered) }
+	go func() {
+		_, err := s.WaitForResponse(context.Background(), "preset-1")
+		waited <- err
+	}()
+	<-entered
+
+	second := &Request{PendingID: "preset-1", SessionID: "s1", Questions: []Question{{Prompt: "Different?", Options: []Option{{ID: "o1", Label: "A"}, {ID: "o2", Label: "B"}}}}}
+	id2, isNew2 := s.CreateRequest(second)
+	if id2 != "preset-1" || isNew2 {
+		t.Fatalf("second create = (%q, %v), want (preset-1, false): a live entry must be joined, not replaced", id2, isNew2)
+	}
+	if got, _ := s.GetRequest("preset-1"); got == nil || got.Questions[0].Prompt != "Q1?" {
+		t.Fatalf("live entry was replaced: %+v", got)
+	}
+	if len(s.ListPending()) != 1 {
+		t.Fatalf("expected 1 pending entry, got %d", len(s.ListPending()))
+	}
+
+	if err := s.Respond("preset-1", &Response{PendingID: "preset-1"}); err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	select {
+	case err := <-waited:
+		if err != nil {
+			t.Fatalf("original waiter must receive the response, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("original waiter was orphaned by the second create")
+	}
+}
+
 // TestWaitForResponse_Broadcast_MultipleWaiters verifies that close(done) in
 // Respond unblocks every parked waiter. The onWaitEntered hook lets the test
 // observe each goroutine after it has captured a *PendingClarification pointer

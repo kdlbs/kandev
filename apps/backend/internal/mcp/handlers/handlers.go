@@ -113,6 +113,19 @@ type clarificationDurableReader interface {
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 }
 
+// clarificationReattacher is an optional repository extension that clears the
+// detached marker from a still-pending bundle once a retry re-adopts it with a
+// live waiter.
+type clarificationReattacher interface {
+	ReattachActiveClarificationBundle(ctx context.Context, sessionID, pendingID string) ([]*models.Message, error)
+}
+
+// clarificationBundlePublisher is an optional message-creator extension that
+// exposes committed bundle rows to bus subscribers.
+type clarificationBundlePublisher interface {
+	PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) error
+}
+
 // durableClarificationState is what an exact retry finds already recorded for
 // its identity. exists means the visible question messages are present and
 // must not be created again; response carries an answered/rejected outcome;
@@ -164,6 +177,40 @@ func (h *Handlers) reconcileDurableClarification(ctx context.Context, sessionID,
 		state.closed = status
 	}
 	return state, nil
+}
+
+// reattachDurableClarification runs after a retry re-adopted a still-pending
+// bundle and a live waiter exists for it again. It clears agent_disconnected
+// from the bundle's current-turn rows and publishes the change so the
+// projection and the orchestrator's live-clarification guard see a live
+// waiter. Failures are logged only: the in-memory wait is already correct and
+// the durable flag is advisory.
+func (h *Handlers) reattachDurableClarification(ctx context.Context, sessionID, pendingID string) {
+	reattacher, ok := h.sessionRepo.(clarificationReattacher)
+	if !ok {
+		return
+	}
+	messages, err := reattacher.ReattachActiveClarificationBundle(ctx, sessionID, pendingID)
+	if err != nil {
+		h.logger.Warn("failed to clear detached marker on re-adopted clarification bundle",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if len(messages) == 0 {
+		return
+	}
+	publisher, ok := h.messageCreator.(clarificationBundlePublisher)
+	if !ok {
+		return
+	}
+	if err := publisher.PublishClarificationBundleUpdates(ctx, messages); err != nil {
+		h.logger.Warn("failed to publish re-adopted clarification bundle",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 // stepCompletionTurnReader exposes the immutable workflow-step stamp on the
@@ -3863,6 +3910,11 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 				"failed to create clarification messages: "+err.Error(), nil)
 		}
+	}
+	if durable.exists {
+		// The bundle may have been detached while no waiter was attached; this
+		// call is about to wait on it again.
+		h.reattachDurableClarification(ctx, req.SessionID, pendingID)
 	}
 
 	// Update session and task states to waiting for input
