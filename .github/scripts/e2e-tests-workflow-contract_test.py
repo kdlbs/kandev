@@ -28,7 +28,12 @@ def job_block(workflow: str, job: str, next_job: str) -> str:
 
 class DesktopE2EWorkflowContractTest(unittest.TestCase):
     def run_image_digest_resolver(
-        self, *, manifest: bytes, failures_before_success: int
+        self,
+        *,
+        manifest: bytes,
+        failures_before_success: int,
+        invalid_manifest: bytes = b"",
+        invalid_responses_before_success: int = 0,
     ) -> tuple[subprocess.CompletedProcess[str], int]:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -37,6 +42,8 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             count_file = temp_path / "docker-count"
             manifest_file = temp_path / "manifest.json"
             manifest_file.write_bytes(manifest)
+            invalid_manifest_file = temp_path / "invalid-manifest.json"
+            invalid_manifest_file.write_bytes(invalid_manifest)
 
             docker = bin_dir / "docker"
             docker.write_text(
@@ -51,6 +58,10 @@ printf '%s' "${count}" > "${FAKE_DOCKER_COUNT}"
 if (( count <= FAKE_DOCKER_FAILURES )); then
   echo "transient registry failure" >&2
   exit 1
+fi
+if (( count <= FAKE_DOCKER_FAILURES + FAKE_DOCKER_INVALID_RESPONSES )); then
+  cat "${FAKE_DOCKER_INVALID_MANIFEST}"
+  exit 0
 fi
 cat "${FAKE_DOCKER_MANIFEST}"
 """,
@@ -68,6 +79,10 @@ cat "${FAKE_DOCKER_MANIFEST}"
                     "PATH": f"{bin_dir}:{env['PATH']}",
                     "FAKE_DOCKER_COUNT": str(count_file),
                     "FAKE_DOCKER_FAILURES": str(failures_before_success),
+                    "FAKE_DOCKER_INVALID_MANIFEST": str(invalid_manifest_file),
+                    "FAKE_DOCKER_INVALID_RESPONSES": str(
+                        invalid_responses_before_success
+                    ),
                     "FAKE_DOCKER_MANIFEST": str(manifest_file),
                 }
             )
@@ -285,11 +300,48 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("attempt 1/5", result.stderr)
         self.assertIn("transient registry failure", result.stderr)
 
+    def test_image_digest_resolver_retries_invalid_manifest_then_succeeds(self) -> None:
+        self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
+        manifest = b'{"schemaVersion":2,"manifests":[]}'
+
+        result, attempts = self.run_image_digest_resolver(
+            manifest=manifest,
+            failures_before_success=0,
+            invalid_manifest=b'{"schemaVersion":1}',
+            invalid_responses_before_success=2,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(), f"sha256:{hashlib.sha256(manifest).hexdigest()}"
+        )
+        self.assertEqual(attempts, 3)
+        self.assertIn("attempt 1/5", result.stderr)
+
+    def test_image_digest_resolver_rejects_invalid_manifest_responses(self) -> None:
+        for name, invalid_manifest in (
+            ("empty", b""),
+            ("malformed", b"not-json"),
+            ("wrong-schema", b'{"schemaVersion":1}'),
+        ):
+            with self.subTest(name=name):
+                result, attempts = self.run_image_digest_resolver(
+                    manifest=b'{"schemaVersion":2,"manifests":[]}',
+                    failures_before_success=0,
+                    invalid_manifest=invalid_manifest,
+                    invalid_responses_before_success=5,
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(attempts, 5)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("Could not resolve an immutable digest", result.stderr)
+
     def test_image_digest_resolver_fails_closed_after_bounded_retries(self) -> None:
         self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
 
         result, attempts = self.run_image_digest_resolver(
-            manifest=b'{"schemaVersion":2}', failures_before_success=5
+            manifest=b'{"schemaVersion":2,"manifests":[]}', failures_before_success=5
         )
 
         self.assertNotEqual(result.returncode, 0)
