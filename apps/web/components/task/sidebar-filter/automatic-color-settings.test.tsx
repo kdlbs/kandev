@@ -18,7 +18,16 @@ vi.mock("./use-sidebar-task-color-automation", () => ({
 }));
 
 vi.mock("./task-color-rule-options", () => ({
-  taskColorDimensionLabelKey: (dimension: string) => `task:${dimension}`,
+  taskColorDimensionLabelKey: (dimension: string) =>
+    ({
+      workflow_step: "task:automaticColorsDimensionWorkflowStep",
+      repository: "task:automaticColorsDimensionRepository",
+      workflow: "task:automaticColorsDimensionWorkflow",
+      executor_profile: "task:automaticColorsDimensionExecutorProfile",
+      task_state: "task:automaticColorsDimensionTaskState",
+      priority: "task:automaticColorsDimensionPriority",
+      origin: "task:automaticColorsDimensionOrigin",
+    })[dimension] ?? `task:${dimension}`,
   taskColorRuleOptionKey: (value: unknown) => JSON.stringify(value),
   useTaskColorRuleOptions: () => ({
     workflow_step: [],
@@ -97,6 +106,26 @@ describe("AutomaticColorSettings timing guidance", () => {
     );
     expect(screen.getByTestId("automatic-colors-help")).toBeTruthy();
     expect(screen.queryByTestId("automatic-colors-timing")).toBeNull();
+  });
+});
+
+describe("AutomaticColorSettings rule headings", () => {
+  it("includes the localized condition in each rule heading", () => {
+    mocks.value = {
+      enabled: true,
+      rules: [
+        {
+          id: "origin-rule",
+          enabled: false,
+          condition: { dimension: "origin", value: "kanban", label: "Kanban" },
+          output: { kind: "fixed", color: "red" },
+        },
+      ],
+    };
+    renderSettings();
+    fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
+
+    expect(screen.getByText("Rule 1 Origin", { exact: true })).toBeTruthy();
   });
 });
 

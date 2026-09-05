@@ -21,6 +21,24 @@ const DESKTOP_AUTOMATION: SidebarTaskColorAutomation = {
   ],
 };
 
+function desktopRepositoryAutomation(repositoryPath: string): SidebarTaskColorAutomation {
+  return {
+    enabled: true,
+    rules: [
+      {
+        id: "desktop-repository-rule",
+        enabled: false,
+        condition: {
+          dimension: "repository",
+          value: { kind: "local", path: repositoryPath },
+          label: "E2E repository",
+        },
+        output: { kind: "fixed", color: "gray" },
+      },
+    ],
+  };
+}
+
 async function openDesktopTask(
   testPage: import("@playwright/test").Page,
   apiClient: import("../../helpers/api-client").ApiClient,
@@ -98,6 +116,7 @@ test.describe("Sidebar automatic task colors", () => {
       "data-state",
       "checked",
     );
+    await expect(automaticSettings.getByText("Rule 1 Task state", { exact: true })).toBeVisible();
     await expect(automaticSettings.getByTestId("automatic-colors-timing")).toHaveCount(0);
     await expect(
       automaticSettings.getByText(
@@ -182,5 +201,44 @@ test.describe("Sidebar automatic task colors", () => {
         return settings.sidebar_task_color_automation;
       })
       .toEqual(DESKTOP_AUTOMATION);
+  });
+
+  test("aligns a repository target with the condition control", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({
+      sidebar_task_color_automation: desktopRepositoryAutomation(seedData.repositoryPath),
+    });
+    await openDesktopTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Desktop repository alignment task",
+      "TODO",
+    );
+
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await filters.open();
+    const automaticSettings = filters.popover.getByTestId("automatic-color-settings");
+    await automaticSettings.getByTestId("automatic-color-settings-toggle").click();
+
+    const condition = automaticSettings.getByTestId(
+      "automatic-color-dimension-desktop-repository-rule",
+    );
+    const repository = automaticSettings.getByTestId(
+      "automatic-color-repository-trigger-desktop-repository-rule",
+    );
+    await expect(condition).toBeVisible();
+    await expect(repository).toBeVisible();
+
+    const [conditionBox, repositoryBox] = await Promise.all([
+      condition.boundingBox(),
+      repository.boundingBox(),
+    ]);
+    expect(conditionBox).not.toBeNull();
+    expect(repositoryBox).not.toBeNull();
+    expect(Math.abs((repositoryBox?.y ?? 0) - (conditionBox?.y ?? 0))).toBeLessThanOrEqual(1);
   });
 });

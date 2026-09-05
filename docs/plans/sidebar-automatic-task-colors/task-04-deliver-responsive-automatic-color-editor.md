@@ -29,6 +29,8 @@ acceptance_criteria:
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.16
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.17
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.18
+  - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.19
+  - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.20
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003.1
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003.2
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003.3
@@ -59,8 +61,9 @@ Deliver the compact disclosure layout and the complete automatic-color editor. P
 
 - Shared Sort, Group by, Task row, and Automatic colors disclosures.
 - Consistent summary spacing and separators for Sort, Group by, and Task row.
+- No extra primitive-level gap between adjacent editor sections.
 - Global enable control, ordered rule cards, selectors, color outputs, and removal.
-  - Localized condition labels, one selected output swatch, and a responsive evaluation-timing help icon.
+  - Localized condition labels in rule headings, aligned condition and target rows, one selected output swatch, and a responsive evaluation-timing help icon.
   - Compact disclosure padding and a bounded editor scroll region that keeps bottom actions reachable.
 - Disabled incomplete-rule state, generated rule summaries, and the 50-rule limit state.
 - Explicit Executor profile, Task state, Priority, Origin, and Kanban-origin options.
@@ -78,6 +81,7 @@ Deliver the compact disclosure layout and the complete automatic-color editor. P
 ## Acceptance
 
 - The compact editor shows accurate summaries without changing a view draft.
+- Rule headings show their order and localized condition dimension, and repository targets align with condition controls.
 - Rule operations remain usable with keyboard, pointer, and touch input.
 - Desktop and mobile flows persist rules and recolor tasks after fact changes.
 - Long editors scroll inside their owning popover or drawer, and the same help content is available by hover, focus, or tap.

@@ -35,7 +35,7 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.3:** Expanding or collapsing a summary shall not create or change a saved-view draft.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.4:** The editor shall show Automatic colors after Task row. It shall identify the setting as personal and global across sidebar views and workspaces through accessible help content.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.5:** The Automatic colors summary shall show whether automation is off or how many rules are enabled.
-- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.6:** The collapsed Sort, Group by, and Task row summaries shall use the same compact bottom inset before their separator.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.6:** The collapsed Sort, Group by, and Task row summaries shall use the same compact bottom inset before their separator, and adjacent editor sections shall not add an extra primitive-level gap.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.7:** When editor content exceeds the available viewport, the surface shall use one vertical scroll owner and keep every setting and action reachable.
 
 ### REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002: Ordered personal color rules
@@ -64,6 +64,8 @@ The UI system owns this presentation contract. The task, workflow, executor, and
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.16:** Condition selectors shall show localized human-readable labels for each supported dimension and origin value.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.17:** A fixed-color output selector shall show one color swatch for its current selection.
 - **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.18:** The editor shall explain that rules apply to existing and new sidebar tasks and reevaluate when relevant task facts or rule settings change through a focusable information icon. Desktop shall open the help on pointer hover and keyboard focus. Phone and tablet shall open the same help on focus or tap. No required information or behavior shall depend on hover.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.19:** Each rule heading shall show its order and the localized name of its selected condition dimension.
+- **AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.20:** Condition and target fields shall share aligned label and control rows in the desktop two-column layout, including repository targets without a selected or available repository.
 
 ### REQ-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-003: Repository rule targets
 

@@ -81,7 +81,7 @@ export function SidebarFilterPopover({
       <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>{trigger}</PopoverTrigger>
         <PopoverContent
-          className="max-h-[var(--radix-popper-available-height)] w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto p-0"
+          className="max-h-[var(--radix-popper-available-height)] w-[calc(100vw-1rem)] max-w-[22rem] overflow-y-auto gap-0 p-0"
           style={{ maxHeight: "var(--radix-popper-available-height, calc(100dvh - 1rem))" }}
           align="end"
           data-testid="sidebar-filter-popover"

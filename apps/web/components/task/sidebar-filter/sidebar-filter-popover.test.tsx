@@ -95,6 +95,18 @@ describe("SidebarFilterPopover task-row editor", () => {
     );
   });
 
+  it("removes the popover primitive's default section gap", () => {
+    render(
+      <SidebarFilterPopover
+        trigger={<button type="button">Open</button>}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("sidebar-filter-popover").className.split(" ")).toContain("gap-0");
+  });
+
   it("describes every group-by and right-side option", () => {
     const renderEditor = () =>
       render(

@@ -103,7 +103,7 @@ Create new rules as disabled incomplete rules. If the list contains 50 rules, di
 
 Add localized copy in all shipped catalogs. Generate the Traditional Chinese catalogs with the existing script.
 
-Keep the shared disclosure padding compact and consistent. Bound the desktop popover by the available viewport with a `100dvh` fallback, retain the drawer as the mobile scroll owner, and expose scope and timing guidance through one hover, focus, and tap-accessible info icon.
+Keep the shared disclosure padding compact and consistent. Override the desktop popover primitive's default flex gap so adjacent sections remain contiguous. Bound the desktop popover by the available viewport with a `100dvh` fallback, retain the drawer as the mobile scroll owner, and expose scope and timing guidance through one hover, focus, and tap-accessible info icon. Rule headings include the localized condition dimension, and the desktop condition and target fields share aligned label and control rows.
 
 ## Tests
 
@@ -142,6 +142,7 @@ Keep the shared disclosure padding compact and consistent. Bound the desktop pop
 - `python3 scripts/lint-spec-files.py --all` and `git diff --check`: passed.
 - Desktop and mobile automatic-color Playwright specs: one test passed in each project.
 - Compact-layout follow-up: focused component tests and desktop or mobile Playwright coverage passed for the shared spacing, viewport scrolling, and responsive help icon.
+- Rule-card polish follow-up: focused component tests and desktop or mobile Playwright coverage passed for the zero-gap editor, localized condition headings, and aligned repository targets.
 - Task 05 backend and frontend settings verification: 1,158 Go tests across 7 packages and 88 focused Vitest tests passed.
 - Task 06 focused frontend verification: 76 Vitest tests passed; typecheck, lint, Traditional Chinese generation, and i18n checks passed.
 - Task 06 desktop and mobile sync Playwright specs: one test passed in each project.

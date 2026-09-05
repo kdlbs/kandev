@@ -280,7 +280,7 @@ Tombstones remain while legacy import support exists. A later cleanup can remove
 
 Each disclosure has a label, summary, chevron, stable content ID, and `aria-expanded`. Disclosure state is transient and starts collapsed.
 
-Sort, Group by, and Task row each own their bottom separator. The shared disclosure padding is `px-2 pb-1 pt-1`, so each collapsed toggle has the same compact inset before and after its separator. Automatic colors follows Task row without adding a second adjacent separator.
+Sort, Group by, and Task row each own their bottom separator. The shared disclosure padding is `px-2 pb-1 pt-1`, so each collapsed toggle has the same compact inset before and after its separator. The desktop popover overrides its primitive flex gap so adjacent editor sections remain contiguous. Automatic colors follows Task row without adding a second adjacent separator.
 
 The Sort summary shows the selected field and direction. Its expanded content keeps the current `SortPicker`.
 
@@ -295,7 +295,7 @@ The Automatic colors summary shows Off or an enabled-rule count. Its expanded co
 
 The information content states that rules apply to existing and new sidebar tasks, explains personal and global scope, describes first-match precedence, and lists the task facts that trigger reevaluation. The same icon is available in the desktop popover and the phone or tablet drawer. Desktop opens it on hover or focus; the drawer also opens it on focus or tap, so no required information depends on hover.
 
-A rule card shows the condition, target, output color, enabled state, reorder control, and remove action. The first matching rule is visually first.
+A rule card heading shows its order and localized condition dimension, for example Rule 1 Origin. The card shows the condition, target, output color, enabled state, reorder control, and remove action. The condition and target fields use the same label and control rows in the desktop two-column layout, including an incomplete repository target. The first matching rule is visually first.
 
 The workflow-step rule offers Use step color. Other rule types use a fixed safe color. Dimension and origin options use localized human-readable labels. A fixed output selection renders the swatch supplied by its selected option exactly once.
 

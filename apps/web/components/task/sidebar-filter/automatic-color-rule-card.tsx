@@ -10,7 +10,7 @@ import type {
 } from "@/lib/task-color-automation-settings";
 import type { RepositoryRuleCatalogOption } from "@/lib/sidebar/repository-rule-catalog";
 import type { TaskColorRuleOption, TaskColorRuleOptionMap } from "./task-color-rule-options";
-import { taskColorRuleOptionKey } from "./task-color-rule-options";
+import { taskColorDimensionLabelKey, taskColorRuleOptionKey } from "./task-color-rule-options";
 import {
   AutomaticColorConditionFields,
   AutomaticColorEnableField,
@@ -78,6 +78,7 @@ export function AutomaticColorRuleCard({
         ruleId={rule.id}
         index={index}
         total={total}
+        dimension={rule.condition.dimension}
         sortable={sortable}
         onRemove={onRemove}
         onMove={onMove}
@@ -166,6 +167,7 @@ function AutomaticColorRuleHeader({
   ruleId,
   index,
   total,
+  dimension,
   sortable,
   onRemove,
   onMove,
@@ -174,6 +176,7 @@ function AutomaticColorRuleHeader({
   ruleId: string;
   index: number;
   total: number;
+  dimension: SidebarTaskColorDimension;
   sortable: ReturnType<typeof useSortable>;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
@@ -193,7 +196,8 @@ function AutomaticColorRuleHeader({
         <IconGripVertical className="size-4" aria-hidden="true" />
       </button>
       <span className="min-w-0 flex-1 text-xs font-medium">
-        {t("task:automaticColorsRule", { number: index + 1 })}
+        {t("task:automaticColorsRule", { number: index + 1 })}{" "}
+        {t(taskColorDimensionLabelKey(dimension))}
       </span>
       <Button
         type="button"

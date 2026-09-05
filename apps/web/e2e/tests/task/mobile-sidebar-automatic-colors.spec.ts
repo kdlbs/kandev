@@ -62,6 +62,7 @@ test.describe("Mobile sidebar automatic task colors", () => {
     await expect(popover).toBeVisible();
     const automaticSettings = popover.getByTestId("automatic-color-settings");
     await automaticSettings.getByTestId("automatic-color-settings-toggle").tap();
+    await expect(automaticSettings.getByText("Rule 1 Repository", { exact: true })).toBeVisible();
     await expect(automaticSettings.getByTestId("automatic-colors-timing")).toHaveCount(0);
     await expect(automaticSettings.getByTestId("automatic-colors-help")).toHaveCount(1);
     await expect(

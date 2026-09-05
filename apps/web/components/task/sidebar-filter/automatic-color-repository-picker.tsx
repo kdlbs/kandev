@@ -60,33 +60,39 @@ export function RepositoryConditionField({
     </Button>
   );
 
+  const fieldLabel = (
+    <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+      {t("task:automaticColorsSelectRepository")}
+    </span>
+  );
   const field = (
-    <label className="min-w-0">
-      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-        {t("task:automaticColorsSelectRepository")}
-      </span>
+    <div className="min-w-0">
+      {fieldLabel}
       {button}
-    </label>
+    </div>
   );
 
   if (isDrawerLayout) return field;
   return (
-    <Popover>
-      <PopoverTrigger asChild>{button}</PopoverTrigger>
-      <PopoverContent align="start" className="w-[20rem] p-2">
-        <RepositoryPicker
-          options={options}
-          query={query}
-          loading={loading}
-          error={error}
-          onQueryChange={onQueryChange}
-          onRefresh={onRefresh}
-          onSelect={onSelect}
-          isDrawerLayout={false}
-          t={t}
-        />
-      </PopoverContent>
-    </Popover>
+    <div className="min-w-0">
+      {fieldLabel}
+      <Popover>
+        <PopoverTrigger asChild>{button}</PopoverTrigger>
+        <PopoverContent align="start" className="w-[20rem] p-2">
+          <RepositoryPicker
+            options={options}
+            query={query}
+            loading={loading}
+            error={error}
+            onQueryChange={onQueryChange}
+            onRefresh={onRefresh}
+            onSelect={onSelect}
+            isDrawerLayout={false}
+            t={t}
+          />
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }
 
