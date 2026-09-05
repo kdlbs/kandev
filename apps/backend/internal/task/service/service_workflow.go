@@ -508,6 +508,14 @@ type workflowMoveConflictRepository interface {
 	UpdateTaskIfWorkflowMatches(ctx context.Context, task *models.Task, expectedWorkflowID string) error
 }
 
+// metadataKeyRemoverRepository clears a single task metadata key in its own
+// statement, without rewriting the concurrent fields a full UpdateTask would
+// carry. Used to strip a stranded workflow_move_pending marker that a committed
+// optioned move left behind when its write produced no step transition.
+type metadataKeyRemoverRepository interface {
+	RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error)
+}
+
 type workflowQueuedTaskPromoter interface {
 	PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, fromStepID, destinationStepID string, limit int) (bool, error)
 }
@@ -705,6 +713,19 @@ func (s *Service) MoveTaskWithOptions(
 		resultFromWorkflowID = oldWorkflowID
 	}
 
+	// An optioned move (moveID != "") always changed step at read time —
+	// ValidateEntryOptions rejects a position-only optioned move — so a
+	// committed write with no transition means the task already occupied
+	// workflowStepID when the atomic write ran: a concurrent move landed it
+	// there between this call's read and its write. The one-shot options were
+	// persisted on the pending marker for a target entry that will never fire
+	// task.moved, so the marker would strand and the override silently never
+	// apply. Clear it and report the conflict instead of returning a MoveID and
+	// EntryOptions the orchestrator will never consume.
+	if moveID != "" && !resultTransitioned {
+		return s.rejectStrandedOptionedMove(ctx, task, resultFromWorkflowID)
+	}
+
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, resultFromWorkflowID)
 	if oldState != task.State {
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
@@ -765,6 +786,26 @@ func (s *Service) MoveTaskWithOptions(
 	}
 
 	return result, nil
+}
+
+// rejectStrandedOptionedMove undoes an optioned move whose committed write
+// produced no step transition (the task already occupied the target step). The
+// write persisted the workflow_move_pending marker, but the zero-transition
+// result means task.moved never fires to consume it, so the marker is removed
+// with a single-key delete that does not clobber the concurrent move's fields.
+// A TaskUpdated event keeps subscribers converged on the cleared row, and the
+// caller receives ErrMoveConflict rather than a false success.
+func (s *Service) rejectStrandedOptionedMove(ctx context.Context, task *models.Task, fromWorkflowID string) (*MoveTaskResult, error) {
+	remover, ok := s.tasks.(metadataKeyRemoverRepository)
+	if !ok {
+		return nil, fmt.Errorf("metadata key remover repository unavailable for task %s", task.ID)
+	}
+	if _, err := remover.RemoveTaskMetadataKey(ctx, task.ID, models.MetaKeyWorkflowMovePending); err != nil {
+		return nil, fmt.Errorf("clear stranded workflow move marker for task %s: %w", task.ID, err)
+	}
+	delete(task.Metadata, models.MetaKeyWorkflowMovePending)
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, fromWorkflowID)
+	return nil, workflowmove.ErrMoveConflict
 }
 
 // prepareWorkflowMoveMarker mints a correlation ID and encodes the one-shot

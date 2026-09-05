@@ -80,3 +80,51 @@ func TestService_MoveTaskWithOptionsConflictsWithPendingMarker(t *testing.T) {
 		t.Fatalf("expected ErrMoveConflict, got %v", err)
 	}
 }
+
+// TestService_MoveTaskWithOptionsRejectsZeroTransitionCommit proves that when an
+// optioned move's atomic write finds the task already on the target step (a
+// concurrent move landed it there between this call's read and its write), the
+// committed workflow_move_pending marker is cleared and the move is reported as
+// ErrMoveConflict. Left unfixed the marker strands in metadata — task.moved
+// never fires on a zero-transition write, so nothing consumes it — while the
+// caller was told its one-shot override was accepted.
+func TestService_MoveTaskWithOptionsRejectsZeroTransitionCommit(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-zero-transition", "wf-source", "step-source", nil)
+	createMoveSession(t, ctx, repo, "session-zero", "task-zero-transition", models.TaskSessionStateWaitingForInput, models.ReviewStatusNone)
+
+	raceRepo := &workflowMoveRaceRepo{Repository: repo}
+	raceRepo.inject = func() {
+		// A concurrent, legitimate move lands the task on step-review-target
+		// before this call's own write commits, so that write produces no step
+		// transition.
+		if _, err := svc.MoveTaskWithOptions(ctx, "task-zero-transition", "wf-source", "step-review-target", 0, MoveTaskOptions{
+			AllowActivePrimarySession: true,
+		}); err != nil {
+			t.Fatalf("concurrent legitimate move (injected mid-call) failed: %v", err)
+		}
+	}
+	svc.tasks = raceRepo
+
+	_, err := svc.MoveTaskWithOptions(ctx, "task-zero-transition", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		AllowActivePrimarySession: true,
+		EntryOptions:              &workflowmove.EntryOptions{Instructions: "please review"},
+	})
+	if !errors.Is(err, workflowmove.ErrMoveConflict) {
+		t.Fatalf("expected ErrMoveConflict on zero-transition committed write, got %v", err)
+	}
+
+	stored, err := repo.GetTask(ctx, "task-zero-transition")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if _, pending := stored.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+		t.Fatalf("expected stranded workflow_move_pending marker cleared, metadata=%+v", stored.Metadata)
+	}
+	if stored.WorkflowStepID != "step-review-target" {
+		t.Fatalf("concurrent move must survive the rejected optioned move: got step %s, want step-review-target", stored.WorkflowStepID)
+	}
+}
