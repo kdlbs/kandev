@@ -1,11 +1,14 @@
 ---
 title: "Team Access"
 description: "Share Kandev workspaces with colleagues using organization units, member roles, and scoped permissions."
+status: experimental
 ---
 
 # Team Access
 
 Kandev starts private: with [authentication](authentication.md) enabled, each person sees only their own workspaces. **Team access** is how a team on a shared server gets shared boards instead, without falling back to a single login everyone knows.
+
+Team access is **experimental** because it is available only through the experimental authenticated multi-user path. It has no separate release toggle: enabling `features.auth` is the opt-in boundary for this path.
 
 The whole model is one idea: **workspaces live in a tree, and so do people.**
 
@@ -176,7 +179,7 @@ Every guarded action names a scope. These strings appear in the API and are what
 ## Current limits
 
 - **"Organization" means one tenant.** With the Organizations feature off there is exactly one, implicitly, and its root unit covers everyone on the server. To run one server for several independent teams or customers, see [Organizations](organizations.md).
-- **The `guest` role has no UI yet.** `Settings > Users` is not ported to the SPA, so a guest is assigned through the API: `PATCH /api/v1/users/{id}` with `{"role": "guest"}`.
+- **The `guest` role cannot be assigned in the UI yet.** `Settings > Access Control > Users` can change accounts between admin and member only, so assign a guest through the API: `PATCH /api/v1/users/{id}` with `{"role": "guest"}`.
 - **Roles are fixed.** There is no custom-role builder; scopes are the extension point and adding one is a code change.
 - **No standalone groups.** A unit answers "who is in this team", so a set of people that ignores the tree, like every site reliability engineer across three departments, is not modelled yet.
 - **No presence.** There are no cursors, typing indicators, or "who else is viewing" markers.

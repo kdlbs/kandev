@@ -1,6 +1,7 @@
 ---
 title: "Organizations"
 description: "Run one Kandev server for several independent teams or customers, with a hard boundary between them."
+status: experimental
 ---
 
 # Organizations
@@ -9,7 +10,7 @@ An organization is a **tenant**: a boundary above users. Two organizations on th
 
 Use organizations when one server serves groups that must stay separate: two teams that should not read each other's code, an agency and its clients, or a hosted deployment. If everyone on your server is one team, you do not need this. Use [Team Access](team-access.md) instead, which is about sharing *within* one organization.
 
-> Organizations require [authentication](authentication.md). Enabling them with authentication off is refused at startup, because a tenant boundary with nobody to belong to it is not a boundary.
+Organizations are an **experimental runtime feature** and are disabled in every shipped profile. They require experimental [authentication](authentication.md); enabling organizations with authentication off is refused at startup, because a tenant boundary with nobody to belong to it is not a boundary.
 
 ## Quick checklist
 

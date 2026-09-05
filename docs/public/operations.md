@@ -538,5 +538,5 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 - [Configuration](configuration.md); paths, database, logging, NATS, Docker, and security-sensitive environment variables
 - [Executors](executors.md); runtime lifecycle, credentials, cleanup, and isolation boundaries
 - [Git operations](git-operations.md); branches, worktrees, push, and pull-request behavior
-- [Automation and MCP](automation-and-mcp.md); external MCP routes and their current unauthenticated trust boundary
+- [Automation and MCP](automation-and-mcp.md); external MCP authentication and deployment trust boundaries
 - [Windows support](windows-support.md); Windows-native limitations and supported alternatives
