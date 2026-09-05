@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/coordinator"
 	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -365,6 +366,11 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		}
 		return "", err
 	}
+	if task.WorkspaceID != "" {
+		if err := r.insertTaskPrincipalTx(ctx, tx, task); err != nil {
+			return "", err
+		}
+	}
 	// Genesis ledger row. By this point applyAdmissionPlacement has already
 	// rewritten task.WorkflowStepID to the actual placement (feeder step when
 	// WIP diverted it), so this satisfies the spec's feeder-step scenario for
@@ -387,6 +393,18 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		}
 	}
 	return entryID, nil
+}
+
+func (r *Repository) insertTaskPrincipalTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	now := task.CreatedAt
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO workspace_agent_principals (
+			id, workspace_id, plugin_installation_id, logical_key,
+			backing_task_id, backing_session_id, revoked_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+	`), uuid.NewString(), task.WorkspaceID, coordinator.TaskPrincipalInstallationID,
+		coordinator.TaskPrincipalLogicalKey(task.ID), task.ID, "", now, now)
+	return err
 }
 
 func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.Tx, targetStepID, feederStepID string) error {
