@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/workflow/engine"
+	"go.uber.org/zap"
 )
 
 // decisionSeatDispatcher is the additive capability HoldsDecisionSeat needs
@@ -32,6 +33,8 @@ func (s *Service) HoldsDecisionSeat(ctx context.Context, taskID, agentProfileID 
 	}
 	stepID, err := s.repo.GetTaskWorkflowStepID(ctx, taskID)
 	if err != nil {
+		s.logger.Warn("resolve task workflow_step_id failed, denying decision seat",
+			zap.String("task_id", taskID), zap.String("agent_profile_id", agentProfileID), zap.Error(err))
 		return false, fmt.Errorf("resolve task workflow_step_id: %w", err)
 	}
 	if stepID == "" {
@@ -42,6 +45,8 @@ func (s *Service) HoldsDecisionSeat(ctx context.Context, taskID, agentProfileID 
 		if errors.Is(err, engine.ErrParticipantNotFound) {
 			return false, nil
 		}
+		s.logger.Warn("resolve participant role failed, denying decision seat",
+			zap.String("task_id", taskID), zap.String("agent_profile_id", agentProfileID), zap.Error(err))
 		return false, fmt.Errorf("resolve participant role: %w", err)
 	}
 	return true, nil
