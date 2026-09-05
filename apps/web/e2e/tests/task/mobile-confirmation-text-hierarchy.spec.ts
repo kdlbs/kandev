@@ -171,12 +171,19 @@ test.describe("Mobile confirmation text hierarchy", () => {
       await expect(drawerTitle).toHaveCSS("text-wrap", "balance");
       await assertPhoneDeleteDialog(dialog, width);
 
+      const discard = dialog.getByTestId("delete-discard-worktree-checkbox");
+      const deleteAction = dialog.locator('[data-slot="alert-dialog-action"]');
+      await expect(discard).toBeVisible();
+      await expect(deleteAction).toBeDisabled();
+
       await dialog.locator('[data-slot="alert-dialog-cancel"]').tap();
       await expect(dialog).toBeHidden();
       expect((await apiClient.getTask(task.task_id)).id).toBe(task.task_id);
     }
 
     const { dialog } = await openDeleteDialog(testPage, LONG_TASK_TITLE);
+    await dialog.getByTestId("delete-discard-worktree-checkbox").tap();
+    await expect(dialog.locator('[data-slot="alert-dialog-action"]')).toBeEnabled();
     await dialog.locator('[data-slot="alert-dialog-action"]').tap();
     await expect
       .poll(

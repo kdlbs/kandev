@@ -16,9 +16,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import { useArchiveAndSwitchTask, useTaskActions } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { deleteTask } from "@/lib/api/domains/kanban-api";
 import type { MessageAction } from "@/components/task/chat/types";
 
 export const ACTION_ICON_MAP: Record<string, ElementType> = {
@@ -85,6 +84,7 @@ export function ActionButton({
   const taskId = messageTaskId || activeTaskId;
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
+  const { deleteTaskById } = useTaskActions();
   const { removeTaskFromBoard } = useTaskRemoval({ store });
 
   const execute = useCallback(async () => {
@@ -99,7 +99,7 @@ export function ActionButton({
         case "delete_task": {
           if (taskId) {
             const { activeTaskId, activeSessionId } = store.getState().tasks;
-            await deleteTask(taskId);
+            await deleteTaskById(taskId);
             await removeTaskFromBoard(taskId, {
               wasActiveTaskId: activeTaskId,
               wasActiveSessionId: activeSessionId,
@@ -124,7 +124,16 @@ export function ActionButton({
       setState("error");
       setTimeout(() => setState("idle"), 3000);
     }
-  }, [action, state, taskId, store, archiveAndSwitch, removeTaskFromBoard, onCompleted]);
+  }, [
+    action,
+    state,
+    taskId,
+    store,
+    archiveAndSwitch,
+    deleteTaskById,
+    removeTaskFromBoard,
+    onCompleted,
+  ]);
 
   // Once a ws_request has been fired, hide this button: it's no longer
   // actionable. If the recovery succeeds the whole ActionMessage unmounts via
