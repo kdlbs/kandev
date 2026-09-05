@@ -1269,12 +1269,16 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 // acquireSessionLifecycleLock.
 //
 // Releasing the guard before dispatch leaves a window where a turn could
-// start between this read and routeActionHandler's launch. That is a
-// route-action-vs-turn-start race, distinct from route-action-vs-route-action
-// (already serialized by the generation CAS in ResolveRouteAction, e.g.
-// ErrStaleGeneration). It is accepted here: closing it would mean holding
-// the guard across the dispatch again, reintroducing the deadlock this
-// function exists to remove.
+// start, or a cancellation could land, between this read and
+// routeActionHandler's launch. Both are accepted here: closing them would
+// mean holding the guard across the dispatch again, reintroducing the
+// deadlock this function exists to remove. route-action-vs-route-action is
+// already serialized by the generation CAS in ResolveRouteAction (e.g.
+// ErrStaleGeneration); route-action-vs-cancellation is handled downstream —
+// every full-session-row write in dynamic_routing.go is conditioned via
+// UpdateTaskSessionIfCurrentState on the state last confirmed before the
+// write, so a cancellation that commits during the window is detected and
+// wins instead of being overwritten by a stale route-action snapshot.
 func (s *Service) rejectRouteActionDuringActiveTurn(ctx context.Context, sessionID string) error {
 	if s.turnService == nil {
 		return nil
