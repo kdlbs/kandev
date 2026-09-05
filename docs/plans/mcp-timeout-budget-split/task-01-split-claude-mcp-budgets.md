@@ -51,8 +51,8 @@ budget.
 ## Acceptance
 
 - `ClaudeACP.Runtime().Env` contains both keys with distinct values, and
-  `MCP_TIMEOUT` parses as an integer no greater than 60000 while
-  `MCP_TOOL_TIMEOUT` parses as an integer no less than 7200000.
+  `MCP_TIMEOUT` parses as exactly 30000 (asserted no greater than 60000 as a
+  bound) while `MCP_TOOL_TIMEOUT` parses as an integer no less than 7200000.
 - The test fails before the change with a message that names the coupled value,
   not only a count mismatch.
 - An agent profile value for either key still replaces the managed agent

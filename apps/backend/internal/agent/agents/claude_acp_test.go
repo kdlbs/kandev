@@ -34,6 +34,7 @@ func TestClaudeACPUsesManagedRuntime(t *testing.T) {
 func TestClaudeACPSeparatesMCPStartupAndToolBudgets(t *testing.T) {
 	env := NewClaudeACP().Runtime().Env
 
+	const wantStartupBudgetMS = 30000
 	const maxStartupBudgetMS = 60000
 	startup, ok := env["MCP_TIMEOUT"]
 	if !ok {
@@ -42,6 +43,9 @@ func TestClaudeACPSeparatesMCPStartupAndToolBudgets(t *testing.T) {
 	startupMS, err := strconv.Atoi(startup)
 	if err != nil {
 		t.Fatalf("MCP_TIMEOUT = %q, want an integer", startup)
+	}
+	if startupMS != wantStartupBudgetMS {
+		t.Errorf("MCP_TIMEOUT = %d, want %d", startupMS, wantStartupBudgetMS)
 	}
 	if startupMS > maxStartupBudgetMS {
 		t.Errorf("MCP_TIMEOUT = %d, want <= %d (startup budget, not a tool-call budget)", startupMS, maxStartupBudgetMS)
