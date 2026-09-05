@@ -179,6 +179,9 @@ func TestRecordAgentDecision_TwoRejectionRoundsQueueDistinctRuns(t *testing.T) {
 	if len(q.runs) != 2 {
 		t.Fatalf("runs = %d, want 2: %#v", len(q.runs), q.runs)
 	}
+	if first.DecisionID == second.DecisionID {
+		t.Fatalf("engine returned identical DecisionIDs for two separate decisions: %q", first.DecisionID)
+	}
 	if want := "decision:" + first.DecisionID; q.runs[0].IdempotencyKey != want {
 		t.Errorf("runs[0].IdempotencyKey = %q, want %q", q.runs[0].IdempotencyKey, want)
 	}
