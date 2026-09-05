@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -26,6 +27,38 @@ type countingMessageCreator struct {
 	calls     atomic.Int32
 	mu        sync.Mutex
 	published [][]*models.Message
+}
+
+type retryReadAnswerRepo struct {
+	*sqliterepo.Repository
+	onRead func()
+	once   sync.Once
+}
+
+func (r *retryReadAnswerRepo) FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error) {
+	messages, err := r.Repository.FindMessagesByPendingID(ctx, pendingID)
+	if err == nil && len(messages) > 0 {
+		r.once.Do(r.onRead)
+	}
+	return messages, err
+}
+
+type countingDetachedResumer struct {
+	calls atomic.Int32
+}
+
+type askUserQuestionResult struct {
+	response *ws.Message
+	err      error
+}
+
+func (r *countingDetachedResumer) Publish(context.Context, string, *bus.Event) error {
+	return nil
+}
+
+func (r *countingDetachedResumer) ResumeDetachedClarification(context.Context, clarification.DetachedClarificationResume) error {
+	r.calls.Add(1)
+	return nil
 }
 
 func (c *countingMessageCreator) CreateClarificationRequestMessages(context.Context, string, string, string, []clarification.Question, string) ([]string, error) {
@@ -201,6 +234,174 @@ func TestHandleAskUserQuestion_RetryReattachesDetachedBundle(t *testing.T) {
 
 	require.NoError(t, store.Respond(pendingID, &clarification.Response{PendingID: pendingID, Answers: []clarification.Answer{{QuestionID: "q1", SelectedOptions: []string{"opt-red"}}}}))
 	wg.Wait()
+}
+
+func TestHandleAskUserQuestion_RetryRejectsSupersededPendingBundleWithoutWaiting(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	taskID, sessionID, pendingID := seedRetrySession(t, ctx, svc, repo, "retry-superseded")
+	seedRetryMessage(t, ctx, repo, taskID, sessionID, pendingID, "pending", nil)
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-retry-superseded-newer",
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+	}))
+
+	store := clarification.NewStore(time.Minute)
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
+	h := NewHandlers(svc, nil, store, nil, &countingMessageCreator{}, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+
+	responseDone := make(chan askUserQuestionResult, 1)
+	go func() {
+		resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, retryAskPayload(sessionID, taskID)))
+		responseDone <- askUserQuestionResult{response: resp, err: err}
+	}()
+	select {
+	case <-waitEntered:
+		cancel()
+		<-responseDone
+		t.Fatal("a superseded durable bundle opened an in-memory wait")
+	case result := <-responseDone:
+		require.NoError(t, result.err)
+		assertWSError(t, result.response, ws.ErrorCodeInternalError)
+	}
+	assert.Empty(t, store.ListPending())
+}
+
+func TestHandleAskUserQuestion_RetryRejectsTerminalSessionBundleWithoutWaiting(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	taskID, sessionID, pendingID := seedRetrySession(t, ctx, svc, repo, "retry-terminal-session")
+	seedRetryMessage(t, ctx, repo, taskID, sessionID, pendingID, "pending", nil)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateCompleted, ""))
+
+	store := clarification.NewStore(time.Minute)
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
+	h := NewHandlers(svc, nil, store, nil, &countingMessageCreator{}, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+
+	responseDone := make(chan askUserQuestionResult, 1)
+	go func() {
+		resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, retryAskPayload(sessionID, taskID)))
+		responseDone <- askUserQuestionResult{response: resp, err: err}
+	}()
+	select {
+	case <-waitEntered:
+		cancel()
+		<-responseDone
+		t.Fatal("a terminal session's durable bundle opened an in-memory wait")
+	case result := <-responseDone:
+		require.NoError(t, result.err)
+		assertWSError(t, result.response, ws.ErrorCodeInternalError)
+	}
+	assert.Empty(t, store.ListPending())
+}
+
+func TestHandleAskUserQuestion_AnswerBetweenRetryReadAndRegistrationUsesOneDeliveryPath(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	taskID, sessionID, pendingID := seedRetrySession(t, ctx, svc, repo, "retry-answer-race")
+	seedRetryMessage(t, ctx, repo, taskID, sessionID, pendingID, "pending", nil)
+
+	store := clarification.NewStore(time.Minute)
+	resumer := &countingDetachedResumer{}
+	resolver := clarification.NewResolver(
+		store,
+		repo,
+		&svcMessageUpdater{Service: svc},
+		svc,
+		resumer,
+		resumer,
+		nil,
+		testLogger(t),
+	)
+	respondLoaded := make(chan struct{})
+	releaseRespond := make(chan struct{})
+	store.SetOnRespondLoaded(func(string) {
+		close(respondLoaded)
+		<-releaseRespond
+	})
+	answerDone := make(chan error, 1)
+	tracingRepo := &retryReadAnswerRepo{Repository: repo}
+	tracingRepo.onRead = func() {
+		hadWaiter := len(store.ListPending()) > 0
+		go func() {
+			_, _, err := resolver.ResolveBundle(ctx, pendingID, clarification.Outcome{Answers: []clarification.Answer{{
+				QuestionID:      "q1",
+				SelectedOptions: []string{"opt-blue"},
+			}}})
+			answerDone <- err
+		}()
+		<-respondLoaded
+		close(releaseRespond)
+		if !hadWaiter {
+			answerErr := <-answerDone
+			answerDone <- answerErr
+		}
+	}
+
+	h := NewHandlers(svc, nil, store, nil, &countingMessageCreator{}, tracingRepo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	responseDone := make(chan askUserQuestionResult, 1)
+	go func() {
+		resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, retryAskPayload(sessionID, taskID)))
+		responseDone <- askUserQuestionResult{response: resp, err: err}
+	}()
+
+	select {
+	case result := <-responseDone:
+		require.NoError(t, result.err)
+		require.Equal(t, ws.MessageTypeResponse, result.response.Type)
+		var body clarification.Response
+		require.NoError(t, json.Unmarshal(result.response.Payload, &body))
+		require.Equal(t, pendingID, body.PendingID)
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("retry waiter was registered after the durable answer had already chosen detached delivery")
+	}
+	require.NoError(t, <-answerDone)
+	require.Zero(t, resumer.calls.Load(), "one answer must not produce both a detached resume and a tool response")
+}
+
+// TestHandleAskUserQuestion_RetryAfterDetachedDeliveryDoesNotReplayToolResponse
+// is reviewer-requested contract coverage for the other side of the atomic
+// handoff: when the responder observed no waiter first, detached delivery owns
+// the answer and the later exact retry must not also return it through MCP.
+func TestHandleAskUserQuestion_RetryAfterDetachedDeliveryDoesNotReplayToolResponse(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	taskID, sessionID, pendingID := seedRetrySession(t, ctx, svc, repo, "retry-after-detached")
+	seedRetryMessage(t, ctx, repo, taskID, sessionID, pendingID, "pending", nil)
+
+	store := clarification.NewStore(time.Minute)
+	resumer := &countingDetachedResumer{}
+	resolver := clarification.NewResolver(
+		store,
+		repo,
+		&svcMessageUpdater{Service: svc},
+		svc,
+		resumer,
+		resumer,
+		nil,
+		testLogger(t),
+	)
+	_, claimed, err := resolver.ResolveBundle(ctx, pendingID, clarification.Outcome{Answers: []clarification.Answer{{
+		QuestionID:      "q1",
+		SelectedOptions: []string{"opt-blue"},
+	}}})
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.EqualValues(t, 1, resumer.calls.Load())
+
+	h := NewHandlers(svc, nil, store, nil, &countingMessageCreator{}, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, retryAskPayload(sessionID, taskID)))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	require.Empty(t, store.ListPending())
+	require.EqualValues(t, 1, resumer.calls.Load(), "retry must not dispatch or return the detached answer twice")
 }
 
 func TestHandleAskUserQuestion_RetryReturnsRecordedAnswerWithoutWaiting(t *testing.T) {

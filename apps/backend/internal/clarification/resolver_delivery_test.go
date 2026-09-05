@@ -462,7 +462,7 @@ func TestResolverLiveDeliveryUsesSynchronousNotifierBeforeAsyncFanout(t *testing
 func TestResolverDetachedResumeFailureRestoresRetryableBundle(t *testing.T) {
 	const pendingID = "pending-detached-retry"
 	message := resolverDeliveryMessage(pendingID, "message-detached-retry", "turn-1")
-	resolver, _, repo, creator, eventBus := newResolverDeliveryFixture(t, pendingID, []*taskmodels.Message{message})
+	resolver, store, repo, creator, eventBus := newResolverDeliveryFixture(t, pendingID, []*taskmodels.Message{message})
 	eventBus.resumeErr = errors.New("orchestrator rejected resume")
 
 	_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, resolverAnswer())
@@ -475,6 +475,15 @@ func TestResolverDetachedResumeFailureRestoresRetryableBundle(t *testing.T) {
 	if creator.restoreCalls != 1 || len(creator.published) != 1 {
 		t.Fatalf("restore calls=%d published=%d, want 1/1", creator.restoreCalls, len(creator.published))
 	}
+	if _, created, missed := store.CreateRetryRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Questions: []Question{{ID: "q1", Prompt: "Continue?"}},
+	}); !created || missed {
+		t.Fatalf("retry after restored detached delivery = created %v, missed %v; want true, false", created, missed)
+	}
+	store.CancelRequest(pendingID)
 
 	eventBus.resumeErr = nil
 	resolution, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, resolverAnswer())

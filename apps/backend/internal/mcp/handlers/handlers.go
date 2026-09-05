@@ -117,7 +117,11 @@ type clarificationDurableReader interface {
 // detached marker from a still-pending bundle once a retry re-adopts it with a
 // live waiter.
 type clarificationReattacher interface {
-	ReattachActiveClarificationBundle(ctx context.Context, sessionID, pendingID string) ([]*models.Message, error)
+	ReattachActiveClarificationBundle(ctx context.Context, sessionID, pendingID string) ([]*models.Message, bool, error)
+}
+
+type clarificationRetryRegistrar interface {
+	CreateRetryRequest(req *clarification.Request) (pendingID string, isNew, deliveryMissed bool)
 }
 
 // clarificationBundlePublisher is an optional message-creator extension that
@@ -131,9 +135,10 @@ type clarificationBundlePublisher interface {
 // must not be created again; response carries an answered/rejected outcome;
 // closed names a cancelled/expired outcome that has no answer to return.
 type durableClarificationState struct {
-	exists   bool
-	response *clarification.Response
-	closed   clarification.Status
+	exists          bool
+	response        *clarification.Response
+	closed          clarification.Status
+	deliveryPending bool
 }
 
 // reconcileDurableClarification loads whatever the durable identity already
@@ -167,6 +172,12 @@ func (h *Handlers) reconcileDurableClarification(ctx context.Context, sessionID,
 		}
 	}
 	state.exists = true
+	for _, message := range messages {
+		if metadataFlag(message.Metadata, "response_delivery_pending") {
+			state.deliveryPending = true
+			break
+		}
+	}
 	status, response, recorded := clarification.RecordedOutcome(pendingID, messages, h.logger)
 	if !recorded {
 		return state, nil
@@ -179,31 +190,40 @@ func (h *Handlers) reconcileDurableClarification(ctx context.Context, sessionID,
 	return state, nil
 }
 
+func metadataFlag(metadata map[string]interface{}, key string) bool {
+	switch value := metadata[key].(type) {
+	case bool:
+		return value
+	case string:
+		return value == "true" || value == "1"
+	case float64:
+		return value == 1
+	default:
+		return false
+	}
+}
+
 // reattachDurableClarification runs after a retry re-adopted a still-pending
 // bundle and a live waiter exists for it again. It clears agent_disconnected
 // from the bundle's current-turn rows and publishes the change so the
 // projection and the orchestrator's live-clarification guard see a live
-// waiter. Failures are logged only: the in-memory wait is already correct and
-// the durable flag is advisory.
-func (h *Handlers) reattachDurableClarification(ctx context.Context, sessionID, pendingID string) {
+// waiter. The returned active flag is authoritative: superseded bundles and
+// terminal sessions must never leave a retry parked on an unreachable waiter.
+func (h *Handlers) reattachDurableClarification(ctx context.Context, sessionID, pendingID string) (bool, error) {
 	reattacher, ok := h.sessionRepo.(clarificationReattacher)
 	if !ok {
-		return
+		return true, nil
 	}
-	messages, err := reattacher.ReattachActiveClarificationBundle(ctx, sessionID, pendingID)
+	messages, active, err := reattacher.ReattachActiveClarificationBundle(ctx, sessionID, pendingID)
 	if err != nil {
-		h.logger.Warn("failed to clear detached marker on re-adopted clarification bundle",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return
+		return false, err
 	}
 	if len(messages) == 0 {
-		return
+		return active, nil
 	}
 	publisher, ok := h.messageCreator.(clarificationBundlePublisher)
 	if !ok {
-		return
+		return active, nil
 	}
 	if err := publisher.PublishClarificationBundleUpdates(ctx, messages); err != nil {
 		h.logger.Warn("failed to publish re-adopted clarification bundle",
@@ -211,6 +231,80 @@ func (h *Handlers) reattachDurableClarification(ctx context.Context, sessionID, 
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	return active, nil
+}
+
+// reconcileClarificationAfterLostAdoption resolves the only race left after a
+// retry registers its waiter: an answer claim can win the durable bundle lock
+// before reattachment. A delivery-pending winner will find the registered
+// waiter, while a finalized winner can be replayed. No winner means the bundle
+// became inactive and must not be waited on.
+func (h *Handlers) reconcileClarificationAfterLostAdoption(
+	ctx context.Context,
+	sessionID, pendingID string,
+) (response *clarification.Response, wait bool, err error) {
+	latest, err := h.reconcileDurableClarification(ctx, sessionID, pendingID)
+	if err != nil {
+		return nil, false, err
+	}
+	if latest.response == nil {
+		return nil, false, nil
+	}
+	if latest.deliveryPending {
+		return nil, true, nil
+	}
+	return latest.response, false, nil
+}
+
+// adoptDurableClarificationRetry checks whether a durable pending bundle is
+// still authoritative and converts any race winner into an immediate result.
+// A nil result with wait=true means the caller owns the registered waiter.
+func (h *Handlers) adoptDurableClarificationRetry(
+	ctx context.Context,
+	msg *ws.Message,
+	sessionID, taskID, pendingID string,
+	isNew bool,
+) (result *ws.Message, resultErr error, wait bool) {
+	active, err := h.reattachDurableClarification(ctx, sessionID, pendingID)
+	if err != nil {
+		if isNew {
+			h.clarificationSvc.CancelRequest(pendingID)
+		}
+		h.logger.Error("failed to adopt durable clarification retry",
+			zap.String("pending_id", pendingID), zap.Error(err))
+		result, resultErr = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to reconcile clarification retry", nil)
+		return result, resultErr, false
+	}
+	if active {
+		return nil, nil, true
+	}
+
+	recorded, deliveryPending, err := h.reconcileClarificationAfterLostAdoption(ctx, sessionID, pendingID)
+	if err != nil {
+		if isNew {
+			h.clarificationSvc.CancelRequest(pendingID)
+		}
+		result, resultErr = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to reconcile clarification retry", nil)
+		return result, resultErr, false
+	}
+	if recorded != nil {
+		if isNew {
+			h.clarificationSvc.CancelRequest(pendingID)
+		}
+		h.setSessionRunning(ctx, taskID, sessionID)
+		result, resultErr = ws.NewResponse(msg.ID, msg.Action, recorded)
+		return result, resultErr, false
+	}
+	if deliveryPending {
+		return nil, nil, true
+	}
+
+	h.clarificationSvc.CancelRequest(pendingID)
+	result, resultErr = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+		"Clarification request is no longer active", nil)
+	return result, resultErr, false
 }
 
 // stepCompletionTurnReader exposes the immutable workflow-step stamp on the
@@ -3852,20 +3946,46 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		}
 	}
 
-	// Reconcile an exact transport retry before touching the in-memory store.
-	// The MCP server scopes retry_key to one connection and request id; the
-	// derived identity lets a retry find the question bundle its interrupted
-	// predecessor already committed, and return a recorded outcome instead of
-	// waiting on a question nobody can answer anymore.
+	// Register the retry before reading its durable bundle. This ordering makes
+	// the handoff to Resolver linearizable: a concurrent durable answer either
+	// finds this waiter, or records that it already chose detached delivery.
 	retryPendingID := clarification.PendingIDForRequest(req.SessionID, req.RetryKey)
+	clarificationReq := &clarification.Request{
+		PendingID: retryPendingID,
+		SessionID: req.SessionID,
+		TaskID:    taskID,
+		Questions: req.Questions,
+		Context:   req.Context,
+	}
+	pendingID, isNew := "", false
+	deliveryMissed := false
+	if registrar, ok := h.clarificationSvc.(clarificationRetryRegistrar); ok && retryPendingID != "" {
+		pendingID, isNew, deliveryMissed = registrar.CreateRetryRequest(clarificationReq)
+	} else {
+		pendingID, isNew = h.clarificationSvc.CreateRequest(clarificationReq)
+	}
+
 	durable, err := h.reconcileDurableClarification(ctx, req.SessionID, retryPendingID)
 	if err != nil {
+		if isNew {
+			h.clarificationSvc.CancelRequest(pendingID)
+		}
 		h.logger.Error("failed to reconcile clarification retry",
 			zap.String("pending_id", retryPendingID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to reconcile clarification retry", nil)
 	}
-	if durable.response != nil {
+	if deliveryMissed {
+		h.logger.Info("clarification retry joined an answer already committed to detached delivery",
+			zap.String("pending_id", retryPendingID),
+			zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"Clarification response is already being delivered after the interrupted wait", nil)
+	}
+	if durable.response != nil && !durable.deliveryPending {
+		if isNew {
+			h.clarificationSvc.CancelRequest(pendingID)
+		}
 		h.setSessionRunning(ctx, taskID, req.SessionID)
 		h.logger.Info("clarification retry returned recorded outcome",
 			zap.String("pending_id", retryPendingID),
@@ -3874,6 +3994,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		return ws.NewResponse(msg.ID, msg.Action, durable.response)
 	}
 	if durable.closed != "" {
+		h.clarificationSvc.CancelRequest(pendingID)
 		h.logger.Warn("clarification retry found closed bundle",
 			zap.String("pending_id", retryPendingID),
 			zap.String("session_id", req.SessionID),
@@ -3881,16 +4002,6 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"Clarification request timed out or was cancelled", nil)
 	}
-
-	// Create the clarification request
-	clarificationReq := &clarification.Request{
-		PendingID: retryPendingID,
-		SessionID: req.SessionID,
-		TaskID:    taskID,
-		Questions: req.Questions,
-		Context:   req.Context,
-	}
-	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
 
 	// Create one chat message per question (triggers WS events to frontend).
 	// If the create fails, the in-store pending entry must be cancelled too —
@@ -3911,10 +4022,14 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 				"failed to create clarification messages: "+err.Error(), nil)
 		}
 	}
-	if durable.exists {
-		// The bundle may have been detached while no waiter was attached; this
-		// call is about to wait on it again.
-		h.reattachDurableClarification(ctx, req.SessionID, pendingID)
+	if durable.exists && durable.response == nil {
+		// Reattachment is also the authoritative activeness check. It is
+		// serialized with answer claims and successor-turn creation.
+		if result, resultErr, wait := h.adoptDurableClarificationRetry(
+			ctx, msg, req.SessionID, taskID, pendingID, isNew,
+		); !wait {
+			return result, resultErr
+		}
 	}
 
 	// Update session and task states to waiting for input

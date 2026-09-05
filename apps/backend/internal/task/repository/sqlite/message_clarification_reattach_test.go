@@ -52,9 +52,12 @@ func TestReattachActiveClarificationBundleClearsDetachedFlagOnlyForCurrentPendin
 	mutationTime := base.Add(time.Hour)
 	repo.clockNow = func() time.Time { return mutationTime }
 
-	updated, err := repo.ReattachActiveClarificationBundle(ctx, "session-reattach", "pending-current")
+	updated, active, err := repo.ReattachActiveClarificationBundle(ctx, "session-reattach", "pending-current")
 	if err != nil {
 		t.Fatalf("ReattachActiveClarificationBundle: %v", err)
+	}
+	if !active {
+		t.Fatal("current pending bundle was not reported active")
 	}
 	if ids := messageIDs(updated); len(ids) != 2 || ids[0] != "message-current-1" || ids[1] != "message-current-2" {
 		t.Fatalf("reattached message IDs = %v, want both current pending rows", ids)
@@ -91,9 +94,12 @@ func TestReattachActiveClarificationBundleClearsDetachedFlagOnlyForCurrentPendin
 	if detached, _ := answered.Metadata["agent_disconnected"].(bool); !detached {
 		t.Fatalf("terminal row was reattached: %#v", answered.Metadata)
 	}
-	repeated, err := repo.ReattachActiveClarificationBundle(ctx, "session-reattach", "pending-current")
+	repeated, active, err := repo.ReattachActiveClarificationBundle(ctx, "session-reattach", "pending-current")
 	if err != nil {
 		t.Fatalf("repeated reattach: %v", err)
+	}
+	if !active {
+		t.Fatal("already-attached current pending bundle was not reported active")
 	}
 	if len(repeated) != 0 {
 		t.Fatalf("repeated reattach changed rows: %v", messageIDs(repeated))
@@ -113,9 +119,12 @@ func TestReattachActiveClarificationBundleIgnoresNeverDetachedBundle(t *testing.
 		"pending-live", "q-live", base,
 	)
 
-	updated, err := repo.ReattachActiveClarificationBundle(ctx, "session-live", "pending-live")
+	updated, active, err := repo.ReattachActiveClarificationBundle(ctx, "session-live", "pending-live")
 	if err != nil {
 		t.Fatalf("ReattachActiveClarificationBundle: %v", err)
+	}
+	if !active {
+		t.Fatal("never-detached current pending bundle was not reported active")
 	}
 	if len(updated) != 0 {
 		t.Fatalf("live bundle was rewritten: %v", messageIDs(updated))
