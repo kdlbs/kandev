@@ -59,6 +59,17 @@ test("auto-hides empty columns without changing drag destinations", async ({
   await expect(kanban.columnByStepId(autoHiddenStep.id)).toBeVisible();
   await expect(kanban.columnByStepId(manuallyHiddenStep.id)).toBeVisible();
 
+  // @covers AC-UI-ADAPTIVE-KANBAN-001.9
+  const sourceColumn = kanban.columnByStepId(sourceStep.id);
+  const sourceWidthBeforeDrag = (await sourceColumn.boundingBox())?.width;
+  if (sourceWidthBeforeDrag == null) throw new Error("drag source has no layout width");
+  await beginPointerDrag(testPage, kanban.taskCard(task.id));
+  const sourceWidthDuringDrag = (await sourceColumn.boundingBox())?.width;
+  if (sourceWidthDuringDrag == null) throw new Error("drag source has no layout width");
+  expect(Math.abs(sourceWidthDuringDrag - sourceWidthBeforeDrag)).toBeLessThanOrEqual(1);
+  await testPage.keyboard.press("Escape");
+  await testPage.mouse.up();
+
   await openColumnsMenu(testPage, workflow.id);
   const autoHideToggle = testPage.getByTestId(`columns-menu-auto-hide-empty-${workflow.id}`);
   await expect(autoHideToggle).toHaveAttribute("aria-checked", "false");

@@ -10,7 +10,7 @@ type AdaptiveDesktopKanbanProps = {
   renderColumn: (step: WorkflowStep) => ReactNode;
 };
 
-export const KANBAN_DRAG_END_PADDING = `max(0px, calc(100% - ${KANBAN_COLUMN_MIN_PX}px))`;
+const KANBAN_DRAG_END_MARGIN = `max(0px, calc(100% - ${KANBAN_COLUMN_MIN_PX}px))`;
 
 const PAN_ACTIVATION_DISTANCE_PX = 4;
 const INTERACTIVE_TARGET_SELECTOR = [
@@ -99,7 +99,7 @@ export function AdaptiveDesktopKanban({
           className="grid h-full min-h-0 min-w-full gap-0"
           style={{
             gridTemplateColumns: getKanbanColumnGridTemplate(steps.length),
-            paddingInlineEnd: isDragging ? KANBAN_DRAG_END_PADDING : undefined,
+            marginInlineEnd: isDragging ? KANBAN_DRAG_END_MARGIN : undefined,
           }}
         >
           {steps.map((step) => (
