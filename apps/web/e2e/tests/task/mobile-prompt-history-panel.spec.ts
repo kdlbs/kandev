@@ -7,8 +7,8 @@ import {
   SECOND_PROMPT_MARKER,
   seedLongPromptHistory,
 } from "../../helpers/prompt-history-long-seed";
-
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+const MOBILE_ALIAS = "mobile-history-alias";
 
 /** CDP touch-scrolls the element upward, which scrolls its content DOWN
  * (revealing older content), matching the repo's mobile scroll convention. */
@@ -37,6 +37,14 @@ async function touchScrollDown(page: Page, scrollElement: Locator) {
 }
 
 test.describe("Prompt history panel on mobile", () => {
+  test.afterEach(async ({ apiClient }) => {
+    const { prompts } = await apiClient.listPrompts();
+    for (const prompt of prompts) {
+      if (!prompt.builtin && prompt.name === MOBILE_ALIAS) {
+        await apiClient.deletePrompt(prompt.id).catch(() => undefined);
+      }
+    }
+  });
   test("opens from Panels and returns to Chat for a prompt jump", async ({
     testPage,
     apiClient,
@@ -44,7 +52,8 @@ test.describe("Prompt history panel on mobile", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const seedPrompt = "Mobile prompt history seeded prompt";
+    await apiClient.createPrompt(MOBILE_ALIAS, "Mobile history alias content");
+    const seedPrompt = `@${MOBILE_ALIAS}`;
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile prompt history task",
@@ -92,13 +101,21 @@ test.describe("Prompt history panel on mobile", () => {
     await expect(historyPanel).toBeVisible({ timeout: 10_000 });
     const row = testPage.getByTestId("prompt-history-row-0");
     await expect(row).toContainText(seedPrompt);
+    const chip = row.getByTestId("custom-prompt-mention");
+    await expect(chip).toBeVisible({ timeout: 15_000 });
+    await expect(chip).toHaveAttribute("data-prompt-name", MOBILE_ALIAS);
+    await chip.tap();
+    await expect(testPage.getByText("Mobile history alias content")).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByText("Mobile history alias content")).toHaveCount(0);
     // The single seeded prompt is the session's very first: #1.
     await expect(row.getByTestId("prompt-history-number-0")).toHaveText("#1");
-    const prompt = row.locator('[role="button"]').first();
+    const prompt = row.locator("[data-message-id]");
     const promptBox = await prompt.boundingBox();
     expect(promptBox?.height).toBeGreaterThanOrEqual(44);
 
-    await prompt.tap();
+    // Tap the row padding, not the nested alias chip.
+    await prompt.tap({ position: { x: 4, y: 4 } });
     await expect(testPage.locator(`#msg-${promptMessage.id}`)).toBeAttached();
   });
 
@@ -193,7 +210,7 @@ test.describe("Prompt history panel on mobile", () => {
       .locator("[data-message-id]")
       .getAttribute("data-message-id");
     if (!firstPromptMessageId) throw new Error("First prompt row has no message id");
-    await firstRow.locator('[role="button"]').first().tap();
+    await firstRow.locator("[data-message-id]").tap();
     await expect(testPage.locator(`#msg-${firstPromptMessageId}`)).toBeAttached({
       timeout: 10_000,
     });

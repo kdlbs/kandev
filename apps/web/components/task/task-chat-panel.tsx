@@ -565,10 +565,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
-  const { isMobile } = useResponsiveBreakpoint();
-  // The anchored bar is a desktop-only, opt-in affordance; mobile always
-  // falls back to the scroll button.
-  const showAnchoredBar = !isMobile && showAnchoredPromptBar;
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  // The anchored bar is a desktop-only, fine-pointer affordance; coarse
+  // pointers use the compact scroll control instead.
+  const showAnchoredBar = isFinePointer && !isMobile && showAnchoredPromptBar;
   const [anchoredBarHeight, setAnchoredBarHeight] = useState(0);
   const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
     resolveLastPromptControls(lastPromptEdge);

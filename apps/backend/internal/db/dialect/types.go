@@ -16,3 +16,12 @@ func BlobType(driver string) string {
 	}
 	return "BLOB"
 }
+
+// ByteLength returns a dialect-specific SQL expression that measures the
+// UTF-8 byte length of a text expression.
+func ByteLength(driver, expression string) string {
+	if IsPostgres(driver) {
+		return "octet_length(" + expression + ")"
+	}
+	return "length(CAST(" + expression + " AS BLOB))"
+}
