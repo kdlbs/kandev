@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,6 +33,32 @@ type GitHubAPIError struct {
 	StatusCode int
 	Endpoint   string
 	Body       string
+	RetryAfter *time.Time
+	RequestID  string
+	URL        string
+}
+
+func githubAPIRetryAfter(resp *http.Response) *time.Time {
+	if resp == nil {
+		return nil
+	}
+	if raw := resp.Header.Get("X-RateLimit-Reset"); raw != "" {
+		if unix, err := strconv.ParseInt(raw, 10, 64); err == nil && unix > 0 {
+			reset := time.Unix(unix, 0).UTC()
+			return &reset
+		}
+	}
+	if raw := resp.Header.Get("Retry-After"); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds >= 0 {
+			reset := time.Now().UTC().Add(time.Duration(seconds) * time.Second)
+			return &reset
+		}
+		if parsed, err := http.ParseTime(raw); err == nil {
+			reset := parsed.UTC()
+			return &reset
+		}
+	}
+	return nil
 }
 
 func (e *GitHubAPIError) Error() string {
@@ -887,30 +914,63 @@ func (c *PATClient) requestJSON(
 	body []byte,
 	result interface{},
 ) error {
+	_, err := c.requestJSONWithMetadata(ctx, method, endpoint, body, result)
+	return err
+}
+
+func (c *PATClient) requestJSONWithMetadata(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+) (GitHubRequestMetadata, error) {
+	return c.requestJSONWithMetadataVersion(ctx, method, endpoint, body, result, githubAPIVersion)
+}
+
+func (c *PATClient) requestJSONWithMetadataVersion(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+	apiVersion string,
+) (GitHubRequestMetadata, error) {
 	u := githubAPIBase + endpoint
+	metadata := GitHubRequestMetadata{URL: u}
 	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return metadata, err
 	}
 	c.setGitHubHeaders(req)
+	if apiVersion != "" {
+		req.Header.Set("X-GitHub-Api-Version", apiVersion)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request %s %s: %w", method, endpoint, err)
+		return metadata, fmt.Errorf("request %s %s: %w", method, endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	metadata.RequestID = resp.Header.Get("X-GitHub-Request-Id")
 	c.recordRateHeaders(resp, endpoint)
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+		return metadata, &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
+			Body: string(respBody), RetryAfter: githubAPIRetryAfter(resp),
+			RequestID: metadata.RequestID, URL: metadata.URL}
 	}
 	if result == nil {
-		return nil
+		return metadata, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(result)
+	err = json.NewDecoder(resp.Body).Decode(result)
+	if errors.Is(err, io.EOF) {
+		return metadata, nil
+	}
+	return metadata, err
 }
 
 // delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.
@@ -964,7 +1024,8 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, body)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
+			Body: string(body), RetryAfter: githubAPIRetryAfter(resp)}
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
 }

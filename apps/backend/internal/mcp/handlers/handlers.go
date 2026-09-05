@@ -304,6 +304,7 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	freshCIRuns            FreshCIRunService
 	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
@@ -481,6 +482,9 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	if h.freshCIRuns != nil {
+		d.RegisterFunc(ws.ActionMCPRequestFreshCIRun, h.handleRequestFreshCIRun)
+	}
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 }
 
