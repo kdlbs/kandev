@@ -38,6 +38,7 @@ vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
   useGitLabAvailable: () => true,
   useTaskMRs: () => gitlabMocks.mrs,
   useUnlinkTaskMR: () => unlinkMock,
+  useWorkspaceMRs: () => undefined,
 }));
 
 vi.mock("@/hooks/domains/gitlab/use-task-mr-automation", () => ({

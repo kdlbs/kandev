@@ -175,6 +175,8 @@ export type UpdateTaskPayload = {
   status?: string;
   comment?: string;
   assignee_agent_profile_id?: string;
+  /** The human assignee. "" unassigns; omitting the field leaves it alone. */
+  assignee_user_id?: string;
   priority?: string;
   project_id?: string;
   parent_id?: string;

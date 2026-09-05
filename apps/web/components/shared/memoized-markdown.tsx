@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useContext, useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import {
   MarkdownFileLinkContext,
@@ -30,10 +30,26 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   content,
   worktreePath,
   onOpenFile,
+  fileRootAliases,
   components,
   taskId = null,
 }: MemoizedMarkdownProps) {
-  const fileLinkContext = useMemo(() => ({ worktreePath, onOpenFile }), [worktreePath, onOpenFile]);
+  const inheritedContext = useContext(MarkdownFileLinkContext);
+  const fileLinkContext = useMemo(
+    () => ({
+      worktreePath: worktreePath ?? inheritedContext.worktreePath,
+      onOpenFile: onOpenFile ?? inheritedContext.onOpenFile,
+      fileRootAliases: fileRootAliases ?? inheritedContext.fileRootAliases,
+    }),
+    [
+      fileRootAliases,
+      inheritedContext.fileRootAliases,
+      inheritedContext.onOpenFile,
+      inheritedContext.worktreePath,
+      onOpenFile,
+      worktreePath,
+    ],
+  );
   const resolvedComponents = components ?? markdownComponents;
 
   return (

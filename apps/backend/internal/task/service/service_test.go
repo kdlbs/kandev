@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/orgunit"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -149,6 +150,9 @@ func (*testWorkflowStepGetter) GetNextStepByPosition(context.Context, string, in
 // caller substitute the Sessions repository (e.g. to wrap it with a test-only
 // hook) while reusing the same DB setup, migrations, and cleanup-worker
 // wiring for every other field.
+// testUnits exposes each test's unit service so a seed can build a tree.
+var testUnits = map[string]*orgunit.Service{}
+
 func createTestServiceWithSessionsRepo(
 	t *testing.T,
 	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
@@ -209,6 +213,18 @@ func createTestServiceWithSessionsRepo(
 		Usage:             repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	svc.SetWorkspaceBootstrapper(repo)
+	// Reach comes from the unit tree, so the service tests wire the real one
+	// rather than a stub: a resolver the wiring never calls protects nothing.
+	unitStore, unitErr := orgunit.NewStore(db.NewPool(sqlxDB, sqlxDB))
+	if unitErr != nil {
+		t.Fatalf("failed to init unit store: %v", unitErr)
+	}
+	unitSvc := orgunit.NewService(unitStore, nil)
+	unitSvc.SetWorkspaceCounter(repo)
+	svc.SetUnitPlacer(unitSvc)
+	svc.SetUnitReach(unitSvc)
+	testUnits[t.Name()] = unitSvc
+	t.Cleanup(func() { delete(testUnits, t.Name()) })
 	svc.SetWorkflowStepGetter(&testWorkflowStepGetter{repo: repo})
 	if err := svc.StartTaskResourceCleanupWorker(context.Background()); err != nil {
 		t.Fatalf("failed to start task resource cleanup worker: %v", err)

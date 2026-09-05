@@ -798,6 +798,8 @@ const (
 	envKeyGitLabToken          = "GITLAB_TOKEN"
 	envKeyGitLabHost           = "GITLAB_HOST"
 	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
+	envKeyMCPTimeout           = "MCP_TIMEOUT"
+	envKeyMCPToolTimeout       = "MCP_TOOL_TIMEOUT"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -811,6 +813,13 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyGitLabToken,
 	envKeyGitLabHost,
 	envKeyKandevGitLabHost,
+}
+
+// sshRemoteAgentRuntimeEnvKeys are non-secret runtime controls that must reach
+// the remote agent process after profile and agent precedence has been resolved.
+var sshRemoteAgentRuntimeEnvKeys = []string{
+	envKeyMCPTimeout,
+	envKeyMCPToolTimeout,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
@@ -828,6 +837,11 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	}
 	env := make(map[string]string)
 	for _, key := range sshRemoteAgentCredentialEnvKeys {
+		if val := req.Env[key]; val != "" {
+			env[key] = val
+		}
+	}
+	for _, key := range sshRemoteAgentRuntimeEnvKeys {
 		if val := req.Env[key]; val != "" {
 			env[key] = val
 		}

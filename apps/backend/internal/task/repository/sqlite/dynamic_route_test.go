@@ -265,6 +265,60 @@ func TestClaimRouteStateFromRequiresExpectedStatus(t *testing.T) {
 	}
 }
 
+func TestClaimRouteStatusRejectsStateThatAlreadyAdvancedAtSameGeneration(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-claim-status", Title: "Claim status"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "claim-status-session", TaskID: "task-claim-status", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	now := time.Now().UTC()
+	seed := dynamicruntime.RouteState{
+		SessionID: "claim-status-session", LogicalProfileID: "dynamic-1",
+		ExecutionProfileID: "concrete-1", Generation: 4, ProfileVersion: 1,
+		Status: "retry_wait", UpdatedAt: now,
+	}
+	if err := repo.SaveRouteState(ctx, seed); err != nil {
+		t.Fatalf("SaveRouteState: %v", err)
+	}
+
+	// First claim observes "retry_wait" and transitions to "retrying" at the
+	// same generation: the durable row still matches, so it succeeds.
+	winner := seed
+	winner.Status = "retrying"
+	winner.UpdatedAt = now.Add(time.Second)
+	claimed, err := repo.ClaimRouteStateFrom(ctx, 4, "retry_wait", winner)
+	if err != nil || !claimed {
+		t.Fatalf("winning ClaimRouteStateFrom = %v, %v", claimed, err)
+	}
+
+	// A second caller that also observed "retry_wait" at generation 4 loses:
+	// the durable state column has already advanced to "retrying", even
+	// though the generation itself has not changed.
+	loser := seed
+	loser.Status = "retrying"
+	loser.UpdatedAt = now.Add(2 * time.Second)
+	claimed, err = repo.ClaimRouteStateFrom(ctx, 4, "retry_wait", loser)
+	if err != nil {
+		t.Fatalf("losing ClaimRouteStateFrom: %v", err)
+	}
+	if claimed {
+		t.Fatal("second caller claimed a status transition already applied by the first")
+	}
+
+	loaded, err := repo.LoadRouteState(ctx, "claim-status-session")
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if loaded == nil || loaded.UpdatedAt.Unix() != winner.UpdatedAt.Unix() {
+		t.Fatalf("loaded state = %#v, want the winner's write", loaded)
+	}
+}
+
 func TestRecordRouteDecisionClaimsInitialGenerationAndWritesAttemptAtomically(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

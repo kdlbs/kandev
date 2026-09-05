@@ -10,6 +10,7 @@ import { StatusPicker } from "./components/status-picker";
 import { PriorityPicker } from "./components/priority-picker";
 import { LabelsPicker } from "./components/labels-picker";
 import { AssigneePicker } from "./components/assignee-picker";
+import { HumanAssigneePicker } from "./components/human-assignee-picker";
 import { ProjectPicker } from "./components/project-picker";
 import { ParentPicker } from "./components/parent-picker";
 import { BlockersPicker } from "./components/blockers-picker";
@@ -19,6 +20,7 @@ import { ApproversPicker } from "./components/approvers-picker";
 import { PendingApprovalBadge } from "./components/pending-approval-badge";
 import { QuorumStatusBadge } from "./components/quorum-status-badge";
 import { useTranslation } from "react-i18next";
+import { useAppStore } from "@/components/state-provider";
 
 type TaskPropertiesProps = {
   task: Task;
@@ -53,6 +55,20 @@ function NoneLabel() {
   return <span className="text-muted-foreground">{t("task:none")}</span>;
 }
 
+// The human assignee row is only meaningful when there is an identity to
+// assign to: with authentication disabled every visitor is the same anonymous
+// user, so the control would offer a choice that cannot mean anything.
+function HumanAssigneeRow({ task }: { task: Task }) {
+  const { t } = useTranslation();
+  const hasIdentity = useAppStore((s) => Boolean(s.auth.user));
+  if (!hasIdentity) return null;
+  return (
+    <PropertyRow label={t("task:assignedTo")} valueClassName="ml-auto">
+      <HumanAssigneePicker task={task} />
+    </PropertyRow>
+  );
+}
+
 function IdentitySection({ task }: { task: Task }) {
   const { t } = useTranslation();
   return (
@@ -73,6 +89,7 @@ function IdentitySection({ task }: { task: Task }) {
       <PropertyRow label={t("task:assignee")} valueClassName="ml-auto">
         <AssigneePicker task={task} />
       </PropertyRow>
+      <HumanAssigneeRow task={task} />
       <PropertyRow label={t("task:project")} valueClassName="ml-auto">
         <ProjectPicker task={task} />
       </PropertyRow>
