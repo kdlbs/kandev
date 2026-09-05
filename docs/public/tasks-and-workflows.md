@@ -702,6 +702,12 @@ Regular Kanban does not currently expose label editing or label filters. Do not 
 
 A workflow sets task steps, prompts, agent profiles, session rules, and automatic transitions. Configure it in **Settings → Workspaces → _workspace_ → Workflows**.
 
+Open **Settings → Workspaces → _workspace_ → Workflows**, then select **Edit** on a workflow. The focused workflow editor shows the ordered pipeline and one selected step at a time. On desktop, the step inspector has **Agent**, **Automation**, and **Policies** tabs. On a phone, select a step from the vertical journey, then use its full-height step screen. A new workflow uses the same editor at `/workflows/new` and is created only when you save it.
+
+The editor uses one manual **Save changes** action for the workflow draft. Moving between steps or inspector tabs does not save or discard changes. If a workflow is synchronized from GitHub or GitLab, the editor stays available for inspection but its mutation controls are disabled; edit the source file and synchronize again.
+
+A workflow has a name, an optional **Default Agent Profile**, and ordered steps. When the workflow has a default profile, users cannot choose another profile in the task-creation dialog.
+
 - Start with **Kanban** for basic task tracking.
 - Choose **Custom** to set step prompts, agent profiles, session behavior, auto-start actions, transitions, and WIP limits.
 - Keep a **Review** or **Do nothing** step when a person must approve the work.
@@ -738,6 +744,179 @@ When a workflow keeps the same conversation across steps, it can change that ses
 - Synced workflows show the rules but cannot edit them.
 
 For event actions, completion signals, and human gates, see [Workflow Tips](workflow-tips.md#events-and-actions).
+
+Answering a parked session starts an agent process for it again, in the same
+task workspace the destination step's session may still be using. Kandev
+permits more than one session of a task to write that shared workspace
+concurrently; it does not serialize them or lock the workspace to one writer.
+If the destination session is still active when you answer the parked one,
+both write the same files. Kandev records this condition (a structured log
+entry and an operational counter) but does not prevent, delay, or queue it. To
+avoid concurrent writers, confirm the destination session has finished before
+answering a parked one, or use **Complete the session** instead of **Park the
+session** for steps that pin a different agent profile.
+
+When **Reset agent context** creates a fresh ACP session, Kandev preserves the
+selected ACP model, permission mode, and provider options. It restores these
+settings before the next automatic prompt. If the provider rejects a setting,
+the reset fails, or the provider does not answer the reset request, Kandev
+leaves the session waiting for input. It does not send the destination step's
+automatic prompt. The conversation keeps a visible previous-agent-error notice
+with the reset cause. To recover, delete the affected conversation from its
+session actions, then create a new session for the task. The task workspace and
+files remain available to the new session. See [Sessions and review](sessions-and-review.md)
+for the session actions and mobile session picker.
+
+The WIP check also applies when a task is created. It runs for an explicit
+`workflow_step_id` and for the workflow's resolved start step, and the
+admission check is atomic. When a limited step is full, the task is still
+created and visible: it is queued in that step when no feeder is configured,
+or placed in the configured feeder and tagged for the destination. Queued
+tasks do not start sessions or consume destination WIP until promoted. If you
+manually move a task, or an automatic transition sends it to a full limited
+step, it queues in that destination instead of using the feeder. The Kanban
+column shows the admitted count and limit, then a **Queued** section. The task
+sidebar shows a queue icon whose tooltip gives the task's position in that
+destination queue. If the configured
+feeder is also full, creation returns a conflict. Ephemeral tasks are not
+counted.
+
+A queued task detail shows a **Workflow WIP limit** banner. It names the
+destination workflow and step, reports task counts, and links to that
+workflow's WIP settings when the destination identity is available. The
+banner can appear before the task has a session. A feeder's name or limit is
+never shown as the destination.
+
+A task can also show **Queued** after workflow entry selects a session but the
+global session capacity blocks automatic launch. This is a separate queue:
+WIP queueing waits before destination entry, while global capacity queueing
+keeps the selected session and retries it automatically. The task detail and
+task navigator identify this cause as **Global session limit**, state that it
+applies to all workspaces, and link to Settings > Task Behavior > Session
+capacity. They show the destination, the latest capacity observation, queue
+time, and retry state. They do not show a queue position or estimated start
+time. Capacity counts older than 40 seconds, or counts unavailable because the
+client is disconnected, are labelled stale while the destination remains
+visible. Opening a task or a parked predecessor does not start it. Use the
+explicit **Start** or **Resume** action, or send a message, to override the
+automatic ceiling for that conversation.
+
+The instance session capacity is disabled by default. An administrator can
+enable it in Settings > Task Behavior > Session capacity, enter a positive
+maximum, and save the change. The saved value applies to later automatic
+starts without a restart and persists across restarts. Disabling it retains
+the maximum for later use. Manual starts can exceed the limit. Workflow WIP
+limits remain separate and are checked before session capacity.
+
+`KANDEV_MAX_CONCURRENT_SESSIONS` is an optional startup override. A valid
+non-negative value takes precedence over the saved setting, and `0` disables
+the ceiling. When the override is present, Settings shows the effective value
+and prevents edits. Change the environment and restart Kandev to remove the
+override.
+
+Integration watchers use the same admission rule. For example, a GitHub review
+watch targeting a `Review` step with a limit of two admits at most two newly
+observed pull requests at a time. Pull requests that lose the capacity race
+remain eligible for a later poll; Kandev releases their temporary watch
+reservation and does not start an agent for them.
+
+Auto-archive is checked on a five-minute background interval and uses the task's last update time. Any task update postpones eligibility, so the archive is not guaranteed at the exact configured minute. Archiving, deleting, or moving an admitted task opens capacity and promotes the oldest queued card. Auto-archive affects the task itself, not its children.
+
+Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and when eligible work is created in its feeder, filling each available slot. Destination-queued tasks are promoted before feeder candidates. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), queue time, creation time, and ID. A candidate whose move fails, for example because its session is running or starting, is skipped for that pull pass.
+
+### Configure events and transitions
+
+| Event                         | Available transition                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **On Turn Start**             | Do nothing, move next, move previous, or move to a selected step when the user sends a message.                                                                                                                                                                                                                                                                                                                                                  |
+| **On Turn Complete**          | **Do nothing (wait for user)**, move next, move previous, or move to a selected step after the agent turn.                                                                                                                                                                                                                                                                                                                                       |
+| **Cancelled turn completion** | When enabled, an explicit user cancellation also runs this step's normal `on_turn_complete` actions after the cancelled turn settles. It bypasses the `auto_advance_requires_signal` / `step_complete_kandev` gate for that cancellation, but a pending clarification still blocks the transition. It does not apply to silent clarification cancellation, peer interruptions, parent/task stops, provider errors, crashes, or runtime teardown. |
+| **When Child Tasks Complete** | Do nothing, move next, move previous, or move to a selected step after every active direct child reaches `COMPLETED`, `FAILED`, or `CANCELLED`, provided the parent has an active session.                                                                                                                                                                                                                                                       |
+
+The child-completion event ignores archived and ephemeral children, does not inspect grandchildren, and does nothing when the parent has no children. It also requires a parent session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT`; a parent with no session, or only an `IDLE`, `COMPLETED`, `FAILED`, or `CANCELLED` session, does not transition.
+
+Generic comment, blocker-resolution, approval, heartbeat, budget, and error triggers, plus participant quorum, belong to the in-progress Office workflow surface. They are not configurable regular-Kanban step events.
+
+### Run lifecycle scripts
+
+Use the **Automation** tab to add one or more **Run script** actions to a step. Each lifecycle list keeps its own order. The supported lists are:
+
+- **On Enter:** runs in the destination session after profile and session routing completes.
+- **On Turn Complete:** runs in the source session before the step transition is applied.
+- **On Exit:** runs in the source session before the step transition is applied.
+
+Each script has a command, a timeout, and a failure policy. The default timeout is 600 seconds. **Block** stops the current lifecycle operation when the script fails or times out. **Continue** records the failure and lets the remaining lifecycle operation continue. Multiple scripts run in their configured order.
+
+The command runs in the bound session's executor workspace with that executor's managed environment. Kandev does not execute a script during editing or saving. The task chat shows one durable script message with the lifecycle, command, status, exit code, output, and truncation state. A process admission that becomes ambiguous during recovery is recorded as interrupted and is not automatically run again. Treat workflow script definitions as executable code and review their repository, workflow, and executor access before enabling them.
+
+When **On Turn Complete** moves a task, **Wait for agent completion signal** is available. With it enabled, a bare turn end leaves the task waiting; the agent must call `step_complete_kandev`. The call requires a summary and can include a handoff or blockers. It is idempotent within the step, runs asynchronously, and a user message sent before the transition is applied cancels that pending signal. Without the option, turn end counts as completion.
+
+If the task changes steps before the agent sends the signal, Kandev rejects the call and names both the turn's launch step and the current step. Retrying in that same turn cannot recover. End the turn and have the user resume the session, then satisfy the current step and call `step_complete_kandev` from the fresh turn. An operator can also use the normal manual workflow move after checking the work and destination. Waiting, reconnecting, or retrying the stale turn does not change its eligibility.
+
+**Run completion actions when a turn is cancelled** is available beneath a configured turn-complete transition. It applies only when a user explicitly presses **Cancel** on the active turn. The normal completion pipeline still applies, including `on_exit`, the configured transition, and the destination step's `on_enter` actions; an `auto_start_agent` action there can start another turn immediately. An eligible explicit cancellation bypasses the `auto_advance_requires_signal` / `step_complete_kandev` gate, but a pending clarification still blocks the transition. The setting does not turn other interruption or failure paths into completion events. When the setting is off, an explicit cancel leaves the task in its current step and ready for input.
+
+The built-in **Kanban** workflow enables this policy on **Backlog** and **In Progress** and leaves it disabled on its other steps. Custom steps and imported definitions default to disabled unless they set the field explicitly.
+
+An auto-started task stays in its current step while the agent session boots and
+while its first turn is running. A boot-ready event is not a turn completion.
+For example, a review step with `on_enter: auto_start_agent` and
+`on_turn_complete: move_to_next` moves to the next step only after the genuine
+review turn completes, not during startup.
+
+Plan mode can be disabled when the turn completes and/or when the task exits the step. A step prompt is Markdown and can include `{{task_prompt}}` to insert the original task description.
+
+#### Override original session options
+
+Check **Override original session options** when a workflow should keep one
+conversation while changing its model settings between steps. For example, a
+task can start with session model **5.6 Sol** and switch to **5.6 Luna** for an
+implementation step. The options editor appears below WIP settings after the
+checkbox is enabled; selecting a fixed **Agent profile** disables this option.
+
+Add one rule per agent family; the rule is ignored when the task started with
+another family. The family picker lists only families represented by configured
+agent profiles, while existing persisted rules remain visible if capability
+data later becomes unavailable. The editor uses the same model and ACP option
+picker as the chat input, so provider-specific models and options are selected
+from the agent's advertised capabilities.
+
+The model and option list is resolved for the selected model. Providers can
+therefore expose different options for different models, and the list can
+change after a model selection. Kandev removes saved option values only after
+a successful provider response; if discovery fails, the current draft remains
+available and can be retried.
+
+Each rule can **Set** a model and any selected options, **Keep** the settings
+already active, or **Restore original** to reapply the immutable model and
+option values captured when the original session finished initializing, after
+profile settings were applied.
+Rules are best-effort: a rejected field produces a warning, while successful
+fields remain active and the step continues. The settings are applied before
+an auto-start prompt and persist as the session's runtime overrides.
+
+This behavior is mutually exclusive with the step's fixed **Agent profile**
+override. A fixed profile intentionally creates a separate session; conditional
+rules never activate or mutate that replacement tab. If an earlier rule may
+carry changed values into a later step, the editor shows a warning with **Keep**,
+**Restore**, and **Set new** choices. Read-only synced workflows display these
+rules and warnings but cannot edit them.
+
+### Build a human gate
+
+For a Review or Approval step:
+
+1. Set **On Turn Complete** to **Do nothing (wait for user)**.
+2. Leave automatic movement into the next step disabled.
+3. Have the reviewer inspect Changes, tests, and the conversation.
+4. Move the task manually or send the next instruction only after approval.
+
+`step_complete_kandev` is an agent-completion gate, not human approval. Profile permissions, repository credentials, and branch protection still apply.
+
+### Avoid automation loops
+
+An entry action can auto-start an agent, and turn completion can move the task into another step that auto-starts again. Trace the entire cycle before enabling it. WIP limits queue over-capacity moves but are not compute budgets. Keep a **Do nothing** transition wherever a person must decide whether work continues.
+
+For examples and portability, see [Workflow tips](workflow-tips.md), [Workflow import and export](workflow-import-export.md), and [Workflow sync](workflow-sync.md).
 
 </details>
 

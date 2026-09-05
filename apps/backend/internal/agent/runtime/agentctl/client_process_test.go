@@ -24,6 +24,7 @@ func TestStartProcess_MarshalsRequestAndDecodesProcessInfo(t *testing.T) {
 	}`))
 
 	req := StartProcessRequest{
+		RequestID:      "run-1",
 		SessionID:      "sess-1",
 		Kind:           "script",
 		ScriptName:     "dev",
@@ -31,6 +32,7 @@ func TestStartProcess_MarshalsRequestAndDecodesProcessInfo(t *testing.T) {
 		WorkingDir:     "/workspace/task-1",
 		Env:            map[string]string{"PORT": "3000"},
 		BufferMaxBytes: 65536,
+		Timeout:        30 * time.Second,
 	}
 	info, err := newHTTPOnlyClient(srv.URL).StartProcess(context.Background(), req)
 	if err != nil {
@@ -54,8 +56,8 @@ func TestStartProcess_MarshalsRequestAndDecodesProcessInfo(t *testing.T) {
 	if sent.Command != "pnpm dev" || sent.WorkingDir != "/workspace/task-1" {
 		t.Errorf("sent command/dir = %q / %q", sent.Command, sent.WorkingDir)
 	}
-	if sent.Env["PORT"] != "3000" || sent.BufferMaxBytes != 65536 {
-		t.Errorf("sent env/buffer = %v / %d", sent.Env, sent.BufferMaxBytes)
+	if sent.RequestID != "run-1" || sent.Env["PORT"] != "3000" || sent.BufferMaxBytes != 65536 || sent.Timeout != 30*time.Second {
+		t.Errorf("sent request/env/buffer/timeout = %q / %v / %d / %s", sent.RequestID, sent.Env, sent.BufferMaxBytes, sent.Timeout)
 	}
 
 	if info.ID != "proc-1" || info.SessionID != "sess-1" {

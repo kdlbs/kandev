@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
 import { useRouter } from "@/lib/routing/client-router";
+import Link from "@/components/routing/app-link";
 import { IconGripVertical, IconArrowsShuffle } from "@tabler/icons-react";
 import {
   DndContext,
@@ -44,6 +45,10 @@ import { WorkflowDialogs } from "@/app/settings/workspace/workspace-workflows-di
 import { useWorkflowCreation } from "@/app/settings/workspace/use-workflow-creation";
 import { useWorkflowImport } from "@/app/settings/workspace/use-workflow-import";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
+import {
+  newWorkflowEditorPath,
+  workflowEditorPath,
+} from "@/components/settings/workflow-editor/workflow-editor-paths";
 
 type WorkspaceWorkflowsClientProps = {
   workspace: Workspace | null;
@@ -56,6 +61,7 @@ type WorkspaceWorkflowsClientProps = {
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
 type WorkflowActionsArgs = {
+  router: ReturnType<typeof useRouter>;
   workspace: Workspace | null;
   workflowItems: Workflow[];
   savedWorkflowItems: Workflow[];
@@ -124,6 +130,7 @@ function mergeSavedWorkflow(current: Workflow, submitted: Workflow, saved: Workf
 }
 
 function useWorkflowActions({
+  router,
   workspace,
   workflowItems,
   savedWorkflowItems,
@@ -137,6 +144,9 @@ function useWorkflowActions({
     workflowItems,
     workflowTemplates,
     setWorkflowItems,
+    onCreateWorkflow: ({ name, templateId }) => {
+      if (workspace) router.push(newWorkflowEditorPath(workspace.id, { name, templateId }));
+    },
   });
 
   const handleUpdateWorkflow = (
@@ -343,6 +353,7 @@ function WorkflowList({
     () => new Map(savedWorkflowItems.map((workflow) => [workflow.id, workflow])),
     [savedWorkflowItems],
   );
+  const { t } = useTranslation();
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -373,22 +384,35 @@ function WorkflowList({
               isDirty={orderDirtyIds.has(workflow.id)}
               readOnly={isImproveWorkspace}
             >
-              <WorkflowCard
-                workflow={workflow}
-                savedWorkflow={savedWorkflowsById.get(workflow.id)}
-                isWorkflowDirty={isWorkflowDirty(workflow)}
-                isOrderDirty={orderDirtyIds.has(workflow.id)}
-                initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
-                otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
-                isImproveWorkspace={isImproveWorkspace}
-                onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
-                onDeleteWorkflow={async () => {
-                  await onDelete(workflow.id);
-                }}
-                onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
-                onWorkflowSaved={onWorkflowSaved}
-                onDiscardWorkflow={() => onDiscard(workflow.id)}
-              />
+              <div className="min-w-0 space-y-2">
+                {!workflow.id.startsWith(TEMP_WORKFLOW_PREFIX) && (
+                  <div className="flex justify-end">
+                    <Link
+                      href={workflowEditorPath(workflow.workspace_id, workflow.id)}
+                      className="min-h-11 cursor-pointer rounded-md px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10"
+                      data-testid={`edit-workflow-${workflow.id}`}
+                    >
+                      {t("workflows:editWorkflow")}
+                    </Link>
+                  </div>
+                )}
+                <WorkflowCard
+                  workflow={workflow}
+                  savedWorkflow={savedWorkflowsById.get(workflow.id)}
+                  isWorkflowDirty={isWorkflowDirty(workflow)}
+                  isOrderDirty={orderDirtyIds.has(workflow.id)}
+                  initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
+                  otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
+                  isImproveWorkspace={isImproveWorkspace}
+                  onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
+                  onDeleteWorkflow={async () => {
+                    await onDelete(workflow.id);
+                  }}
+                  onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
+                  onWorkflowSaved={onWorkflowSaved}
+                  onDiscardWorkflow={() => onDiscard(workflow.id)}
+                />
+              </div>
             </SortableWorkflowItem>
           ))}
         </div>
@@ -555,6 +579,7 @@ function useWorkspaceWorkflowsPage(
   const importExport = useWorkflowImportExport(workspace, workflowItems, router, toast);
   const importState = useWorkflowImport({ workspace, router, toast });
   const actions = useWorkflowActions({
+    router,
     workspace,
     workflowItems,
     savedWorkflowItems,

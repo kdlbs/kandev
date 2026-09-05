@@ -284,7 +284,8 @@ func (m *Manager) releaseTerminalProcessActivity(status *agentctltypes.ProcessSt
 	switch status.Status {
 	case agentctltypes.ProcessStatusExited,
 		agentctltypes.ProcessStatusFailed,
-		agentctltypes.ProcessStatusStopped:
+		agentctltypes.ProcessStatusStopped,
+		agentctltypes.ProcessStatusTimedOut:
 		m.releaseActivity(processActivityKey(status.ProcessID))
 	}
 }

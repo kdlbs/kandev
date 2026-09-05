@@ -6,6 +6,7 @@ export type NavigationIntent = {
 export type NavigationBlocker = (intent: NavigationIntent) => void;
 
 const HISTORY_POSITION_KEY = "__kandevNavigationPosition";
+const SHALLOW_ROUTE_KEY = "__kandevShallowRoute";
 
 let activeBlocker: NavigationBlocker | null = null;
 let currentPosition: number | null = null;
@@ -13,6 +14,7 @@ let popstateInstalled = false;
 let historyMutationsTracked = false;
 let allowedPop = false;
 let restoringPop = false;
+let currentShallowRoute: string | null = null;
 // Position of a blocked-pop restoration whose traversal is still in flight
 // when the intent was cancelled. The delayed popstate for that position must
 // be consumed without touching currentPosition, so a newer navigation (e.g. a
@@ -66,19 +68,35 @@ export function runWithNavigationBlockerBypassed(proceed: () => void): void {
   }
 }
 
+/** Marks the current history entry as part of a route-local navigation stack. */
+export function markCurrentNavigationRoute(route: string): void {
+  if (typeof window === "undefined") return;
+  ensureHistoryTracking();
+  window.history.replaceState(withShallowRoute(window.history.state, route), "");
+}
+
+type NavigationStateOptions = {
+  bypassBlocker?: boolean;
+  shallowRoute?: string;
+};
+
 export function pushNavigationState(
   state: unknown,
   title: string,
   url?: string | URL | null,
   onNavigated?: () => void,
+  options?: NavigationStateOptions,
 ): void {
   ensureHistoryTracking();
-  requestNavigation(() => {
+  const push = () => {
     const nextPosition = (currentPosition ?? 0) + 1;
-    window.history.pushState(withPosition(state, nextPosition), title, url);
+    const nextState = withShallowRoute(state, options?.shallowRoute);
+    window.history.pushState(withPosition(nextState, nextPosition), title, url);
     currentPosition = nextPosition;
     onNavigated?.();
-  });
+  };
+  if (options?.bypassBlocker) push();
+  else requestNavigation(push);
 }
 
 export function replaceNavigationState(
@@ -86,13 +104,17 @@ export function replaceNavigationState(
   title: string,
   url?: string | URL | null,
   onNavigated?: () => void,
+  options?: NavigationStateOptions,
 ): void {
   ensureHistoryTracking();
-  requestNavigation(() => {
+  const replace = () => {
     const position = currentPosition ?? 0;
-    window.history.replaceState(withPosition(state, position), title, url);
+    const nextState = withShallowRoute(state, options?.shallowRoute);
+    window.history.replaceState(withPosition(nextState, position), title, url);
     onNavigated?.();
-  });
+  };
+  if (options?.bypassBlocker) replace();
+  else requestNavigation(replace);
 }
 
 export function clearNavigationBlockerForTests(): void {
@@ -100,6 +122,7 @@ export function clearNavigationBlockerForTests(): void {
   currentPosition = null;
   allowedPop = false;
   restoringPop = false;
+  currentShallowRoute = null;
   blockedPop = null;
   canceledRestorationPosition = null;
 }
@@ -112,6 +135,7 @@ function ensureHistoryTracking(): void {
   const statePosition = readPosition(window.history.state);
   if (currentPosition === null) {
     currentPosition = statePosition ?? 0;
+    currentShallowRoute = readShallowRoute(window.history.state);
     if (statePosition === null) {
       window.history.replaceState(withPosition(window.history.state, currentPosition), "");
     }
@@ -149,6 +173,7 @@ function handlePopState(event: PopStateEvent): void {
   if (allowedPop) {
     allowedPop = false;
     currentPosition = targetPosition;
+    currentShallowRoute = readShallowRoute(event.state);
     return;
   }
 
@@ -158,6 +183,7 @@ function handlePopState(event: PopStateEvent): void {
     } else {
       restoringPop = false;
       currentPosition = targetPosition;
+      currentShallowRoute = readShallowRoute(event.state);
       finishPopRestoration();
       return;
     }
@@ -165,8 +191,14 @@ function handlePopState(event: PopStateEvent): void {
 
   const fromPosition = currentPosition ?? targetPosition;
   const delta = targetPosition - fromPosition;
+  const targetShallowRoute = readShallowRoute(event.state);
+  if (targetShallowRoute && targetShallowRoute === currentShallowRoute) {
+    currentPosition = targetPosition;
+    return;
+  }
   if (!activeBlocker || delta === 0) {
     currentPosition = targetPosition;
+    currentShallowRoute = targetShallowRoute;
     return;
   }
 
@@ -204,6 +236,7 @@ function trackNativeHistoryMutations(): void {
     const position = readPosition(state) ?? (currentPosition ?? 0) + 1;
     pushState(withPosition(state, position), title, url);
     currentPosition = position;
+    currentShallowRoute = readShallowRoute(state);
     // A new navigation supersedes any blocked-pop traversal still in flight;
     // without this the cancelled restoration position could eat a later
     // legitimate popstate to the same position.
@@ -213,6 +246,7 @@ function trackNativeHistoryMutations(): void {
     const position = readPosition(state) ?? currentPosition ?? 0;
     replaceState(withPosition(state, position), title, url);
     currentPosition = position;
+    currentShallowRoute = readShallowRoute(state);
     canceledRestorationPosition = null;
   };
 }
@@ -256,6 +290,20 @@ function readPosition(state: unknown): number | null {
   if (!state || typeof state !== "object") return null;
   const position = (state as Record<string, unknown>)[HISTORY_POSITION_KEY];
   return typeof position === "number" ? position : null;
+}
+
+function readShallowRoute(state: unknown): string | null {
+  if (!state || typeof state !== "object") return null;
+  const route = (state as Record<string, unknown>)[SHALLOW_ROUTE_KEY];
+  return typeof route === "string" ? route : null;
+}
+
+function withShallowRoute(state: unknown, route: string | undefined): Record<string, unknown> {
+  const source = state && typeof state === "object" ? state : {};
+  const next = { ...source } as Record<string, unknown>;
+  if (route) next[SHALLOW_ROUTE_KEY] = route;
+  else delete next[SHALLOW_ROUTE_KEY];
+  return next;
 }
 
 function withPosition(state: unknown, position: number): Record<string, unknown> {

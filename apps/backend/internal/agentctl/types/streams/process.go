@@ -10,6 +10,7 @@ const (
 	ProcessKindCleanup          ProcessKind = "cleanup"
 	ProcessKindDev              ProcessKind = "dev"
 	ProcessKindCustom           ProcessKind = "custom"
+	ProcessKindWorkflowScript   ProcessKind = "workflow_script"
 	ProcessKindAgentPassthrough ProcessKind = "agent_passthrough"
 )
 
@@ -22,6 +23,7 @@ const (
 	ProcessStatusExited   ProcessStatus = "exited"
 	ProcessStatusFailed   ProcessStatus = "failed"
 	ProcessStatusStopped  ProcessStatus = "stopped"
+	ProcessStatusTimedOut ProcessStatus = "timed_out"
 )
 
 // ProcessOutput carries stdout/stderr output from a process.
