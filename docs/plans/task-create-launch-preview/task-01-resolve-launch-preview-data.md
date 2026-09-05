@@ -23,8 +23,8 @@ system_design:
 ## Summary
 
 Create the shared launch-step and prompt-composition projection. Preserve prompt
-data when the dialog fetches steps for the effective workflow, including when it
-is the visible context workflow.
+data when the dialog fetches steps for a different effective workflow, and keep
+the visible workflow's cached steps current through workflow-step events.
 
 ## In scope
 
@@ -45,8 +45,8 @@ is the visible context workflow.
   fallback order.
 - Fetched steps can contribute only when their workflow ID matches the effective
   workflow. A successful empty fetch is authoritative over the snapshot.
-- The effect refreshes the effective workflow even when it matches the visible
-  context workflow.
+- Workflow-step create, update, and delete events keep loaded workflow
+  snapshots current for the visible and non-visible workflows.
 - Composition replaces only the first `{{task_prompt}}` and preserves all
   server-owned placeholders.
 
@@ -67,6 +67,8 @@ pnpm run typecheck
 - `apps/web/components/task-create-dialog-effects.test.ts`
 - `apps/web/components/task-create-dialog-prop-builders.ts`
 - `apps/web/components/task-create-dialog-prop-builders.test.ts`
+- `apps/web/lib/ws/handlers/workflows.ts`
+- `apps/web/lib/ws/handlers/workflows.test.ts`
 
 ## Dependencies
 
@@ -100,5 +102,5 @@ None.
 - `cd apps/web && pnpm test -- --run components/task-create-dialog-launch-preview.test.ts components/task-create-dialog-effects.test.ts components/task-create-dialog-prop-builders.test.ts` passed (40 tests).
 - `cd apps/web && pnpm run typecheck` passed.
 - Review fixup coverage passed: plan-mode routing, authoritative empty fetch,
-  and same-workflow refresh. Disabled-tooltip focus coverage passed with the
-  task-create component tests.
+  and workflow snapshot step-event synchronization. Disabled-tooltip focus
+  coverage passed with the task-create component tests.

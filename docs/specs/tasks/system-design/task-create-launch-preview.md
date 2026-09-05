@@ -31,8 +31,10 @@ workflow-step API.
 
 - A pure task-create helper selects the launch destination and composes the
   step-prompt preview.
-- `useWorkflowStepsEffect` retains each fetched step prompt with its actions,
-  position, and workflow identity.
+- `useWorkflowStepsEffect` retains each fallback-fetched step prompt with its
+  actions, position, and workflow identity.
+- Workflow-step WebSocket handlers keep loaded workflow snapshots synchronized
+  for step create, update, and delete events.
 - `buildDialogFormBodyProps` selects steps for the effective workflow. It passes
   one launch-preview model to the shared create form.
 - `WorkflowSelectorRow` shows the launch destination beside the selected
@@ -61,9 +63,11 @@ existing fields:
 The dialog uses matching fetched steps when they exist. A successful empty fetch
 is authoritative and produces no destination. If the fetch is unavailable, or
 contains only steps from another workflow, the dialog uses the selected workflow
-snapshot. A fetched step from another workflow is never a candidate. The dialog
-refreshes the effective workflow even when it is the visible context workflow so
-that edits made elsewhere do not remain hidden behind a stale snapshot.
+snapshot. A fetched step from another workflow is never a candidate. When the
+effective workflow is the visible context workflow, the dialog uses its live
+snapshot; workflow-step WebSocket events keep that snapshot current after edits
+made elsewhere. A different effective workflow is fetched by the existing
+fallback path.
 
 ## Launch-step projection
 
@@ -144,7 +148,9 @@ another workflow's fetched steps from becoming candidates.
 
 If steps arrive after the dialog opens, the derived model updates from those
 steps. A workflow change removes any prior preview model before new steps can
-replace it.
+replace it. Step create, update, and delete events update loaded workflow
+snapshots, so the visible workflow does not require a component-level refresh
+request to reflect edits made elsewhere.
 
 ## Localization and public documentation
 
@@ -155,7 +161,7 @@ server-owned values.
 ## Verification
 
 - Unit tests cover action-sensitive launch routing, stale workflow filtering,
-  same-workflow refresh, and prompt composition.
+  workflow-snapshot step-event synchronization, and prompt composition.
 - Component tests cover selector text, toggle state, draft preservation, and
   the no-prompt fallback.
 - Desktop Playwright covers workflow switching and composed preview content.

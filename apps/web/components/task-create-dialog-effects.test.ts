@@ -60,42 +60,6 @@ beforeEach(() => {
   workflowApiMocks.listWorkflowSteps.mockReset();
 });
 
-describe("useWorkflowStepsEffect refresh", () => {
-  it("refreshes steps when the effective workflow is the visible context workflow", async () => {
-    workflowApiMocks.listWorkflowSteps.mockResolvedValue({
-      steps: [
-        {
-          id: "visible-current",
-          workflow_id: "visible",
-          name: "Current step",
-          position: 0,
-          is_start_step: true,
-          prompt: "Current prompt",
-        },
-      ],
-      total: 1,
-    });
-    const setFetchedSteps = vi.fn();
-    const fs = {
-      selectedWorkflowId: "visible",
-      setFetchedSteps,
-    } as unknown as DialogFormState;
-
-    renderHook(() => useWorkflowStepsEffect(fs, true, "visible", "visible"));
-
-    await waitFor(() => expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledWith("visible"));
-    await waitFor(() =>
-      expect(setFetchedSteps).toHaveBeenCalledWith([
-        expect.objectContaining({
-          id: "visible-current",
-          prompt: "Current prompt",
-          workflowId: "visible",
-        }),
-      ]),
-    );
-  });
-});
-
 describe("useWorkflowStepsEffect", () => {
   it("loads the visible fallback steps when hidden task context was removed", async () => {
     workflowApiMocks.listWorkflowSteps.mockResolvedValue({
