@@ -841,7 +841,8 @@ Task writes use Kandev's first-party service layer, so normal task events and
 browser updates occur. Kandev stamps the source as `plugin:<id>` and reserves
 the `metadata.source` key; plugin metadata is stored under that source. `.Update`
 writes title, description, state, and priority: it rejects a workflow step
-change.
+change. Priority accepts only `critical`, `high`, `medium`, or `low`; omitted
+priority on `.Create` defaults to `medium`.
 
 The read-side `Task.Labels` field remains available only as deprecated API v1
 compatibility for plugins built against Kandev v0.93.0. New plugins should keep

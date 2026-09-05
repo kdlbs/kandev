@@ -93,12 +93,13 @@ func taskRepositoryFromProto(p *pluginv1.TaskRepository) TaskRepository {
 
 // Task is the Go-native mirror of kandev.plugin.v1.Task.
 type Task struct {
-	ID           string
-	WorkspaceID  string
-	WorkflowID   string
-	Title        string
-	Description  string
-	State        string
+	ID          string
+	WorkspaceID string
+	WorkflowID  string
+	Title       string
+	Description string
+	State       string
+	// Priority is one of critical, high, medium, or low.
 	Priority     string
 	CreatedBy    string
 	CreatedAt    string
@@ -1043,7 +1044,8 @@ type CreateTaskInput struct {
 	// StartAgent asks the host to auto-launch an agent on the created task,
 	// mirroring the REST/MCP create_task start_agent flag. Best-effort: a
 	// launch failure does not fail task creation.
-	StartAgent   bool
+	StartAgent bool
+	// Priority accepts critical, high, medium, or low. Empty defaults to medium.
 	Priority     string
 	Repositories []PluginTaskRepository
 	Launch       *PluginTaskLaunchOptions
@@ -1213,7 +1215,8 @@ type UpdateTaskInput struct {
 	Description    *string
 	State          *string
 	WorkflowStepID *string
-	Priority       *string
+	// Priority, when set, must be critical, high, medium, or low.
+	Priority *string
 }
 
 func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {

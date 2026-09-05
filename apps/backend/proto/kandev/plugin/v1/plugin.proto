@@ -364,6 +364,8 @@ message Task {
   string title = 4;
   string description = 5;
   string state = 6; // TaskState enum value as a string, stable
+  // One of critical, high, medium, or low. Create defaults to medium when
+  // omitted; updates validate the supplied value.
   string priority = 7;
   string created_by = 8;
   string created_at = 9; // RFC3339
@@ -822,7 +824,8 @@ message CreateTaskRequest {
   repeated PluginTaskRepository repositories = 8;
   optional PluginTaskLaunchOptions launch = 9;
   google.protobuf.Struct metadata = 10; // plugin namespace only; host reserves source.
-  string priority = 11; // empty defaults to medium
+  // One of critical, high, medium, or low; empty defaults to medium.
+  string priority = 11;
 }
 message PluginTaskRepository {
   string repository_id = 1; // existing Kandev repository, or empty with remote below

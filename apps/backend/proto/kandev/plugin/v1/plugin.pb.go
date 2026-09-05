@@ -2366,24 +2366,26 @@ func (x *PageInfo) GetHasMore() bool {
 
 // ── Task ────────────────────────────────────────────────────────────────────
 type Task struct {
-	state        protoimpl.MessageState `protogen:"open.v1"`
-	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkspaceId  string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	WorkflowId   string                 `protobuf:"bytes,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
-	Title        string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
-	Description  string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
-	State        string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"` // TaskState enum value as a string, stable
-	Priority     string                 `protobuf:"bytes,7,opt,name=priority,proto3" json:"priority,omitempty"`
-	CreatedBy    string                 `protobuf:"bytes,8,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
-	CreatedAt    string                 `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // RFC3339
-	UpdatedAt    string                 `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	StartedAt    *string                `protobuf:"bytes,11,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
-	CompletedAt  *string                `protobuf:"bytes,12,opt,name=completed_at,json=completedAt,proto3,oneof" json:"completed_at,omitempty"`
-	ParentId     *string                `protobuf:"bytes,13,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
-	Identifier   string                 `protobuf:"bytes,14,opt,name=identifier,proto3" json:"identifier,omitempty"`
-	IsEphemeral  bool                   `protobuf:"varint,15,opt,name=is_ephemeral,json=isEphemeral,proto3" json:"is_ephemeral,omitempty"`
-	Repositories []*TaskRepository      `protobuf:"bytes,16,rep,name=repositories,proto3" json:"repositories,omitempty"`
-	Metadata     *structpb.Struct       `protobuf:"bytes,17,opt,name=metadata,proto3" json:"metadata,omitempty"` // free-form; plugin-tolerant
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	WorkflowId  string                 `protobuf:"bytes,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	Title       string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	Description string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	State       string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"` // TaskState enum value as a string, stable
+	// One of critical, high, medium, or low. Create defaults to medium when
+	// omitted; updates validate the supplied value.
+	Priority     string            `protobuf:"bytes,7,opt,name=priority,proto3" json:"priority,omitempty"`
+	CreatedBy    string            `protobuf:"bytes,8,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	CreatedAt    string            `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // RFC3339
+	UpdatedAt    string            `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	StartedAt    *string           `protobuf:"bytes,11,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
+	CompletedAt  *string           `protobuf:"bytes,12,opt,name=completed_at,json=completedAt,proto3,oneof" json:"completed_at,omitempty"`
+	ParentId     *string           `protobuf:"bytes,13,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
+	Identifier   string            `protobuf:"bytes,14,opt,name=identifier,proto3" json:"identifier,omitempty"`
+	IsEphemeral  bool              `protobuf:"varint,15,opt,name=is_ephemeral,json=isEphemeral,proto3" json:"is_ephemeral,omitempty"`
+	Repositories []*TaskRepository `protobuf:"bytes,16,rep,name=repositories,proto3" json:"repositories,omitempty"`
+	Metadata     *structpb.Struct  `protobuf:"bytes,17,opt,name=metadata,proto3" json:"metadata,omitempty"` // free-form; plugin-tolerant
 	// RFC3339, set only when the task is archived. Present so a plugin reading
 	// with include_archived can tell a live task from a retired one; absent is
 	// the normal case, not an unknown.
@@ -6200,10 +6202,11 @@ type CreateTaskRequest struct {
 	ParentId       *string                `protobuf:"bytes,6,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
 	StartAgent     bool                   `protobuf:"varint,7,opt,name=start_agent,json=startAgent,proto3" json:"start_agent,omitempty"`
 	// kandev stamps source = "plugin:<id>" server-side; not settable here.
-	Repositories  []*PluginTaskRepository  `protobuf:"bytes,8,rep,name=repositories,proto3" json:"repositories,omitempty"`
-	Launch        *PluginTaskLaunchOptions `protobuf:"bytes,9,opt,name=launch,proto3,oneof" json:"launch,omitempty"`
-	Metadata      *structpb.Struct         `protobuf:"bytes,10,opt,name=metadata,proto3" json:"metadata,omitempty"` // plugin namespace only; host reserves source.
-	Priority      string                   `protobuf:"bytes,11,opt,name=priority,proto3" json:"priority,omitempty"` // empty defaults to medium
+	Repositories []*PluginTaskRepository  `protobuf:"bytes,8,rep,name=repositories,proto3" json:"repositories,omitempty"`
+	Launch       *PluginTaskLaunchOptions `protobuf:"bytes,9,opt,name=launch,proto3,oneof" json:"launch,omitempty"`
+	Metadata     *structpb.Struct         `protobuf:"bytes,10,opt,name=metadata,proto3" json:"metadata,omitempty"` // plugin namespace only; host reserves source.
+	// One of critical, high, medium, or low; empty defaults to medium.
+	Priority      string `protobuf:"bytes,11,opt,name=priority,proto3" json:"priority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
