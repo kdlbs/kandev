@@ -34,6 +34,10 @@ const EMPTY_AGENT = { ...AGENT, profiles: [] } as unknown as Agent;
 let storeState: {
   settingsAgents: { items: Agent[] };
   agentProfiles: { items: Array<{ id: string }> };
+  // The row's actions are gated on org.config.manage, which useIsAdmin reads
+  // off the auth slice. Auth disabled is the default install and resolves to
+  // an administrator, matching the backend's synthetic identity.
+  auth: { mode: string | undefined; user: { role: string } | undefined };
 };
 
 function setSettingsAgents(items: Agent[]) {
@@ -128,6 +132,7 @@ describe("ProfileRow deletion", () => {
     storeState = {
       settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
       agentProfiles: { items: [{ id: "p-1" }, { id: "p-2" }] },
+      auth: { mode: undefined, user: undefined },
     };
     vi.clearAllMocks();
   });
@@ -227,6 +232,7 @@ describe("ProfileRow duplicate", () => {
     storeState = {
       settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
       agentProfiles: { items: [] },
+      auth: { mode: undefined, user: undefined },
     };
   });
   afterEach(() => cleanup());
@@ -251,6 +257,7 @@ describe("ProfileRow responsive actions", () => {
     storeState = {
       settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
       agentProfiles: { items: [] },
+      auth: { mode: undefined, user: undefined },
     };
     mocks.responsive.isFullDesktop = false;
     mocks.responsive.isFinePointer = false;

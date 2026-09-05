@@ -89,7 +89,11 @@ vi.mock("./context-popover", () => ({
 }));
 
 vi.mock("./implement-plan-button", () => ({
-  ImplementPlanButton: () => <button type="button">Implement plan</button>,
+  ImplementPlanButton: ({ presentation = "desktop" }: { presentation?: "desktop" | "mobile" }) => (
+    <button type="button" data-testid="mock-implement-plan-button" data-presentation={presentation}>
+      Implement plan
+    </button>
+  ),
 }));
 
 vi.mock("./reset-context-button", () => ({
@@ -109,6 +113,7 @@ import type { ChatInputToolbarProps } from "./chat-input-toolbar";
 
 const MOBILE_TOOLBAR_TEST_ID = "mobile-chat-input-toolbar";
 const CANCEL_AGENT_BUTTON_TEST_ID = "cancel-agent-button";
+const SUBMIT_MESSAGE_BUTTON_TEST_ID = "submit-message-button";
 const SESSION_TIMESTAMP = "2026-01-01T00:00:00Z";
 
 function deferred<T>() {
@@ -290,7 +295,7 @@ describe("ChatInputToolbar cancel button", () => {
     renderFullToolbar({ isAgentBusy: true, canCancelAgent: false });
 
     expect(screen.queryByTestId(CANCEL_AGENT_BUTTON_TEST_ID)).toBeNull();
-    expect(screen.getByTestId("submit-message-button")).toBeTruthy();
+    expect(screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID)).toBeTruthy();
     expect(screen.getByText("Queue message")).toBeTruthy();
   });
 
@@ -367,12 +372,61 @@ describe("ChatInputToolbar submit button", () => {
       </StateProvider>,
     );
 
-    expect((screen.getByTestId("submit-message-button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     expect(screen.getByText("The agent is still being set up.")).toBeTruthy();
   });
 });
 
 describe("ChatInputToolbar responsive wrapper", () => {
+  it("gives mobile composer controls 44px touch targets", () => {
+    responsiveMock.breakpoint = "mobile";
+    renderFullToolbar({
+      hidePlanMode: false,
+      isAgentBusy: true,
+      canCancelAgent: true,
+    });
+
+    for (const testId of [
+      "plan-mode-toggle-button",
+      "chat-attachments-button",
+      "chat-context-button",
+      "cancel-agent-button",
+      SUBMIT_MESSAGE_BUTTON_TEST_ID,
+    ]) {
+      const control = screen.getByTestId(testId);
+      expect(control.className).toContain("min-h-11");
+      expect(control.className).toContain("min-w-11");
+    }
+  });
+
+  it("keeps compact composer geometry on desktop", () => {
+    responsiveMock.breakpoint = "desktop";
+    renderFullToolbar({ hidePlanMode: false });
+
+    for (const testId of [
+      "plan-mode-toggle-button",
+      "chat-attachments-button",
+      "chat-context-button",
+      SUBMIT_MESSAGE_BUTTON_TEST_ID,
+    ]) {
+      const control = screen.getByTestId(testId);
+      expect(control.className).toContain("h-7");
+      expect(control.className).not.toContain("min-h-11");
+      expect(control.className).not.toContain("min-w-11");
+    }
+  });
+
+  it("passes the touch presentation to plan implementation on tablets", () => {
+    responsiveMock.breakpoint = "tablet";
+    renderFullToolbar({ planModeEnabled: true, onImplementPlan: () => {} });
+
+    expect(screen.getByTestId("mock-implement-plan-button").getAttribute("data-presentation")).toBe(
+      "mobile",
+    );
+  });
+
   it("routes mobile breakpoints to the compact toolbar without a duplicate sessions control", () => {
     responsiveMock.breakpoint = "mobile";
     renderFullToolbar();

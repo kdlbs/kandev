@@ -148,6 +148,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Composer Suggestion Overlays](system-design/composer-suggestion-overlays.md)
 - [Compact step navigation](system-design/compact-workflow-step-navigation.md)
 - [Kanban preview navigation](system-design/kanban-preview-workflow-step-navigation.md)
+- [Comment Markdown Rendering](system-design/comment-markdown.md)
 - [Workflow column visibility (Part 1)](system-design/board-step-visibility-filter-01.md)
 - [Workflow column visibility (Part 2)](system-design/board-step-visibility-filter-02.md)
 - [Task PR auto 1](system-design/ci-pr-automation-01.md)

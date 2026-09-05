@@ -18,6 +18,7 @@ func TestRegisterRoutesRejectsMutationWithoutInterimSettingsInterlock(t *testing
 	}
 
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	NewHandlers(nil, nil, log, "test-interlock").registerHTTP(router)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader("{"))
@@ -38,6 +39,7 @@ func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T
 	}
 
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	NewHandlers(nil, nil, log, "test-interlock").registerHTTP(router)
 	requests := []struct {
 		method string

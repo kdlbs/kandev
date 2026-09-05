@@ -80,6 +80,7 @@ export type TaskLike = {
   origin?: string | null;
   is_remote_executor?: boolean;
   parent_id?: string | null;
+  assignee_user_id?: string;
   updated_at?: string;
   created_at?: string;
   wip_admitted?: boolean;
@@ -225,6 +226,17 @@ export function copyPrimaryExecutorFields(merged: KanbanTask, existing: KanbanTa
   merged.isRemoteExecutor = existing.isRemoteExecutor;
 }
 
+/**
+ * "Unassigned" has one spelling in the store: undefined.
+ *
+ * The wire uses an empty string for it (that is what a PATCH sends to
+ * unassign), so without this the store would hold both "" and undefined for
+ * the same state and every consumer would need to know that.
+ */
+export function pickAssignee(value: string | undefined): string | undefined {
+  return value ? value : undefined;
+}
+
 // eslint-disable-next-line complexity -- Maps the complete task wire contract into the shared Kanban model.
 export function toKanbanTask(source: TaskLike): KanbanTask {
   return {
@@ -262,6 +274,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     labels: pickLabels(source),
     origin: source.origin ?? undefined,
     isRemoteExecutor: source.is_remote_executor ?? false,
+    assigneeUserId: pickAssignee(source.assignee_user_id),
     parentTaskId: source.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,

@@ -210,6 +210,24 @@ describe("toKanbanTask — pending and status fields", () => {
   });
 });
 
+describe("toKanbanTask — human assignee", () => {
+  // The kanban board and the task top bar both read the assignee out of the
+  // store, so this mapper is the only hop between the backend field and every
+  // kanban surface. Dropping it here reads as "nobody is assigned to anything"
+  // with no error anywhere.
+  it("carries the human assignee through both task shapes", () => {
+    const http = toKanbanTask(httpDTO({ assignee_user_id: "user-7" }));
+    const ws = toKanbanTask(wsPayload({ assignee_user_id: "user-7" }));
+
+    expect(http.assigneeUserId).toBe("user-7");
+    expect(ws.assigneeUserId).toBe("user-7");
+  });
+
+  it("leaves the assignee undefined when the backend omits it", () => {
+    expect(toKanbanTask(httpDTO()).assigneeUserId).toBeUndefined();
+  });
+});
+
 describe("toKanbanTask — autopilot", () => {
   it("preserves the immutable task creation mode for HTTP and websocket payloads", () => {
     expect(toKanbanTask(httpDTO({ autopilot: true }))).toMatchObject({ autopilot: true });
