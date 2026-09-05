@@ -146,14 +146,7 @@ function CreateMenuInlineInputHarness() {
   return (
     <TooltipProvider>
       <FileBrowserToolbar
-        displayPath="workspace"
-        fullPath="/workspace"
-        copied={false}
-        expandedPathsSize={0}
-        onCopyPath={vi.fn()}
-        onOpenFolder={vi.fn()}
-        onStartSearch={vi.fn()}
-        onCollapseAll={vi.fn()}
+        {...createMenuBaseProps}
         showCreateButton
         onStartCreate={() => setCreating(true)}
         onUploadFiles={vi.fn()}
