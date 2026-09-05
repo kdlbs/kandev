@@ -1,6 +1,16 @@
 package lifecycle
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
+
 const executorTypeSSH = "ssh"
+
+// This hash identifies the built-in Sprites script that shipped before the
+// in-place, full-history materialization flow. Upgrade only that exact value;
+// user-authored prepare scripts must remain unchanged.
+const legacySpritesPrepareScriptSHA256 = "e656f9e51496e1bb1e5cee205058bbeaa7fe1ab37073f600e6c94310ead7be4d"
 
 // DefaultPrepareScript returns the default prepare script for a given executor type string.
 func DefaultPrepareScript(executorType string) string {
@@ -20,6 +30,11 @@ func DefaultPrepareScript(executorType string) string {
 	default:
 		return ""
 	}
+}
+
+func isLegacySpritesPrepareScript(script string) bool {
+	digest := sha256.Sum256([]byte(script))
+	return hex.EncodeToString(digest[:]) == legacySpritesPrepareScriptSHA256
 }
 
 // KandevBranchCheckoutPostlude returns a kandev-managed shell snippet that
@@ -58,25 +73,24 @@ func KandevBranchCheckoutPostlude() string {
 # quotes — double quotes would re-expose $(...) command substitution. Do NOT
 # assume they are unquoted data either; the value carries its own quoting.
 #
-# The fetch below must never carry --depth. A depth-limited fetch grafts a
-# history-less tip into the workspace (it writes .git/shallow even when the
-# repository was cloned in full), which leaves the session branch with no
-# common ancestor to the base branch. "git merge-base",
-# "git diff <base>...HEAD" and rebase-onto-base then fail, and those are
-# exactly what the diff panel and pull-request flow run
-# (see internal/agentctl/server/api/git.go computeMergeBase). Nothing in the
-# backend ever unshallows a workspace, so a graft here is permanent.
+# Keep the complete commit graph so diff and rebase operations have a common
+# ancestor.
+worktree_branch={{worktree.branch}}
+repository_branch={{repository.branch}}
 (
   if [ -d {{workspace.path}}/.git ] \
-     && [ -n {{worktree.branch}} ] \
-     && [ {{worktree.branch}} != {{repository.branch}} ]; then
+     && [ -n "$worktree_branch" ] \
+     && [ "$worktree_branch" != "$repository_branch" ]; then
     cd {{workspace.path}} || exit 0
-    if git rev-parse --verify {{worktree.branch}} >/dev/null 2>&1; then
-      git checkout {{worktree.branch}}
-    elif git fetch --no-tags origin {{worktree.branch}} 2>/dev/null; then
-      git checkout -b {{worktree.branch}} origin/{{worktree.branch}}
+    if [ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo false)" = true ]; then
+      git fetch --unshallow --no-tags origin
+    fi
+    if git rev-parse --verify "$worktree_branch" >/dev/null 2>&1; then
+      git checkout "$worktree_branch"
+    elif git fetch --no-tags origin "+refs/heads/$worktree_branch:refs/remotes/origin/$worktree_branch" 2>/dev/null; then
+      git checkout -b "$worktree_branch" "origin/$worktree_branch"
     else
-      git checkout -b {{worktree.branch}}
+      git checkout -b "$worktree_branch"
     fi
   fi
 ) || true
@@ -237,11 +251,8 @@ git config --global --add safe.directory '*'
 {{github.auth_setup}}
 
 # ---- Install pnpm (best effort, never fatal) ----
-# Repositories pin their own pnpm through package.json "packageManager", so a
-# single hardcoded global binary is wrong for any repository that pins a
-# different one; corepack honours the per-repository pin. This must not be able
-# to fail the launch: a prepare failure destroys the whole sandbox, and the
-# agent can install a package manager on demand.
+# Use corepack so the repository packageManager value controls the pnpm version.
+# Package-manager setup errors must not stop sandbox preparation.
 if ! command -v pnpm >/dev/null 2>&1; then
   corepack enable pnpm >/dev/null 2>&1 || true
 fi
@@ -253,28 +264,22 @@ fi
 {{git.identity_setup}}
 
 # ---- Materialize the primary repository ----
-# The workspace is not guaranteed to be empty when this script runs: office
-# sessions upload skill files under the worktree root first, and "git clone"
-# refuses a non-empty destination. Initialize in place instead, exactly as the
-# SSH default does, so the script is also idempotent for a reused workspace.
-#
-# History is NOT truncated. Sessions open pull requests, so "git merge-base",
-# "git diff <base>...HEAD" and rebase-onto-base have to work; a --depth clone
-# leaves the branch with no common ancestor once the session branch is fetched.
-# A blobless partial clone keeps the whole commit graph while deferring file
-# contents until something reads them, which keeps large repositories inside
-# the preparation timeout. Drop both --filter flags for a full fetch when the
-# sandbox has no network access after preparation.
-#
+# Initialize in place because Office files can exist before preparation starts.
+# Fetch a blobless commit graph so later diff and rebase operations retain history.
 # The kandev-managed feature-branch checkout is appended as an invariant
 # postlude (see KandevBranchCheckoutPostlude) — keep it out of the default
 # so old profiles snapshotting this script and the postlude never disagree.
-#
-# Never echo $repository_url: when the profile supplies GH_TOKEN/GITHUB_TOKEN
-# the resolver injects it into the URL, and this script's output is streamed
-# into the task UI and quoted verbatim in preparation failures.
+# Never print $repository_url because it can contain a credential.
 mkdir -p "$workspace"
 if [ -n "$repository_url" ]; then
+  scrub_origin() {
+    origin_url=$(git -C "$workspace" remote get-url origin 2>/dev/null || true)
+    if [ -n "$origin_url" ]; then
+      clean_origin_url=$(printf '%s' "$origin_url" | sed 's|https://[^@]*@github.com/|https://github.com/|')
+      git -C "$workspace" remote set-url origin "$clean_origin_url" 2>/dev/null || true
+    fi
+  }
+  trap scrub_origin EXIT HUP INT TERM
   if git -C "$workspace" rev-parse --git-dir >/dev/null 2>&1; then
     configured_url=$(git -C "$workspace" config --get remote.origin.url 2>/dev/null || true)
     if [ -z "$configured_url" ]; then
@@ -292,7 +297,6 @@ if [ -n "$repository_url" ]; then
     git init -q "$workspace"
     git -C "$workspace" remote add origin "$repository_url"
   fi
-
   git_dir=$(git -C "$workspace" rev-parse --absolute-git-dir)
   exclude_file="$git_dir/info/exclude"
   mkdir -p "$(dirname "$exclude_file")"
@@ -318,10 +322,8 @@ if [ -n "$repository_url" ]; then
     git -C "$workspace" checkout -q -b "$repository_branch" "refs/remotes/origin/$repository_branch"
   fi
 
-  # Strip embedded token from remote URL to avoid persisting credentials in
-  # .git/config. Runs after the fetches that needed it; later pushes go through
-  # the credential helper configured above.
-  git -C "$workspace" remote set-url origin "$(git -C "$workspace" remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
+  scrub_origin
+  trap - EXIT HUP INT TERM
 fi
 
 cd "$workspace"
