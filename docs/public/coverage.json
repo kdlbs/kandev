@@ -555,7 +555,7 @@
         "user",
         "operator"
       ],
-      "stability": "beta",
+      "stability": "experimental",
       "docs": [
         "authentication"
       ],
@@ -579,7 +579,7 @@
     {
       "id": "team-access",
       "audiences": ["user", "operator"],
-      "stability": "beta",
+      "stability": "experimental",
       "docs": ["team-access"],
       "sources": [
         "apps/backend/internal/authz/scopes.go",
