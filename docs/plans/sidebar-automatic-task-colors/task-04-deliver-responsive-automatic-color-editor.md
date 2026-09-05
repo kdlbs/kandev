@@ -19,6 +19,7 @@ acceptance_criteria:
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.4
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.5
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.6
+  - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-001.7
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.1
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.11
   - AC-UI-SIDEBAR-AUTOMATIC-TASK-COLORS-002.12
@@ -59,7 +60,8 @@ Deliver the compact disclosure layout and the complete automatic-color editor. P
 - Shared Sort, Group by, Task row, and Automatic colors disclosures.
 - Consistent summary spacing and separators for Sort, Group by, and Task row.
 - Global enable control, ordered rule cards, selectors, color outputs, and removal.
-- Localized condition labels, one selected output swatch, and responsive evaluation-timing help.
+  - Localized condition labels, one selected output swatch, and a responsive evaluation-timing help icon.
+  - Compact disclosure padding and a bounded editor scroll region that keeps bottom actions reachable.
 - Disabled incomplete-rule state, generated rule summaries, and the 50-rule limit state.
 - Explicit Executor profile, Task state, Priority, Origin, and Kanban-origin options.
 - Desktop repository popover and focused mobile repository pane.
@@ -78,6 +80,7 @@ Deliver the compact disclosure layout and the complete automatic-color editor. P
 - The compact editor shows accurate summaries without changing a view draft.
 - Rule operations remain usable with keyboard, pointer, and touch input.
 - Desktop and mobile flows persist rules and recolor tasks after fact changes.
+- Long editors scroll inside their owning popover or drawer, and the same help content is available by hover, focus, or tap.
 - A second browser context receives the stored rule order, targets, and output colors.
 - The manual color menu remains unchanged. Task 06 replaces its device-local persistence.
 
@@ -131,4 +134,4 @@ Implemented shared settings disclosures, the global automatic-color editor, orde
 
 Verification: the component suite passed; `pnpm run i18n:zh-hant` and `pnpm run i18n:check` passed; both automatic-color Playwright specs passed.
 
-Follow-up polish aligned the Sort, Group by, and Task row separator spacing; corrected localized condition and origin labels; removed the duplicate selected-color swatch; and added desktop hover or focus help with equivalent visible drawer guidance. Component, localization, typecheck, desktop Playwright, and mobile Playwright verification passed.
+Follow-up polish aligned the Sort, Group by, and Task row separator spacing; corrected localized condition and origin labels; removed the duplicate selected-color swatch; and added responsive hover or focus help. The compact-layout follow-up reduced shared disclosure padding, moved scope and timing copy into one help icon on both layouts, and added explicit viewport fallback scrolling. Component, localization, typecheck, desktop Playwright, and mobile Playwright verification passed.

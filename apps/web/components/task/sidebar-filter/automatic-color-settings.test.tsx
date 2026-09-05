@@ -71,24 +71,32 @@ afterEach(() => {
 });
 
 describe("AutomaticColorSettings timing guidance", () => {
-  it("shows timing help on desktop and visible timing guidance in the drawer", () => {
+  it("keeps scope and timing guidance behind a focusable info tooltip", () => {
     const { rerender } = renderSettings();
     fireEvent.click(screen.getByTestId(SETTINGS_TOGGLE_TEST_ID));
 
     expect(screen.getByTestId("automatic-colors-help").getAttribute("aria-label")).toBe(
       "When automatic colors apply",
     );
-    expect(screen.getByTestId("automatic-colors-timing").textContent).toContain(
-      "Rules apply to existing and new sidebar tasks.",
-    );
+    expect(screen.queryByTestId("automatic-colors-timing")).toBeNull();
+    expect(
+      screen.queryByText("Personal setting. Applies across sidebar views and workspaces.", {
+        exact: true,
+      }),
+    ).toBeNull();
+    expect(
+      screen.queryByText("The first matching rule wins. Manual colors remain as fallback.", {
+        exact: true,
+      }),
+    ).toBeNull();
 
     rerender(
       <TooltipProvider>
         <AutomaticColorSettings isDrawerLayout />
       </TooltipProvider>,
     );
-    expect(screen.queryByTestId("automatic-colors-help")).toBeNull();
-    expect(screen.getByTestId("automatic-colors-timing")).toBeTruthy();
+    expect(screen.getByTestId("automatic-colors-help")).toBeTruthy();
+    expect(screen.queryByTestId("automatic-colors-timing")).toBeNull();
   });
 });
 
