@@ -105,9 +105,10 @@ context. Its purpose is to show how the launch step applies its own template.
 
 ## Workflow selector
 
-The selected workflow trigger renders the workflow name first. It then renders
-the launch destination with muted styling before the existing chevron.
-Truncation keeps both values within the trigger width.
+The selected workflow trigger renders only the workflow name and existing
+chevron. The launch destination renders as a muted sibling outside the trigger,
+aligned to its right, with the localized **Start step: {{step}}** label.
+Truncation keeps the selector row within its available width.
 
 The existing selector visibility rules remain unchanged. A single implicit
 workflow can still omit the selector when it has no override information.
@@ -123,8 +124,10 @@ The preview surface uses the same height boundary and overflow ownership as the
 textarea.
 
 The button uses `aria-pressed` and localized labels for preview and edit modes.
-If the workflow changes to a destination without a prompt, the component closes
-preview mode and shows the unchanged editor value.
+The inactive preview label identifies the workflow step prompt and resolved
+step, for example **Preview launch prompt with workflow step prompt: In
+Progress**. If the workflow changes to a destination without a prompt, the
+component closes preview mode and shows the unchanged editor value.
 
 ## Responsive behavior
 

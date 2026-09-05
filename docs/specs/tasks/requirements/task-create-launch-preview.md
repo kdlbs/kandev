@@ -45,7 +45,8 @@ that the workflow destination is not hidden.
 
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.1:** When the workflow selector
   shows a selected workflow, the system shall show the immediate launch
-  destination beside the workflow name in muted text.
+  destination outside the selector, aligned to its right in muted text, with
+  the label **Start step: {{step}}**.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.2:** When the description is empty,
   the displayed launch destination shall be the first positional step because
   **Start Plan Mode** uses the plan-mode launch path. When the description is
@@ -89,8 +90,9 @@ so that a step template cannot replace my task prompt without notice.
   no step prompt, the toolbar shall not show the preview button. If a workflow
   change removes the available preview, the editor shall return to edit mode.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-002.6:** The preview button shall have a
-  localized accessible name and pressed state. On coarse pointers, its active
-  hit area shall be at least 44 CSS pixels.
+  localized accessible name that identifies the workflow step prompt and
+  resolved step, plus a pressed state. On coarse pointers, its active hit area
+  shall be at least 44 CSS pixels.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-002.7:** On phone layouts, the prompt
   preview shall remain inside the dialog and shall not cause document-level
   horizontal overflow.

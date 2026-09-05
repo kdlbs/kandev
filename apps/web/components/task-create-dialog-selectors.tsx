@@ -682,6 +682,7 @@ function FormInputsToolbar({
         <TaskCreateLaunchPreviewToggle
           active={isLaunchPromptPreview}
           disabled={disabled}
+          stepName={launchPreview.stepName}
           onToggle={onToggleLaunchPromptPreview}
         />
       )}

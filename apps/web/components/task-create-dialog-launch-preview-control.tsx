@@ -8,16 +8,20 @@ import { useTranslation } from "react-i18next";
 type TaskCreateLaunchPreviewToggleProps = {
   active: boolean;
   disabled?: boolean;
+  stepName: string;
   onToggle: () => void;
 };
 
 export function TaskCreateLaunchPreviewToggle({
   active,
   disabled,
+  stepName,
   onToggle,
 }: TaskCreateLaunchPreviewToggleProps) {
   const { t } = useTranslation();
-  const label = active ? t("task:editTaskPrompt") : t("task:previewLaunchPrompt");
+  const label = active
+    ? t("task:editTaskPrompt")
+    : t("task:previewLaunchPrompt", { step: stepName });
   return (
     <Tooltip>
       <TooltipTrigger asChild>

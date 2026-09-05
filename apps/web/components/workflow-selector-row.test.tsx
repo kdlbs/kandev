@@ -28,12 +28,19 @@ function renderSelector(preview: TaskCreateLaunchPreview | null = launchPreview)
 }
 
 describe("WorkflowSelectorRow launch destination", () => {
-  it("shows the shared launch destination beside the selected workflow", () => {
+  it("shows the launch step outside and to the right of the selector", () => {
     renderSelector();
 
     const trigger = screen.getByTestId("workflow-selector-trigger");
+    const row = screen.getByTestId("workflow-selector-row");
+    const launchStep = screen.getByTestId("task-create-launch-step");
+
     expect(trigger.textContent).toContain("Development");
-    expect(screen.getByTestId("task-create-launch-step").textContent).toContain("In Progress");
+    expect(trigger.contains(launchStep)).toBe(false);
+    expect(row.contains(trigger)).toBe(true);
+    expect(row.contains(launchStep)).toBe(true);
+    expect(launchStep.textContent).toBe("Start step: In Progress");
+    expect(launchStep.className).toContain("ml-auto");
   });
 
   it("does not show a destination when the selected workflow has no preview", () => {

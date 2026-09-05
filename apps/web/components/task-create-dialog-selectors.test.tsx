@@ -169,12 +169,21 @@ describe("TaskFormInputs launch prompt preview", () => {
 
 describe("TaskCreateLaunchPreviewToggle", () => {
   it("keeps a disabled toggle tooltip trigger focusable", () => {
-    render(<TaskCreateLaunchPreviewToggle active={false} disabled onToggle={() => undefined} />, {
-      wrapper: Wrapper,
-    });
+    render(
+      <TaskCreateLaunchPreviewToggle
+        active={false}
+        disabled
+        stepName="In Progress"
+        onToggle={() => undefined}
+      />,
+      { wrapper: Wrapper },
+    );
 
     const toggle = screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID);
     expect(toggle.getAttribute("disabled")).not.toBeNull();
+    expect(toggle.getAttribute("aria-label")).toBe(
+      "Preview launch prompt with workflow step prompt: In Progress",
+    );
     expect(toggle.parentElement?.getAttribute("tabindex")).toBe("0");
     expect(toggle.parentElement?.classList.contains("inline-flex")).toBe(true);
   });

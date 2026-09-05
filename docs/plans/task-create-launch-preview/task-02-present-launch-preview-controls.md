@@ -24,12 +24,13 @@ system_design:
 
 ## Summary
 
-Show the launch destination in the workflow selector. Add the inline prompt
+Show the launch destination beside, but outside, the workflow selector. Add the inline prompt
 preview toggle, localization, component coverage, and public task guidance.
 
 ## In scope
 
-- Render the muted destination step beside the selected workflow.
+- Render the muted **Start step: {{step}}** label outside the selected workflow
+  trigger and aligned to its right.
 - Add the preview icon after **Enhance prompt with AI**.
 - Toggle between the unchanged editor and a read-only composed preview.
 - Add accessible names, pressed state, and coarse-pointer sizing.
@@ -39,7 +40,6 @@ preview toggle, localization, component coverage, and public task guidance.
 
 - Launch behavior, API contracts, or persisted state.
 - Other prompt composers.
-- Playwright coverage.
 
 ## Acceptance
 
@@ -72,6 +72,8 @@ git diff --check
 - `apps/web/components/task-create-dialog-form-body.test.tsx`
 - `apps/web/components/workflow-selector-row.tsx`
 - `apps/web/components/workflow-selector-row.test.tsx`
+- `apps/web/e2e/tests/task/create-task.spec.ts`
+- `apps/web/e2e/tests/task/mobile-create-task-launch-preview.spec.ts`
 - `apps/web/components/task-create-dialog.test.tsx`
 - `apps/web/src/locales/en/task.json`
 - `apps/web/src/locales/pt-pt/task.json`
@@ -102,14 +104,18 @@ git diff --check
 
 ## Results
 
-- Added the muted launch destination to the workflow selector and an inline
-  preview toggle after **Enhance prompt with AI**.
+- Added the muted **Start step: {{step}}** destination beside, but outside, the
+  workflow selector and an inline preview toggle after **Enhance prompt with AI**.
+- Made the preview tooltip identify the workflow step prompt it will show.
 - Added the read-only wrapping preview surface, localized accessible labels,
   pressed state, and 44-pixel coarse-pointer sizing.
 - Added all five locale catalog entries, regenerated the pseudo catalog, and
   updated the public task creation guide.
 - Wrapped the disabled preview button in the shared focusable tooltip-trigger
   pattern so its explanation remains reachable by keyboard and pointer.
+- Follow-up refinement moved the launch-step label outside the selector and
+  aligned it to the right, changed the copy to **Start step: {{step}}**, and
+  made the preview tooltip identify its workflow step prompt.
 - Focused component tests passed (43 tests), typecheck passed, and the focused
   ESLint command passed with zero warnings.
 - `cd apps/web && pnpm run i18n:check` passed; `pnpm run i18n:ratchet` passed.

@@ -50,15 +50,24 @@ test.describe("mobile task-create launch prompt preview", () => {
         .last()
         .tap();
       await dialog.getByTestId("task-description-input").fill("");
-      await expect(dialog.getByTestId("task-create-launch-step")).toContainText("Backlog");
+      const launchStep = dialog.getByTestId("task-create-launch-step");
+      await expect(launchStep).toHaveText("Start step: Backlog");
+      await expect(workflowSelector).not.toContainText("Start step:");
+      const selectorBox = await workflowSelector.boundingBox();
+      const launchStepBox = await launchStep.boundingBox();
+      if (!selectorBox || !launchStepBox) throw new Error("launch step has no layout box");
+      expect(launchStepBox.x).toBeGreaterThanOrEqual(selectorBox.x + selectorBox.width - 1);
 
       await dialog.getByTestId("task-title-input").fill("Mobile launch preview");
       const description = "Review mobile launch preview";
       await dialog.getByTestId("task-description-input").fill(description);
-      await expect(dialog.getByTestId("task-create-launch-step")).toContainText("In Progress");
+      await expect(launchStep).toHaveText("Start step: In Progress");
 
       const toggle = dialog.getByTestId("task-create-launch-preview-toggle");
-      await expect(toggle).toHaveAttribute("aria-label", "Preview launch prompt");
+      await expect(toggle).toHaveAttribute(
+        "aria-label",
+        "Preview launch prompt with workflow step prompt: In Progress",
+      );
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
       const toggleBox = await toggle.boundingBox();
       if (!toggleBox) throw new Error("launch preview toggle has no layout box");
