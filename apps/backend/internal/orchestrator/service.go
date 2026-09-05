@@ -1267,6 +1267,14 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 // (dynamic route launches relaunch through startCreatedSession), and holding
 // the guard across it would invert the global lock order documented on
 // acquireSessionLifecycleLock.
+//
+// Releasing the guard before dispatch leaves a window where a turn could
+// start between this read and routeActionHandler's launch. That is a
+// route-action-vs-turn-start race, distinct from route-action-vs-route-action
+// (already serialized by the generation CAS in ResolveRouteAction, e.g.
+// ErrStaleGeneration). It is accepted here: closing it would mean holding
+// the guard across the dispatch again, reintroducing the deadlock this
+// function exists to remove.
 func (s *Service) rejectRouteActionDuringActiveTurn(ctx context.Context, sessionID string) error {
 	if s.turnService == nil {
 		return nil
@@ -2489,9 +2497,16 @@ func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
 // Global lock order: this lock is OUTER to acquireCancelInFlightGuard. A
 // caller that holds the cancel-in-flight guard for sessionID must release it
 // (lockedCancelInFlightGuard's unlock/relock protocol) before acquiring this
-// lock. Acquiring them in the opposite order on the same session deadlocks
-// against every caller that already takes lifecycle first — resetAgentContext,
-// ResumeTaskSessionWithOptions, ensureSessionRunning.
+// lock, or it can deadlock against every caller that already takes lifecycle
+// first — resetAgentContext, ResumeTaskSessionWithOptions,
+// ensureSessionRunning, reclaimIdleSession. handleAgentCompletedLocked and
+// ApplyRouteAction's route-action dispatch follow this order.
+//
+// Known remaining inversion: autoStartStepPrompt (event_handlers_workflow.go)
+// holds the cancel guard across the whole StartCreatedSession launch for a
+// session in CREATED state, by design, to keep terminalization from racing
+// the launch admission. Closing it needs a redesign of that admission
+// invariant, tracked separately rather than in this lock-order fix.
 func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	if sessionID == "" {
 		return func() {}
