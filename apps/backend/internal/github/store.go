@@ -1941,7 +1941,7 @@ func (s *Store) GetPRWatchBySession(ctx context.Context, sessionID string) (*PRW
 // GetPRWatch returns a PR watch by ID.
 func (s *Store) GetPRWatch(ctx context.Context, id string) (*PRWatch, error) {
 	var w PRWatch
-	err := s.ro.GetContext(ctx, &w, `SELECT * FROM github_pr_watches WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &w, s.ro.Rebind(`SELECT * FROM github_pr_watches WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
