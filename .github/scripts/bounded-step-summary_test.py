@@ -71,6 +71,23 @@ class BoundedStepSummaryTest(unittest.TestCase):
             rendered,
         )
 
+    def test_oversized_summary_retains_later_failure_identity(self) -> None:
+        summary = (
+            "<h2>📝 Test results</h2>\n"
+            "<table><tr><td><ul>"
+            "<li>🔴<code>TestEarlyFailure</code></li>"
+            "</ul></td></tr></table>\n"
+            + "diagnostic=失敗🔥\n" * 200_000
+            + "<table><tr><td><ul>"
+            "<li>🔴<code>TestLaterFailure</code></li>"
+            "</ul></td></tr></table>\n"
+        )
+
+        rendered = self.run_writer(summary).decode("utf-8")
+
+        self.assertIn("TestEarlyFailure", rendered)
+        self.assertIn("TestLaterFailure", rendered)
+
     def test_invalid_utf8_input_is_rejected(self) -> None:
         # Contract coverage for the writer's existing UTF-8 validation.
         with tempfile.TemporaryDirectory() as tmp:

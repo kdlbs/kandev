@@ -2,7 +2,11 @@
 """Write generated Markdown within GitHub Actions' step-summary size limit."""
 
 import argparse
+import re
 from pathlib import Path
+
+
+FAILURE_IDENTITY = re.compile(r"<li>🔴<code>([^<]*)</code></li>")
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,7 +26,7 @@ def bounded_summary(
     diagnostics_url: str,
     max_bytes: int,
 ) -> bytes:
-    source.decode("utf-8")
+    source_text = source.decode("utf-8")
     if len(source) <= max_bytes:
         return source
 
@@ -36,10 +40,25 @@ def bounded_summary(
         raise ValueError("max bytes is too small for the truncation notice")
 
     prefix_budget = max_bytes - len(notice)
+    failure_identities = FAILURE_IDENTITY.findall(source_text)
+    identity_section = b""
+    if failure_identities:
+        identity_section = (
+            "## Failed test identities\n\n"
+            + "\n".join(f"- `{identity}`" for identity in failure_identities)
+            + "\n\n"
+        ).encode("utf-8")
+        identity_section = (
+            identity_section[: max(0, prefix_budget)]
+            .decode("utf-8", errors="ignore")
+            .encode("utf-8")
+        )
+
+    prefix_budget -= len(identity_section)
     # The full source is valid UTF-8, so ignoring errors can only discard a
     # partial code point at the byte boundary.
     prefix = source[:prefix_budget].decode("utf-8", errors="ignore").encode("utf-8")
-    return notice + prefix
+    return notice + identity_section + prefix
 
 
 def main() -> int:
