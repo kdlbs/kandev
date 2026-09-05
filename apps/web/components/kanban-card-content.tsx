@@ -25,7 +25,6 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
-import { RepoChipRow } from "@/components/kanban-card-repo-chips";
 import { KanbanCardPriorityIndicator } from "@/components/kanban-card-priority-indicator";
 import { RepoChipRow } from "@/components/kanban-card-repository-chips";
 import { CardTitle } from "@/components/kanban-card-title";
