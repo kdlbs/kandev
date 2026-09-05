@@ -358,6 +358,8 @@ export type AgentProfileDeletedPayload = {
 
 export type AgentProfileChangedPayload = {
   profile: AgentProfilePayload;
+  /** Sessionless-inference capability for profile events received before agent hydration. */
+  inference_capable?: boolean;
 };
 
 export type UserSettingsUpdatedPayload = Omit<

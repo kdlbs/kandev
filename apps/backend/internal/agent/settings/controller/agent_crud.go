@@ -27,7 +27,7 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
+	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 	if err := c.decorateAgentDTO(ctx, &result); err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		if err != nil {
 			return nil, err
 		}
-		entry := toAgentDTO(agent, filterGlobalProfiles(profiles))
+		entry := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 		if err := c.decorateAgentDTO(ctx, &entry); err != nil {
 			return nil, err
 		}
@@ -182,7 +182,7 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, profiles)
+	result := c.toAgentDTO(agent, profiles)
 	c.applyCapabilityStatus(&result, agent.Name)
 	return &result, nil
 }
@@ -302,7 +302,7 @@ func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
+	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 	return &result, nil
 }
 

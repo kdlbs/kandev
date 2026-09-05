@@ -127,10 +127,21 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
 /** Hydrate settings slices, preserving loading states. */
 function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   if (state.executors) deepMerge(draft.executors, state.executors);
-  if (state.settingsAgents) deepMerge(draft.settingsAgents, state.settingsAgents);
   if (state.agentDiscovery) deepMerge(draft.agentDiscovery, state.agentDiscovery);
   mergeWithLoading(draft.availableAgents, state.availableAgents);
-  if (state.agentProfiles) deepMerge(draft.agentProfiles, state.agentProfiles);
+  const preserveLiveAgentProfiles =
+    (state.agentProfiles?.version ?? 0) < draft.agentProfiles.version;
+  if (state.settingsAgents && !preserveLiveAgentProfiles) {
+    deepMerge(draft.settingsAgents, state.settingsAgents);
+  }
+  if (state.agentProfiles) {
+    // Route bootstrap snapshots start at version zero. Preserve a newer
+    // profile mutation delivered over WebSocket while that snapshot was in
+    // flight; otherwise the stale response can erase the live option.
+    if (!preserveLiveAgentProfiles) {
+      deepMerge(draft.agentProfiles, state.agentProfiles);
+    }
+  }
   mergeWithLoading(draft.editors, state.editors);
   mergeWithLoading(draft.prompts, state.prompts);
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
