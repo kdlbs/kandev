@@ -7,7 +7,6 @@ import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./t
 import {
   buildTaskSessionProjectionActions,
   mergeOrphanPendingActionProjection,
-  mergePendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
 import {
@@ -16,10 +15,7 @@ import {
   removePromptMessage,
   updatePromptMessage,
 } from "./prompt-message-actions";
-import {
-  migrateEnvKeyedData,
-  purgeSessionRuntimeState,
-} from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { mergeTaskSession } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
 import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
@@ -95,14 +91,6 @@ function mergeMessageAtIndex(messages: Message[], message: Message): void {
 function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
 }
-
-const IDLE_SESSION_STATES = new Set<TaskSession["state"]>([
-  "IDLE",
-  "WAITING_FOR_INPUT",
-  "COMPLETED",
-  "FAILED",
-  "CANCELLED",
-]);
 
 /** Normalize and merge a complete session record without erasing a newer live activity event. */
 function mergeTaskSessionSnapshot(

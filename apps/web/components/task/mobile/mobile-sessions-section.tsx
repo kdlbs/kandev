@@ -263,6 +263,51 @@ function SessionIdentity({ row }: { row: SessionRow }) {
   );
 }
 
+function SessionRowTrailingActions({
+  row,
+  taskId,
+  totalSessions,
+  isConfirming,
+  onAskDelete,
+  onCancelDelete,
+  onHandoffProfile,
+  actions,
+}: {
+  row: SessionRow;
+  taskId: string;
+  totalSessions: number;
+  isConfirming: boolean;
+  onAskDelete: () => void;
+  onCancelDelete: () => void;
+  onHandoffProfile: (profileId: string) => void;
+  actions: ReturnType<typeof useSessionActions>;
+}) {
+  if (isConfirming) {
+    return (
+      <SessionDeleteInlineConfirmation
+        isPrimary={row.isPrimary}
+        isOnlySession={totalSessions === 1}
+        targetName={row.agentLabel}
+        onCancel={onCancelDelete}
+        onClose={onCancelDelete}
+        onConfirm={() => void actions.remove()}
+      />
+    );
+  }
+  return (
+    <SessionActionsMenu
+      taskId={taskId}
+      state={row.state}
+      isPrimary={row.isPrimary}
+      onSetPrimary={() => void actions.setPrimary()}
+      onStop={() => void actions.stop()}
+      onResume={() => void actions.resume()}
+      onAskDelete={onAskDelete}
+      onHandoffProfile={onHandoffProfile}
+    />
+  );
+}
+
 function SessionRowItem({
   row,
   taskId,
@@ -329,27 +374,16 @@ function SessionRowItem({
           parkedOnBackgroundWork={row.parkedOnBackgroundWork}
           testId={`mobile-session-state-${row.id}`}
         />
-        {isConfirming ? (
-          <SessionDeleteInlineConfirmation
-            isPrimary={row.isPrimary}
-            isOnlySession={totalSessions === 1}
-            targetName={row.agentLabel}
-            onCancel={onCancelDelete}
-            onClose={onCancelDelete}
-            onConfirm={() => void actions.remove()}
-          />
-        ) : (
-          <SessionActionsMenu
-            taskId={taskId}
-            state={row.state}
-            isPrimary={row.isPrimary}
-            onSetPrimary={() => void actions.setPrimary()}
-            onStop={() => void actions.stop()}
-            onResume={() => void actions.resume()}
-            onAskDelete={onAskDelete}
-            onHandoffProfile={handleHandoffProfile}
-          />
-        )}
+        <SessionRowTrailingActions
+          row={row}
+          taskId={taskId}
+          totalSessions={totalSessions}
+          isConfirming={isConfirming}
+          onAskDelete={onAskDelete}
+          onCancelDelete={onCancelDelete}
+          onHandoffProfile={handleHandoffProfile}
+          actions={actions}
+        />
       </div>
       {handoffPreset && (
         <NewSessionDialog

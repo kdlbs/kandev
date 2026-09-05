@@ -166,7 +166,9 @@ describe("buildSidebarItem", () => {
     expect(item.wipQueue).toEqual(wipQueue);
     expect(item.queuedCount).toBeUndefined();
   });
+});
 
+describe("buildSidebarItem — parked on background work", () => {
   it("carries the parked-on-background-work projection through to the sidebar row", () => {
     const item = buildSidebarItem(task({ parkedOnBackgroundWork: true }), emptyContext());
 

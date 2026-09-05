@@ -99,40 +99,33 @@ export function mergeTaskUpdate(
     payloadKey: "parent_id",
     taskField: "parentTaskId",
   });
-  if (!hasPayloadField(payload, "primary_session_id") && nextTask.primarySessionId === undefined) {
-    merged.primarySessionId = existing.primarySessionId;
-  }
-  if (
-    !hasPayloadField(payload, "primary_session_state") &&
-    nextTask.primarySessionState === undefined
-  ) {
-    merged.primarySessionState = existing.primarySessionState;
-  }
-  if (
-    !hasPayloadField(payload, "primary_session_pending_action") &&
-    nextTask.primarySessionPendingAction === undefined
-  ) {
-    merged.primarySessionPendingAction = existing.primarySessionPendingAction;
-  }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "primary_session_id",
+    taskField: "primarySessionId",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "primary_session_state",
+    taskField: "primarySessionState",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "primary_session_pending_action",
+    taskField: "primarySessionPendingAction",
+  });
   preservePrimaryExecutorFields(existing, merged, payload);
   if (!hasPayloadField(payload, "metadata")) merged.metadata = existing.metadata;
   if (!hasPayloadField(payload, "labels")) merged.labels = existing.labels;
   if (!hasPayloadField(payload, "origin")) merged.origin = existing.origin;
-  if (
-    !hasPayloadField(payload, "task_pending_action") &&
-    nextTask.taskPendingAction === undefined
-  ) {
-    merged.taskPendingAction = existing.taskPendingAction;
-  }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "task_pending_action",
+    taskField: "taskPendingAction",
+  });
   // Preserve the task-level activity aggregate only when the event omits it
   // entirely (e.g. a lightweight kanban.update). A task.updated that carries an
   // explicit null clears a stale background-running reading, so it must win.
-  if (
-    !hasPayloadField(payload, "foreground_activity") &&
-    nextTask.foregroundActivity === undefined
-  ) {
-    merged.foregroundActivity = existing.foregroundActivity;
-  }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "foreground_activity",
+    taskField: "foregroundActivity",
+  });
   mergeTaskParkedFields(existing, merged, nextTask);
   preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "interrupted",
@@ -142,12 +135,10 @@ export function mergeTaskUpdate(
     payloadKey: "auto_start_failed",
     taskField: "autoStartFailed",
   });
-  if (
-    !hasPayloadField(payload, "active_subagent_count") &&
-    nextTask.activeSubagentCount === undefined
-  ) {
-    merged.activeSubagentCount = existing.activeSubagentCount;
-  }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "active_subagent_count",
+    taskField: "activeSubagentCount",
+  });
   preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "status_summary",
     taskField: "statusSummary",

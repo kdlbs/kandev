@@ -315,7 +315,7 @@ describe("MobileSessionsPicker parked-on-background-work (AC-51/52)", () => {
 
     const state = screen.getByTestId(SESSION_BG_STATE_TESTID);
     expect(state.querySelector("svg")?.getAttribute("class")).toContain(BACKGROUND_SPINNER_CLASS);
-    expect(state.querySelector("svg")?.getAttribute("class")).toContain("animate-spin");
+    expect(state.querySelector(".animate-spin")).not.toBeNull();
     expect(state.textContent).toMatch(/background/i);
   });
 

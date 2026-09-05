@@ -33,6 +33,7 @@
  * task created below.
  */
 import type { Locator } from "@playwright/test";
+import { dwell } from "../../helpers/causal-waits";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
@@ -66,7 +67,7 @@ async function expectAffordanceHoldsAcrossLiveSamples(
         `expected at least ${minSamples} live probe samples for ${sessionId}, got ${calls}`,
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await dwell(200, "poll-interval", "polling the scripted probe's call count between samples");
   }
 }
 

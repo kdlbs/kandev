@@ -38,6 +38,8 @@ export type TaskStateIconProps = {
   showBackgroundTooltip?: boolean;
 };
 
+const BACKGROUND_WORK_RUNNING_LABEL_KEY = "task:backgroundWorkIsRunning";
+
 function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState): boolean {
   return classifyTask(sessionState, state) === "in_progress";
 }
@@ -76,14 +78,14 @@ function BackgroundWorkTaskIcon({ showTooltip }: { showTooltip: boolean }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          aria-label={t("task:backgroundWorkIsRunning")}
+          aria-label={t(BACKGROUND_WORK_RUNNING_LABEL_KEY)}
           tabIndex={0}
           className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
         >
           {spinner}
         </span>
       </TooltipTrigger>
-      <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
+      <TooltipContent side="right">{t(BACKGROUND_WORK_RUNNING_LABEL_KEY)}</TooltipContent>
     </Tooltip>
   );
 }
@@ -253,8 +255,8 @@ export function getTaskStateIconLabelKey({
     return "common:taskStateWaitingForInput";
   }
   if (foregroundActivity === "generating") return "common:taskStateInProgress";
-  if (foregroundActivity === "background") return "task:backgroundWorkIsRunning";
-  if (parkedOnBackgroundWork) return "task:backgroundWorkIsRunning";
+  if (foregroundActivity === "background") return BACKGROUND_WORK_RUNNING_LABEL_KEY;
+  if (parkedOnBackgroundWork) return BACKGROUND_WORK_RUNNING_LABEL_KEY;
   if (shouldUseQuestionTaskIcon(state)) return "common:taskStateWaitingForInput";
   if (computeIsPreparing(state, sessionState)) return "common:taskStateScheduling";
   if (computeIsInProgress(state, sessionState)) {
