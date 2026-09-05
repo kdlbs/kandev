@@ -103,13 +103,12 @@ discovers the intended test count before treating a focused command as evidence.
 
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
-`--no-build` reuses every production E2E artifact, not only Vite assets and the
-backend executable. On a fresh worktree or after rebasing, confirm packaged
-fixtures also exist; global setup currently requires
-`apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz`. If it is absent, run
-without `--no-build` or first run `make -C apps/backend e2e-plugin-package`.
-Prefer a normal managed build after source or base-branch changes and reserve
-`--no-build` for repeated runs against unchanged artifacts.
+`--no-build` reuses every production E2E artifact, including Vite assets, the backend executable,
+and packaged fixtures. Global setup requires `apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz`;
+if absent, run without `--no-build` or first run `make -C apps/backend e2e-plugin-package`.
+Prefer a normal managed build after source or base-branch changes and reserve `--no-build` for
+unchanged artifacts. If intentional after either kind of change, rebuild and verify both artifacts
+with `make -C apps/backend build` and `make -C apps/backend e2e-plugin-package`.
 
 For a raw Docker/SSH/container run, `make build-backend` alone does not build
 the Linux mock-agent fixture. Prefer the managed runner; otherwise run
@@ -432,8 +431,10 @@ When a test fails:
   intended result after both viewport and container-only changes.
 - **Initial hydration/readiness regressions:** do not use a page-object readiness helper that can reload or re-navigate the page (for example `SessionPage.waitForLoad`) to prove first-render behavior. Wait directly for the invariant locator on the current navigation, using a bounded non-reloading wait when needed. Keep reload-capable helpers for persistence and recovery scenarios.
 - **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` before opening transient dialogs/drawers/popovers; it may reload and re-derive state from the Go boot payload. If it must run later, reopen the transient UI first. For WS/session hydration races, retain a bounded reload-and-retry fallback in the page object: keep the fast path immediate and the final check failing when genuinely stuck; remove it only with an equivalent deterministic readiness guarantee and focused regression.
+- **Editor readiness is not submit readiness** — a `contenteditable` may be present and writable while a session is still `STARTING`. Before submitting, wait for the scoped submit control to be enabled or for the exact session to reach `WAITING_FOR_INPUT`; use retries disabled when reproducing this boundary.
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI). In workflow cache steps, `actions/cache/restore` sets `cache-hit` to `true` for an exact key, `false` for a restore-key/prefix hit, and empty on a miss; gate verification/fallback on empty versus non-empty, smoke-test Chromium before skipping image extraction, and use bounded backoff for transient registry metadata probes such as `docker buildx imagetools inspect`.
+- **Page-closed errors after timeouts** — `Target page, context or browser has been closed` can be teardown masking an earlier overlay interception. Inspect the preceding action and screenshot, for example with `rtk proxy unzip -p <trace.zip> 0-trace.trace | rtk proxy jq -c 'select(.type == "action" or .type == "error")'`, then close the overlay in the page object, assert it is closed, and rerun with retries disabled before changing timeouts or routes.
 
 ### Debugging CI shard failures
 

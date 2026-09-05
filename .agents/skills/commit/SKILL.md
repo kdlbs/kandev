@@ -147,9 +147,11 @@ qualifies as a successful hook receipt.
    ```bash
    COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
    set -o pipefail
-   rtk proxy git commit -m "type(scope): description" 2>&1 | tee "$COMMIT_LOG" >/dev/null
+   rtk proxy git commit -m "type(scope): description" 2>&1 | rtk proxy tee "$COMMIT_LOG" >/dev/null
    ```
-   Read the log to extract every hook ID/result and confirm the receipt still
+   Both the commit and `tee` stages must use raw-output mode when the log is
+   parsed; normal `rtk git commit` output may contain only `ok <sha>` and is not
+   hook evidence. Read the log to extract every hook ID/result and confirm the receipt still
    says `bypass: false`, rather than printing the full stream again. Remove the
    exact temporary file after copying the receipt into
    the handoff:

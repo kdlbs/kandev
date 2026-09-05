@@ -140,8 +140,7 @@ means that the waiter reached its deadline, not that CI passed or failed. If no
 user limit was reached, rerun with a larger deadline. Report "CI in progress"
 only when the user's limit or the workflow's own timeout prevents further
 waiting, and name the pending checks or unconfirmed terminal rollup. This is an
-upper deadline, not a minimum hold time: `pr-await` may return early when all
-checks are terminal, so do not claim it waited for the full duration.
+upper deadline, not a minimum hold time: `pr-await` may return early when all checks are terminal, so do not claim it waited for the full duration. If a fresh PR query reports `MERGED` or `CLOSED` while it runs or after a deadline snapshot, stop polling and queue work; refresh once only if needed, never re-enqueue, rebase, push, or recreate the stale branch. Peer or poller notices remain advisory until revalidated against current PR state.
 
 Read the final tool result's `exit_code`, including when the command runs in a
 PTY or session, rather than re-deriving state from stdout: 0 clean, 1 terminal
@@ -179,7 +178,7 @@ checks, and only a sparse subset of workflows materialized. Use
 `scripts/pr-await <PR>` and require its terminal-rollup confirmation; do not
 declare the PR clean from one sparse snapshot. If its waiter deadline expires before the rollup is confirmed, including when its
 internal `pr-state` 180-second bound is hit, treat exit 2 as CI in progress;
-rerun with a larger explicit `--deadline-min` (and optionally `--interval-sec`) against the current head, never switch to timer-driven snapshots; after a rerun or push, restart the waiter against the current head and require `checks_head_sha` to equal `headRefOid` with zero pending, failed, and unresolved counts before calling it clean.
+rerun with a larger explicit `--deadline-min` (and optionally `--interval-sec`) against the current head, never switch to timer-driven snapshots; after a rerun or push, restart the waiter against the current head and require `checks_head_sha` to equal `headRefOid` with zero pending, failed, and unresolved counts before calling it clean. If a new head has an empty current-head review list but an earlier snapshot had aggregate or top-level bot comments, run one `scripts/pr-state --summary --all` audit and revalidate those bodies against the current source before declaring review clean.
 If a job remains pending beyond the workflow's configured timeout, or its status
 conflicts with the GitHub UI/API, query the exact job with
 `gh api repos/<owner>/<repo>/actions/jobs/<job_id>` (or inspect the run with

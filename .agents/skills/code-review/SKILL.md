@@ -27,6 +27,7 @@ change and a small diff because this limits risk and maintainer burden.
 ## Available skills
 
 - **`/tdd`** — Recommend when flagging untested logic. The author can use this to add tests.
+- **`/mobile-parity`** — Required when a review touches frontend or user-facing UI, including scrolling, visibility, or activation behavior, even when the change is not described as responsive.
 
 ## Steps
 
@@ -129,6 +130,8 @@ Before reviewing implementation details:
   coverage.
 - For terminal event streams, block an earlier publication, enqueue a terminal event (for example delete or cancellation), then enqueue a stale update. Assert no later mutation reaches an upserting consumer; queues must tombstone the entity or discard pending work at the terminal boundary.
 - When completion events lack a stable workload identity, test N outstanding registrations with N completion signals and duplicate delivery. A single-registration test cannot prove that uncorrelated completions retire work correctly. Compare this behavior with the accepted spec or ADR; a passing test that contradicts the contract is still a blocker.
+- For durable one-shot metadata, inventory every producer, claim, restore, retry/redelivery, and startup-sweep path. If a token carries a structured descriptor, restore that exact claimed value rather than replacing it with a boolean marker; test a real producer and a claim-to-restore-to-reclaim round trip.
+- Components can remain mounted while hidden or zero-sized. For visibility/activation behavior, ensure deadlines begin or reset at visible activation; mount the hidden state, advance fake timers or deliver content/layout changes, activate it, and assert final ownership with controlled observers or animation frames.
 - Treat missing tests for new or changed non-UI logic as a blocker unless the change is explicitly untestable and says why.
 - For forms that catch typed validation or provider errors, review feedback and cleanup as separate paths. Require focused coverage for every typed error family (or a table-driven equivalent) that asserts localized feedback is shown and the dialog/input remains open, plus a success assertion that it still closes; a `finally` block must not close a recoverable form unconditionally.
 

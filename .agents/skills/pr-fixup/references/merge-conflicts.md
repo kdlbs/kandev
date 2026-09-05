@@ -99,6 +99,12 @@ merge. Recheck it immediately before pushing; use the explicit lease shown in
    --all` and inspect `git diff <base>...HEAD` for the intended migration delta.
    Verify again with `git ls-files -u`, the marker scan, and the full spec lint.
 
+   If conflict resolution touches `apps/backend/go.mod` or `apps/backend/go.sum`,
+   marker-free text is not enough: a union can silently lose a required module
+   checksum. From `apps/backend`, run `go mod tidy` and then `go mod verify`
+   sequentially, inspect that only intended module files changed, and run the
+   affected backend package tests or build before committing.
+
    For structured files (especially JSON catalogs), validate syntax and duplicate
    keys before continuing. JSON's default parser may silently keep the last
    duplicate key; use an `object_pairs_hook` that raises on duplicates, then run
