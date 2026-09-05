@@ -29,6 +29,7 @@ import (
 const (
 	openCodeCommand       = "opencode"
 	openCodeACPSubcommand = "acp"
+	kandevAgentGuardPath  = "/usr/local/bin/kandev-agent-guard"
 
 	acpCommandTerminateGrace = 250 * time.Millisecond
 	acpCommandForceKillGrace = 500 * time.Millisecond
@@ -85,7 +86,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	cmdArgs := args[1:]
 	if len(cfg.CommandPrefix) > 0 {
 		args = append(append([]string{}, cfg.CommandPrefix...), args...)
-		resolvedCmd = resolveProbeCommand(args[0])
+		resolvedCmd = resolveACPCommandPrefix(args[0])
 		if resolvedCmd == "" {
 			return &PromptResponse{Success: false, Error: fmt.Sprintf("command prefix %q is not an allowed ACP command", args[0])}, nil
 		}
@@ -1222,6 +1223,18 @@ func resolveProbeCommand(name string) string {
 		}
 	}
 	return ""
+}
+
+// resolveACPCommandPrefix validates the optional launcher that wraps an
+// already allow-listed ACP agent command. The deployment guard is accepted
+// only at its fixed image path: accepting a matching basename from another
+// directory would let a caller substitute an untrusted wrapper. Existing
+// allow-listed agent commands retain their prior prefix behavior.
+func resolveACPCommandPrefix(name string) string {
+	if name == kandevAgentGuardPath {
+		return kandevAgentGuardPath
+	}
+	return resolveProbeCommand(name)
 }
 
 // stderrTailLimit bounds how much of a spawned agent's stderr reaches the log:
