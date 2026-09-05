@@ -2103,7 +2103,6 @@ func (s *Store) DeletePRWatchesByTaskID(ctx context.Context, taskID string) (int
 	return n, nil
 }
 
-// UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery (or
 // resets it to 0 to re-search). Promoting to a non-zero PR number could
 // collide with the canonical discovered-watch identity (task_id,
@@ -2152,19 +2151,16 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 		return tx.Commit()
 	}
 
+	const savepoint = "update_pr_watch_pr_number"
+	if _, err := tx.ExecContext(ctx, s.db.Rebind("SAVEPOINT "+savepoint)); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		s.db.Rebind(`UPDATE github_pr_watches SET pr_number = ?, updated_at = ? WHERE id = ?`),
 		prNumber, time.Now().UTC(), id); err != nil {
-		// Same belt-and-suspenders as UpdatePRWatchBranchIfSearching: an
-		// external writer could still race between the probe and this
-		// UPDATE. Treat a UNIQUE violation identically to the probe-found
-		// path.
-		if isPRWatchDiscoveredUniqueViolation(err) {
-			if _, delErr := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); delErr != nil {
-				return delErr
-			}
-			return tx.Commit()
-		}
+		return recoverPRWatchDiscoveredUpdate(ctx, tx, s.db.Rebind, savepoint, id, err, tx.Commit)
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind("RELEASE SAVEPOINT "+savepoint)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2307,6 +2303,31 @@ func recoverPRWatchUniqueUpdate(
 	if _, err := tx.ExecContext(ctx, rebind(
 		`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`,
 	), id); err != nil {
+		return err
+	}
+	return commit()
+}
+
+func recoverPRWatchDiscoveredUpdate(
+	ctx context.Context,
+	tx prWatchTx,
+	rebind func(string) string,
+	savepoint, id string,
+	updateErr error,
+	commit func() error,
+) error {
+	if _, err := tx.ExecContext(ctx, rebind("ROLLBACK TO SAVEPOINT "+savepoint)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, rebind("RELEASE SAVEPOINT "+savepoint)); err != nil {
+		return err
+	}
+	// An external writer can still race between the preflight probe and the
+	// UPDATE. Treat that discovered-index collision like the probe-found path.
+	if !isPRWatchDiscoveredUniqueViolation(updateErr) {
+		return updateErr
+	}
+	if _, err := tx.ExecContext(ctx, rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
 		return err
 	}
 	return commit()

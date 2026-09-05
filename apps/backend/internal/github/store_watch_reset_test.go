@@ -154,6 +154,81 @@ func TestStore_UpdatePRWatchPRNumber_PostgresDifferentSessionCollision(t *testin
 	}
 }
 
+func TestStore_UpdatePRWatchPRNumber_PostgresUpdateCollisionKeepsTransactionUsable(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at TIMESTAMP);
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		INSERT INTO workspaces (id) VALUES ('ws-1');
+		INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1');`); err != nil {
+		t.Fatalf("create task fixtures: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE github_pr_watches (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT '',
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL,
+			repo TEXT NOT NULL,
+			pr_number INTEGER NOT NULL,
+			branch TEXT NOT NULL,
+			last_checked_at TIMESTAMP,
+			last_comment_at TIMESTAMP,
+			last_check_status TEXT DEFAULT '',
+			last_review_state TEXT DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE UNIQUE INDEX idx_github_pr_watches_discovered
+			ON github_pr_watches (task_id, repository_id, pr_number) WHERE pr_number <> 0;
+		CREATE OR REPLACE FUNCTION insert_colliding_pr_watch()
+		RETURNS trigger AS $$
+		BEGIN
+			IF NEW.id = 'watch-source-pg' AND NEW.pr_number = 99 THEN
+				INSERT INTO github_pr_watches (
+					id, workspace_id, session_id, task_id, repository_id, owner, repo,
+					pr_number, branch, created_at, updated_at
+				) VALUES (
+					'watch-sibling-pg', NEW.workspace_id, 'session-2', NEW.task_id,
+					NEW.repository_id, NEW.owner, NEW.repo, NEW.pr_number,
+					'feature/B', NEW.updated_at, NEW.updated_at
+				);
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER insert_colliding_pr_watch_before_update
+			BEFORE UPDATE OF pr_number ON github_pr_watches
+			FOR EACH ROW EXECUTE FUNCTION insert_colliding_pr_watch();`); err != nil {
+		t.Fatalf("create postgres PR-watch fixture: %v", err)
+	}
+	store := &Store{db: db, ro: db}
+	now := time.Now().UTC()
+	source := &PRWatch{
+		ID: "watch-source-pg", WorkspaceID: "ws-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repo-1", Owner: "owner", Repo: "repo", Branch: "feature/A",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreatePRWatch(ctx, source); err != nil {
+		t.Fatalf("create source watch: %v", err)
+	}
+
+	if err := store.UpdatePRWatchPRNumber(ctx, source.ID, 99); err != nil {
+		t.Fatalf("update-time discovered-watch collision must keep transaction usable: %v", err)
+	}
+
+	got, err := store.GetPRWatch(ctx, source.ID)
+	if err != nil {
+		t.Fatalf("get source watch: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected source watch to be dropped after update-time collision, got %+v", got)
+	}
+}
+
 // TestStore_ReviewWatch_ListTaskIDsAndReset pins the contract used by the
 // review watch reset flow: every dedup row's task_id (including empty
 // reservations) is enumerable, and ResetReviewWatchState wipes those rows
