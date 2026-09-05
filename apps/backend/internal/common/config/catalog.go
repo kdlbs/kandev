@@ -128,6 +128,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_MOCK_LINEAR", Class: "test", Reason: "test-only provider replacement"},
 	{EnvVar: "KANDEV_FEATURES_OFFICE", Class: "profile", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_AUTH", Class: "profile", Reason: "runtime feature flag registry"},
+	{EnvVar: "KANDEV_FEATURES_CANVASES", Class: "profile", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", Class: "debug", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", Class: "debug", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY", Class: "debug", Reason: "runtime feature flag registry"},

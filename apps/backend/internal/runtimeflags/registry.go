@@ -69,6 +69,24 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.canvases",
+			EnvVar:      "KANDEV_FEATURES_CANVASES",
+			Kind:        KindFeature,
+			Label:       "Agent-authored canvases",
+			Description: "Enables isolated agent-authored web application canvases for tasks and workspaces.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Canvas applications execute arbitrary packaged browser code in a sandboxed runtime and " +
+				"can access only explicitly granted Kandev data. Enable this only while reviewing the isolation, " +
+				"storage, and permission behavior of the experimental feature.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Canvases },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Canvases = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.multiTenancy",
 			EnvVar:      "KANDEV_FEATURES_MULTI_TENANCY",
 			Kind:        KindFeature,

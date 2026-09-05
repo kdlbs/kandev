@@ -23,6 +23,7 @@ export type FormResetters = {
   setDiscoverReposLoaded: (value: boolean) => void;
   setUseRemote: (value: boolean) => void;
   setNoRepository: (value: boolean) => void;
+  setPreferLocalExecutor: (value: boolean) => void;
   setWorkspacePath: (value: string) => void;
   setAutopilot: (value: boolean) => void;
   setPriority: (value: TaskPriority) => void;
@@ -69,6 +70,9 @@ export function resetTaskForm(
   resetters.setExecutorProfileId("");
   resetters.setSelectedWorkflowId(workflowId);
   resetters.setFetchedSteps(null);
+  resetters.setNoRepository(initialValues?.noRepository ?? false);
+  resetters.setPreferLocalExecutor(initialValues?.preferLocalExecutor ?? false);
+  resetters.setWorkspacePath("");
   resetters.setAutopilot(false);
   resetters.setPriority("medium");
 }
