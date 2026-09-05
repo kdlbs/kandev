@@ -233,3 +233,48 @@ func TestDirtyWorktreeCleanupMixedFailureRemainsRetryable(t *testing.T) {
 		t.Fatal("wrapped dirty-worktree refusal was not classified as terminal")
 	}
 }
+
+func TestDirtyWorktreeCleanupBatchOrderRemainsRetryable(t *testing.T) {
+	ctx := context.Background()
+	_, _, repo := createTestService(t)
+	const taskID = "task-batch-cleanup-order"
+	const sessionID = "session-batch-cleanup-order"
+	seedCleanupTaskAndSession(t, repo, taskID, sessionID)
+
+	repoPath := initSimpleGitRepo(t)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-batch-cleanup-order", WorkspaceID: "ws-" + taskID,
+		Name: "repo-batch-cleanup-order", SourceType: "local", LocalPath: repoPath,
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	mgr := newCleanupTestWorktreeManager(t, repo)
+	wt, err := mgr.Create(ctx, worktree.CreateRequest{
+		TaskID: taskID, SessionID: sessionID, TaskTitle: "Batch cleanup order",
+		RepositoryID: "repo-batch-cleanup-order", RepositoryPath: repoPath,
+		BaseBranch: "main", TaskDirName: taskID, RepoName: "repo-batch-cleanup-order",
+	})
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	dirtyPath := filepath.Join(wt.Path, "dirty-before-retry.txt")
+	if err := os.WriteFile(dirtyPath, []byte("preserve me\n"), 0o644); err != nil {
+		t.Fatalf("write dirty worktree file: %v", err)
+	}
+
+	// The first inventory row fails for a retryable metadata reason. The second
+	// row refuses cleanup because it is dirty. Both failures must reach the job
+	// classifier; returning only the final sentinel would incorrectly terminalize
+	// this batch.
+	firstFailure := &worktree.Worktree{ID: "wt-retryable-first", TaskID: taskID}
+	cleanupErr := mgr.CleanupWorktrees(ctx, []*worktree.Worktree{firstFailure, wt})
+	if cleanupErr == nil {
+		t.Fatal("batch cleanup succeeded despite two failures")
+	}
+	if !errors.Is(cleanupErr, worktree.ErrDirtyWorktreeCleanup) {
+		t.Fatalf("batch cleanup error = %v, want dirty refusal included", cleanupErr)
+	}
+	if isDirtyWorktreeCleanupError(cleanupErr) {
+		t.Fatalf("batch cleanup was classified as terminal: %v", cleanupErr)
+	}
+}

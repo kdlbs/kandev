@@ -109,3 +109,12 @@ the same conversation.
   task row and dirty file preserved. Consent cleanup and raced terminal-state regressions also pass.
 - Verification: `go test ./internal/worktree ./internal/task/service ./internal/task/handlers
   -count=1` passed 2,685 tests across the three packages.
+- Review follow-up joins every cleanup failure instead of retaining only the last error. The new
+  batch-order regression proves that a retryable metadata failure followed by a dirty-worktree
+  refusal remains retryable, and the missing-metadata inspection regression proves admission fails
+  closed after cache enrichment.
+- The cascade service regression drives `DeleteTaskTreeWithOptions` through the complete root,
+  child, and grandchild set, proving refusal is atomic and the discard option reaches admission.
+- Follow-up verification: `go test ./internal/worktree ./internal/task/service
+  ./internal/task/handlers -count=1` passed 2,693 tests across the three packages; specification
+  lint also passed.

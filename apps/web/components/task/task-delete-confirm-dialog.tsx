@@ -65,8 +65,8 @@ function DiscardWorktreeChangesOption({
   disabled,
   onCheckedChange,
 }: DiscardWorktreeChangesOptionProps) {
-  if (!enabled) return null;
   const { t } = useTranslation();
+  if (!enabled) return null;
   return (
     <label className="flex min-h-11 cursor-pointer items-start gap-2 text-sm">
       <Checkbox

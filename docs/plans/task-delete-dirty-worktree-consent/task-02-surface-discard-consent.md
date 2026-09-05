@@ -131,3 +131,10 @@ results. Update this work order and `plan.md` in the same conversation.
   sidebar E2E (1 passed); mobile confirmation/layout E2E (4 passed); and public-doc validation
   (61 tests, 45 pages). The backend suite above proves physical dirty-worktree preservation and
   consented cleanup; the browser flows prove the shared desktop/mobile consent state.
+- Review follow-up moves `useTranslation` before the discard-option early return, preserving hook
+  order while the async cascade capability resolves.
+- The mobile confirmation flow now materializes a real worktree, writes an uncommitted marker,
+  proves cancel and unconsented deletion preserve both task and file, then proves consented
+  deletion removes both. Follow-up verification passed 58 focused Vitest tests, web typecheck,
+  targeted ESLint, and `pnpm e2e:run --project mobile-chrome
+  tests/task/mobile-confirmation-text-hierarchy.spec.ts` (4 passed).

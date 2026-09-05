@@ -166,3 +166,18 @@ backend contract from Task 01. The wave labels do not authorize subagents.
 - Verification passed: 2,685 focused backend tests; 29 focused frontend tests; web lint and
   typecheck; i18n checks; desktop sidebar E2E (1 passed); mobile confirmation E2E (4 passed); and
   public-doc validation (61 tests, 45 pages).
+
+## Review follow-up results
+
+- Fixed the cleanup batch error-loss path: every per-worktree failure is now joined, so a
+  retryable failure remains retryable even when a later worktree reports the dirty-worktree
+  sentinel.
+- Dirty-worktree admission now fails closed when an identified worktree still lacks repository or
+  worktree path metadata after cache enrichment. A cascade regression proves full-tree preflight,
+  atomic refusal, and discard-consent propagation.
+- The shared discard option calls its translation hook in stable order, and the mobile browser
+  flow now creates a real dirty worktree, proves cancel/unconsented preservation, then proves
+  consented task and worktree removal.
+- Follow-up verification passed: 2,693 backend tests across worktree, task service, and task
+  handlers; 58 focused frontend tests; web typecheck and targeted ESLint; specification lint; and
+  the mobile confirmation E2E suite (4 passed).

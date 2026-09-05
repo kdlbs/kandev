@@ -39,7 +39,7 @@ func (m *Manager) InspectDirtyWorktrees(
 		}
 		m.enrichCleanupWorktreeFromCache(wt)
 		if strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
-			continue
+			return nil, fmt.Errorf("worktree %s is missing repository or worktree path metadata", wt.ID)
 		}
 		key := wt.RepositoryPath + "\x00" + filepath.Clean(wt.Path)
 		if _, ok := seen[key]; ok {

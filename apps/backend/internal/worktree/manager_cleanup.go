@@ -541,7 +541,7 @@ func (m *Manager) cleanupWorktrees(
 		return nil
 	}
 
-	var lastErr error
+	var errs []error
 	for _, wt := range worktrees {
 		if wt == nil {
 			continue
@@ -558,11 +558,11 @@ func (m *Manager) cleanupWorktrees(
 				zap.String("task_id", wt.TaskID),
 				zap.String("worktree_id", wt.ID),
 				zap.Error(err))
-			lastErr = err
+			errs = append(errs, fmt.Errorf("cleanup worktree %s: %w", wt.ID, err))
 		}
 	}
 
-	return lastErr
+	return errors.Join(errs...)
 }
 
 // OnTaskDeleted cleans up all worktrees for a task when it is deleted.

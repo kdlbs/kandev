@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import {
@@ -149,17 +151,41 @@ test.describe("Mobile confirmation text hierarchy", () => {
   }) => {
     test.setTimeout(120_000);
     await testPage.setViewportSize({ width: 320, height: 400 });
-    const task = await apiClient.seedTask(seedData.workspaceId, LONG_TASK_TITLE, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      LONG_TASK_TITLE,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 60_000,
+        message: "the dirty-worktree task environment did not become ready",
+      })
+      .toBe("ready");
+    const environment = await apiClient.getTaskEnvironment(task.id);
+    const dirtyWorktreePath =
+      environment?.repos?.[0]?.worktree_path ?? environment?.worktree_path ?? "";
+    if (!dirtyWorktreePath) {
+      throw new Error("the dirty-worktree task did not expose a worktree path");
+    }
+    const dirtyFilePath = path.join(dirtyWorktreePath, "mobile-delete-dirty.txt");
+    fs.writeFileSync(dirtyFilePath, "preserve this local change\n", "utf8");
+    expect(fs.existsSync(dirtyFilePath)).toBe(true);
+
     await apiClient.seedTask(seedData.workspaceId, "Mobile cleanup confirmation child", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
-      parent_id: task.task_id,
+      parent_id: task.id,
     });
 
-    await testPage.goto(`/t/${task.task_id}`);
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
     await enablePseudoLocale(testPage);
 
@@ -178,7 +204,8 @@ test.describe("Mobile confirmation text hierarchy", () => {
 
       await dialog.locator('[data-slot="alert-dialog-cancel"]').tap();
       await expect(dialog).toBeHidden();
-      expect((await apiClient.getTask(task.task_id)).id).toBe(task.task_id);
+      expect((await apiClient.getTask(task.id)).id).toBe(task.id);
+      expect(fs.existsSync(dirtyFilePath)).toBe(true);
     }
 
     const { dialog } = await openDeleteDialog(testPage, LONG_TASK_TITLE);
@@ -186,11 +213,17 @@ test.describe("Mobile confirmation text hierarchy", () => {
     await expect(dialog.locator('[data-slot="alert-dialog-action"]')).toBeEnabled();
     await dialog.locator('[data-slot="alert-dialog-action"]').tap();
     await expect
-      .poll(
-        async () => (await apiClient.rawRequest("GET", `/api/v1/tasks/${task.task_id}`)).status,
-        { timeout: 15_000, message: "the mobile Delete action should remove the task" },
-      )
+      .poll(async () => (await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status, {
+        timeout: 15_000,
+        message: "the mobile Delete action should remove the task",
+      })
       .toBe(404);
+    await expect
+      .poll(() => fs.existsSync(dirtyFilePath), {
+        timeout: 15_000,
+        message: "consented deletion should remove the dirty worktree",
+      })
+      .toBe(false);
   });
 
   // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.1, AC-UI-SURFACE-TEXT-HIERARCHY-001.3
