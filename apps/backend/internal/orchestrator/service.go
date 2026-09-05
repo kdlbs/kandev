@@ -1254,22 +1254,37 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	if err := s.authorizeSession(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
-	lock, release := s.acquireCancelInFlightGuard(request.SessionID)
+	if err := s.rejectRouteActionDuringActiveTurn(ctx, request.SessionID); err != nil {
+		return nil, err
+	}
+	return s.routeActionHandler(ctx, request)
+}
+
+// rejectRouteActionDuringActiveTurn holds the cancel-in-flight guard only for
+// the active-turn read, making it atomic against a concurrent cancel
+// decision. The guard is released before ApplyRouteAction calls
+// routeActionHandler: that handler can reach acquireSessionLifecycleLock
+// (dynamic route launches relaunch through startCreatedSession), and holding
+// the guard across it would invert the global lock order documented on
+// acquireSessionLifecycleLock.
+func (s *Service) rejectRouteActionDuringActiveTurn(ctx context.Context, sessionID string) error {
+	if s.turnService == nil {
+		return nil
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 	defer func() {
 		lock.Unlock()
 		release()
 	}()
-	if s.turnService != nil {
-		activeTurn, err := s.turnService.GetActiveTurn(ctx, request.SessionID)
-		if err != nil && !isNoActiveTurnError(err) {
-			return nil, fmt.Errorf("check active turn for route action: %w", err)
-		}
-		if activeTurn != nil {
-			return nil, ErrRouteActionActiveTurn
-		}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil && !isNoActiveTurnError(err) {
+		return fmt.Errorf("check active turn for route action: %w", err)
 	}
-	return s.routeActionHandler(ctx, request)
+	if activeTurn != nil {
+		return ErrRouteActionActiveTurn
+	}
+	return nil
 }
 
 // Status contains orchestrator status information
@@ -2470,6 +2485,13 @@ func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
 // session's persisted conversation identity. Keep the critical section around
 // the complete reset/resume operation, including the bounded runtime wait, so
 // no caller can launch with a token that a concurrent reset is invalidating.
+//
+// Global lock order: this lock is OUTER to acquireCancelInFlightGuard. A
+// caller that holds the cancel-in-flight guard for sessionID must release it
+// (lockedCancelInFlightGuard's unlock/relock protocol) before acquiring this
+// lock. Acquiring them in the opposite order on the same session deadlocks
+// against every caller that already takes lifecycle first — resetAgentContext,
+// ResumeTaskSessionWithOptions, ensureSessionRunning.
 func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	if sessionID == "" {
 		return func() {}
