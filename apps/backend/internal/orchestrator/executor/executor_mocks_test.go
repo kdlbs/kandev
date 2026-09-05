@@ -27,6 +27,7 @@ type mockAgentManager struct {
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	setExecutionEnvFunc              func(ctx context.Context, agentExecutionID string, env map[string]string) error
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
+	listSessionIDsForTaskFunc        func(taskID string) []string
 	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
 	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
 	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
@@ -220,6 +221,12 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 		return m.getExecutionIDForSessionFunc(ctx, sessionID)
 	}
 	return "", fmt.Errorf("no execution found for session %s", sessionID)
+}
+func (m *mockAgentManager) ListSessionIDsForTask(taskID string) []string {
+	if m.listSessionIDsForTaskFunc != nil {
+		return m.listSessionIDsForTaskFunc(taskID)
+	}
+	return nil
 }
 
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {

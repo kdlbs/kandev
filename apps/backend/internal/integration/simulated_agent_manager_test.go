@@ -633,6 +633,17 @@ func (s *SimulatedAgentManagerClient) GetExecutionIDForSession(_ context.Context
 	}
 	return "", fmt.Errorf("no execution found for session %s", sessionID)
 }
+func (s *SimulatedAgentManagerClient) ListSessionIDsForTask(taskID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sessionIDs []string
+	for _, inst := range s.instances {
+		if inst.taskID == taskID && inst.sessionID != "" {
+			sessionIDs = append(sessionIDs, inst.sessionID)
+		}
+	}
+	return sessionIDs
+}
 func (s *SimulatedAgentManagerClient) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
 	return nil, nil
 }

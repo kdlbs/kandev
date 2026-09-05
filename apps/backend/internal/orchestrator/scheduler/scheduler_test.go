@@ -149,6 +149,9 @@ func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Contex
 func (m *mockAgentManager) GetExecutionIDForSession(_ context.Context, _ string) (string, error) {
 	return "", fmt.Errorf("no execution found")
 }
+func (m *mockAgentManager) ListSessionIDsForTask(_ string) []string {
+	return nil
+}
 
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	return nil
