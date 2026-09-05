@@ -22,8 +22,8 @@ type forbiddenShape struct {
 // catalogue revision, not a design change.
 var payloadForbiddenShapes = []forbiddenShape{
 	{"Bearer token", regexp.MustCompile(`(?i)\bBearer\s+\S+`)},
-	{"vendor key prefix", regexp.MustCompile(`\b(?:sk|sess|org)-[A-Za-z0-9_-]+`)},
-	{"OpenCode identifier", regexp.MustCompile(`\b(?:ses|wrk)_[A-Za-z0-9_-]+`)},
+	{"vendor key prefix", regexp.MustCompile(`(?i)\b(?:sk|sess|org)-[A-Za-z0-9_-]+`)},
+	{"OpenCode identifier", regexp.MustCompile(`(?i)\b(?:ses|wrk)_[A-Za-z0-9_-]+`)},
 	{"URL", regexp.MustCompile(`(?i)\bhttps?://\S+`)},
 	{"absolute host path", regexp.MustCompile(`(?:^|[^A-Za-z0-9_])/(?:Users|home|var)/\S+`)},
 	{"email address", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)},
@@ -37,8 +37,8 @@ var payloadForbiddenShapes = []forbiddenShape{
 // since no envelope needs a URL to replay faithfully.
 var provenanceForbiddenShapes = []forbiddenShape{
 	{"Bearer token", regexp.MustCompile(`(?i)\bBearer\s+\S+`)},
-	{"vendor key prefix", regexp.MustCompile(`\b(?:sk|sess|org)-[A-Za-z0-9_-]+`)},
-	{"OpenCode identifier", regexp.MustCompile(`\b(?:ses|wrk)_[A-Za-z0-9_-]+`)},
+	{"vendor key prefix", regexp.MustCompile(`(?i)\b(?:sk|sess|org)-[A-Za-z0-9_-]+`)},
+	{"OpenCode identifier", regexp.MustCompile(`(?i)\b(?:ses|wrk)_[A-Za-z0-9_-]+`)},
 	{"email address", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)},
 	{"RFC 4122 UUID", regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)},
 	{"URL userinfo component", regexp.MustCompile(`(?i)://[^/\s@]+@`)},

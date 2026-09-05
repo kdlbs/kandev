@@ -45,18 +45,22 @@ func TestValidateSanitisationAllowsCleanFixture(t *testing.T) {
 // path, not just the scanning helper.
 func TestValidateFixtureRejectsForbiddenPayloadShapes(t *testing.T) {
 	cases := map[string]string{
-		"bearer token":           "Authorization: Bearer abc123XYZ",
-		"vendor key prefix sk":   "leaked key sk-abcdef123456",
-		"vendor key prefix sess": "leaked key sess-abcdef123456",
-		"vendor key prefix org":  "leaked key org-abcdef123456",
-		"opencode ses id":        "workspace ses_abc123",
-		"opencode wrk id":        "workspace wrk_abc123",
-		"url":                    "see https://internal.example.com/status for detail",
-		"absolute path Users":    "wrote to /Users/alice/.config/kandev/token",
-		"absolute path home":     "wrote to /home/alice/.config/kandev/token",
-		"absolute path var":      "wrote to /var/secrets/kandev/token",
-		"email address":          "contact ops@example.com for access",
-		"rfc4122 uuid":           "account 4b1f6f1a-4a2b-4c3d-8e9f-0123456789ab is suspended",
+		"bearer token":                       "Authorization: Bearer abc123XYZ",
+		"vendor key prefix sk":               "leaked key sk-abcdef123456",
+		"vendor key prefix sess":             "leaked key sess-abcdef123456",
+		"vendor key prefix org":              "leaked key org-abcdef123456",
+		"opencode ses id":                    "workspace ses_abc123",
+		"opencode wrk id":                    "workspace wrk_abc123",
+		"vendor key prefix sk, mixed case":   "leaked key SK-abcdef123456",
+		"vendor key prefix sess, mixed case": "leaked key Sess-ABCDEF123456",
+		"opencode ses id, mixed case":        "workspace SES_abc123",
+		"opencode wrk id, mixed case":        "workspace Wrk_abc123",
+		"url":                                "see https://internal.example.com/status for detail",
+		"absolute path Users":                "wrote to /Users/alice/.config/kandev/token",
+		"absolute path home":                 "wrote to /home/alice/.config/kandev/token",
+		"absolute path var":                  "wrote to /var/secrets/kandev/token",
+		"email address":                      "contact ops@example.com for access",
+		"rfc4122 uuid":                       "account 4b1f6f1a-4a2b-4c3d-8e9f-0123456789ab is suspended",
 	}
 	for name, text := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -105,19 +109,21 @@ func TestValidateFixtureRejectsForbiddenPayloadShapesInIdentity(t *testing.T) {
 // rule — a bare http(s) URL alone is not forbidden there.
 func TestValidateFixtureRejectsForbiddenProvenanceShapes(t *testing.T) {
 	cases := map[string]string{
-		"bearer token":      "Bearer abc123XYZ",
-		"vendor key prefix": "sk-abcdef123456",
-		"opencode id":       "ses_abc123",
-		"email address":     "ops@example.com",
-		"rfc4122 uuid":      "4b1f6f1a-4a2b-4c3d-8e9f-0123456789ab",
-		"userinfo in url":   "https://user:pass@example.com/docs",
-		"localhost":         "http://localhost:4173/docs",
-		"loopback literal":  "http://127.0.0.1:4173/docs",
-		"rfc1918 10":        "http://10.1.2.3/docs",
-		"rfc1918 172":       "http://172.16.0.5/docs",
-		"rfc1918 192":       "http://192.168.1.5/docs",
-		"internal host":     "http://kandev.internal/docs",
-		"local host":        "http://kandev.local/docs",
+		"bearer token":                  "Bearer abc123XYZ",
+		"vendor key prefix":             "sk-abcdef123456",
+		"vendor key prefix, mixed case": "SK-ABCDEF123456",
+		"opencode id":                   "ses_abc123",
+		"opencode id, mixed case":       "SES_abc123",
+		"email address":                 "ops@example.com",
+		"rfc4122 uuid":                  "4b1f6f1a-4a2b-4c3d-8e9f-0123456789ab",
+		"userinfo in url":               "https://user:pass@example.com/docs",
+		"localhost":                     "http://localhost:4173/docs",
+		"loopback literal":              "http://127.0.0.1:4173/docs",
+		"rfc1918 10":                    "http://10.1.2.3/docs",
+		"rfc1918 172":                   "http://172.16.0.5/docs",
+		"rfc1918 192":                   "http://192.168.1.5/docs",
+		"internal host":                 "http://kandev.internal/docs",
+		"local host":                    "http://kandev.local/docs",
 	}
 	for name, source := range cases {
 		t.Run(name, func(t *testing.T) {

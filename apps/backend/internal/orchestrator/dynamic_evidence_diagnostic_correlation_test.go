@@ -92,6 +92,67 @@ func TestDynamicAttemptEvidenceContainmentSurvivesSanitizedTrailingPunctuation(t
 	}
 }
 
+// TestDynamicAttemptEvidenceSecondDiagnosticDoesNotOverwriteFirst pins the
+// no-overwrite rule stated independently in AC.20, AC.21 and AC.23: a second
+// marked diagnostic in the same generation must not replace the first
+// recorded code and text. Without this, a gateway that emits an imperfect
+// diagnostic and then retries with a better-shaped one could retry its own
+// way into a containment match against a terminal failure the first
+// diagnostic never actually preceded.
+func TestDynamicAttemptEvidenceSecondDiagnosticDoesNotOverwriteFirst(t *testing.T) {
+	var service Service
+	const firstDiagnostic = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
+	const secondDiagnostic = "API Error: 500 Internal server error."
+	const terminalMatchingSecond = "Internal error: API Error: 500 Internal server error. This is a server-side issue, usually temporary - try again in a moment."
+
+	service.beginPromptAttempt("session-1", "execution-1", 1, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, firstDiagnostic)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, secondDiagnostic)
+
+	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 1,
+		ErrorMessage:     terminalMatchingSecond,
+	})
+	if !got.OutputObserved {
+		t.Fatal("a second diagnostic overwrote the first recorded diagnostic, letting a terminal failure the first diagnostic never preceded authorize recovery")
+	}
+	if service.promptAttemptPreResultSafe(got) {
+		t.Fatal("a second diagnostic incorrectly overwrote the first, wrongly authorizing pre-result recovery")
+	}
+}
+
+// TestDynamicAttemptEvidenceToolActivityAfterDiagnosticFailsEffectFenceWithoutClearing
+// pins AC.21's asymmetric clearing rule: tool activity in the same generation
+// as a recorded, containment-matching diagnostic does not clear that
+// diagnostic (only ordinary output does), but the attempt is still not
+// pre-result safe because the effect fence fails it independently.
+func TestDynamicAttemptEvidenceToolActivityAfterDiagnosticFailsEffectFenceWithoutClearing(t *testing.T) {
+	var service Service
+	const diagnostic = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
+
+	service.beginPromptAttempt("session-1", "execution-1", 1, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, diagnostic)
+	service.observePromptAttempt("session-1", "execution-1", 1, false, true)
+
+	got := service.withPromptAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 1,
+		ErrorMessage:     diagnostic,
+	})
+	if got.OutputObserved {
+		t.Fatal("tool activity incorrectly cleared a recorded diagnostic that still contains-matches the terminal failure")
+	}
+	if !got.EffectObserved {
+		t.Fatal("tool activity was not recorded as effect evidence")
+	}
+	if service.promptAttemptPreResultSafe(got) {
+		t.Fatal("an attempt with tool activity after a matching diagnostic was incorrectly pre-result safe")
+	}
+}
+
 // TestDynamicAttemptEvidenceContainmentSatisfiedByGatewaySubstring pins the
 // gateway-500 sample from the system design's input inventory: the chunk text
 // is a strict substring of the sanitized terminal message, and containment
