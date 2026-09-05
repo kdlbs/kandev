@@ -174,8 +174,16 @@ func (r *SSHExecutor) runPrepareScript(ctx context.Context, client *ssh.Client, 
 	return nil
 }
 
+// sshStdinEnvImport imports the `KEY='value'` lines Kandev writes to the remote
+// command's stdin. It must read stdin to EOF: bash 3.2, the /bin/bash on macOS,
+// sources a FIFO by reading only the bytes buffered when it opens the file, so
+// `. /dev/stdin` raced sshd's stdin forwarding and usually imported nothing.
+// `eval "$(cat)"` waits for EOF in sh, bash, and zsh and keeps the values out of
+// process arguments and the filesystem.
+const sshStdinEnvImport = `eval "$(cat)"`
+
 func sshScriptWithEnvironment(script string) string {
-	return "set -ae\n. /dev/stdin\nset +a\nset -e\n" + script
+	return "set -ae\n" + sshStdinEnvImport + "\nset +a\nset -e\n" + script
 }
 
 func redactSSHScriptOutput(output string, env map[string]string) string {
