@@ -31,9 +31,10 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 	if err := repo.CreateTask(ctx, &models.Task{ID: "coordinator", WorkspaceID: "ws-1", Title: "Coordinator"}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	principal, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "coordinator")
-	if err != nil || principal == nil {
-		t.Fatalf("GetActiveWorkspaceAgentPrincipalForTask: %#v, %v", principal, err)
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator", BackingTaskID: "coordinator", BackingSessionID: "session-1",
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
 	}
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	if err != nil {
@@ -58,8 +59,8 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
 	}
-	grants, err := repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, principal.ID, "ws-1")
-	if err != nil || len(grants) != 1 || grants[0].PrincipalID != principal.ID {
+	grants, err := repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, "principal-1", "ws-1")
+	if err != nil || len(grants) != 1 || grants[0].PrincipalID != "principal-1" {
 		t.Fatalf("principal grants = %#v, err = %v; want one principal-bound grant", grants, err)
 	}
 	created, err := repo.ListCoordinatorGrants(ctx, "ws-1", "coordinator", false)

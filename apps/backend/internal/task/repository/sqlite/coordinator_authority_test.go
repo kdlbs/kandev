@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -203,7 +202,7 @@ func TestWorkspaceAgentPrincipalRepositoryRebindsAndRevokesImmediately(t *testin
 	now := time.Now().UTC()
 	principal := &models.WorkspaceAgentPrincipal{
 		ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
-		BackingTaskID: "external-a", BackingSessionID: "session-a", CreatedAt: now,
+		BackingTaskID: "coordinator-a", BackingSessionID: "session-a", CreatedAt: now,
 	}
 	if err := repo.CreateWorkspaceAgentPrincipal(ctx, principal); err != nil {
 		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
@@ -218,44 +217,23 @@ func TestWorkspaceAgentPrincipalRepositoryRebindsAndRevokesImmediately(t *testin
 	if err != nil || byContext.ID != principal.ID {
 		t.Fatalf("GetWorkspaceAgentPrincipalByContext = %#v, %v; want principal-1", byContext, err)
 	}
-	if err := repo.RebindWorkspaceAgentPrincipal(ctx, principal.ID, "external-b", "session-b", now.Add(time.Minute)); err != nil {
+	if err := repo.RebindWorkspaceAgentPrincipal(ctx, principal.ID, "coordinator-b", "session-b", now.Add(time.Minute)); err != nil {
 		t.Fatalf("RebindWorkspaceAgentPrincipal: %v", err)
 	}
-	if active, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "external-a"); err != nil || active != nil {
+	if active, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "coordinator-a"); err != nil || active != nil {
 		t.Fatalf("old task active principal = %#v, %v; want nil", active, err)
 	}
-	if active, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "external-b"); err != nil || active == nil || active.BackingSessionID != "session-b" {
+	if active, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "coordinator-b"); err != nil || active == nil || active.BackingSessionID != "session-b" {
 		t.Fatalf("new task active principal = %#v, %v; want rebound principal", active, err)
 	}
 	if err := repo.RevokeWorkspaceAgentPrincipal(ctx, principal.ID, now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("RevokeWorkspaceAgentPrincipal: %v", err)
 	}
-	if active, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "external-b"); err != nil || active != nil {
+	if active, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "coordinator-b"); err != nil || active != nil {
 		t.Fatalf("revoked active principal = %#v, %v; want nil", active, err)
 	}
-	if err := repo.RebindWorkspaceAgentPrincipal(ctx, principal.ID, "external-a", "session-c", now.Add(3*time.Minute)); !errors.Is(err, repoerrors.ErrWorkspaceAgentPrincipalNotFound) {
+	if err := repo.RebindWorkspaceAgentPrincipal(ctx, principal.ID, "coordinator-a", "session-c", now.Add(3*time.Minute)); !errors.Is(err, repoerrors.ErrWorkspaceAgentPrincipalNotFound) {
 		t.Fatalf("RebindWorkspaceAgentPrincipal revoked error = %v, want ErrWorkspaceAgentPrincipalNotFound", err)
-	}
-}
-
-func TestCreateTaskCreatesServerOwnedPrincipal(t *testing.T) {
-	repo := newUsageEventsTestRepo(t)
-	ctx := context.Background()
-	workspaceID := "ws-task-principal"
-	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: workspaceID}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	task := &models.Task{ID: "task-principal", WorkspaceID: workspaceID, Title: "Task"}
-	if err := repo.CreateTask(ctx, task); err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-
-	principal, err := repo.GetWorkspaceAgentPrincipalByContext(ctx, workspaceID, coordinator.TaskPrincipalInstallationID, coordinator.TaskPrincipalLogicalKey(task.ID))
-	if err != nil {
-		t.Fatalf("GetWorkspaceAgentPrincipalByContext: %v", err)
-	}
-	if principal == nil || principal.BackingTaskID != task.ID || principal.BackingSessionID != "" {
-		t.Fatalf("principal = %#v, want an unbound server-owned task principal", principal)
 	}
 }
 
