@@ -74,6 +74,8 @@ export interface Task {
   primaryExecutorType?: string | null;
   primaryExecutorName?: string | null;
   isRemoteExecutor?: boolean;
+  /** Human assignee (user id); the card renders their name read-only. */
+  assigneeUserId?: string;
   parentTaskId?: string | null;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   updatedAt?: string;

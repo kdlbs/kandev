@@ -118,6 +118,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Sync — Per-User Workspace Authorization](requirements/workflow-sync-workspace-authz.md)
 - [Workflow task-step transition ledger scenarios](requirements/workflow-task-step-transition-ledger-scenarios.md)
 - [Workflow task-step transition ledger](requirements/workflow-task-step-transition-ledger.md)
+- [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
 

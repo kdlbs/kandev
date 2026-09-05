@@ -69,6 +69,26 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.multiTenancy",
+			EnvVar:      "KANDEV_FEATURES_MULTI_TENANCY",
+			Kind:        KindFeature,
+			Label:       "Organizations",
+			Description: "Adds organizations above users: every account belongs to exactly one org, and orgs cannot see each other's workspaces, tasks, or secrets. Requires Authentication & users.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Turning this ON puts every existing user, workspace and secret into a single default " +
+				"organization after restart, and adds an instance operator tier that manages organizations. " +
+				"It requires Authentication & users: with authentication off the instance refuses to start. " +
+				"Filesystem paths and agent CLI credentials are still shared across organizations, so this is " +
+				"an application-layer boundary, not a sandbox.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.MultiTenancy },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.MultiTenancy = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.dynamicAgentRouting",
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,

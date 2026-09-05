@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { IconAlertCircle, IconLock, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { AssigneeBadge } from "@/components/kanban-card-assignee-badge";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { cn } from "@/lib/utils";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
@@ -137,6 +138,7 @@ function hasCardBadges(task: Task, hideSessionCount?: boolean): boolean {
     task.reviewStatus === "changes_requested" ||
     task.reviewStatus === "pending" ||
     task.queuedForStepId ||
+    task.assigneeUserId ||
     task.blocked,
   );
 }
@@ -163,6 +165,7 @@ export function KanbanCardBadges({
   return (
     <div className={cn("flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0", className)}>
       {task.blocked && <BlockedBadge task={task} />}
+      {task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
       {task.queuedForStepId && (
         <Badge
           variant="secondary"
