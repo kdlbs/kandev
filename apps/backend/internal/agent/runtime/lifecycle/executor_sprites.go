@@ -46,14 +46,25 @@ func (u *spriteFileUploader) ReadFile(ctx context.Context, path string) ([]byte,
 		return filesystem.ReadFile(path)
 	}
 	data, err := reader.ReadFileContext(ctx, path)
-	if err == nil || errors.Is(err, fs.ErrNotExist) {
+	if err == nil {
 		return data, err
 	}
-	var apiErr *sprites.APIError
-	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+	if isSpritesNotFound(err) {
 		return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrNotExist}
 	}
 	return data, err
+}
+
+func isSpritesNotFound(err error) bool {
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	var apiErr *sprites.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "not found") || strings.Contains(message, "http 404") || strings.Contains(message, "status 404")
 }
 
 func (u *spriteFileUploader) WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error {

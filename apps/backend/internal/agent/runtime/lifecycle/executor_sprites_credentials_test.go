@@ -30,6 +30,24 @@ func TestSpriteFileUploaderReadFileNormalizesMissingTarget(t *testing.T) {
 	}
 }
 
+func TestIsSpritesNotFoundRecognizesSDKNotFoundErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "api status", err: &sprites.APIError{StatusCode: http.StatusNotFound}},
+		{name: "http message", err: errors.New("request failed: HTTP 404")},
+		{name: "not found message", err: errors.New("file not found")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !isSpritesNotFound(tt.err) {
+				t.Fatalf("isSpritesNotFound(%v) = false", tt.err)
+			}
+		})
+	}
+}
+
 func TestSpriteFileUploaderReadFileHonorsCancellation(t *testing.T) {
 	started := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
