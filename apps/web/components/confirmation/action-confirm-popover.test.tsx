@@ -310,3 +310,49 @@ describe("ActionConfirmPopover focus boundaries", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: deleteTitle })).toBeNull());
   });
 });
+
+describe("ActionConfirmPopover stale menu events", () => {
+  afterEach(cleanup);
+
+  function MenuEventHarness({ state }: { state: "open" | "closed" }) {
+    const [open, setOpen] = useState(true);
+    const anchorRef = useRef<HTMLButtonElement>(null);
+    return (
+      <>
+        <button ref={anchorRef} type="button">
+          Delete
+        </button>
+        <div
+          data-radix-menu-content=""
+          data-state={state}
+          data-testid="menu-content"
+          tabIndex={0}
+        />
+        <ActionConfirmPopover
+          open={open}
+          anchorRef={anchorRef}
+          title={deleteTitle}
+          description="This cannot be undone."
+          cancelLabel="Cancel"
+          confirmLabel="Delete"
+          onOpenChange={setOpen}
+          onConfirm={vi.fn()}
+        />
+      </>
+    );
+  }
+
+  it("keeps the popover open for the originating menu's closing portal", async () => {
+    render(<MenuEventHarness state="closed" />);
+    screen.getByTestId("menu-content").focus();
+
+    await waitFor(() => expect(screen.getByRole("dialog", { name: deleteTitle })).toBeTruthy());
+  });
+
+  it("dismisses when an unrelated open menu receives interaction", async () => {
+    render(<MenuEventHarness state="open" />);
+    screen.getByTestId("menu-content").focus();
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: deleteTitle })).toBeNull());
+  });
+});

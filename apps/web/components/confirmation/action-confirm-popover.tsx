@@ -201,16 +201,14 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
       onOpenAutoFocus={(event) => preventAndFocusCancel(event, cancelRef)}
       onFocusOutside={(event) => {
         // Ignore stale focus events from the closing context-menu portal.
-        if ((event.target as Element)?.closest?.("[data-radix-menu-content]"))
-          return event.preventDefault();
+        if (isClosingRadixMenuContent(event.target)) return event.preventDefault();
         // A replaced boundary fails contains(), so the live trigger ref stays correct.
         if (focusBoundaryRef?.current?.contains(event.target as Node)) event.preventDefault();
       }}
       onInteractOutside={(event) => {
         const target = event.target as Node;
         // Ignore stale interaction events from the closing context-menu portal.
-        if ((target as Element)?.closest?.("[data-radix-menu-content]"))
-          return event.preventDefault();
+        if (isClosingRadixMenuContent(target)) return event.preventDefault();
         // If the interaction target is no longer in the DOM (e.g., the context
         // menu content was just removed), it's a stale event from a preceding
         // close — prevent it from closing the popover.
@@ -286,4 +284,11 @@ function closeActionConfirm(
 
 function isConnected(element: HTMLElement | null): element is HTMLElement {
   return element !== null && element.isConnected;
+}
+
+function isClosingRadixMenuContent(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest('[data-radix-menu-content][data-state="closed"]') !== null
+  );
 }
