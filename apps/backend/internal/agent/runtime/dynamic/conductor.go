@@ -448,13 +448,12 @@ const conversationUserBudget = continuationFieldLimit / 2
 const maxRedactionInputBytes = 256 * 1024
 
 // redactionLookbackBytes bounds how far sanitizedTail/sanitizedHead may
-// extend their scan window past its edge to reach a line boundary. Every
-// rule in redactions is confined to a single line except Bearer,
-// Authorization: and (password|secret|token), which use \s and can span
-// one newline; snapping the window's edge to the nearest line boundary
-// within this many bytes keeps those three rules from being bisected by
-// the window itself, at a fixed extra cost regardless of how large the
-// caller's raw input is.
+// extend their scan window past its edge to keep a redaction rule whole.
+// Bearer, Authorization: and (password|secret|token) separate their literal
+// anchor from its value with \s, so the two can sit any distance apart in
+// whitespace; extending the window's edge by this many bytes keeps those
+// rules from being bisected by the window itself, at a fixed extra cost
+// regardless of how large the caller's raw input is.
 const redactionLookbackBytes = 64 * 1024
 
 // sanitizedTail returns up to budget bytes of the newest content in raw,
@@ -472,51 +471,47 @@ func sanitizedTail(raw string, budget int) string {
 	if len(raw) <= maxRedactionInputBytes {
 		return boundedTailN(routingerr.Redact(raw), budget)
 	}
-	start := snapWindowStartToLineBoundary(raw, len(raw)-maxRedactionInputBytes)
+	start := windowStartWithLookback(raw, len(raw)-maxRedactionInputBytes)
 	return boundedTailN(routingerr.Redact(raw[start:]), budget)
 }
 
 // sanitizedHead mirrors sanitizedTail for ToolSummary, whose final cut
 // (bounded()) keeps the head instead of the tail: the window's trailing
-// edge is snapped forward to the nearest following line boundary (within
-// redactionLookbackBytes) so an anchored rule ending on a later line is not
-// split by the window itself.
+// edge is extended forward by redactionLookbackBytes so an anchored rule
+// ending later is not split by the window itself.
 func sanitizedHead(raw string) string {
 	if len(raw) <= maxRedactionInputBytes {
 		return bounded(routingerr.Redact(raw))
 	}
-	end := snapWindowEndToLineBoundary(raw, maxRedactionInputBytes)
+	end := windowEndWithLookahead(raw, maxRedactionInputBytes)
 	return bounded(routingerr.Redact(raw[:end]))
 }
 
-// snapWindowStartToLineBoundary moves start back to just after the nearest
-// preceding newline within redactionLookbackBytes. If no newline is found,
-// it falls back to the lookback boundary, then advances that boundary past
-// a bisected run instead of keeping the fragment: losing bytes at the
-// window edge is always preferable to leaking them.
-func snapWindowStartToLineBoundary(raw string, start int) int {
+// windowStartWithLookback extends the tail window's leading edge back by a
+// fixed redactionLookbackBytes allowance so a rule whose literal anchor
+// precedes its value stays inside the window with that value. Bearer,
+// Authorization: and (password|secret|token) join anchor to value with \s,
+// which matches any run of whitespace including several newlines, so no
+// fixed number of line boundaries is enough; a byte allowance is
+// independent of how the two are separated. The extended edge can itself
+// land inside a token, so it is advanced past a bisected run: losing bytes
+// at the window edge is always preferable to leaking them. The extra
+// context costs at most redactionLookbackBytes on top of
+// maxRedactionInputBytes, regardless of how large raw is.
+func windowStartWithLookback(raw string, start int) int {
 	floor := start - redactionLookbackBytes
 	if floor < 0 {
 		floor = 0
 	}
-	if idx := strings.LastIndexByte(raw[floor:start], '\n'); idx >= 0 {
-		return floor + idx + 1
-	}
 	return skipBisectedRunForward(raw, floor)
 }
 
-// snapWindowEndToLineBoundary moves end forward to just before the nearest
-// following newline within redactionLookbackBytes. If no newline is found,
-// it falls back to the lookback boundary, then retreats that boundary past
-// a bisected run instead of keeping the fragment: losing bytes at the
-// window edge is always preferable to leaking them.
-func snapWindowEndToLineBoundary(raw string, end int) int {
+// windowEndWithLookahead mirrors windowStartWithLookback for sanitizedHead,
+// whose final cut keeps the head instead of the tail.
+func windowEndWithLookahead(raw string, end int) int {
 	ceil := end + redactionLookbackBytes
 	if ceil > len(raw) {
 		ceil = len(raw)
-	}
-	if idx := strings.IndexByte(raw[end:ceil], '\n'); idx >= 0 {
-		return end + idx
 	}
 	return skipBisectedRunBackward(raw, ceil)
 }

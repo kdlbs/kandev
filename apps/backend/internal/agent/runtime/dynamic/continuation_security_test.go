@@ -421,3 +421,72 @@ func TestSanitizedTailAndHeadStayBoundedForLargeCollapsingInput(t *testing.T) {
 		}
 	})
 }
+
+// TestSanitizedTailRedactsAnchorSeparatedFromValueAtWindowCut is the
+// R5-BLOCKER-1 regression. Bearer, Authorization: and
+// (password|secret|token) separate their literal anchor from its value with
+// \s, which matches any run of whitespace, so the anchor can sit any number
+// of newlines before the byte the window cut falls on. The window's leading
+// edge used to snap to a nearby line boundary, which excluded the anchor and
+// kept its value: no rule then matched the bare value, and it crossed to the
+// successor provider raw. windowStartWithLookback extends by a fixed byte
+// allowance instead, so the separator's shape does not matter.
+//
+// The prefix is longer than redactionLookbackBytes, so the lookback does not
+// clamp to the input start and the extension itself is the branch under
+// test. It is full of newlines, so a boundary-counting snap cannot pass by
+// accident. Each case pins the window start exactly at the value's first
+// byte, which is the worst alignment.
+func TestSanitizedTailRedactsAnchorSeparatedFromValueAtWindowCut(t *testing.T) {
+	const marker = "BENIGN-KEEP-MARKER"
+	prefix := strings.Repeat("p\n", redactionLookbackBytes)
+
+	cases := []struct {
+		name   string
+		anchor string // ends with the whitespace run the rule's \s must match
+		value  string
+	}{
+		{"bearer_one_newline", "Bearer \n", "abcdefghijklmnopqrst"},
+		{"authorization_one_newline", "Authorization:\n", "hunter2secretvalue"},
+		{"password_one_newline", "password:\n", "hunter2secretvalue"},
+		{"authorization_blank_line", "Authorization:\n\n", "hunter2secretvalue"},
+		{"bearer_many_newlines", "Bearer \n\n\n\n", "abcdefghijklmnopqrst"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Precondition: the rule really does redact this credential when
+			// the anchor and value are both inside the window, so a
+			// vacuously empty result cannot make the test pass.
+			if strings.Contains(routingerr.Redact(tc.anchor+tc.value), tc.value) {
+				t.Fatalf("precondition failed: routingerr.Redact does not redact %q", tc.anchor+tc.value)
+			}
+
+			// The filler collapses to "***" under the generic 32+ char rule,
+			// leaving room in the tail budget for any leaked fragment. The
+			// marker sits on its own line so the Authorization rule, whose
+			// value class runs to end-of-line, cannot swallow it.
+			fillerLen := maxRedactionInputBytes - len(tc.value) - 2 - len(marker)
+			raw := prefix + tc.anchor + tc.value + "\n" + strings.Repeat("a", fillerLen) + "\n" + marker
+			// The window start lands on the value's first byte, so a snap to
+			// any nearby line boundary would have excluded the anchor.
+			if got, want := len(raw)-maxRedactionInputBytes, len(prefix)+len(tc.anchor); got != want {
+				t.Fatalf("window start is %d bytes into raw, want the value's first byte (%d)", got, want)
+			}
+			// The lookback must not clamp to the input start, or the window
+			// would cover everything and prove nothing.
+			if len(prefix) <= redactionLookbackBytes {
+				t.Fatalf("prefix (%d bytes) must exceed redactionLookbackBytes (%d)", len(prefix), redactionLookbackBytes)
+			}
+
+			got := sanitizedTail(raw, conversationUserBudget)
+
+			if leaked := rawValueSuffix(tc.value, got); leaked != "" {
+				t.Fatalf("sanitizedTail retained a raw credential suffix %q: %q", leaked, got)
+			}
+			if !strings.Contains(got, marker) {
+				t.Fatalf("sanitizedTail dropped the benign marker (vacuous pass risk): %q", got)
+			}
+		})
+	}
+}
