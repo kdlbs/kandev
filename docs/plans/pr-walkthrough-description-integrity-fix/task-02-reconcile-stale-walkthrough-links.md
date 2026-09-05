@@ -101,16 +101,18 @@ group before reconciliation is enabled.
 ## Results
 
 Implemented the dedicated `pull_request_target` `edited` reconciliation
-workflow. It checks the current canonical short-SHA URL as non-empty HTML,
-uses the trusted marker helper in required-existing mode, and applies the
-bounded fresh-read, compare, PATCH, and readback protocol. It skips missing
-objects and missing callouts, and fails closed on malformed markers without a
-body PATCH.
+workflow. It checks the current canonical short-SHA URL as a final, non-empty
+HTML response, verifies that redirects do not change the URL, and confirms the
+PR head is still the event head before and after a write. It uses the trusted
+marker helper in required-existing mode and applies the bounded fresh-read,
+compare, PATCH, and readback protocol. It skips missing objects and missing
+callouts, and fails closed on malformed markers without a body PATCH.
 
 Verification passed:
 
 - `python3 scripts/pr-walkthrough-pr-body.test.py` (9 tests)
 - `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` (27 tests)
+- `python3 .github/scripts/preview-env-workflow-contract_test.py` (3 tests)
 - `python3 .github/scripts/lint-action-pinning_test.py` (9 tests)
 - `python3 .github/scripts/lint-action-pinning.py` (22 workflows)
 - `mise x actionlint@1.7.12 -- actionlint .github/workflows/pr-walkthrough.yml .github/workflows/preview-env.yml .github/workflows/pr-walkthrough-reconcile.yml`

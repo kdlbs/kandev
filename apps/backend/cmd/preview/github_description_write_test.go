@@ -238,3 +238,26 @@ func TestRemoveDescriptionSectionWithoutMarkerDoesNotPatch(t *testing.T) {
 		t.Fatalf("expected no PATCH request without a marker, got %d", patchCount)
 	}
 }
+
+func TestRemoveDescriptionSectionWithOrphanEndMarkerDoesNotPatch(t *testing.T) {
+	currentBody := "Contributor content\n\n" + sectionEnd
+	patchCount := 0
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.Method {
+		case http.MethodGet:
+			return githubJSONResponse(req, http.StatusOK, map[string]string{"body": currentBody}), nil
+		case http.MethodPatch:
+			patchCount++
+		}
+		return githubJSONResponse(req, http.StatusOK, map[string]string{"body": currentBody}), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+
+	if err := removeDescriptionSection(context.Background(), "token", "owner/repo", 1); err != nil {
+		t.Fatalf("removeDescriptionSection() error = %v", err)
+	}
+	if patchCount != 0 {
+		t.Fatalf("expected no PATCH request for an orphan end marker, got %d", patchCount)
+	}
+}

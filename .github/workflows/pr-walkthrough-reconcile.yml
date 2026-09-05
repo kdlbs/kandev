@@ -63,18 +63,22 @@ jobs:
 
           SHORT_HEAD_SHA="${HEAD_SHA:0:12}"
           PUBLIC_URL="${WALKTHROUGH_BASE_URL%/}/pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"
-          HEADERS_PATH=pr-walkthrough-public.headers
+          RESPONSE_META_PATH=pr-walkthrough-public.response
           PUBLIC_HTML_PATH=pr-walkthrough-public.html
 
           if ! curl --fail --silent --show-error --location --max-time 30 \
             --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 30 \
-            --dump-header "$HEADERS_PATH" \
             --output "$PUBLIC_HTML_PATH" \
+            --write-out '%{http_code}\t%{content_type}\t%{url_effective}' \
+            > "$RESPONSE_META_PATH" \
             "$PUBLIC_URL"; then
             echo "Canonical walkthrough is not publicly available; skipping repair." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if ! grep -Eiq '^content-type:[[:space:]]*text/html(;|[[:space:]]|$)' "$HEADERS_PATH" ||
+          IFS=$'\t' read -r response_status response_content_type response_effective_url < "$RESPONSE_META_PATH"
+          if [ "$response_status" != "200" ] ||
+            [ "$response_effective_url" != "$PUBLIC_URL" ] ||
+            ! printf '%s\n' "$response_content_type" | grep -Eiq '^text/html(;|[[:space:]]|$)' ||
             ! test -s "$PUBLIC_HTML_PATH"; then
             echo "Canonical walkthrough did not return a non-empty HTML response; skipping repair." >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -137,6 +141,11 @@ jobs:
               sleep 2
               continue
             fi
+            current_head_sha="$(jq -r '.head.sha // ""' pr-latest-response.json)"
+            if [ "$current_head_sha" != "$HEAD_SHA" ]; then
+              echo "PR head advanced to ${current_head_sha}; skipping stale repair." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             jq -j '.body // ""' pr-latest-response.json > pr-body-latest
             if ! cmp -- pr-body-before pr-body-latest; then
               echo "Pull request description changed before repair PATCH; retrying." >&2
@@ -164,6 +173,11 @@ jobs:
               fi
               sleep 2
               continue
+            fi
+            verified_head_sha="$(jq -r '.head.sha // ""' pr-verified-response.json)"
+            if [ "$verified_head_sha" != "$HEAD_SHA" ]; then
+              echo "PR head advanced to ${verified_head_sha}; skipping stale repair." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
             fi
             jq -j '.body // ""' pr-verified-response.json > pr-body-verified
             if ! cmp -- pr-body-expected pr-body-verified; then

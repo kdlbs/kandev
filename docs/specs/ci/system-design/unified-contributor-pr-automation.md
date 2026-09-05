@@ -89,11 +89,13 @@ The walkthrough keeps the existing provider-neutral contract:
 4. Validate the public response and exact HTML bytes.
 5. Add or replace the owned callout in the pull request body in the link job.
 
-The walkthrough link job and the preview workflow use one per-pull-request
-description-write concurrency group. Each writer fetches the body again before
-its PATCH, retries when the body changed, and reads the result back after the
-write. This protects the walkthrough and preview marker blocks from stale
-full-body updates while preserving contributor content.
+The walkthrough link, reconciliation, and short preview-description jobs use
+one per-pull-request description-write concurrency group. Long-running preview
+deployment and cleanup jobs do not hold that lock. Each description writer
+fetches the body again before its PATCH, retries when the body changed, and
+reads the result back after the write. This protects the walkthrough and
+preview marker blocks from stale full-body updates while preserving contributor
+content.
 
 The public object key remains
 `pr/<number>/<first-12-lowercase-head-sha>.html`.

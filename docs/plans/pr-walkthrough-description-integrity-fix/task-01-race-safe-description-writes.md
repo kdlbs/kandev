@@ -27,8 +27,8 @@ after the PATCH.
 
 - Keep the walkthrough link job bound to the publication job's validated
   12-character URL.
-- Add the shared per-PR description concurrency group to walkthrough link and
-  preview deploy/cleanup writers.
+- Add the shared per-PR description concurrency group to the walkthrough link
+  and short trusted preview-description writers.
 - Add fresh-snapshot comparison, bounded retry, marker preservation, and
   post-write readback to the Python and Go write paths.
 - Add canonical URL and concurrent body-update regression tests.
@@ -102,13 +102,15 @@ Implemented the fresh-snapshot, bounded retry, and post-write readback
 protocol for preview description updates. Walkthrough link updates now use
 the same per-PR description concurrency group and no longer retry a stale
 payload. Added Go regression coverage for pre-PATCH body changes, readback
-loss, bounded non-convergence, marker preservation, and cleanup no-ops.
+loss, bounded non-convergence, marker preservation, cleanup no-ops, and orphan
+end markers.
 
 Verification passed:
 
 - `python3 scripts/pr-walkthrough-pr-body.test.py` (9 tests)
-- `go test -race ./cmd/preview` (27 tests)
+- `go test -race ./cmd/preview` (28 tests)
 - `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` (27 tests)
+- `python3 .github/scripts/preview-env-workflow-contract_test.py` (3 tests)
 - `python3 .github/scripts/lint-action-pinning_test.py` (9 tests)
 - `python3 .github/scripts/lint-action-pinning.py` (22 workflows)
 - `mise x actionlint@1.7.12 -- actionlint .github/workflows/pr-walkthrough.yml .github/workflows/preview-env.yml`

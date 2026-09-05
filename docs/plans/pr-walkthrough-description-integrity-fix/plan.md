@@ -74,10 +74,12 @@ Update `scripts/pr-walkthrough-pr-body` and
 `apps/backend/cmd/preview/github.go` callers to follow the design's bounded
 fresh-read, merge, compare, PATCH, and readback sequence. The walkthrough link
 job continues to consume the publication job's validated URL and rejects any
-URL that does not match the 12-character canonical form. The preview deploy,
-preview cleanup, walkthrough link, and reconciliation jobs use the shared
+URL that does not match the 12-character canonical form. The walkthrough link,
+reconciliation, and short preview-description jobs use the shared
 `pr-description-<number>` concurrency group with cancellation disabled for
-the write section.
+the write section. Long-running preview lifecycle jobs do not hold that lock;
+they pass their preview result to a trusted description job, which performs the
+body write after deployment or cleanup.
 
 The Go path will use an HTTP transport fake in tests and a bounded retry loop
 around the body snapshot protocol. The workflow path will keep the

@@ -47,7 +47,10 @@ func removeDescriptionSection(ctx context.Context, token, repo string, pr int) e
 			return stripSection(body)
 		},
 		func(body string) bool {
-			return !strings.Contains(body, sectionStart) && !strings.Contains(body, sectionEnd)
+			if !strings.Contains(body, sectionStart) {
+				return true
+			}
+			return !strings.Contains(body, sectionEnd)
 		},
 	)
 }

@@ -78,8 +78,9 @@ Every Kandev-owned body mutation follows this bounded protocol:
    present.
 
 The protocol is bounded to three attempts. A per-pull-request description
-concurrency group serializes the walkthrough and preview workflow jobs that
-Kandev controls, but the compare-and-readback checks remain required because
+concurrency group serializes the walkthrough, reconciliation, and short
+preview-description jobs that Kandev controls. Long-running preview lifecycle
+jobs do not hold that lock. Compare-and-readback checks remain required because
 users and external integrations can edit the document outside GitHub Actions.
 An update that cannot converge fails without a best-effort broad rewrite.
 

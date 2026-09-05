@@ -56,6 +56,15 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         cls.preview_deploy = workflow_job(cls.preview_workflow, "deploy-same-repo")
         cls.preview_fork = workflow_job(cls.preview_workflow, "deploy-fork")
         cls.preview_cleanup = workflow_job(cls.preview_workflow, "cleanup-preview")
+        cls.preview_description_same = workflow_job(
+            cls.preview_workflow, "update-description-same-repo"
+        )
+        cls.preview_description_fork = workflow_job(
+            cls.preview_workflow, "update-description-fork"
+        )
+        cls.preview_description_cleanup = workflow_job(
+            cls.preview_workflow, "cleanup-preview-description"
+        )
         cls.same_repo_review = workflow_job(cls.review_workflow, "opencode-review-same-repo")
         cls.fork_review = workflow_job(cls.review_workflow, "opencode-review-fork")
 
@@ -118,11 +127,16 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             "WALKTHROUGH_BASE_URL: https://walkthrough.kandev.ai",
             'SHORT_HEAD_SHA="${HEAD_SHA:0:12}"',
             'PUBLIC_URL="${WALKTHROUGH_BASE_URL%/}/pr/${PR_NUMBER}/${SHORT_HEAD_SHA}.html"',
+            "RESPONSE_META_PATH=pr-walkthrough-public.response",
             "curl --fail",
-            'grep -Eiq \'^content-type:[[:space:]]*text/html(;|[[:space:]]|$)\'',
+            "--write-out '%{http_code}\\t%{content_type}\\t%{url_effective}'",
+            "response_status",
+            'response_effective_url" != "$PUBLIC_URL"',
+            "response_content_type",
             'test -s "$PUBLIC_HTML_PATH"',
         ):
             self.assertIn(value, self.reconcile)
+        self.assertNotIn("--dump-header", self.reconcile)
 
         for forbidden in (
             "OPENCODE_API_KEY",
@@ -152,6 +166,8 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             "pr-body-verified",
             "cmp -- pr-body-expected pr-body-verified",
             "gh api --method PATCH",
+            "current_head_sha=",
+            "verified_head_sha=",
             "pr-verified-response.json",
             "verify_status",
         ):
@@ -462,9 +478,9 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
     def test_description_writers_compare_fresh_bodies_and_verify_after_patch(self) -> None:
         for job in (
             self.link,
-            self.preview_deploy,
-            self.preview_fork,
-            self.preview_cleanup,
+            self.preview_description_same,
+            self.preview_description_fork,
+            self.preview_description_cleanup,
         ):
             self.assertIn("concurrency:", job)
             self.assertIn(
