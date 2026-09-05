@@ -139,6 +139,37 @@ func TestListPendingRouteStatesExcludesAmbiguousRetryingStates(t *testing.T) {
 	}
 }
 
+func TestListStartingRouteStatesReturnsOnlyStartingRows(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, sessionID := range []string{"starting-orphan", "active-session", "retrying-session"} {
+		taskID := "task-" + sessionID
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: sessionID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateWaitingForInput}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
+		}
+	}
+	for _, state := range []dynamicruntime.RouteState{
+		{SessionID: "starting-orphan", LogicalProfileID: "dynamic", Generation: 1, Status: "starting", UpdatedAt: now},
+		{SessionID: "active-session", LogicalProfileID: "dynamic", Generation: 1, Status: "active", UpdatedAt: now.Add(time.Second)},
+		{SessionID: "retrying-session", LogicalProfileID: "dynamic", Generation: 1, Status: "retrying", UpdatedAt: now.Add(2 * time.Second)},
+	} {
+		if err := repo.SaveRouteState(ctx, state); err != nil {
+			t.Fatalf("SaveRouteState(%s): %v", state.SessionID, err)
+		}
+	}
+	states, err := repo.ListStartingRouteStates(ctx)
+	if err != nil {
+		t.Fatalf("ListStartingRouteStates: %v", err)
+	}
+	if len(states) != 1 || states[0].SessionID != "starting-orphan" {
+		t.Fatalf("starting states = %#v", states)
+	}
+}
+
 func TestClaimRouteStateAdvancesGenerationWithFence(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -182,6 +213,55 @@ func TestClaimRouteStateAdvancesGenerationWithFence(t *testing.T) {
 	}
 	if loaded == nil || loaded.Generation != 2 || loaded.ExecutionProfileID != "concrete-2" {
 		t.Fatalf("claimed state = %#v", loaded)
+	}
+}
+
+func TestClaimRouteStateFromRequiresExpectedStatus(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-conditional-status"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "conditional-status-session", TaskID: "task-conditional-status",
+		State: models.TaskSessionStateStarting,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	initial := dynamicruntime.RouteState{
+		SessionID: "conditional-status-session", LogicalProfileID: "logical",
+		ExecutionProfileID: "candidate", Generation: 1, Status: "starting",
+		UpdatedAt: time.Now().UTC(),
+	}
+	claimed, err := repo.ClaimRouteState(ctx, 0, initial)
+	if err != nil || !claimed {
+		t.Fatalf("initial ClaimRouteState = %v, %v", claimed, err)
+	}
+
+	active := initial
+	active.Status = "active"
+	active.UpdatedAt = time.Now().UTC()
+	claimed, err = repo.ClaimRouteStateFrom(ctx, 1, "starting", active)
+	if err != nil || !claimed {
+		t.Fatalf("conditional active transition = %v, %v", claimed, err)
+	}
+
+	stale := active
+	stale.Status = "action_required"
+	stale.UpdatedAt = time.Now().UTC()
+	claimed, err = repo.ClaimRouteStateFrom(ctx, 1, "starting", stale)
+	if err != nil {
+		t.Fatalf("stale conditional transition: %v", err)
+	}
+	if claimed {
+		t.Fatal("conditional transition succeeded after status changed")
+	}
+	loaded, err := repo.LoadRouteState(ctx, initial.SessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if loaded == nil || loaded.Status != "active" {
+		t.Fatalf("route state after stale transition = %#v, want active", loaded)
 	}
 }
 

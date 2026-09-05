@@ -77,9 +77,8 @@ type agentProfileRecentUseRecorder interface {
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
-// Kanban subtask path to attach workspace-group membership and the
-// sequential blocker chain (handoffs phase 5). Optional — nil disables
-// post-create attachment, matching the pre-handoffs behaviour.
+// Kanban subtask path. The task service uses the same instance to attach
+// workspace-group membership before any create route returns.
 //
 // Wiring a HandoffService also re-installs the per-user task guard on it. That
 // is not a convenience: this setter is what makes the archive / delete / unarchive
@@ -91,8 +90,13 @@ type agentProfileRecentUseRecorder interface {
 // everywhere else.
 func (h *TaskHandlers) SetHandoffService(svc *service.HandoffService) {
 	h.handoffSvc = svc
-	if svc != nil && h.service != nil {
-		svc.SetTaskAccessChecker(h.service.AuthorizeTaskAccess)
+	if h.service != nil {
+		if svc == nil {
+			h.service.SetWorkspacePolicyAttacher(nil)
+		} else {
+			svc.SetTaskAccessChecker(h.service.AuthorizeTaskAccess)
+			h.service.SetWorkspacePolicyAttacher(svc)
+		}
 	}
 }
 

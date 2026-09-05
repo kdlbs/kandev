@@ -671,6 +671,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
 		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"resolveSessionHostnames":           settings.ResolveSessionHostnames,
 		"appStatusBarOrder":                 mapAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quickChatTabOrderByWorkspace":      settings.QuickChatTabOrderByWorkspace,
 		"hiddenWorkflowStepIds":             stringSliceMap(settings.KanbanHiddenStepIDs),
@@ -776,6 +777,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"sessionCount":                task.SessionCount,
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
 		"parentTaskId":                nullString(task.ParentID),
+		"priority":                    task.Priority,
 		"updatedAt":                   task.UpdatedAt,
 		"createdAt":                   task.CreatedAt,
 		// Dependency projection. This mapper is a camelCase whitelist writing

@@ -76,6 +76,25 @@ describe("KanbanCardBody — task-card-indicators slot", () => {
   });
 });
 
+describe("KanbanCardBody — priority indicator", () => {
+  it("renders the priority indicator inside the title row for a critical task", () => {
+    const { container } = render(
+      <KanbanCardBody task={{ ...TASK, priority: "critical" }} repositoryChips={[]} />,
+    );
+    const titleRow = container.querySelector('[data-testid="kanban-card-title-row"]');
+    expect(
+      titleRow?.querySelector('[data-testid="kanban-card-priority-indicator"]'),
+    ).not.toBeNull();
+  });
+
+  it("renders no priority indicator for a medium-priority task", () => {
+    const { container } = render(
+      <KanbanCardBody task={{ ...TASK, priority: "medium" }} repositoryChips={[]} />,
+    );
+    expect(container.querySelector('[data-testid="kanban-card-priority-indicator"]')).toBeNull();
+  });
+});
+
 describe("Kanban task status motion", () => {
   it("animates the fallback running status on an HTML wrapper", () => {
     const { container } = render(<>{renderTaskStatusIcon(TASK, true, false, false)}</>);

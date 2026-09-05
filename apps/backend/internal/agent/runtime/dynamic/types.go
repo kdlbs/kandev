@@ -132,6 +132,13 @@ type GenerationClaimer interface {
 	ClaimRouteState(context.Context, int64, RouteState) (bool, error)
 }
 
+// GenerationStatusClaimer updates one generation only while its status still
+// matches the caller's observation. This closes the same-generation race
+// between a launch becoming active and a concurrent recovery transition.
+type GenerationStatusClaimer interface {
+	ClaimRouteStateFrom(context.Context, int64, string, RouteState) (bool, error)
+}
+
 // DecisionRecorder lets a repository commit the state row and immutable
 // attempt row in one transaction. Persistence remains backwards compatible
 // for callers that only need the narrow Save/Append contract.

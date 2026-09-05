@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -72,6 +73,15 @@ type ResetOptions struct {
 // attached to the environment.
 type SessionRunningChecker interface {
 	IsAnySessionRunningForTask(ctx context.Context, taskID string) (bool, error)
+}
+
+// taskEnvironmentResetClaimer reserves an environment reset behind the
+// durable cleanup barrier. It is optional so lightweight service test doubles
+// and integrations that do not persist cleanup jobs retain their legacy
+// behavior.
+type taskEnvironmentResetClaimer interface {
+	ClaimTaskEnvironmentReset(ctx context.Context, taskID, environmentID string, expectedGeneration int64, operationID string) (string, error)
+	ReleaseTaskEnvironmentReset(ctx context.Context, jobID string, state models.TaskResourceCleanupState, errStr string) error
 }
 
 // ErrSessionRunning is returned by ResetTaskEnvironment when at least one session
@@ -295,6 +305,38 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 		return ErrSessionRunning
 	}
 
+	var resetJobID string
+	var resetClaimer taskEnvironmentResetClaimer
+	if claimer, ok := s.taskEnvironments.(taskEnvironmentResetClaimer); ok {
+		resetClaimer = claimer
+		resetJobID, err = claimer.ClaimTaskEnvironmentReset(
+			ctx,
+			taskID,
+			env.ID,
+			env.OwnershipGeneration,
+			fmt.Sprintf("task-environment-reset:%s", uuid.NewString()),
+		)
+		if err != nil {
+			return fmt.Errorf("claim environment reset: %w", err)
+		}
+	}
+	releaseReset := func(state models.TaskResourceCleanupState, releaseErr error) {
+		if resetClaimer == nil || resetJobID == "" {
+			return
+		}
+		lastError := ""
+		if releaseErr != nil {
+			lastError = releaseErr.Error()
+		}
+		if err := resetClaimer.ReleaseTaskEnvironmentReset(context.WithoutCancel(ctx), resetJobID, state, lastError); err != nil {
+			s.logger.Warn("failed to finalize task environment reset barrier",
+				zap.String("task_id", taskID),
+				zap.String("env_id", env.ID),
+				zap.String("cleanup_job_id", resetJobID),
+				zap.Error(err))
+		}
+	}
+
 	s.logger.Info("resetting task environment",
 		zap.String("task_id", taskID),
 		zap.String("env_id", env.ID),
@@ -306,20 +348,26 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 
 	if opts.PushBranch {
 		if s.envDestroyer == nil {
-			return fmt.Errorf("environment destroyer not configured; cannot push branch")
+			err := fmt.Errorf("environment destroyer not configured; cannot push branch")
+			releaseReset(models.TaskResourceCleanupStateFailed, err)
+			return err
 		}
 		if err := s.envDestroyer.PushEnvironmentBranch(ctx, env); err != nil {
+			releaseReset(models.TaskResourceCleanupStateFailed, err)
 			return fmt.Errorf("push branch before reset: %w", err)
 		}
 	}
 
 	if err := s.teardownEnvironmentResources(ctx, env); err != nil {
+		releaseReset(models.TaskResourceCleanupStateFailed, err)
 		return err
 	}
 
 	if err := s.taskEnvironments.DeleteTaskEnvironment(ctx, env.ID); err != nil {
+		releaseReset(models.TaskResourceCleanupStateFailed, err)
 		return fmt.Errorf("delete task environment row: %w", err)
 	}
+	releaseReset(models.TaskResourceCleanupStateSucceeded, nil)
 	s.logger.Info("task environment reset complete",
 		zap.String("task_id", taskID),
 		zap.String("env_id", env.ID))

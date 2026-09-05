@@ -93,6 +93,7 @@ async function openMenuAndSnapshot() {
 function expectedMenuEntries() {
   return [
     { text: t("common:edit"), disabled: true, destructive: false },
+    { text: t("kanban:priority"), disabled: false, destructive: false },
     { text: t("kanban:link"), disabled: false, destructive: false },
     { text: t("kanban:archive"), disabled: true, destructive: false },
     { text: t("kanban:delete"), disabled: false, destructive: true },
