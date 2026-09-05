@@ -40,7 +40,7 @@ test.describe("property pickers", () => {
     });
     await gotoTaskPage(testPage, task.id, "Hidden Human Assignee");
 
-    await expect(testPage.getByTestId("human-assignee-picker-trigger")).toHaveCount(0);
+    await expect(testPage.getByText("Assigned to", { exact: true })).toHaveCount(0);
   });
 
   test("status picker updates task status and persists", async ({

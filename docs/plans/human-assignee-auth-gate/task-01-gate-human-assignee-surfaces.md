@@ -47,12 +47,12 @@ behavior.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web test components/task/task-assignee-control.test.tsx components/task/simple/task-properties.test.tsx components/kanban-card-assignee.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
-cd apps/web && pnpm e2e:run tests/task/human-assignee-auth-gate.spec.ts
-cd apps/web && pnpm e2e:run tests/office/property-pickers.spec.ts -- --grep "human assignee"
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web test components/task/task-assignee-control.test.tsx components/task/simple/task-properties.test.tsx components/kanban-card-assignee.test.tsx components/kanban-card-content.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
+(cd apps/web && pnpm e2e:run tests/task/human-assignee-auth-gate.spec.ts)
+(cd apps/web && pnpm e2e:run tests/office/property-pickers.spec.ts -- --grep "human assignee")
 git diff --check
 ```
 
@@ -100,3 +100,6 @@ None.
 - Added focused task, board, and Office browser regressions.
 - Verification passed: 27 component tests, two Playwright tests, TypeScript,
   frontend lint, specification validation, and whitespace checks.
+- Addressed review feedback by making verification commands root-safe, covering
+  the kanban content test, asserting complete Office-row absence, and using a
+  strict task-topbar title locator.

@@ -114,6 +114,9 @@ path, so this change does not add one.
   row on an authentication-disabled installation.
 - Passed 27 focused component tests, both focused browser tests, TypeScript,
   frontend lint, specification validation, and `git diff --check`.
+- Addressed review feedback by making workorder commands root-safe, including
+  the kanban content test, asserting complete Office-row absence, and using
+  strict task-title locators.
 
 ## Risks
 

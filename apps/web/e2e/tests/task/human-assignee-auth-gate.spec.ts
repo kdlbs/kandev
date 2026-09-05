@@ -19,7 +19,7 @@ test("auth-disabled installs hide human assignee controls and indicators", async
   expect(response.ok).toBe(true);
 
   await testPage.goto(`/t/${task.id}`);
-  await expect(testPage.getByText("Hidden Human Assignee", { exact: true }).first()).toBeVisible();
+  await expect(testPage.getByTestId("task-topbar-title")).toHaveText("Hidden Human Assignee");
   await expect(testPage.getByTestId("task-assignee-control")).toHaveCount(0);
 
   const kanban = new KanbanPage(testPage);

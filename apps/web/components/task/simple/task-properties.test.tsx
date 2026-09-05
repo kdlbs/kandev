@@ -64,7 +64,7 @@ describe("TaskProperties human assignee", () => {
 
     render(<TaskProperties task={TASK} />);
 
-    expect(screen.queryByTestId("human-assignee-picker-trigger")).toBeNull();
+    expect(screen.queryByText("Assigned to", { exact: true })).toBeNull();
   });
 
   it("hides the row when enabled auth has no signed-in user", () => {
@@ -72,12 +72,13 @@ describe("TaskProperties human assignee", () => {
 
     render(<TaskProperties task={TASK} />);
 
-    expect(screen.queryByTestId("human-assignee-picker-trigger")).toBeNull();
+    expect(screen.queryByText("Assigned to", { exact: true })).toBeNull();
   });
 
   it("shows the row when authentication is enabled for a signed-in user", () => {
     render(<TaskProperties task={TASK} />);
 
+    expect(screen.getByText("Assigned to", { exact: true })).toBeTruthy();
     expect(screen.getByTestId("human-assignee-picker-trigger")).toBeTruthy();
   });
 });
