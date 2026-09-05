@@ -35,7 +35,9 @@ export function useSwimlaneMove(
         );
       const nextPosition = targetTasks.length;
 
-      const originalTasks = snapshot.tasks;
+      const originalTask = snapshot.tasks.find(
+        (t: KanbanState["tasks"][number]) => t.id === task.id,
+      );
 
       // Optimistic update
       state.setWorkflowSnapshot(workflowId, {
@@ -54,12 +56,39 @@ export function useSwimlaneMove(
         // Backend handles on_enter actions (auto_start_agent, plan_mode, etc.)
         // via the task.moved event → orchestrator processOnEnter()
       } catch (error) {
-        // Rollback
+        // Rollback only this task's entry, and only while it still holds the
+        // exact optimistic value this move wrote. Matching (step, position)
+        // alone is not sufficient proof: a different, independently
+        // successful write can land on the identical tuple (e.g. two moves
+        // to the same empty target step both resolve to position 0), so the
+        // check also requires updatedAt to be unchanged since before this
+        // move's own optimistic write — a real write always advances it,
+        // while this move's own optimistic patch does not. If either signal
+        // has since changed, an out-of-band update supersedes this move and
+        // the rollback is skipped.
         const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
-        if (currentSnapshot) {
+        const currentTask = currentSnapshot?.tasks.find(
+          (t: KanbanState["tasks"][number]) => t.id === task.id,
+        );
+        if (
+          currentSnapshot &&
+          originalTask &&
+          currentTask &&
+          currentTask.workflowStepId === targetStepId &&
+          currentTask.position === nextPosition &&
+          currentTask.updatedAt === originalTask.updatedAt
+        ) {
           store.getState().setWorkflowSnapshot(workflowId, {
             ...currentSnapshot,
-            tasks: originalTasks,
+            tasks: currentSnapshot.tasks.map((t: KanbanState["tasks"][number]) =>
+              t.id === task.id
+                ? {
+                    ...t,
+                    workflowStepId: originalTask.workflowStepId,
+                    position: originalTask.position,
+                  }
+                : t,
+            ),
           });
         }
         const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);

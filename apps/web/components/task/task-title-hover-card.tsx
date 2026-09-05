@@ -2,10 +2,12 @@
 
 import { useRef, type FocusEvent, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { IconSubtask } from "@tabler/icons-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskSubtasks, type TaskSubtask } from "@/hooks/domains/kanban/use-task-subtasks";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { cn } from "@/lib/utils";
 import { TaskSubtaskRow } from "./task-subtask-row";
 
@@ -42,9 +44,43 @@ function SubtasksSection({ subtasks }: { subtasks: TaskSubtask[] }) {
   );
 }
 
+function DescriptionSection({ description }: { description?: string }) {
+  if (!description) return null;
+  return (
+    <div
+      data-testid="task-title-hover-description"
+      className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground [overflow-wrap:anywhere]"
+    >
+      {description}
+    </div>
+  );
+}
+
+function ParentSection({ parentTaskId }: { parentTaskId?: string | null }) {
+  const { t } = useTranslation();
+  const parentTitle = useTaskById(parentTaskId)?.title ?? null;
+  if (!parentTaskId) return null;
+  // Matches KanbanCardRelationship's fallback (kanban-card-status-strip.tsx)
+  // so the two "show the parent relationship" surfaces don't diverge when the
+  // parent title isn't resolvable from the store.
+  const relationshipTitle = parentTitle ?? t("task:subtask");
+  return (
+    <div
+      data-testid="task-title-hover-parent"
+      className="mt-2 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground"
+    >
+      <IconSubtask className="h-3 w-3 shrink-0" />
+      <span className="shrink-0 font-medium">{t("kanban:subtaskOf")}</span>
+      <span className="min-w-0 truncate">{relationshipTitle}</span>
+    </div>
+  );
+}
+
 function DesktopTaskTitlePreview({
   title,
   children,
+  description,
+  parentTaskId,
   subtasks,
   side,
   align,
@@ -52,6 +88,8 @@ function DesktopTaskTitlePreview({
 }: {
   title: string;
   children: ReactNode;
+  description?: string;
+  parentTaskId?: string | null;
   subtasks: TaskSubtask[];
   side: "top" | "right" | "bottom" | "left";
   align: "start" | "center" | "end";
@@ -85,6 +123,8 @@ function DesktopTaskTitlePreview({
           aria-expanded={hover.open}
           onPointerEnter={hover.onTriggerEnter}
           onPointerLeave={hover.onTriggerLeave}
+          onFocus={hover.onTriggerEnter}
+          onBlur={hover.onTriggerLeave}
           onKeyDown={(event) => {
             // Only swallow keys while the preview is open (protects it from
             // the card/row's own keyboard shortcuts, e.g. drag pickup).
@@ -136,6 +176,8 @@ function DesktopTaskTitlePreview({
         <div className="text-pretty break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">
           {title}
         </div>
+        <DescriptionSection description={description} />
+        <ParentSection parentTaskId={parentTaskId} />
         <SubtasksSection subtasks={subtasks} />
       </PopoverContent>
     </Popover>
@@ -147,6 +189,9 @@ export function TaskTitleHoverCard({
   taskId,
   title,
   children,
+  description,
+  parentTaskId,
+  isTitleTruncated,
   side = "bottom",
   align = "start",
   triggerClassName,
@@ -154,18 +199,24 @@ export function TaskTitleHoverCard({
   taskId: string;
   title: string;
   children: ReactNode;
+  description?: string;
+  parentTaskId?: string | null;
+  isTitleTruncated?: boolean;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   triggerClassName?: string;
 }) {
   const { isFinePointer } = useResponsiveBreakpoint();
   const subtasks = useTaskSubtasks(taskId);
+  const hasContent = Boolean(description) || Boolean(parentTaskId) || subtasks.length > 0;
 
-  if (!isFinePointer || subtasks.length === 0) return <>{children}</>;
+  if (!isFinePointer || (!hasContent && !isTitleTruncated)) return <>{children}</>;
 
   return (
     <DesktopTaskTitlePreview
       title={title}
+      description={description}
+      parentTaskId={parentTaskId}
       subtasks={subtasks}
       side={side}
       align={align}

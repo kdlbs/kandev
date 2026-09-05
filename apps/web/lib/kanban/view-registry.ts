@@ -14,7 +14,7 @@ export type ViewContentProps = {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
-  onDeleteTask: (task: Task) => void;
+  onDeleteTask: (task: Task, opts?: { cascade?: boolean }) => void;
   onArchiveTask?: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;
   deletingTaskId?: string | null;
@@ -57,7 +57,7 @@ export const VIEW_REGISTRY: ViewRegistryEntry[] = [
     storedValue: "graph2",
     labelKey: "kanban:pipeline",
     icon: IconTimeline,
-    component: SwimlaneGraph2Content as ComponentType<ViewContentProps>,
+    component: SwimlaneGraph2Content,
     enabled: true,
   },
 ];

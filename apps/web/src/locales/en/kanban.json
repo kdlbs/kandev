@@ -67,6 +67,8 @@
   "openPreviewOnClick": "Open preview on click",
   "overWipLimit": "Over WIP limit",
   "pipeline": "Pipeline",
+  "pipelineRowPosition": "{{title}}, step {{position}} of {{total}}",
+  "pipelineUnassignedStep": "Unassigned",
   "previewPanel": "Preview Panel",
   "previousStep": "Previous step",
   "priority": "Priority",
