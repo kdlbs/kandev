@@ -45,7 +45,7 @@ func RunnerProjection(alias string) string {
 		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
 		 WHERE wsp.task_id = ` + alias + `.id
 		   AND wsp.role = 'runner'
-		 ORDER BY wsp.rowid DESC LIMIT 1), ''),
+		 ORDER BY wsp.created_at DESC, wsp.id ASC LIMIT 1), ''),
 		''
 	)`
 }
