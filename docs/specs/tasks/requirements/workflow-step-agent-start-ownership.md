@@ -94,6 +94,28 @@ intent-derived destination.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.4:** Desktop and mobile task
 creation shall apply the same immediate-launch placement rule.
 
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005: Step prompt trigger guidance
+
+**Intent:** Make the difference between step prompt content and automatic step
+entry clear during workflow editing.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1:** When a workflow step
+has a non-empty prompt and no `auto_start_agent` entry action, the workflow
+editor shall show a visible warning. The warning shall state that step entry
+does not send the prompt automatically.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.2:** The warning shall tell
+the user to start the agent manually or enable automatic start.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.3:** The warning shall not
+appear when the prompt is empty or the step has an `auto_start_agent` entry
+action.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** The workflow editor
+shall state that a step prompt replaces the task description unless it contains
+`{{task_prompt}}`.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** Desktop and mobile
+workflow editors shall show the same guidance without horizontal page overflow.
+
 ## Migrated source detail
 
 ## Why

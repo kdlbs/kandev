@@ -6,6 +6,7 @@ requirements:
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004
+  - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005
 ---
 
 # Workflow Step Agent Start Ownership System Design
@@ -26,6 +27,7 @@ The design preserves runtime configuration through the existing reset contract. 
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002` | [Active-turn reset flow](#active-turn-reset-flow), [Bounded predecessor wait](#bounded-predecessor-wait) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003` | [Prompt fallback ownership](#prompt-fallback-ownership), [Prompt-history contract](#prompt-history-contract), [Workflow-entry prompt flow](#workflow-entry-prompt-flow) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004` | [Creation destination routing](#creation-destination-routing) |
+| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005` | [Workflow editor guidance](#workflow-editor-guidance) |
 
 ## Components and responsibilities
 
@@ -201,6 +203,20 @@ This repair does not reconcile sessions that became stuck before the new boundar
 The prompt counter and fallback claim are durable across backend restarts. A
 restart cannot make an earlier task description eligible for another fallback
 dispatch, and deleting/recreating a session ID starts a new prompt boundary.
+
+## Workflow editor guidance
+
+`StepPromptSection` compares the local prompt with the step entry actions. A
+non-empty prompt without `auto_start_agent` shows a non-blocking inline warning.
+The warning explains that step entry does not send the prompt automatically.
+
+The warning uses the existing amber settings-panel pattern. It contains no
+action, so desktop and mobile use the same component and state. Its text wraps
+inside the workflow step panel without a separate scroll region.
+
+The warning disappears immediately when the user clears the prompt or enables
+`auto_start_agent`. The prompt usage hint also states that a step prompt replaces
+the task description unless it contains `{{task_prompt}}`.
 
 ## Observability
 

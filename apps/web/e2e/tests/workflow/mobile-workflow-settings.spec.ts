@@ -2,6 +2,45 @@ import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings on mobile", () => {
+  // @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5
+  test("warns when a step prompt has no automatic start", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile Prompt Guidance");
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
+      is_start_step: true,
+    });
+    await apiClient.updateWorkflowStep(reviewStep.id, { prompt: "Review the changes" });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Mobile Prompt Guidance");
+    const panel = await page.selectStep(card, "Review", true);
+    const warning = panel.getByTestId("workflow-step-prompt-auto-start-warning");
+
+    await expect(warning).toBeVisible();
+    if (prCapture.capturing) {
+      await warning.scrollIntoViewIfNeeded();
+    }
+    await prCapture.screenshot("mobile-step-prompt-auto-start-warning", {
+      caption: "Step prompt guidance remains readable at a phone viewport width.",
+    });
+    const warningBox = await warning.boundingBox();
+    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+    expect(warningBox).not.toBeNull();
+    expect(warningBox!.x).toBeGreaterThanOrEqual(0);
+    expect(warningBox!.x + warningBox!.width).toBeLessThanOrEqual(viewportWidth);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+
+    await page.setAutoStart(card, "Review", true, true);
+    await expect(warning).toBeHidden();
+  });
+
   test("remove sync confirmation keeps 44px inline actions", async ({
     testPage,
     apiClient,
