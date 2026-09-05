@@ -79,7 +79,9 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
       capabilities?: Record<string, unknown>;
       summary?: Record<string, unknown> | null;
     };
-    const completedAt = "2099-07-23T12:00:02Z";
+    const startedAt = new Date(Date.now() - 1200).toISOString();
+    const completedAt = new Date(Date.now()).toISOString();
+    const refreshDueAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     const sourceProgress = {
       workspaces: {
         state: "ready",
@@ -106,11 +108,11 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
       ? {
           generation: 901,
           state: "ready",
-          started_at: "2099-07-23T12:00:00Z",
+          started_at: startedAt,
           completed_at: completedAt,
           duration_ms: 1200,
           cache_ttl_seconds: 900,
-          refresh_due_at: "2099-07-23T12:15:02Z",
+          refresh_due_at: refreshDueAt,
           stale: false,
           error: null,
           progress: { completed_sources: 5, total_sources: 5, sources: sourceProgress },
@@ -119,7 +121,7 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
       : {
           generation: 901,
           state: "scanning",
-          started_at: "2099-07-23T12:00:00Z",
+          started_at: startedAt,
           completed_at: null,
           duration_ms: null,
           cache_ttl_seconds: 900,
