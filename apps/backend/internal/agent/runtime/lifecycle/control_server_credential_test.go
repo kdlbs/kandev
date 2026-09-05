@@ -86,6 +86,49 @@ func TestStoreControlServerCredentialFallsBackToCreateWhenSecretIDMissing(t *tes
 	}
 }
 
+// TestStoreControlServerCredentialDoesNotOverwriteUnreadableExistingSecret
+// pins AC-EXECUTORS-CONTROL-OWNERSHIP-001.9's "shall not delete the stored
+// credential" for a transient read error: when the existing secret is
+// present but a Reveal on it currently fails (not absent -- a real row a
+// later attempt might still recover), storing a new credential must not
+// blindly overwrite that row via Update, since Update never re-decrypts the
+// prior value and would silently destroy it. It must fall back to a fresh
+// secret instead, and the old row's value must remain exactly as it was.
+func TestStoreControlServerCredentialDoesNotOverwriteUnreadableExistingSecret(t *testing.T) {
+	store := newInMemorySecretStore()
+	existingID, err := storeControlServerCredential(context.Background(), store, "", "still-needed-token")
+	if err != nil {
+		t.Fatalf("storeControlServerCredential(initial): %v", err)
+	}
+
+	store.revealErr = errors.New("transient read failure")
+
+	gotID, err := storeControlServerCredential(context.Background(), store, existingID, "unrelated-fresh-token")
+	if err != nil {
+		t.Fatalf("storeControlServerCredential: %v", err)
+	}
+	if gotID == existingID {
+		t.Fatalf("gotID = %q, want a freshly allocated ID distinct from the unreadable existing one", gotID)
+	}
+
+	store.revealErr = nil
+	got, err := store.Reveal(context.Background(), existingID)
+	if err != nil {
+		t.Fatalf("Reveal(existingID) after fallback: %v", err)
+	}
+	if got != "still-needed-token" {
+		t.Fatalf("existing secret value = %q, want untouched %q", got, "still-needed-token")
+	}
+
+	gotFresh, err := store.Reveal(context.Background(), gotID)
+	if err != nil {
+		t.Fatalf("Reveal(gotID): %v", err)
+	}
+	if gotFresh != "unrelated-fresh-token" {
+		t.Fatalf("fresh secret value = %q, want %q", gotFresh, "unrelated-fresh-token")
+	}
+}
+
 // TestStoreControlServerCredentialRejectsEmptyToken pins that an empty
 // bearer token is never durably stored -- storing a blank credential would
 // silently make adoption impossible to distinguish from "not yet bootstrapped".
