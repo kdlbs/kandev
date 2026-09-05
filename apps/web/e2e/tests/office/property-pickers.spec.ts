@@ -367,9 +367,23 @@ test.describe("property pickers", () => {
     apiClient,
     officeSeed,
   }) => {
-    const task = await apiClient.createTask(officeSeed.workspaceId, "Picker Timeline Task", {
+    // The office approval gate only allows a "done" write once the task is on
+    // its workflow's terminal step, so this task needs to start there. Seed
+    // it directly (rather than create + move) so the test doesn't route
+    // through the generic task-move path, which treats entering the
+    // workflow's terminal step as completion in its own right (see
+    // handleTaskMoved/finalizeDone) and would pre-empt the very "todo ->
+    // in_progress -> done" transition this test is verifying.
+    const stepsResp = await apiClient.listWorkflowSteps(officeSeed.workflowId);
+    const terminalStep = stepsResp.steps.reduce((max, step) =>
+      step.position > max.position ? step : max,
+    );
+    const seeded = await apiClient.seedTask(officeSeed.workspaceId, "Picker Timeline Task", {
       workflow_id: officeSeed.workflowId,
+      workflow_step_id: terminalStep.id,
+      state: "TODO",
     });
+    const task = { id: seeded.task_id };
 
     // startedAt/completedAt are derived server-side from the status-change
     // timeline (see deriveTaskTimestamps in the backend) and delivered to
