@@ -459,6 +459,24 @@ describe("queueTaskCreateLastUsedFromPayload workflow history", () => {
     });
   });
 
+  // @covers AC-TASKS-TASK-CREATE-WORKFLOW-MEMORY-001.1
+  it("keeps the latest workflow from consecutive submissions in one workspace", () => {
+    queueTaskCreateLastUsedFromPayload({
+      workspace_id: WORKSPACE_ONE,
+      workflow_id: WORKFLOW_ONE,
+      repositories: [],
+    });
+    queueTaskCreateLastUsedFromPayload({
+      workspace_id: WORKSPACE_ONE,
+      workflow_id: WORKFLOW_TWO,
+      repositories: [],
+    });
+
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({
+      workflowIdsByWorkspace: { [WORKSPACE_ONE]: WORKFLOW_TWO },
+    });
+  });
+
   it("waits for every queued workspace workflow to appear in settings", () => {
     syncTaskCreateLastUsed({ workspace_id: WORKSPACE_ONE, workflow_id: WORKFLOW_ONE });
     syncTaskCreateLastUsed({ workspace_id: WORKSPACE_TWO, workflow_id: WORKFLOW_TWO });
