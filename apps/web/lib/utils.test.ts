@@ -184,6 +184,10 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(ago(9 * SECOND))).toBe("just now");
   });
 
+  it.each(["", "not-a-date"])("returns an empty label for invalid input %j", (value) => {
+    expect(formatRelativeTime(value)).toBe("");
+  });
+
   it("localizes EVERY branch, so a timestamp does not change language as it ages", async () => {
     // The regression: "just now" was routed through the catalog while the rungs
     // below it stayed hardcoded, so a non-English locale showed a translated

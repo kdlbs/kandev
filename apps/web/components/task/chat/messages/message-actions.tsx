@@ -247,7 +247,9 @@ function MessageTimestamp({ createdAt }: { createdAt: string }) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
-  const absoluteTime = new Date(createdAt).toLocaleString();
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+  const absoluteTime = date.toLocaleString();
   const timeEl = (
     <time
       dateTime={createdAt}
