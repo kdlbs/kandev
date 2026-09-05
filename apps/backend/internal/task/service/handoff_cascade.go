@@ -22,10 +22,11 @@ type workspaceEnvironmentRepository interface {
 }
 
 type workspaceEnvironmentOwnershipTransfer struct {
-	groupID        string
-	environmentID  string
-	oldOwnerTaskID string
-	newOwnerTaskID string
+	groupID             string
+	environmentID       string
+	oldOwnerTaskID      string
+	newOwnerTaskID      string
+	resultingGeneration int64
 }
 
 // publishUpdatedTask re-reads the task row and forwards it to the event
@@ -95,11 +96,14 @@ func (s *HandoffService) evaluateWorkspaceGroupCleanup(ctx context.Context, grou
 			orchmodels.WorkspaceCleanupStatusPending,
 			"active executor still bound to group's member session", nil)
 	}
-	// Mark the group as cleanup_pending before invoking the cleaner so
-	// any concurrent observer sees a consistent state machine.
-	if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, groupID,
-		orchmodels.WorkspaceCleanupStatusPending, "", nil); err != nil {
+	// Claim this ownership generation before invoking the cleaner. A stale
+	// evaluator or a concurrent membership admission cannot pass this write.
+	claimed, err := claimWorkspaceGroupCleanup(ctx, s.wsGroups, g)
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		return nil
 	}
 	if s.cleaner == nil {
 		// No cleaner wired — leave the group in cleanup_pending so the
@@ -108,12 +112,12 @@ func (s *HandoffService) evaluateWorkspaceGroupCleanup(ctx context.Context, grou
 		return nil
 	}
 	if err := s.runWorkspaceGroupCleanup(ctx, g); err != nil {
-		_ = s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, groupID,
+		_ = completeWorkspaceGroupCleanup(ctx, s.wsGroups, g,
 			orchmodels.WorkspaceCleanupStatusFailed, err.Error(), nil)
 		return err
 	}
 	now := time.Now().UTC()
-	return s.wsGroups.UpdateWorkspaceGroupCleanupStatus(ctx, groupID,
+	return completeWorkspaceGroupCleanup(ctx, s.wsGroups, g,
 		orchmodels.WorkspaceCleanupStatusCleaned, "", &now)
 }
 
@@ -527,7 +531,9 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 	if newOwner == "" {
 		return nil, fmt.Errorf("preserve workspace group %s: no surviving member can own environment %s", group.ID, env.ID)
 	}
-	if err := environments.TransferTaskEnvironmentToTask(ctx, env.ID, newOwner); err != nil {
+	if err := environments.TransferTaskEnvironmentOwnership(
+		ctx, env.ID, env.TaskID, env.OwnershipGeneration, newOwner,
+	); err != nil {
 		return nil, fmt.Errorf("transfer workspace environment %s to task %s: %w", env.ID, newOwner, err)
 	}
 	s.logf().Info("transferred shared workspace environment before task lifecycle cleanup",
@@ -536,10 +542,11 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 		zap.String("old_owner_task_id", env.TaskID),
 		zap.String("new_owner_task_id", newOwner))
 	return &workspaceEnvironmentOwnershipTransfer{
-		groupID:        group.ID,
-		environmentID:  env.ID,
-		oldOwnerTaskID: env.TaskID,
-		newOwnerTaskID: newOwner,
+		groupID:             group.ID,
+		environmentID:       env.ID,
+		oldOwnerTaskID:      env.TaskID,
+		newOwnerTaskID:      newOwner,
+		resultingGeneration: env.OwnershipGeneration + 1,
 	}, nil
 }
 
@@ -580,8 +587,12 @@ func (s *HandoffService) rollbackWorkspaceEnvironmentOwnershipTransfers(
 				// A concurrent retry already restored this transfer.
 			case env.TaskID != transfer.newOwnerTaskID:
 				err = fmt.Errorf("owner changed from rollback target %s to %s", transfer.newOwnerTaskID, env.TaskID)
+			case env.OwnershipGeneration != transfer.resultingGeneration:
+				err = fmt.Errorf("ownership generation changed from rollback target %d to %d", transfer.resultingGeneration, env.OwnershipGeneration)
 			default:
-				err = environments.TransferTaskEnvironmentToTask(ctx, transfer.environmentID, transfer.oldOwnerTaskID)
+				err = environments.TransferTaskEnvironmentOwnership(
+					ctx, transfer.environmentID, transfer.newOwnerTaskID, transfer.resultingGeneration, transfer.oldOwnerTaskID,
+				)
 			}
 		}
 		mu.Unlock()

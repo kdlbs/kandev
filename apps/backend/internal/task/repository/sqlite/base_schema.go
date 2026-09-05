@@ -1002,6 +1002,7 @@ const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_environments (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		ownership_generation INTEGER NOT NULL DEFAULT 1,
 		executor_type TEXT NOT NULL DEFAULT '',
 		executor_id TEXT DEFAULT '',
 		executor_profile_id TEXT DEFAULT '',

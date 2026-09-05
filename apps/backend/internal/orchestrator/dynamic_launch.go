@@ -21,6 +21,8 @@ import (
 )
 
 const dynamicRouteStatusWaiting = "waiting"
+const dynamicRouteStatusActive = "active"
+const dynamicRouteStatusActionRequired = "action_required"
 
 // dynamicSuccessorDetachedTimeout bounds one detached fallback launch: the
 // predecessor stop plus the successor launch. Without it the repository calls
@@ -172,6 +174,167 @@ func (s *Service) persistDynamicACPSession(
 	}
 	session.DownstreamACPSessionID = acpSessionID
 	return s.repo.UpdateTaskSession(ctx, session)
+}
+
+// markDynamicRouteActive completes the durable "starting" -> "active"
+// transition after a concrete launch has actually succeeded, and mirrors the
+// status onto the task-session projection so both durable stores agree.
+// Best-effort: a launch that already succeeded is not undone by a failure to
+// record this side transition.
+func (s *Service) markDynamicRouteActive(ctx context.Context, sessionID string, generation int64) {
+	if s.profileExecutionResolver == nil || sessionID == "" || generation <= 0 {
+		return
+	}
+	if err := s.profileExecutionResolver.MarkRouteActive(ctx, sessionID, generation); err != nil {
+		if !errors.Is(err, dynamicruntime.ErrStaleGeneration) && !errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
+			s.logger.Warn("failed to mark dynamic route active",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration != generation {
+		return
+	}
+	if loader, ok := s.repo.(dynamicRouteStateLoader); ok {
+		state, loadErr := loader.LoadRouteState(ctx, sessionID)
+		if loadErr != nil || state == nil || state.Generation != generation || state.Status != dynamicRouteStatusActive {
+			return
+		}
+	}
+	s.mirrorDynamicRouteProjection(ctx, session, generation, dynamicRouteStatusActive, session.RouteReason)
+}
+
+// markDynamicRouteActionRequired transitions a claimed dynamic route to
+// durable action_required and mirrors the status onto the task-session
+// projection. It is the catch-all recovery marker every declined or failed
+// dynamic launch path falls back to, so a claimed route is never left
+// silently stuck at "starting" with no recovery affordance. The underlying
+// engine call only transitions a route that is still "starting" (see
+// Engine.MarkActionRequired), so calling this on a route a launch already
+// carried to "active" is a safe no-op: neither store is touched, and an
+// unrelated later failure cannot overwrite a healthy route's reason.
+func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID string, generation int64, reason string) {
+	if s.profileExecutionResolver == nil || sessionID == "" || generation <= 0 {
+		return
+	}
+	decision, err := s.profileExecutionResolver.MarkRouteActionRequired(ctx, sessionID, generation, reason)
+	if err != nil {
+		if !errors.Is(err, dynamicruntime.ErrStaleGeneration) && !errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
+			s.logger.Warn("failed to mark dynamic route action_required",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return
+	}
+	if decision.Status != dynamicRouteStatusActionRequired {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration != generation {
+		return
+	}
+	s.mirrorDynamicRouteProjection(ctx, session, generation, decision.Status, reason)
+}
+
+type dynamicRouteSessionProjector interface {
+	UpdateTaskSessionDynamicRouteIfCurrent(
+		context.Context,
+		string,
+		int64,
+		string,
+		string,
+		string,
+	) (bool, time.Time, error)
+}
+
+func (s *Service) mirrorDynamicRouteProjection(
+	ctx context.Context,
+	session *models.TaskSession,
+	generation int64,
+	status, reason string,
+) {
+	if session == nil || session.RouteGeneration != generation || status == "" {
+		return
+	}
+	if session.RouteState == status && session.RouteReason == reason {
+		return
+	}
+	oldState := session.State
+	if projector, ok := s.repo.(dynamicRouteSessionProjector); ok {
+		changed, updatedAt, err := projector.UpdateTaskSessionDynamicRouteIfCurrent(
+			ctx, session.ID, generation, session.RouteState, status, reason,
+		)
+		if err != nil {
+			s.logger.Warn("failed to mirror dynamic route state to task session",
+				zap.String("session_id", session.ID), zap.Error(err))
+			return
+		}
+		if !changed {
+			return
+		}
+		session.RouteState = status
+		session.RouteReason = reason
+		session.UpdatedAt = updatedAt
+		s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, oldState, session.State, session.ErrorMessage, &updatedAt, session)
+		return
+	}
+	// Legacy repositories do not expose the narrow route projection update. Keep
+	// the fallback for tests and older adapters, while production SQLite uses the
+	// generation/status-guarded method above.
+	session.RouteState = status
+	session.RouteReason = reason
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.logger.Warn("failed to mirror dynamic route state to task session",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return
+	}
+	updatedAt := session.UpdatedAt
+	s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, oldState, session.State, session.ErrorMessage, &updatedAt, session)
+}
+
+// handleAgentProcessStarted settles a dynamic route only after the asynchronous
+// process start succeeds. LaunchPreparedSession returns before this point.
+func (s *Service) handleAgentProcessStarted(
+	ctx context.Context,
+	_, sessionID, agentExecutionID string,
+) {
+	if s.profileExecutionResolver == nil || sessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
+		return
+	}
+	if session.AgentExecutionID != "" && agentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return
+	}
+	if session.State != models.TaskSessionStateStarting && session.State != models.TaskSessionStateRunning {
+		return
+	}
+	s.markDynamicRouteActive(ctx, sessionID, session.RouteGeneration)
+}
+
+// handleAgentProcessStartFailed settles a claimed dynamic route when process
+// startup fails after LaunchPreparedSession already returned successfully.
+func (s *Service) handleAgentProcessStartFailed(
+	ctx context.Context,
+	_, sessionID, agentExecutionID string,
+	_ error,
+) {
+	if s.profileExecutionResolver == nil || sessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
+		return
+	}
+	if session.AgentExecutionID != "" && agentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return
+	}
+	if session.State == models.TaskSessionStateCancelled || session.State == models.TaskSessionStateCompleted {
+		return
+	}
+	s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "agent_process_start_failed")
 }
 
 func applyDynamicRouteDecisionProjection(
@@ -482,12 +645,35 @@ func (s *Service) routeDynamicAgentFailure(
 	data watcher.AgentEventData,
 	classified *routingerr.Error,
 ) bool {
-	if classified == nil || !classified.FallbackAllowed {
-		return false
-	}
 	data = s.withDynamicAttemptEvidence(data)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
+		return false
+	}
+	reason := "dynamic_recovery_declined"
+	if classified != nil {
+		reason = classified.Error()
+	}
+	// The route already holds a claimed generation the moment
+	// dynamicFailureSession succeeds. Every return below is a decline, so the
+	// deferred guard covers every early return uniformly (including any added
+	// later) instead of relying on each branch to remember its own
+	// transition. `generation` is updated in place once RouteAfterFailure
+	// claims a new one so the guard marks the generation actually holding the
+	// failed attempt, not the one this call started from. The guard is safe
+	// to arm this early even for a failure the classifier forbids fallback
+	// for: markDynamicRouteActionRequired only transitions a route that is
+	// still "starting", so it is a no-op once this generation's launch has
+	// already reached "active" (an ordinary runtime failure on a healthy
+	// session), and only fires for a route genuinely stranded mid-launch.
+	generation := session.RouteGeneration
+	handled := false
+	defer func() {
+		if !handled {
+			s.markDynamicRouteActionRequired(ctx, session.ID, generation, reason)
+		}
+	}()
+	if classified == nil || !classified.FallbackAllowed {
 		return false
 	}
 	if !dynamicPreResultSafe(data) {
@@ -512,9 +698,12 @@ func (s *Service) routeDynamicAgentFailure(
 		session.RouteGeneration, classified,
 	)
 	if err != nil {
-		return s.persistPendingDynamicRecovery(ctx, session, decision, err)
+		handled = s.persistPendingDynamicRecovery(ctx, session, decision, err)
+		return handled
 	}
-	return s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
+	generation = decision.Generation
+	handled = s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
+	return handled
 }
 
 func (s *Service) persistPendingDynamicRecovery(
@@ -752,6 +941,15 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 		}
 		return errors.New("dynamic route action session not found")
 	}
+	// The backend route-action handler has already claimed session.RouteGeneration
+	// as "starting" before calling this. Every error return below leaves that
+	// claim without an owner unless the deferred guard marks it action_required.
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "manual dynamic route action failed")
+		}
+	}()
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err
@@ -786,6 +984,7 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 	if !s.relaunchDynamicTaskAfterFailure(ctx, data, session.ExecutionProfileID) {
 		return errors.New("dynamic route action successor launch failed")
 	}
+	succeeded = true
 	return nil
 }
 
@@ -811,7 +1010,29 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	executionProfileID string,
-) bool {
+) (succeeded bool) {
+	defer func() {
+		if succeeded || s.profileExecutionResolver == nil || data.SessionID == "" {
+			return
+		}
+		// This helper is used by both the synchronous route-failure path and
+		// the detached successor worker. The caller's deferred guard covers
+		// the former, but the detached path reports handled=true before the
+		// worker completes, so this helper must settle the claimed generation
+		// when the relaunch fails.
+		markCtx := context.WithoutCancel(ctx)
+		session, err := s.repo.GetTaskSession(markCtx, data.SessionID)
+		if err != nil || session == nil || session.RouteGeneration <= 0 {
+			return
+		}
+		s.markDynamicRouteActionRequired(
+			markCtx,
+			data.SessionID,
+			session.RouteGeneration,
+			"dynamic_successor_launch_failed",
+		)
+	}()
+
 	prompt, ok := s.dynamicRelaunchPrompt(ctx, data.SessionID)
 	if !ok {
 		return false

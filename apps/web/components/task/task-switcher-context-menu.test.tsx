@@ -134,6 +134,20 @@ function stubTouchEvent() {
 }
 
 describe("TaskItemWithContextMenu — pointer containment", () => {
+  it("shows a flag-labelled priority submenu with the current value", async () => {
+    renderWithDragHandle({ priority: "high" } as Partial<TaskSwitcherItem>);
+    await openContextMenu();
+
+    const priority = screen.getByTestId("task-context-priority");
+    expect(priority.querySelector("svg")).not.toBeNull();
+    fireEvent.pointerMove(priority, { pointerType: "mouse" });
+
+    expect(await screen.findByTestId("task-context-priority-current-high")).not.toBeNull();
+    expect(screen.getByTestId("task-context-priority-critical")).not.toBeNull();
+    expect(screen.getByTestId("task-context-priority-medium")).not.toBeNull();
+    expect(screen.getByTestId("task-context-priority-low")).not.toBeNull();
+  });
+
   // Regression: the menu renders in a portal whose fiber ancestors include the
   // drag handle. Without a guard, mousedown/pointerdown on any menu item
   // bubbles through the React fiber tree to the handle's dnd-kit sensor

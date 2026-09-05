@@ -19,6 +19,7 @@ var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
+var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
 
@@ -161,6 +162,13 @@ type TaskRepository interface {
 	// and bumps updated_at. Returns the task as it exists immediately after
 	// the update, or nil if no task held the identity.
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
+}
+
+// TaskPriorityRepository updates a task's priority without replacing the
+// complete task row. Implementations use this capability for priority-only
+// mutations so concurrent changes to other task fields are preserved.
+type TaskPriorityRepository interface {
+	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 }
 
 // TaskStatusSummaryRepository stores the bounded task-level projection used by

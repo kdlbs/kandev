@@ -3,14 +3,18 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+const taskEnvironmentOwnershipQuery = `SELECT task_id, ownership_generation FROM task_environments WHERE id = ?`
 
 // CreateTaskEnvironment creates a new task environment record.
 // If env.Repos is non-empty, the per-repo rows are inserted in the same transaction.
@@ -30,6 +34,9 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 	now := time.Now().UTC()
 	env.CreatedAt = now
 	env.UpdatedAt = now
+	if env.OwnershipGeneration == 0 {
+		env.OwnershipGeneration = 1
+	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -60,14 +67,14 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environments (
-			id, task_id, executor_type, executor_id, executor_profile_id,
+			id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
 			container_id, container_bootstrap_nonce_secret_id, container_control_auth_token_secret_id, sandbox_id, task_dir_name,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
-		env.ID, env.TaskID, env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
+		env.ID, env.TaskID, env.OwnershipGeneration, env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
 		env.ControlPort, string(env.Status), env.MaterializationSessionID,
 		env.WorkspacePath,
 		env.ContainerID, env.ContainerBootstrapNonceSecretID, env.ContainerControlAuthTokenSecretID, env.SandboxID, env.TaskDirName,
@@ -92,14 +99,14 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 	var status string
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, executor_type, executor_id, executor_profile_id,
+		SELECT id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
 			created_at, updated_at
 		FROM task_environments WHERE id = ?
 	`), id).Scan(
-		&env.ID, &env.TaskID, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
+		&env.ID, &env.TaskID, &env.OwnershipGeneration, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath,
 		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID, &env.SandboxID, &env.TaskDirName,
@@ -128,14 +135,14 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 	var status string
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, executor_type, executor_id, executor_profile_id,
+		SELECT id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
 			created_at, updated_at
 		FROM task_environments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
 	`), taskID).Scan(
-		&env.ID, &env.TaskID, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
+		&env.ID, &env.TaskID, &env.OwnershipGeneration, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath,
 		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID, &env.SandboxID, &env.TaskDirName,
@@ -590,10 +597,54 @@ func (r *Repository) taskHasRepositoriesTx(ctx context.Context, tx *sqlx.Tx, tas
 	return count > 0, nil
 }
 
-func (r *Repository) TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+// TransferTaskEnvironmentOwnership moves an environment only when the
+// caller's owner-generation snapshot is still current.
+func (r *Repository) TransferTaskEnvironmentOwnership(
+	ctx context.Context,
+	envID, expectedTaskID string,
+	expectedGeneration int64,
+	taskID string,
+) error {
+	return r.transferTaskEnvironmentOwnership(ctx, envID, expectedTaskID, expectedGeneration, taskID)
+}
+
+func (r *Repository) transferTaskEnvironmentOwnership(
+	ctx context.Context,
+	envID, expectedTaskID string,
+	expectedGeneration int64,
+	taskID string,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	query := taskEnvironmentOwnershipQuery
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var currentTaskID string
+	var currentGeneration int64
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), envID).Scan(&currentTaskID, &currentGeneration); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, envID)
+		}
+		return err
+	}
+	if currentTaskID != expectedTaskID || currentGeneration != expectedGeneration {
+		return fmt.Errorf("%w: environment %s is owned by %s at generation %d",
+			ErrTaskEnvironmentOwnershipChanged, envID, currentTaskID, currentGeneration)
+	}
+	if currentTaskID == taskID {
+		return tx.Commit()
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, currentTaskID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environments SET
 			task_id = ?,
+			ownership_generation = ownership_generation + 1,
 			updated_at = ?
 		WHERE id = ?
 	`), taskID, time.Now().UTC(), envID)
@@ -604,7 +655,74 @@ func (r *Repository) TransferTaskEnvironmentToTask(ctx context.Context, envID, t
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, envID)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// ClaimTaskEnvironmentReset reserves destructive environment reset behind the
+// same task cleanup barrier used by lifecycle cleanup. The prepared barrier
+// remains in place while external resources are torn down, so ownership
+// transfers cannot race the reset's snapshot.
+func (r *Repository) ClaimTaskEnvironmentReset(
+	ctx context.Context,
+	taskID, environmentID string,
+	expectedGeneration int64,
+	operationID string,
+) (string, error) {
+	if taskID == "" || environmentID == "" || operationID == "" {
+		return "", errors.New("task environment reset claim: task, environment, and operation ids are required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+		return "", err
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	jobID := uuid.NewString()
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_resource_cleanup_jobs (
+			id, operation_id, task_id, trigger, state, resource_snapshot, attempts,
+			next_attempt_at, last_error, created_at, updated_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), jobID, operationID, taskID, models.TaskResourceCleanupTriggerReconcile,
+		models.TaskResourceCleanupStatePrepared, `{}`, 0, nil, "", now, now, nil); err != nil {
+		return "", err
+	}
+	query := taskEnvironmentOwnershipQuery
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var ownerTaskID string
+	var generation int64
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), environmentID).Scan(&ownerTaskID, &generation); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, environmentID)
+		}
+		return "", err
+	}
+	if ownerTaskID != taskID || generation != expectedGeneration {
+		return "", fmt.Errorf("%w: environment %s is owned by %s at generation %d",
+			ErrTaskEnvironmentOwnershipChanged, environmentID, ownerTaskID, generation)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return jobID, nil
+}
+
+// ReleaseTaskEnvironmentReset removes a reset's durable cleanup barrier.
+func (r *Repository) ReleaseTaskEnvironmentReset(
+	ctx context.Context,
+	jobID string,
+	state models.TaskResourceCleanupState,
+	errStr string,
+) error {
+	return r.CompleteTaskResourceCleanupJob(ctx, jobID, state, errStr, nil)
 }
 
 // DeleteTaskEnvironment deletes a task environment by ID.

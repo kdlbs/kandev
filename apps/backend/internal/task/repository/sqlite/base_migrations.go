@@ -131,6 +131,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_environments.materialization_session_id", `ALTER TABLE task_environments ADD COLUMN materialization_session_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_environments.container_bootstrap_nonce_secret_id", `ALTER TABLE task_environments ADD COLUMN container_bootstrap_nonce_secret_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_environments.container_control_auth_token_secret_id", `ALTER TABLE task_environments ADD COLUMN container_control_auth_token_secret_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.ownership_generation", `ALTER TABLE task_environments ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -946,6 +947,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		`CREATE TABLE task_environments_new (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
+			ownership_generation INTEGER NOT NULL DEFAULT 1,
 			repository_id TEXT DEFAULT '',
 			executor_type TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
@@ -967,7 +969,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_environments_new SELECT
-			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
+			id, task_id, ownership_generation, repository_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, '', worktree_id, worktree_path, worktree_branch,
 			workspace_path, container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			COALESCE(task_dir_name, ''), created_at, updated_at

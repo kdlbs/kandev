@@ -35,6 +35,7 @@ import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
+import { PluginShortcutsCard } from "@/components/settings/plugins/plugin-shortcuts-card";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
 import { TerminalEditorsSettings } from "@/components/settings/terminal-editors-settings";
 import { AboutSettings } from "@/components/settings/system/about-settings";
@@ -78,6 +79,7 @@ import {
   PluginRouteFallback,
 } from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
+import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import {
   fetchUserSettings,
   listAgentDiscovery,
@@ -318,10 +320,14 @@ function renderDynamicSettingsRoute(pathname: string) {
 
   const pluginId = matchSingle(pathname, /^\/settings\/plugins\/([^/]+)$/);
   if (pluginId) {
-    // A plugin-authored settings route registered at exactly this path
-    // (registry.registerSettingsRoute) wins over the first-party detail
-    // page, so a plugin can fully replace its own settings surface.
-    return renderPluginSettingsRoute(pathname) ?? <PluginDetailPage pluginId={pluginId} />;
+    const pluginRoute = renderPluginSettingsRoute(pathname);
+    // A plugin may replace its detail content, but host-owned personal
+    // shortcuts remain reachable beside that contribution.
+    return pluginRoute ? (
+      <PluginRootSettingsRoute pluginId={pluginId}>{pluginRoute}</PluginRootSettingsRoute>
+    ) : (
+      <PluginDetailPage pluginId={pluginId} />
+    );
   }
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
@@ -340,6 +346,23 @@ function renderDynamicSettingsRoute(pathname: string) {
   if (executorRoute) return executorRoute;
 
   return null;
+}
+
+function PluginRootSettingsRoute({
+  pluginId,
+  children,
+}: {
+  pluginId: string;
+  children: ReactNode;
+}) {
+  const { items } = usePlugins();
+  const plugin = items.find((candidate) => candidate.id === pluginId);
+  return (
+    <div className="min-w-0 space-y-6">
+      {children}
+      {plugin && <PluginShortcutsCard plugin={plugin} plugins={items} />}
+    </div>
+  );
 }
 
 function renderExecutorSettingsRoute(pathname: string): ReactNode {

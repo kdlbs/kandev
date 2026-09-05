@@ -77,6 +77,19 @@ type pendingTaskTitleSetter interface {
 	SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error)
 }
 
+func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
+	return req != nil &&
+		req.Priority != nil &&
+		req.Title == nil &&
+		req.Description == nil &&
+		req.State == nil &&
+		req.WorkflowStepID == nil &&
+		req.Repositories == nil &&
+		req.Position == nil &&
+		req.Metadata == nil &&
+		req.ParentID == nil
+}
+
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
@@ -102,7 +115,12 @@ type taskEnvironmentSessionBorrowerFinder interface {
 }
 
 type taskEnvironmentOwnerTransferer interface {
-	TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error
+	TransferTaskEnvironmentOwnership(
+		ctx context.Context,
+		envID, expectedTaskID string,
+		expectedGeneration int64,
+		taskID string,
+	) error
 }
 
 type workflowStepCapacityTaskCreator interface {
@@ -250,6 +268,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.inheritParentProject(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.prepareWorkspacePolicyForCreation(ctx, req); err != nil {
+		return nil, err
+	}
 
 	if err := prepareAutoTitle(req); err != nil {
 		return nil, err
@@ -391,6 +412,15 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 	if err := s.persistTaskRepositoryRows(ctx, task.ID, prepared.repositories); err != nil {
 		return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, err)
 	}
+	if req.WorkspacePolicy != nil && req.WorkspacePolicy.NeedsAttachment() {
+		if s.workspacePolicyAttacher == nil {
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID,
+				errors.New("workspace policy attachment is unavailable"))
+		}
+		if err := s.workspacePolicyAttacher.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, *req.WorkspacePolicy); err != nil {
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("attach workspace policy: %w", err))
+		}
+	}
 
 	// Load repositories into task for response
 	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
@@ -411,6 +441,76 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return CreateTaskResult{Task: task, Outcome: CreateTaskOutcomeCreated}, nil
+}
+
+func (s *Service) prepareWorkspacePolicyForCreation(ctx context.Context, req *CreateTaskRequest) error {
+	policy := WorkspacePolicy{}
+	if req.WorkspacePolicy != nil {
+		policy = *req.WorkspacePolicy
+	} else if workspace, ok := req.Metadata["workspace"].(map[string]interface{}); ok {
+		policy.Mode, _ = workspace["mode"].(string)
+		policy.GroupID, _ = workspace["group_id"].(string)
+		policy.DefaultChildWorkspace, _ = workspace["default_child_workspace"].(string)
+		policy.DefaultChildOrdering, _ = workspace["default_child_ordering"].(string)
+	}
+	if err := s.applyParentWorkspacePolicyDefaults(ctx, req, &policy); err != nil {
+		return err
+	}
+	if err := validateWorkspacePolicy(req.ParentID, &policy); err != nil {
+		return err
+	}
+	if len(policy.MetadataBlock()) == 0 {
+		return nil
+	}
+	req.Metadata = policy.MergeMetadataBlock(req.Metadata)
+	req.WorkspacePolicy = &policy
+	return nil
+}
+
+func (s *Service) applyParentWorkspacePolicyDefaults(
+	ctx context.Context,
+	req *CreateTaskRequest,
+	policy *WorkspacePolicy,
+) error {
+	if req.ParentID == "" {
+		return nil
+	}
+	parent, err := s.tasks.GetTask(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("load parent workspace policy: %w", err)
+	}
+	if parent == nil {
+		return fmt.Errorf("parent task %s not found", req.ParentID)
+	}
+	parentWorkspace, _ := parent.Metadata["workspace"].(map[string]interface{})
+	if policy.ParentOrdering == "" {
+		policy.ParentOrdering, _ = parentWorkspace["default_child_ordering"].(string)
+	}
+	if policy.Mode != "" {
+		return nil
+	}
+	policy.Mode, _ = parentWorkspace["default_child_workspace"].(string)
+	return nil
+}
+
+func validateWorkspacePolicy(parentID string, policy *WorkspacePolicy) error {
+	switch policy.Mode {
+	case "":
+		return nil
+	case workspaceModeInheritParent:
+		if parentID == "" {
+			return fmt.Errorf("workspace_mode=%s requires parent_id", workspaceModeInheritParent)
+		}
+	case workspaceModeNewWorkspace:
+		policy.GroupID = ""
+	case workspaceModeSharedGroup:
+		if policy.GroupID == "" {
+			return errors.New("workspace_group_id is required when workspace_mode=shared_group")
+		}
+	default:
+		return fmt.Errorf("invalid workspace_mode: %s", policy.Mode)
+	}
+	return nil
 }
 
 // findTaskByExternalIDIfPresent is CreateTask's step-3 lookup: when the
@@ -1754,6 +1854,33 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 	return task, nil
 }
 
+func (s *Service) tryUpdateTaskPriorityOnly(
+	ctx context.Context,
+	id string,
+	task *models.Task,
+	priority string,
+) (*models.Task, bool, error) {
+	updater, ok := s.tasks.(taskrepo.TaskPriorityRepository)
+	if !ok {
+		return nil, false, nil
+	}
+	if err := updater.UpdateTaskPriority(ctx, id, priority); err != nil {
+		s.logger.Error("failed to update task priority", zap.String("task_id", id), zap.Error(err))
+		return nil, true, err
+	}
+
+	task = s.reloadTaskAfterMutation(ctx, id, task, "update priority")
+	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		s.logger.Error("failed to list task repositories", zap.Error(err))
+	} else {
+		task.Repositories = repos
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	s.logger.Info("task updated", zap.String("task_id", task.ID))
+	return task, true, nil
+}
+
 // hydrateTaskRelations populates the relations every task read is expected
 // to carry — repositories and workspace folders — that a raw
 // repository-layer task struct does not include. Callers that bypass GetTask
@@ -1790,9 +1917,16 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			return nil, err
 		}
 	}
+	if isPriorityOnlyTaskUpdate(req) {
+		updated, handled, err := s.tryUpdateTaskPriorityOnly(ctx, id, task, *req.Priority)
+		if handled {
+			return updated, err
+		}
+	}
 	oldWorkflowStepID := task.WorkflowStepID
 	var oldState *v1.TaskState
 	stateChanged := false
+	parentCleared := false
 
 	if req.Description != nil {
 		task.Description = *req.Description
@@ -1829,7 +1963,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
 		}
 	}
-	parentCleared := false
 	if req.ParentID != nil && *req.ParentID != task.ParentID {
 		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
 			return nil, err
@@ -3353,19 +3486,35 @@ func (s *Service) cleanupDestructiveTaskResources(
 	if cause := context.Cause(ctx); cause != nil {
 		return []error{cause}
 	}
-	skipOwnedEnvironment, err := s.hasActiveOtherTaskSessionsForEnvironment(ctx, taskID, envCleanup.env)
+	currentOwnership, err := s.taskEnvironmentCleanupOwnershipIsCurrent(ctx, envCleanup.env)
 	if err != nil {
-		s.logger.Warn("skipping task environment cleanup after shared-environment ownership check failed",
+		s.logger.Warn("skipping task environment cleanup after ownership-generation check failed",
 			zap.String("task_id", taskID),
 			zap.String("env_id", taskEnvironmentID(envCleanup.env)),
 			zap.Error(err))
 		errs = append(errs, fmt.Errorf("check task environment ownership %s: %w", taskEnvironmentID(envCleanup.env), err))
-		skipOwnedEnvironment = true
+	}
+	skipOwnedEnvironment := !currentOwnership
+	if currentOwnership {
+		var shared bool
+		shared, err = s.hasActiveOtherTaskSessionsForEnvironment(ctx, taskID, envCleanup.env)
+		skipOwnedEnvironment = shared
+		if err != nil {
+			s.logger.Warn("skipping task environment cleanup after shared-environment ownership check failed",
+				zap.String("task_id", taskID),
+				zap.String("env_id", taskEnvironmentID(envCleanup.env)),
+				zap.Error(err))
+			errs = append(errs, fmt.Errorf("check task environment ownership %s: %w", taskEnvironmentID(envCleanup.env), err))
+			skipOwnedEnvironment = true
+		}
 	}
 	if skipOwnedEnvironment {
 		s.logger.Info("skipping task environment cleanup while another task still uses it",
 			zap.String("task_id", taskID),
 			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
+	}
+	if !currentOwnership {
+		return errs
 	}
 	if cause := context.Cause(ctx); cause != nil {
 		return append(errs, cause)
@@ -3496,7 +3645,9 @@ func (s *Service) preserveTaskEnvironmentForActiveBorrower(ctx context.Context, 
 	if !ok {
 		return false, fmt.Errorf("task environment repository cannot transfer borrowed environment %s", env.ID)
 	}
-	if err := ownerTransfer.TransferTaskEnvironmentToTask(ctx, env.ID, borrowerTaskID); err != nil {
+	if err := ownerTransfer.TransferTaskEnvironmentOwnership(
+		ctx, env.ID, env.TaskID, env.OwnershipGeneration, borrowerTaskID,
+	); err != nil {
 		return false, fmt.Errorf("transfer task environment %s to %s: %w", env.ID, borrowerTaskID, err)
 	}
 	env.TaskID = borrowerTaskID
@@ -3616,6 +3767,13 @@ func (s *Service) cleanupTaskEnvironment(
 	if cause := context.Cause(ctx); cause != nil {
 		return []error{cause}
 	}
+	current, err := s.taskEnvironmentCleanupOwnershipIsCurrent(ctx, cleanup.env)
+	if err != nil {
+		return []error{fmt.Errorf("verify task environment ownership %s: %w", cleanup.env.ID, err)}
+	}
+	if !current {
+		return nil
+	}
 	if err := s.teardownEnvironmentResources(ctx, cleanup.env); err != nil {
 		s.logger.Warn("failed to teardown task environment during task cleanup",
 			zap.String("task_id", taskID),
@@ -3637,6 +3795,63 @@ func (s *Service) cleanupTaskEnvironment(
 		}
 	}
 	return nil
+}
+
+func (s *Service) taskEnvironmentCleanupOwnershipIsCurrent(
+	ctx context.Context,
+	snapshot *models.TaskEnvironment,
+) (bool, error) {
+	if snapshot == nil || snapshot.ID == "" {
+		return true, nil
+	}
+	if s.taskEnvironments == nil {
+		return false, errors.New("task environment repository is unavailable")
+	}
+	current, err := s.taskEnvironments.GetTaskEnvironment(ctx, snapshot.ID)
+	if errors.Is(err, taskrepo.ErrTaskEnvironmentNotFound) {
+		return s.taskEnvironmentSnapshotOwnerDeleted(ctx, snapshot)
+	}
+	if err != nil {
+		return false, err
+	}
+	if current == nil {
+		return s.taskEnvironmentSnapshotOwnerDeleted(ctx, snapshot)
+	}
+	if current.TaskID == snapshot.TaskID &&
+		(snapshot.OwnershipGeneration == 0 || current.OwnershipGeneration == snapshot.OwnershipGeneration) {
+		return true, nil
+	}
+	s.logger.Info("skipping stale task environment cleanup",
+		zap.String("env_id", snapshot.ID),
+		zap.String("expected_owner_task_id", snapshot.TaskID),
+		zap.Int64("expected_ownership_generation", snapshot.OwnershipGeneration),
+		zap.String("current_owner_task_id", current.TaskID),
+		zap.Int64("current_ownership_generation", current.OwnershipGeneration))
+	return false, nil
+}
+
+// taskEnvironmentSnapshotOwnerDeleted proves that a missing environment row
+// is the result of the owning task being deleted, rather than treating a
+// missing authority row as permission to use an arbitrary stale snapshot.
+func (s *Service) taskEnvironmentSnapshotOwnerDeleted(
+	ctx context.Context,
+	snapshot *models.TaskEnvironment,
+) (bool, error) {
+	if snapshot == nil || snapshot.TaskID == "" || s.tasks == nil {
+		if snapshot != nil && snapshot.TaskID == "" &&
+			snapshot.ContainerID == "" && snapshot.SandboxID == "" {
+			return true, nil
+		}
+		return false, nil
+	}
+	task, err := s.tasks.GetTask(ctx, snapshot.TaskID)
+	if errors.Is(err, taskrepo.ErrTaskNotFound) || task == nil {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // ListTasks returns all tasks for a workflow

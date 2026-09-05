@@ -42,6 +42,8 @@ func (r *Repository) runMigrations() {
 	r.migrateRunOutcome()
 	r.migrateParentWakeIndexes()
 	r.migrateParentWakeReceiptColumns()
+	r.migrate.Apply("task_workspace_groups.ownership_generation",
+		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases

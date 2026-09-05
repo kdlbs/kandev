@@ -321,6 +321,31 @@ func (r *ProfileExecutionResolver) ResolveRouteAction(
 	}
 }
 
+// MarkRouteActive completes a claimed route's starting phase after the
+// asynchronous agent process-start callback confirms success.
+func (r *ProfileExecutionResolver) MarkRouteActive(ctx context.Context, sessionID string, expectedGeneration int64) error {
+	if r.engine == nil {
+		return errors.New("dynamic profile execution is not configured")
+	}
+	return r.engine.MarkActive(ctx, sessionID, expectedGeneration)
+}
+
+// MarkRouteActionRequired transitions a claimed route to durable
+// action_required regardless of its current status. Callers use this so a
+// launch failure after a generation claim always exposes a recovery action
+// instead of leaving the route stuck at "starting".
+func (r *ProfileExecutionResolver) MarkRouteActionRequired(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	reason string,
+) (dynamic.RouteDecision, error) {
+	if r.engine == nil {
+		return dynamic.RouteDecision{}, errors.New("dynamic profile execution is not configured")
+	}
+	return r.engine.MarkActionRequired(ctx, sessionID, expectedGeneration, reason)
+}
+
 func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 	ctx context.Context,
 	sessionID, profileID, currentExecutionProfileID string,
