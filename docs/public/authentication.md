@@ -20,10 +20,14 @@ Authentication is a **runtime feature toggle**: the same system as the other fea
 ## What changes when authentication is on
 
 - Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`. The signed-in user is shown in the bottom-left of the sidebar, with a log-out menu.
-- **Workspaces become per-user.** You only see workspaces you own, including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup.
+- **Workspaces become per-user by default.** You only see workspaces you own, including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup. A workspace can then be shared with colleagues on purpose: see [Team Access](team-access.md).
 - Secrets are per-user. A **Global** secret is user-global across that user's workspaces; a **Workspace** secret belongs to one of their workspaces. With authentication disabled, Global is install-global. Executors and agent profiles remain shared across the instance, so they can reference Global secrets only; repositories may bind Global or same-workspace secrets.
-- Admins manage users and instance settings, but do **not** see other users' workspaces.
+- Admins manage users and instance settings, but do **not** see other users' private workspaces. Admin is a management role, not a visibility role.
 - Programmatic clients (external MCP, scripts) authenticate with personal access tokens.
+
+## Sharing work with a team
+
+Authentication makes each person's work private. To give a team a shared board without a shared login, see [Team Access](team-access.md): workspace visibility, member roles, and scoped permissions.
 
 ## Enabling authentication
 

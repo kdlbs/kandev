@@ -54,7 +54,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	)
 	state := map[string]any{
 		"workspaces": map[string]any{
-			"items":    workspaceItemStates(workspaces),
+			"items":    b.workspaceItemStates(ctx, workspaces),
 			"activeId": nullString(activeWorkspaceID),
 		},
 	}
@@ -122,7 +122,7 @@ func (b bootStateBuilder) routeContextBootData(ctx context.Context, req *http.Re
 	)
 	state := map[string]any{
 		"workspaces": map[string]any{
-			"items":    workspaceItemStates(workspaces),
+			"items":    b.workspaceItemStates(ctx, workspaces),
 			"activeId": nullString(activeWorkspaceID),
 		},
 	}
@@ -171,11 +171,21 @@ func workspaceIDSet(workspaces []*taskmodels.Workspace) map[string]bool {
 }
 
 // workspaceItemStates maps each workspace to its boot state shape.
-func workspaceItemStates(workspaces []*taskmodels.Workspace) []map[string]any {
+// workspaceItemStates maps each workspace to its boot state shape, including
+// the caller's resolved role and scopes.
+//
+// The projection is threaded through here rather than left to the HTTP list
+// endpoint: this is a second, independent serialization path into the same
+// store, and a field added only to the DTO silently never reaches a
+// first-paint render.
+func (b bootStateBuilder) workspaceItemStates(ctx context.Context, workspaces []*taskmodels.Workspace) []map[string]any {
+	access := b.p.taskSvc.ProjectWorkspaceAccess(ctx, workspaces)
 	items := make([]map[string]any, 0, len(workspaces))
 	for _, workspace := range workspaces {
 		if workspace != nil {
-			items = append(items, mapWorkspaceItemState(taskdto.FromWorkspace(workspace)))
+			items = append(items, mapWorkspaceItemState(taskdto.FromWorkspaceWithAccess(
+				workspace, access.Decision(workspace.ID), access.MemberCounts[workspace.ID],
+			)))
 		}
 	}
 	return items
@@ -696,6 +706,10 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"name":                            workspace.Name,
 		"description":                     workspace.Description,
 		"owner_id":                        workspace.OwnerID,
+		"unit_id":                         workspace.UnitID,
+		"viewer_role":                     workspace.ViewerRole,
+		"scopes":                          workspace.Scopes,
+		"member_count":                    workspace.MemberCount,
 		"default_executor_id":             workspace.DefaultExecutorID,
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,

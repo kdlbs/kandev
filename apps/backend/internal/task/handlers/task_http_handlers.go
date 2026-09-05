@@ -1573,6 +1573,8 @@ type httpUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. "" unassigns.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 type httpUpdateTaskPortForwardingRequest struct {
@@ -1647,14 +1649,15 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	}
 
 	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
-		Title:        title,
-		Description:  description,
-		Priority:     body.Priority,
-		State:        body.State,
-		Repositories: convertUpdateRepositories(body.Repositories != nil, repos),
-		Position:     body.Position,
-		Metadata:     body.Metadata,
-		ParentID:     body.ParentID,
+		Title:          title,
+		Description:    description,
+		Priority:       body.Priority,
+		State:          body.State,
+		Repositories:   convertUpdateRepositories(body.Repositories != nil, repos),
+		Position:       body.Position,
+		Metadata:       body.Metadata,
+		ParentID:       body.ParentID,
+		AssigneeUserID: body.AssigneeUserID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")

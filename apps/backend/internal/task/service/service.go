@@ -319,6 +319,10 @@ type Repos struct {
 // Service provides task business logic
 type Service struct {
 	workspaces                      repository.WorkspaceRepository
+	userDirectory                   UserDirectory
+	unitPlacer                      UnitPlacer
+	unitReach                       UnitReachResolver
+	userOrgs                        func(ctx context.Context, userID string) (string, error)
 	tasks                           repository.TaskRepository
 	taskRepos                       repository.TaskRepoRepository
 	workspaceFolders                repository.TaskWorkspaceFolderRepository

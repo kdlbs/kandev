@@ -246,9 +246,9 @@ func (s *Store) CreateInvite(ctx context.Context, invite *Invite) error {
 	}
 	invite.CreatedAt = time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO auth_invites (id, token_sha256, email, role, created_by, created_at, expires_at, used_by, used_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), invite.ID, invite.TokenHash, invite.Email, invite.Role, invite.CreatedBy, invite.CreatedAt, invite.ExpiresAt, invite.UsedBy, invite.UsedAt)
+		INSERT INTO auth_invites (id, token_sha256, email, role, org_id, created_by, created_at, expires_at, used_by, used_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), invite.ID, invite.TokenHash, invite.Email, invite.Role, invite.OrgID, invite.CreatedBy, invite.CreatedAt, invite.ExpiresAt, invite.UsedBy, invite.UsedAt)
 	return err
 }
 

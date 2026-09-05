@@ -218,6 +218,7 @@ export type WorkspacePayload = {
   name: string;
   description?: string;
   owner_id?: string;
+  unit_id?: string;
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;

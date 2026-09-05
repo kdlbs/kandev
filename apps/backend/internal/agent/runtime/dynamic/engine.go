@@ -17,6 +17,7 @@ const (
 	routeStatusStarting       = "starting"
 	routeStatusActive         = "active"
 	routeStatusActionRequired = "action_required"
+	routeStatusRetrying       = "retrying"
 )
 
 func WithClock(now func() time.Time) EngineOption {
@@ -576,6 +577,26 @@ func (e *Engine) persistInitialGeneration(
 	return true, nil
 }
 
+// persistExpectedStatus atomically updates a same-generation route status.
+// Persistence without status-fencing support fails closed.
+func (e *Engine) persistExpectedStatus(ctx context.Context, expectedGeneration int64, expectedStatus string, state RouteState) error {
+	if e.persistence == nil {
+		return nil
+	}
+	claimer, ok := e.persistence.(GenerationStatusClaimer)
+	if !ok {
+		return ErrStatusClaimUnsupported
+	}
+	claimed, err := claimer.ClaimRouteStateFrom(ctx, expectedGeneration, expectedStatus, state)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return ErrStaleGeneration
+	}
+	return nil
+}
+
 func mustJSON(value PolicyState) []byte {
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -725,6 +746,27 @@ func (e *Engine) MarkActionRequired(
 	}, nil
 }
 
+// MarkRecoveryActionRequired returns an in-flight route to manual recovery.
+// Stale generations and states that already moved on are no-ops.
+func (e *Engine) MarkRecoveryActionRequired(ctx context.Context, sessionID string, expectedGeneration int64) error {
+	state, exists, err := e.stateForFailure(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !exists || state.Generation != expectedGeneration || state.Status != routeStatusRetrying {
+		return nil
+	}
+	state.Status = routeStatusActionRequired
+	state.UpdatedAt = e.now()
+	if err := e.persistExpectedStatus(ctx, expectedGeneration, routeStatusRetrying, state); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	e.states[sessionID] = state
+	e.mu.Unlock()
+	return nil
+}
+
 func (e *Engine) resumePending(
 	ctx context.Context,
 	sessionID string,
@@ -741,12 +783,13 @@ func (e *Engine) resumePending(
 	if state.Generation != expectedGeneration {
 		return RouteDecision{}, ErrStaleGeneration
 	}
-	if force && state.Status == "retrying" {
+	if force && state.Status == routeStatusRetrying {
 		return RouteDecision{}, ErrRecoveryPending
 	}
 	if !force && state.Status != string(routingpolicy.DecisionRetry) && state.Status != string(routingpolicy.DecisionWaitForReset) {
 		return RouteDecision{}, ErrRecoveryPending
 	}
+	observedStatus := state.Status
 	var policyState PolicyState
 	if state.PolicyStateJSON != "" {
 		if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); err != nil {
@@ -757,10 +800,9 @@ func (e *Engine) resumePending(
 	if !force && policyState.Deadline != nil && now.Before(*policyState.Deadline) {
 		return RouteDecision{}, ErrRecoveryNotDue
 	}
-	expectedStatus := state.Status
-	state.Status = "retrying"
+	state.Status = routeStatusRetrying
 	state.UpdatedAt = now
-	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
+	if err := e.persistExpectedStatus(ctx, expectedGeneration, observedStatus, state); err != nil {
 		return RouteDecision{}, err
 	}
 	e.mu.Lock()

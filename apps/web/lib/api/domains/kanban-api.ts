@@ -143,6 +143,8 @@ export async function updateTask(
     }>;
     /** Nest under another task. Empty string clears the parent (un-nest). */
     parent_id?: string;
+    /** Human assignee. "" unassigns; omitting the field leaves it alone. */
+    assignee_user_id?: string;
     priority?: TaskPriority;
   },
   options?: ApiRequestOptions,
