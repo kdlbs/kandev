@@ -49,7 +49,7 @@ export function buildFrontendErrorReport(input: FrontendErrorReportInput): Front
     client_timestamp: new Date().toISOString(),
     source: input.source,
     title: visibleText(input.title),
-    description: visibleText(input.description),
+    ...(input.source === "backend-reload" ? {} : { description: visibleText(input.description) }),
   };
   if (input.source !== "backend-reload") {
     report.stack = bounded(new Error("error toast emitted").stack, STACK_LIMIT);

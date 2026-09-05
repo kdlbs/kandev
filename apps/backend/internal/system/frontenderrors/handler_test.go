@@ -97,6 +97,7 @@ func TestHandlerRejectsInvalidBackendReloadReports(t *testing.T) {
 	}{
 		{name: "unknown signal", body: `{"source":"backend-reload","title":"other"}`},
 		{name: "error data", body: `{"source":"backend-reload","title":"boot_id_changed","stack":"toast stack"}`},
+		{name: "description data", body: `{"source":"backend-reload","title":"boot_id_changed","description":"should be rejected"}`},
 	}
 
 	for _, test := range tests {

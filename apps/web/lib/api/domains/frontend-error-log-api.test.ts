@@ -62,6 +62,16 @@ describe("frontend error log API", () => {
     expect(report.error).toBeUndefined();
   });
 
+  it("omits descriptions from backend-reload reports", () => {
+    const report = buildFrontendErrorReport({
+      source: "backend-reload",
+      title: "boot_id_changed",
+      description: "should be suppressed",
+    });
+
+    expect(report.description).toBeUndefined();
+  });
+
   it("uses an authenticated two-second request and silently accepts 204", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
