@@ -67,6 +67,7 @@ test.describe("Mobile sidebar task actions", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
+      priority: "critical",
     });
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
@@ -92,6 +93,8 @@ test.describe("Mobile sidebar task actions", () => {
     const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
     await expect(row).toBeVisible();
     const prIcon = row.getByTestId(`pr-task-icon-${task.id}`);
+    const priorityIcon = row.getByTestId("sidebar-task-priority-indicator");
+    await expect(priorityIcon).toHaveAttribute("aria-label", "Priority Critical");
     await expect(prIcon).toBeVisible({ timeout: 15_000 });
 
     const spacing = await row.evaluate((el, titleText) => {
@@ -99,21 +102,46 @@ test.describe("Mobile sidebar task actions", () => {
         (candidate) =>
           candidate.classList.contains("whitespace-nowrap") && candidate.textContent === titleText,
       );
+      const priority = el.querySelector('[data-testid="sidebar-task-priority-indicator"]');
       const pr = el.querySelector('[data-testid^="pr-task-icon-"]');
-      if (!titleElement || !pr) return { found: false, gap: -1, titleTop: -1, prTop: -1 };
+      if (!titleElement || !priority || !pr) {
+        return { found: false, titleRight: -1, priorityLeft: -1, priorityRight: -1, prLeft: -1 };
+      }
       const titleBox = titleElement.getBoundingClientRect();
+      const priorityBox = priority.getBoundingClientRect();
       const prBox = pr.getBoundingClientRect();
       return {
         found: true,
-        gap: prBox.left - titleBox.right,
-        titleTop: titleBox.top,
-        prTop: prBox.top,
+        titleRight: titleBox.right,
+        priorityLeft: priorityBox.left,
+        priorityRight: priorityBox.right,
+        prLeft: prBox.left,
       };
     }, title);
     expect(spacing.found).toBe(true);
-    expect(Math.abs(spacing.titleTop - spacing.prTop)).toBeLessThan(4);
-    expect(spacing.gap).toBeGreaterThanOrEqual(0);
-    expect(spacing.gap).toBeLessThan(32);
+    expect(spacing.titleRight).toBeLessThanOrEqual(spacing.priorityLeft);
+    expect(spacing.priorityRight).toBeLessThanOrEqual(spacing.prLeft);
+
+    await row.getByRole("button", { name: "Task actions" }).tap();
+    const priorityMenu = testPage.getByTestId("task-context-priority");
+    await expect(priorityMenu.locator(".tabler-icon-flag")).toBeVisible();
+    await priorityMenu.tap();
+    const lowOption = testPage.getByTestId("task-context-priority-low");
+    await expect(lowOption).toBeVisible();
+    const prioritySubmenu = lowOption.locator("xpath=ancestor::*[@role='menu'][1]");
+    await prioritySubmenu.evaluate((element) =>
+      Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)),
+      ),
+    );
+    const optionBox = await lowOption.boundingBox();
+    expect(optionBox).not.toBeNull();
+    expect(Math.round(optionBox!.height)).toBeGreaterThanOrEqual(44);
+    await lowOption.tap();
+    await expect(priorityIcon).toHaveAttribute("aria-label", "Priority Low");
+    await expect.poll(async () => (await apiClient.getTask(task.id)).priority).toBe("low");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile sidebar PR badge spacing");
   });
 

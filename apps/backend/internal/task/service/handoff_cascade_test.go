@@ -22,17 +22,26 @@ func newCascadeRepo(base *fakeTaskRepo) *fakeCascadeRepo {
 	return &fakeCascadeRepo{phase4TaskRepo: &phase4TaskRepo{base: base}}
 }
 
-func (r *fakeCascadeRepo) ArchiveTaskIfActive(_ context.Context, id, cascadeID string) (bool, error) {
+func (r *fakeCascadeRepo) ArchiveTaskIfActive(ctx context.Context, id, cascadeID string) (bool, error) {
+	_, changed, err := r.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
+	return changed, err
+}
+
+func (r *fakeCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
+	_ context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
 	t := r.base.tasks[id]
 	if t == nil || t.ArchivedAt != nil {
-		return false, nil
+		return "", false, nil
 	}
 	now := time.Now().UTC()
 	t.ArchivedAt = &now
 	t.ArchivedByCascadeID = cascadeID
-	return true, nil
+	return t.WorkflowStepID, true, nil
 }
 
 func (r *fakeCascadeRepo) UnarchiveTaskByCascade(_ context.Context, id, cascadeID string) (bool, error) {
@@ -580,6 +589,14 @@ func (r *archiveErrorCascadeRepo) ArchiveTaskIfActive(context.Context, string, s
 	return false, r.err
 }
 
+func (r *archiveErrorCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
+	context.Context,
+	string,
+	string,
+) (string, bool, error) {
+	return "", false, r.err
+}
+
 func TestArchiveTaskTree_DoesNotFinalizeSessionWhenArchiveFails(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.addTask("root", "", "ws-1")
@@ -612,11 +629,20 @@ type fakeDeleteRepo struct {
 	*fakeCascadeRepo
 }
 
-func (r *fakeDeleteRepo) DeleteTask(_ context.Context, id string) error {
+func (r *fakeDeleteRepo) DeleteTask(ctx context.Context, id string) error {
+	_, err := r.DeleteTaskWithVacatedStep(ctx, id)
+	return err
+}
+
+func (r *fakeDeleteRepo) DeleteTaskWithVacatedStep(_ context.Context, id string) (string, error) {
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
+	task := r.base.tasks[id]
+	if task == nil {
+		return "", errors.New("task not found")
+	}
 	delete(r.base.tasks, id)
-	return nil
+	return task.WorkflowStepID, nil
 }
 
 func (r *fakeDeleteRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
@@ -630,6 +656,10 @@ type deleteErrorCascadeRepo struct {
 
 func (r *deleteErrorCascadeRepo) DeleteTask(context.Context, string) error {
 	return r.err
+}
+
+func (r *deleteErrorCascadeRepo) DeleteTaskWithVacatedStep(context.Context, string) (string, error) {
+	return "", r.err
 }
 
 func TestDeleteTaskTree_DoesNotFinalizeSessionWhenDeleteFails(t *testing.T) {

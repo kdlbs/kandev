@@ -96,6 +96,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     quickChatTabOrderByWorkspace: {},
     hiddenWorkflowStepIds: {},
@@ -372,6 +373,7 @@ export function buildCoreFields(
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
     quickChatTabOrderByWorkspace:
       s.quick_chat_tab_order_by_workspace ?? current.quickChatTabOrderByWorkspace,
+    resolveSessionHostnames: s.resolve_session_hostnames ?? current.resolveSessionHostnames,
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
     workflowIdsWithAutoHideEmptySteps:
       s.workflow_ids_with_auto_hide_empty_steps ?? current.workflowIdsWithAutoHideEmptySteps,

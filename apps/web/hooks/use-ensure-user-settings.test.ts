@@ -112,6 +112,7 @@ function makeUnloadedSettings(): UserSettingsState {
     lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     quickChatTabOrderByWorkspace: {},
     lspAutoStartLanguages: [],

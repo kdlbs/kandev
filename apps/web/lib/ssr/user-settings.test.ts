@@ -196,6 +196,24 @@ describe("quick-chat tab order hydration", () => {
   });
 });
 
+describe("session hostname resolution setting hydration", () => {
+  it("defaults to disabled, maps explicit values, and preserves omitted updates", () => {
+    const defaults = buildCoreFields({}) as Record<string, unknown>;
+    const enabled = buildCoreFields({ resolve_session_hostnames: true } as Parameters<
+      typeof buildCoreFields
+    >[0]) as Record<string, unknown>;
+    const current = {
+      ...mapUserSettingsResponse(null),
+      resolveSessionHostnames: true,
+    } as Parameters<typeof buildCoreFields>[1];
+    const omitted = buildCoreFields({}, current) as Record<string, unknown>;
+
+    expect(defaults.resolveSessionHostnames).toBe(false);
+    expect(enabled.resolveSessionHostnames).toBe(true);
+    expect(omitted.resolveSessionHostnames).toBe(true);
+  });
+});
+
 describe("buildCoreFields", () => {
   it("normalizes the simplified metrics preference and defaults old rows to detailed", () => {
     expect(parseSystemMetricsDisplay({ show_in_topbar: true, simplified: true } as never)).toEqual({

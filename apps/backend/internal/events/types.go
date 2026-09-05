@@ -182,6 +182,7 @@ const (
 const (
 	UserSettingsUpdated              = "user.settings.updated"
 	UserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
+	AuthSessionHostnameResolved      = "auth.session.hostname.resolved"
 )
 
 // PluginUserStateUpdated fires after a successful write/delete on a

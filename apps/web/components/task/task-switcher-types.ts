@@ -26,6 +26,7 @@ export type TaskSwitcherItem = {
   id: string;
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
   /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
@@ -38,7 +39,6 @@ export type TaskSwitcherItem = {
   workflowStepId?: string;
   workflowStepTitle?: string;
   workspaceId?: string;
-  priority?: TaskPriority;
   origin?: TaskOrigin | string;
   primaryExecutorProfileId?: string;
   workflowStepColor?: string;

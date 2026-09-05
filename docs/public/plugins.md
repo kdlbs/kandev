@@ -51,10 +51,12 @@ plugin is installed and active. Bundles can also inject components into
 host-defined slots, including **icon buttons in the chat composer toolbar**
 (beside the model picker, mic, and send button), so an active plugin can add
 its own action right where you message an agent. A bundle can also declare
-**keybindings** (user-overridable at **Settings > Keyboard Shortcuts**, with
-core shortcuts always winning on a conflict) and open host-owned **modal
-windows** from anywhere in its code: see [Authoring a
-plugin](plugins-authoring.md) for both.
+**keybindings** (user-overridable on the installed plugin's detail page at
+**Settings > Plugins > `<plugin>`**, with core shortcuts always winning on a
+conflict) and open host-owned **modal windows** from anywhere in its code: see
+[Authoring a plugin](plugins-authoring.md) for both. Shortcut overrides are
+personal to each user; plugin configuration and lifecycle controls remain
+administrator-only.
 
 ### Global Status contributions
 

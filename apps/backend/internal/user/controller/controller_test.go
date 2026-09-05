@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"testing"
-
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
+	"reflect"
+	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/user/dto"
@@ -274,4 +274,64 @@ func TestSystemMetricsDisplayPatch(t *testing.T) {
 			t.Fatalf("Simplified = %v, want nil for omitted field", *got.Simplified)
 		}
 	})
+}
+
+func TestUpdateUserSettingsMapsResolveSessionHostnames(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{}}
+	controller := NewController(service.NewService(repo, nil, log))
+
+	var enabled dto.UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"resolve_session_hostnames":true}`), &enabled); err != nil {
+		t.Fatalf("decode enabled patch: %v", err)
+	}
+	response, err := controller.UpdateUserSettings(context.Background(), enabled)
+	if err != nil {
+		t.Fatalf("update enabled setting: %v", err)
+	}
+	encoded, err := json.Marshal(response.Settings)
+	if err != nil {
+		t.Fatalf("encode settings response: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode settings response: %v", err)
+	}
+	if got, ok := payload["resolve_session_hostnames"].(bool); !ok || !got {
+		t.Fatalf("resolve_session_hostnames = %#v, want true", payload["resolve_session_hostnames"])
+	}
+
+	var omitted dto.UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted patch: %v", err)
+	}
+	if _, err := controller.UpdateUserSettings(context.Background(), omitted); err != nil {
+		t.Fatalf("apply omitted patch: %v", err)
+	}
+	if !resolveSessionHostnamesFromSettings(t, repo.settings) {
+		t.Fatal("omitted ResolveSessionHostnames did not preserve true")
+	}
+
+	var disabled dto.UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"resolve_session_hostnames":false}`), &disabled); err != nil {
+		t.Fatalf("decode disabled patch: %v", err)
+	}
+	if _, err := controller.UpdateUserSettings(context.Background(), disabled); err != nil {
+		t.Fatalf("apply disabled patch: %v", err)
+	}
+	if resolveSessionHostnamesFromSettings(t, repo.settings) {
+		t.Fatal("explicit false did not persist")
+	}
+}
+
+func resolveSessionHostnamesFromSettings(t *testing.T, settings *models.UserSettings) bool {
+	t.Helper()
+	field := reflect.ValueOf(settings).Elem().FieldByName("ResolveSessionHostnames")
+	if !field.IsValid() {
+		t.Fatal("ResolveSessionHostnames field is missing")
+	}
+	return field.Bool()
 }

@@ -215,6 +215,7 @@ function useSubmitHandlersWiring({
     repositoryLocalPath,
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
+    priority: fs.priority,
     blockedBy: fs.blockedBy,
     editDependencies,
   });

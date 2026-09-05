@@ -354,6 +354,13 @@ test.describe("Git Changes Panel", () => {
     const stagedSection = testPage.getByTestId("staged-files-section");
     const stagedRow = stagedSection.getByTestId("file-row-pending-action.txt");
     await expect(stagedRow).toBeVisible();
+    // The stage response and its status refresh arrive on separate WebSocket
+    // frames. Wait for the first operation's pending state to clear before
+    // starting the second operation, so a late stage refresh cannot clear the
+    // unstage marker that the next assertion is checking.
+    await expect(
+      stagedRow.getByTestId("file-row-icon-action-slot").locator(":scope > div"),
+    ).toHaveCSS("opacity", "0");
 
     pausedAction.arm("worktree.unstage");
     await stagedRow.hover();

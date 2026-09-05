@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type { LocalRepository } from "@/lib/types/http";
+import type { LocalRepository, TaskPriority } from "@/lib/types/http";
 import type {
   TaskFormInputsHandle,
   TaskRemoteRepoRow,
@@ -328,6 +328,7 @@ function useFormStateValues(workflowId: string | null) {
   const [noRepository, setNoRepository] = useState(false);
   const [workspacePath, setWorkspacePath] = useState("");
   const [autopilot, setAutopilot] = useState(false);
+  const [priority, setPriority] = useState<TaskPriority>("medium");
   return {
     taskName,
     setTaskName,
@@ -365,6 +366,8 @@ function useFormStateValues(workflowId: string | null) {
     setWorkspacePath,
     autopilot,
     setAutopilot,
+    priority,
+    setPriority,
   };
 }
 
@@ -437,6 +440,7 @@ export function useDialogFormState(
       setNoRepository: form.setNoRepository,
       setWorkspacePath: form.setWorkspacePath,
       setAutopilot: form.setAutopilot,
+      setPriority: form.setPriority,
     },
   });
 

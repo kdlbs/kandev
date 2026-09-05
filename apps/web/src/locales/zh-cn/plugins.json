@@ -79,6 +79,8 @@
   "resetAutoUpdateFor": "将 {{name}} 的自动更新重置为默认",
   "savingRestartsPlugin": "保存后将重启插件以使新设置生效。",
   "searchPlugins": "搜索插件…",
+  "shortcuts": "键盘快捷键",
+  "shortcutsDescription": "这些快捷键属于您的个人账户，仅在此插件处于活跃状态时运行。",
   "selectAUtilityAgent": "选择辅助智能体…",
   "selectPlaceholder": "选择…",
   "selectedUtilityAgentUnavailable": "所选辅助智能体不可用",

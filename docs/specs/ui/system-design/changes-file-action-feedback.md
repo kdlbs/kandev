@@ -25,8 +25,9 @@ unchanged.
 
 - `useSessionGit` continues to own `pendingStageFiles`, keyed by repository and
   path. It starts the per-file pending state before dispatching
-  `worktree.stage` or `worktree.unstage` and clears it through the existing
-  status-refresh and failure paths.
+  `worktree.stage` or `worktree.unstage` and clears it when the associated
+  request completes, including the failure path. Independent status frames do
+  not clear an in-flight marker.
 - `changes-panel-tree.tsx` and `changes-panel-timeline.tsx` continue to derive
   `FileRow.isPending` from that set. No additional local loading state is added.
 - `FileRow` continues to share one implementation across the desktop Changes
@@ -78,9 +79,10 @@ section.
 ## Failure and recovery
 
 The UI does not infer completion from hover or elapsed time. It follows the
-existing `isPending` input. Existing status-refresh and request-failure paths
-clear that state; the slot then restores the idle icon/action presentation.
-Backend and WebSocket errors remain surfaced through their current paths.
+existing `isPending` input. Request completion or failure clears that state;
+the slot then restores the idle icon/action presentation. Independent status
+refreshes cannot clear an in-flight marker. Backend and WebSocket errors remain
+surfaced through their current paths.
 
 ## Verification
 

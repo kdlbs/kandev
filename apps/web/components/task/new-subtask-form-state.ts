@@ -175,6 +175,11 @@ const INERT_TITLE_DRAFT = {
   openCycle: 0,
   autopilot: false,
   setAutopilot: NOOP,
+  // The subtask dialog doesn't render a priority control; subtasks are
+  // created at the default priority and can be changed from their card
+  // afterward.
+  priority: "medium",
+  setPriority: NOOP,
 } as const;
 
 // No-repo / scratch workspace mode is a top-level create-task feature. The

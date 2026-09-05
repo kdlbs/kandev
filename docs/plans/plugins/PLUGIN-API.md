@@ -755,7 +755,9 @@ interface PluginRegistry {
   registerNavItem(item: NavItem): void;
 
   // Route under /settings/plugins/{id}/... rendered inside settings shell.
-  // The settings shell already provides its own topbar chrome — no options here.
+  // The exact /settings/plugins/{id} route retains the host-owned personal
+  // shortcut card beside the plugin component; nested routes are fully
+  // plugin-owned. The settings shell already provides its own topbar chrome.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
 
   // Native Settings > Integrations contribution. The host adds index/navigation
@@ -842,8 +844,10 @@ interface PluginRegistry {
   // ctrl/cmd/mod/alt modifier, and the dispatcher re-checks the *resolved*
   // combo, so a user override that drops the modifier silently falls back to
   // skipping editables rather than swallowing ordinary keystrokes. Combos are
-  // user-overridable in Settings > Keyboard Shortcuts, namespaced
-  // `plugin:{pluginId}:{id}`. Binding an id the manifest didn't declare still
+  // user-overridable on the installed plugin detail page (Settings > Plugins >
+  // <plugin>), namespaced `plugin:{pluginId}:{id}`. Overrides are personal to
+  // the signed-in user; plugin configuration and lifecycle controls remain
+  // administrator-only. Binding an id the manifest didn't declare still
   // stores the handler (a console warning is logged) since the dispatcher's
   // effective-shortcut resolution keys off the manifest list.
   //

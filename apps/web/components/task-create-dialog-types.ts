@@ -5,6 +5,7 @@ import type {
   RepositorySet,
   Executor,
   Task,
+  TaskPriority,
   CreateTaskResponse,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
@@ -432,6 +433,9 @@ export type DialogFormState = {
   /** Create-mode opt-in. Autopilot is immutable after task creation. */
   autopilot: boolean;
   setAutopilot: (v: boolean) => void;
+  /** Priority to submit with the created task. Defaults to `medium`. */
+  priority: TaskPriority;
+  setPriority: (v: TaskPriority) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -522,6 +526,8 @@ export type SubmitHandlersDeps = {
   editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
+  /** Priority to submit with the created task. Defaults to `medium`. */
+  priority: TaskPriority;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
