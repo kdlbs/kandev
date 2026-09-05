@@ -33,6 +33,7 @@ type PollOperation = {
 type SharedRequest = {
   controller: AbortController;
   consumers: Set<symbol>;
+  terminalProjection: boolean;
   promise: Promise<ShellCommandOutputSnapshot>;
 };
 
@@ -76,6 +77,7 @@ function requestSharedOutput(
   sessionId: string,
   messageId: string,
   consumer: symbol,
+  terminalProjection: boolean,
 ) {
   const output = outputCache.get(outputKey) ?? { snapshot: null, request: null };
   touchOutput(outputKey, output);
@@ -83,20 +85,27 @@ function requestSharedOutput(
     return Promise.resolve(output.snapshot);
   }
   if (output.request) {
-    output.request.consumers.add(consumer);
-    return output.request.promise;
+    if (!terminalProjection || output.request.terminalProjection) {
+      output.request.consumers.add(consumer);
+      return output.request.promise;
+    }
+    output.request.controller.abort();
+    output.request = null;
   }
 
   const controller = new AbortController();
   const request: SharedRequest = {
     controller,
     consumers: new Set([consumer]),
+    terminalProjection,
     promise: fetchShellCommandOutput(sessionId, messageId, {
       init: { signal: controller.signal },
     })
       .then((snapshot) => {
-        output.snapshot = snapshot;
-        touchOutput(outputKey, output);
+        if (output.request === request) {
+          output.snapshot = snapshot;
+          touchOutput(outputKey, output);
+        }
         return snapshot;
       })
       .finally(() => {
@@ -182,7 +191,13 @@ export function useShellCommandOutput({
     const requestSnapshot = async () => {
       if (!snapshotRef.current) setIsLoading(true);
       try {
-        const nextSnapshot = await requestSharedOutput(outputKey, sessionId, messageId, consumer);
+        const nextSnapshot = await requestSharedOutput(
+          outputKey,
+          sessionId,
+          messageId,
+          consumer,
+          isTerminalToolCallStatus(messageStatusRef.current),
+        );
         if (operation.generation !== generation) return;
         failureCount = 0;
         snapshotRef.current = nextSnapshot;

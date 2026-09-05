@@ -215,6 +215,53 @@ describe("useShellCommandOutput shared cache", () => {
     expect(reopened.result.current.snapshot?.output.stdout).toBe("cached");
     expect(fetchOutputMock).toHaveBeenCalledTimes(1);
   });
+
+  it("replaces a shared running request once when separate renderers become terminal", async () => {
+    const finalOutput = "final shared output";
+    const running = deferred<ShellCommandOutputSnapshot>();
+    const terminal = deferred<ShellCommandOutputSnapshot>();
+    const signals: AbortSignal[] = [];
+    fetchOutputMock.mockImplementation((_sessionId, _messageId, options) => {
+      const signal = options?.init?.signal;
+      if (signal) signals.push(signal);
+      return signals.length === 1 ? running.promise : terminal.promise;
+    });
+
+    const renderOutput = () =>
+      renderHook(
+        ({ messageStatus }) =>
+          useShellCommandOutput({
+            sessionId: "session-1",
+            messageId,
+            isOpen: true,
+            messageStatus,
+          }),
+        { initialProps: { messageStatus: "running" } },
+      );
+    const first = renderOutput();
+    const second = renderOutput();
+    expect(fetchOutputMock).toHaveBeenCalledTimes(1);
+
+    first.rerender({ messageStatus: "complete" });
+    second.rerender({ messageStatus: "complete" });
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(fetchOutputMock).toHaveBeenCalledTimes(2);
+    terminal.resolve(snapshot("complete", finalOutput, { exit_code: 0 }));
+    await flushPromises();
+    expect(first.result.current.snapshot?.output.stdout).toBe(finalOutput);
+    expect(second.result.current.snapshot?.output.stdout).toBe(finalOutput);
+
+    running.resolve(snapshot("running", "stale shared output"));
+    await flushPromises();
+    first.unmount();
+    second.unmount();
+
+    const reopened = renderOutput();
+    await flushPromises();
+    expect(reopened.result.current.snapshot?.output.stdout).toBe(finalOutput);
+    expect(fetchOutputMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("useShellCommandOutput cleanup", () => {
