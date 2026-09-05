@@ -27,7 +27,7 @@ type stepEntryDispatchCall struct {
 	ctxErr                              error
 }
 
-func (f *fakeStepEntryDispatcher) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
+func (f *fakeStepEntryDispatcher) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string, markerEntryID int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, stepEntryDispatchCall{
@@ -64,7 +64,7 @@ func TestDispatchStepEntryUsesLiveContextAfterCommit(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	repo.dispatchStepEntry(ctx, "task-1", "wf-1", "step-1", "entry-1")
+	repo.dispatchStepEntry(ctx, "task-1", "wf-1", "step-1", "entry-1", 0)
 
 	calls := fake.callsForTask("task-1")
 	if len(calls) != 1 {

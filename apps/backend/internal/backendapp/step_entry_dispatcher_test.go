@@ -114,7 +114,7 @@ func TestEngineStepEntryDispatcherAdapterReadsEngineLazily(t *testing.T) {
 	provider := &fakeWorkflowEngineProvider{eng: engineWithoutCallback}
 	adapter := &engineStepEntryDispatcherAdapter{engineProvider: provider, log: newTestLogger()}
 
-	adapter.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-build", "entry-1")
+	adapter.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-build", "entry-1", 0)
 	if callback.calls != 0 {
 		t.Fatalf("callback should not have been reachable through the pre-reinit engine, got %d calls", callback.calls)
 	}
@@ -122,7 +122,7 @@ func TestEngineStepEntryDispatcherAdapterReadsEngineLazily(t *testing.T) {
 	// Simulate reinitWorkflowEngine replacing s.workflowEngine wholesale.
 	provider.eng = engineWithCallback
 
-	adapter.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-build", "entry-2")
+	adapter.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-build", "entry-2", 0)
 	if callback.calls != 1 {
 		t.Fatalf("expected DispatchStepEntry to reach the current (post-reinit) engine's callback exactly once, got %d calls", callback.calls)
 	}
@@ -135,5 +135,5 @@ func TestEngineStepEntryDispatcherAdapterNilEngineIsNoop(t *testing.T) {
 	provider := &fakeWorkflowEngineProvider{eng: nil}
 	adapter := &engineStepEntryDispatcherAdapter{engineProvider: provider, log: newTestLogger()}
 
-	adapter.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-build", "entry-1")
+	adapter.DispatchStepEntry(context.Background(), "task-1", "wf-1", "step-build", "entry-1", 0)
 }
