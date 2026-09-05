@@ -43,6 +43,35 @@ describe("frontend error log API", () => {
     expect(JSON.stringify(report)).not.toContain("must-not-be-walked");
   });
 
+  it("builds backend-reload reports without a synthetic toast stack", () => {
+    const report = buildFrontendErrorReport({
+      source: "backend-reload",
+      title: "boot_id_changed",
+    });
+
+    expect(report.stack).toBeUndefined();
+  });
+
+  it("omits error objects from backend-reload reports", () => {
+    const report = buildFrontendErrorReport({
+      source: "backend-reload",
+      title: "boot_id_changed",
+      error: new Error("not a toast error"),
+    });
+
+    expect(report.error).toBeUndefined();
+  });
+
+  it("omits descriptions from backend-reload reports", () => {
+    const report = buildFrontendErrorReport({
+      source: "backend-reload",
+      title: "boot_id_changed",
+      description: "should be suppressed",
+    });
+
+    expect(report.description).toBeUndefined();
+  });
+
   it("uses an authenticated two-second request and silently accepts 204", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
