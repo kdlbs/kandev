@@ -84,8 +84,10 @@ system-metrics subsystems until a later removal proposal.
   primitives.
 - The `main-top-bar` component derives the requested metric families from the
   confirmed preference, polls `summary` at the interval returned by the
-  backend, and renders one compact clickable contribution. It never starts a
-  timer when no reading is enabled.
+  backend, and renders one compact clickable contribution. It calls
+  `host.api.fetch("webhooks/summary", ...)`, which the host scopes to this
+  plugin's authenticated webhook route. It never starts a timer when no
+  reading is enabled.
 - The existing modal continues to poll `usage` only while mounted. It is not
   restyled or reinterpreted by ambient display preferences.
 
@@ -101,7 +103,8 @@ config_schema:
       type: integer
       title: Ambient refresh interval
       description: Seconds between Task Manager top-bar updates.
-      enum: [1, 2, 5, 10, 30, 60, 120, 300]
+      minimum: 1
+      maximum: 300
       default: 5
     disk_path:
       type: string
@@ -111,10 +114,12 @@ config_schema:
   required: [refresh_interval_seconds, disk_path]
 ```
 
-The enum keeps the generic schema form and backend validator aligned without a
-new minimum/maximum plugin-contract feature. `disk_path` must be non-empty and
-is never accepted from the summary request. Invalid runtime configuration
-returns a bounded configuration error instead of sampling an arbitrary fallback
+The generic schema form and backend validator enforce the inclusive
+1-to-300-second range through their shared numeric minimum/maximum subset.
+`disk_path` must be non-empty and is never accepted from the summary request.
+An invalid cached refresh interval returns a bounded configuration error. An
+invalid cached disk path makes only the disk metric unavailable; CPU, memory,
+temperature, and load requests continue without sampling an arbitrary fallback
 path. Config is install-wide and administrator-owned; the existing plugin save
 and restart lifecycle applies.
 
@@ -299,7 +304,10 @@ host's generic configuration form.
 The contribution is one button with ordered metric segments and one click target
 that opens Task Manager. Desktop uses a compact height consistent with the
 existing contribution. Mobile uses the host's horizontal action strip and a
-minimum 44 px touch height without adding an inner scroller.
+minimum 44 px touch height without adding an inner scroller. Because this is a
+rich status control rather than an icon action, it marks its root with
+`data-main-top-bar-rich`; the host preserves its dimensions while continuing
+to normalize unmarked icon buttons to 32 px.
 
 The frontend view model derives each bar's capacity percentage: CPU uses the
 summary's `relative_percent`, and memory and disk use their `percent` fields.
@@ -337,8 +345,10 @@ and authoritative storage read.
   a retryable status.
 - A single collector failure produces one unavailable metric and leaves the
   response, schedule, and other readings intact.
-- An invalid summary body returns 400. Invalid cached operator configuration
+- An invalid summary body returns 400. An invalid cached refresh interval
   returns a bounded 500/configuration error until an administrator corrects it.
+  An invalid cached disk path produces an unavailable disk metric while other
+  requested metrics remain usable.
 - A failed personal-settings read disables Save. A failed write keeps the draft
   dirty. A conflict never discards the local draft.
 - Unmount, plugin reload, disable, and uninstall fence late promise callbacks so

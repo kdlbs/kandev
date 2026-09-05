@@ -27,6 +27,10 @@ export type PluginIcon = string | Component<PluginIconProps>;
 /** Placement for a registered nav item; see `PluginRegistry.registerNavItem`. */
 export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
+// On mobile, the host normalizes ordinary `host.ui.Button` contributions to
+// a 32px icon action. A rich status control with text may opt out by setting
+// `data-main-top-bar-rich` on its root and must own its compact layout and
+// minimum 44px touch height. Rich controls must not add a nested scroller.
 /** Context passed to components registered for the `main-top-bar` slot. */
 export interface MainTopBarSlotProps {
   workspaceId: string | null;
