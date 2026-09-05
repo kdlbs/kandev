@@ -2,6 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -276,6 +279,122 @@ func TestSSHExecutorUploadCredentials(t *testing.T) {
 		}
 	})
 
+	// @covers AC-EXECUTORS-SSH-EXECUTOR-001.11
+	t.Run("OpenCode provider maps preserve target-only logins", func(t *testing.T) {
+		localHome := t.TempDir()
+		t.Setenv("HOME", localHome)
+		localAuth := filepath.Join(localHome, ".local", "share", "opencode", "auth.json")
+		if err := os.MkdirAll(filepath.Dir(localAuth), 0o755); err != nil {
+			t.Fatalf("seed local credential dir: %v", err)
+		}
+		if err := os.WriteFile(localAuth, []byte(`{
+			"openai":{"type":"oauth","access":"host-openai"},
+			"anthropic":{"type":"oauth","access":"host-anthropic"}
+		}`), 0o600); err != nil {
+			t.Fatalf("seed local auth: %v", err)
+		}
+
+		remoteHome := t.TempDir()
+		remoteAuth := filepath.Join(remoteHome, ".local", "share", "opencode", "auth.json")
+		if err := os.MkdirAll(filepath.Dir(remoteAuth), 0o755); err != nil {
+			t.Fatalf("seed remote credential dir: %v", err)
+		}
+		if err := os.WriteFile(remoteAuth, []byte(`{
+			"openai":{"type":"oauth","access":"remote-openai"},
+			"custom":{"type":"api","key":"remote-custom"}
+		}`), 0o600); err != nil {
+			t.Fatalf("seed remote auth: %v", err)
+		}
+
+		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+			if strings.Contains(command, remoteHomeCommand) {
+				return sshOut(remoteHome)
+			}
+			return sshOK
+		})
+		server.enableSFTP()
+		opencode := agents.NewOpenCodeACP()
+		exec := &SSHExecutor{
+			logger:    newTestLogger(),
+			agentList: &mockAgentLister{agents: []agents.Agent{opencode}},
+		}
+		req := &ExecutorCreateRequest{Metadata: map[string]interface{}{
+			"remote_credentials": `["agent:opencode-acp:files:0"]`,
+		}}
+
+		if err := exec.uploadCredentials(context.Background(), server.dial(t), req, SSHRemotePlatform{}); err != nil {
+			t.Fatalf("uploadCredentials: %v", err)
+		}
+
+		data, err := os.ReadFile(remoteAuth)
+		if err != nil {
+			t.Fatalf("read remote auth: %v", err)
+		}
+		var providers map[string]map[string]string
+		if err := json.Unmarshal(data, &providers); err != nil {
+			t.Fatalf("merged remote auth is not JSON: %v", err)
+		}
+		if providers["custom"]["key"] != "remote-custom" {
+			t.Fatalf("target-only provider was replaced: %s", data)
+		}
+		if providers["anthropic"]["access"] != "host-anthropic" {
+			t.Fatalf("source-only provider is missing: %s", data)
+		}
+		if providers["openai"]["access"] != "host-openai" {
+			t.Fatalf("source provider did not win collision: %s", data)
+		}
+	})
+
+	// @covers AC-EXECUTORS-SSH-EXECUTOR-001.12
+	t.Run("malformed remote OpenCode auth remains unchanged", func(t *testing.T) {
+		localHome := t.TempDir()
+		t.Setenv("HOME", localHome)
+		localAuth := filepath.Join(localHome, ".local", "share", "opencode", "auth.json")
+		if err := os.MkdirAll(filepath.Dir(localAuth), 0o755); err != nil {
+			t.Fatalf("seed local credential dir: %v", err)
+		}
+		if err := os.WriteFile(localAuth, []byte(`{"openai":{"type":"oauth"}}`), 0o600); err != nil {
+			t.Fatalf("seed local auth: %v", err)
+		}
+
+		remoteHome := t.TempDir()
+		remoteAuth := filepath.Join(remoteHome, ".local", "share", "opencode", "auth.json")
+		if err := os.MkdirAll(filepath.Dir(remoteAuth), 0o755); err != nil {
+			t.Fatalf("seed remote credential dir: %v", err)
+		}
+		const malformed = `{"custom":`
+		if err := os.WriteFile(remoteAuth, []byte(malformed), 0o600); err != nil {
+			t.Fatalf("seed remote auth: %v", err)
+		}
+
+		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+			if strings.Contains(command, remoteHomeCommand) {
+				return sshOut(remoteHome)
+			}
+			return sshOK
+		})
+		server.enableSFTP()
+		exec := &SSHExecutor{
+			logger:    newTestLogger(),
+			agentList: &mockAgentLister{agents: []agents.Agent{agents.NewOpenCodeACP()}},
+		}
+		req := &ExecutorCreateRequest{Metadata: map[string]interface{}{
+			"remote_credentials": `["agent:opencode-acp:files:0"]`,
+		}}
+
+		err := exec.uploadCredentials(context.Background(), server.dial(t), req, SSHRemotePlatform{})
+		if err == nil || !strings.Contains(err.Error(), "existing target is not a JSON object") {
+			t.Fatalf("uploadCredentials error = %v", err)
+		}
+		data, readErr := os.ReadFile(remoteAuth)
+		if readErr != nil {
+			t.Fatalf("read remote auth: %v", readErr)
+		}
+		if string(data) != malformed {
+			t.Fatalf("malformed remote auth changed to %q", data)
+		}
+	})
+
 	t.Run("unresolvable remote home is the one hard failure", func(t *testing.T) {
 		localHome := t.TempDir()
 		t.Setenv("HOME", localHome)
@@ -348,5 +467,27 @@ func TestSSHFileUploaderWriteFileFailsOnUncreatableParent(t *testing.T) {
 		[]byte("x"), 0o600)
 	if err == nil {
 		t.Fatal("expected the write to fail when the parent cannot be created")
+	}
+}
+
+func TestSSHFileUploaderReadFile(t *testing.T) {
+	server := newFakeSSHServer(t, nil)
+	server.enableSFTP()
+	uploader := &sshFileUploader{client: server.dial(t)}
+	target := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(target, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	data, err := uploader.ReadFile(context.Background(), target)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "secret" {
+		t.Fatalf("ReadFile data = %q", data)
+	}
+	_, err = uploader.ReadFile(context.Background(), target+".missing")
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing ReadFile error = %v, want fs.ErrNotExist", err)
 	}
 }
