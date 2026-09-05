@@ -187,9 +187,10 @@ func (a *OpenCodeACP) ApplyFilesystemPolicy(env map[string]string, policy Filesy
 		return fmt.Errorf("unsupported filesystem policy %q", policy.Name)
 	}
 	rules := map[string]map[string]string{
-		"external_directory": {},
-		"read":               {},
-		"edit":               {},
+		"bash":               {"*": "deny"},
+		"external_directory": {"*": "deny"},
+		"read":               {"*": "deny"},
+		"edit":               {"*": "deny"},
 	}
 	for _, rule := range policy.Rules {
 		path := strings.TrimSpace(rule.Path)
@@ -200,8 +201,11 @@ func (a *OpenCodeACP) ApplyFilesystemPolicy(env map[string]string, policy Filesy
 		switch rule.Access {
 		case FilesystemAccessRead:
 			rules["read"][pattern] = "allow"
+			rules["external_directory"][pattern] = "allow"
 		case FilesystemAccessWrite:
+			rules["read"][pattern] = "allow"
 			rules["edit"][pattern] = "allow"
+			rules["external_directory"][pattern] = "allow"
 		case FilesystemAccessDeny:
 			for _, action := range []string{"external_directory", "read", "edit"} {
 				rules[action][pattern] = "deny"

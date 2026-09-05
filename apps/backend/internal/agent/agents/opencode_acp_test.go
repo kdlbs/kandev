@@ -49,6 +49,11 @@ func TestOpenCodeACPApplyFilesystemPolicyRendersNativePermissions(t *testing.T) 
 	if got := config.Permission["edit"]["/workspace/.git/**"]; got != "allow" {
 		t.Errorf("edit GitDir permission = %q, want allow", got)
 	}
+	for _, action := range []string{"bash", "external_directory", "read", "edit"} {
+		if got := config.Permission[action]["*"]; got != "deny" {
+			t.Errorf("%s default permission = %q, want deny", action, got)
+		}
+	}
 	if got := config.Permission["read"]["/workspace/.git/objects/**"]; got != "allow" {
 		t.Errorf("read objects permission = %q, want allow", got)
 	}
