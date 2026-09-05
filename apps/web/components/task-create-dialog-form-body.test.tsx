@@ -195,6 +195,8 @@ function makeFs(): DialogFormState {
     setCurrentLocalBranchLoading: () => {},
     noRepository: false,
     setNoRepository: () => {},
+    preferLocalExecutor: false,
+    setPreferLocalExecutor: () => {},
     workspacePath: "",
     setWorkspacePath: () => {},
   };

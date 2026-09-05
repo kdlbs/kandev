@@ -298,9 +298,10 @@ type Handlers struct {
 	// Native code review (optional, set via SetReviewService /
 	// SetReviewRunner). Without them the review actions are simply not
 	// registered — see registerReviewHandlers.
-	reviewService *service.ReviewService
-	reviewRunner  ReviewRunner
-	pluginSvc     *plugins.Service
+	reviewService      *service.ReviewService
+	reviewRunner       ReviewRunner
+	pluginSvc          *plugins.Service
+	canvasAuthoringSvc CanvasAuthoringService
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
@@ -430,6 +431,13 @@ func (h *Handlers) SetPluginService(svc *plugins.Service) {
 	h.pluginSvc = svc
 }
 
+// SetCanvasAuthoringService wires the feature-gated, task-scoped canvas
+// authoring boundary. Leave it unset when canvas support is disabled so raw WS
+// canvas actions are not registered either.
+func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
+	h.canvasAuthoringSvc = svc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(dispatcher *ws.Dispatcher) {
 	d := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
@@ -447,6 +455,7 @@ func (h *Handlers) registerTaskModeHandlers(d *guardedMCPDispatcher) {
 	h.registerTaskPlanHandlers(d)
 	h.registerTaskQuestionHandlers(d)
 	h.registerReviewHandlers(d)
+	h.registerCanvasHandlers(d)
 }
 
 func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {

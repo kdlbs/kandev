@@ -47,6 +47,11 @@ vi.mock("./sections/tasks-section", () => ({
     </div>
   ),
 }));
+vi.mock("./sections/canvases-section", () => ({
+  CanvasesSection: ({ collapsed }: { collapsed: boolean }) => (
+    <div data-testid="canvases-section" data-collapsed={collapsed ? "true" : "false"} />
+  ),
+}));
 vi.mock("./sections/projects-section", () => ({
   ProjectsSection: () => <div data-testid="projects-section" />,
 }));
@@ -102,6 +107,7 @@ vi.mock("@/hooks/use-office-workspace-data", () => ({
 const storeState = {
   features: {
     office: false,
+    canvases: false,
   },
   workspaces: {
     activeId: undefined as string | undefined,
@@ -115,6 +121,7 @@ const storeState = {
       projects: false,
       agents: false,
       integrations: false,
+      canvases: false,
       automations: false,
       settings: false,
     },
@@ -168,6 +175,8 @@ function resetSidebarState() {
   officeRouteMock.mode = null;
   storeState.appSidebar.collapsed = false;
   storeState.appSidebar.settingsMode = false;
+  storeState.appSidebar.sectionExpanded.canvases = false;
+  storeState.features.canvases = false;
   storeState.toggleAppSidebar = vi.fn();
   storeState.toggleAppSidebarSection = vi.fn();
   storeState.toggleAppSidebarSettingsMode = vi.fn();
@@ -295,6 +304,25 @@ describe("AppSidebar", () => {
       expect(storeState.setAppSidebarSettingsMode).toHaveBeenCalledWith(false);
     });
     expect(storeState.toggleAppSidebarSettingsMode).not.toHaveBeenCalled();
+  });
+});
+
+describe("AppSidebar canvas routes", () => {
+  beforeEach(resetSidebarState);
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("does not force-expand the Canvases section for a direct canvas route", async () => {
+    navigationMock.pathname = "/canvases/canvas-1";
+    storeState.features.canvases = true;
+
+    renderSidebar();
+
+    await waitFor(() => expect(screen.getByTestId("canvases-section")).toBeTruthy());
+    expect(storeState.toggleAppSidebarSection).not.toHaveBeenCalledWith("canvases");
+    expect(storeState.appSidebar.sectionExpanded.canvases).toBe(false);
   });
 });
 

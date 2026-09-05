@@ -31,6 +31,18 @@ export const TRANSCRIPT_SENTINEL_ROOT_MARGIN = "200px 0px 0px 0px";
 
 // INT32_MAX: WebKit resolves Number.MAX_SAFE_INTEGER to 0 (not bottom).
 const NATIVE_BOTTOM_SCROLL_TOP = 2_147_483_647;
+const USER_SCROLL_INTENT_WINDOW_MS = 250;
+const SCROLL_KEYS = new Set([
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
 
 /** Writes a clamped maximum so the browser resolves the native bottom without
  * forcing a synchronous scrollHeight layout read. */
@@ -653,6 +665,7 @@ export function useAutoScroll(params: {
   return { isNearBottomRef, resyncIsNearBottom, markNotNearBottom };
 }
 
+// eslint-disable-next-line max-lines-per-function -- persisted placement coordinates user intent, session resets, and layout recovery.
 function usePersistedTranscriptScroll({
   scrollRef,
   sessionId,
@@ -677,6 +690,7 @@ function usePersistedTranscriptScroll({
   initialPlacementPending: boolean;
 }) {
   const frozenScrollTopRef = useRef<number | null>(null);
+  const userScrollIntentUntilRef = useRef(0);
   const latestSessionIdRef = useRef(sessionId);
   if (latestSessionIdRef.current !== sessionId) {
     latestSessionIdRef.current = sessionId;
@@ -685,6 +699,15 @@ function usePersistedTranscriptScroll({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const markUserScrollIntent = () => {
+      userScrollIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
+    };
+    const clearUserScrollIntent = () => {
+      userScrollIntentUntilRef.current = 0;
+    };
+    const markScrollKeyIntent = (event: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(event.key)) markUserScrollIntent();
+    };
     /** Persists the container's current scrollTop for the session (used when
      * auto-scroll is disabled). */
     const captureScrollTop = () => {
@@ -703,11 +726,37 @@ function usePersistedTranscriptScroll({
     const onScroll = () => {
       if (!isVisibleRef.current) return;
       resyncIsNearBottom();
-      if (!enabled) frozenScrollTopRef.current = el.scrollTop;
+      // A layout change can clamp a disabled transcript's scrollTop and emit a
+      // native scroll event. Only adopt an offset when a recent user gesture
+      // explains the movement; otherwise the layout effect must restore the
+      // frozen offset on the next render.
+      if (!enabled && userScrollIntentUntilRef.current >= Date.now()) {
+        frozenScrollTopRef.current = el.scrollTop;
+      }
       coalescer.schedule();
     };
+    el.addEventListener("wheel", markUserScrollIntent, { passive: true });
+    el.addEventListener("touchstart", markUserScrollIntent, { passive: true });
+    el.addEventListener("touchmove", markUserScrollIntent, { passive: true });
+    el.addEventListener("pointerdown", markUserScrollIntent, { passive: true });
+    el.addEventListener("pointerup", clearUserScrollIntent, { passive: true });
+    el.addEventListener("pointercancel", clearUserScrollIntent, { passive: true });
+    el.addEventListener("touchend", clearUserScrollIntent, { passive: true });
+    el.addEventListener("touchcancel", clearUserScrollIntent, { passive: true });
+    el.addEventListener("keydown", markScrollKeyIntent);
+    el.addEventListener("scrollend", clearUserScrollIntent);
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
+      el.removeEventListener("wheel", markUserScrollIntent);
+      el.removeEventListener("touchstart", markUserScrollIntent);
+      el.removeEventListener("touchmove", markUserScrollIntent);
+      el.removeEventListener("pointerdown", markUserScrollIntent);
+      el.removeEventListener("pointerup", clearUserScrollIntent);
+      el.removeEventListener("pointercancel", clearUserScrollIntent);
+      el.removeEventListener("touchend", clearUserScrollIntent);
+      el.removeEventListener("touchcancel", clearUserScrollIntent);
+      el.removeEventListener("keydown", markScrollKeyIntent);
+      el.removeEventListener("scrollend", clearUserScrollIntent);
       el.removeEventListener("scroll", onScroll);
       // Final capture on unmount so a disabled session's exact position
       // survives a dockview panel teardown/remount (e.g. navigating away
@@ -715,7 +764,16 @@ function usePersistedTranscriptScroll({
       // if a coalesced write above was still pending.
       if (!initialPlacementPending || latestSessionIdRef.current !== sessionId) coalescer.flush();
     };
-  }, [scrollRef, sessionId, storeApi, resyncIsNearBottom, enabled, initialPlacementPending]);
+  }, [
+    scrollRef,
+    sessionId,
+    storeApi,
+    resyncIsNearBottom,
+    enabled,
+    frozenScrollTopRef,
+    userScrollIntentUntilRef,
+    initialPlacementPending,
+  ]);
 
   // Own the disabled offset across every transcript layout update. Sending a
   // prompt can briefly shrink the scroll range before the new message row is
