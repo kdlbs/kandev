@@ -235,6 +235,25 @@ func TestNewSessionWithAdditionalDirectoriesResolvesRootsJustBeforeConsumption(t
 	}
 }
 
+func TestResetSessionWithAdditionalDirectoriesResolvesRoots(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+	called := false
+	_, err := adapter.ResetSessionWithAdditionalDirectories(context.Background(), nil, func() ([]string, error) {
+		called = true
+		return []string{"/workspace/secondary"}, nil
+	})
+	if err != nil {
+		t.Fatalf("ResetSessionWithAdditionalDirectories: %v", err)
+	}
+	if !called {
+		t.Fatal("reset did not invoke the validated workspace-root resolver")
+	}
+	if !slices.Equal(capture.newRequest.AdditionalDirectories, []string{"/workspace/secondary"}) {
+		t.Fatalf("reset additionalDirectories = %v, want validated root", capture.newRequest.AdditionalDirectories)
+	}
+}
+
 func TestResetSessionInvalidatesPromptOwnership(t *testing.T) {
 	adapter, _ := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
 

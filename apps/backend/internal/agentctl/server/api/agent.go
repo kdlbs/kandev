@@ -865,7 +865,13 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
-	sessionID, err := sr.ResetSession(ctx, mcpServers)
+	var sessionID string
+	var err error
+	if rooted, ok := agentAdapter.(adapter.AdditionalDirectoriesSessionResetter); ok {
+		sessionID, err = rooted.ResetSessionWithAdditionalDirectories(ctx, mcpServers, s.procMgr.ValidatedWorkspaceSourceRoots)
+	} else {
+		sessionID, err = sr.ResetSession(ctx, mcpServers)
+	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
 		s.logger.Error("session reset failed", zap.Error(err))

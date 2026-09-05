@@ -194,7 +194,14 @@ func remoteGitMetadataRuntimeEnv(req *ExecutorCreateRequest) (map[string]string,
 	if !ok {
 		return nil, errors.New("agent filesystem policy environment is unavailable")
 	}
-	env := make(map[string]string)
+	// Preserve the complete executor environment. The policy renderer mutates
+	// only its reserved configuration key; dropping run and credential values
+	// here would make a successful attestation restart with an incomplete
+	// process environment.
+	env := make(map[string]string, len(req.Env))
+	for key, value := range req.Env {
+		env[key] = value
+	}
 	for _, key := range keysAgent.FilesystemPolicyEnvironmentKeys() {
 		if value := req.Env[key]; value != "" {
 			env[key] = value

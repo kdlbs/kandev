@@ -1744,8 +1744,8 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		}
 	}
 	if policyErr := installAttestedCloneGitMetadataPolicy(ctx, execReq, execInstance); policyErr != nil {
-		_ = rt.StopInstance(context.WithoutCancel(ctx), execInstance, false)
-		err = fmt.Errorf("install clone Git metadata policy: %w", policyErr)
+		cleanupErr := rt.StopInstance(context.WithoutCancel(ctx), execInstance, true)
+		err = errors.Join(fmt.Errorf("install clone Git metadata policy: %w", policyErr), cleanupErr)
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}

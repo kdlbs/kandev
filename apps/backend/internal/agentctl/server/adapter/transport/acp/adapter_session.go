@@ -623,6 +623,16 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // superseded one, so a successful reset closes the outgoing session to release its
 // resources. The old session is captured before NewSession overwrites a.sessionID.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	return a.resetSessionWithAdditionalDirectories(ctx, mcpServers, nil)
+}
+
+// ResetSessionWithAdditionalDirectories keeps the server-owned workspace
+// roots on the same path as initial session creation.
+func (a *Adapter) ResetSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, resolveRoots types.WorkspaceSourceRootsResolver) (string, error) {
+	return a.resetSessionWithAdditionalDirectories(ctx, mcpServers, resolveRoots)
+}
+
+func (a *Adapter) resetSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, resolveRoots types.WorkspaceSourceRootsResolver) (string, error) {
 	a.sessionTransitionMu.Lock()
 	defer a.sessionTransitionMu.Unlock()
 
@@ -630,7 +640,7 @@ func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer
 	previous, conn := a.sessionID, a.acpConn
 	a.mu.RUnlock()
 
-	newID, err := a.newSession(ctx, mcpServers)
+	newID, err := a.newSessionWithAdditionalDirectories(ctx, mcpServers, resolveRoots)
 	if err != nil {
 		return "", err
 	}

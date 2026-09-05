@@ -2109,6 +2109,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	now := time.Now()
 	existing.Path = worktreePath
 	existing.Status = StatusActive
+	// Reused describes only the Create call that returned this in-memory
+	// record. Recreation created a fresh checkout, so stale reuse state must
+	// never suppress rollback or cleanup on a later multi-repository failure.
+	existing.Reused = false
 	existing.DeletedAt = nil
 	existing.UpdatedAt = now
 	existing.BaseBranchFallbackWarning = fallbackWarning

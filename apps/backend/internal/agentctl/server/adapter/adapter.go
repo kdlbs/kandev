@@ -156,6 +156,12 @@ type SessionResettableAdapter interface {
 	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 }
 
+// AdditionalDirectoriesSessionResetter preserves lifecycle-owned workspace
+// roots when an ACP session is reset in place.
+type AdditionalDirectoriesSessionResetter interface {
+	ResetSessionWithAdditionalDirectories(context.Context, []types.McpServer, types.WorkspaceSourceRootsResolver) (string, error)
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`

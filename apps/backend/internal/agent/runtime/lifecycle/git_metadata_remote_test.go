@@ -42,7 +42,7 @@ func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.
 	req := &ExecutorCreateRequest{
 		GitMetadataRequirement: cloneGitMetadataRequirement(true),
 		AgentConfig:            agents.NewCodexACP(),
-		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`, "RUN_TOKEN": "preserve-me"},
 	}
 	instance := &ExecutorInstance{
 		Client:               agentctl.NewClient(parsed.Hostname(), port, log),
@@ -60,6 +60,9 @@ func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.
 		t.Fatalf("clone launch synthesized host projections: %#v", req.GitMetadataProjections)
 	}
 	policyEnv := instance.Metadata["runtime_env"].(map[string]string)
+	if policyEnv["RUN_TOKEN"] != "preserve-me" {
+		t.Fatalf("runtime environment dropped non-policy variable: %#v", policyEnv)
+	}
 	if !strings.Contains(req.Env["CODEX_CONFIG"], "/executor/workspace/.git") {
 		t.Fatalf("launch request did not receive attested clone policy: %s", req.Env["CODEX_CONFIG"])
 	}
