@@ -28,6 +28,7 @@ A focused Chromium reproduction measured a source column at 362.66px before drag
 
 - Keep the width of existing desktop columns stable when drag state does not change the rendered steps.
 - Preserve the end scroll range that supports drag scroll anchoring.
+- Keep drag-only scroll overflow contained and hide its transient native scrollbar.
 - Preserve auto-hidden drag destinations, cancellation, and successful drops.
 - Add component and Chromium E2E regression coverage.
 
@@ -65,12 +66,13 @@ The E2E test must fail on the current padding behavior. It must continue through
 | `AC-UI-ADAPTIVE-KANBAN-001.3` | The existing Chromium scenario proves contained horizontal lane scrolling. |
 | `AC-UI-ADAPTIVE-KANBAN-001.4` | The existing Chromium scenario completes drag cancellation and a successful task move. |
 | `AC-UI-ADAPTIVE-KANBAN-001.9` | The Chromium scenario compares every rendered desktop column before and during drag and verifies reserve after overflowing tracks. |
+| `AC-UI-ADAPTIVE-KANBAN-001.10` | The Chromium scenario verifies fixed document width and a hidden native scrollbar during drag. |
 
 ## E2E tests
 
 Use the Chromium project for `apps/web/e2e/tests/kanban/auto-hide-empty-columns.spec.ts`.
 
-The scenario uses a 1440px desktop viewport and three visible columns. It compares the source column width before and during drag.
+The scenario uses a 1440px desktop viewport and three visible columns. It compares every rendered column width before and during drag and verifies contained, hidden drag-only overflow.
 
 No new mobile test is required because this correction changes only `AdaptiveDesktopKanban`. The existing mobile auto-hide scenario remains the parity evidence.
 
@@ -82,7 +84,7 @@ No new mobile test is required because this correction changes only `AdaptiveDes
 
 - The focused component suite passed with 10 tests.
 - The Chromium production-build scenario passed with two tests, including overflow-track scroll range.
-- Scoped ESLint, web type checking, and the i18n ratchet passed.
+- The drag-only scrollbar regression failed with `scrollbar-width: thin` and passed with `scrollbar-width: none` after the correction.
 - Specification tests and lint passed, and `git diff --check` passed.
 - Scoped ESLint, web type checking, and the i18n ratchet passed.
 

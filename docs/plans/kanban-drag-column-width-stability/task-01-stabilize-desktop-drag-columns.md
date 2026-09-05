@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-UI-ADAPTIVE-KANBAN-001.3
   - AC-UI-ADAPTIVE-KANBAN-001.4
   - AC-UI-ADAPTIVE-KANBAN-001.9
+  - AC-UI-ADAPTIVE-KANBAN-001.10
 system_design:
   - ../../specs/ui/system-design/adaptive-kanban.md
 ---
@@ -41,6 +42,7 @@ Move the desktop drag end reserve after the overflowing grid tracks. Add browser
 - The regression test fails because the current drag padding changes a column from 362.66px to 280px.
 - A drag with an unchanged rendered step set keeps every rendered desktop column within one CSS pixel.
 - A board wider than the viewport retains the full drag reserve after its overflowing tracks.
+- Drag-only reserve does not widen the document or show a transient native horizontal scrollbar.
 - The focused scenario still restores auto-hidden destinations and moves a task into one destination.
 
 ## Verification
@@ -87,4 +89,5 @@ None.
 - Added Chromium geometry and overflow-track scroll-range assertions.
 - Focused component tests passed with 10 tests.
 - Production-build Chromium tests passed with two tests, including overflow-track scroll range and all-column width stability.
+- The document remained contained while the internal drag scroll range grew, and the native scrollbar is hidden during drag.
 - Scoped ESLint, web type checking, i18n ratchet, specification tests, specification lint, and diff checks passed.

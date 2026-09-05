@@ -75,6 +75,19 @@ test("auto-hides empty columns without changing drag destinations", async ({
   widthsDuringDrag.forEach((width, index) => {
     expect(Math.abs(width - widthsBeforeDrag[index])).toBeLessThanOrEqual(1);
   });
+  const dragOverflow = await testPage.evaluate(() => {
+    const scrollWindow = document.querySelector<HTMLElement>(
+      '[data-testid="desktop-kanban-scroll-window"]',
+    );
+    if (!scrollWindow) throw new Error("desktop Kanban scroll window is missing");
+    return {
+      documentClientWidth: document.documentElement.clientWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      scrollbarWidth: getComputedStyle(scrollWindow).scrollbarWidth,
+    };
+  });
+  expect(dragOverflow.documentScrollWidth).toBe(dragOverflow.documentClientWidth);
+  expect(dragOverflow.scrollbarWidth).toBe("none");
   await testPage.keyboard.press("Escape");
   await testPage.mouse.up();
 

@@ -29,6 +29,7 @@ People use Kandev in portrait desktop windows, beside a task preview, and with a
 - **AC-UI-ADAPTIVE-KANBAN-001.7:** A column with 440 tasks mounts fewer than 100 card bodies during initial display on desktop, tablet, and phone surfaces.
 - **AC-UI-ADAPTIVE-KANBAN-001.8:** Opening or resizing the task preview may change the effective desktop composition without changing the user's saved Kanban, Pipeline, workflow, or preview preferences.
 - **AC-UI-ADAPTIVE-KANBAN-001.9:** When a pointer drag starts or ends without a change to the rendered workflow steps, each desktop column SHALL retain its computed width.
+- **AC-UI-ADAPTIVE-KANBAN-001.10:** A desktop pointer drag MAY extend the workflow's internal scroll range for drag anchoring, but it SHALL NOT widen the document or show a transient horizontal scrollbar solely for that reserve.
 
 ## Migrated source detail
 
@@ -104,6 +105,9 @@ desktop.
   bodies are mounted and the visible cards respond to user input.
 - **GIVEN** a desktop board whose rendered workflow steps do not change, **WHEN** pointer drag starts
   or ends, **THEN** each column keeps its computed width.
+- **GIVEN** a desktop board whose columns fit before a pointer drag, **WHEN** drag anchoring adds
+  internal end space, **THEN** the document width stays fixed and no transient horizontal scrollbar
+  appears.
 - **GIVEN** a phone column with 440 tasks, **WHEN** Kanban renders, **THEN** fewer than 100 card
   bodies are mounted inside the existing focused-column scroll area.
 - **GIVEN** a windowed column, **WHEN** the user scrolls from the first task to the last task,

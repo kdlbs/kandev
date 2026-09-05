@@ -41,6 +41,8 @@ The lane grid must not use end padding or margin for this reserve. Padding reduc
 
 The reserve exists only while a task drag is active. The normal board has no additional end space.
 
+The desktop scroll window hides its native horizontal scrollbar while drag state is active. The window keeps its internal scroll range so pointer-driven and automatic drag scrolling continue to work. Document width remains unchanged.
+
 ## Drag control flow
 
 1. The drag-start handler records the source step and its viewport position.
@@ -66,6 +68,7 @@ The existing mobile auto-hide E2E scenario covers the nearest mobile surface. It
 - Component tests assert that drag state uses a trailing spacer and does not use end padding.
 - The Chromium Kanban E2E scenario compares every rendered desktop column before and during drag.
 - The same Chromium scenario covers a board whose minimum track width exceeds the viewport and verifies the added scroll range.
+- The Chromium scenario verifies document containment and the absence of a transient drag-only scrollbar.
 - The same E2E scenario proves temporary destinations, cancellation, and a successful drop.
 - The existing `mobile-chrome` scenario continues to prove mobile drag destinations and document-width containment.
 

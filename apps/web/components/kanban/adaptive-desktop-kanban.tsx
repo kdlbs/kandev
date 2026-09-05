@@ -87,7 +87,7 @@ export function AdaptiveDesktopKanban({
         data-testid="desktop-kanban-scroll-window"
         className={`h-full min-h-0 min-w-0 overflow-x-auto snap-x snap-mandatory ${
           isPanCandidate ? "cursor-grabbing" : ""
-        } ${isPanning ? "select-none" : ""}`}
+        } ${isPanning ? "select-none" : ""} ${isDragging ? "scrollbar-hide" : ""}`}
         style={{
           containerType: "inline-size",
           scrollSnapType: isPanning ? "none" : undefined,
