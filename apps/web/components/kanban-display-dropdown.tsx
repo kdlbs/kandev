@@ -27,7 +27,7 @@ import {
   KANBAN_SORT_LABEL_KEYS,
   type KanbanSort,
 } from "@/lib/kanban/kanban-sort";
-import { KANBAN_PRIORITY_TOKENS, KANBAN_PRIORITY_LABEL_KEYS } from "@/lib/kanban/task-priority";
+import { TASK_PRIORITY_TOKENS, TASK_PRIORITY_LABEL_KEYS } from "@/lib/tasks/task-priority";
 
 type KanbanDisplayDropdownProps = {
   triggerSize?: ComponentProps<typeof Button>["size"];
@@ -160,14 +160,14 @@ function PriorityFilterSection({
         {t("kanban:priorityFilter")}
       </DropdownMenuLabel>
       <div className="space-y-1">
-        {KANBAN_PRIORITY_TOKENS.map((token) => (
+        {TASK_PRIORITY_TOKENS.map((token) => (
           <label key={token} className="flex items-center gap-2 cursor-pointer">
             <Checkbox
               data-testid={`display-priority-filter-option-${token}`}
               checked={priorityFilterTokens.includes(token)}
               onCheckedChange={() => onPriorityFilterChange(token)}
             />
-            <span className="text-sm text-foreground">{t(KANBAN_PRIORITY_LABEL_KEYS[token])}</span>
+            <span className="text-sm text-foreground">{t(TASK_PRIORITY_LABEL_KEYS[token])}</span>
           </label>
         ))}
       </div>

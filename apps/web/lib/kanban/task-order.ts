@@ -1,4 +1,4 @@
-import { KANBAN_PRIORITY_TOKENS } from "@/lib/kanban/task-priority";
+import { TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
 import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 import type { TaskPriority } from "@/lib/types/http";
 
@@ -22,8 +22,8 @@ export function compareTasksByCreatedDesc(a: CreatedTask, b: CreatedTask): numbe
 
 /** Unranked (absent or out-of-vocabulary) sorts after all four tokens. */
 function priorityRank(priority: TaskPriority | undefined): number {
-  const index = priority ? (KANBAN_PRIORITY_TOKENS as readonly string[]).indexOf(priority) : -1;
-  return index === -1 ? KANBAN_PRIORITY_TOKENS.length : index;
+  const index = priority ? (TASK_PRIORITY_TOKENS as readonly string[]).indexOf(priority) : -1;
+  return index === -1 ? TASK_PRIORITY_TOKENS.length : index;
 }
 
 function compareIdsAsc(a: string, b: string): number {

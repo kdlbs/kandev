@@ -26,7 +26,7 @@ import {
   KANBAN_SORT_LABEL_KEYS,
   type KanbanSort,
 } from "@/lib/kanban/kanban-sort";
-import { KANBAN_PRIORITY_TOKENS, KANBAN_PRIORITY_LABEL_KEYS } from "@/lib/kanban/task-priority";
+import { TASK_PRIORITY_TOKENS, TASK_PRIORITY_LABEL_KEYS } from "@/lib/tasks/task-priority";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 import { useMobileMenuSheetState } from "@/hooks/use-mobile-menu-sheet-state";
@@ -215,7 +215,7 @@ function MobilePriorityFilterGroup({
     <div className={mobileFieldClass}>
       <label className={mobileFieldLabelClass}>{t("kanban:priorityFilter")}</label>
       <div className="space-y-1">
-        {KANBAN_PRIORITY_TOKENS.map((token) => (
+        {TASK_PRIORITY_TOKENS.map((token) => (
           <label
             key={token}
             className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium"
@@ -225,7 +225,7 @@ function MobilePriorityFilterGroup({
               checked={priorityFilterTokens.includes(token)}
               onCheckedChange={() => onPriorityFilterChange(token)}
             />
-            <span>{t(KANBAN_PRIORITY_LABEL_KEYS[token])}</span>
+            <span>{t(TASK_PRIORITY_LABEL_KEYS[token])}</span>
           </label>
         ))}
       </div>

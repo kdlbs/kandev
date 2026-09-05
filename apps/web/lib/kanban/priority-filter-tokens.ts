@@ -1,4 +1,4 @@
-import { KANBAN_PRIORITY_TOKENS, isKanbanPriority } from "@/lib/kanban/task-priority";
+import { TASK_PRIORITY_TOKENS, isTaskPriority } from "@/lib/tasks/task-priority";
 import type { TaskPriority } from "@/lib/types/http";
 
 /**
@@ -12,9 +12,9 @@ export function parseKanbanPriorityFilterTokens(value: unknown): TaskPriority[] 
   if (!Array.isArray(value)) return [];
   const selected = new Set<TaskPriority>();
   for (const item of value) {
-    if (isKanbanPriority(item)) selected.add(item);
+    if (isTaskPriority(item)) selected.add(item);
   }
-  return KANBAN_PRIORITY_TOKENS.filter((token) => selected.has(token));
+  return TASK_PRIORITY_TOKENS.filter((token) => selected.has(token));
 }
 
 /** Adds or removes `token`, returning the result in rank order. */
@@ -25,7 +25,7 @@ export function toggleKanbanPriorityFilterToken(
   const next = new Set(selection);
   if (next.has(token)) next.delete(token);
   else next.add(token);
-  return KANBAN_PRIORITY_TOKENS.filter((t) => next.has(t));
+  return TASK_PRIORITY_TOKENS.filter((t) => next.has(t));
 }
 
 /**
