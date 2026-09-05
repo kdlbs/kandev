@@ -17,6 +17,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Task Add-Panel PR Submenu](requirements/add-panel-pr-submenu.md)
 - [Agent Launch Prompt Composer](requirements/agent-launch-prompt-composer.md)
 - [Dialog containment](requirements/dialog-content-containment.md)
+- [Descriptive select options](requirements/descriptive-select-options.md)
 - [Surface text](requirements/surface-text-hierarchy.md)
 - [Message comments](requirements/agent-message-comments.md)
 - [Agent Todo List Panel](requirements/agent-todo-list-panel.md)
@@ -97,6 +98,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Session](requirements/session-start-composer-readiness.md)
 - [Session tab delete feedback](requirements/session-tab-delete-feedback.md)
 - [Settings Discovery](requirements/settings-discovery.md)
+- [Settings Menu Default](requirements/settings-menu-default.md)
 - [Settings Manual Save](requirements/settings-manual-save.md)
 - [Settings Prompt Editor](requirements/settings-prompt-editor.md)
 - [Consistent settings typography](requirements/settings-typography.md)
@@ -137,6 +139,7 @@ UI owns responsive behavior; other systems own behavior/state.
 ### Design
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Dialog containment](system-design/dialog-content-containment.md)
+- [Descriptive select options](system-design/descriptive-select-options.md)
 - [Surface text](system-design/surface-text-hierarchy.md)
 - [Agent Todo List Panel](system-design/agent-todo-list-panel.md)
 - [App Status Bar](system-design/app-status-bar.md)
@@ -180,6 +183,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Terminal Rendering](system-design/terminal-rendering.md)
 - [Terminal Touch Scrolling](system-design/terminal-touch-scrolling.md)
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
+- [Settings Menu Default](system-design/settings-menu-default.md)
 - [Transcript history visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
 ## Related

@@ -59,6 +59,12 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
 
+// Enabled reports the effective dynamic-agent-routing flag value this
+// resolver was constructed or last set with. Callers outside this package
+// use it to gate durable recovery and manual route-action launch paths that
+// do not otherwise pass through a selection method.
+func (r *ProfileExecutionResolver) Enabled() bool { return r.enabled.Load() }
+
 // SetCredentialBindingResolver supplies the installation-scoped fingerprint
 // used to share provider health between concrete profiles that prove the same
 // credential binding. A missing or incomplete descriptor remains isolated to
@@ -315,6 +321,31 @@ func (r *ProfileExecutionResolver) ResolveRouteAction(
 	}
 }
 
+// MarkRouteActive completes a claimed route's starting phase after the
+// asynchronous agent process-start callback confirms success.
+func (r *ProfileExecutionResolver) MarkRouteActive(ctx context.Context, sessionID string, expectedGeneration int64) error {
+	if r.engine == nil {
+		return errors.New("dynamic profile execution is not configured")
+	}
+	return r.engine.MarkActive(ctx, sessionID, expectedGeneration)
+}
+
+// MarkRouteActionRequired transitions a claimed route to durable
+// action_required regardless of its current status. Callers use this so a
+// launch failure after a generation claim always exposes a recovery action
+// instead of leaving the route stuck at "starting".
+func (r *ProfileExecutionResolver) MarkRouteActionRequired(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	reason string,
+) (dynamic.RouteDecision, error) {
+	if r.engine == nil {
+		return dynamic.RouteDecision{}, errors.New("dynamic profile execution is not configured")
+	}
+	return r.engine.MarkActionRequired(ctx, sessionID, expectedGeneration, reason)
+}
+
 func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 	ctx context.Context,
 	sessionID, profileID, currentExecutionProfileID string,
@@ -332,7 +363,7 @@ func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 		if resumeErr == nil {
 			return r.executionFromDecision(ctx, profileID, sessionID, decision)
 		}
-		if !errors.Is(resumeErr, dynamic.ErrRecoveryPending) && !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
+		if !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
 			return ProfileExecution{}, resumeErr
 		}
 	}
@@ -344,6 +375,11 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 	sessionID, profileID, currentExecutionProfileID string,
 	expectedGeneration int64,
 ) (ProfileExecution, error) {
+	if state, exists, err := r.engine.LoadState(ctx, sessionID); err != nil {
+		return ProfileExecution{}, err
+	} else if exists && state.Generation == expectedGeneration && state.Status == "retrying" {
+		return ProfileExecution{}, dynamic.ErrRecoveryPending
+	}
 	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
 	if err != nil {
 		return ProfileExecution{}, err
@@ -394,6 +430,9 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 	if r.engine == nil || r.profiles == nil {
 		return ProfileExecution{}, errors.New("dynamic profile execution is not configured")
 	}
+	if !r.enabled.Load() {
+		return ProfileExecution{}, ErrDynamicRoutingDisabled
+	}
 	state, exists, err := r.engine.LoadState(ctx, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
@@ -406,6 +445,19 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 		return ProfileExecution{}, err
 	}
 	return r.executionFromDecision(ctx, state.LogicalProfileID, sessionID, decision)
+}
+
+// MarkRouteRecoveryActionRequired returns a claimed "retrying" route to
+// manual recovery after its resumed launch failed.
+func (r *ProfileExecutionResolver) MarkRouteRecoveryActionRequired(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+) error {
+	if r.engine == nil {
+		return nil
+	}
+	return r.engine.MarkRecoveryActionRequired(ctx, sessionID, expectedGeneration)
 }
 
 func (r *ProfileExecutionResolver) resolve(

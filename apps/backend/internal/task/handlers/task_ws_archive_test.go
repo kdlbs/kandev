@@ -34,6 +34,15 @@ func (r *archiveStampRepo) ArchiveTaskIfActive(_ context.Context, id, cascadeID 
 	return true, nil
 }
 
+func (r *archiveStampRepo) ArchiveTaskIfActiveWithVacatedStep(
+	ctx context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
+	changed, err := r.ArchiveTaskIfActive(ctx, id, cascadeID)
+	return "", changed, err
+}
+
 // TestWsArchiveTask_StampsCascadeID is the WS-side parity test: archives
 // issued over the WebSocket action must route through HandoffService and
 // receive a cascade stamp, otherwise WS-archived tasks were permanently

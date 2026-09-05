@@ -79,6 +79,7 @@ export function toSheetItem(
     id: task.id,
     title: task.title,
     autopilot: task.autopilot,
+    priority: task.priority,
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,

@@ -1568,6 +1568,32 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	return rows > 0, now, nil
 }
 
+// UpdateTaskSessionDynamicRouteIfCurrent changes only the route projection
+// while the session generation and projected route state still match the
+// caller's observation. It avoids writing a stale full session row after an
+// asynchronous launch or recovery callback.
+func (r *Repository) UpdateTaskSessionDynamicRouteIfCurrent(
+	ctx context.Context,
+	id string,
+	expectedGeneration int64,
+	expectedRouteState, routeState, routeReason string,
+) (bool, time.Time, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET route_state = ?, route_reason = ?, updated_at = ?
+		WHERE id = ? AND route_generation = ? AND route_state = ?
+	`), routeState, routeReason, now, id, expectedGeneration, expectedRouteState)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return rows > 0, now, nil
+}
+
 // CancelActiveTaskSession atomically transitions one active session to
 // CANCELLED. A false result means the row exists in a non-active state or was
 // concurrently changed before this conditional write; callers re-read to

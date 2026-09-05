@@ -746,6 +746,12 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 	return nil
 }
 
+// ReconcileVacatedStep fills available capacity in a workflow step from its
+// same-step queue or configured feeder.
+func (s *Service) ReconcileVacatedStep(ctx context.Context, vacatedStepID string) {
+	s.pullNextTaskOnVacate(ctx, vacatedStepID, "")
+}
+
 func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
 	// A queue/WIP reconciliation is always wip_pull, unconditionally
 	// overriding whatever trigger the caller that vacated the step declared

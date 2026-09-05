@@ -25,6 +25,7 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import { KanbanCardPriorityIndicator } from "@/components/kanban-card-priority-indicator";
 import { CardTitle } from "@/components/kanban-card-title";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
@@ -148,6 +149,7 @@ export function KanbanCardBody({
           <RepoChipRow chips={repositoryChips} />
           <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
             <CardTitle task={task} enableTitleHover={enableTitleHover} />
+            <KanbanCardPriorityIndicator priority={task.priority} />
             <PRTaskIcon taskId={task.id} />
             <MRTaskIcon taskId={task.id} />
             <RegisteredChangeRequestTaskIcon taskId={task.id} />
@@ -515,7 +517,7 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
         <button
           ref={menuTriggerRef}
           type="button"
-          className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
+          className="text-muted-foreground hover:text-foreground hover:bg-muted inline-flex h-11 min-h-11 w-11 min-w-11 items-center justify-center rounded-sm p-0 transition-colors cursor-pointer sm:h-auto sm:min-h-0 sm:w-auto sm:min-w-0 sm:p-1 sm:-m-1"
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
           aria-label={t("kanban:moreOptions")}

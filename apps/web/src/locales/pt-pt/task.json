@@ -1006,6 +1006,8 @@
   "priority": "Prioridade",
   "priorityCritical": "Crítica",
   "priorityHigh": "Alta",
+  "priorityInfo": "A prioridade mostra o grau de urgência desta tarefa no quadro.",
+  "priorityInfoLabel": "Sobre a prioridade da tarefa",
   "priorityLow": "Baixa",
   "priorityMedium": "Média",
   "private": "privado",

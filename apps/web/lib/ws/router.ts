@@ -31,6 +31,7 @@ import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
 import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
+import { registerSessionHostnamesHandlers } from "@/lib/ws/handlers/session-hostnames";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
 import { registerRepositorySetsHandlers } from "@/lib/ws/handlers/repository-sets";
 import { registerRepositoryBranchPoliciesHandlers } from "@/lib/ws/handlers/repository-branch-policies";
@@ -68,6 +69,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSessionTodosHandlers(store),
     ...registerPromptUsageHandlers(store),
     ...registerUsersHandlers(store),
+    ...registerSessionHostnamesHandlers(store),
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),
     ...messages.handlers,

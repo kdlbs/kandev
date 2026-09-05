@@ -1005,6 +1005,8 @@
   "priority": "优先级",
   "priorityCritical": "紧急",
   "priorityHigh": "高",
+  "priorityInfo": "优先级显示此任务在看板上的紧急程度。",
+  "priorityInfoLabel": "关于任务优先级",
   "priorityLow": "低",
   "priorityMedium": "中",
   "private": "私有",

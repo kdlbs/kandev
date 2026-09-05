@@ -15,6 +15,27 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const (
+	// Validation and reuse only enumerate and read the pinned directory. They
+	// must never request DELETE: a Windows current-directory handle is opened
+	// with FILE_SHARE_READ|FILE_SHARE_WRITE but not FILE_SHARE_DELETE, so any
+	// process whose current directory sits in the task root or worktree makes a
+	// DELETE-requesting open fail with a sharing violation and blocks resume.
+	windowsDependencyReadAccess uint32 = windows.FILE_GENERIC_READ
+	// Removal reopens the target and its descendants with DELETE, but only at the
+	// moment it is about to mark them for deletion.
+	windowsDependencyDeleteAccess uint32 = windows.FILE_GENERIC_READ | windows.DELETE
+	// Creation writes new components and the ownership marker; it never needs to
+	// delete the already-existing managed root.
+	windowsDependencyWriteAccess uint32 = windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE
+)
+
+// These handles are consumed by os.File (Readdirnames, Stat, Read, Write), which
+// issues synchronous I/O. NtCreateFile defaults to asynchronous handles, and a
+// synchronous directory read on one (GetFileInformationByHandleEx) waits on the
+// file object forever, so every component is opened for synchronous I/O.
+const windowsDependencyOpenOptions uint32 = windows.FILE_OPEN_REPARSE_POINT | windows.FILE_SYNCHRONOUS_IO_NONALERT
+
 // RemoveDirectoryNoFollow opens every path component without following links and
 // removes the target through the resulting native handles.
 func RemoveDirectoryNoFollow(ctx context.Context, root, target string) error {
@@ -40,13 +61,13 @@ func removeDependencyDirectoryWithHook(
 	if err != nil {
 		return err
 	}
-	rootHandle, err := openWindowsDependencyDirectoryPath(root)
+	rootHandle, err := openWindowsDependencyDirectoryPath(root, windowsDependencyReadAccess)
 	if err != nil {
 		return fmt.Errorf("open dependency workspace root: %w", err)
 	}
 	defer windows.CloseHandle(rootHandle)
 
-	parentHandle, targetHandle, err := openWindowsDependencyTarget(rootHandle, relative)
+	parentHandle, targetHandle, err := openWindowsDependencyTarget(rootHandle, relative, windowsDependencyDeleteAccess)
 	if err != nil {
 		return err
 	}
@@ -87,34 +108,36 @@ func dependencyRelativePath(root, target string) (string, error) {
 	return relative, nil
 }
 
-func openWindowsDependencyDirectoryPath(path string) (windows.Handle, error) {
+func openWindowsDependencyDirectoryPath(path string, desiredAccess uint32) (windows.Handle, error) {
 	name := windowsDependencyNTPath(path)
-	handle, err := openWindowsDependencyHandle(0, name, windows.FILE_DIRECTORY_FILE)
+	handle, err := openWindowsDependencyHandle(0, name, desiredAccess, windows.FILE_DIRECTORY_FILE)
 	if err != nil {
 		return 0, err
 	}
 	return rejectWindowsDependencyReparse(handle)
 }
 
-func openWindowsDependencyDirectoryRelative(parent windows.Handle, name string) (windows.Handle, error) {
-	return openWindowsDependencyHandle(parent, name, windows.FILE_DIRECTORY_FILE)
+func openWindowsDependencyDirectoryRelative(parent windows.Handle, name string, desiredAccess uint32) (windows.Handle, error) {
+	return openWindowsDependencyHandle(parent, name, desiredAccess, windows.FILE_DIRECTORY_FILE)
 }
 
-func openWindowsDependencyEntryRelative(parent windows.Handle, name string) (windows.Handle, error) {
-	return openWindowsDependencyHandle(parent, name, windows.FILE_NON_DIRECTORY_FILE)
+func openWindowsDependencyEntryRelative(parent windows.Handle, name string, desiredAccess uint32) (windows.Handle, error) {
+	return openWindowsDependencyHandle(parent, name, desiredAccess, windows.FILE_NON_DIRECTORY_FILE)
 }
 
 func openWindowsDependencyHandle(
 	parent windows.Handle,
 	name string,
+	desiredAccess uint32,
 	createOption uint32,
 ) (windows.Handle, error) {
-	return openWindowsDependencyHandleWithDisposition(parent, name, windows.FILE_OPEN, createOption)
+	return openWindowsDependencyHandleWithDisposition(parent, name, desiredAccess, windows.FILE_OPEN, createOption)
 }
 
 func openWindowsDependencyHandleWithDisposition(
 	parent windows.Handle,
 	name string,
+	desiredAccess uint32,
 	disposition uint32,
 	createOption uint32,
 ) (windows.Handle, error) {
@@ -133,21 +156,32 @@ func openWindowsDependencyHandleWithDisposition(
 	var handle windows.Handle
 	err = windows.NtCreateFile(
 		&handle,
-		windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE|windows.DELETE,
+		desiredAccess,
 		objectAttributes,
 		&ioStatus,
 		&allocationSize,
 		0,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		disposition,
-		createOption|windows.FILE_OPEN_REPARSE_POINT,
+		createOption|windowsDependencyOpenOptions,
 		0,
 		0,
 	)
 	if err != nil {
-		return 0, err
+		return 0, windowsDependencyOpenError(err)
 	}
 	return handle, nil
+}
+
+// windowsDependencyOpenError converts the raw NTSTATUS returned by NtCreateFile
+// into its Win32 errno equivalent so errors.Is(err, os.ErrNotExist) and a
+// readable message survive the fmt wrap chain the callers add.
+func windowsDependencyOpenError(err error) error {
+	var status windows.NTStatus
+	if errors.As(err, &status) {
+		return status.Errno()
+	}
+	return err
 }
 
 func rejectWindowsDependencyReparse(handle windows.Handle) (windows.Handle, error) {
@@ -174,11 +208,17 @@ func windowsDependencyNTPath(path string) string {
 	return `\??\` + clean
 }
 
-func openWindowsDependencyTarget(rootHandle windows.Handle, relative string) (parent, target windows.Handle, err error) {
+func openWindowsDependencyTarget(rootHandle windows.Handle, relative string, targetAccess uint32) (parent, target windows.Handle, err error) {
 	parts := strings.FieldsFunc(filepath.Clean(relative), func(r rune) bool { return r == '\\' || r == '/' })
 	parent = rootHandle
 	for index, part := range parts {
-		next, openErr := openWindowsDependencyDirectoryRelative(parent, part)
+		// Intermediate components are only traversed; only the final target may
+		// carry the caller's access (DELETE for removal, read for validation).
+		access := windowsDependencyReadAccess
+		if index == len(parts)-1 {
+			access = targetAccess
+		}
+		next, openErr := openWindowsDependencyDirectoryRelative(parent, part, access)
 		if openErr != nil {
 			if parent != rootHandle {
 				_ = windows.CloseHandle(parent)
@@ -236,7 +276,7 @@ func removeWindowsDependencyContents(ctx context.Context, dirHandle windows.Hand
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		child, dirErr := openWindowsDependencyDirectoryRelative(dirHandle, name)
+		child, dirErr := openWindowsDependencyDirectoryRelative(dirHandle, name, windowsDependencyDeleteAccess)
 		if dirErr == nil {
 			reparse, checkErr := windowsDependencyHandleIsReparsePoint(child)
 			if checkErr != nil {
@@ -258,7 +298,7 @@ func removeWindowsDependencyContents(ctx context.Context, dirHandle windows.Hand
 			}
 			continue
 		}
-		file, fileErr := openWindowsDependencyEntryRelative(dirHandle, name)
+		file, fileErr := openWindowsDependencyEntryRelative(dirHandle, name, windowsDependencyDeleteAccess)
 		if fileErr != nil {
 			return fmt.Errorf("open dependency entry %s: %w", name, fileErr)
 		}

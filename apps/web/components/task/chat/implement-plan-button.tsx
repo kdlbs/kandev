@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
  */
 type ImplementPlanButtonProps = {
   onClick: (fresh: boolean) => void | Promise<unknown>;
+  presentation?: "desktop" | "mobile";
   disabled?: boolean;
   disabledReason?: string;
   framed?: boolean;
@@ -32,8 +33,26 @@ type ImplementPlanButtonProps = {
   };
 };
 
+type ImplementPlanPresentation = "desktop" | "mobile";
+
 function legacyRootTestId(rootId: string) {
   return rootId === "implement-plan-control" ? undefined : "implement-plan-control";
+}
+
+function controlSizeClass(presentation: ImplementPlanPresentation, framed?: boolean): string {
+  if (presentation === "mobile") return "min-h-11 min-w-11";
+  if (framed) return "h-5";
+  return "h-7";
+}
+
+function disabledInteractionClass(disabled?: boolean): string {
+  return disabled ? "pointer-events-none cursor-not-allowed" : "cursor-pointer";
+}
+
+function framedRootClass(framed?: boolean): string | undefined {
+  return framed
+    ? "border border-violet-400/35 bg-background/40 focus-within:ring-[2px] focus-within:ring-violet-400/25"
+    : undefined;
 }
 
 function DisabledImplementTooltip({
@@ -57,95 +76,39 @@ function DisabledImplementTooltip({
 
 export function ImplementPlanButton({
   onClick,
+  presentation = "desktop",
   disabled,
   disabledReason,
   framed,
   testIds,
 }: ImplementPlanButtonProps) {
-  const { t } = useTranslation();
   const ids = {
     root: testIds?.root ?? "implement-plan-control",
     button: testIds?.button ?? "implement-plan-button",
     menuTrigger: testIds?.menuTrigger ?? "implement-plan-menu-trigger",
     freshItem: testIds?.freshItem ?? "implement-fresh-menu-item",
   };
-  const controlHeightClass = framed ? "h-5" : "h-7";
-  const primaryButton = (
-    <span className="inline-flex">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        data-testid={ids.button}
-        disabled={disabled}
-        className={cn(
-          "gap-1.5 px-2 text-violet-400 rounded-r-none pr-1.5 border-transparent",
-          controlHeightClass,
-          "hover:bg-muted/40 focus-visible:border-transparent focus-visible:ring-violet-400/30",
-          disabled ? "pointer-events-none cursor-not-allowed" : "cursor-pointer",
-        )}
-        onClick={() => onClick(false)}
-      >
-        <IconRocket className="h-4 w-4" />
-        <span className="text-xs">{t("task:implement")}</span>
-      </Button>
-    </span>
-  );
-  const primary = disabledReason ? (
-    primaryButton
-  ) : (
-    <Tooltip>
-      <TooltipTrigger asChild>{primaryButton}</TooltipTrigger>
-      <TooltipContent>{t("task:implementThePlanInThisSession")}</TooltipContent>
-    </Tooltip>
-  );
+  const controlSize = controlSizeClass(presentation, framed);
   const splitButton = (
     <div
       data-testid={ids.root}
       data-legacy-testid={legacyRootTestId(ids.root)}
-      className={cn(
-        "inline-flex items-center rounded-md",
-        framed &&
-          "border border-violet-400/35 bg-background/40 focus-within:ring-[2px] focus-within:ring-violet-400/25",
-      )}
+      className={cn("inline-flex items-center rounded-md", framedRootClass(framed))}
     >
-      {primary}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-testid={ids.menuTrigger}
-            aria-label={t("task:moreImplementOptions")}
-            aria-disabled={disabled}
-            disabled={disabled}
-            className={cn(
-              "px-1 text-violet-400 rounded-l-none border-y-0 border-r-0 border-l border-violet-400/20",
-              controlHeightClass,
-              "hover:bg-muted/40 focus-visible:border-y-0 focus-visible:border-r-0 focus-visible:border-l-violet-400/20 focus-visible:ring-0",
-              disabled ? "pointer-events-none cursor-not-allowed" : "cursor-pointer",
-            )}
-          >
-            <IconChevronDown className="h-3.5 w-3.5" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuItem
-            data-testid={ids.freshItem}
-            onClick={() => onClick(true)}
-            className="cursor-pointer"
-          >
-            <IconPlus className="h-4 w-4 mr-2 shrink-0 self-start mt-0.5" />
-            <div>
-              <div>{t("task:implementInFreshAgent")}</div>
-              <div className="text-[11px] text-muted-foreground font-normal">
-                {t("task:startsANewSessionWithA")}
-              </div>
-            </div>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <ImplementPrimaryButton
+        buttonId={ids.button}
+        controlSize={controlSize}
+        disabled={disabled}
+        disabledReason={disabledReason}
+        onClick={onClick}
+      />
+      <ImplementMenuButton
+        controlSize={controlSize}
+        disabled={disabled}
+        freshItemId={ids.freshItem}
+        menuTriggerId={ids.menuTrigger}
+        onClick={onClick}
+      />
     </div>
   );
 
@@ -155,5 +118,103 @@ export function ImplementPlanButton({
     <DisabledImplementTooltip disabledReason={disabledReason}>
       {splitButton}
     </DisabledImplementTooltip>
+  );
+}
+
+function ImplementPrimaryButton({
+  buttonId,
+  controlSize,
+  disabled,
+  disabledReason,
+  onClick,
+}: {
+  buttonId: string;
+  controlSize: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  onClick: (fresh: boolean) => void | Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  const button = (
+    <span className="inline-flex">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        data-testid={buttonId}
+        disabled={disabled}
+        className={cn(
+          "gap-1.5 px-2 text-violet-400 rounded-r-none pr-1.5 border-transparent",
+          controlSize,
+          "hover:bg-muted/40 focus-visible:border-transparent focus-visible:ring-violet-400/30",
+          disabledInteractionClass(disabled),
+        )}
+        onClick={() => onClick(false)}
+      >
+        <IconRocket className="h-4 w-4" />
+        <span className="text-xs">{t("task:implement")}</span>
+      </Button>
+    </span>
+  );
+  if (disabledReason) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent>{t("task:implementThePlanInThisSession")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ImplementMenuButton({
+  controlSize,
+  disabled,
+  freshItemId,
+  menuTriggerId,
+  onClick,
+}: {
+  controlSize: string;
+  disabled?: boolean;
+  freshItemId: string;
+  menuTriggerId: string;
+  onClick: (fresh: boolean) => void | Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-testid={menuTriggerId}
+          aria-label={t("task:moreImplementOptions")}
+          aria-disabled={disabled}
+          disabled={disabled}
+          className={cn(
+            "px-1 text-violet-400 rounded-l-none border-y-0 border-r-0 border-l border-violet-400/20",
+            controlSize,
+            "hover:bg-muted/40 focus-visible:border-y-0 focus-visible:border-r-0 focus-visible:border-l-violet-400/20 focus-visible:ring-0",
+            disabledInteractionClass(disabled),
+          )}
+        >
+          <IconChevronDown className="h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuItem
+          data-testid={freshItemId}
+          onClick={() => onClick(true)}
+          className="cursor-pointer"
+        >
+          <IconPlus className="h-4 w-4 mr-2 shrink-0 self-start mt-0.5" />
+          <div>
+            <div>{t("task:implementInFreshAgent")}</div>
+            <div className="text-[11px] text-muted-foreground font-normal">
+              {t("task:startsANewSessionWithA")}
+            </div>
+          </div>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
