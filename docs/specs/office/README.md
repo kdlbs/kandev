@@ -94,6 +94,8 @@ dashboard projections, and Office testing contracts.
 - [Office Config Sync Reconciliation System Design](system-design/config-sync-reconciliation.md)
 - [Office: Cost Tracking & Budget Management System Design Part 1](system-design/costs-01.md)
 - [Office: Cost Tracking & Budget Management System Design Part 2](system-design/costs-02.md)
+- [Office: Budget Notification Idempotency System Design (Part 3)](system-design/costs-03.md)
+- [Office: Budget Notification Idempotency System Design (Part 4)](system-design/costs-04.md)
 - [Office Live Updates System Design Part 1](system-design/live-updates-01.md)
 - [Office Live Updates System Design Part 2](system-design/live-updates-02.md)
 - [Office per-agent and per-role tier selection System Design Part 1](system-design/office-agent-tier-routing-01.md)

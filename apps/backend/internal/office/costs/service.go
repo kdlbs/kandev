@@ -32,6 +32,9 @@ type Repository interface {
 	UpdateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error
 	DeleteBudgetPolicy(ctx context.Context, id string) error
 	UpdateAgentStatusFields(ctx context.Context, agentID, status, pauseReason string) error
+	// Claim atomically records that (policyID, periodKey, level) may emit its
+	// budget notification. See docs/specs/office/requirements/costs.md.
+	Claim(ctx context.Context, policyID, periodKey, level string) (bool, error)
 }
 
 // CostService handles cost recording, summaries, and budget evaluation.

@@ -53,6 +53,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 		"office_agent_runtime",
 		"office_cost_events",
 		"office_budget_policies",
+		"office_budget_claims",
 		"runs",
 		"office_routines",
 		"office_routine_triggers",
