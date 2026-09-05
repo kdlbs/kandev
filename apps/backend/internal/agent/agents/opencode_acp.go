@@ -187,7 +187,10 @@ func (a *OpenCodeACP) ApplyFilesystemPolicy(env map[string]string, policy Filesy
 		return fmt.Errorf("unsupported filesystem policy %q", policy.Name)
 	}
 	rules := map[string]map[string]string{
-		"bash":               {"*": "deny"},
+		// Git add/commit and normal agent workflows execute through OpenCode's
+		// bash tool. Path isolation remains enforced by the executor/container
+		// boundary and the read/edit/external_directory rules below.
+		"bash":               {"*": "allow"},
 		"external_directory": {"*": "deny"},
 		"read":               {"*": "deny"},
 		"edit":               {"*": "deny"},
