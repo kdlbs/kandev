@@ -24,10 +24,24 @@ vi.mock("@/hooks/domains/session/use-session-actions", () => ({
 }));
 
 vi.mock("./session-tab-menu", () => ({
-  SessionContextMenuItems: ({ actions }: { actions: { handleCloseOthers: () => void } }) => (
-    <button type="button" onClick={actions.handleCloseOthers}>
-      Close Others
-    </button>
+  SessionContextMenuItems: ({
+    actions,
+  }: {
+    actions: {
+      handleCloseOthers: () => void;
+      hideSessionPanel?: () => void;
+    };
+  }) => (
+    <>
+      {actions.hideSessionPanel && (
+        <button type="button" onClick={actions.hideSessionPanel}>
+          Hide
+        </button>
+      )}
+      <button type="button" onClick={actions.handleCloseOthers}>
+        Close Others
+      </button>
+    </>
   ),
   SessionTabDialogs: () => null,
 }));
@@ -52,7 +66,61 @@ import type { TaskId, TaskSession } from "@/lib/types/http";
 
 afterEach(() => cleanup());
 
+function renderSoleSessionTab() {
+  const currentPanel = { id: "session:current" };
+  const api = {
+    id: currentPanel.id,
+    isActive: true,
+    group: { id: "group-A", panels: [currentPanel] },
+    onDidActiveChange: () => ({ dispose: vi.fn() }),
+    onDidTitleChange: () => ({ dispose: vi.fn() }),
+    title: "Current",
+    setTitle: vi.fn(),
+  };
+  const containerApi = {
+    panels: [currentPanel],
+    getPanel: (id: string) => (id === currentPanel.id ? currentPanel : undefined),
+    removePanel: vi.fn(),
+    onDidAddPanel: () => ({ dispose: vi.fn() }),
+    onDidRemovePanel: () => ({ dispose: vi.fn() }),
+  };
+  const currentSession = {
+    id: "current",
+    state: "COMPLETED",
+    name: "Current",
+    task_id: "task-A",
+  } as TaskSession;
+
+  render(
+    <StateProvider
+      initialState={{
+        ...defaultState,
+        tasks: { ...defaultState.tasks, activeTaskId: "task-A" as TaskId },
+        taskSessions: { ...defaultState.taskSessions, items: { current: currentSession } },
+        taskSessionsByTask: {
+          ...defaultState.taskSessionsByTask,
+          itemsByTaskId: { "task-A": [currentSession] },
+        },
+      }}
+    >
+      <SessionTab
+        api={api as never}
+        containerApi={containerApi as never}
+        params={{}}
+        tabLocation="header"
+      />
+    </StateProvider>,
+  );
+}
+
 describe("SessionTab Close Others", () => {
+  it("does not expose Hide when it is the sole visible session panel", () => {
+    renderSoleSessionTab();
+
+    expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Close Others" })).not.toBeNull();
+  });
+
   it("preserves non-session tabs and session tabs in other Dockview groups", () => {
     const currentPanel = { id: "session:current" };
     const siblingSessionPanel = { id: "session:sibling" };

@@ -210,7 +210,7 @@ function useSessionTabActions(
     handleStop,
     handleResume,
     handleDelete,
-    hideSessionPanel: hideCurrentSessionPanel,
+    hideSessionPanel: visibleSessionCount > 1 ? hideCurrentSessionPanel : undefined,
     handleCloseOthers,
     visibleSessionCount,
   };
@@ -285,7 +285,7 @@ function SessionTabTriggerContent({
   sessionState: TaskSessionState | null;
   isActive: boolean;
   showCloseAction: boolean;
-  onCloseTab: () => void;
+  onCloseTab?: () => void;
 }) {
   return (
     <div className="flex items-center">
@@ -310,7 +310,9 @@ function SessionTabTriggerContent({
           />
         ))}
       <DockviewDefaultTab {...props} hideClose />
-      {showCloseAction && <SessionTabCloseAction sessionId={sessionId} onClose={onCloseTab} />}
+      {showCloseAction && onCloseTab && (
+        <SessionTabCloseAction sessionId={sessionId} onClose={onCloseTab} />
+      )}
     </div>
   );
 }
@@ -387,7 +389,7 @@ function SessionTabBody({
   sessionState: TaskSessionState | null;
   isActive: boolean;
   showCloseAction: boolean;
-  onCloseTab: () => void;
+  onCloseTab?: () => void;
 }) {
   if (isRenaming) {
     return (
