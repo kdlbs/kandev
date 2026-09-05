@@ -1,4 +1,4 @@
-import { createRef } from "react";
+import { createRef, type ComponentProps } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -295,30 +295,110 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
 });
 
 describe("CreateEditSelectors", () => {
-  it("links credential setup to the selected executor profile", () => {
-    const EmptySelector = () => <button type="button">selector</button>;
+  const WORKFLOW_NAME = "Development";
+  const EXECUTOR_NAME = "Fly";
+  const EMPTY_STATE_TEST_ID = "agent-profile-empty-state";
+  const SELECTOR_TEST_ID = "agent-selector-stub";
+  const AgentSelectorStub = () => (
+    <button type="button" data-testid="agent-selector-stub">
+      selector
+    </button>
+  );
+  const ExecutorSelectorStub = () => <button type="button">executor</button>;
+  const baseProps: Omit<ComponentProps<typeof CreateEditSelectors>, "agentCompatState"> = {
+    isTaskStarted: false,
+    agentProfiles: [{ id: "agent-1", label: "Codex", agent_name: "codex" } as never],
+    agentProfilesLoading: false,
+    agentProfileOptions: [],
+    agentProfileId: "",
+    onAgentProfileChange: () => {},
+    isCreatingSession: false,
+    executorProfileOptions: [],
+    executorProfileId: "exec-profile-1",
+    onExecutorProfileChange: () => {},
+    executorsLoading: false,
+    AgentSelectorComponent: AgentSelectorStub,
+    ExecutorProfileSelectorComponent: ExecutorSelectorStub,
+    workflowAgentLocked: false,
+    executorProfileName: "Docker",
+    selectedAgentProfileName: null,
+    effectiveWorkflowName: null,
+  };
 
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.4
+  it("links credential setup to the selected executor profile", () => {
+    render(<CreateEditSelectors {...baseProps} agentCompatState="none-compatible" />);
+
+    expect(screen.getByTestId(EMPTY_STATE_TEST_ID).textContent).toContain(
+      "No compatible agent profiles",
+    );
+    expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
+      "/settings/executors/exec-profile-1",
+    );
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.1
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  it("keeps the selector and names the incompatible agent when another agent is compatible", () => {
     render(
       <CreateEditSelectors
-        isTaskStarted={false}
-        agentProfiles={[{ id: "agent-1", label: "Codex", agent_name: "codex" } as never]}
-        agentProfilesLoading={false}
-        agentProfileOptions={[]}
-        agentProfileId=""
-        onAgentProfileChange={() => {}}
-        isCreatingSession={false}
-        executorProfileOptions={[]}
-        executorProfileId="exec-profile-1"
-        onExecutorProfileChange={() => {}}
-        executorsLoading={false}
-        AgentSelectorComponent={EmptySelector}
-        ExecutorProfileSelectorComponent={EmptySelector}
-        workflowAgentLocked={false}
-        noCompatibleAgent={true}
-        executorProfileName="Docker"
+        {...baseProps}
+        agentProfileId="agent-1"
+        agentCompatState="selected-incompatible"
+        selectedAgentProfileName="OpenCode"
+        executorProfileName={EXECUTOR_NAME}
       />,
     );
 
+    expect(screen.getByTestId(SELECTOR_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID)).toBeNull();
+    const note = screen.getByTestId("agent-profile-incompatible-note").textContent ?? "";
+    expect(note).toContain("OpenCode");
+    expect(note).toContain(EXECUTOR_NAME);
+    expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
+      "/settings/executors/exec-profile-1",
+    );
+  });
+
+  it("keeps the selector and shows an unavailable note while replacement is pending", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentProfileId="agent-1"
+        agentCompatState={"selected-unavailable" as never}
+        selectedAgentProfileName="Disabled agent"
+        executorProfileName={EXECUTOR_NAME}
+      />,
+    );
+
+    expect(screen.getByTestId(SELECTOR_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID)).toBeNull();
+    expect(screen.getByTestId("agent-profile-unavailable-note").textContent).toContain(
+      "Disabled agent",
+    );
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.5
+  it("names the workflow, agent, and executor when the workflow locks an incompatible agent", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentProfileId="agent-1"
+        agentCompatState="selected-incompatible"
+        workflowAgentLocked={true}
+        selectedAgentProfileName="OpenCode"
+        effectiveWorkflowName={WORKFLOW_NAME}
+        executorProfileName={EXECUTOR_NAME}
+      />,
+    );
+
+    const note = screen.getByTestId("agent-profile-incompatible-note").textContent ?? "";
+    expect(note).toContain(WORKFLOW_NAME);
+    expect(note).toContain("OpenCode");
+    expect(note).toContain(EXECUTOR_NAME);
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID)).toBeNull();
     expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
       "/settings/executors/exec-profile-1",
     );
