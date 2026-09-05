@@ -10,6 +10,9 @@ Use this skill to decide whether public docs need updates and to make those upda
 ## Docs Boundaries
 
 - Public website docs source lives under `docs/public/**`.
+- Repository-facing public docs also include the root `README.md` and
+  `docs/screenshots.md`; search them for feature, integration, and screenshot
+  changes even when the website source is unchanged.
 - Product context, requirements, and system designs stay under `docs/specs/**`.
 - Implementation plans and work orders stay under `docs/plans/**`.
 - Architecture decisions stay under `docs/decisions/**`.
@@ -37,26 +40,31 @@ Skip public docs when the change is:
 ## Workflow
 
 1. Identify docs impact from the diff and changed behavior.
-2. Search `docs/public/**` first for affected terms and commands.
+2. Search `docs/public/**`, the root `README.md`, and `docs/screenshots.md`
+   first for affected terms, features, integrations, and screenshots.
 3. If public docs exist, update them with the same PR as the behavior change.
 4. If no public docs exist but the behavior is user-facing, add or propose the smallest useful public page/section.
    When adding a page, include `title` and `description` frontmatter and list its page slug or path without the `.md` extension in `docs/public/meta.json` exactly once, for example `cli`. See `docs/public/README.md`.
 5. If the change only updates implementation intent or architectural history, update specs/plans/ADRs instead.
-6. Classify each public page by its primary Diátaxis content type:
+6. For operational recovery guidance, distinguish permission-denied, active-lock,
+   and stale-lock failures before recommending a fallback. Verify that the
+   fallback uses a different execution or resource path; if it shares the same
+   worktree, state that it cannot bypass the contention.
+7. Classify each public page by its primary Diátaxis content type:
    - **Tutorial:** teach a beginner by leading them through one successful outcome.
    - **How-to guide:** help a reader complete a known task, with focused steps, choices, and recovery paths.
    - **Reference:** provide accurate, complete lookup information such as fields, commands, defaults, limits, or protocol contracts.
    - **Explanation:** build understanding of a concept, boundary, rationale, or trade-off.
    Keep one dominant type per page. Link to another page when a long section changes from learning to procedure, lookup, or explanation; do not force every page into a generic tutorial-shaped opening.
-7. Keep public docs task-oriented and scan-friendly:
+8. Keep public docs task-oriented and scan-friendly:
    - Tutorials should lead with prerequisites and a linear first success; how-to guides should lead with the task, expected result, and only the prerequisites it needs.
    - Reference pages should lead with scope and the contract readers need to look up; explanation pages should lead with the question or concept and why it matters.
    - Use short paragraphs (one idea, normally three sentences or fewer) and bullets for choices, limits, and consequences.
    - Prefer a link to the page that owns a detailed contract over repeating it.
    - Use native `<details>` / `<summary>` disclosures for non-essential edge cases, exhaustive option lists, and advanced configuration. Keep required steps, security warnings, destructive effects, and eligibility limits visible.
    - Use tables only for genuine comparisons, not narrative text.
-8. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
-9. Note docs impact and the page's primary content type in the PR body.
+9. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
+10. Note docs impact and the page's primary content type in the PR body.
 
 ## Diagrams for Public Docs
 
@@ -99,6 +107,9 @@ rg -n "SEARCH_TERM" docs/public docs/specs docs/decisions
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 ```
+
+Run both public-doc validators when the root README or screenshot catalog is
+updated, not only when `docs/public/**` changes.
 
 For website docs publishing changes, also run from the landing repo:
 

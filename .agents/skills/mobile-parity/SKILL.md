@@ -76,6 +76,9 @@ When a task changes composition, navigation, overlays, touch behavior, scrolling
    - In this repo, name mobile test files `mobile-*.spec.ts` so the `mobile-chrome` Playwright project picks them up automatically.
    - Cover the actual mobile composition: drawer or full-height surface, visible overflow action, focused navigation, direct route, or bottom control.
    - For overlay and dense-navigation changes, assert viewport containment, internal scrolling, and the absence of document horizontal overflow where those properties are part of the regression.
+   - For responsive visual or utility changes, define the base phone behavior and assert computed styles at the canonical phone viewport and just below and above the relevant breakpoint; geometry or overflow checks alone can miss a desktop style leaking into a full-screen mobile surface.
+   - When responsive CSS changes an overlay or absolute child to normal flow (for example, `position: static`), re-check the parent's allocated width and height; a fixed-size desktop wrapper can under-report combined in-flow mobile content.
+   - For containment regressions, compare the interactive control's bounding box with its row, drawer, or viewport bounds. An intrinsic 44px hitbox plus a document-overflow check does not prove that an ancestor is not clipping the control.
    - When a touch-only control is replaced or hidden, run `rg` across mobile E2E tests for the removed control. Replace every affected interaction with the intended gesture or alternate control, then run those tests together.
 
 5. Verify visually and behaviorally.

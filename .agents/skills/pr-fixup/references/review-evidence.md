@@ -118,19 +118,24 @@ body with `scripts/pr-resolve show <PR> <THREAD_ID>`; use the flat comment comma
 only for a comment without thread context. A listed thread that is already
 resolved is stale summary state: re-poll and do not reply again.
 
-Poll at 30-second cadence with a 20-minute cap using bounded one-shot commands;
-avoid long inline loops and `gh pr checks --watch`. In default monitoring,
-stop early on a required failure. For an explicit fixed-duration request, use
-strict-deadline mode: accumulate failures and comments until the absolute
-deadline, stopping early only if the PR is merged/closed or access is revoked.
+Use `scripts/pr-await` for normal waiting: it polls at 60-second cadence and
+defaults to a 45-minute deadline. For a user-specified wait limit, pass
+`--deadline-min N` and, when cadence must be explicit, `--interval-sec S`; do
+not rely on the defaults. This is a maximum deadline, not
+a minimum hold time: `pr-await` can return early when checks are terminal. Avoid
+long inline loops and `gh pr checks --watch`. In default monitoring, stop early
+on a required failure. For an explicit wait limit, accumulate failures and
+comments until the absolute deadline, stopping early only if the PR is
+merged/closed, access is revoked, or the helper reports a terminal result.
 Queued/in-progress jobs are pending, not speculative-fix triggers. On an
-explicit wait-through-CI request without a fixed deadline, use the same
-20-minute absolute cap: repeat bounded checks until failures, pending checks,
-and unresolved-thread count are all empty/zero, or stop at the deadline and
-report remaining pending checks or unresolved threads. A nonzero unresolved
-count is a blocker even when every remaining thread is informational, optional,
-or invalid. Preserve early stopping
-for failures and merged/closed or access-revoked conditions.
+explicit wait-through-CI request without a fixed deadline, use the helper's
+45-minute default; if manual polling is required, use a 20-minute absolute cap:
+repeat bounded checks until failures, pending checks, and unresolved-thread count
+are all empty/zero; matrix and aggregate checks may materialize later and increase
+the pending count, so only the final terminal report is authoritative. Stop at the deadline and report remaining pending checks
+or unresolved threads. A nonzero unresolved count is a blocker even when every
+remaining thread is informational, optional, or invalid. Preserve early
+stopping for failures and merged/closed or access-revoked conditions.
 
 For E2E-only pending work, summarize a saved snapshot before printing shards:
 
@@ -141,4 +146,10 @@ jq -r '.pending_checks[] | "\(.status) | \(.name)"' /tmp/prstate-<PR>.json
 ```
 
 If a manual poll is interrupted, terminate only polling processes you started.
+An interrupted `pr-await` has no verdict: inspect only the exact PR's polling
+processes before starting another, and never launch a duplicate monitor. If its
+PTY or session handle is lost, do not trust partial output or assume it stopped;
+terminate only the waiter process tree started by the primary session, restart
+one monitor with a retained handle and an explicit deadline, then reconcile with
+a fresh `scripts/pr-state --summary <PR>` after it exits.
 Use raw `scripts/pr-state <PR>` only for an odd-state diagnostic.

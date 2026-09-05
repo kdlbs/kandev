@@ -90,6 +90,7 @@ Use the configured `mobile-chrome` Pixel 5 project and assert user outcomes. Add
 - primary action is visible and completes the same outcome as desktop
 - drawer/menu remains inside the viewport and long content scrolls internally
 - new primary actions, standalone icon controls, and menu rows meet the 44px hitbox expectation
+- controls revealed by responsive position overrides stay inside their surface: `controlBox.x >= surfaceBox.x` and `controlBox.x + controlBox.width <= surfaceBox.x + surfaceBox.width`, with the equivalent vertical checks when relevant
 - nested choices remain usable without horizontal overflow
 - document `scrollWidth` does not exceed `clientWidth`
 - fixed controls and final rows clear the bottom safe area

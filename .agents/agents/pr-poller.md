@@ -21,14 +21,15 @@ primary sources. In the default mode, poll at a 60-second cadence for at most
 review feedback, or a terminal clean state. Keep polling directly in this mode:
 `scripts/pr-await` waits for every check to finish, which cannot return early on
 a failure or conflict while other checks are still pending. If the caller says "wait N
-minutes" or "then fix up", use strict-deadline mode instead: the 20-minute cap
-does not apply there — honor the caller's own N-minute deadline. Those
-semantics are exactly what `scripts/pr-await <PR> --deadline-min N` implements,
-so prefer it there and report its single output. Without that script, still poll
-at a 60-second cadence but for the caller's full N minutes: calculate and
-include the absolute deadline in the polling prompt, accumulate findings, and
-do not return early for findings, pending checks, or a clean snapshot. Stop
-early only if the PR is merged/closed or access is revoked. At the deadline,
+minutes" or "then fix up", pass the caller's value to
+`scripts/pr-await <PR> --deadline-min N` as a maximum deadline. The helper can
+return early when checks are terminal; do not describe that as a full-duration
+wait. If the caller explicitly requires the full N minutes, the helper has no
+minimum-wait mode: without that script, poll at a 60-second cadence for the
+caller's full N minutes, calculate and include the absolute deadline in the
+polling prompt, accumulate findings, and do not return early for findings,
+pending checks, or a clean snapshot. Stop early only if the PR is merged/closed
+or access is revoked. At the deadline,
 return the latest named pending checks and named actionable review findings,
 not only aggregate CI and review states.
 

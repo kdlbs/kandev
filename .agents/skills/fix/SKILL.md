@@ -57,6 +57,12 @@ Classify the bug:
 Do not create a standalone repair specification. The requirement is the durable
 behavioral source. The plan and work orders record this repair.
 
+For predicates over collections or inventory, state the quantifier explicitly:
+distinguish existential conditions such as “at least one live row” from
+universal conditions such as “all rows.” When behavior depends on that
+distinction, require a mixed-state regression containing both live and failed or
+deleted rows.
+
 Do not create parallel feature and UI requirements for one repair. A separate UI
 requirement is valid only when the repair changes an independent reusable UI
 contract.

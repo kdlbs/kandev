@@ -17,6 +17,12 @@ Apply this guidance whenever editing `.github/**`.
 - PR label/metadata cleanup jobs that operate on pull requests must declare
   `pull-requests: write`, not `issues: write`; mirror the permission shape used
   by `preview-env.yml`.
+- **Trusted-main workflow tests:** Some mutating or scheduled workflows
+  intentionally check out `origin/main`. A `workflow_dispatch` started from a
+  feature branch therefore tests the current default-branch workflow, not the
+  PR's workflow files. Inspect the checkout ref and head SHA, separate PR CI
+  from post-merge production-workflow smoke tests, and do not call a
+  trusted-main failure a pre-merge implementation failure.
 - Release workflow changes must trace prepare/summary outputs and conditions
   through every build and publication job: skip decisions must propagate
   without accidental publishing, while backfill must reuse and validate the
