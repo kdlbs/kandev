@@ -21,6 +21,7 @@ import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collaps
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { projectWorkflowTasks } from "@/lib/kanban/task-projections";
+import { buildTaskVcsSearchIndex } from "@/lib/kanban/task-search-index";
 import {
   selectMobileNavigatorWorkflows,
   selectWorkflowSwimlanes,
@@ -100,6 +101,8 @@ function renderEmptyState(emptyMessage: string) {
 
 /** Stable identity so an unhidden workflow does not remount its menu each render. */
 const EMPTY_HIDDEN_IDS: string[] = [];
+/** Stable identity so a workspace with no GitLab MRs does not re-trigger downstream memos. */
+const EMPTY_TASK_MRS_BY_TASK_ID: Record<string, never[]> = {};
 
 type WorkflowItemProps = {
   wf: { id: string; name: string };
@@ -289,6 +292,21 @@ function useWorkflowReorder(
   return { sensors, canSort, handleDragEnd };
 }
 
+/** One lowercase `#<number>` haystack per task, built from its linked PRs/MRs in the active workspace. */
+function useVcsSearchIndex() {
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
+  const taskMRsByTaskId = useAppStore(
+    (state) =>
+      (activeWorkspaceId && state.taskMRs.byWorkspaceId[activeWorkspaceId]) ||
+      EMPTY_TASK_MRS_BY_TASK_ID,
+  );
+  return useMemo(
+    () => buildTaskVcsSearchIndex(taskPRsByTaskId, taskMRsByTaskId),
+    [taskPRsByTaskId, taskMRsByTaskId],
+  );
+}
+
 function useSwimlaneData(
   workflowFilter: string | null | undefined,
   selectedRepositoryIds: string[],
@@ -303,6 +321,7 @@ function useSwimlaneData(
   const workflowIdsWithAutoHideEmptySteps = useAppStore(
     (state) => state.userSettings.workflowIdsWithAutoHideEmptySteps,
   );
+  const vcsSearchTextByTaskId = useVcsSearchIndex();
 
   const repositories = useMemo(
     () => Object.values(repositoriesByWorkspace).flat() as Repository[],
@@ -330,13 +349,21 @@ function useSwimlaneData(
       const hiddenSet = hidden && hidden.length > 0 ? new Set(hidden) : undefined;
       const projection = projectWorkflowTasks(snapshots, wfId, repoFilter, {
         searchQuery,
+        vcsSearchTextByTaskId,
         matchesPluginTaskFilters,
         hiddenStepIds: hiddenSet,
       });
       cache.set(wfId, projection);
       return projection;
     };
-  }, [snapshots, repoFilter, searchQuery, matchesPluginTaskFilters, hiddenWorkflowStepIds]);
+  }, [
+    snapshots,
+    repoFilter,
+    searchQuery,
+    vcsSearchTextByTaskId,
+    matchesPluginTaskFilters,
+    hiddenWorkflowStepIds,
+  ]);
   const getFilteredTasks = useCallback(
     (wfId: string) => getTaskProjection(wfId).visibleTasks,
     [getTaskProjection],
