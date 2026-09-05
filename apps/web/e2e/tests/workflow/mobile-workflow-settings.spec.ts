@@ -22,6 +22,15 @@ test.describe("Workflow settings on mobile", () => {
     const warning = panel.getByTestId("workflow-step-prompt-auto-start-warning");
 
     await expect(warning).toBeVisible();
+    await expect(warning).toContainText(
+      "This prompt does not start the agent by itself. Start the agent manually, or enable Auto-start agent.",
+    );
+    await expect(
+      panel.getByText(
+        "A step prompt replaces the task description unless it contains {{task_prompt}}.",
+        { exact: true },
+      ),
+    ).toBeVisible();
     if (prCapture.capturing) {
       await warning.scrollIntoViewIfNeeded();
     }

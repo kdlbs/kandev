@@ -212,7 +212,7 @@
   "workflowPromptSetHint": "Configured; expand to edit",
   "workflowInstructionsCollapsed": "Workflow instructions",
   "stepPrompt": "Step Prompt",
-  "stepPromptAutoStartWarning": "This prompt does not run when a task enters this step. Start the agent manually, or enable Auto-start agent.",
+  "stepPromptAutoStartWarning": "This prompt does not start the agent by itself. Start the agent manually, or enable Auto-start agent. A different agent profile can also start it when the step changes profiles.",
   "stepPromptHelp": "Custom instructions for the agent on this step. Use {{taskPrompt}} to include the task description.",
   "stepPromptPlaceholderExample": "Implement user authentication with OAuth2",
   "stepPromptPlaceholderTaskPrompt": "The original task description provided by the user",

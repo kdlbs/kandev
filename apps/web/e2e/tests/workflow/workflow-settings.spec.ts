@@ -33,7 +33,7 @@ test.describe("Workflow settings", () => {
     const warning = panel.getByTestId("workflow-step-prompt-auto-start-warning");
 
     await expect(warning).toContainText(
-      "This prompt does not run when a task enters this step. Start the agent manually, or enable Auto-start agent.",
+      "This prompt does not start the agent by itself. Start the agent manually, or enable Auto-start agent.",
     );
     await expect(
       panel.getByText(

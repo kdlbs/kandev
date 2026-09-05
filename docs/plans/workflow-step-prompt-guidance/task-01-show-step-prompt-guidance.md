@@ -97,6 +97,10 @@ None.
 - Updated the public workflow reference with the trigger and replacement rules.
 - Added desktop and mobile production E2E coverage. The mobile scenario also
   verifies viewport bounds and horizontal overflow.
+- Fixup aligned whitespace-only prompts with backend persistence and clarified
+  that a profile change can also trigger a prompt without explicit auto-start.
+- The mobile scenario now asserts both guidance messages before its layout
+  checks.
 - Passed the web type check and localization check.
 - Passed both public documentation validators and both specification validators.
 - Passed the focused desktop and mobile E2E scenarios.
