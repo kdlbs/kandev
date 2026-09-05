@@ -102,6 +102,86 @@ func TestGetTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.4
+func TestTransferTaskEnvironmentAdvancesGenerationAndHonorsCleanupBarrier(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-environment-transfer")
+	for _, taskID := range []string{"owner-a", "owner-b", "owner-c"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "workspace-environment-transfer", Title: taskID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "environment-transfer", TaskID: "owner-a", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-transfer", "owner-a", 1, "owner-b"); err != nil {
+		t.Fatalf("TransferTaskEnvironmentOwnership: %v", err)
+	}
+	transferred, err := repo.GetTaskEnvironment(ctx, "environment-transfer")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if transferred.TaskID != "owner-b" || transferred.OwnershipGeneration != 2 {
+		t.Fatalf("transferred environment = owner %q generation %d; want owner-b, 2", transferred.TaskID, transferred.OwnershipGeneration)
+	}
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-transfer", "owner-a", 1, "owner-c"); err == nil {
+		t.Fatal("stale ownership retry transferred the current generation")
+	}
+
+	if err := repo.CreateTaskResourceCleanupJob(ctx, &models.TaskResourceCleanupJob{
+		ID: "cleanup-owner-b", OperationID: "delete:owner-b", TaskID: "owner-b",
+		Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePending,
+	}); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-transfer", "owner-b", 2, "owner-c"); err == nil {
+		t.Fatal("TransferTaskEnvironmentOwnership succeeded through active cleanup barrier")
+	}
+	current, err := repo.GetTaskEnvironment(ctx, "environment-transfer")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after rejected transfer: %v", err)
+	}
+	if current.TaskID != "owner-b" || current.OwnershipGeneration != 2 {
+		t.Fatalf("environment after rejected transfer = owner %q generation %d; want owner-b, 2", current.TaskID, current.OwnershipGeneration)
+	}
+}
+
+func TestClaimTaskEnvironmentResetBlocksOwnershipTransferUntilReleased(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-environment-reset-claim")
+	for _, taskID := range []string{"reset-owner", "reset-borrower"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "workspace-environment-reset-claim", Title: taskID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "environment-reset-claim", TaskID: "reset-owner", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	jobID, err := repo.ClaimTaskEnvironmentReset(ctx, "reset-owner", "environment-reset-claim", 1, "reset:operation")
+	if err != nil {
+		t.Fatalf("ClaimTaskEnvironmentReset: %v", err)
+	}
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-reset-claim", "reset-owner", 1, "reset-borrower"); err == nil {
+		t.Fatal("TransferTaskEnvironmentOwnership succeeded while reset claim was active")
+	}
+	if err := repo.ReleaseTaskEnvironmentReset(ctx, jobID, models.TaskResourceCleanupStateSucceeded, ""); err != nil {
+		t.Fatalf("ReleaseTaskEnvironmentReset: %v", err)
+	}
+	if err := repo.TransferTaskEnvironmentOwnership(ctx, "environment-reset-claim", "reset-owner", 1, "reset-borrower"); err != nil {
+		t.Fatalf("TransferTaskEnvironmentOwnership after release: %v", err)
+	}
+}
+
 func TestTaskEnvironment_PersistsDockerBootstrapNonceReference(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
@@ -221,6 +301,74 @@ func TestFinalizeTaskEnvironmentMaterializationAllowsEmptyInventoryForRepoLessTa
 	}
 	if len(persisted.Repos) != 0 {
 		t.Fatalf("canonical inventory = %#v, want empty for repo-less task", persisted.Repos)
+	}
+}
+
+func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-transition")
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-transition", WorkspaceID: "workspace-transition", Title: "transition"}); err != nil {
+		t.Fatal(err)
+	}
+	env := &models.TaskEnvironment{
+		ID: "env-transition", TaskID: "task-transition", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/workspace/old",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	for _, row := range []*models.TaskEnvironmentRepo{
+		{ID: "keep", TaskEnvironmentID: env.ID, RepositoryID: "repo-keep", BranchSlug: "main", WorktreeID: "wt-old"},
+		{ID: "remove", TaskEnvironmentID: env.ID, RepositoryID: "repo-remove", BranchSlug: "old", WorktreeID: "wt-remove"},
+	} {
+		if err := repo.CreateTaskEnvironmentRepo(ctx, row); err != nil {
+			t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
+		}
+	}
+
+	env.ExecutorType = string(models.ExecutorTypeWorktree)
+	env.WorkspacePath = "/workspace/new"
+	if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
+		RepositoryID: "repo-keep", BranchSlug: "main", WorktreeID: "wt-new", WorktreePath: "/workspace/new/repo",
+	}}, true); err != nil {
+		t.Fatalf("PersistTaskEnvironmentTransition: %v", err)
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.ExecutorType != string(models.ExecutorTypeWorktree) || persisted.WorkspacePath != "/workspace/new" {
+		t.Fatalf("environment = %#v, want rebound executor and path", persisted)
+	}
+	if len(persisted.Repos) != 2 {
+		t.Fatalf("repository inventory = %#v, want active row plus tombstone", persisted.Repos)
+	}
+	for _, row := range persisted.Repos {
+		if row.ID == "keep" && row.WorktreeID != "wt-new" {
+			t.Fatalf("kept row = %#v, want refreshed worktree", row)
+		}
+		if row.ID == "remove" && (row.Status != worktreeRepoStatusDeleted || row.DeletedAt == nil) {
+			t.Fatalf("removed row = %#v, want deleted tombstone", row)
+		}
+	}
+
+	env.ExecutorType = string(models.ExecutorTypeLocal)
+	env.WorkspacePath = "/workspace/recreated"
+	if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
+		RepositoryID: "repo-remove", BranchSlug: "old", WorktreeID: "wt-recreated",
+	}}, true); err != nil {
+		t.Fatalf("PersistTaskEnvironmentTransition recreate: %v", err)
+	}
+	persisted, err = repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after recreate: %v", err)
+	}
+	for _, row := range persisted.Repos {
+		if row.ID == "remove" && (row.Status != worktreeRepoStatusActive || row.DeletedAt != nil || row.WorktreeID != "wt-recreated") {
+			t.Fatalf("recreated row = %#v, want active row", row)
+		}
 	}
 }
 
@@ -564,10 +712,10 @@ func TestUpdateTaskEnvironmentAllowsFailedMaterializationWithoutWorkspacePath(t 
 func TestTransferTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	repo := newRepoForHealTests(t)
 
-	err := repo.TransferTaskEnvironmentToTask(context.Background(), "missing-environment", "task-1")
+	err := repo.TransferTaskEnvironmentOwnership(context.Background(), "missing-environment", "task-1", 1, "task-2")
 
 	if !errors.Is(err, ErrTaskEnvironmentNotFound) {
-		t.Fatalf("TransferTaskEnvironmentToTask error = %v, want ErrTaskEnvironmentNotFound", err)
+		t.Fatalf("TransferTaskEnvironmentOwnership error = %v, want ErrTaskEnvironmentNotFound", err)
 	}
 }
 

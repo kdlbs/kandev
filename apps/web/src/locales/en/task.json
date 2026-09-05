@@ -1065,6 +1065,8 @@
   "priority": "Priority",
   "priorityCritical": "Critical",
   "priorityHigh": "High",
+  "priorityInfo": "Priority shows how urgent this task is on the board.",
+  "priorityInfoLabel": "About task priority",
   "priorityLow": "Low",
   "priorityMedium": "Medium",
   "private": "private",

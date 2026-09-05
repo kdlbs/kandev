@@ -280,3 +280,19 @@ describe("buildCreateTaskPayload dependencies", () => {
     expect(buildCreateTaskPayload(base).blocked_by).toBeUndefined();
   });
 });
+
+describe("buildCreateTaskPayload priority", () => {
+  const base = {
+    ...AGENT_PAYLOAD_DEFAULTS,
+    trimmedTitle: "Fix the bug",
+    trimmedDescription: "",
+  };
+
+  it("submits the selected priority token", () => {
+    expect(buildCreateTaskPayload({ ...base, priority: "critical" }).priority).toBe("critical");
+  });
+
+  it("defaults to medium when no priority is selected", () => {
+    expect(buildCreateTaskPayload(base).priority).toBe("medium");
+  });
+});

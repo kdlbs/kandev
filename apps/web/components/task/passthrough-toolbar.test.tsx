@@ -1,5 +1,9 @@
+/* eslint-disable max-lines -- this suite covers the toolbar's desktop and mobile interaction surfaces. */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+afterEach(cleanup);
+beforeEach(resetMocks);
 
 // --- Constants declared before vi.mock so factories can reference them ---
 const TASK_ID = "task-1";
@@ -23,11 +27,15 @@ const TID_PENDING_BANNER = "passthrough-pending-comments-banner";
 const TID_PLAN_TOGGLE = "plan-mode-toggle-button";
 const TID_ATTACHMENTS = "chat-attachments-button";
 const TID_CONTEXT = "chat-context-button";
+const TID_SEND_COMMENTS = "passthrough-send-comments";
 
 // --- Mutable state for per-test overrides ---
 let mockSessionState: string | null = null;
 let mockKeyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }> =
   {};
+const responsiveMock = vi.hoisted(() => ({
+  breakpoint: "desktop" as "mobile" | "tablet" | "desktop",
+}));
 let mockPendingByFile: Record<string, import("@/lib/state/slices/comments").DiffComment[]> = {};
 let mockPlanModeEnabled = false;
 let mockImplementPlanHandler: ((fresh: boolean) => void) | undefined;
@@ -116,7 +124,8 @@ vi.mock("@/hooks/use-file-editors", () => ({
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
-    isMobile: false,
+    isMobile: responsiveMock.breakpoint === "mobile",
+    isTablet: responsiveMock.breakpoint === "tablet",
     isFinePointer: mockIsFinePointer,
   }),
 }));
@@ -294,6 +303,7 @@ async function openComposer() {
 function resetMocks() {
   mockSessionState = null;
   mockKeyboardShortcuts = {};
+  responsiveMock.breakpoint = "desktop";
   mockPendingByFile = {};
   mockPlanModeEnabled = false;
   mockImplementPlanHandler = undefined;
@@ -320,8 +330,6 @@ function latestPassthroughTerminalProps(): { enableTouchScroll?: boolean } {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – default state", () => {
-  afterEach(cleanup);
-
   it("renders the toolbar and hides the composer when session is idle", () => {
     mockSessionState = "IDLE";
     renderToolbar();
@@ -356,6 +364,52 @@ describe("PassthroughToolbar – default state", () => {
   });
 });
 
+function renderStatusRow(breakpoint: "mobile" | "tablet" | "desktop") {
+  responsiveMock.breakpoint = breakpoint;
+  mockSessionState = "IDLE";
+  mockPendingByFile = { [SRC_FILE]: [makeDiffComment("c1")] };
+  mockNextStep = { proceedStepName: "Review", proceed: vi.fn(), isMoving: false };
+  renderToolbar();
+}
+
+function expectTouchSized(testId: string) {
+  const control = screen.getByTestId(testId);
+  expect(control.className).toContain("min-h-11");
+  expect(control.className).toContain("min-w-11");
+}
+
+function expectCompactSized(testId: string) {
+  const control = screen.getByTestId(testId);
+  expect(control.className).toContain("h-6");
+  expect(control.className).not.toContain("min-h-11");
+  expect(control.className).not.toContain("min-w-11");
+}
+
+async function expectCommentSendSize(touchSized: boolean) {
+  fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
+  await waitFor(() => expect(screen.getByTestId(TID_COMMENTS_PANEL)).toBeTruthy());
+  if (touchSized) expectTouchSized(TID_SEND_COMMENTS);
+  else expectCompactSized(TID_SEND_COMMENTS);
+}
+
+describe("PassthroughToolbar – mobile touch targets", () => {
+  it("sizes status and comment-send controls for touch without changing desktop geometry", async () => {
+    renderStatusRow("mobile");
+    for (const testId of [TID_TOGGLE, TID_TOGGLE_COMMENTS, TID_PROCEED]) expectTouchSized(testId);
+    await expectCommentSendSize(true);
+
+    cleanup();
+    renderStatusRow("desktop");
+    for (const testId of [TID_TOGGLE, TID_TOGGLE_COMMENTS, TID_PROCEED]) expectCompactSized(testId);
+    await expectCommentSendSize(false);
+  });
+
+  it("sizes status controls for coarse-pointer tablets", () => {
+    renderStatusRow("tablet");
+    for (const testId of [TID_TOGGLE, TID_TOGGLE_COMMENTS, TID_PROCEED]) expectTouchSized(testId);
+  });
+});
+
 describe("PassthroughToolbar – touch-scroll activation", () => {
   beforeEach(resetMocks);
   afterEach(cleanup);
@@ -382,9 +436,6 @@ describe("PassthroughToolbar – touch-scroll activation", () => {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – composer toggle", () => {
-  beforeEach(resetMocks);
-  afterEach(cleanup);
-
   it("clicking Chat toggle opens and closes the composer", async () => {
     renderToolbar();
     const toggle = screen.getByTestId(TID_TOGGLE);
@@ -512,9 +563,6 @@ describe("PassthroughToolbar – composer toggle", () => {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – completed session", () => {
-  beforeEach(resetMocks);
-  afterEach(cleanup);
-
   it("passes completed session state to the passthrough composer", async () => {
     mockSessionState = "COMPLETED";
     renderToolbar();
@@ -529,9 +577,6 @@ describe("PassthroughToolbar – completed session", () => {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – implement plan handler", () => {
-  beforeEach(resetMocks);
-  afterEach(cleanup);
-
   it("forwards the implement handler to the composer while plan mode is active", async () => {
     const implementHandler = vi.fn();
     mockPlanModeEnabled = true;
@@ -573,9 +618,6 @@ describe("PassthroughToolbar – implement plan handler", () => {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – send message", () => {
-  beforeEach(resetMocks);
-  afterEach(cleanup);
-
   it("send with no pending comments calls message.add with exact text and closes composer", async () => {
     renderToolbar();
     await openComposer();
@@ -642,9 +684,6 @@ describe("PassthroughToolbar – send message", () => {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – pending comment indicators", () => {
-  beforeEach(resetMocks);
-  afterEach(cleanup);
-
   it("shows a numeric chip when the composer is collapsed and comments are pending", () => {
     mockPendingByFile = {
       [SRC_FILE]: [makeDiffComment("c1"), makeDiffComment("c2"), makeDiffComment("c3")],
@@ -669,9 +708,6 @@ describe("PassthroughToolbar – pending comment indicators", () => {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – Comments panel", () => {
-  beforeEach(resetMocks);
-  afterEach(cleanup);
-
   it("clicking Comments opens a panel with one card per pending comment", async () => {
     mockPendingByFile = {
       [SRC_FILE]: [makeDiffComment("c1"), makeDiffComment("c2")],
@@ -728,9 +764,6 @@ describe("PassthroughToolbar – Comments panel", () => {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – proceed button", () => {
-  beforeEach(resetMocks);
-  afterEach(cleanup);
-
   it("is absent when nextStepName is null", () => {
     mockNextStep = { proceedStepName: null, proceed: vi.fn(), isMoving: false };
     mockSessionState = "IDLE";

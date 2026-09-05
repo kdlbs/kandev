@@ -95,4 +95,3 @@ subscribing to its transcript.
 - Limiting full detail streams in a layout where the user explicitly makes
   several session details visible at the same time.
 - Persisting viewport or selected-tab state on the backend.
-

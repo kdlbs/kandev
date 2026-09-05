@@ -2089,11 +2089,12 @@ const (
 // It owns the workspace (worktree/container/sandbox) and the agentctl control server.
 // Multiple sessions can share the same TaskEnvironment.
 type TaskEnvironment struct {
-	ID                string `json:"id"`
-	TaskID            string `json:"task_id"`
-	ExecutorType      string `json:"executor_type"`
-	ExecutorID        string `json:"executor_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
+	ID                  string `json:"id"`
+	TaskID              string `json:"task_id"`
+	OwnershipGeneration int64  `json:"ownership_generation"`
+	ExecutorType        string `json:"executor_type"`
+	ExecutorID          string `json:"executor_id"`
+	ExecutorProfileID   string `json:"executor_profile_id"`
 	// AgentExecutionID was removed: executors_running owns the execution<->session
 	// mapping now. Read it via repo.GetExecutorRunningBySessionID(sessionID) when
 	// needed (the orchestrator does this in service_turns.go for WorkspaceInfo).
