@@ -25,9 +25,10 @@ test.describe("Workflow settings on mobile", () => {
     await expect(warning).toContainText(
       "This prompt does not start the agent by itself. Start the agent manually, or enable Auto-start agent.",
     );
+    await expect(warning).toHaveClass(/bg-muted\/50/);
     await expect(
       panel.getByText(
-        "A step prompt replaces the task description unless it contains {{task_prompt}}.",
+        "A step prompt replaces the task description unless it contains {{task_prompt}}. Saved prompts are attached as hidden context; editing a saved prompt updates every step that references it. Note: {{task_prompt}} only expands in the step prompt itself, not inside a referenced saved prompt.",
         { exact: true },
       ),
     ).toBeVisible();
