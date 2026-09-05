@@ -77,6 +77,25 @@ func TestUploadCredentialFilesWritesSecretFilesPrivate(t *testing.T) {
 	}
 }
 
+func TestUploadCredentialFilesReportsUnreadableSource(t *testing.T) {
+	hostHome := seedTestHostHome(t)
+	sourcePath := filepath.Join(hostHome, ".local/share/opencode/auth.json")
+	if err := os.MkdirAll(sourcePath, 0o700); err != nil {
+		t.Fatalf("seed unreadable credential source: %v", err)
+	}
+
+	methods := []remoteauth.Method{{
+		MethodID:     "agent:opencode-acp:files:0",
+		Type:         "files",
+		SourceFiles:  []string{".local/share/opencode/auth.json"},
+		TargetRelDir: ".local/share/opencode",
+	}}
+	err := UploadCredentialFiles(context.Background(), &recordingCredentialUploader{}, methods, t.TempDir(), newSeederTestLogger(t))
+	if err == nil || !strings.Contains(err.Error(), "failed to read credential source") {
+		t.Fatalf("UploadCredentialFiles error = %v", err)
+	}
+}
+
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.11
 func TestUploadCredentialFilesMergesOpenCodeProviderMap(t *testing.T) {
 	hostHome := seedTestHostHome(t)

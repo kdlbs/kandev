@@ -384,7 +384,7 @@ The profile editor exposes remote shell and agent-readiness checks. Backend/API 
 
 The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token.
 
-OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and logs the error.
+OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
 
 These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 

@@ -55,10 +55,13 @@ func UploadCredentialFiles(
 			srcPath := filepath.Join(home, relPath)
 			data, readErr := os.ReadFile(srcPath)
 			if readErr != nil {
-				log.Warn("credential source file not found, skipping",
-					zap.String("method_id", method.MethodID),
-					zap.String("path", srcPath))
-				continue
+				if errors.Is(readErr, fs.ErrNotExist) {
+					log.Warn("credential source file not found, skipping",
+						zap.String("method_id", method.MethodID),
+						zap.String("path", srcPath))
+					continue
+				}
+				return fmt.Errorf("failed to read credential source %s: %w", srcPath, readErr)
 			}
 
 			targetPath := filepath.Join(targetHomeDir, method.TargetRelDir, filepath.Base(relPath))

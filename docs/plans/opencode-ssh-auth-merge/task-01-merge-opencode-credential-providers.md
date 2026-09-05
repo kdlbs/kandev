@@ -43,6 +43,8 @@ Add an agent-owned merge policy to the remote credential pipeline. Use it to pre
 - A copy preserves target-only providers and adds source-only providers.
 - A source provider replaces a target provider with the same key.
 - An unreadable or malformed existing target remains byte-for-byte unchanged.
+- An unreadable source file reports a credential-copy error and does not write a target.
+- A malformed source file reports a credential-copy error and does not write a target.
 
 ## Verification
 
@@ -94,7 +96,7 @@ None.
 
 Implemented the agent-owned JSON-object conflict policy for OpenCode credentials. SSH and Sprites read persistent targets before the merge.
 
-Isolated targets validate and write the source object. Malformed inputs leave an existing target unchanged.
+Isolated targets validate and write the source object. Malformed inputs leave an existing target unchanged, and unreadable or malformed sources report a credential-copy error before any write.
 
 Public docs updated: `docs/public/executors.md` (reference).
 

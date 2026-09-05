@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -36,7 +38,22 @@ func (u *spriteFileUploader) ReadFile(ctx context.Context, path string) ([]byte,
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return u.sprite.Filesystem().ReadFile(path)
+	filesystem := u.sprite.Filesystem()
+	reader, ok := filesystem.(interface {
+		ReadFileContext(context.Context, string) ([]byte, error)
+	})
+	if !ok {
+		return filesystem.ReadFile(path)
+	}
+	data, err := reader.ReadFileContext(ctx, path)
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
+		return data, err
+	}
+	var apiErr *sprites.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrNotExist}
+	}
+	return data, err
 }
 
 func (u *spriteFileUploader) WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error {
