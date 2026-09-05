@@ -319,6 +319,7 @@ e2e-plugin-package:
 	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
 	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
 	$(GO) run ./cmd/plugin-pack -dir $(FIXTURE_STAGE_DIR) -out $(FIXTURE_PACKAGE_OUT) -platform-only
+	$(GO) build $(GOFLAGS) -o .build/plugin-package-verify$(EXE) ./cmd/plugin-package-verify
 	@$(RMDIR) $(FIXTURE_STAGE_DIR)
 	@echo "Wrote $(FIXTURE_PACKAGE_OUT)"
 

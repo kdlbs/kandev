@@ -49,6 +49,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
+import { PluginMarketplaceReleaseFixture } from "../../helpers/plugin-marketplace-release";
 import { dwell } from "../../helpers/causal-waits";
 import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
 import {
@@ -374,97 +375,58 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(globalToggle).toHaveAttribute("aria-checked", "false");
   });
 
-  /**
-   * Deliberate scope limit (see docs/plans/plugins/task-*): there is no
-   * fixture package for a *second* signed version, so this proves the
-   * operator-triggered check surfaces a highlighted Update button via a
-   * route-mocked catalog, and that a manual update failing against a
-   * (deliberately unreachable) mocked `package_url` renders inline without
-   * disturbing the rest of the row. The real, successful reinstall path is
-   * covered at the unit level (use-plugin-update-action.test.tsx).
-   */
-  test("marketplace update check highlights the Update button, and a failing manual update shows an inline error", async ({
-    testPage,
-  }) => {
-    test.setTimeout(60_000);
+  test("curated release becomes an installable update", async ({ testPage, apiClient }) => {
+    test.setTimeout(120_000);
+    const releaseFixture = await PluginMarketplaceReleaseFixture.start();
+    let sourceId = "";
+    try {
+      await openInstallDialog(testPage);
+      await uploadPackage(testPage, PACKAGE_PATH);
+      const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+      await expect(pluginRow).toBeVisible({ timeout: 15_000 });
 
-    await openInstallDialog(testPage);
-    await uploadPackage(testPage, PACKAGE_PATH);
-    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
-    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
-
-    const newerVersion = "9.9.9";
-    await testPage.route("**/api/plugins/marketplace", async (route) => {
-      if (route.request().method() !== "GET") return route.fallback();
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          plugins: [
-            {
-              id: PLUGIN_ID,
-              name: "E2E Hello",
-              description: "",
-              author: "kandev",
-              categories: [],
-              icon_url: "",
-              repo_url: "",
-              version: newerVersion,
-              min_kandev_version: "",
-              package_url: "https://example.invalid/kandev-plugin-e2e-9.9.9.tar.gz",
-              package_sha256: "",
-              stars: 0,
-              updated_at: new Date(0).toISOString(),
-              install_state: "update_available",
-              installed_version: "1.0.0",
-              source_id: "official",
-              source_name: "Kandev Official",
-            },
-          ],
-          sources: [
-            {
-              id: "official",
-              name: "Kandev Official",
-              url: "https://example.invalid",
-              enabled: true,
-              builtin: true,
-              healthy: true,
-            },
-          ],
-        }),
+      const addSource = await apiClient.rawRequest("POST", "/api/plugins/marketplace/sources", {
+        name: "Curated release fixture",
+        url: releaseFixture.indexUrl,
       });
-    });
-    await testPage.route("**/api/plugins/marketplace/refresh", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ refreshed: true }),
-      }),
-    );
+      expect(addSource.ok).toBe(true);
+      sourceId = ((await addSource.json()) as { id: string }).id;
 
-    await testPage.getByTestId("plugins-check-updates-button").click();
+      expect(await releaseFixture.detectRelease()).toBe(false);
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
+      await expect(latestVersion).toContainText("1.0.0", { timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`)).toHaveCount(0);
 
-    const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
-    const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
-    await expect(latestVersion).toContainText(newerVersion, { timeout: 15_000 });
-    await expect(updateButton).toBeVisible();
-    await expect(updateButton).toHaveAttribute("data-variant", "default");
-    await expect(testPage.getByTestId("plugins-updates-last-checked")).toBeVisible();
+      releaseFixture.publishRelease("1.5.0");
+      expect(await releaseFixture.detectRelease()).toBe(true);
+      await expect(releaseFixture.rebuildIndex()).rejects.toThrow();
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      await expect(latestVersion).toContainText("1.0.0", { timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`)).toHaveCount(0);
 
-    // The update tries to install from the (deliberately unreachable) mocked
-    // package_url and fails — the row surfaces the error inline, keeps the
-    // old version, and keeps the button clickable, without disturbing
-    // enable/disable/uninstall or the rest of the row.
-    await updateButton.click();
-    await expect(pluginRow.getByTestId(`plugin-update-error-${PLUGIN_ID}`)).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(updateButton).toBeEnabled();
-    await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
-    await expect(pluginRow.getByRole("button", { name: "Disable" })).toBeEnabled();
+      releaseFixture.publishRelease("2.0.0");
+      expect(await releaseFixture.detectRelease()).toBe(true);
+      await releaseFixture.rebuildIndex();
 
-    await testPage.unroute("**/api/plugins/marketplace");
-    await testPage.unroute("**/api/plugins/marketplace/refresh");
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
+      await expect(latestVersion).toContainText("2.0.0", { timeout: 15_000 });
+      await expect(updateButton).toBeVisible();
+      await expect(updateButton).toHaveAttribute("data-variant", "default");
+
+      await updateButton.click();
+      await expect(pluginRow.getByText(`${PLUGIN_ID} · v2.0.0`, { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
+      await expect(updateButton).toHaveCount(0);
+    } finally {
+      if (sourceId) {
+        await apiClient.rawRequest("DELETE", `/api/plugins/marketplace/sources/${sourceId}`);
+      }
+      await releaseFixture.close();
+    }
   });
 
   test("row and detail uninstall confirmations stay local to their initiating controls", async ({

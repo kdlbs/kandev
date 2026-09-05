@@ -212,7 +212,7 @@ function PluginRowContent({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <PluginRowIdentity plugin={plugin} needsSetup={needsSetup} update={update} />
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:shrink-0">
             {canManage && (
               <PluginRowActions
                 plugin={plugin}
@@ -490,7 +490,7 @@ function PluginRowActions({
   const { t } = useTranslation();
   const updateEntry = update?.hasUpdate ? update.latest : undefined;
   return (
-    <div className="relative z-10 flex flex-wrap items-center gap-2 shrink-0">
+    <div className="relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-none sm:shrink-0">
       {updateEntry && onUpdate && (
         <Button
           variant="default"
