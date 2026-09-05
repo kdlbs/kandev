@@ -1275,19 +1275,22 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 // to remove, so both windows stay open — but they are not equally covered.
 // route-action-vs-route-action is already serialized by the generation CAS
 // in ResolveRouteAction (e.g. ErrStaleGeneration). route-action-vs-cancellation
-// is covered downstream: every full-session-row write in dynamic_routing.go
+// is covered end to end: every full-session-row write in dynamic_routing.go
 // is conditioned via UpdateTaskSessionIfCurrentState on a state confirmed no
-// earlier than the write itself, so a cancellation landing during the window
-// is detected and wins instead of being overwritten by a stale snapshot.
-// route-action-vs-turn-admission is NOT covered: a turn admitted in this
-// window takes the same cancel-in-flight guard (task_operations.go's
-// claimLifecyclePromptDispatch, queued_dispatch.go's
-// claimQueuedDispatchForExecution) and can start successfully after this
-// check passes, but relaunchDynamicTaskAfterFailure's destructive reset
-// (StopExecution + session state reset to CREATED) has no way to see that
-// admission — RUNNING is a state the CAS accepts — so it can stop and reset a
-// turn that was legitimately admitted after this function returned nil.
-// Tracked as a follow-up rather than closed here.
+// earlier than the write itself, and relaunchDynamicTaskAfterFailure's own
+// CREATED reset (dynamic_launch.go) reloads the session immediately before
+// writing, refuses a reloaded terminal state, and CASes on that reload — so a
+// cancellation landing anywhere in the window, including during the
+// predecessor's StopExecution, is detected and wins instead of being
+// overwritten by a stale snapshot. route-action-vs-turn-admission is NOT
+// covered: a turn admitted in this window takes the same cancel-in-flight
+// guard (task_operations.go's claimLifecyclePromptDispatch,
+// queued_dispatch.go's claimQueuedDispatchForExecution) and can start
+// successfully after this check passes, but relaunchDynamicTaskAfterFailure's
+// destructive reset (StopExecution + session state reset to CREATED) has no
+// way to see that admission — RUNNING is a state the CAS accepts — so it can
+// stop and reset a turn that was legitimately admitted after this function
+// returned nil. Tracked as a follow-up rather than closed here.
 func (s *Service) rejectRouteActionDuringActiveTurn(ctx context.Context, sessionID string) error {
 	if s.turnService == nil {
 		return nil
@@ -2515,11 +2518,20 @@ func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
 // ensureSessionRunning, reclaimIdleSession. handleAgentCompletedLocked and
 // ApplyRouteAction's route-action dispatch follow this order.
 //
-// Known remaining inversion: autoStartStepPrompt (event_handlers_workflow.go)
-// holds the cancel guard across the whole StartCreatedSession launch for a
-// session in CREATED state, by design, to keep terminalization from racing
-// the launch admission. Closing it needs a redesign of that admission
-// invariant, tracked separately rather than in this lock-order fix.
+// Known remaining inversions, both guard-then-lifecycle chains that reach
+// this lock while still holding the cancel-in-flight guard, by design, to
+// keep terminalization/failure-routing from racing launch admission. Closing
+// them needs a redesign of that admission invariant, tracked separately
+// rather than in this lock-order fix:
+//   - autoStartStepPrompt (event_handlers_workflow.go) holds the guard across
+//     the whole StartCreatedSession launch for a session in CREATED state.
+//   - runDetachedDynamicSuccessorLaunch (dynamic_launch.go) acquires its own
+//     guard and reaches this lock via relaunchDynamicTaskAfterFailure ->
+//     StartCreatedSession. Both handleAgentFailedLocked and
+//     handleAgentErrorEvent schedule it (via routeDynamicAgentFailure ->
+//     launchDynamicSuccessorAfterFailure -> launchDynamicSuccessorDetached)
+//     as a detached goroutine rather than reaching it while holding their own
+//     dispatch-level guard, so this is one call site, not two.
 func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	if sessionID == "" {
 		return func() {}
