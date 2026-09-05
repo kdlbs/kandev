@@ -174,8 +174,8 @@ func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
 	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true, true) {
 		t.Fatal("workspace reuse should remain enabled for the owning executor type")
 	}
-	if workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true, true) {
-		t.Fatal("legacy environments without a physical worktree should not be reused by worktree launches")
+	if !workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true, true) {
+		t.Fatal("empty Worktree inventory should remain attach-only until the guarded validator refuses or repairs it")
 	}
 	if !workspaceReuseAllowed(&models.TaskEnvironment{
 		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "legacy-worktree", Status: "active"}},
@@ -189,7 +189,6 @@ func TestWorkspaceReuseAllowedRequiresInventoryForRepoBackedExecutors(t *testing
 		string(models.ExecutorTypeLocal),
 		string(models.ExecutorTypeLocalDocker),
 		string(models.ExecutorTypeSSH),
-		string(models.ExecutorTypeWorktree),
 	} {
 		t.Run(executorType, func(t *testing.T) {
 			env := &models.TaskEnvironment{ExecutorType: executorType}

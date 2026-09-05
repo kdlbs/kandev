@@ -48,6 +48,7 @@ func (r *Repository) initSchema() error {
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
+		r.initWorkspaceInventoryRecoverySchema,
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
@@ -55,6 +56,39 @@ func (r *Repository) initSchema() error {
 		}
 	}
 	return nil
+}
+
+const workspaceInventoryRecoverySchemaDDL = `
+	CREATE TABLE IF NOT EXISTS workspace_inventory_recovery_receipts (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		task_environment_id TEXT NOT NULL,
+		task_repository_id TEXT NOT NULL,
+		environment_repo_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL,
+		request_hash TEXT NOT NULL,
+		result_code TEXT NOT NULL,
+		receipt_json TEXT NOT NULL,
+		post_repair_matched BOOLEAN NOT NULL DEFAULT FALSE,
+		post_repair_verified_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		UNIQUE(task_id, idempotency_key),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment
+		ON workspace_inventory_recovery_receipts(task_environment_id, created_at);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment_repo
+		ON workspace_inventory_recovery_receipts(task_id, environment_repo_id, created_at);
+`
+
+func (r *Repository) initWorkspaceInventoryRecoverySchema() error {
+	_, err := r.db.Exec(workspaceInventoryRecoverySchemaDDL)
+	return err
 }
 
 func (r *Repository) initDynamicRoutingSchema() error {

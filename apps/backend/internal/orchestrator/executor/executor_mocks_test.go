@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -291,9 +293,21 @@ type mockRepository struct {
 	// lookup failure (e.g. the AC-003.7 re-read-after-conflict arm in
 	// createOfficeSessionWithBoundedRecovery), which the default map lookup
 	// can never produce on its own.
-	getTaskSessionByTaskAndAgentFunc   func(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
-	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
-	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	getTaskSessionByTaskAndAgentFunc                  func(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
+	updateTaskSessionStateFunc                        func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
+	listActiveTaskSessionsByTaskIDFunc                func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	listExecutorsRunningByTaskIDFunc                  func(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
+	repairWorkspaceInventoryFunc                      func(ctx context.Context, repair *models.WorkspaceInventoryRepair) (*models.WorkspaceInventoryRecoveryReceipt, error)
+	getWorkspaceInventoryRepairReceiptFunc            func(ctx context.Context, taskID, idempotencyKey string) (*models.WorkspaceInventoryRecoveryReceipt, error)
+	getWorkspaceInventoryRepairReceiptForRowFunc      func(ctx context.Context, taskID, environmentRepoID string) (*models.WorkspaceInventoryRecoveryReceipt, error)
+	recordWorkspaceInventoryPostRepairAttestationFunc func(ctx context.Context, taskID, idempotencyKey string, evidence *models.WorkspaceInventoryPreservation, matched bool, verifiedAt time.Time) error
+	// workspaceInventoryReceipts is the default in-memory store used by
+	// RepairWorkspaceInventory/GetWorkspaceInventoryRepairReceipt/
+	// RecordWorkspaceInventoryPostRepairAttestation when a test does not
+	// override the corresponding *Func hook, so tests can exercise the real
+	// executor-level idempotency short-circuit and attestation wiring
+	// end-to-end against the mock alone.
+	workspaceInventoryReceipts map[string]*models.WorkspaceInventoryRecoveryReceipt
 	// Optional hook invoked at the top of UpdateTaskStateIfCurrentIn, before
 	// it reads task state/archived_at. Lets tests simulate the exact TOCTOU
 	// window this CAS closes: an earlier (non-transactional) archived-state
@@ -375,6 +389,7 @@ func newMockRepository() *mockRepository {
 		executorsRunning:               make(map[string]*models.ExecutorRunning),
 		taskEnvironments:               make(map[string]*models.TaskEnvironment),
 		taskEnvironmentRepos:           make(map[string][]*models.TaskEnvironmentRepo),
+		workspaceInventoryReceipts:     make(map[string]*models.WorkspaceInventoryRecoveryReceipt),
 		plans:                          make(map[string]*models.TaskPlan),
 		updateTaskStateIfNotArchivedCh: make(chan struct{}, 8),
 	}
@@ -1140,6 +1155,18 @@ func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sess
 	}
 	return nil, nil
 }
+func (m *mockRepository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
+	if m.listExecutorsRunningByTaskIDFunc != nil {
+		return m.listExecutorsRunningByTaskIDFunc(ctx, taskID)
+	}
+	var result []*models.ExecutorRunning
+	for _, running := range m.executorsRunning {
+		if running != nil && running.TaskID == taskID {
+			result = append(result, running)
+		}
+	}
+	return result, nil
+}
 func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
 	return nil
 }
@@ -1268,6 +1295,130 @@ func (m *mockRepository) UpdateTaskEnvironmentRepo(_ context.Context, repo *mode
 		}
 	}
 	m.taskEnvironmentRepos[repo.TaskEnvironmentID] = append(rows, repo)
+	return nil
+}
+func (m *mockRepository) RepairWorkspaceInventory(ctx context.Context, repair *models.WorkspaceInventoryRepair) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	if m.repairWorkspaceInventoryFunc != nil {
+		return m.repairWorkspaceInventoryFunc(ctx, repair)
+	}
+	if m.workspaceInventoryReceipts == nil {
+		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	key := repair.TaskID + "\x00" + repair.IdempotencyKey
+	if existing, ok := m.workspaceInventoryReceipts[key]; ok {
+		if existing.RequestHash != repair.RequestHash {
+			return nil, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict
+		}
+		deduplicated := *existing
+		deduplicated.ResultCode = models.WorkspaceInventoryRecoveryDeduplicated
+		return &deduplicated, nil
+	}
+	receipt := &models.WorkspaceInventoryRecoveryReceipt{
+		ID: uuid.NewString(), TaskID: repair.TaskID, WorkspaceID: repair.WorkspaceID,
+		SessionID: repair.SessionID, TaskEnvironmentID: repair.TaskEnvironmentID,
+		TaskRepositoryID: repair.TaskRepositoryID, EnvironmentRepoID: repair.EnvironmentRepoID,
+		RepositoryID: repair.RepositoryID, IdempotencyKey: repair.IdempotencyKey,
+		RequestHash: repair.RequestHash, ResultCode: models.WorkspaceInventoryRecoveryRepaired,
+		ExpectedEnvironmentUpdatedAt:  repair.ExpectedEnvironmentUpdatedAt,
+		ExpectedTaskRepositoryUpdate:  repair.ExpectedTaskRepositoryUpdate,
+		ExpectedEnvironmentRepoUpdate: repair.ExpectedEnvironmentRepoUpdate,
+		Preservation:                  repair.Preservation, CreatedAt: time.Now().UTC(),
+	}
+	// Store an independent copy: like the real repository, the returned
+	// in-memory receipt is decoupled from committed storage once the
+	// transaction returns, so a caller mutating fields on its own copy (e.g.
+	// surfacing post-repair attestation results) never silently taints what
+	// a concurrent or later read observes as durably persisted.
+	stored := *receipt
+	m.workspaceInventoryReceipts[key] = &stored
+	rows := m.taskEnvironmentRepos[repair.TaskEnvironmentID]
+	repaired := &models.TaskEnvironmentRepo{
+		ID: repair.EnvironmentRepoID, TaskEnvironmentID: repair.TaskEnvironmentID,
+		RepositoryID: repair.RepositoryID, BranchSlug: repair.BranchSlug,
+		WorktreeID: repair.WorktreeID, WorktreePath: repair.WorktreePath,
+		WorktreeBranch: repair.WorktreeBranch, Position: repair.Position,
+	}
+	updated := false
+	for i, row := range rows {
+		if row != nil && row.ID == repair.EnvironmentRepoID {
+			rows[i] = repaired
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		rows = append(rows, repaired)
+	}
+	m.taskEnvironmentRepos[repair.TaskEnvironmentID] = rows
+	return receipt, nil
+}
+func (m *mockRepository) GetWorkspaceInventoryRepairReceipt(ctx context.Context, taskID, idempotencyKey string) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	if m.getWorkspaceInventoryRepairReceiptFunc != nil {
+		return m.getWorkspaceInventoryRepairReceiptFunc(ctx, taskID, idempotencyKey)
+	}
+	if m.workspaceInventoryReceipts == nil {
+		return nil, nil
+	}
+	existing, ok := m.workspaceInventoryReceipts[taskID+"\x00"+idempotencyKey]
+	if !ok {
+		return nil, nil
+	}
+	found := *existing
+	found.ResultCode = models.WorkspaceInventoryRecoveryDeduplicated
+	return &found, nil
+}
+
+// GetWorkspaceInventoryRepairReceiptForRow returns the latest receipt
+// recorded against a specific environment-repo row, regardless of which
+// session or idempotency key produced it — mirrors the sqlite repository's
+// row-scoped lookup used to gate an already-valid canonical row on durable
+// attestation independent of the current caller's own idempotency key.
+func (m *mockRepository) GetWorkspaceInventoryRepairReceiptForRow(ctx context.Context, taskID, environmentRepoID string) (*models.WorkspaceInventoryRecoveryReceipt, error) {
+	if m.getWorkspaceInventoryRepairReceiptForRowFunc != nil {
+		return m.getWorkspaceInventoryRepairReceiptForRowFunc(ctx, taskID, environmentRepoID)
+	}
+	if m.workspaceInventoryReceipts == nil {
+		return nil, nil
+	}
+	var found *models.WorkspaceInventoryRecoveryReceipt
+	for _, existing := range m.workspaceInventoryReceipts {
+		if existing == nil || existing.TaskID != taskID || existing.EnvironmentRepoID != environmentRepoID {
+			continue
+		}
+		if found == nil || existing.CreatedAt.After(found.CreatedAt) {
+			found = existing
+		}
+	}
+	if found == nil {
+		return nil, nil
+	}
+	copied := *found
+	return &copied, nil
+}
+
+func (m *mockRepository) RecordWorkspaceInventoryPostRepairAttestation(
+	ctx context.Context,
+	taskID, idempotencyKey string,
+	evidence *models.WorkspaceInventoryPreservation,
+	matched bool,
+	verifiedAt time.Time,
+) error {
+	if m.recordWorkspaceInventoryPostRepairAttestationFunc != nil {
+		return m.recordWorkspaceInventoryPostRepairAttestationFunc(ctx, taskID, idempotencyKey, evidence, matched, verifiedAt)
+	}
+	if m.workspaceInventoryReceipts == nil {
+		return models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	existing, ok := m.workspaceInventoryReceipts[taskID+"\x00"+idempotencyKey]
+	if !ok {
+		return models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	updated := *existing
+	updated.PostRepairEvidence = evidence
+	updated.PostRepairMatched = matched
+	verified := verifiedAt
+	updated.PostRepairVerifiedAt = &verified
+	m.workspaceInventoryReceipts[taskID+"\x00"+idempotencyKey] = &updated
 	return nil
 }
 
