@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // gatewayServerFailureSample is a text sample that classifies as a
@@ -83,5 +84,44 @@ func TestHandleAgentStreamEvent_MessageStreamingTracksMarkedProviderDiagnosticFo
 	}
 	if !svc.promptAttemptPreResultSafe(got) {
 		t.Fatal("marked provider-diagnostic chunk contained in the terminal message was not pre-result safe")
+	}
+}
+
+// TestHandleAgentStreamEvent_MessageStreamingMarkedDiagnosticDoesNotAdvanceTurnProgress
+// pins AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.21's "shall not advance turn
+// progress" clause at the message_streaming dispatch site. A marked chunk
+// arriving while the session has yielded to background work has the exact
+// same shape as a genuine foreground resumption (non-empty text) but must not
+// flip the session back to generating or publish the operator-facing
+// activity signal.
+func TestHandleAgentStreamEvent_MessageStreamingMarkedDiagnosticDoesNotAdvanceTurnProgress(t *testing.T) {
+	svc, _ := newTransientTestService(t)
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	svc.registerBackgroundTask("s1", "subagent-1")
+	emitForegroundIdle(svc, "t1", "s1")
+	if got := svc.foregroundActivityValue("s1"); got != v1.ForegroundActivityBackground {
+		t.Fatalf("setup: session must be background-idle before the marked chunk arrives, got %q", got)
+	}
+	eb.events = nil
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "execution-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:                        "message_streaming",
+			MessageID:                   "msg-1",
+			Text:                        gatewayServerFailureSample,
+			ProviderDiagnosticCandidate: true,
+		},
+	})
+
+	if got := activityValues(eb); len(got) != 0 {
+		t.Fatalf("marked provider-diagnostic chunk must not advance turn progress / publish an activity change, got %v", got)
+	}
+	if got := svc.foregroundActivityValue("s1"); got != v1.ForegroundActivityBackground {
+		t.Fatalf("marked provider-diagnostic chunk flipped the session out of background-idle, got %q", got)
 	}
 }
