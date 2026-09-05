@@ -20,10 +20,10 @@ func (r *Repository) GetControlServerRecord(ctx context.Context) (*models.Contro
 	var capabilitiesJSON string
 
 	err := r.ro.QueryRowContext(ctx, `
-		SELECT endpoint, server_identity, credential_secret_id, instance_credential_secret_id, capabilities, diagnostic_log_path, created_at, updated_at
+		SELECT endpoint, server_identity, credential_secret_id, capabilities, diagnostic_log_path, created_at, updated_at
 		FROM control_server_records WHERE id = 1
 	`).Scan(
-		&record.Endpoint, &record.ServerIdentity, &record.CredentialSecretID, &record.InstanceCredentialSecretID, &capabilitiesJSON,
+		&record.Endpoint, &record.ServerIdentity, &record.CredentialSecretID, &capabilitiesJSON,
 		&record.DiagnosticLogPath, &record.CreatedAt, &record.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -68,13 +68,12 @@ func (r *Repository) UpsertControlServerRecord(ctx context.Context, record *mode
 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO control_server_records (
-			id, endpoint, server_identity, credential_secret_id, instance_credential_secret_id, capabilities, diagnostic_log_path, created_at, updated_at
-		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, endpoint, server_identity, credential_secret_id, capabilities, diagnostic_log_path, created_at, updated_at
+		) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			endpoint = excluded.endpoint,
 			server_identity = excluded.server_identity,
 			credential_secret_id = excluded.credential_secret_id,
-			instance_credential_secret_id = excluded.instance_credential_secret_id,
 			capabilities = excluded.capabilities,
 			diagnostic_log_path = excluded.diagnostic_log_path,
 			updated_at = excluded.updated_at
@@ -82,7 +81,6 @@ func (r *Repository) UpsertControlServerRecord(ctx context.Context, record *mode
 		record.Endpoint,
 		record.ServerIdentity,
 		record.CredentialSecretID,
-		record.InstanceCredentialSecretID,
 		string(capabilitiesJSON),
 		record.DiagnosticLogPath,
 		record.CreatedAt,

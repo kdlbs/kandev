@@ -28,19 +28,12 @@ type ControlServerRecord struct {
 	// echoes on its identity endpoint, compared by the adopting backend to
 	// confirm it is talking to the server this record describes.
 	ServerIdentity string `json:"server_identity"`
-	// CredentialSecretID is a reference into the secret store for the
-	// rotating control-plane ownership credential. The credential itself is
-	// never stored here: this is a reference, not the bearer token.
+	// CredentialSecretID is a reference into the secret store for the single
+	// rotating credential that authenticates both control-plane and
+	// per-instance operations and streams (design 01 "Single driver",
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). The credential itself is never
+	// stored here: this is a reference, not the bearer token.
 	CredentialSecretID string `json:"credential_secret_id"`
-	// InstanceCredentialSecretID is a reference into the secret store for
-	// the fixed, never-rotated per-instance credential every already-running
-	// per-instance agentctl server still enforces (a control-server
-	// credential rotation never touches an instance's own static auth
-	// token). Populated once when the server is first recorded and never
-	// overwritten by a later rotation -- reusing CredentialSecretID's slot
-	// would let rotation's in-place secret update silently change the value
-	// out from under every live instance.
-	InstanceCredentialSecretID string `json:"instance_credential_secret_id"`
 	// Capabilities is the named capability set last observed from the
 	// control server's identity endpoint.
 	Capabilities []string `json:"capabilities"`

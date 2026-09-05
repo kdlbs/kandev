@@ -997,9 +997,9 @@ func startGatewayAndServe(
 	hostControlClient := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log,
 		agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
 	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
-	// Per-instance servers enforce the pre-rotation credential, not the
-	// control server's own rotating one -- see config.AgentConfig's field doc.
-	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneInstanceAuthToken)
+	// Per-instance servers enforce the same single rotating credential as
+	// the control server -- see config.AgentConfig's field doc.
+	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneAuthToken)
 	hostUtilityMgr.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok

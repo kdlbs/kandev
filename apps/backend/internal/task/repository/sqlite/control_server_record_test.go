@@ -32,12 +32,11 @@ func TestUpsertControlServerRecordThenGetRoundTrips(t *testing.T) {
 	ctx := context.Background()
 
 	record := &models.ControlServerRecord{
-		Endpoint:                   "127.0.0.1:41123",
-		ServerIdentity:             "server-identity-1",
-		CredentialSecretID:         "secret-ref-1",
-		InstanceCredentialSecretID: "instance-secret-ref-1",
-		Capabilities:               []string{"resume", "diagnostics"},
-		DiagnosticLogPath:          "/home/kandev/logs/agentctl-diagnostic.log",
+		Endpoint:           "127.0.0.1:41123",
+		ServerIdentity:     "server-identity-1",
+		CredentialSecretID: "secret-ref-1",
+		Capabilities:       []string{"resume", "diagnostics"},
+		DiagnosticLogPath:  "/home/kandev/logs/agentctl-diagnostic.log",
 	}
 	if err := repo.UpsertControlServerRecord(ctx, record); err != nil {
 		t.Fatalf("UpsertControlServerRecord: %v", err)
@@ -55,9 +54,6 @@ func TestUpsertControlServerRecordThenGetRoundTrips(t *testing.T) {
 	}
 	if got.CredentialSecretID != record.CredentialSecretID {
 		t.Errorf("CredentialSecretID = %q, want %q", got.CredentialSecretID, record.CredentialSecretID)
-	}
-	if got.InstanceCredentialSecretID != record.InstanceCredentialSecretID {
-		t.Errorf("InstanceCredentialSecretID = %q, want %q", got.InstanceCredentialSecretID, record.InstanceCredentialSecretID)
 	}
 	if len(got.Capabilities) != 2 || got.Capabilities[0] != "resume" || got.Capabilities[1] != "diagnostics" {
 		t.Errorf("Capabilities = %#v, want [resume diagnostics]", got.Capabilities)

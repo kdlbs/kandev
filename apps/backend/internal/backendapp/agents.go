@@ -62,10 +62,9 @@ func provideLifecycleManager(
 		cfg.Agent.StandalonePort,
 		log,
 	)
-	// Per-instance servers enforce the pre-rotation credential
-	// (StandaloneInstanceAuthToken), not the control server's own rotating
-	// one -- see the field doc on config.AgentConfig.
-	standaloneExec.SetAuthToken(cfg.Agent.StandaloneInstanceAuthToken)
+	// Per-instance servers enforce the same single rotating credential as
+	// the control server -- see the field doc on config.AgentConfig.
+	standaloneExec.SetAuthToken(cfg.Agent.StandaloneAuthToken)
 
 	// Create InteractiveRunner for passthrough mode (no WorkspaceTracker, uses callbacks)
 	interactiveRunner := process.NewInteractiveRunner(nil, log, 2*1024*1024) // 2MB buffer

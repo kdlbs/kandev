@@ -186,29 +186,23 @@ const (
 )
 
 // AdoptionOutcome is the result of attempting to adopt a previously-detached
-// control server. Endpoint, Credential, and InstanceCredential are populated
-// only when Adopted. ContactedAt is the instant this attempt first reached
-// the recorded control endpoint (the GetIdentity call) -- the
-// AC-EXECUTORS-SURVIVAL-003.7 recovery deadline's clock start. It is left
-// zero when no live server was ever reached (no record, or the
-// client/transport itself could not be built), since nothing
-// recovery-relevant is running in that case.
+// control server. Endpoint and Credential are populated only when Adopted.
+// ContactedAt is the instant this attempt first reached the recorded control
+// endpoint (the GetIdentity call) -- the AC-EXECUTORS-SURVIVAL-003.7 recovery
+// deadline's clock start. It is left zero when no live server was ever
+// reached (no record, or the client/transport itself could not be built),
+// since nothing recovery-relevant is running in that case.
 type AdoptionOutcome struct {
 	Adopted  bool
 	Reason   AdoptionReason
 	Endpoint string
-	// Credential is the freshly rotated control-server credential
-	// (AC-EXECUTORS-CONTROL-OWNERSHIP-002): use it for control-plane calls
-	// (create/list/delete instance, health, further rotation).
-	Credential string
-	// InstanceCredential is the credential this backend presented to the
-	// rotate call -- i.e. the pre-rotation credential every already-running
-	// per-instance agentctl server still enforces, since a control-server
-	// credential rotation never touches an instance's own static auth
-	// token. Use it for clients built against a per-instance server
-	// (agentctl.NewClient / WithAuthToken), not Credential.
-	InstanceCredential string
-	ContactedAt        time.Time
+	// Credential is the single credential that authenticates both
+	// control-plane and per-instance operations and streams (design 01
+	// "Single driver", AC-EXECUTORS-CONTROL-OWNERSHIP-002.6): use it for
+	// every client built against this control server or any instance it
+	// supervises.
+	Credential  string
+	ContactedAt time.Time
 	// UnownedPeriod is the adopted server's own resolved unowned period, read
 	// back from its /identity response (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/
 	// .7). Only this value is safe to compute an ownership-renewal cadence
@@ -262,7 +256,7 @@ func AttemptAdoptControlServer(
 		return AdoptionOutcome{Reason: AdoptionReasonIdentityMismatch, ContactedAt: contactedAt}
 	}
 
-	credential, instanceCredential, err := revealAdoptionCredentials(ctx, secretStore, record)
+	credential, err := revealControlServerCredential(ctx, secretStore, record.CredentialSecretID)
 	if err != nil {
 		return AdoptionOutcome{Reason: AdoptionReasonCredentialUnavailable, ContactedAt: contactedAt}
 	}
@@ -285,13 +279,12 @@ func AttemptAdoptControlServer(
 	}
 
 	updated := &models.ControlServerRecord{
-		Endpoint:                   record.Endpoint,
-		ServerIdentity:             identity.ServerIdentity,
-		CredentialSecretID:         secretID,
-		InstanceCredentialSecretID: record.InstanceCredentialSecretID,
-		Capabilities:               identity.Capabilities,
-		DiagnosticLogPath:          identity.DiagnosticLogPath,
-		CreatedAt:                  record.CreatedAt,
+		Endpoint:           record.Endpoint,
+		ServerIdentity:     identity.ServerIdentity,
+		CredentialSecretID: secretID,
+		Capabilities:       identity.Capabilities,
+		DiagnosticLogPath:  identity.DiagnosticLogPath,
+		CreatedAt:          record.CreatedAt,
 	}
 	if err := store.UpsertControlServerRecord(ctx, updated); err != nil {
 		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: contactedAt}
@@ -310,12 +303,11 @@ func AttemptAdoptControlServer(
 	}
 
 	return AdoptionOutcome{
-		Adopted:            true,
-		Endpoint:           record.Endpoint,
-		Credential:         rotated.Credential,
-		InstanceCredential: instanceCredential,
-		ContactedAt:        contactedAt,
-		UnownedPeriod:      time.Duration(identity.UnownedPeriodMS) * time.Millisecond,
+		Adopted:       true,
+		Endpoint:      record.Endpoint,
+		Credential:    rotated.Credential,
+		ContactedAt:   contactedAt,
+		UnownedPeriod: time.Duration(identity.UnownedPeriodMS) * time.Millisecond,
 	}
 }
 
@@ -341,10 +333,9 @@ func RecordFreshControlServer(
 		return fmt.Errorf("read freshly spawned control server identity: %w", err)
 	}
 
-	var priorSecretID, priorInstanceSecretID string
+	var priorSecretID string
 	if prior, err := store.GetControlServerRecord(ctx); err == nil {
 		priorSecretID = prior.CredentialSecretID
-		priorInstanceSecretID = prior.InstanceCredentialSecretID
 	}
 
 	secretID, err := storeControlServerCredential(ctx, secretStore, priorSecretID, credential)
@@ -352,25 +343,12 @@ func RecordFreshControlServer(
 		return fmt.Errorf("store freshly spawned control server credential: %w", err)
 	}
 
-	// The per-instance static credential starts out equal to the control
-	// credential at generation 0 (design 01: per-instance servers never
-	// rotate their own bearer token), but lives in a secret-store slot of
-	// its own: reusing secretID's slot would let a later rotation's
-	// in-place update silently change the value every already-running
-	// per-instance server still enforces (see
-	// models.ControlServerRecord.InstanceCredentialSecretID).
-	instanceSecretID, err := storeControlServerCredential(ctx, secretStore, priorInstanceSecretID, credential)
-	if err != nil {
-		return fmt.Errorf("store freshly spawned control server instance credential: %w", err)
-	}
-
 	record := &models.ControlServerRecord{
-		Endpoint:                   endpoint,
-		ServerIdentity:             identity.ServerIdentity,
-		CredentialSecretID:         secretID,
-		InstanceCredentialSecretID: instanceSecretID,
-		Capabilities:               identity.Capabilities,
-		DiagnosticLogPath:          identity.DiagnosticLogPath,
+		Endpoint:           endpoint,
+		ServerIdentity:     identity.ServerIdentity,
+		CredentialSecretID: secretID,
+		Capabilities:       identity.Capabilities,
+		DiagnosticLogPath:  identity.DiagnosticLogPath,
 	}
 	return store.UpsertControlServerRecord(ctx, record)
 }
@@ -471,27 +449,6 @@ func stopIncompatibleControlServer(
 		repairLiveStandaloneRecordsAfterOwnServerStopped(ctx, repairStore, log)
 	}
 	return AdoptionOutcome{Reason: AdoptionReasonCapabilityIncompatible, ContactedAt: contactedAt}
-}
-
-// revealAdoptionCredentials reveals both secrets an adoption attempt needs:
-// the rotating control-plane credential and, separately, the fixed
-// never-rotated per-instance secret every already-running per-instance
-// agentctl server still enforces (see
-// models.ControlServerRecord.InstanceCredentialSecretID). Reusing the
-// control credential for the latter would report a value that stops
-// matching what per-instance servers accept starting at the second
-// adoption, once rotation overwrites the control credential's own secret
-// slot.
-func revealAdoptionCredentials(ctx context.Context, secretStore secrets.SecretStore, record *models.ControlServerRecord) (credential, instanceCredential string, err error) {
-	credential, err = revealControlServerCredential(ctx, secretStore, record.CredentialSecretID)
-	if err != nil {
-		return "", "", err
-	}
-	instanceCredential, err = revealControlServerCredential(ctx, secretStore, record.InstanceCredentialSecretID)
-	if err != nil {
-		return "", "", err
-	}
-	return credential, instanceCredential, nil
 }
 
 // identityMatchesRecordedServer reports whether a live server's identity

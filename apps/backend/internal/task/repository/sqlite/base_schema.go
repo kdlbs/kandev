@@ -145,7 +145,6 @@ const controlServerRecordSchemaDDL = `
 		endpoint TEXT NOT NULL,
 		server_identity TEXT NOT NULL,
 		credential_secret_id TEXT NOT NULL,
-		instance_credential_secret_id TEXT NOT NULL DEFAULT '',
 		capabilities TEXT NOT NULL DEFAULT '[]',
 		diagnostic_log_path TEXT NOT NULL,
 		created_at TIMESTAMP NOT NULL,

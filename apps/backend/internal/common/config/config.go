@@ -554,31 +554,16 @@ type AgentConfig struct {
 	// StandalonePort is the control port for standalone agentctl (default: 39429)
 	StandalonePort int `mapstructure:"standalonePort"`
 
-	// StandaloneAuthToken is the credential for the agentctl *control server*
-	// (instance create/list/delete, health, ownership rotate/confirm). After
-	// adopting a surviving control server it holds the freshly rotated
-	// credential (AC-EXECUTORS-CONTROL-OWNERSHIP-002), which is NOT the same
-	// value a pre-existing per-instance server was launched with -- rotation
-	// only replaces the control server's own credentialState, never the
-	// static per-instance config.AuthToken baked into each already-running
-	// instance's HTTP server. Set at runtime after agentctl starts; not
-	// persisted in config files.
+	// StandaloneAuthToken is the single credential that authenticates both
+	// the agentctl *control server* (instance create/list/delete, health,
+	// ownership rotate/confirm) and every per-instance agentctl server it
+	// supervises (/agent/stream, file tree, shell, ...), per design 01
+	// "Single driver" (AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). After adopting
+	// a surviving control server it holds the freshly rotated credential
+	// (AC-EXECUTORS-CONTROL-OWNERSHIP-002); use it for every client built
+	// against this control server or any instance it supervises. Set at
+	// runtime after agentctl starts; not persisted in config files.
 	StandaloneAuthToken string `mapstructure:"-"`
-
-	// StandaloneInstanceAuthToken is the credential per-instance agentctl
-	// servers actually enforce (/agent/stream, file tree, shell, ...): the
-	// bootstrap token an instance's own config.Config.AuthToken snapshotted
-	// at launch, which a later control-server credential rotation never
-	// updates. For a freshly spawned agentctl this equals
-	// StandaloneAuthToken; for an adopted one it is the pre-rotation
-	// credential this backend presented to the rotate call, not the
-	// replacement it got back. Clients built for a per-instance server
-	// (agentctl.NewClient / agentctl.WithAuthToken) must use this field, not
-	// StandaloneAuthToken -- using the rotated control credential here
-	// produces "invalid auth token" / WS "bad handshake" against any
-	// instance that predates the rotation, i.e. every recovered instance.
-	// Set at runtime after agentctl starts; not persisted in config files.
-	StandaloneInstanceAuthToken string `mapstructure:"-"`
 
 	// StandalonePID is the OS process id of the standalone agentctl control-server
 	// this backend spawned. Set at runtime after agentctl starts (from the

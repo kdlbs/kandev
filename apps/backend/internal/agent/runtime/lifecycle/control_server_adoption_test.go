@@ -152,20 +152,6 @@ func adoptionFixture(t *testing.T, record *models.ControlServerRecord, client *f
 	return store, factory
 }
 
-// seedAdoptionInstanceCredential stores value as the record's fixed,
-// never-rotated per-instance credential (see
-// models.ControlServerRecord.InstanceCredentialSecretID) and returns its
-// secret ID, for tests that need adoption to reach past the credential-reveal
-// gate but don't otherwise care about the instance credential's value.
-func seedAdoptionInstanceCredential(t *testing.T, secretStore secrets.SecretStore, value string) string {
-	t.Helper()
-	id, err := storeControlServerCredential(context.Background(), secretStore, "", value)
-	if err != nil {
-		t.Fatalf("seed instance credential: %v", err)
-	}
-	return id
-}
-
 // TestAttemptAdoptControlServerNoRecordSpawnsFresh pins
 // AC-EXECUTORS-CONTROL-OWNERSHIP-001.8's "no recorded control endpoint"
 // branch: nothing to adopt, no refusal reason, caller spawns fresh.
@@ -280,7 +266,6 @@ func TestAttemptAdoptControlServerAuthenticationFailureRefusesWithoutStop(t *tes
 	}
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "stale-token")
 	client := &fakeAdoptionControlClient{
 		identity:  validIdentity(),
 		rotateErr: errors.New("401 invalid auth token"),
@@ -311,7 +296,6 @@ func TestAttemptAdoptControlServerIncompatibleCapabilityStopsSurvivor(t *testing
 	}
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
 	identity := validIdentity()
 	identity.Capabilities = []string{"some-other-capability"}
 	client := &fakeAdoptionControlClient{
@@ -361,7 +345,6 @@ func TestAttemptAdoptControlServerIncompatibleCapabilityRetriesStopBeforeGivingU
 	}
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
 	identity := validIdentity()
 	identity.Capabilities = []string{"some-other-capability"}
 	client := &countingShutdownControlClient{
@@ -417,7 +400,6 @@ func TestAttemptAdoptControlServerIncompatibleCapabilityConnectionRefusedCountsA
 	}
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
 	identity := validIdentity()
 	identity.Capabilities = []string{"some-other-capability"}
 	client := &countingShutdownControlClient{
@@ -458,8 +440,6 @@ func TestAttemptAdoptControlServerSucceedsRotatesAndPersists(t *testing.T) {
 	}
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	instanceSecretID := seedAdoptionInstanceCredential(t, secretStore, "instance-token")
-	record.InstanceCredentialSecretID = instanceSecretID
 	identity := validIdentity()
 	client := &fakeAdoptionControlClient{
 		identity:     identity,
@@ -478,12 +458,6 @@ func TestAttemptAdoptControlServerSucceedsRotatesAndPersists(t *testing.T) {
 	}
 	if outcome.Credential != "rotated-token" {
 		t.Fatalf("Credential = %q, want rotated-token", outcome.Credential)
-	}
-	// The instance credential is the fixed, never-rotated per-instance
-	// secret (see models.ControlServerRecord.InstanceCredentialSecretID),
-	// never the rotated control credential above.
-	if outcome.InstanceCredential != "instance-token" {
-		t.Fatalf("InstanceCredential = %q, want instance-token (never the rotated control credential)", outcome.InstanceCredential)
 	}
 	// Review round 3, finding 5: the adopted server's own reported unowned
 	// period must travel back on the outcome, not be left for the caller to
@@ -515,9 +489,6 @@ func TestAttemptAdoptControlServerSucceedsRotatesAndPersists(t *testing.T) {
 	}
 	if written.CredentialSecretID != secretID {
 		t.Fatalf("CredentialSecretID = %q, want unchanged %q (rotation reuses the same secret)", written.CredentialSecretID, secretID)
-	}
-	if written.InstanceCredentialSecretID != instanceSecretID {
-		t.Fatalf("InstanceCredentialSecretID = %q, want unchanged %q (rotation never touches the instance credential's slot)", written.InstanceCredentialSecretID, instanceSecretID)
 	}
 	if written.Endpoint != record.Endpoint {
 		t.Fatalf("Endpoint = %q, want unchanged %q", written.Endpoint, record.Endpoint)
@@ -564,7 +535,6 @@ func TestAttemptAdoptControlServerEmptyRecordedServerIdentitySkipsCheck(t *testi
 	record := validRecord()
 	record.ServerIdentity = ""
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
 	identity := validIdentity()
 	identity.ServerIdentity = "whatever-this-server-reports"
 	client := &fakeAdoptionControlClient{
@@ -594,7 +564,6 @@ func TestAttemptAdoptControlServerUnownedPeriodFallsBackToFloorWhenUnreported(t 
 	}
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
 	identity := validIdentity()
 	identity.UnownedPeriodMS = 0
 	client := &fakeAdoptionControlClient{
@@ -614,24 +583,21 @@ func TestAttemptAdoptControlServerUnownedPeriodFallsBackToFloorWhenUnreported(t 
 	}
 }
 
-// TestAttemptAdoptControlServerInstanceCredentialSurvivesMultipleAdoptions
-// pins the core scenario Review round 2 finding 4 fixed: InstanceCredential
-// must keep naming the original bootstrap token across a chain of
-// consecutive adoptions, not just the first one -- a chain of two or more
-// consecutive restarts is this feature's own core scenario. Before the fix,
-// the second call's InstanceCredential silently became the first call's
-// rotated control credential instead, which every already-running
-// per-instance agentctl server would reject.
-func TestAttemptAdoptControlServerInstanceCredentialSurvivesMultipleAdoptions(t *testing.T) {
+// TestAttemptAdoptControlServerCredentialKeepsRotatingAcrossAdoptions pins a
+// chain of two or more consecutive restarts -- this feature's own core
+// scenario: each adoption's rotated credential is the one the NEXT adoption
+// must present and receive a further rotation for, under the SAME secret
+// slot throughout, since design 01 "Single driver" uses exactly one
+// credential for both control-plane and per-instance operations and there
+// is nothing else to keep synchronized across the chain.
+func TestAttemptAdoptControlServerCredentialKeepsRotatingAcrossAdoptions(t *testing.T) {
 	secretStore := newInMemorySecretStore()
 	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "bootstrap-token")
 	if err != nil {
 		t.Fatalf("seed credential: %v", err)
 	}
-	instanceSecretID := seedAdoptionInstanceCredential(t, secretStore, "bootstrap-token")
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = instanceSecretID
 	client := &fakeAdoptionControlClient{
 		identity:     validIdentity(),
 		rotateResult: &agentctl.CredentialRotationResult{RotationID: 1, Credential: "rotated-token-1"},
@@ -643,11 +609,14 @@ func TestAttemptAdoptControlServerInstanceCredentialSurvivesMultipleAdoptions(t 
 	if !first.Adopted {
 		t.Fatalf("first adoption = %+v, want Adopted", first)
 	}
-	if first.InstanceCredential != "bootstrap-token" {
-		t.Fatalf("first InstanceCredential = %q, want bootstrap-token", first.InstanceCredential)
+	if first.Credential != "rotated-token-1" {
+		t.Fatalf("first Credential = %q, want rotated-token-1", first.Credential)
 	}
 	if len(store.upserts) != 1 {
 		t.Fatalf("upserts = %d, want 1 after the first adoption", len(store.upserts))
+	}
+	if store.upserts[0].CredentialSecretID != secretID {
+		t.Fatalf("CredentialSecretID = %q, want unchanged %q across the chain", store.upserts[0].CredentialSecretID, secretID)
 	}
 
 	// Simulate the next restart reading back the record the first call wrote.
@@ -658,9 +627,6 @@ func TestAttemptAdoptControlServerInstanceCredentialSurvivesMultipleAdoptions(t 
 		testHomeDir, RequiredSurvivalCapabilities, 0, -1, newAdoptionTestLogger(t))
 	if !second.Adopted {
 		t.Fatalf("second adoption = %+v, want Adopted", second)
-	}
-	if second.InstanceCredential != "bootstrap-token" {
-		t.Fatalf("second InstanceCredential = %q, want bootstrap-token (the real per-instance servers never rotated)", second.InstanceCredential)
 	}
 	if second.Credential != "rotated-token-2" {
 		t.Fatalf("second Credential = %q, want rotated-token-2", second.Credential)
@@ -681,7 +647,6 @@ func TestAttemptAdoptControlServerConfirmFailureStillReportsAdopted(t *testing.T
 	}
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
 	client := &fakeAdoptionControlClient{
 		identity:     validIdentity(),
 		rotateResult: &agentctl.CredentialRotationResult{RotationID: 9, Credential: "rotated-token"},
@@ -710,7 +675,6 @@ func TestAttemptAdoptControlServerRotationStorageFailureIsIncomplete(t *testing.
 	secretStore.failUpdateFor = secretID
 	record := validRecord()
 	record.CredentialSecretID = secretID
-	record.InstanceCredentialSecretID = seedAdoptionInstanceCredential(t, secretStore, "current-token")
 	client := &fakeAdoptionControlClient{
 		identity:     validIdentity(),
 		rotateResult: &agentctl.CredentialRotationResult{RotationID: 5, Credential: "rotated-token"},
@@ -733,21 +697,18 @@ func TestAttemptAdoptControlServerRotationStorageFailureIsIncomplete(t *testing.
 
 // TestRecordFreshControlServerReusesPriorSecretID pins the "own server
 // started after a refused or failed adoption" failure-table row: the record
-// is rewritten to name the new server, and the existing secret rows -- both
-// the control credential and the separate instance credential -- are reused
-// in place (updated to the new server's bootstrap token) rather than leaving
-// the old rows orphaned.
+// is rewritten to name the new server, and the existing credential secret
+// row is reused in place (updated to the new server's bootstrap token)
+// rather than leaving the old row orphaned.
 func TestRecordFreshControlServerReusesPriorSecretID(t *testing.T) {
 	secretStore := newInMemorySecretStore()
 	priorSecretID, err := storeControlServerCredential(context.Background(), secretStore, "", "old-servers-token")
 	if err != nil {
 		t.Fatalf("seed prior credential: %v", err)
 	}
-	priorInstanceSecretID := seedAdoptionInstanceCredential(t, secretStore, "old-servers-token")
 	store := &fakeAdoptionRecordStore{record: &models.ControlServerRecord{
-		Endpoint:                   "127.0.0.1:8888",
-		CredentialSecretID:         priorSecretID,
-		InstanceCredentialSecretID: priorInstanceSecretID,
+		Endpoint:           "127.0.0.1:8888",
+		CredentialSecretID: priorSecretID,
 	}}
 	client := &fakeAdoptionControlClient{identity: validIdentity()}
 
@@ -766,9 +727,6 @@ func TestRecordFreshControlServerReusesPriorSecretID(t *testing.T) {
 	if written.CredentialSecretID != priorSecretID {
 		t.Fatalf("CredentialSecretID = %q, want reused %q", written.CredentialSecretID, priorSecretID)
 	}
-	if written.InstanceCredentialSecretID != priorInstanceSecretID {
-		t.Fatalf("InstanceCredentialSecretID = %q, want reused %q", written.InstanceCredentialSecretID, priorInstanceSecretID)
-	}
 
 	got, err := secretStore.Reveal(context.Background(), priorSecretID)
 	if err != nil {
@@ -777,20 +735,11 @@ func TestRecordFreshControlServerReusesPriorSecretID(t *testing.T) {
 	if got != "new-servers-token" {
 		t.Fatalf("stored credential = %q, want new-servers-token", got)
 	}
-	gotInstance, err := secretStore.Reveal(context.Background(), priorInstanceSecretID)
-	if err != nil {
-		t.Fatalf("Reveal (instance): %v", err)
-	}
-	if gotInstance != "new-servers-token" {
-		t.Fatalf("stored instance credential = %q, want new-servers-token", gotInstance)
-	}
 }
 
 // TestRecordFreshControlServerCreatesSecretWhenNoPriorRecord pins the
-// first-ever-launch case: no prior record exists at all, so brand new
-// secrets are created for both the control and the instance credential
-// rather than a reuse being attempted, and they land in distinct rows even
-// though both currently hold the same value.
+// first-ever-launch case: no prior record exists at all, so a brand new
+// secret is created rather than a reuse being attempted.
 func TestRecordFreshControlServerCreatesSecretWhenNoPriorRecord(t *testing.T) {
 	secretStore := newInMemorySecretStore()
 	store := &fakeAdoptionRecordStore{}
@@ -805,11 +754,8 @@ func TestRecordFreshControlServerCreatesSecretWhenNoPriorRecord(t *testing.T) {
 		t.Fatalf("upserts = %d, want 1", len(store.upserts))
 	}
 	written := store.upserts[0]
-	if written.CredentialSecretID == "" || written.InstanceCredentialSecretID == "" {
-		t.Fatalf("written = %+v, want both credential secret IDs populated", written)
-	}
-	if written.CredentialSecretID == written.InstanceCredentialSecretID {
-		t.Fatalf("CredentialSecretID and InstanceCredentialSecretID both = %q, want distinct secret-store rows", written.CredentialSecretID)
+	if written.CredentialSecretID == "" {
+		t.Fatalf("written = %+v, want a populated credential secret ID", written)
 	}
 	got, err := secretStore.Reveal(context.Background(), written.CredentialSecretID)
 	if err != nil {
@@ -817,13 +763,6 @@ func TestRecordFreshControlServerCreatesSecretWhenNoPriorRecord(t *testing.T) {
 	}
 	if got != "fresh-token" {
 		t.Fatalf("stored credential = %q, want fresh-token", got)
-	}
-	gotInstance, err := secretStore.Reveal(context.Background(), written.InstanceCredentialSecretID)
-	if err != nil {
-		t.Fatalf("Reveal (instance): %v", err)
-	}
-	if gotInstance != "fresh-token" {
-		t.Fatalf("stored instance credential = %q, want fresh-token", gotInstance)
 	}
 }
 
