@@ -188,7 +188,9 @@ export function queueTaskCreateLastUsedFromPayload(
 ) {
   if (!payload) return;
   const previousWorkflowIdsByWorkspace = lastQueuedLastUsed.workflowIdsByWorkspace;
-  lastQueuedLastUsed = {};
+  lastQueuedLastUsed = previousWorkflowIdsByWorkspace
+    ? { workflowIdsByWorkspace: previousWorkflowIdsByWorkspace }
+    : {};
   const firstWorkspaceRepo = payload.repositories?.find((repo) => repo.repository_id);
   syncTaskCreateLastUsed({
     workspace_id: payload.workspace_id,
@@ -198,11 +200,6 @@ export function queueTaskCreateLastUsedFromPayload(
     agent_profile_id: payload.agent_profile_id,
     executor_profile_id: payload.executor_profile_id,
   });
-  if (previousWorkflowIdsByWorkspace) {
-    lastQueuedLastUsed = mergeTaskCreateLastUsedState(lastQueuedLastUsed, {
-      workflowIdsByWorkspace: previousWorkflowIdsByWorkspace,
-    });
-  }
 }
 
 function mergeTaskCreateLastUsedState(
