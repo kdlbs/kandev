@@ -35,6 +35,11 @@ export interface MainTopBarSlotProps {
   presentation: "desktop" | "mobile";
 }
 
+// On mobile, the host normalizes ordinary `host.ui.Button` contributions to
+// a 32px icon action. A rich status control with text may opt out by setting
+// `data-main-top-bar-rich` on its root and must own its compact layout and
+// minimum 44px touch height. Rich controls must not add a nested scroller.
+
 export type StateUpdater<Value> = Value | ((previous: Value) => Value);
 export type StateSetter<Value> = (value: StateUpdater<Value>) => void;
 

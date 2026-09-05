@@ -1,6 +1,6 @@
 ---
 created: 2026-09-05
-status: completed
+status: in_progress
 requirements:
   - REQ-PLUGINS-TASK-MANAGER-MONITOR-001
   - REQ-PLUGINS-TASK-MANAGER-MONITOR-002
@@ -39,7 +39,9 @@ runtime contract before it is exposed.
 ### Out of scope
 
 - Removing or modifying Kandev's built-in resource monitor.
-- A Kandev host/SDK/protocol change.
+- A new Kandev host API, database, WebSocket protocol, or first-party monitor
+  change. A small compatibility rule in the existing mobile top-bar wrapper is
+  in scope so rich status controls can preserve their required touch target.
 - Remote executor metrics, alerts, retained time series, process control, or
   resource limits.
 - Reordering the plugin contribution relative to other top-bar items.
@@ -151,7 +153,7 @@ runtime contract before it is exposed.
 
 - [x] [Task 01: Add ambient summary sampling](task-01-ambient-summary-sampling.md)
 - [x] [Task 02: Build configurable monitor UI](task-02-configurable-monitor-ui.md)
-- [x] [Task 03: Prove the packaged monitor](task-03-packaged-monitor-verification.md)
+- [ ] [Task 03: Prove the packaged monitor](task-03-packaged-monitor-verification.md)
 
 Dependency order: Task 01, then Task 02, then Task 03. The work orders share
 the manifest, UI bundle, harness, and package contract, so none is
@@ -159,9 +161,9 @@ parallel-safe.
 
 ## Verification results
 
-Completed on 2026-09-05. The plugin implementation, deterministic UI model
-tests, portable browser harness, cross-platform builds, and packaged archive
-checks passed in the plugin repository:
+Local verification completed on 2026-09-05. The plugin implementation,
+deterministic UI model tests, portable browser harness, cross-platform builds,
+and packaged archive checks passed in the plugin repository:
 
 - `make fmt`
 - `make vet`
@@ -171,6 +173,10 @@ checks passed in the plugin repository:
 - `make package`
 - `tar -tzf kandev-plugin-task-manager-0.1.1.tar.gz`
 - Darwin, Windows, and FreeBSD `go test -c` compilation checks
+
+The disposable real-app smoke test remains pending because this workspace has no
+`KANDEV_URL`. Task 03 and this plan stay in progress until that command is run
+against a disposable Kandev instance.
 
 ## Risks
 

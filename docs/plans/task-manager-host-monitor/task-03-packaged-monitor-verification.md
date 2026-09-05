@@ -1,7 +1,7 @@
 ---
 id: "03-packaged-monitor-verification"
 title: "Prove the packaged monitor"
-status: completed
+status: in_progress
 wave: 3
 depends_on:
   - "01-ambient-summary-sampling"
@@ -108,11 +108,13 @@ Run from `kdlbs-kandev-plugin-task-manager`, followed by the documented
 
 ## Results
 
-Completed on 2026-09-05. CI now installs pinned harness dependencies and
-Chromium, runs Go/UI/browser verification, and builds the package. The README
-documents host versus task readings, operator versus personal settings, and
-panel versus ambient cost. The package archive contains all five platform
-executables, the manifest, the UI bundle, and generated checksums.
+Local verification completed on 2026-09-05. CI now installs pinned harness
+dependencies and Chromium, runs Go/UI/browser verification, and builds the
+package. The README documents host versus task readings, operator versus
+personal settings, and panel versus ambient cost. The package archive contains
+all five platform executables, the manifest, the UI bundle, and generated
+checksums.
 
-The real-app smoke command remains environment-dependent and must be run with
-`KANDEV_URL` set to a disposable Kandev instance.
+The real-app smoke command remains pending and must be run with `KANDEV_URL` set
+to a disposable Kandev instance. This work order remains in progress until that
+smoke result is recorded.
