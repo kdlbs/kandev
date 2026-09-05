@@ -30,6 +30,7 @@ import type {
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 
 export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
@@ -167,6 +168,7 @@ export type StepType = {
   workflowId?: string;
   position?: number;
   is_start_step?: boolean;
+  prompt?: string;
   events?: {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -572,6 +574,7 @@ export type DialogFormBodyProps = {
   workflows: WorkflowsState["items"];
   snapshots: KanbanMultiState["snapshots"];
   effectiveWorkflowId: string | null;
+  launchPreview: TaskCreateLaunchPreview | null;
   fs: DialogFormState;
   editDependencies: TaskEditDialogDependenciesState;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;

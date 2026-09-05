@@ -9,6 +9,7 @@ import { Button } from "@kandev/ui/button";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { AgentLogo } from "@/components/agent-logo";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 
 type StepItem = {
   id: string;
@@ -88,9 +89,46 @@ type WorkflowSelectorRowProps = {
   selectedWorkflowId: string | null;
   onWorkflowChange: (workflowId: string) => void;
   agentProfiles: AgentProfileOption[];
+  launchPreview?: TaskCreateLaunchPreview | null;
   clearLabel?: string;
   placeholder?: string;
 };
+
+function WorkflowSelectorTrigger({
+  selectedWorkflow,
+  launchPreview,
+  placeholder,
+}: {
+  selectedWorkflow: WorkflowSelectorRowProps["workflows"][number] | undefined;
+  launchPreview?: TaskCreateLaunchPreview | null;
+  placeholder?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <PopoverTrigger asChild>
+      <Button
+        type="button"
+        variant="ghost"
+        className="min-h-11 w-auto min-w-0 max-w-full justify-between cursor-pointer md:min-h-7"
+        data-testid="workflow-selector-trigger"
+      >
+        <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate">
+          {selectedWorkflow?.name ?? placeholder ?? t("workflows:selectWorkflow")}
+        </span>
+        {launchPreview && (
+          <span
+            className="min-w-0 max-w-[45vw] truncate text-xs text-muted-foreground"
+            data-testid="task-create-launch-step"
+          >
+            {t("task:launchDestination", { step: launchPreview.stepName })}
+          </span>
+        )}
+        <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+    </PopoverTrigger>
+  );
+}
 
 export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   workflows,
@@ -98,6 +136,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   selectedWorkflowId,
   onWorkflowChange,
   agentProfiles,
+  launchPreview,
   clearLabel,
   placeholder,
 }: WorkflowSelectorRowProps) {
@@ -111,20 +150,11 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          className="min-h-11 w-auto justify-between cursor-pointer md:min-h-7"
-          data-testid="workflow-selector-trigger"
-        >
-          <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {selectedWorkflow?.name ?? placeholder ?? t("workflows:selectWorkflow")}
-          </span>
-          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
+      <WorkflowSelectorTrigger
+        selectedWorkflow={selectedWorkflow}
+        launchPreview={launchPreview}
+        placeholder={placeholder}
+      />
       <PopoverContent className="w-auto min-w-[300px] max-w-none p-1" align="start">
         <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">
           {t("workflows:workflow")}

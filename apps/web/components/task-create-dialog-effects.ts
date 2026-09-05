@@ -55,6 +55,7 @@ export function useWorkflowStepsEffect(
             workflowId: effectiveWorkflowId,
             position: s.position,
             is_start_step: s.is_start_step,
+            prompt: s.prompt,
             events: s.events,
           })),
         );

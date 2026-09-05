@@ -13,6 +13,7 @@ import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 import { useTranslation } from "react-i18next";
 
 type SelectorOption = {
@@ -274,6 +275,7 @@ type WorkflowSectionProps = {
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
+  launchPreview?: TaskCreateLaunchPreview | null;
   /**
    * When true the picker is hidden entirely. Used by feature wrappers
    * (Improve Kandev) where the workflow is enforced and the user must not be
@@ -291,6 +293,7 @@ function renderWorkflowSection({
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
+  launchPreview,
   workflowLocked,
 }: WorkflowSectionProps) {
   // Hidden workflows (e.g. improve-kandev) are excluded from the picker; they
@@ -308,6 +311,7 @@ function renderWorkflowSection({
         selectedWorkflowId={effectiveWorkflowId ?? null}
         onWorkflowChange={onWorkflowChange}
         agentProfiles={agentProfiles}
+        launchPreview={launchPreview}
       />
     );
   }
@@ -375,6 +379,7 @@ export type DialogPromptSectionProps = {
   descriptionPlaceholder?: string;
   /** Optional slot rendered above the description textarea (e.g. a tab toggle). */
   aboveDescriptionSlot?: React.ReactNode;
+  launchPreview?: TaskCreateLaunchPreview | null;
   /**
    * Whether the description textarea should grab focus on mount. Defaults to
    * `!isTaskStarted`. Callers that render a task-name input above the
@@ -412,6 +417,7 @@ export function DialogPromptSection({
   extraFormSlot,
   descriptionPlaceholder,
   aboveDescriptionSlot,
+  launchPreview,
   autoFocusDescription,
   onComposerSubmit,
 }: DialogPromptSectionProps) {
@@ -436,6 +442,7 @@ export function DialogPromptSection({
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
+        launchPreview={launchPreview}
         jiraImport={importBindings(importsEnabled, ws, onJiraImport)}
         linearImport={importBindings(importsEnabled, ws, onLinearImport)}
         onComposerSubmit={onComposerSubmit}
