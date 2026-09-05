@@ -23,7 +23,7 @@ apps/
 - **Web-only scripts** live in `apps/web/package.json`; run them from `apps/web` (for example `pnpm run i18n:check` or `pnpm run i18n:ratchet`) or use `pnpm --filter @kandev/web ...`, not from `apps/`.
 - **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
-- **E2E**: Playwright (`cd apps/web && pnpm e2e:raw`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
+- **E2E**: Playwright (`cd apps/web && pnpm e2e:raw`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers Docker, SSH, and Kind-backed Kubernetes executor scenarios — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
 
@@ -58,6 +58,12 @@ Architecture notes and per-area conventions live alongside the code they describ
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+### Engineering language
+
+Use English for all engineering text, including specs, plans, PRs, docs,
+comments, and docstrings. Translate non-English input before recording it.
+Only required product localization and product data can use another language.
+
 ### Commit Conventions (enforced by CI)
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
@@ -76,6 +82,8 @@ Static analysis runs in CI and pre-commit. Each subtree has its own thresholds:
 - TypeScript limits: see `apps/web/AGENTS.md` (and `apps/web/eslint.config.mjs`).
 
 When you hit a limit: extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
+
+Production comments state the invariant, not the argument for it: no `AC-NN` reference, no "Review round N", no "BLOCKING FINDING", no narration of a bug's history. That context belongs in the spec, the plan, or the PR body — a comment that has to argue the code is correct usually means the code is not constrained enough to be obviously correct.
 
 ### Testing
 
@@ -146,9 +154,11 @@ history and remains immutable.
   live under `docs/specs/**`. New work uses
   `docs/specs/<system>/requirements/` and
   `docs/specs/<system>/system-design/`. Read `docs/specs/README.md` and the
-  relevant file in `docs/specs/guide/`. Use `docs/specs/INDEX.md` only to find
-  unmigrated legacy specifications. Run `python3 scripts/lint-spec-files.py
-  --all` after specification changes.
+  relevant file in `docs/specs/guide/`. Choose the owner from the durable
+  contract, not the affected code layer. Keep one vertical requirement/design
+  pair and include its UI outcomes there. Use `docs/specs/INDEX.md` only to
+  find unmigrated legacy specifications. Run `python3
+  scripts/lint-spec-files.py --all` after specification changes.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
 - **Plans:** Implementation plans are generated from requirements and system
   designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package
@@ -164,6 +174,7 @@ history and remains immutable.
 
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
 - ADR 0015's step-completion-signal telemetry lives under `workflow_*`: `workflow_step_completion_signal_received_total` (`internal/workflow/signalmetrics/`), labelled by `source` and `agent_type`, counts accepted `step_complete_kandev` signals. Its separate `workflow_step_completion_signal_fallback_used_total` counter is labelled by `agent_type` and counts manual fallback uses. The fallback button does not have a production increment site yet, so the counter remains zero until that UI ships.
+- Office stall detection (REQ-OFFICE-STALL-VISIBILITY) lives under `office_stall_*`: `office_stall_stranded_signal_total` (labelled by `gate`, which names which of the two watchdog gate sites saw it), `office_stall_decision_waiting_total`, and `office_stall_detector_skipped_total` (labelled by `reason`, so a detector that fails closed is visible rather than silent). Detection only: these counters never accompany a transition, a synthesized decision, or a queued run, because Office tasks are surfaced and never reclaimed. Also emitted as structured zap logs.
 
 ### GitHub Operations
 
@@ -248,7 +259,7 @@ Contract authority is intentionally split by implementation boundary: frontend a
 
 Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; each registration owns the public metadata, environment variable, config reader, and config applier. Do not add parallel per-flag maps or switches.
 
-Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
+Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` → `dev`, otherwise `prod`. `KANDEV_DEBUG_PPROF_ENABLED=true` enables pprof behavior but does not select the `dev` profile on its own. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
 
 Stable operator startup settings have a separate typed source contract in
 `apps/backend/internal/common/config/catalog.go` and `source.go`. The catalog

@@ -35,6 +35,7 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL DEFAULT '',
+			assignee_user_id TEXT NOT NULL DEFAULT '',
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical','high','medium','low')),
@@ -85,10 +86,28 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			role TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+			provenance TEXT NOT NULL DEFAULT 'manual'
 		)
 	`); err != nil {
 		t.Fatalf("create workflow_step_participants table: %v", err)
+	}
+	// AddTaskParticipant checks for a claimable auto-cast seat by joining
+	// against workflow_step_decisions (see findClaimableAutoSeat) — stub it
+	// out here so callers of AddTaskParticipant don't need their own copy.
+	if _, err := repo.ExecRaw(ctx, `
+		CREATE TABLE IF NOT EXISTS workflow_step_decisions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL DEFAULT '',
+			step_id TEXT NOT NULL DEFAULT '',
+			participant_id TEXT NOT NULL DEFAULT '',
+			decision TEXT NOT NULL DEFAULT '',
+			decided_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+			superseded_at TIMESTAMP NULL
+		)
+	`); err != nil {
+		t.Fatalf("create workflow_step_decisions table: %v", err)
 	}
 	return repo
 }
@@ -758,7 +777,7 @@ func TestCountActionableTasksForAgent_AgentIsolation(t *testing.T) {
 
 // Automation runs are hidden from the task list by their origin, not by
 // is_ephemeral: they are ordinary persistent tasks with their own destination
-// (docs/specs/office/automations-settings.md). The quick chat alongside them
+// (docs/specs/office/requirements/automations-settings.md). The quick chat alongside them
 // still behaves exactly as it did.
 func TestOfficeTaskListsExcludeAutomationOriginTasks(t *testing.T) {
 	repo := newSearchTestRepo(t)

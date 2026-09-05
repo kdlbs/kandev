@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["03-decouple-git-polling"]
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 04: Stabilize Session Transport

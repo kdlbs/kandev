@@ -34,8 +34,12 @@ No schema change.
 - Clarification questions remain `task_session_messages` rows with
   `type = "clarification_request"`.
 - Rows in one bundle share `metadata.pending_id`; terminal status remains in `metadata.status`.
-- `task_session_messages.turn_id` associates a question with its turn. The newest authoritative durable
-  `task_session_turns` record for the session identifies the current turn; deleting messages does not
+- `task_session_messages.turn_id` associates a question with its turn. The newest durable
+  **conversational** `task_session_turns` record for the session identifies the current turn — a
+  turn whose `metadata.lifecycle_only` flag is not set; a lifecycle turn (for example the
+  agent-boot-on-resume record) is never current-turn authority, however recent. Ranking among
+  conversational turns is: an open turn (`completed_at IS NULL`) before any completed turn regardless
+  of timestamps, then `started_at`, `created_at`, and `id`, all descending. Deleting messages does not
   delete that parent turn or move ownership backward.
 - A pre-acknowledgement successor carries `metadata.prompt_dispatch_pending=true` plus the source
   clarification turn, pending ID, and exact claimed message IDs. An empty row carrying only the pending
@@ -66,11 +70,15 @@ No new route. Task-session responses add `pending_action_revision` beside the ex
   decimal epoch is a database-backed, monotonically allocated backend generation; sequence orders
   reads within that generation. Clients compare both fields and reject any older result, including
   an unseen pre-restart epoch delivered after client state has been rebuilt.
-- `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history;
-  unpublished reservations stay hidden until publication or durable message evidence, including while
-  an attempt marker makes them internal current-turn authority. Attempted reservations are preserved
-  across restart because their dispatch outcome is ambiguous. Visible history is ordered ascending by
-  `started_at`, `created_at`, then `id`, matching the reverse ordering used to select the current turn.
+- `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history, including
+  lifecycle turns and their `metadata.lifecycle_only` marker; unpublished reservations stay hidden
+  until publication or durable message evidence, including while an attempt marker makes them internal
+  current-turn authority. Attempted reservations are preserved across restart because their dispatch
+  outcome is ambiguous. Visible history is ordered ascending by `started_at`, `created_at`, then `id`
+  across every visible turn, lifecycle or conversational. That is the reverse of the tie-break keys
+  used to select the current turn, but not the full current-turn ordering: current-turn selection also
+  excludes lifecycle turns entirely and ranks an open turn ahead of any completed one regardless of
+  timestamp, neither of which visible history does.
 - Task list, workflow snapshot, and boot payloads continue to expose task-level `pending_action` in
   the status summary and legacy fallback fields.
 - `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:
@@ -121,6 +129,36 @@ Transitions:
   `delivery_claimed` state is recoverable. A new request creates a new
   bundle identity; message deletion cannot reverse this transition.
 
+## Primary-answer watchdog recovery
+
+The primary path uses the live waiter's durable delivery-confirmation callback as the ordering
+boundary between response persistence and ACP delivery. The resolver is constructed with a synchronous
+local orchestrator notifier. After the claim is finalized, that notifier registers the watchdog for the
+pending ID and clarification turn before the callback returns the response to the agent. The event-bus
+publication remains fan-out for other consumers and carries an inline-handled marker so the local
+subscription does not arm a duplicate watchdog. NATS publication is not used as the acknowledgement:
+its publish call can return before subscribers run. The agent therefore cannot emit a tool-completion
+acknowledgement before an armed watchdog can observe and cancel itself. Terminal clarification message
+publication remains after successful delivery; watchdog registration does not publish those messages
+early.
+
+Each watchdog has an armed phase and a fallback-recovery phase. Independent live stream activity
+cancels either phase, and service shutdown cancels all phases. Once fallback owns the per-session
+cancel-and-handoff sequence, it marks the silent cancellation as recovery-owned. The cancellation
+operation's captured execution and prompt-generation identity plus a cancellation-acknowledgement
+frame type classifies frames caused by that cancellation. Only those exact frames are ignored; message,
+thinking, and tool frames always cancel the recovery context, and a newer execution or prompt
+generation cancels it even while cancellation is blocked. The marker is cleared when cancellation
+settles, so later independent activity retains its normal cancellation authority.
+
+Fallback uses one bounded context through turn-authority reads, silent cancellation, terminal-safe
+session reconciliation, and replacement-answer queue handoff. The recovery-owned activity exception
+does not weaken current-turn checks, prompt-generation checks, explicit user cancellation, coordinator
+stop, or service-shutdown cancellation. Recovery checks turn authority before cancellation and again
+after it settles. Because owned cancellation normally closes the captured turn, the post-cancel check
+accepts only that exact turn's durable completion when no active turn remains; an active successor fails
+closed. No watchdog or recovery phase is persisted.
+
 ## Permissions
 
 No authorization change. A user can see, answer, or dismiss only clarification data for a task and
@@ -168,6 +206,15 @@ session they can already access. Session selection does not broaden task visibil
   report whether retry state was recovered, and never restore it after a successor turn is accepted. A
   started confirmation may finish after the responder's bounded wait, but it cannot mutate the
   responder's claim snapshot and its durable finalization serializes against that restore.
+- Live delivery acknowledgement races response finalization: invoke the resolver's construction-supplied
+  local primary-answer watchdog notifier synchronously inside the finalized delivery-confirmation
+  boundary before returning the response to the agent. Keep the event-bus publication as fan-out and
+  mark the event as handled inline so the local subscriber does not register a duplicate watchdog. Do
+  not rely on NATS or another asynchronous bus delivery to establish watchdog ordering.
+- Primary-answer fallback cancellation produces its own stream activity: retain the bounded fallback
+  context while that recovery-owned cancellation settles, then revalidate the captured turn's durable
+  authority before the single replacement-answer handoff. Independent activity and service shutdown
+  still cancel recovery; a successor turn prevents the stale handoff.
 - Historical partial terminalization leaves pending and terminal siblings in one current-turn bundle:
   complete the pending siblings without rewriting terminal history or returning a permanent conflict.
 - A malformed persisted pending row has no matching durable turn: drain any live in-memory waiter, but
@@ -201,7 +248,7 @@ session they can already access. Session selection does not broaden task visibil
 - Message history remains durable and is not destructively rewritten merely because a newer turn
   exists.
 - Active clarification state is reconstructable after restart from message status plus the newest
-  authoritative durable turn.
+  durable conversational turn (a lifecycle turn is never authoritative, however recent).
 - Current-turn ownership is reconstructable from durable turn rows even when a turn has no remaining
   messages.
 - Unpublished detached-answer reservations carry enough recovery identity to restore only their own

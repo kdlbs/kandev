@@ -14,7 +14,7 @@ import { useToast } from "@/components/toast-provider";
 import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
 import { useApplyRepositorySet } from "@/components/task-create-dialog-repository-sets-apply";
 import { selectedRepositoryIdsForSet } from "@/components/task-create-dialog-repository-sets";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   useDialogFormState,
   useTaskCreateDialogEffects,
@@ -29,6 +29,8 @@ import type { TaskCreateDialogProps } from "@/components/task-create-dialog";
 import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-dialog-workflow-context";
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import { t } from "@/lib/i18n";
+import { listRepositoryBranchPolicies } from "@/lib/api";
+import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 
 // Catalog key: module scope, so it is resolved at the call site.
 const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
@@ -111,6 +113,23 @@ function useLinearImportHandler(
   );
 }
 
+function useEditDialogDependencies(
+  open: boolean,
+  isEditMode: boolean,
+  workspaceId: string | null | undefined,
+  taskId: string | null | undefined,
+) {
+  return useTaskEditDialogDependencies({
+    open: open && isEditMode,
+    workspaceId,
+    taskId,
+  });
+}
+
+function isFreshBranchAvailable(fs: DialogFormState, isLocalExecutor: boolean): boolean {
+  return !fs.useRemote && isLocalExecutor && fs.repositories.length === 1;
+}
+
 type SubmitWiringArgs = {
   props: TaskCreateDialogProps;
   fs: ReturnType<typeof useDialogFormState>;
@@ -120,6 +139,8 @@ type SubmitWiringArgs = {
   isSessionMode: boolean;
   isEditMode: boolean;
   autoTitle: boolean;
+  editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
+  refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
 };
 
@@ -132,6 +153,8 @@ function useSubmitHandlersWiring({
   isSessionMode,
   isEditMode,
   autoTitle,
+  editDependencies,
+  refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
 }: SubmitWiringArgs) {
   const {
@@ -155,8 +178,8 @@ function useSubmitHandlersWiring({
     workspaceId,
     workflowId,
     effectiveWorkflowId: computed.effectiveWorkflowId,
-    effectiveDefaultStepId: computed.effectiveDefaultStepId,
     repositories: fs.repositories,
+    repositoriesDirty: fs.repositoriesDirty,
     discoveredRepositories: fs.discoveredRepositories,
     workspaceRepositories,
     useRemote: fs.useRemote,
@@ -170,6 +193,7 @@ function useSubmitHandlersWiring({
     onCreateSession,
     onOpenChange,
     createTask,
+    refreshBranchPolicies,
     preserveTaskCreateLastUsedOnClose: preserveQueuedLastUsedOnClose,
     taskId,
     parentTaskId,
@@ -191,7 +215,9 @@ function useSubmitHandlersWiring({
     repositoryLocalPath,
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
+    priority: fs.priority,
     blockedBy: fs.blockedBy,
+    editDependencies,
   });
 }
 
@@ -210,7 +236,12 @@ function useDialogSetupData(
 ) {
   const { open, workspaceId, workflowId, defaultStepId, initialValues } = props;
   const { toast } = useToast();
+  const storeApi = useAppStoreApi();
   const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
+  const setRepositoryBranchPolicies = useAppStore((state) => state.setRepositoryBranchPolicies);
+  const setRepositoryBranchPoliciesLoading = useAppStore(
+    (state) => state.setRepositoryBranchPoliciesLoading,
+  );
   const data = useTaskCreateDialogData({
     open,
     workspaceId,
@@ -218,6 +249,8 @@ function useDialogSetupData(
     defaultStepId,
     fs,
     lockedWorkflow: props.lockedFields?.workflow === true,
+    agentProfileRecentUseContext:
+      props.mode === "session" || props.mode === "edit" ? "task_session" : "task_create",
   });
   const {
     workflows,
@@ -257,9 +290,38 @@ function useDialogSetupData(
     executors,
     upsertWorkspaceRepository,
   });
+  const refreshBranchPolicies = useCallback(async () => {
+    const repositoryIds = [
+      ...new Set(
+        fs.repositories
+          .map((row) => row.repositoryId)
+          .filter((repositoryId): repositoryId is string => Boolean(repositoryId)),
+      ),
+    ];
+    await Promise.all(
+      repositoryIds.map(async (repositoryId) => {
+        const requestRevision =
+          storeApi.getState().repositoryBranchPolicies.revisionByRepositoryId[repositoryId] ?? 0;
+        setRepositoryBranchPoliciesLoading(repositoryId, true);
+        try {
+          const response = await listRepositoryBranchPolicies(repositoryId, { cache: "no-store" });
+          setRepositoryBranchPolicies(
+            repositoryId,
+            response.repository_branch_policies,
+            requestRevision,
+          );
+        } catch {
+          // Keep the original task error visible when recovery cannot refresh.
+        } finally {
+          setRepositoryBranchPoliciesLoading(repositoryId, false);
+        }
+      }),
+    );
+  }, [fs.repositories, setRepositoryBranchPolicies, setRepositoryBranchPoliciesLoading, storeApi]);
   return {
     ...data,
     handlers,
+    refreshBranchPolicies,
     repositoryLocalPath: resolveSingleRowLocalPath(fs, repositories),
   };
 }
@@ -269,8 +331,14 @@ export function useTaskCreateDialogSetup(
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
 ) {
   const resolvedProps = useResolvedTaskCreateWorkflowContext(props);
-  const { open, mode = "create", workspaceId, workflowId } = resolvedProps;
-  const { editingTask, initialValues } = resolvedProps;
+  const {
+    open,
+    mode = "create",
+    workspaceId,
+    workflowId,
+    editingTask,
+    initialValues,
+  } = resolvedProps;
   const isSessionMode = mode === "session";
   const isEditMode = mode === "edit";
   const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
@@ -285,30 +353,26 @@ export function useTaskCreateDialogSetup(
     initialValues,
     resolvedProps.lockedFields?.workflow === true,
   );
+  const editDependencies = useEditDialogDependencies(
+    open,
+    isEditMode,
+    workspaceId,
+    editingTask?.id ?? null,
+  );
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
-  const {
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    refreshRepositories,
-    taskCreateLastUsed,
-    userSettingsLoaded,
-    computed,
-    handlers,
-    repositoryLocalPath,
-  } = data;
+  const { computed, handlers, repositoryLocalPath, refreshBranchPolicies } = data;
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
     computed,
-    workspaceRepositories: repositories,
+    workspaceRepositories: data.repositories,
     repositoryLocalPath,
     isSessionMode,
     isEditMode,
     autoTitle,
+    editDependencies,
+    refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
   });
   const guardedHandleSubmit = useGuardedSubmit(
@@ -321,17 +385,18 @@ export function useTaskCreateDialogSetup(
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);
   const handleLinearImport = useLinearImportHandler(fs, data.handlers.handleTaskNameChange);
-  const freshBranchAvailable =
-    !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
+  const freshBranchAvailable = isFreshBranchAvailable(fs, computed.isLocalExecutor);
   const repositorySets = useRepositorySetsForDialog({
     workspaceId: resolvedProps.workspaceId ?? null,
     open: resolvedProps.open,
     rows: fs.repositories,
-    repositories,
+    repositories: data.repositories,
     setRepositories: fs.setRepositories,
-    userSettingsLoaded,
+    setRepositoriesDirty: fs.setRepositoriesDirty,
+    userSettingsLoaded: data.userSettingsLoaded,
   });
   return {
+    ...data,
     fs,
     isSessionMode,
     isEditMode,
@@ -339,24 +404,17 @@ export function useTaskCreateDialogSetup(
     autoTitle,
     isTaskStarted,
     sessionRepoName,
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    refreshRepositories,
     computed,
     handlers,
     submitHandlers,
     handleKeyDown,
     freshBranchAvailable,
     repositorySets,
-    taskCreateLastUsed,
-    userSettingsLoaded,
     guardedHandleSubmit,
     enhance,
     handleJiraImport,
     handleLinearImport,
+    editDependencies,
   };
 }
 
@@ -366,6 +424,7 @@ type RepositorySetsForDialogArgs = {
   rows: DialogFormState["repositories"];
   repositories: Repository[];
   setRepositories: DialogFormState["setRepositories"];
+  setRepositoriesDirty: DialogFormState["setRepositoriesDirty"];
   userSettingsLoaded: boolean;
 };
 
@@ -383,10 +442,16 @@ function useRepositorySetsForDialog({
   rows,
   repositories,
   setRepositories,
+  setRepositoriesDirty,
   userSettingsLoaded,
 }: RepositorySetsForDialogArgs) {
   const { sets } = useRepositorySets(workspaceId, open);
-  const onApply = useApplyRepositorySet({ rows, repositories, setRepositories });
+  const onApply = useApplyRepositorySet({
+    rows,
+    repositories,
+    setRepositories,
+    setRepositoriesDirty,
+  });
   const [saveOpen, setSaveOpen] = useState(false);
   // Offer "Save as set" only when there is a workspace-repository selection worth
   // saving, so the action is never a dead end.

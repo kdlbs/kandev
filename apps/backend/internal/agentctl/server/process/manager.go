@@ -94,6 +94,7 @@ const processDefaultExitGrace = 5 * time.Second
 
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
+const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
@@ -107,6 +108,9 @@ type Manager struct {
 	stdin              io.WriteCloser
 	stdout             io.ReadCloser
 	stderr             io.ReadCloser
+	stderrPipeMu       sync.Mutex
+	stderrReader       io.ReadCloser
+	stderrWriter       io.WriteCloser
 	status             atomic.Value // Status
 	exitCode           atomic.Int32
 	exitErr            atomic.Value // error
@@ -175,6 +179,20 @@ type Manager struct {
 	// from branch-only overrides. Updating one target must not race tracker
 	// creation or rewrite siblings' authoritative state.
 	comparisonTargetsMu sync.RWMutex
+	// trackerGitEnv is the process manager's detached snapshot of the instance
+	// environment used by workspace trackers. Each tracker receives its own
+	// copy so tracker-local changes cannot affect another tracker.
+	trackerGitEnv   []string
+	trackerGitEnvMu sync.RWMutex
+
+	// comparisonTargetOps tracks one cancellable materialization per
+	// repository scope. The wait group lets teardown observe all operations
+	// that were admitted before shutdown.
+	comparisonTargetOps          map[string]*comparisonTargetOperation
+	comparisonTargetOpsMu        sync.Mutex
+	comparisonTargetOpsWG        sync.WaitGroup
+	comparisonTargetOpsStopping  bool
+	comparisonTargetOpsPermanent bool
 
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
@@ -278,6 +296,14 @@ func (m *Manager) admitStart() (func(), error) {
 // CloseAdmission rejects new process owners without waiting for in-flight
 // handlers. Instance teardown calls it before shutting down HTTP.
 func (m *Manager) CloseAdmission() {
+	m.comparisonTargetOpsMu.Lock()
+	m.comparisonTargetOpsStopping = true
+	m.comparisonTargetOpsPermanent = true
+	for _, operation := range m.comparisonTargetOps {
+		operation.cancel()
+	}
+	m.comparisonTargetOpsMu.Unlock()
+
 	m.admissionMu.Lock()
 	m.stopping = true
 	lifetimeCancel := m.lifetimeCancel
@@ -349,6 +375,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		lifetimeCtx:          lifetimeCtx,
 		lifetimeCancel:       lifetimeCancel,
 		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		trackerGitEnv:        append([]string(nil), cfg.AgentEnv...),
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -711,9 +738,9 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
 		return t, nil
 	}
-	t := NewWorkspaceTracker(full, m.logger)
+	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
 	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
-	m.prepareTrackerComparisonTarget(context.Background(), t)
+	m.prepareTrackerComparisonTarget(t)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
@@ -894,7 +921,9 @@ func (m *Manager) findRepositoryTracker(repositoryName string) *WorkspaceTracker
 // otherwise sit at its construction default and be demoted by the grace timer
 // 60s later, while the user is looking at it.
 func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
-	return NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker := NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker.SetGitEnvironment(m.trackerGitEnvironment())
+	return tracker
 }
 
 // applyWorkspacePollModeLocked gives newly built trackers the last mode the
@@ -1045,6 +1074,27 @@ func (m *Manager) gitEnvironment() []string {
 	return append([]string(nil), m.cfg.AgentEnv...)
 }
 
+func (m *Manager) trackerGitEnvironment() []string {
+	m.trackerGitEnvMu.RLock()
+	defer m.trackerGitEnvMu.RUnlock()
+	return append([]string(nil), m.trackerGitEnv...)
+}
+
+func (m *Manager) setTrackerGitEnvironment(env []string) {
+	detached := append([]string(nil), env...)
+	m.trackerGitEnvMu.Lock()
+	m.trackerGitEnv = detached
+	m.trackerGitEnvMu.Unlock()
+
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.SetGitEnvironment(detached)
+	}
+	for _, tracker := range trackers {
+		tracker.SetGitEnvironment(detached)
+	}
+}
+
 // resolveSubpath normalises and validates a repo subpath relative to
 // cfg.WorkDir. Returns ("", "", nil) for the root (empty/"."); otherwise
 // returns the cleaned relative path and the absolute full path.
@@ -1178,12 +1228,17 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
+		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
 		return formatAgentStartError(err, m.cfg.AgentEnv)
+	}
+	if err := m.closeStderrWriter(); err != nil {
+		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
 	processLifecycle, err := installProcessLifecycle(m.cmd)
 	if err != nil {
 		reapErr := killAndWaitStartedCommand(m.cmd)
+		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
 		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
 	}
@@ -1205,14 +1260,17 @@ func (m *Manager) Start(ctx context.Context) error {
 		default:
 			reapErr = killAndWaitStartedCommand(m.cmd)
 		}
+		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
 		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
-	// Start stderr reader and exit waiter
+	// Start stderr reader and exit waiter. Keep the completion channel local to
+	// this process generation so a delayed reader cannot signal a replacement.
+	stderrDone := make(chan struct{})
 	m.wg.Add(2)
-	go m.readStderr()
-	go m.waitForExit()
+	go m.readStderr(stderrDone)
+	go m.waitForExit(stderrDone)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1282,7 +1340,6 @@ func (m *Manager) buildAdapterConfig() error {
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
 		AutoApprove:               m.cfg.AutoApprovePermissions,
-		ApprovalPolicy:            m.cfg.ApprovalPolicy,
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,
@@ -1292,7 +1349,7 @@ func (m *Manager) buildAdapterConfig() error {
 	}
 
 	// Configure one-shot mode when a continue command is provided.
-	// One-shot adapters (e.g., Amp) spawn a new subprocess per prompt.
+	// One-shot adapters spawn a new subprocess per prompt.
 	continueArgs := m.cfg.ContinueArgs
 	if continueArgs == nil && m.cfg.ContinueCommand != "" {
 		continueArgs = config.ParseCommand(m.cfg.ContinueCommand)
@@ -1338,6 +1395,7 @@ func (m *Manager) buildAdapterConfig() error {
 	if m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 	return nil
 }
 
@@ -1363,7 +1421,7 @@ func (m *Manager) buildFinalCommand() error {
 	m.cmd.Dir = m.cfg.WorkDir
 	m.cmd.Env = m.cfg.AgentEnv
 	// Create a new process group so we can kill all child processes together.
-	// This is important for adapters like OpenCode that spawn child processes
+	// This is important for agents like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
 	setAgentProcGroup(m.cmd)
 
@@ -1470,13 +1528,45 @@ func (m *Manager) startProcessPipes() error {
 		_ = m.stdin.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	m.stderr, err = m.cmd.StderrPipe()
+	stderrReader, stderrWriter, err := os.Pipe()
 	if err != nil {
 		_ = m.stdin.Close()
 		_ = m.stdout.Close()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
+	m.stderr = stderrReader
+	m.stderrPipeMu.Lock()
+	m.stderrReader = stderrReader
+	m.stderrWriter = stderrWriter
+	m.stderrPipeMu.Unlock()
+	m.cmd.Stderr = stderrWriter
 	return nil
+}
+
+func (m *Manager) closeStderrReader() error {
+	m.stderrPipeMu.Lock()
+	reader := m.stderrReader
+	m.stderrReader = nil
+	m.stderrPipeMu.Unlock()
+	if reader == nil {
+		return nil
+	}
+	return reader.Close()
+}
+
+func (m *Manager) closeStderrWriter() error {
+	m.stderrPipeMu.Lock()
+	writer := m.stderrWriter
+	m.stderrWriter = nil
+	m.stderrPipeMu.Unlock()
+	if writer == nil {
+		return nil
+	}
+	return writer.Close()
+}
+
+func (m *Manager) closeStderrPipe() error {
+	return errors.Join(m.closeStderrWriter(), m.closeStderrReader())
 }
 
 // startAgentShell auto-creates a shell session when ShellEnabled is configured.
@@ -1581,12 +1671,12 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
-	// Set approval policy if provided (for Codex)
+	// Set approval policy if provided
 	if approvalPolicy != "" {
 		m.cfg.ApprovalPolicy = approvalPolicy
 	}
 
-	// Store continue command for one-shot adapters (e.g., Amp)
+	// Store continue command for one-shot adapters
 	if continueArgsPresent {
 		m.cfg.ContinueCommand = continueCommand
 		m.cfg.ContinueArgs = continueArgs
@@ -1627,7 +1717,7 @@ func (m *Manager) createAdapter() error {
 	}
 	m.adapter = adpt
 
-	// Set stderr provider for adapters that support it (Codex, StreamJSON)
+	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
@@ -1778,6 +1868,10 @@ func (m *Manager) stop(ctx context.Context) error {
 
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
+	comparisonStopErr, comparisonTargetsDrained := m.stopComparisonTargetOperations(ctx)
+	if comparisonTargetsDrained {
+		defer m.reopenComparisonTargetOperations()
+	}
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
@@ -1793,18 +1887,18 @@ func (m *Manager) stop(ctx context.Context) error {
 			// after a normal stop, in which case behaviour is unchanged.
 			tornDown := m.closeAdapterAndStdin()
 			if err := m.stopShellAndProcesses(ctx); err != nil {
-				return err
+				return errors.Join(comparisonStopErr, err)
 			}
 			switch {
 			case m.mainReapPending.Load():
 				if err := m.waitForProcessExit(ctx); err != nil {
-					return err
+					return errors.Join(comparisonStopErr, err)
 				}
 				m.mainReapPending.Store(false)
 			case tornDown:
 				m.drainAfterLateTeardown(ctx)
 			}
-			return nil
+			return comparisonStopErr
 		}
 		return nil
 	}
@@ -1817,7 +1911,7 @@ func (m *Manager) stop(ctx context.Context) error {
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
 
-	auxiliaryStopErr := m.stopShellAndProcesses(ctx)
+	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
 	m.closeAdapterAndStdin()
 	m.killProcessGroupIfRequired()
 	mainStopErr := m.waitForProcessExit(ctx)
@@ -1960,7 +2054,7 @@ func (m *Manager) drainAfterLateTeardown(ctx context.Context) {
 }
 
 // killProcessGroupIfRequired immediately kills the entire process group for
-// adapters (such as OpenCode) that are known not to exit when stdin is closed.
+// agents (such as OpenCode) that are known not to exit when stdin is closed.
 // Other adapters still get process-group cleanup in waitForProcessExit after
 // their graceful stdin-close path has had a chance to finish.
 func (m *Manager) killProcessGroupIfRequired() {
@@ -2254,9 +2348,10 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
-// readStderr reads and logs stderr from the agent
-func (m *Manager) readStderr() {
+// readStderr reads and logs stderr from the agent.
+func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 	defer m.wg.Done()
+	defer close(stderrDone)
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
@@ -2272,6 +2367,9 @@ func (m *Manager) readStderr() {
 		if m.stderrSanitizer != nil {
 			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
 		}
+		if !keep {
+			line, keep = safeManagedNpmStderrLine(rawLine)
+		}
 		if !keep || line == "" {
 			continue
 		}
@@ -2283,6 +2381,20 @@ func (m *Manager) readStderr() {
 
 	if err := scanner.Err(); err != nil {
 		m.logger.Debug("stderr reader error", zap.Error(err))
+	}
+}
+
+func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+	if stderrDone == nil {
+		return
+	}
+	timer := time.NewTimer(processStderrDrainTimeout)
+	defer timer.Stop()
+	select {
+	case <-stderrDone:
+	case <-timer.C:
+		m.logger.Warn("timed out waiting for agent stderr to drain")
+		_ = m.closeStderrReader()
 	}
 }
 
@@ -2327,12 +2439,18 @@ func (m *Manager) ClearStderrBuffer() {
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit() {
+func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
 	pid := m.agentPID()
+	// The manager owns stderr's read/write pipe, so Wait can reap the process
+	// without closing the reader. The reader drains the pipe concurrently.
 	err := m.cmd.Wait()
+	// Wait has observed process exit; now bound the reader drain in case a child
+	// process inherited the stderr writer and kept the pipe open.
+	m.waitForStderrDrain(stderrDone)
+	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
 
 	switch {

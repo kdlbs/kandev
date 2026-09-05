@@ -106,6 +106,10 @@ test.describe("Subagent card", () => {
       await session.waitForChatIdle({ timeout: 15_000 });
     }
     await expect(metadata).toBeVisible();
+    // Successful completion: identity chips stay, Working is gone, a check remains.
+    await expect(card.getByRole("status", { name: "Loading" })).toHaveCount(0);
+    await expect(card.getByText("Working...")).toHaveCount(0);
+    await expect(card.getByLabel("Completed")).toHaveCount(1);
     await expect(card.locator('[data-testid="subagent-meta-duration"]')).toContainText("2.2s");
     await expect(card.locator('[data-testid="subagent-meta-tokens"]')).toContainText("9,987");
     await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");

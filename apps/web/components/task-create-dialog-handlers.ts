@@ -265,8 +265,8 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
       const wasLocalPath = Boolean(fs.repositories.find((row) => row.key === key)?.localPath);
       const isLocalPath = !isWorkspaceRepo && Boolean(value);
       const patch: Partial<TaskRepoRow> = isWorkspaceRepo
-        ? { repositoryId: value, localPath: undefined, branch: "" }
-        : { repositoryId: undefined, localPath: value, branch: "" };
+        ? { repositoryId: value, localPath: undefined, branch: "", branchPolicyId: undefined }
+        : { repositoryId: undefined, localPath: value, branch: "", branchPolicyId: undefined };
       fs.updateRepository(key, patch);
       if (wasLocalPath !== isLocalPath) {
         fs.setExecutorId("");
@@ -286,13 +286,21 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
 
   const handleRowBranchChange = useCallback(
     (key: string, value: string) => {
-      fs.updateRepository(key, { branch: value });
+      fs.updateRepository(key, { branch: value, branchPolicyId: undefined });
       syncTaskCreateLastUsed({ branch: value });
     },
     [fs],
   );
 
-  return { handleRowRepositoryChange, handleRowBranchChange };
+  const handleRowPolicyChange = useCallback(
+    (key: string, policyId: string, baseBranch: string) => {
+      fs.updateRepository(key, { branch: baseBranch, branchPolicyId: policyId });
+      syncTaskCreateLastUsed({ branch: baseBranch });
+    },
+    [fs],
+  );
+
+  return { handleRowRepositoryChange, handleRowBranchChange, handleRowPolicyChange };
 }
 
 function useProfileAndNameHandlers(fs: DialogFormState) {

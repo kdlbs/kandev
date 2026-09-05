@@ -158,6 +158,22 @@ func TestTaskPublication_PreservesSameSecondActivityOrdering(t *testing.T) {
 	}
 }
 
+func TestTaskPublication_KnownPrimaryWithoutAgentIdentityEmitsExplicitNulls(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	data := make(map[string]interface{})
+	svc.addPrimarySessionEventFields(context.Background(), "task-1", data, &models.TaskSession{
+		ID:    "session-1",
+		State: models.TaskSessionStateRunning,
+	})
+
+	if value, ok := data["primary_agent_profile_id"]; !ok || value != nil {
+		t.Fatalf("primary_agent_profile_id = %#v (present = %t), want explicit null", value, ok)
+	}
+	if value, ok := data["primary_agent_name"]; !ok || value != nil {
+		t.Fatalf("primary_agent_name = %#v (present = %t), want explicit null", value, ok)
+	}
+}
+
 func TestTaskPublication_QueuedActivityOutlivesCallerCancellation(t *testing.T) {
 	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
 		return cancellationAwareSessionRepository{SessionRepository: repo}
@@ -600,6 +616,40 @@ func TestPublishTaskUpdated_EmitsAutopilot(t *testing.T) {
 	data := singlePublishedEventData(t, eventBus)
 	if got, ok := data["autopilot"].(bool); !ok || !got {
 		t.Fatalf("autopilot payload = %#v, want true", data["autopilot"])
+	}
+}
+
+func TestPublishTaskUpdatedRedactsDeferredLaunchAttribution(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	task := &models.Task{
+		ID: "task-private-attribution", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch: map[string]interface{}{
+				models.DeferredLaunchUserIDKey:          "user-private",
+				models.DeferredLaunchRecordRecentUseKey: true,
+			},
+		},
+	}
+
+	svc.PublishTaskUpdated(context.Background(), task)
+
+	data := singlePublishedEventData(t, eventBus)
+	metadata, ok := data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event metadata = %#v, want a map", data["metadata"])
+	}
+	launch, ok := metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event deferred launch metadata = %#v, want a map", metadata[models.MetaKeyDeferredLaunch])
+	}
+	if _, exists := launch[models.DeferredLaunchUserIDKey]; exists {
+		t.Fatalf("event exposed deferred launch user_id = %v", launch[models.DeferredLaunchUserIDKey])
+	}
+	if _, exists := launch[models.DeferredLaunchRecordRecentUseKey]; exists {
+		t.Fatalf("event exposed deferred launch recency marker = %v", launch[models.DeferredLaunchRecordRecentUseKey])
+	}
+	if got := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})[models.DeferredLaunchUserIDKey]; got != "user-private" {
+		t.Fatalf("redacting the event mutated the source task user_id = %v", got)
 	}
 }
 

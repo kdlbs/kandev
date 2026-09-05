@@ -92,6 +92,7 @@ const TEST_TIMESTAMP = "2026-07-31T00:00:00Z";
 function makePR(id: string, number: number, repo = "kandev"): TaskPR {
   return {
     id,
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo,

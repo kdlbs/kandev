@@ -3,6 +3,7 @@ package dto
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -34,6 +35,7 @@ type WorkspaceDTO struct {
 	Name                        string    `json:"name"`
 	Description                 *string   `json:"description,omitempty"`
 	OwnerID                     string    `json:"owner_id"`
+	UnitID                      string    `json:"unit_id,omitempty"`
 	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
@@ -43,6 +45,13 @@ type WorkspaceDTO struct {
 	OfficeWorkflowID            string    `json:"office_workflow_id,omitempty"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
+
+	// ViewerRole and Scopes describe what the *requesting* user may do here.
+	// The frontend gates every control on Scopes rather than comparing the
+	// current user ID to OwnerID, so permission logic lives in one place.
+	ViewerRole  string   `json:"viewer_role,omitempty"`
+	Scopes      []string `json:"scopes,omitempty"`
+	MemberCount int      `json:"member_count,omitempty"`
 }
 
 type RepositoryDTO struct {
@@ -94,6 +103,18 @@ type RepositorySetDTO struct {
 type RepositorySetItemDTO struct {
 	RepositoryID string `json:"repository_id"`
 	Position     int    `json:"position"`
+}
+
+type RepositoryBranchPolicyDTO struct {
+	ID                string    `json:"id"`
+	RepositoryID      string    `json:"repository_id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description"`
+	BaseBranch        string    `json:"base_branch"`
+	BranchTemplate    string    `json:"branch_template"`
+	PullRequestTarget string    `json:"pull_request_target"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type RepositoryScriptDTO struct {
@@ -182,6 +203,7 @@ type TaskDTO struct {
 	PrimaryExecutorType         *string                  `json:"primary_executor_type,omitempty"`
 	PrimaryExecutorName         *string                  `json:"primary_executor_name,omitempty"`
 	PrimaryAgentName            *string                  `json:"primary_agent_name,omitempty"`
+	PrimaryAgentProfileID       *string                  `json:"primary_agent_profile_id,omitempty"`
 	PrimaryWorkingDirectory     *string                  `json:"primary_working_directory,omitempty"`
 	PrimarySessionState         *string                  `json:"primary_session_state,omitempty"`
 	PrimarySessionPendingAction *string                  `json:"primary_session_pending_action"`
@@ -231,10 +253,12 @@ type TaskDTO struct {
 
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
-	Origin                 string `json:"origin,omitempty"`
-	ProjectID              string `json:"project_id,omitempty"`
-	Labels                 string `json:"labels,omitempty"`
-	Identifier             string `json:"identifier,omitempty"`
+	// AssigneeUserID is the human assignee, independent of the agent one.
+	AssigneeUserID string `json:"assignee_user_id,omitempty"`
+	Origin         string `json:"origin,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	Labels         string `json:"labels,omitempty"`
+	Identifier     string `json:"identifier,omitempty"`
 	// ExternalID is a caller-supplied identity used for task create-
 	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
@@ -264,15 +288,20 @@ type TaskDTO struct {
 }
 
 type TaskRepositoryDTO struct {
-	ID             string                 `json:"id"`
-	TaskID         string                 `json:"task_id"`
-	RepositoryID   string                 `json:"repository_id"`
-	BaseBranch     string                 `json:"base_branch"`
-	CheckoutBranch string                 `json:"checkout_branch,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	ID                            string                 `json:"id"`
+	TaskID                        string                 `json:"task_id"`
+	RepositoryID                  string                 `json:"repository_id"`
+	BaseBranch                    string                 `json:"base_branch"`
+	CheckoutBranch                string                 `json:"checkout_branch,omitempty"`
+	BranchPolicyID                string                 `json:"branch_policy_id,omitempty"`
+	BranchPolicyName              string                 `json:"branch_policy_name,omitempty"`
+	BranchPolicyBaseBranch        string                 `json:"branch_policy_base_branch,omitempty"`
+	BranchPolicyBranchTemplate    string                 `json:"branch_policy_branch_template,omitempty"`
+	BranchPolicyPullRequestTarget string                 `json:"branch_policy_pull_request_target,omitempty"`
+	Position                      int                    `json:"position"`
+	Metadata                      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt                     time.Time              `json:"created_at"`
+	UpdatedAt                     time.Time              `json:"updated_at"`
 }
 
 // TaskWorkspaceFolderDTO is the API projection of a durable non-Git source.
@@ -516,6 +545,11 @@ type ListRepositorySetsResponse struct {
 	Total          int                `json:"total"`
 }
 
+type ListRepositoryBranchPoliciesResponse struct {
+	Policies []RepositoryBranchPolicyDTO `json:"repository_branch_policies"`
+	Total    int                         `json:"total"`
+}
+
 type ListRepositoryScriptsResponse struct {
 	Scripts []RepositoryScriptDTO `json:"scripts"`
 	Total   int                   `json:"total"`
@@ -626,6 +660,7 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		Name:                        workspace.Name,
 		Description:                 description,
 		OwnerID:                     workspace.OwnerID,
+		UnitID:                      workspace.UnitID,
 		DefaultExecutorID:           workspace.DefaultExecutorID,
 		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
 		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
@@ -636,6 +671,16 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		CreatedAt:                   workspace.CreatedAt,
 		UpdatedAt:                   workspace.UpdatedAt,
 	}
+}
+
+// FromWorkspaceWithAccess projects a workspace together with the requesting
+// user's resolved role and scopes.
+func FromWorkspaceWithAccess(workspace *models.Workspace, decision authz.Decision, memberCount int) WorkspaceDTO {
+	out := FromWorkspace(workspace)
+	out.ViewerRole = string(decision.Role)
+	out.Scopes = decision.Scopes.Strings()
+	out.MemberCount = memberCount
+	return out
 }
 
 func FromRepository(repository *models.Repository) RepositoryDTO {
@@ -686,6 +731,15 @@ func FromRepositorySet(set *models.RepositorySet) RepositorySetDTO {
 		Repositories: items,
 		CreatedAt:    set.CreatedAt,
 		UpdatedAt:    set.UpdatedAt,
+	}
+}
+
+func FromRepositoryBranchPolicy(policy *models.RepositoryBranchPolicy) RepositoryBranchPolicyDTO {
+	return RepositoryBranchPolicyDTO{
+		ID: policy.ID, RepositoryID: policy.RepositoryID, Name: policy.Name,
+		Description: policy.Description, BaseBranch: policy.BaseBranch,
+		BranchTemplate: policy.BranchTemplate, PullRequestTarget: policy.PullRequestTarget,
+		CreatedAt: policy.CreatedAt, UpdatedAt: policy.UpdatedAt,
 	}
 }
 
@@ -770,7 +824,7 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
@@ -783,6 +837,7 @@ func FromTaskWithSessionInfo(
 	primaryExecutorType *string,
 	primaryExecutorName *string,
 	primaryAgentName *string,
+	primaryAgentProfileID *string,
 	primaryWorkingDirectory *string,
 	primarySessionState *string,
 	primarySessionPendingAction *string,
@@ -791,15 +846,20 @@ func FromTaskWithSessionInfo(
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
 		repositories = append(repositories, TaskRepositoryDTO{
-			ID:             repo.ID,
-			TaskID:         repo.TaskID,
-			RepositoryID:   repo.RepositoryID,
-			BaseBranch:     repo.BaseBranch,
-			CheckoutBranch: repo.CheckoutBranch,
-			Position:       repo.Position,
-			Metadata:       repo.Metadata,
-			CreatedAt:      repo.CreatedAt,
-			UpdatedAt:      repo.UpdatedAt,
+			ID:                            repo.ID,
+			TaskID:                        repo.TaskID,
+			RepositoryID:                  repo.RepositoryID,
+			BaseBranch:                    repo.BaseBranch,
+			CheckoutBranch:                repo.CheckoutBranch,
+			BranchPolicyID:                repo.BranchPolicyID,
+			BranchPolicyName:              repo.BranchPolicyName,
+			BranchPolicyBaseBranch:        repo.BranchPolicyBaseBranch,
+			BranchPolicyBranchTemplate:    repo.BranchPolicyBranchTemplate,
+			BranchPolicyPullRequestTarget: repo.BranchPolicyPullRequestTarget,
+			Position:                      repo.Position,
+			Metadata:                      repo.Metadata,
+			CreatedAt:                     repo.CreatedAt,
+			UpdatedAt:                     repo.UpdatedAt,
 		})
 	}
 	var workspaceFolders []TaskWorkspaceFolderDTO
@@ -837,6 +897,7 @@ func FromTaskWithSessionInfo(
 		PrimaryExecutorType:         primaryExecutorType,
 		PrimaryExecutorName:         primaryExecutorName,
 		PrimaryAgentName:            primaryAgentName,
+		PrimaryAgentProfileID:       primaryAgentProfileID,
 		PrimaryWorkingDirectory:     primaryWorkingDirectory,
 		PrimarySessionState:         primarySessionState,
 		PrimarySessionPendingAction: primarySessionPendingAction,
@@ -846,13 +907,14 @@ func FromTaskWithSessionInfo(
 		ArchivedAt:                  task.ArchivedAt,
 		CreatedAt:                   task.CreatedAt,
 		UpdatedAt:                   task.UpdatedAt,
-		Metadata:                    task.Metadata,
+		Metadata:                    models.PublicTaskMetadata(task.Metadata),
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
 		AssigneeAgentProfileID: task.AssigneeAgentProfileID,
+		AssigneeUserID:         task.AssigneeUserID,
 		Origin:                 task.Origin,
 		ProjectID:              task.ProjectID,
 		Labels:                 task.Labels,
@@ -1025,20 +1087,22 @@ func steerEligible(sessionID string, state models.TaskSessionState, provider For
 
 // WorkflowStepDTO represents a workflow step for API responses
 type WorkflowStepDTO struct {
-	ID                    string         `json:"id"`
-	WorkflowID            string         `json:"workflow_id"`
-	Name                  string         `json:"name"`
-	Position              int            `json:"position"`
-	Color                 string         `json:"color"`
-	Prompt                string         `json:"prompt,omitempty"`
-	Events                *StepEventsDTO `json:"events,omitempty"`
-	AllowManualMove       bool           `json:"allow_manual_move"`
-	IsStartStep           bool           `json:"is_start_step"`
-	ShowInCommandPanel    bool           `json:"show_in_command_panel"`
-	AutoArchiveAfterHours int            `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID        string         `json:"agent_profile_id,omitempty"`
-	WIPLimit              int            `json:"wip_limit"`
-	PullFromStepID        string         `json:"pull_from_step_id,omitempty"`
+	ID                        string                                   `json:"id"`
+	WorkflowID                string                                   `json:"workflow_id"`
+	Name                      string                                   `json:"name"`
+	Position                  int                                      `json:"position"`
+	Color                     string                                   `json:"color"`
+	Prompt                    string                                   `json:"prompt,omitempty"`
+	Events                    *StepEventsDTO                           `json:"events,omitempty"`
+	AllowManualMove           bool                                     `json:"allow_manual_move"`
+	IsStartStep               bool                                     `json:"is_start_step"`
+	ShowInCommandPanel        bool                                     `json:"show_in_command_panel"`
+	AutoArchiveAfterHours     int                                      `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID            string                                   `json:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
+	ProfileSessionEndPolicy   models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
+	WIPLimit                  int                                      `json:"wip_limit"`
+	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
 	StageType                  string    `json:"stage_type,omitempty"`
@@ -1125,14 +1189,21 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 // TaskPlanRevisionDTO represents a plan revision for API responses.
 // Content is optional so list responses can omit it (fetched on demand).
 type TaskPlanRevisionDTO struct {
-	ID                 string    `json:"id"`
-	TaskID             string    `json:"task_id"`
-	RevisionNumber     int       `json:"revision_number"`
-	Title              string    `json:"title"`
-	Content            string    `json:"content,omitempty"`
+	ID             string `json:"id"`
+	TaskID         string `json:"task_id"`
+	RevisionNumber int    `json:"revision_number"`
+	Title          string `json:"title"`
+	Content        string `json:"content,omitempty"`
+	// ContentLength is the character (rune) count of Content, computed here
+	// before TaskPlanRevisionMetaFromModel blanks Content for list/WS payloads
+	// — so list rows can show a size without fetching full content.
+	ContentLength      int       `json:"content_length"`
 	AuthorKind         string    `json:"author_kind"`
 	AuthorName         string    `json:"author_name"`
 	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
+	WorkflowStepID     string    `json:"workflow_step_id,omitempty"`
+	WorkflowStepName   string    `json:"workflow_step_name,omitempty"`
+	WorkflowStepColor  string    `json:"workflow_step_color,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -1148,9 +1219,13 @@ func TaskPlanRevisionFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisionDT
 		RevisionNumber:     rev.RevisionNumber,
 		Title:              rev.Title,
 		Content:            rev.Content,
+		ContentLength:      models.PlanContentLength(rev.Content),
 		AuthorKind:         rev.AuthorKind,
 		AuthorName:         rev.AuthorName,
 		RevertOfRevisionID: rev.RevertOfRevisionID,
+		WorkflowStepID:     rev.WorkflowStepID,
+		WorkflowStepName:   rev.WorkflowStepName,
+		WorkflowStepColor:  rev.WorkflowStepColor,
 		CreatedAt:          rev.CreatedAt,
 		UpdatedAt:          rev.UpdatedAt,
 	}

@@ -108,8 +108,8 @@ describe("ChatSubmitPluginDecoration", () => {
     const layer = screen.getByTestId("chat-submit-decoration-layer");
     expect(layer.className).toContain("absolute");
     expect(layer.className).toContain("inset-0");
-    // A decoration must never block the send button underneath it. Children
-    // that need interaction opt back in with `pointer-events-auto`.
+    // A decoration must never block the send button underneath it. Interactive
+    // behavior should observe the host button or use a separate toolbar action.
     expect(layer.className).toContain("pointer-events-none");
   });
 });

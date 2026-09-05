@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,7 +34,8 @@ const ghAccessibleReposPathFmt = "/user/repos?affiliation=%s&sort=pushed&per_pag
 
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
-	rateTracker *RateTracker
+	rateTracker   *RateTracker
+	mergePollWait func(context.Context, time.Duration) error
 }
 
 // NewGHClient creates a new gh CLI-based client.
@@ -693,6 +696,7 @@ func (c *GHClient) ListPRReviews(ctx context.Context, owner, repo string, number
 // ghComment is the JSON shape for review comments from the GitHub API.
 type ghComment struct {
 	ID        int64     `json:"id"`
+	HTMLURL   string    `json:"html_url"`
 	Path      string    `json:"path"`
 	Line      int       `json:"line"`
 	Side      string    `json:"side"`
@@ -855,6 +859,75 @@ func isForbiddenErr(err error) bool {
 		strings.Contains(s, "status: 403")
 }
 
+// isUnauthorizedErr matches the formats the `gh` CLI uses to report a 401
+// (expired or revoked credential).
+func isUnauthorizedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 401") ||
+		strings.Contains(s, "401 Unauthorized") ||
+		strings.Contains(s, "status: 401")
+}
+
+// isRateLimitedErr matches the formats the `gh` CLI uses to report a 429.
+func isRateLimitedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 429") ||
+		strings.Contains(s, "429 Too Many Requests") ||
+		strings.Contains(s, "status: 429")
+}
+
+// ghServerErrPattern extracts a 5xx status from gh CLI stderr. Unlike the
+// single-status matchers above, a server error can be any code in the range,
+// so this is a pattern rather than an enumeration; every 5xx classifies the
+// same way (config sync's ErrUnavailable), so the exact code only matters for
+// diagnostics.
+var ghServerErrPattern = regexp.MustCompile(`(?:HTTP |status: )(5\d\d)\b`)
+
+func ghServerErrStatusCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	m := ghServerErrPattern.FindStringSubmatch(err.Error())
+	if m == nil {
+		return 0, false
+	}
+	code, convErr := strconv.Atoi(m[1])
+	if convErr != nil {
+		return 0, false
+	}
+	return code, true
+}
+
+// ghClassifyContentsErr promotes a gh CLI repo-contents failure to a
+// *GitHubAPIError for every status config sync's fetch-error classification
+// needs to see: 404 (existing, unchanged), 401, 403, 429, and any 5xx.
+// Returns nil when the error matches none of those, so the caller falls back
+// to a bare wrapped error — which is exactly right, since an unclassified
+// status belongs in the residue class by exclusion, not by a guess here.
+func ghClassifyContentsErr(err error, endpoint string) *GitHubAPIError {
+	switch {
+	case isNotFoundErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: endpoint, Body: err.Error()}
+	case isUnauthorizedErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusUnauthorized, Endpoint: endpoint, Body: err.Error()}
+	case isForbiddenErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: endpoint, Body: err.Error()}
+	case isRateLimitedErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusTooManyRequests, Endpoint: endpoint, Body: err.Error()}
+	default:
+		if code, ok := ghServerErrStatusCode(err); ok {
+			return &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+		}
+		return nil
+	}
+}
+
 func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
 	out, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/pulls/%d/files", owner, repo, number),
@@ -919,55 +992,86 @@ func (c *GHClient) RequestReviewers(ctx context.Context, owner, repo string, num
 	return nil
 }
 
-func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, request MergePRRequest) (MergeOutcome, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
 	args := []string{"api", endpoint, "-X", "PUT", "-f", "merge_action=default"}
-	if mergeMethod != "" {
-		args = append(args, "-f", "merge_method="+mergeMethod)
+	if request.MergeMethod != "" {
+		args = append(args, "-f", "merge_method="+request.MergeMethod)
+	}
+	if request.ExpectedHeadSHA != "" {
+		args = append(args, "-f", "sha="+request.ExpectedHeadSHA)
 	}
 	out, err := c.run(ctx, args...)
-	conflictBody := false
+	response, err := decodeInitialMergeAsyncResponse(endpoint, number, out, err)
 	if err != nil {
+		return "", err
+	}
+	response, err = c.pollMergeAsyncResponse(ctx, endpoint, number, response)
+	if err != nil {
+		return "", err
+	}
+	if response.Status == mergeStatusFailed {
+		return "", newMergeFailureError(response.Details)
+	}
+	return normalizeMergeOutcome(response.Status)
+}
+
+func decodeInitialMergeAsyncResponse(endpoint string, number int, out string, runErr error) (mergeAsyncResponse, error) {
+	conflictBody := false
+	if runErr != nil {
 		// Surface status-based errors as GitHubAPIError so httpMergePR can
 		// translate merge rejections for gh CLI users, matching the PAT path.
-		if code, ok := ghMergeStatusCode(err); ok {
+		if code, ok := ghMergeStatusCode(runErr); ok {
 			if code != http.StatusConflict {
-				return "", &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+				return mergeAsyncResponse{}, &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: runErr.Error()}
 			}
-			out = err.Error()
+			out = runErr.Error()
 			conflictBody = true
 		} else {
-			return "", fmt.Errorf("merge PR #%d: %w", number, err)
+			return mergeAsyncResponse{}, fmt.Errorf("merge PR #%d: %w", number, runErr)
 		}
 	}
-	var response mergeAsyncResponse
 	jsonBody := out
 	if start := strings.Index(jsonBody, "{"); start >= 0 {
 		if end := strings.LastIndex(jsonBody, "}"); end >= start {
 			jsonBody = jsonBody[start : end+1]
 		}
 	} else if conflictBody {
-		return "", &GitHubAPIError{StatusCode: http.StatusConflict, Endpoint: endpoint, Body: out}
+		return mergeAsyncResponse{}, &GitHubAPIError{StatusCode: http.StatusConflict, Endpoint: endpoint, Body: out}
 	}
+	var response mergeAsyncResponse
 	if unmarshalErr := json.Unmarshal([]byte(jsonBody), &response); unmarshalErr != nil {
-		return "", fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
+		return mergeAsyncResponse{}, fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
 	}
+	return response, nil
+}
+
+func (c *GHClient) pollMergeAsyncResponse(
+	ctx context.Context,
+	endpoint string,
+	number int,
+	response mergeAsyncResponse,
+) (mergeAsyncResponse, error) {
 	for response.Status == "pending" {
-		if response.UUID == "" {
-			return "", fmt.Errorf("GitHub merge response is pending without a UUID")
+		if response.Details.UUID == "" {
+			return mergeAsyncResponse{}, fmt.Errorf("GitHub merge response is pending without a UUID")
 		}
-		result, runErr := c.run(ctx, "api", endpoint+"/"+response.UUID)
+		wait := c.mergePollWait
+		if wait == nil {
+			wait = waitForMergePoll
+		}
+		if waitErr := wait(ctx, mergePollInterval); waitErr != nil {
+			return mergeAsyncResponse{}, fmt.Errorf("wait to poll merge PR #%d: %w", number, waitErr)
+		}
+		result, runErr := c.run(ctx, "api", endpoint+"/"+response.Details.UUID)
 		if runErr != nil {
-			return "", fmt.Errorf("poll merge PR #%d: %w", number, runErr)
+			return mergeAsyncResponse{}, fmt.Errorf("poll merge PR #%d: %w", number, runErr)
 		}
 		if unmarshalErr := json.Unmarshal([]byte(result), &response); unmarshalErr != nil {
-			return "", fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
+			return mergeAsyncResponse{}, fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
 		}
 	}
-	if response.Status == mergeStatusFailed {
-		return "", fmt.Errorf("GitHub rejected merge: %s", response.Message)
-	}
-	return normalizeMergeOutcome(response.Status)
+	return response, nil
 }
 
 // ghMergeStatusCode extracts the HTTP status code from a gh CLI merge error.
@@ -1106,18 +1210,16 @@ func (c *GHClient) DeleteGist(ctx context.Context, gistID string) error {
 }
 
 // ListRepoDirectory lists the entries of a directory in a repository at the
-// given ref via `gh api repos/{owner}/{repo}/contents/{path}`. A 404 (missing
-// directory) is promoted to a *GitHubAPIError, mirroring PATClient.
+// given ref via `gh api repos/{owner}/{repo}/contents/{path}`. 404 (missing
+// directory), 401, 403, 429, and any 5xx are promoted to a *GitHubAPIError,
+// mirroring PATClient.
 func (c *GHClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref string) ([]RepoContentEntry, error) {
 	args := ghContentsArgs(owner, repo, dir, ref)
 	out, err := c.run(ctx, args...)
 	if err != nil {
-		if isNotFoundErr(err) {
-			return nil, &GitHubAPIError{
-				StatusCode: http.StatusNotFound,
-				Endpoint:   fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(dir)),
-				Body:       err.Error(),
-			}
+		endpoint := fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(dir))
+		if apiErr := ghClassifyContentsErr(err, endpoint); apiErr != nil {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("list repo directory: %w", err)
 	}
@@ -1129,18 +1231,16 @@ func (c *GHClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref 
 }
 
 // GetRepoFileContent fetches the raw decoded content of a single file via
-// `gh api repos/{owner}/{repo}/contents/{path}`. A 404 (missing file) is
-// promoted to a *GitHubAPIError, mirroring PATClient.
+// `gh api repos/{owner}/{repo}/contents/{path}`. 404 (missing file), 401,
+// 403, 429, and any 5xx are promoted to a *GitHubAPIError, mirroring
+// PATClient.
 func (c *GHClient) GetRepoFileContent(ctx context.Context, owner, repo, path, ref string) ([]byte, error) {
 	args := ghContentsArgs(owner, repo, path, ref)
 	out, err := c.run(ctx, args...)
 	if err != nil {
-		if isNotFoundErr(err) {
-			return nil, &GitHubAPIError{
-				StatusCode: http.StatusNotFound,
-				Endpoint:   fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(path)),
-				Body:       err.Error(),
-			}
+		endpoint := fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(path))
+		if apiErr := ghClassifyContentsErr(err, endpoint); apiErr != nil {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("get repo file content: %w", err)
 	}

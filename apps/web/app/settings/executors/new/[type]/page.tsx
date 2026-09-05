@@ -47,6 +47,7 @@ import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
 import { EXECUTOR_TYPE_MAP, executorTypeLabel, type ExecutorTypeInfo } from "./executor-types";
 import { SSHCreatePage } from "./ssh-create-page";
+import { KubernetesCreatePage } from "./kubernetes-create-page";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -67,6 +68,10 @@ export default function CreateProfilePage({ executorType }: { executorType: stri
 
   if (executorType === "ssh") {
     return <SSHCreatePage />;
+  }
+
+  if (executorType === "k8s") {
+    return <KubernetesCreatePage />;
   }
 
   return <CreateProfileForm executorType={executorType as ExecutorType} typeInfo={typeInfo} />;

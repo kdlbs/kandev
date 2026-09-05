@@ -179,6 +179,7 @@ Changes:
 - Frontend focused tests passed (29 workflow API/settings action/component tests, including create-step forwarding), web typecheck and lint passed, and both i18n ratchet/check commands passed.
 - Public documentation validation passed (58 tests and 41 published pages).
 - Managed Playwright coverage passed: desktop enabled/disabled scenarios 2/2 and a clean follow-up mobile run 1/1; the mobile assertion measures the associated label's 44px target.
+- The terminal-step cancellation regression test passed. Cancellation now returns an existing terminal-step task to `REVIEW` when no workflow transition occurs.
 
 ---
 

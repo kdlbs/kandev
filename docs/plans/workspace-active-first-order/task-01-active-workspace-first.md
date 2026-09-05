@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/workspace-active-first-order.md"
+spec: "../../specs/ui/requirements/workspace-active-first-order.md"
 ---
 
 # Task 01: Order active workspace first
@@ -41,7 +41,7 @@ spec: "../../specs/ui/workspace-active-first-order.md"
 - **Parallelism:** sequential. The sidebar and page must consume the same
   helper, and E2E should run after both consumers are wired.
 - **Inputs:**
-  - `docs/specs/ui/workspace-active-first-order.md`
+  - `docs/specs/ui/requirements/workspace-active-first-order.md`
   - `docs/plans/workspace-active-first-order/plan.md`
   - `apps/web/AGENTS.md`
   - `apps/web/components/app-sidebar/sections/settings/settings-menu-branches.ts`
@@ -70,7 +70,7 @@ Files changed:
 - `apps/web/e2e/tests/settings/workspace-display-order.spec.ts`
 - `apps/web/e2e/tests/settings/mobile-workspace-display-order.spec.ts`
 - `docs/specs/INDEX.md`
-- `docs/specs/ui/workspace-active-first-order.md`
+- `docs/specs/ui/requirements/workspace-active-first-order.md`
 - `docs/plans/workspace-active-first-order/plan.md`
 - `docs/plans/workspace-active-first-order/task-01-active-workspace-first.md`
 

@@ -4,6 +4,7 @@
 // Regression guard: tapping a file in the Files → All files tab must replace
 // the Files panel with the file viewer, NOT navigate to the Changes panel.
 import { type Page } from "@playwright/test";
+import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
@@ -65,6 +66,55 @@ async function setupMobileFileViewerTest({
   await session.waitForChatIdle({ timeout: 45_000 });
   return { session, filePath };
 }
+
+test.describe("Mobile file tree keyboard shortcuts", () => {
+  test("select-all stays in the new-file name input", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.1
+    // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.2
+    const { session, filePath } = await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile File Create Select All",
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    await expect(session.fileTreeNode(filePath)).toBeVisible({ timeout: 15_000 });
+
+    const directNewFile = testPage.getByRole("button", { name: "New file" });
+    if (await directNewFile.isVisible().catch(() => false)) {
+      await directNewFile.tap();
+    } else {
+      await testPage.getByTestId("files-create-menu").tap();
+      await testPage.getByRole("menuitem", { name: "New file" }).tap();
+    }
+    const input = testPage.getByPlaceholder("filename...");
+    await expect(input).toBeFocused({ timeout: 5_000 });
+
+    const draftName = "mobile-draft.ts";
+    await input.fill(draftName);
+    await input.press("ControlOrMeta+a");
+
+    await expect
+      .poll(async () => ({
+        selection: await input.evaluate((element) => ({
+          start: element.selectionStart,
+          end: element.selectionEnd,
+        })),
+        selectedRows: await session.fileTreeSelectedNodes().count(),
+      }))
+      .toEqual({
+        selection: { start: 0, end: draftName.length },
+        selectedRows: 0,
+      });
+  });
+});
 
 test.describe("Mobile file viewer panel", () => {
   test.describe.configure({ retries: 1 });
@@ -157,6 +207,76 @@ test.describe("Mobile file viewer panel", () => {
     await expect(viewer).toBeVisible({ timeout: 5_000 });
     await expect(viewer.getByText("Cannot preview this file")).toBeVisible();
     await expect(viewer.getByText("Binary file")).toBeVisible();
+  });
+
+  test("binary viewer exposes a touch-sized download control", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+    const binary = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]);
+    const { session, filePath } = await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile FV Binary Download",
+      options: { extension: "bin", content: binary },
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    await session.fileTreeNode(filePath).tap();
+    const viewer = testPage.getByTestId("mobile-file-viewer-panel");
+    await expect(viewer).toBeVisible({ timeout: 5_000 });
+
+    const downloadControl = viewer.getByRole("button", { name: "Download file" });
+    await expect(downloadControl).toBeVisible();
+    const box = await downloadControl.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    expect(box?.width).toBeGreaterThanOrEqual(44);
+
+    const download = testPage.waitForEvent("download");
+    await downloadControl.tap();
+    const saved = await download;
+    const target = path.join(backend.tmpDir, "mobile-file-download.bin");
+    await saved.saveAs(target);
+    expect(fs.readFileSync(target)).toEqual(binary);
+  });
+
+  test("Files upload menu keeps its actions touch-sized", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+    await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile FV Upload Menu",
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    const createMenu = testPage.getByTestId("files-create-menu");
+    const triggerBox = await createMenu.boundingBox();
+    expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+    expect(triggerBox?.width).toBeGreaterThanOrEqual(44);
+    await createMenu.tap();
+
+    const uploadFiles = testPage.getByRole("menuitem", { name: "Upload files" });
+    const uploadFolder = testPage.getByRole("menuitem", { name: "Upload folder" });
+    await expect(uploadFiles).toBeVisible();
+    await expect(uploadFolder).toBeVisible();
+    await expect
+      .poll(async () => (await uploadFiles.boundingBox())?.height ?? 0, { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await uploadFolder.boundingBox())?.height ?? 0, { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(44);
   });
 
   test("viewer panel keeps a visible close action and supports scrolling large files", async ({
@@ -310,6 +430,58 @@ test.describe("Mobile file viewer panel", () => {
     await expect(session.activeChat().getByText(`${fileName} (1)`)).toBeVisible({
       timeout: 5_000,
     });
+  });
+
+  test("wide Markdown preview tables scroll locally without resize controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.12.
+    test.setTimeout(90_000);
+    const marker = "Mobile file preview table marker";
+    const { filePath } = await setupMobileFileViewerTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      taskTitle: "Mobile FV Markdown Table",
+      options: {
+        extension: "md",
+        content: [
+          "| Status | Owner | Project | Branch | Review | Build | Deploy | Notes |",
+          "| --- | --- | --- | --- | --- | --- | --- | --- |",
+          `| Ready | Team Alpha | Kandev | main | Pending | Passing | Staged | ${marker} |`,
+        ].join("\n"),
+      },
+    });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${filePath}"]`);
+    await expect(fileNode).toBeVisible({ timeout: 15_000 });
+    await fileNode.tap();
+
+    const viewer = testPage.getByTestId("mobile-file-viewer-panel");
+    await expect(viewer).toBeVisible({ timeout: 5_000 });
+    await viewer.getByTestId("markdown-preview-toggle").tap();
+
+    const preview = viewer.getByTestId("markdown-preview");
+    const table = preview.locator("table", { hasText: marker });
+    const wrapper = table.locator("xpath=..");
+    await expect(table).toBeVisible();
+    await expect(preview.getByTestId(/^markdown-table-resizer-/)).toHaveCount(0);
+    expect(await wrapper.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(
+      true,
+    );
+    expect(
+      await preview.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      ),
+    ).toBe(true);
   });
 
   test("viewer header shows full path for files inside subdirectories", async ({

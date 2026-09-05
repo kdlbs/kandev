@@ -117,7 +117,7 @@ jobs:
     # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
     # because this job compiles the backend.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     # Container jobs default to `sh`; pin to bash for the few shell steps below.
     defaults:
       run:
@@ -178,6 +178,42 @@ jobs:
       # always do it; the regular E2E job ignores them.
       - name: Build Docker E2E helper binaries
         run: make build-backend-linux-helpers
+
+      - name: Record immutable E2E build identity
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { createHash } = require("node:crypto");
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const backendDir = path.resolve("apps/backend");
+          const artifacts = [
+            "bin/kandev",
+            "bin/mock-agent",
+            "bin/agentctl-linux-amd64",
+            "bin/mock-agent-linux-amd64",
+            ".build/kandev-plugin-e2e-1.0.0.tar.gz",
+          ];
+          const checksums = Object.fromEntries(
+            artifacts.map((artifact) => {
+              const contents = fs.readFileSync(path.join(backendDir, artifact));
+              return [artifact, createHash("sha256").update(contents).digest("hex")];
+            }),
+          );
+          fs.writeFileSync(
+            path.join(backendDir, "bin/e2e-build-identity.json"),
+            JSON.stringify(
+              {
+                schema_version: 1,
+                source_revision: process.env.GITHUB_SHA,
+                artifacts: checksums,
+              },
+              null,
+              2,
+            ) + "\n",
+          );
+          NODE
 
       - name: Locate latest successful main timing profile artifact
         id: main-timing-run
@@ -424,19 +460,14 @@ jobs:
       # executor and the SSH executor's sshd target). Without --project the
       # container-bound specs would run here too, fail seeding (Docker not
       # enabled for these shards), and spam every shard.
-      # global-setup.ts refuses to run a backend binary older than any
-      # apps/backend source. That guard exists for local runs, where nothing
-      # else notices `pnpm run build:e2e` rebuilding only the frontend. Here
-      # the binary is staged out of band: the `build` job compiled it from
-      # this same commit, and the shard's own checkout stamps every source
-      # file with a *later* mtime than the artifact it downloads. Freshness is
-      # already guaranteed by `needs: build`; the mtime comparison is not
-      # meaningful across jobs.
+      # Cross-job archive extraction does not preserve useful mtimes. Validate
+      # the source revision and every required artifact checksum instead.
       - name: Run planned E2E tests (shard ${{ matrix.shard }}/14)
         working-directory: apps/web
         env:
           E2E_SHARD: ${{ matrix.shard }}
-          KANDEV_E2E_SKIP_FRESHNESS: "1"
+          KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
+          KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
         run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${{ matrix.shard }}.json"
 
       - name: Upload blob report
@@ -455,15 +486,14 @@ jobs:
           path: apps/web/e2e/test-results/
           retention-days: 7
 
-  # Real-Docker E2E: exercises the local_docker executor end-to-end.
+  # Real-container E2E: exercises the Docker, SSH, and Kubernetes executors.
   # ubuntu-latest ships with Docker preinstalled, so no service container is
-  # required. Container-bound tests are slow (~2 min each), so we shard across
+  # required. Container-bound tests are slow (up to ~3 min each), so we shard across
   # 6 runners — the build job creates a duration-aware manifest for this
   # cohort, and each runner executes its explicit file selection.
   #
-  # This job runs the `containers` Playwright project, which covers both the
-  # Docker executor and the SSH executor (since the SSH executor's e2e tests
-  # also rely on Docker to host a real sshd container as the remote target).
+  # This job runs the `containers` Playwright project. SSH uses Docker for a
+  # real sshd target; Kubernetes uses a pinned, disposable Kind cluster.
   # Sharded 6 ways — each shard is its own runner. See apps/web/e2e/README.md.
   e2e-containers:
     name: E2E Containers Shard ${{ matrix.shard }}/6
@@ -477,7 +507,7 @@ jobs:
     # We still avoid the slow `playwright install --with-deps` step by copying
     # browsers out of the kandev-ci image — see the extract step below.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -513,14 +543,20 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
+      - name: Start Playwright browser setup timer
+        id: browser_setup_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       # The kandev-ci image is public, so fork PRs can pull it anonymously.
       # Their read-only GITHUB_TOKEN can still be rejected by GHCR during an
       # explicit login because it belongs to the base repository, not the
-      # contributor's fork. Keep authenticated pulls for trusted runs.
+      # contributor's fork. Keep authenticated metadata and image requests for
+      # trusted runs.
       #
       # A merge_group run has no `github.event.pull_request` at all, so the
-      # first operand decides it. That is the right answer: the queue branch
-      # lives in this repository and its token is a base-repository token.
+      # condition decides it is a base-repository run. That is the right
+      # answer: the queue branch lives in this repository and its token is a
+      # base-repository token.
       - name: Log in to GHCR
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -529,27 +565,107 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Skip the Playwright CDN download (~7 min and an outage-prone path) by
-      # copying the prebaked chromium out of the kandev-ci image, which is
-      # `FROM mcr.microsoft.com/playwright:...` and already ships the matching
-      # browser at /ms-playwright. Pulling the `runtime` tag (matches the
-      # `e2e` / `e2e-report` jobs above) — the `build` tag has the same
-      # browser layer but is ~300 MB larger because of the Go toolchain.
-      - name: Extract Playwright browsers from kandev-ci image
+      # Resolve the mutable convenience tag before restoring the cache. The
+      # digest binds both the cache and the fallback extraction to one image
+      # identity, while avoiding a full image pull on a verified cache hit.
+      - name: Resolve immutable Playwright runtime image
+        id: playwright_image
         run: |
           set -euo pipefail
-          docker pull ghcr.io/kdlbs/kandev-ci:runtime-latest
+          image=ghcr.io/kdlbs/kandev-ci:runtime-latest
+          digest=""
+          for attempt in 1 2 3; do
+            candidate=""
+            if candidate="$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')" \
+              && [[ "$candidate" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              digest="$candidate"
+              break
+            fi
+            if (( attempt < 3 )); then
+              echo "::warning::Could not resolve $image on attempt $attempt/3; retrying"
+              sleep "$((attempt * 2))"
+            fi
+          done
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Could not resolve an immutable digest for $image"
+            exit 1
+          fi
+          {
+            echo "digest=$digest"
+            echo "ref=$image@$digest"
+          } >> "$GITHUB_OUTPUT"
+
+      # The runtime image remains the browser source of truth. The cache only
+      # avoids copying its already-installed browsers on warm host runners.
+      # Each run has a unique primary key so a repaired fallback can replace a
+      # cache entry whose verification failed. The restore prefix selects the
+      # newest compatible entry without allowing a rejected exact key to win.
+      - name: Restore Playwright browser cache
+        id: playwright_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: /tmp/ms-playwright
+          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-
+
+      - name: Configure Playwright browser path
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright" >> "$GITHUB_ENV"
+
+      # A cache hit is usable only after Chromium launches from the restored
+      # directory. `cache-hit` is non-empty for both an exact hit and a
+      # restore-key match. A corrupted or incompatible entry takes the normal
+      # image extraction path below.
+      - name: Verify cached Playwright browser
+        id: playwright_cache_verify
+        if: steps.playwright_cache.outputs.cache-hit != ''
+        continue-on-error: true
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { chromium } = require("@playwright/test");
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            await page.goto("data:text/html,ok");
+            await browser.close();
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+          echo "Playwright Chromium cache entry verified."
+
+      # On a cache miss or failed cache verification, skip the Playwright CDN
+      # download (~7 min and an outage-prone path) by copying the prebaked
+      # browser out of the kandev-ci image. The runtime image is
+      # `FROM mcr.microsoft.com/playwright:...` and ships it at /ms-playwright.
+      # Pulling the resolved digest keeps the fallback tied to the image used
+      # for the cache key; the build image has the same browser layer but is
+      # ~300 MB larger.
+      - name: Extract Playwright browsers from kandev-ci image
+        id: playwright_extract
+        if: steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success'
+        env:
+          PLAYWRIGHT_RUNTIME_REF: ${{ steps.playwright_image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          docker pull "$PLAYWRIGHT_RUNTIME_REF"
           mkdir -p /tmp/ms-playwright
           docker run --rm \
             -v /tmp/ms-playwright:/dest \
-            ghcr.io/kdlbs/kandev-ci:runtime-latest \
+            "$PLAYWRIGHT_RUNTIME_REF" \
             cp -a /ms-playwright/. /dest/
-          echo "PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright" >> "$GITHUB_ENV"
 
-      # Browser binaries come from the image above. GitHub's Ubuntu runners
-      # usually already have the shared libs Chromium needs, so smoke-test the
-      # copied browser first and only hit apt as a bounded fallback.
+      # Browser binaries come from the verified cache or the image above.
+      # GitHub's Ubuntu runners usually already have the shared libs Chromium
+      # needs, so smoke-test the copied browser and only hit apt as a bounded
+      # fallback.
       - name: Verify Playwright browser runtime
+        id: playwright_runtime_verify
+        if: steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success'
         working-directory: apps/web
         run: |
           set -euo pipefail
@@ -578,6 +694,49 @@ jobs:
           echo "::warning::Playwright Chromium failed to launch; installing missing host packages."
           timeout 180s npx playwright install-deps chromium
           smoke_test
+
+      - name: Save Playwright browser cache
+        id: playwright_cache_save
+        if: success() && (steps.playwright_cache.outputs.cache-hit == '' || steps.playwright_cache_verify.outcome != 'success')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: /tmp/ms-playwright
+          key: e2e-playwright-${{ runner.os }}-v1.61.1-noble-${{ steps.playwright_image.outputs.digest }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Summarize Playwright browser setup
+        if: always()
+        env:
+          CACHE_HIT: ${{ steps.playwright_cache.outputs.cache-hit }}
+          CACHE_RESTORE_OUTCOME: ${{ steps.playwright_cache.outcome }}
+          CACHE_VERIFY_OUTCOME: ${{ steps.playwright_cache_verify.outcome }}
+          CACHE_EXTRACT_OUTCOME: ${{ steps.playwright_extract.outcome }}
+          CACHE_SAVE_OUTCOME: ${{ steps.playwright_cache_save.outcome }}
+          IMAGE_DIGEST: ${{ steps.playwright_image.outputs.digest }}
+          SETUP_STARTED_AT: ${{ steps.browser_setup_timer.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          started="${SETUP_STARTED_AT:-$(date +%s)}"
+          elapsed="$(( $(date +%s) - started ))"
+          cache_state="miss"
+          setup_mode="image-fallback"
+          if [[ -n "${CACHE_HIT:-}" ]]; then
+            cache_state="hit"
+          fi
+          if [[ -n "${CACHE_HIT:-}" && "${CACHE_VERIFY_OUTCOME:-}" == "success" ]]; then
+            setup_mode="cache-hit"
+          fi
+          {
+            echo "### Playwright browser setup"
+            echo "- image-digest: ${IMAGE_DIGEST:-unresolved}"
+            echo "- cache: ${cache_state}"
+            echo "- mode: ${setup_mode}"
+            echo "- restore: ${CACHE_RESTORE_OUTCOME:-not-run}"
+            echo "- verification: ${CACHE_VERIFY_OUTCOME:-not-run}"
+            echo "- extraction: ${CACHE_EXTRACT_OUTCOME:-not-run}"
+            echo "- save: ${CACHE_SAVE_OUTCOME:-not-run}"
+            echo "- elapsed: ${elapsed}s"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Download backend build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -614,15 +773,95 @@ jobs:
           name: e2e-shard-manifests
           path: e2e-manifests
 
-      # Same out-of-band staging as the chromium shards above — see the comment
-      # on that step for why the backend-binary freshness guard is skipped.
-      - name: Run planned container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker executor + SSH executor)
+      - name: Detect Kubernetes specs in this shard
+        id: kubernetes
+        env:
+          MANIFEST_PATH: ${{ github.workspace }}/e2e-manifests/containers/${{ matrix.shard }}.json
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST_PATH, "utf8"));
+          const shard = manifest.shards.find((candidate) => candidate.index === Number(process.env.SHARD_INDEX));
+          if (!shard) throw new Error(`container shard ${process.env.SHARD_INDEX} is absent`);
+          const hasKubernetes = shard.files.some((file) => file.startsWith("tests/kubernetes/"));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `has_kubernetes=${hasKubernetes}\n`);
+          console.log(`Kubernetes specs assigned: ${hasKubernetes}`);
+          NODE
+
+      # Tool and node versions are intentionally coupled. The Kind fixture
+      # verifies the downloaded checksums again before creating a cluster.
+      - name: Install pinned Kind and kubectl
+        if: steps.kubernetes.outputs.has_kubernetes == 'true'
+        env:
+          KIND_VERSION: v0.32.0
+          KIND_SHA256_AMD64: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+          KUBERNETES_VERSION: v1.36.1
+          KUBECTL_SHA256_AMD64: 629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7
+          KIND_NODE_IMAGE: kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+        run: |
+          set -euo pipefail
+          tool_dir="$RUNNER_TEMP/kandev-kubernetes-tools"
+          mkdir -p "$tool_dir"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64" \
+            --output "$tool_dir/kind"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://dl.k8s.io/release/${KUBERNETES_VERSION}/bin/linux/amd64/kubectl" \
+            --output "$tool_dir/kubectl"
+          echo "${KIND_SHA256_AMD64}  $tool_dir/kind" | sha256sum --check --strict
+          echo "${KUBECTL_SHA256_AMD64}  $tool_dir/kubectl" | sha256sum --check --strict
+          chmod 0755 "$tool_dir/kind" "$tool_dir/kubectl"
+          "$tool_dir/kind" version
+          "$tool_dir/kubectl" version --client
+          echo "Kind node image: $KIND_NODE_IMAGE"
+          echo "KANDEV_E2E_KIND_BIN=$tool_dir/kind" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KUBECTL_BIN=$tool_dir/kubectl" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KIND_CLUSTER_NAME=kandev-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.shard }}" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KIND_OWNERSHIP_MARKER=$RUNNER_TEMP/kandev-kind-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.shard }}.owned" >> "$GITHUB_ENV"
+
+      # Validate the same immutable build identity as the regular shards.
+      - name: Run planned container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker + SSH + Kubernetes)
         working-directory: apps/web
         env:
           KANDEV_E2E_CONTAINERS: "1"
           E2E_SHARD: ${{ matrix.shard }}
-          KANDEV_E2E_SKIP_FRESHNESS: "1"
+          KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
+          KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
         run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/containers/${{ matrix.shard }}.json"
+
+      - name: Delete exact Kind cluster
+        if: always() && steps.kubernetes.outputs.has_kubernetes == 'true'
+        run: |
+          set -euo pipefail
+          kind_bin="${KANDEV_E2E_KIND_BIN:-}"
+          cluster_name="${KANDEV_E2E_KIND_CLUSTER_NAME:-}"
+          ownership_marker="${KANDEV_E2E_KIND_OWNERSHIP_MARKER:-}"
+          if [[ -z "$kind_bin" || -z "$cluster_name" || -z "$ownership_marker" ]]; then
+            echo "Kind tools or exact target were never initialized; cleanup is a no-op."
+            exit 0
+          fi
+          if [[ ! -f "$ownership_marker" ]]; then
+            echo "No reserved ownership marker for $cluster_name; cleanup is a no-op."
+            exit 0
+          fi
+          if [[ ! -x "$kind_bin" ]]; then
+            echo "Pinned Kind tool is not executable: $kind_bin" >&2
+            exit 1
+          fi
+          if [[ ! "$cluster_name" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+            echo "Refusing cleanup for invalid exact Kind cluster name: $cluster_name" >&2
+            exit 1
+          fi
+          owned_name="$(tr -d '\r\n' < "$ownership_marker")"
+          if ! [[ "$owned_name" == "$cluster_name" ]]; then
+            echo "Refusing cleanup: marker owns '$owned_name', not '$cluster_name'." >&2
+            exit 1
+          fi
+          "$kind_bin" delete cluster --name "$cluster_name"
+          rm -f -- "$ownership_marker"
 
       # Named with the same `blob-report-*` prefix the merge job globs for
       # so the containers results land in the unified HTML report alongside
@@ -641,6 +880,164 @@ jobs:
         with:
           name: containers-e2e-test-results-${{ matrix.shard }}
           path: apps/web/e2e/test-results/
+          retention-days: 7
+
+  # API-only real-cluster smoke on the oldest and current supported Kubernetes
+  # releases. The full 12-case browser lifecycle runs only once, above, on the
+  # current release; this matrix keeps compatibility coverage intentionally small.
+  e2e-kubernetes-compatibility:
+    name: Kubernetes Compatibility (${{ matrix.kubernetes_version }})
+    needs: [changes, build]
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: v1-34-8
+            kubernetes_version: v1.34.8
+            kubectl_sha256_amd64: f6249132865c13abe3c9dd5038f5da65849cb86eee1608c001831504e481aa8c
+            node_image: kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
+          - id: v1-36-1
+            kubernetes_version: v1.36.1
+            kubectl_sha256_amd64: 629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7
+            node_image: kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Verify Docker is available
+        run: docker info
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: "9.15.9"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Install dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Download backend build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-backend-build
+          path: apps/backend/bin/
+
+      - name: Make backend binaries executable
+        run: chmod +x apps/backend/bin/*
+
+      - name: Download E2E fixture plugin package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-plugin-package
+          path: apps/backend/.build/
+
+      - name: Download web build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-web-build
+          path: apps/web/
+
+      - name: Extract web build
+        working-directory: apps/web
+        run: tar -xf web-dist.tar && rm web-dist.tar
+
+      - name: Install pinned Kind and kubectl
+        env:
+          KIND_VERSION: v0.32.0
+          KIND_SHA256_AMD64: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+          KUBERNETES_VERSION: ${{ matrix.kubernetes_version }}
+          KUBECTL_SHA256_AMD64: ${{ matrix.kubectl_sha256_amd64 }}
+          KIND_NODE_IMAGE: ${{ matrix.node_image }}
+        run: |
+          set -euo pipefail
+          tool_dir="$RUNNER_TEMP/kandev-kubernetes-tools-${{ matrix.id }}"
+          mkdir -p "$tool_dir"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64" \
+            --output "$tool_dir/kind"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://dl.k8s.io/release/${KUBERNETES_VERSION}/bin/linux/amd64/kubectl" \
+            --output "$tool_dir/kubectl"
+          echo "${KIND_SHA256_AMD64}  $tool_dir/kind" | sha256sum --check --strict
+          echo "${KUBECTL_SHA256_AMD64}  $tool_dir/kubectl" | sha256sum --check --strict
+          chmod 0755 "$tool_dir/kind" "$tool_dir/kubectl"
+          "$tool_dir/kind" version
+          "$tool_dir/kubectl" version --client
+          echo "Kind node image: $KIND_NODE_IMAGE"
+          echo "KANDEV_E2E_KIND_BIN=$tool_dir/kind" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KUBECTL_BIN=$tool_dir/kubectl" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KUBERNETES_VERSION=$KUBERNETES_VERSION" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KIND_CLUSTER_NAME=kandev-e2e-compat-${{ matrix.id }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KIND_OWNERSHIP_MARKER=$RUNNER_TEMP/kandev-kind-compat-${{ matrix.id }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.owned" >> "$GITHUB_ENV"
+
+      # Validate the build job's immutable source revision and artifact hashes.
+      - name: Run Kubernetes API compatibility smoke
+        working-directory: apps/web
+        env:
+          KANDEV_E2E_CONTAINERS: "1"
+          KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
+          KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
+          E2E_FAIL_ON_FLAKY: "1"
+        run: >-
+          pnpm exec playwright test --config e2e/playwright.config.ts
+          --project=kubernetes-compat --reporter=list tests/kubernetes-compat
+
+      - name: Delete exact Kind compatibility cluster
+        if: always()
+        run: |
+          set -euo pipefail
+          kind_bin="${KANDEV_E2E_KIND_BIN:-}"
+          cluster_name="${KANDEV_E2E_KIND_CLUSTER_NAME:-}"
+          ownership_marker="${KANDEV_E2E_KIND_OWNERSHIP_MARKER:-}"
+          if [[ -z "$kind_bin" || -z "$cluster_name" || -z "$ownership_marker" ]]; then
+            echo "Kind tools or exact target were never initialized; cleanup is a no-op."
+            exit 0
+          fi
+          if [[ ! -f "$ownership_marker" ]]; then
+            echo "No reserved ownership marker for $cluster_name; cleanup is a no-op."
+            exit 0
+          fi
+          if [[ ! -x "$kind_bin" ]]; then
+            echo "Pinned Kind tool is not executable: $kind_bin" >&2
+            exit 1
+          fi
+          if [[ ! "$cluster_name" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+            echo "Refusing cleanup for invalid exact Kind cluster name: $cluster_name" >&2
+            exit 1
+          fi
+          owned_name="$(tr -d '\r\n' < "$ownership_marker")"
+          if ! [[ "$owned_name" == "$cluster_name" ]]; then
+            echo "Refusing cleanup: marker owns '$owned_name', not '$cluster_name'." >&2
+            exit 1
+          fi
+          "$kind_bin" delete cluster --name "$cluster_name"
+          rm -f -- "$ownership_marker"
+
+      - name: Upload Kubernetes compatibility results
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kubernetes-compatibility-results-${{ matrix.id }}
+          path: apps/web/e2e/test-results/
+          if-no-files-found: ignore
           retention-days: 7
 
   desktop-e2e:
@@ -1068,7 +1465,16 @@ jobs:
   e2e-gate:
     name: E2E Tests Passed
     runs-on: ubuntu-latest
-    needs: [changes, build, e2e, e2e-containers, desktop-e2e, e2e-report]
+    needs:
+      [
+        changes,
+        build,
+        e2e,
+        e2e-containers,
+        e2e-kubernetes-compatibility,
+        desktop-e2e,
+        e2e-report,
+      ]
     if: always()
 
     steps:
@@ -1078,6 +1484,7 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
           E2E_CONTAINERS_RESULT: ${{ needs['e2e-containers'].result }}
+          E2E_KUBERNETES_COMPATIBILITY_RESULT: ${{ needs['e2e-kubernetes-compatibility'].result }}
           DESKTOP_E2E_RESULT: ${{ needs['desktop-e2e'].result }}
           E2E_REPORT_RESULT: ${{ needs['e2e-report'].result }}
         run: |
@@ -1087,6 +1494,7 @@ jobs:
           echo "Build: ${BUILD_RESULT}"
           echo "E2E shards: ${E2E_RESULT}"
           echo "E2E container shards: ${E2E_CONTAINERS_RESULT}"
+          echo "Kubernetes compatibility: ${E2E_KUBERNETES_COMPATIBILITY_RESULT}"
           echo "Desktop smoke: ${DESKTOP_E2E_RESULT}"
           echo "Report merge: ${E2E_REPORT_RESULT}"
 
@@ -1109,6 +1517,7 @@ jobs:
             "build:${BUILD_RESULT}" \
             "e2e:${E2E_RESULT}" \
             "e2e-containers:${E2E_CONTAINERS_RESULT}" \
+            "e2e-kubernetes-compatibility:${E2E_KUBERNETES_COMPATIBILITY_RESULT}" \
             "desktop-e2e:${DESKTOP_E2E_RESULT}" \
             "e2e-report:${E2E_REPORT_RESULT}"; do
             name="${entry%%:*}"

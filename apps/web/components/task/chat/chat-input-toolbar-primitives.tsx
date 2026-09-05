@@ -29,7 +29,6 @@ type SubmitButtonProps = {
   /** Task context for the `chat-submit-decoration` plugin slot. */
   taskId: string | null;
   taskTitle?: string;
-  presentation: PluginPresentation;
   hasContent: boolean;
   isDisabled: boolean;
   submitDisabledReason?: string;
@@ -38,6 +37,7 @@ type SubmitButtonProps = {
   onCancel: () => void | Promise<void>;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
+  presentation?: PluginPresentation;
 };
 
 type SendSubmitButtonProps = Pick<
@@ -72,12 +72,12 @@ function SendSubmitButton({
   sessionId,
   taskId,
   taskTitle,
-  presentation,
   isDisabled,
   isSending,
   planModeEnabled,
   onSubmit,
   submitShortcut,
+  presentation = "desktop",
   tooltipDescription,
 }: SendSubmitButtonProps) {
   const { t } = useTranslation();
@@ -97,7 +97,9 @@ function SendSubmitButton({
           variant="default"
           size="icon"
           className={cn(
-            "h-7 w-7 rounded-full cursor-pointer",
+            presentation === "mobile"
+              ? "min-h-11 min-w-11 rounded-full cursor-pointer"
+              : "h-7 w-7 rounded-full cursor-pointer",
             planModeEnabled && "bg-violet-600 hover:bg-violet-500",
           )}
           disabled={isDisabled}
@@ -129,7 +131,6 @@ export function SubmitButton({
   sessionId,
   taskId,
   taskTitle,
-  presentation,
   hasContent,
   isDisabled,
   submitDisabledReason,
@@ -138,6 +139,7 @@ export function SubmitButton({
   onCancel,
   onSubmit,
   submitShortcut,
+  presentation = "desktop",
 }: SubmitButtonProps) {
   const { t } = useTranslation();
   const showSendButton = !isAgentBusy || hasContent;
@@ -176,7 +178,10 @@ export function SubmitButton({
               type="button"
               variant="secondary"
               size="icon"
-              className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-70"
+              className={cn(
+                presentation === "mobile" ? "min-h-11 min-w-11" : "h-7 w-7",
+                "rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-70",
+              )}
               onClick={handleCancelClick}
               disabled={isCancelling}
               data-testid="cancel-agent-button"
@@ -199,12 +204,12 @@ export function SubmitButton({
           sessionId={sessionId}
           taskId={taskId}
           taskTitle={taskTitle}
-          presentation={presentation}
           isDisabled={isDisabled}
           isSending={isSending}
           planModeEnabled={planModeEnabled}
           onSubmit={onSubmit}
           submitShortcut={submitShortcut}
+          presentation={presentation}
           tooltipDescription={tooltipDescription}
         />
       )}
@@ -216,10 +221,12 @@ export function PlanToggleButton({
   planModeEnabled,
   planModeAvailable,
   onPlanModeChange,
+  presentation = "desktop",
 }: {
   planModeEnabled: boolean;
   planModeAvailable: boolean;
   onPlanModeChange: (enabled: boolean) => void;
+  presentation?: "desktop" | "mobile";
 }) {
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const planModeShortcutLabel = formatShortcut(getShortcut("TOGGLE_PLAN_MODE", keyboardShortcuts));
@@ -238,7 +245,9 @@ export function PlanToggleButton({
           data-plan-available={planModeAvailable}
           data-plan-enabled={planModeEnabled}
           className={cn(
-            "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
+            presentation === "mobile"
+              ? "min-h-11 min-w-11 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer"
+              : "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
             planModeEnabled && planModeAvailable && "bg-violet-500/15 text-violet-400",
           )}
           onClick={() => onPlanModeChange(!planModeEnabled)}
@@ -251,7 +260,13 @@ export function PlanToggleButton({
   );
 }
 
-export function AttachFilesButton({ onClick }: { onClick: () => void }) {
+export function AttachFilesButton({
+  onClick,
+  presentation = "desktop",
+}: {
+  onClick: () => void;
+  presentation?: "desktop" | "mobile";
+}) {
   const { t } = useTranslation();
   return (
     <Tooltip>
@@ -260,7 +275,11 @@ export function AttachFilesButton({ onClick }: { onClick: () => void }) {
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+          className={cn(
+            presentation === "mobile"
+              ? "min-h-11 min-w-11 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+              : "h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40",
+          )}
           onClick={onClick}
           data-testid="chat-attachments-button"
         >

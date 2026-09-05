@@ -9,6 +9,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import type {
   Agent,
   AgentDiscovery,
@@ -29,6 +30,7 @@ import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
+import { isHandledApiError } from "@/lib/api/client";
 
 const defaultMcpConfig: NonNullable<DraftProfile["mcp_config"]> = {
   enabled: false,
@@ -450,17 +452,19 @@ function AgentSetupForm({
     if (savedDraft) saveRevision.setSaved(JSON.stringify(savedDraft));
   };
   const profilesValid = areAgentProfilesValid(draftAgent);
-  const saveInvalidReason = resolveSaveInvalidReason(
-    t,
-    profilesValid,
-    hasInvalidMcpConfig,
-    draftAgent.name === "dynamic",
-  );
+  // Agents and agent profiles are org configuration: every mutating route
+  // behind this page requires org.config.manage, which only an administrator
+  // holds. Without this the save bar stays live for a member and the write
+  // fails with a 403 they cannot act on.
+  const canManage = useIsAdmin();
+  const saveInvalidReason = canManage
+    ? resolveSaveInvalidReason(t, profilesValid, hasInvalidMcpConfig, draftAgent.name === "dynamic")
+    : t("agents:adminOnly");
   useSettingsSaveContributor({
     id: `agent:${draftAgent.id}`,
     revision: saveRevision.revision,
     isDirty: isCreateMode ? isAgentDirty : saveRevision.revision !== saveRevision.saved,
-    canSave: profilesValid && !hasInvalidMcpConfig,
+    canSave: canManage && profilesValid && !hasInvalidMcpConfig,
     invalidReason: saveInvalidReason,
     save: handleCoordinatedSave,
     discard: () => undefined,
@@ -476,7 +480,7 @@ function AgentSetupForm({
         isCreateMode={isCreateMode}
         savedAgent={savedAgent}
         showInstallationStatus={draftAgent.name !== "dynamic"}
-        onDelete={handleDeleteAgent}
+        onDelete={canManage ? handleDeleteAgent : undefined}
       />
       <Separator />
       <ProfilesCard
@@ -582,6 +586,7 @@ export default function AgentSetupPage() {
   if (!initialAgent) return null;
 
   const handleToastError = (error: unknown) => {
+    if (isHandledApiError(error)) return;
     toast({
       title: t("agents:failedToSaveAgent"),
       description: error instanceof Error ? error.message : t("agents:requestFailed"),

@@ -23,6 +23,8 @@ import {
 } from "@/components/task/task-move-context-menu";
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import {
   TaskPluginLinkMenu,
@@ -38,6 +40,7 @@ import {
 import type { StepDef, TaskSwitcherItem } from "./task-switcher-types";
 import { TaskPluginPrimaryMenuItems } from "./task-switcher-plugin-menu-items";
 import { useTaskSwitcherArchiveConfirmation } from "./task-switcher-archive-confirmation";
+import { TaskPriorityContextMenu } from "./task-priority-context-menu";
 export type { StepDef } from "./task-switcher-types";
 export { createTaskLinkSelectAction } from "./task-switcher-link-menu";
 
@@ -168,22 +171,23 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
     setMenuKey((k) => k + 1);
   };
   const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(setContextOpen);
+  const { isFinePointer } = useResponsiveBreakpoint();
   const archive = useTaskSwitcherArchiveConfirmation({
     task: menuProps.task,
     onArchiveTask: menuProps.onArchiveTask,
     isArchiving: menuProps.isArchiving,
     closeMenu,
   });
+  const archiveConfirmation = archive.archiveOpen ? archive.archiveConfirmation : undefined;
+  const inlineArchiveConfirmation = isFinePointer ? undefined : archiveConfirmation;
+  const portaledArchiveConfirmation = isFinePointer ? archiveConfirmation : undefined;
 
   return (
     <ContextMenu key={menuKey} onOpenChange={handleOpenChange}>
       <ContextMenuTrigger asChild>
         <div ref={archive.archiveAnchorRef} tabIndex={-1} {...triggerProps}>
-          {cloneWithMenuOpen(
-            children,
-            contextOpen,
-            archive.archiveOpen ? archive.archiveConfirmation : undefined,
-          )}
+          {cloneWithMenuOpen(children, contextOpen, inlineArchiveConfirmation)}
+          {portaledArchiveConfirmation}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent
@@ -266,6 +270,7 @@ function SingleSelectionMenuItems({
   ...linkHandlers
 }: TaskContextMenuItemsProps & { actingIds: string[]; actingOnSelection: boolean }) {
   const { t } = useTranslation();
+  const updateTaskPriority = useUpdateTaskPriority();
   // Acting on a lone selected row (Pin / Delete) must drop it from the selection
   // so later plain clicks navigate instead of toggling.
   const onDelete = withSelectionClear(actingOnSelection, onClearSelection, onDeleteTask);
@@ -279,6 +284,13 @@ function SingleSelectionMenuItems({
         onTogglePin={withSelectionClear(actingOnSelection, onClearSelection, onTogglePin)}
       />
       <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
+      {!task.isArchived && (
+        <TaskPriorityContextMenu
+          currentPriority={task.priority}
+          disabled={isDeleting}
+          onSelect={(priority) => void updateTaskPriority(task.id, priority)}
+        />
+      )}
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
       {!task.isArchived && (

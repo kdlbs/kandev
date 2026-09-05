@@ -37,7 +37,7 @@ None.
 ## Inputs
 
 - `docs/specs/tasks/requirements/multi-branch.md` — Remote task-creation scenarios.
-- `docs/specs/gitlab-integration/spec.md` — task-creation anonymous exception.
+- `docs/specs/integrations/requirements/gitlab-integration.md` — task-creation anonymous exception.
 - Existing `listRepoBranchesAnonymous` GitHub implementation and GitLab workspace-client resolution.
 
 ## Output contract

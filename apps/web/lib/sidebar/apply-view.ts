@@ -57,7 +57,9 @@ const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   workflow: (t) => t.workflowId,
   workflowStep: (t) => t.workflowStepId,
   executorType: (t) => t.remoteExecutorType,
-  repository: (t) => (t.repositories && t.repositories.length > 1 ? "__multi__" : t.repositoryPath),
+  // Repository filters keep the primary compatibility value. Grouping uses
+  // the complete combination separately in `groupExtractors` below.
+  repository: (t) => t.repositoryPath,
   hasDiff: (t) => {
     const ds = t.diffStats;
     return !!ds && (ds.additions > 0 || ds.deletions > 0);
@@ -203,8 +205,9 @@ export function applySort(
  * the mobile task-switcher sheet already carry `i18n.language` in their memo
  * deps for the same reason.
  *
- * Only `label` is copy. The group `key`s below (`__multi__`, `__unassigned__`,
- * `__all__`, `__not_started__`) are identity: they are compared in
+ * Only `label` is copy. The group `key`s below (`__multi__`, the
+ * `__repo_combination__:<json>` keys, `__unassigned__`, `__all__`,
+ * `__not_started__`) are identity: they are compared in
  * `mergeSingleRepoUnassigned` / `sortRepoGroups`, index `STATE_GROUP_ORDER`, and
  * are persisted in the view's `collapsedGroups`. They are never translated.
  */
@@ -212,6 +215,7 @@ const UNASSIGNED_LABEL_KEY = "sidebar:groupUnassigned";
 const MULTI_REPO_LABEL_KEY = "sidebar:groupMultiRepo";
 const ALL_GROUP_LABEL_KEY = "sidebar:groupAll";
 const NOT_STARTED_STATE_GROUP_KEY = "__not_started__";
+const REPOSITORY_COMBINATION_PREFIX = "__repo_combination__:";
 
 const STATE_GROUP_ORDER: Record<string, number> = {
   [NOT_STARTED_STATE_GROUP_KEY]: 0,
@@ -228,6 +232,26 @@ const STATE_GROUP_ORDER: Record<string, number> = {
 };
 
 type GroupExtractor = (task: TaskSwitcherItem) => { key: string; label: string };
+
+function repositoryLinkIds(task: TaskSwitcherItem): string[] {
+  const ids = new Set<string>();
+  for (const link of task.repositoryLinks ?? []) ids.add(String(link.repository_id));
+  return [...ids];
+}
+
+function isCompleteRepositoryCombination(task: TaskSwitcherItem): boolean {
+  const repositories = task.repositories ?? [];
+  const linkedRepositoryIds = repositoryLinkIds(task);
+  return repositories.length >= 2 && repositories.length === linkedRepositoryIds.length;
+}
+
+function hasMultipleRepositoryLinks(task: TaskSwitcherItem): boolean {
+  return (task.repositories?.length ?? 0) > 1 || repositoryLinkIds(task).length > 1;
+}
+
+function repositoryCombinationKey(repositories: string[]): string {
+  return `${REPOSITORY_COMBINATION_PREFIX}${JSON.stringify(repositories)}`;
+}
 
 function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string } {
   if (!task.state)
@@ -286,7 +310,14 @@ const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
   // copy, so they must not. Rename the parameter before adding a `t()` call to
   // any of the others.
   repository: (task) => {
-    if (task.repositories && task.repositories.length > 1) {
+    if (isCompleteRepositoryCombination(task)) {
+      const repositories = task.repositories!;
+      return {
+        key: repositoryCombinationKey(repositories),
+        label: repositories.join(", "),
+      };
+    }
+    if (hasMultipleRepositoryLinks(task)) {
       return { key: "__multi__", label: t(MULTI_REPO_LABEL_KEY) };
     }
     if (task.repositoryPath) return { key: task.repositoryPath, label: task.repositoryPath };
@@ -372,7 +403,12 @@ export function applyGroup(
 }
 
 function mergeSingleRepoUnassigned(groups: SidebarGroup[]): void {
-  const repoGroups = groups.filter((g) => g.key !== "__multi__" && g.key !== "__unassigned__");
+  const repoGroups = groups.filter(
+    (g) =>
+      g.key !== "__multi__" &&
+      g.key !== "__unassigned__" &&
+      !g.key.startsWith(REPOSITORY_COMBINATION_PREFIX),
+  );
   if (repoGroups.length !== 1) return;
   const unassignedIdx = groups.findIndex((g) => g.key === "__unassigned__");
   if (unassignedIdx === -1) return;
@@ -385,6 +421,10 @@ function sortRepoGroups(groups: SidebarGroup[]): void {
   groups.sort((a, b) => {
     if (a.key === "__multi__") return -1;
     if (b.key === "__multi__") return 1;
+    const aIsCombination = a.key.startsWith(REPOSITORY_COMBINATION_PREFIX);
+    const bIsCombination = b.key.startsWith(REPOSITORY_COMBINATION_PREFIX);
+    if (aIsCombination && !bIsCombination && b.key !== "__unassigned__") return -1;
+    if (bIsCombination && !aIsCombination && a.key !== "__unassigned__") return 1;
     if (a.key === "__unassigned__") return 1;
     if (b.key === "__unassigned__") return -1;
     return a.label.localeCompare(b.label);

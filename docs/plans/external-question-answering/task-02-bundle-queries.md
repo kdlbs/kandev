@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-resolutions-table"]
 plan: "plan.md"
-spec: "../../specs/external-question-answering/spec.md"
+spec: "../../specs/integrations/requirements/external-question-answering.md"
 ---
 
 # Task 02: Durable clarification bundle read queries

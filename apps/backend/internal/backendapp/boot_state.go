@@ -80,6 +80,7 @@ func bootInitialState(
 			state["agentRuntime"] = snapshot
 		}
 	}
+	builder.addAgentProfileRecentUseState(ctx, state)
 
 	if route.Route == webapp.RouteSettings {
 		// Resolve an active workspace rather than emitting null. The SPA derives
@@ -98,14 +99,14 @@ func bootInitialState(
 		builder.addUserSettingsState(ctx, state, activeID)
 		builder.addSettingsRouteState(ctx, state, route.Path)
 	}
-	// Home and unknown SPA routes both render the full app shell (nav,
+	// Home, Threads, and unknown SPA routes all render the full app shell (nav,
 	// workspace picker) without a route-specific data payload. Unknown
 	// covers plugin-owned routes (e.g. /github-plugin) registered at
 	// runtime, which the backend classifier can't enumerate — they still
 	// need the base workspace/workflow/kanban context so native plugin UI
 	// (like host.ui.TaskCreateDialog) has workspaces and workflows to work
 	// with, not an empty store.
-	if route.Route == webapp.RouteHome || route.Route == webapp.RouteUnknown {
+	if route.Route == webapp.RouteHome || route.Route == webapp.RouteThreads || route.Route == webapp.RouteUnknown {
 		builder.addHomeKanbanRouteState(ctx, req, state)
 	}
 	if route.Route == webapp.RouteTasks {
@@ -243,6 +244,30 @@ func (b bootStateBuilder) addUserSettingsState(ctx context.Context, state map[st
 	state["userSettings"] = mapUserSettingsState(response, workspaceID)
 }
 
+func (b bootStateBuilder) addAgentProfileRecentUseState(ctx context.Context, state map[string]any) {
+	if b.p.userCtrl == nil {
+		return
+	}
+	records, err := b.p.userCtrl.GetAgentProfileRecentUse(ctx)
+	if err != nil {
+		b.logBootError("get agent profile recent use", err)
+		return
+	}
+	state["agentProfileRecentUse"] = mapAgentProfileRecentUseState(records)
+}
+
+func mapAgentProfileRecentUseState(records []userdto.AgentProfileRecentUseDTO) map[string]any {
+	byContext := make(map[string]any, len(records))
+	for _, record := range records {
+		byContext[string(record.Context)] = map[string]any{
+			"profileIds": append([]string{}, record.ProfileIDs...),
+			"revision":   record.Revision,
+			"updatedAt":  record.UpdatedAt,
+		}
+	}
+	return map[string]any{"records": byContext, "loaded": true}
+}
+
 func (b bootStateBuilder) addSettingsRouteState(ctx context.Context, state map[string]any, path string) {
 	switch path {
 	case "/settings/prompts":
@@ -318,6 +343,7 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 	}
 	b.addRepositoriesState(ctx, state, activeWorkspaceID)
 	b.addRepositorySetsState(ctx, state, activeWorkspaceID)
+	b.addRepositoryBranchPoliciesState(ctx, state, activeWorkspaceID)
 	b.addKanbanSnapshotsState(ctx, state, workflows, activeWorkflowID)
 }
 
@@ -391,6 +417,10 @@ func (b bootStateBuilder) addRepositorySetsState(ctx context.Context, state map[
 		loaded = true
 	}
 	state["repositorySets"] = repositorySetsState(workspaceID, items, loaded)
+}
+
+func (b bootStateBuilder) addRepositoryBranchPoliciesState(ctx context.Context, state map[string]any, workspaceID string) {
+	b.repositoryBranchPoliciesForState(ctx, workspaceID, state)
 }
 
 func (b bootStateBuilder) addQuickChatState(
@@ -774,6 +804,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			info.executorType,
 			info.executorName,
 			info.agentName,
+			info.agentProfileID,
 			info.workingDirectory,
 			info.sessionState,
 			bootPendingActionPtr(info.sessionID, pendingActionsBySession),
@@ -834,6 +865,7 @@ type bootSessionInfoFields struct {
 	executorType     *string
 	executorName     *string
 	agentName        *string
+	agentProfileID   *string
 	workingDirectory *string
 }
 
@@ -867,6 +899,10 @@ func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
 		if value, ok := session.AgentProfileSnapshot["name"].(string); ok && value != "" {
 			info.agentName = &value
 		}
+	}
+	if session.AgentProfileID != "" {
+		value := session.AgentProfileID
+		info.agentProfileID = &value
 	}
 	if session.RepositorySnapshot != nil {
 		if value, ok := session.RepositorySnapshot["path"].(string); ok && value != "" {

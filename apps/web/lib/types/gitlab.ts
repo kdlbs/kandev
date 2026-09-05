@@ -161,6 +161,7 @@ export type Issue = {
   project_path: string;
   labels: string[];
   assignees: string[];
+  milestone?: string;
   created_at: string;
   updated_at: string;
   closed_at?: string;

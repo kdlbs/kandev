@@ -54,11 +54,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	if eventExecutionID == "" {
 		eventExecutionID = payload.AgentID
 	}
+	eventType := payload.Data.Type
 	if !s.cancellationOwnsStreamEvent(
 		payload.SessionID,
 		eventExecutionID,
 		payload.Data.PromptGeneration,
 	) {
+		s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
 		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -68,7 +70,6 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
-	eventType := payload.Data.Type
 	terminalCompleteStream := false
 
 	if eventType == agentEventComplete {
@@ -93,25 +94,44 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		return
 	}
 	switch eventType {
-	case "message_streaming", "thinking_streaming", agentEventComplete:
-		s.observeDynamicAttempt(
+	case "message_streaming":
+		s.observePromptAttempt(
 			payload.SessionID,
-			payload.ExecutionID,
+			eventExecutionID,
+			payload.Data.PromptGeneration,
+			strings.TrimSpace(payload.Data.Text) != "",
+			false,
+		)
+	case "thinking_streaming":
+		s.observePromptAttempt(
+			payload.SessionID,
+			eventExecutionID,
+			payload.Data.PromptGeneration,
 			strings.TrimSpace(payload.Data.Text) != "",
 			false,
 		)
 	case agentEventToolCall, agentEventToolUpdate:
-		s.observeDynamicAttempt(payload.SessionID, payload.ExecutionID, false, true)
+		s.observePromptAttempt(
+			payload.SessionID,
+			eventExecutionID,
+			payload.Data.PromptGeneration,
+			false,
+			true,
+		)
 	}
 	if eventType == agentEventComplete {
-		defer s.clearDynamicAttemptEvidence(payload.SessionID, payload.ExecutionID)
+		defer s.clearPromptAttemptEvidence(
+			payload.SessionID,
+			eventExecutionID,
+			payload.Data.PromptGeneration,
+		)
 	}
 
 	if !terminalCompleteStream {
 		// Any live agent stream activity means the agent resumed after clarification.
 		// Cancel primary-path clarification watchdogs for this session. Late terminal
 		// completes are excluded because they belong to an already-finished execution.
-		s.cancelClarificationWatchdogsForSession(sessionID, eventType)
+		s.cancelClarificationWatchdogsForSession(sessionID, eventType, payload)
 	}
 
 	s.logger.Debug("handling agent stream event",
@@ -302,19 +322,24 @@ func (s *Service) completeTurnForStreamEvent(
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
 	if sessionID != "" {
 		failure := watcher.AgentEventData{
 			TaskID:           taskID,
 			SessionID:        sessionID,
-			AgentExecutionID: payload.ExecutionID,
+			AgentExecutionID: executionID,
 			AgentID:          payload.AgentID,
+			PromptGeneration: payload.Data.PromptGeneration,
 			ErrorMessage:     payload.Data.Error,
 			ProviderError:    payload.Data.ProviderError,
 		}
 		if failure.ErrorMessage == "" {
 			failure.ErrorMessage = payload.Data.Text
 		}
-		failure = s.withDynamicAttemptEvidence(failure)
+		failure = s.withPromptAttemptEvidence(failure)
 		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
 			return
 		}
@@ -2457,11 +2482,12 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return
 	}
-	if session != nil && s.handleAutomationTurnComplete(
+	if session != nil && s.handleAutomationTurnCompleteForTurn(
 		ctx,
 		payload.TaskID,
 		payload.SessionID,
 		session,
+		completionTurnID,
 		stopReason,
 		extractCompleteIsError(payload),
 		extractCompleteErrorMessage(payload),

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -21,6 +22,12 @@ type Components struct {
 
 // Start begins background processing (scheduler + GitHub polling + webhook subscriber + merged-PR subscriber).
 func (c *Components) Start(ctx context.Context) {
+	if err := c.Service.ReconcileOpenRuns(ctx); err != nil {
+		c.Service.logger.Warn("automation open-run reconciliation failed", zap.Error(err))
+	}
+	if err := c.Service.ReconcileCleanupJobs(ctx); err != nil {
+		c.Service.logger.Warn("automation cleanup-job reconciliation failed", zap.Error(err))
+	}
 	c.Scheduler.Start(ctx)
 	c.Evaluator.Start(ctx)
 	c.WebhookSubscriber.Start(ctx)

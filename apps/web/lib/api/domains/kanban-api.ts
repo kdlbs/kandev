@@ -67,6 +67,7 @@ export async function createTask(
     position?: number;
     repositories?: Array<{
       repository_id: string;
+      branch_policy_id?: string;
       base_branch?: string;
       checkout_branch?: string;
       pr_number?: number;
@@ -142,6 +143,9 @@ export async function updateTask(
     }>;
     /** Nest under another task. Empty string clears the parent (un-nest). */
     parent_id?: string;
+    /** Human assignee. "" unassigns; omitting the field leaves it alone. */
+    assignee_user_id?: string;
+    priority?: TaskPriority;
   },
   options?: ApiRequestOptions,
 ) {

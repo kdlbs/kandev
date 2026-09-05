@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-06-22
-updated: 2026-08-08
+updated: 2026-08-31
 owners:
   - cfl
 ---
@@ -28,3 +28,9 @@ and safe when runtimes or task rows are already gone.
 - **AC-TASKS-RUNTIME-CLEANUP-001.4:** When an agent or agentctl process does not stop within its grace period, the system shall terminate the complete process group and shall not report shutdown complete while descendants remain attached to PID 1.
 - **AC-TASKS-RUNTIME-CLEANUP-001.5:** When startup reconciliation sees a stale runtime row, the system shall remove only a confirmed-dead local runtime, preserve alive, unknown, remote, or generically failed rows for retry, and emit bounded diagnostics for fail-closed outcomes.
 - **AC-TASKS-RUNTIME-CLEANUP-001.6:** When lifecycle cleanup begins, the system shall persist an operation snapshot and retry state before mutating task state; repeated delivery shall reuse the durable job, and unarchiving shall prevent a pending archive retry from deleting active resources.
+- **AC-TASKS-RUNTIME-CLEANUP-001.7:** When an archived task is unarchived after
+  cleanup removed its physical worktree, resuming the task shall recreate or
+  reactivate the recoverable task-owned worktree instead of requiring
+  attach-only reuse of the deleted workspace.
+- **AC-TASKS-RUNTIME-CLEANUP-001.8:** When dead-row repair loses its compare-and-set to a newer execution, reconciliation shall preserve the newer row without a warning. Other repair errors shall remain warnings.
+- **AC-TASKS-RUNTIME-CLEANUP-001.9:** When task deletion reclaims a Git worktree, the system shall verify the exact recorded path, branch, and commit before mutation; preserve a checkout with tracked or untracked changes; preserve a clean local branch with commits not contained by the recorded base or repository default; recover idempotently when the checkout path is already absent; and keep failed registration or branch cleanup retryable.

@@ -5,10 +5,17 @@ import type {
   FilterClause,
   GroupKey,
   SidebarSliceState,
+  SidebarTaskRowPresentation,
   SidebarView,
   SidebarViewDraft,
   SortSpec,
 } from "./sidebar-view-types";
+import type {
+  ThreadFilterClause,
+  ThreadSortSpec,
+  ThreadViewSliceState,
+  ThreadView,
+} from "./thread-view-types";
 
 export type PreviewStage = "closed" | "logs" | "preview";
 export type PreviewViewMode = "preview" | "output";
@@ -167,6 +174,10 @@ export type QuickChatState = {
   sessionOwnership: Record<string, QuickChatSessionOwnership>;
   syncRevisionByWorkspace: Record<string, number>;
   tombstonedSessions: Record<string, QuickChatSessionTombstone>;
+  /** Optimistic mixed-tab order keyed by workspace until the save settles. */
+  tabOrderByWorkspace: Record<string, string[]>;
+  tabOrderSyncErrorByWorkspace: Record<string, string | null>;
+  tabOrderSyncPendingByWorkspace: Record<string, boolean>;
 };
 
 export type SessionFailureNotification = {
@@ -285,6 +296,7 @@ export type UISliceState = {
   updateAvailableNotification: UpdateAvailableNotification | null;
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
+  threadViews: ThreadViewSliceState;
   /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
   collapsedSubtaskParents: string[];
   /** Task ID currently shown in the kanban preview side-panel, or null if closed. */
@@ -375,6 +387,15 @@ export type UISliceActions = {
   recordQuickChatSettled: (sessionId: string, updatedAt: string) => boolean;
   /** Removes a server-backed quick-chat session and suppresses late task events. */
   removeQuickChatSession: (sessionId: string) => void;
+  /** Sets the optimistic mixed conversation/terminal order for a workspace. */
+  setQuickChatTabOrder: (workspaceId: string, order: string[]) => void;
+  /** Clears a matching optimistic order after its authoritative save succeeds. */
+  clearQuickChatTabOrder: (workspaceId: string, expectedOrder: string[]) => void;
+  /** Updates the pending/error state for a workspace order save. */
+  setQuickChatTabOrderSyncState: (
+    workspaceId: string,
+    state: { pending: boolean; error: string | null },
+  ) => void;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
@@ -385,7 +406,12 @@ export type UISliceActions = {
   setSidebarActiveView: (viewId: string) => void;
   createSidebarView: () => string | null;
   updateSidebarDraft: (
-    patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
+    patch: Partial<{
+      filters: FilterClause[];
+      sort: SortSpec;
+      group: GroupKey;
+      taskRow: SidebarTaskRowPresentation;
+    }>,
   ) => void;
   saveSidebarDraftAs: (name: string) => void;
   saveSidebarDraftOverwrite: () => void;
@@ -397,6 +423,25 @@ export type UISliceActions = {
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: () => void;
+  setThreadActiveView: (viewId: string) => void;
+  createThreadView: () => string | null;
+  updateThreadViewDraft: (
+    patch: Partial<{
+      taskScope: ThreadView["taskScope"];
+      filters: ThreadFilterClause[];
+      sort: ThreadSortSpec;
+      maxColumns: number | null;
+    }>,
+  ) => void;
+  saveThreadViewDraftAs: (name: string) => void;
+  saveThreadViewDraftOverwrite: () => void;
+  discardThreadViewDraft: () => void;
+  deleteThreadView: (viewId: string) => void;
+  renameThreadView: (viewId: string, name: string) => void;
+  duplicateThreadView: (viewId: string, name: string) => void;
+  reapplyThreadViewSort: () => void;
+  retryThreadViewSync: () => void;
+  clearThreadViewSyncError: () => void;
   clearSidebarTaskPrefsSyncError: () => void;
   setKanbanPreviewedTaskId: (taskId: string | null) => void;
   togglePinnedTask: (taskId: string) => void;

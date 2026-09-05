@@ -63,6 +63,9 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.RepositorySetCreated, ws.ActionRepositorySetCreated)
 	b.subscribe(eventBus, events.RepositorySetUpdated, ws.ActionRepositorySetUpdated)
 	b.subscribe(eventBus, events.RepositorySetDeleted, ws.ActionRepositorySetDeleted)
+	b.subscribe(eventBus, events.RepositoryBranchPolicyCreated, ws.ActionRepositoryBranchPolicyCreated)
+	b.subscribe(eventBus, events.RepositoryBranchPolicyUpdated, ws.ActionRepositoryBranchPolicyUpdated)
+	b.subscribe(eventBus, events.RepositoryBranchPolicyDeleted, ws.ActionRepositoryBranchPolicyDeleted)
 	b.subscribe(eventBus, events.RepositoryScriptCreated, ws.ActionRepositoryScriptCreated)
 	b.subscribe(eventBus, events.RepositoryScriptUpdated, ws.ActionRepositoryScriptUpdated)
 	b.subscribe(eventBus, events.RepositoryScriptDeleted, ws.ActionRepositoryScriptDeleted)
@@ -79,6 +82,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
 	b.subscribe(eventBus, events.TaskSessionActivityChanged, ws.ActionSessionActivityChanged)
 	b.subscribe(eventBus, events.TaskSessionCancellationChanged, ws.ActionSessionCancellationChanged)
+	b.subscribe(eventBus, events.SessionPendingActionChanged, ws.ActionSessionPendingActionChanged)
 	b.subscribe(eventBus, events.TaskStatusSummaryUpdated, ws.ActionTaskStatusSummaryUpdated)
 	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
 	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
@@ -274,6 +278,12 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
+	case ws.ActionSessionPendingActionChanged:
+		// Pending action is a compact workspace projection. It must reach
+		// inactive session selectors, but an unattributed event must never
+		// fall back to a global broadcast when authentication is enforced.
+		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
+		return nil
 	case ws.ActionMessageQueueStatusChanged:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
@@ -285,7 +295,8 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		// session page after task creation.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
-	case ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+	case ws.ActionGitHubTaskPRUpdated, ws.ActionGitHubTaskPRDeleted,
+		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
 		// These payloads carry per-task PR/MR automation and lifecycle state. Fail closed
 		// (drop, don't fall back to a global broadcast) when workspace
 		// resolution came back empty and auth is enforced — an unattributed

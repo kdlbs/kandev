@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/repository"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,9 +29,20 @@ import (
 )
 
 type mockRepository struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	scriptsByRepo map[string][]*models.RepositoryScript
 	sessions      map[string]*models.TaskSession
 	executors     map[string]*models.Executor
+}
+
+func (m *mockRepository) HasUserPromptHistory(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockRepository) ClaimInitialPromptFallback(context.Context, string) (bool, error) {
+	return true, nil
 }
 
 func (m *mockRepository) DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error) {
@@ -263,6 +275,9 @@ func (m *mockRepository) FindActiveClarificationMessagesBySessionID(ctx context.
 }
 func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
 	return make(map[string]models.TaskPendingAction), nil
+}
+func (m *mockRepository) ListPendingInteractions(context.Context, models.PendingInteractionFilter) ([]*models.Message, error) {
+	return nil, nil
 }
 func (m *mockRepository) CompleteActiveClarificationBundle(
 	context.Context,
@@ -620,6 +635,15 @@ func (m *mockRepository) GetLatestGitSnapshot(ctx context.Context, sessionID str
 }
 func (m *mockRepository) GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error) {
 	return make(map[string]*models.GitSnapshot), nil
+}
+func (m *mockRepository) GetLatestGitSnapshotByTaskEnvironmentID(ctx context.Context, taskEnvironmentID string) (*models.GitSnapshot, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetLatestGitSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) (map[string]*models.GitSnapshot, error) {
+	return make(map[string]*models.GitSnapshot), nil
+}
+func (m *mockRepository) GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) ([]*models.GitSnapshot, error) {
+	return nil, nil
 }
 func (m *mockRepository) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
 	return nil, nil

@@ -96,6 +96,10 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
   RepoChipsRow: () => null,
 }));
 
+vi.mock("./task-edit-dialog-dependencies", () => ({
+  TaskEditDialogDependencies: () => null,
+}));
+
 vi.mock("@/hooks/use-task-create-dialog-popover-container", () => ({
   useTaskCreateDialogPopoverContainer: () => null,
   TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => (
@@ -121,6 +125,11 @@ vi.mock("@/components/state-provider", () => ({
       setRepositorySets: () => undefined,
       setRepositorySetsLoading: () => undefined,
     }),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      repositoryBranchPolicies: { revisionByRepositoryId: {} },
+    }),
+  }),
 }));
 
 vi.mock("@/components/task-create-dialog-submit", () => ({
@@ -260,6 +269,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,
+    priority: "medium",
+    setPriority: () => undefined,
     setTaskName: () => undefined,
     hasTitle: true,
     setHasTitle: () => undefined,
@@ -272,7 +283,9 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     currentDefaults: { name: "Task title", description: initialDescription },
     descriptionInputRef: createRef<TaskFormInputsHandle>(),
     repositories: [],
+    repositoriesDirty: false,
     setRepositories: () => undefined,
+    setRepositoriesDirty: () => undefined,
     addRepository: () => undefined,
     removeRepository: () => undefined,
     updateRepository: () => undefined,

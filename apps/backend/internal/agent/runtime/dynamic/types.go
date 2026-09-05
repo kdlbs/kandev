@@ -27,6 +27,11 @@ var (
 	ErrRouteStateNotFound  = errors.New("dynamic route state not found")
 	ErrRecoveryPending     = errors.New("dynamic route recovery is pending")
 	ErrRecoveryNotDue      = errors.New("dynamic route recovery is not due")
+	// ErrStatusClaimUnsupported means the persistence implementation cannot
+	// fence a same-generation status transition. Status-fenced claims must
+	// fail closed rather than silently degrade to a generation-only claim,
+	// which would let two concurrent callers both win the same transition.
+	ErrStatusClaimUnsupported = errors.New("dynamic route persistence does not support status-fenced claims")
 )
 
 type Candidate struct {
@@ -130,6 +135,14 @@ type StateLoader interface {
 // means another worker already advanced the session generation.
 type GenerationClaimer interface {
 	ClaimRouteState(context.Context, int64, RouteState) (bool, error)
+}
+
+// GenerationStatusClaimer updates one generation only while its status still
+// matches the caller's observation. This closes the same-generation race
+// between a launch becoming active and a concurrent recovery transition, and
+// between two concurrent callers observing the same due retry/wait state.
+type GenerationStatusClaimer interface {
+	ClaimRouteStateFrom(context.Context, int64, string, RouteState) (bool, error)
 }
 
 // DecisionRecorder lets a repository commit the state row and immutable

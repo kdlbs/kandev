@@ -24,7 +24,7 @@ async function chooseDirectory(
   const picker = page.locator('[data-testid="folder-picker-popover"][data-state="open"]');
   await expect(picker).toBeVisible();
   for (const segment of relativeDirectory.split(path.sep).filter(Boolean)) {
-    await picker.getByTestId("folder-picker-entry").filter({ hasText: segment }).click();
+    await picker.getByRole("button", { name: segment, exact: true }).click();
   }
   await picker.getByTestId("folder-picker-choose").click();
 }
@@ -32,6 +32,7 @@ async function chooseDirectory(
 function createSourceDirectories(root: string) {
   const gitEnv = makeGitEnv(root);
   const repositoryPath = path.join(root, "sources", "second-local-repository");
+  const originPath = path.join(root, "sources", "second-local-repository-origin.git");
   const folderPath = path.join(root, "sources", "plain-local-folder");
   fs.mkdirSync(repositoryPath, { recursive: true });
   fs.mkdirSync(folderPath, { recursive: true });
@@ -40,6 +41,18 @@ function createSourceDirectories(root: string) {
   execFileSync("git", ["init", "-b", "main"], { cwd: repositoryPath, env: gitEnv });
   execFileSync("git", ["add", "."], { cwd: repositoryPath, env: gitEnv });
   execFileSync("git", ["commit", "-m", "initial source"], { cwd: repositoryPath, env: gitEnv });
+  // Workspace-source materialization refreshes required branches before it
+  // creates the attached worktree. Give this local fixture a real offline
+  // origin so that refresh succeeds deterministically.
+  execFileSync("git", ["init", "--bare", "-b", "main", originPath], { env: gitEnv });
+  execFileSync("git", ["remote", "add", "origin", originPath], {
+    cwd: repositoryPath,
+    env: gitEnv,
+  });
+  execFileSync("git", ["push", "--set-upstream", "origin", "main"], {
+    cwd: repositoryPath,
+    env: gitEnv,
+  });
   return { repositoryPath, folderPath };
 }
 
@@ -290,9 +303,11 @@ test.describe("Attach local workspace sources", () => {
     if (!linkedRepoPath) throw new Error("attached repository worktree path was not returned");
     const primaryFilePath = path.join(repoPaths[0], "changes/repository-0.txt");
     const linkedFilePath = path.join(linkedRepoPath, "second-source.txt");
+    const registeredSourceFilePath = path.join(repositoryPath, "second-source.txt");
+    fs.writeFileSync(linkedFilePath, "active worktree source\n");
     await apiClient.seedSessionMessage(activeSessionId, {
       type: "message",
-      content: `[primary source](${primaryFilePath}) [second source](${linkedFilePath})`,
+      content: `[registered source](${registeredSourceFilePath}:1) [primary source](${primaryFilePath}) [second source](${linkedFilePath})`,
     });
 
     await testPage.reload();
@@ -300,17 +315,34 @@ test.describe("Attach local workspace sources", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
     await session.showSessionContext();
     const primaryChatLink = session.activeChat().getByRole("link", { name: "primary source" });
+    const registeredChatLink = session
+      .activeChat()
+      .getByRole("link", { name: "registered source" });
     const siblingChatLink = session.activeChat().getByRole("link", { name: "second source" });
+    await expect(registeredChatLink).toBeVisible({ timeout: 15_000 });
     await expect(primaryChatLink).toBeVisible({ timeout: 15_000 });
     await expect(siblingChatLink).toBeVisible({ timeout: 15_000 });
-    await primaryChatLink.click();
+    const taskUrlBeforeSourceLink = testPage.url();
+    await registeredChatLink.click();
     const fileEditor = activeFileEditor(testPage);
+    await expect(fileEditor).toBeVisible({ timeout: 15_000 });
+    await expect(fileEditor.locator(".view-lines")).toContainText("active worktree source");
+    await expect(activeFileTab(testPage, "second-source.txt")).toBeVisible({ timeout: 15_000 });
+    expect(testPage.url()).toBe(taskUrlBeforeSourceLink);
+    await prCapture.screenshot("registered-source-file-opened-desktop", {
+      caption: "Desktop file tab showing content from the active task worktree",
+    });
+    await session.showSessionContext();
+    await prCapture.screenshot("registered-source-link-opened-desktop", {
+      caption: "Desktop task transcript link with the matching active-worktree file tab open",
+    });
+    await primaryChatLink.click();
     await expect(fileEditor).toBeVisible({ timeout: 15_000 });
     await expect(fileEditor.locator(".view-lines")).toContainText("repository 0");
     await expect(activeFileTab(testPage, "repository-0.txt")).toBeVisible({ timeout: 15_000 });
     await session.showSessionContext();
     await session.activeChat().getByRole("link", { name: "second source" }).click();
-    await expect(fileEditor.locator(".view-lines")).toContainText("repository source");
+    await expect(fileEditor.locator(".view-lines")).toContainText("active worktree source");
     await expect(activeFileTab(testPage, "second-source.txt")).toBeVisible({ timeout: 15_000 });
   });
 

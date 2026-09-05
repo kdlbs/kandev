@@ -117,6 +117,34 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(wsPayload()).repositoryId).toBe("repo-a");
   });
 
+  it("preserves branch policy snapshot fields through HTTP and WS mapping", () => {
+    const repositories = [
+      {
+        repository_id: "repo-a",
+        base_branch: "main",
+        checkout_branch: "feature/ship-it",
+        branch_policy_id: "policy-a",
+        branch_policy_name: "Feature branches",
+        branch_policy_base_branch: "main",
+        branch_policy_branch_template: "feature/{title}-{suffix}",
+        branch_policy_pull_request_target: "develop",
+      },
+    ];
+    const http = toKanbanTask(httpDTO({ repositories }));
+    const ws = toKanbanTask(wsPayload({ repositories }));
+
+    expect(http.repositories?.[0]).toMatchObject({
+      branch_policy_id: "policy-a",
+      branch_policy_name: "Feature branches",
+      branch_policy_base_branch: "main",
+      branch_policy_branch_template: "feature/{title}-{suffix}",
+      branch_policy_pull_request_target: "develop",
+    });
+    expect(ws.repositories).toEqual(http.repositories);
+  });
+});
+
+describe("toKanbanTask — pending and status fields", () => {
   it("maps primary session pending action from HTTP and WS shapes", () => {
     const pendingAction = {
       primary_session_pending_action: "clarification",
@@ -179,6 +207,24 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(http.statusSummary).toEqual(statusSummary);
     expect(ws.statusSummary).toEqual(statusSummary);
     expect(http).toEqual(ws);
+  });
+});
+
+describe("toKanbanTask — human assignee", () => {
+  // The kanban board and the task top bar both read the assignee out of the
+  // store, so this mapper is the only hop between the backend field and every
+  // kanban surface. Dropping it here reads as "nobody is assigned to anything"
+  // with no error anywhere.
+  it("carries the human assignee through both task shapes", () => {
+    const http = toKanbanTask(httpDTO({ assignee_user_id: "user-7" }));
+    const ws = toKanbanTask(wsPayload({ assignee_user_id: "user-7" }));
+
+    expect(http.assigneeUserId).toBe("user-7");
+    expect(ws.assigneeUserId).toBe("user-7");
+  });
+
+  it("leaves the assignee undefined when the backend omits it", () => {
+    expect(toKanbanTask(httpDTO()).assigneeUserId).toBeUndefined();
   });
 });
 

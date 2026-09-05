@@ -34,8 +34,11 @@ const EMPTY_SESSIONS: TaskSession[] = [];
  * around it.
  *
  * The layer is `pointer-events-none` so a decoration can never swallow a click
- * meant for send. A decoration that genuinely needs interaction (a popover
- * trigger) opts back in with `pointer-events-auto` on that child alone.
+ * meant for send. Keep visual disclosures inert and observe the host button's
+ * hover or focus from an effect, cleaning up the listeners on unmount. The
+ * plugin renders inside this layer, not beside the button, so its immediate
+ * parent is not the positioned button wrapper. `pointer-events-auto` is a last
+ * resort for a separate hit target that does not obstruct send.
  */
 export function ChatSubmitPluginDecoration(props: {
   sessionId: string | null;

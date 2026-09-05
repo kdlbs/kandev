@@ -31,7 +31,11 @@ trust, see [Security posture](#security-posture).
 
 ## How it works
 
-![Plugin lifecycle: install, verify, extract, and spawn a go-plugin gRPC subprocess; then, over one supervised gRPC connection, kandev delivers bus events and relays external webhooks to the plugin, the plugin calls back into the Host API, and the SPA optionally loads the native UI bundle.](../screenshots/plugin-architecture.png)
+![Plugin runtime lifecycle: Kandev installs, verifies, extracts, and supervises a plugin subprocess; bus events and external webhooks reach it, it calls the Host API, and the SPA can optionally load its native UI bundle.](../screenshots/plugin-architecture.svg)
+
+[Open full-size SVG diagram][plugin-runtime-diagram]
+
+[plugin-runtime-diagram]: ../../docs/screenshots/plugin-architecture.svg
 
 Kandev owns the whole process lifecycle: it extracts the package, spawns the
 binary, completes the go-plugin handshake, health-checks it (`Ping` every
@@ -47,10 +51,12 @@ plugin is installed and active. Bundles can also inject components into
 host-defined slots, including **icon buttons in the chat composer toolbar**
 (beside the model picker, mic, and send button), so an active plugin can add
 its own action right where you message an agent. A bundle can also declare
-**keybindings** (user-overridable at **Settings > Keyboard Shortcuts**, with
-core shortcuts always winning on a conflict) and open host-owned **modal
-windows** from anywhere in its code: see [Authoring a
-plugin](plugins-authoring.md) for both.
+**keybindings** (user-overridable on the installed plugin's detail page at
+**Settings > Plugins > `<plugin>`**, with core shortcuts always winning on a
+conflict) and open host-owned **modal windows** from anywhere in its code: see
+[Authoring a plugin](plugins-authoring.md) for both. Shortcut overrides are
+personal to each user; plugin configuration and lifecycle controls remain
+administrator-only.
 
 ### Global Status contributions
 
@@ -147,6 +153,11 @@ settings page; a `Setup required` badge marks a plugin whose manifest declares
 a required setting that has no value yet:
 
 ![The Settings > Plugins page listing an installed, active plugin with its category, a Setup required badge, an unsigned badge, Disable/Uninstall actions, and a chevron opening the plugin's settings page.](../screenshots/plugin-settings-list.png)
+
+The Installed tab also gives you an overview of automatic updates, installed
+versions, available updates, and per-plugin controls:
+
+![Settings > Plugins showing automatic updates and the installed plugin list with sync, update, enable, disable, uninstall, and settings controls.](../screenshots/plugin-settings.png)
 
 <details>
 <summary>Filesystem sideload and synchronization</summary>

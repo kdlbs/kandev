@@ -93,6 +93,42 @@ func TestEngineAppliesCandidateErrorActions(t *testing.T) {
 	}
 }
 
+// Contract coverage: Codex's complete usage-limit envelope must reach the
+// existing hard-error policy without adding a provider branch to the engine.
+func TestEngineRoutesCodexUsageLimitThroughHardPolicy(t *testing.T) {
+	failure := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: "codex-acp",
+		Stderr:     `{"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"usageLimitExceeded","message":"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 1st, 2026 3:14 PM."}}`,
+	})
+	if failure.Code != routingerr.CodeQuotaLimited || failure.Class != routingerr.ClassHard {
+		t.Fatalf("classification = %+v, want hard quota_limited", failure)
+	}
+
+	profile := Profile{
+		ID: "dynamic-1", Version: 1,
+		Candidates: []Candidate{
+			{ID: "codex", Enabled: true, BindingKey: "codex", Policies: routingpolicy.DefaultDocument()},
+			{ID: "fallback", Enabled: true, BindingKey: "fallback", Policies: routingpolicy.DefaultDocument()},
+		},
+	}
+	engine := NewEngine()
+	initial, err := engine.Select("session-1", profile, 0, "")
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	decision, err := engine.ApplyFailure(
+		"session-1", profile, initial.Generation, initial.ExecutionProfileID, failure,
+	)
+	if err != nil {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	if decision.ExecutionProfileID != "fallback" || decision.Reason != "policy_skip" {
+		t.Fatalf("decision = %#v, want fallback selected by hard policy", decision)
+	}
+}
+
 func TestEngineRetrySameKeepsTheFailedCandidate(t *testing.T) {
 	profile := Profile{
 		ID: "dynamic-1", Version: 1,
@@ -242,6 +278,209 @@ func TestEngineCancelPendingStopsWithoutAdvancingGeneration(t *testing.T) {
 	}
 	if stopped.Status != "action_required" || stopped.Generation != initial.Generation || stopped.Reason != "manual_stop" {
 		t.Fatalf("stopped decision = %#v", stopped)
+	}
+}
+
+func TestEngineMarkActiveCompletesStartingPhase(t *testing.T) {
+	engine := NewEngine()
+	profile := Profile{ID: "dynamic-active", Candidates: []Candidate{{ID: "first", Enabled: true}}}
+	initial, err := engine.Select("active-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	state, ok := engine.State("active-session")
+	if !ok || state.Status != routeStatusStarting {
+		t.Fatalf("precondition: state = %#v, ok=%v, want starting", state, ok)
+	}
+	if err := engine.MarkActive(context.Background(), "active-session", initial.Generation); err != nil {
+		t.Fatalf("MarkActive: %v", err)
+	}
+	state, ok = engine.State("active-session")
+	if !ok || state.Status != routeStatusActive || state.Generation != initial.Generation {
+		t.Fatalf("state after MarkActive = %#v, ok=%v", state, ok)
+	}
+	// A repeat call (e.g. from a duplicate callback) is a no-op, not an error.
+	if err := engine.MarkActive(context.Background(), "active-session", initial.Generation); err != nil {
+		t.Fatalf("repeat MarkActive: %v", err)
+	}
+	if err := engine.MarkActive(context.Background(), "active-session", initial.Generation-1); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale MarkActive error = %v, want %v", err, ErrStaleGeneration)
+	}
+	if err := engine.MarkActive(context.Background(), "missing-session", 1); !errors.Is(err, ErrRouteStateNotFound) {
+		t.Fatalf("missing session MarkActive error = %v, want %v", err, ErrRouteStateNotFound)
+	}
+}
+
+func TestEngineMarkActiveIsNoOpWhenRouteAlreadyLeftStarting(t *testing.T) {
+	engine := NewEngine()
+	profile := Profile{ID: "dynamic-active-skip", Candidates: []Candidate{
+		{ID: "first", Enabled: true},
+		{ID: "second", Enabled: true},
+	}}
+	initial, err := engine.Select("active-skip-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	next, err := engine.SelectContextWithReason(
+		context.Background(), "active-skip-session", profile, initial.Generation, initial.ExecutionProfileID, "manual_skip",
+	)
+	if err != nil {
+		t.Fatalf("manual skip: %v", err)
+	}
+	// A late MarkActive call for the superseded generation must not resurrect
+	// it as active over the newer claim.
+	if err := engine.MarkActive(context.Background(), "active-skip-session", initial.Generation); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("MarkActive for superseded generation error = %v, want %v", err, ErrStaleGeneration)
+	}
+	state, ok := engine.State("active-skip-session")
+	if !ok || state.Generation != next.Generation || state.Status != routeStatusStarting {
+		t.Fatalf("state after stale MarkActive = %#v, ok=%v", state, ok)
+	}
+}
+
+func TestEngineMarkActionRequiredFromStartingAndFencesGeneration(t *testing.T) {
+	engine := NewEngine()
+	profile := Profile{ID: "dynamic-action-required", Candidates: []Candidate{{ID: "first", Enabled: true}}}
+	initial, err := engine.Select("action-required-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	// A route sitting in "starting" (the exact stranded case this exists to
+	// fix) must be acceptable input.
+	decision, err := engine.MarkActionRequired(context.Background(), "action-required-session", initial.Generation, "launch_failed")
+	if err != nil {
+		t.Fatalf("MarkActionRequired: %v", err)
+	}
+	if decision.Status != routeStatusActionRequired || decision.Reason != "launch_failed" || decision.Generation != initial.Generation {
+		t.Fatalf("decision = %#v", decision)
+	}
+	state, ok := engine.State("action-required-session")
+	if !ok || state.Status != routeStatusActionRequired {
+		t.Fatalf("state after MarkActionRequired = %#v, ok=%v", state, ok)
+	}
+	// A second call (a different failure path re-declaring the same route) is
+	// idempotent, not an error, and keeps its own reason.
+	decision, err = engine.MarkActionRequired(context.Background(), "action-required-session", initial.Generation, "second_reason")
+	if err != nil {
+		t.Fatalf("repeat MarkActionRequired: %v", err)
+	}
+	if decision.Reason != "second_reason" || decision.Status != routeStatusActionRequired {
+		t.Fatalf("repeat decision = %#v", decision)
+	}
+	if _, err := engine.MarkActionRequired(context.Background(), "action-required-session", initial.Generation-1, "stale"); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale MarkActionRequired error = %v, want %v", err, ErrStaleGeneration)
+	}
+	if _, err := engine.MarkActionRequired(context.Background(), "missing-session", 1, "missing"); !errors.Is(err, ErrRouteStateNotFound) {
+		t.Fatalf("missing session MarkActionRequired error = %v, want %v", err, ErrRouteStateNotFound)
+	}
+}
+
+// TestEngineMarkActionRequiredIsNoOpOnceRouteIsActive is the regression test
+// for review finding F1: a route a launch already carried to "active" must
+// not be demoted to action_required by an unrelated later failure (for
+// example a permission-denied or resume-corrupted error the classifier
+// forbids fallback for), which would surface a "Try next provider" recovery
+// banner on a healthy session.
+func TestEngineMarkActionRequiredIsNoOpOnceRouteIsActive(t *testing.T) {
+	engine := NewEngine()
+	profile := Profile{ID: "dynamic-action-required-active", Candidates: []Candidate{{ID: "first", Enabled: true}}}
+	initial, err := engine.Select("active-route-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if err := engine.MarkActive(context.Background(), "active-route-session", initial.Generation); err != nil {
+		t.Fatalf("MarkActive: %v", err)
+	}
+	decision, err := engine.MarkActionRequired(context.Background(), "active-route-session", initial.Generation, "permission_denied")
+	if err != nil {
+		t.Fatalf("MarkActionRequired on active route: %v", err)
+	}
+	if decision.Status != routeStatusActive {
+		t.Fatalf("decision.Status = %q, want unchanged %q", decision.Status, routeStatusActive)
+	}
+	state, ok := engine.State("active-route-session")
+	if !ok || state.Status != routeStatusActive {
+		t.Fatalf("state after no-op MarkActionRequired = %#v, ok=%v, want unchanged active", state, ok)
+	}
+}
+
+func TestEngineMarkRecoveryActionRequiredUnsticksManualRecoveryAfterFailedLaunch(t *testing.T) {
+	engine := NewEngine()
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 60}
+	profile := Profile{ID: "launch-fail-policy", Version: 1, Candidates: []Candidate{
+		{ID: "first", Enabled: true, Policies: document},
+	}}
+	initial, err := engine.Select("launch-fail-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if _, err := engine.ApplyFailure(
+		"launch-fail-session", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
+	); !errors.Is(err, ErrRecoveryPending) {
+		t.Fatalf("ApplyFailure error = %v, want recovery pending", err)
+	}
+	ctx := context.Background()
+	if _, err := engine.ResumePendingNow(ctx, "launch-fail-session", initial.Generation); err != nil {
+		t.Fatalf("ResumePendingNow (simulated timer/manual claim): %v", err)
+	}
+
+	// The durable state is now "retrying" — as if a launch was claimed but
+	// then failed before it could advance the state further. Every manual
+	// recovery path must reject it until the launch-failure handler syncs it.
+	if _, err := engine.ResumePendingNow(ctx, "launch-fail-session", initial.Generation); !errors.Is(err, ErrRecoveryPending) {
+		t.Fatalf("ResumePendingNow while stuck at retrying = %v, want recovery pending", err)
+	}
+	if _, err := engine.CancelPending(ctx, "launch-fail-session", initial.Generation, "manual_stop"); !errors.Is(err, ErrRecoveryPending) {
+		t.Fatalf("CancelPending while stuck at retrying = %v, want recovery pending", err)
+	}
+
+	if err := engine.MarkRecoveryActionRequired(ctx, "launch-fail-session", initial.Generation); err != nil {
+		t.Fatalf("MarkRecoveryActionRequired: %v", err)
+	}
+	state, exists := engine.State("launch-fail-session")
+	if !exists || state.Status != routeStatusActionRequired || state.Generation != initial.Generation {
+		t.Fatalf("state after MarkRecoveryActionRequired = %#v, exists=%v", state, exists)
+	}
+
+	// Manual retry and stop are both unblocked now that the durable state
+	// reflects action_required instead of a launch that will never resolve.
+	if stopped, err := engine.CancelPending(ctx, "launch-fail-session", initial.Generation, "manual_stop"); err != nil {
+		t.Fatalf("CancelPending after sync: %v", err)
+	} else if stopped.Status != routeStatusActionRequired {
+		t.Fatalf("stopped decision = %#v", stopped)
+	}
+}
+
+func TestEngineMarkRecoveryActionRequiredIsNoOpWhenStateMovedOn(t *testing.T) {
+	engine := NewEngine()
+	profile := Profile{ID: "no-op-policy", Version: 1, Candidates: []Candidate{
+		{ID: "first", Enabled: true},
+	}}
+	ctx := context.Background()
+	initial, err := engine.Select("no-op-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+
+	// Never entered "retrying" — no-op, not an error.
+	if err := engine.MarkRecoveryActionRequired(ctx, "no-op-session", initial.Generation); err != nil {
+		t.Fatalf("MarkRecoveryActionRequired on non-retrying state: %v", err)
+	}
+	state, _ := engine.State("no-op-session")
+	if state.Status == routeStatusActionRequired {
+		t.Fatalf("state unexpectedly advanced to action_required: %#v", state)
+	}
+
+	// Stale generation — no-op, not an error.
+	if err := engine.MarkRecoveryActionRequired(ctx, "no-op-session", initial.Generation+1); err != nil {
+		t.Fatalf("MarkRecoveryActionRequired on stale generation: %v", err)
+	}
+
+	// Unknown session — no-op, not an error.
+	if err := engine.MarkRecoveryActionRequired(ctx, "unknown-session", 1); err != nil {
+		t.Fatalf("MarkRecoveryActionRequired on unknown session: %v", err)
 	}
 }
 

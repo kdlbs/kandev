@@ -67,6 +67,10 @@ const (
 // Event types for task sessions
 const (
 	TaskSessionStateChanged = "task_session.state_changed"
+	// SessionPendingActionChanged carries the compact, workspace-scoped
+	// pending-action projection for one session. It contains no transcript
+	// content and lets inactive session selectors stay current.
+	SessionPendingActionChanged = "session.pending_action_changed"
 	// TaskSessionActivityChanged fires when a session's fine-grained activity
 	// flips — a RUNNING foreground turn moving between actively generating and
 	// idle-on-background-work, or detached background work starting/finishing
@@ -140,6 +144,13 @@ const (
 	RepositorySetDeleted = "repository_set.deleted"
 )
 
+// Event types for repository branch policies.
+const (
+	RepositoryBranchPolicyCreated = "repository_branch_policy.created"
+	RepositoryBranchPolicyUpdated = "repository_branch_policy.updated"
+	RepositoryBranchPolicyDeleted = "repository_branch_policy.deleted"
+)
+
 // Event types for repository scripts
 const (
 	RepositoryScriptCreated = "repository.script.created"
@@ -169,7 +180,9 @@ const (
 
 // Event types for users
 const (
-	UserSettingsUpdated = "user.settings.updated"
+	UserSettingsUpdated              = "user.settings.updated"
+	UserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
+	AuthSessionHostnameResolved      = "auth.session.hostname.resolved"
 )
 
 // PluginUserStateUpdated fires after a successful write/delete on a

@@ -410,6 +410,22 @@ func TestResolveDescriptors_RepositoriesAllUnresolved_EmptyList(t *testing.T) {
 	}
 }
 
+func TestResolveDescriptors_RepositoryFreeModeOmitsRepositoryReferences(t *testing.T) {
+	svc := newTestService(t)
+	tx := beginTestReadTx(t, svc)
+
+	got, warnings, err := svc.resolveDescriptors(context.Background(), tx, &Automation{
+		ID: "a1", Name: "scratch", RepositoryMode: RepositoryModeNone,
+		RepositoryIDs: []string{"stale-repository-id"},
+	})
+	if err != nil {
+		t.Fatalf("resolveDescriptors: %v", err)
+	}
+	if len(got.Repositories) != 0 || len(warnings) != 0 {
+		t.Fatalf("repository-free export resolved references: repositories=%v warnings=%v", got.Repositories, warnings)
+	}
+}
+
 func TestResolveDescriptors_LookupNotWired_FailsClosed(t *testing.T) {
 	svc := newTestService(t)
 	tx := beginTestReadTx(t, svc)

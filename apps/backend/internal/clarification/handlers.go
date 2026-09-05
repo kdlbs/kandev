@@ -32,8 +32,21 @@ const (
 
 	clarificationPersistenceTimeout = 30 * time.Second
 
+	// clarificationClaimTimeout bounds only the interactive claim call
+	// (see clarificationClaimContext) -- short enough that a user hitting
+	// writer-pool contention gets fail-fast feedback instead of a 60-75s
+	// dead wait, matching the SQLite busy_timeout order of magnitude.
+	clarificationClaimTimeout = 5 * time.Second
+
 	errClarificationRequestNotFound = "clarification request not found"
 	errClarificationInternal        = "failed to authorize clarification request"
+
+	// clarificationConflictNotActive is the machine-readable `code` sent
+	// alongside a 409's human-readable `error`. It is the only conflict code
+	// /respond produces today (IsNotActiveError, R2's no-winner branch); the
+	// frontend fails closed on any 409 body it doesn't recognize rather than
+	// assuming a future code is safe to treat as success.
+	clarificationConflictNotActive = "not_active"
 )
 
 // handlerMessageStore is the task repository surface used by HTTP handlers
@@ -95,6 +108,27 @@ type MessageCreator interface {
 type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
 }
+
+// PrimaryAnswered is the local ordering notification for a primary-path
+// clarification response. The resolver invokes its notifier synchronously after
+// durable live delivery confirmation and before the live waiter is released.
+// The event bus remains a fan-out projection for other consumers.
+type PrimaryAnswered struct {
+	SessionID           string
+	TaskID              string
+	PendingID           string
+	ClarificationTurnID string
+	Question            string
+	AnswerText          string
+	Rejected            bool
+	RejectReason        string
+}
+
+// PrimaryAnsweredNotifier arms the orchestrator's primary-answer watchdog at
+// the live delivery boundary. It must return only after the local watchdog has
+// been registered. It is deliberately separate from EventBus: NATS Publish is
+// fire-and-forget and cannot acknowledge local watchdog registration.
+type PrimaryAnsweredNotifier func(context.Context, PrimaryAnswered)
 
 // DetachedClarificationResume contains the durable context required to resume
 // a session after its original clarification waiter has gone away.
@@ -404,7 +438,10 @@ func (h *Handlers) writeResolutionResult(c *gin.Context, pendingID string, res *
 	case IsValidationError(err):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case IsNotActiveError(err):
-		c.JSON(http.StatusConflict, gin.H{"error": "clarification request is no longer active"})
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "clarification request is no longer active",
+			"code":  clarificationConflictNotActive,
+		})
 	default:
 		h.logger.Error("failed to resolve clarification bundle",
 			zap.String("pending_id", pendingID), zap.Error(err))
@@ -499,6 +536,19 @@ func clarificationPersistenceContext(ctx context.Context) (context.Context, cont
 	// failed detached response can sequence claim, resume, and restore phases,
 	// so its worst-case response latency may span three of these windows.
 	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
+}
+
+// clarificationClaimContext bounds only the interactive claim
+// (CompleteActiveClarificationBundle) that /respond waits on synchronously.
+// SQLite's single writer connection (SetMaxOpenConns(1)) can queue this call
+// behind other writers for far longer than a user should be left staring at
+// a spinner; clarificationClaimTimeout fails it fast so the caller sees an
+// error (and Defect 1's retry affordance) in single-digit seconds instead of
+// waiting out the full clarificationPersistenceTimeout. Every other
+// persistence phase (resume, restore, the loser re-read) keeps the longer
+// budget -- only this call site changed.
+func clarificationClaimContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), clarificationClaimTimeout)
 }
 
 func clarificationPersistenceContextPreservingDeadline(ctx context.Context) (context.Context, context.CancelFunc) {

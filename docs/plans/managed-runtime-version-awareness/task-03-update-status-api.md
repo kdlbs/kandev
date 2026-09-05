@@ -5,7 +5,7 @@ status: complete
 wave: 3
 depends_on: ["02-effective-version-selection"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 03: Add cached update status

@@ -6,8 +6,6 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
-import { scoreBranch } from "@/lib/utils/branch-filter";
-import { BranchRefreshButton } from "./branch-refresh-button";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import {
   processFile,
@@ -48,6 +46,9 @@ import {
   useStablePluginComposerCapability,
 } from "@/lib/plugins/composer-capability";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+
+export { BranchSelector } from "./branch-selector";
+export type { BranchOption, BranchSelectorProps } from "./branch-selector";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -114,72 +115,6 @@ export const RepositorySelector = memo(function RepositorySelector({
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
       testId="repository-selector"
-    />
-  );
-});
-
-type BranchOption = {
-  value: string;
-  label: string;
-  keywords?: string[];
-  renderLabel: () => React.ReactNode;
-};
-
-type BranchSelectorProps = {
-  options: BranchOption[];
-  value: string;
-  onValueChange: (value: string) => void;
-  disabled: boolean;
-  placeholder: string;
-  searchPlaceholder: string;
-  emptyMessage: string;
-  triggerClassName?: string;
-  onRefresh?: () => void;
-  refreshing?: boolean;
-  fetchedAt?: string;
-  fetchError?: string;
-  loading?: boolean;
-};
-
-export const BranchSelector = memo(function BranchSelector({
-  options,
-  value,
-  onValueChange,
-  disabled,
-  placeholder,
-  searchPlaceholder,
-  emptyMessage,
-  triggerClassName,
-  onRefresh,
-  refreshing,
-  fetchedAt,
-  fetchError,
-  loading,
-}: BranchSelectorProps) {
-  const headerAction = onRefresh ? (
-    <BranchRefreshButton
-      onRefresh={onRefresh}
-      refreshing={refreshing}
-      fetchedAt={fetchedAt}
-      fetchError={fetchError}
-    />
-  ) : undefined;
-  return (
-    <Combobox
-      options={options}
-      value={value}
-      onValueChange={onValueChange}
-      placeholder={placeholder}
-      searchPlaceholder={searchPlaceholder}
-      emptyMessage={emptyMessage}
-      disabled={disabled}
-      dropdownLabel={t("task:baseBranch2")}
-      className={disabled ? undefined : CURSOR_POINTER_CLASS}
-      triggerClassName={triggerClassName}
-      testId="branch-selector"
-      filter={scoreBranch}
-      headerAction={headerAction}
-      loading={loading}
     />
   );
 });

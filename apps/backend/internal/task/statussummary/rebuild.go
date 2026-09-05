@@ -41,6 +41,8 @@ type PullRequestInput struct {
 	RequiredReviews       int
 	ChecksTotal           int
 	ChecksPassing         int
+	AutoFixEnabled        bool
+	AutoMergeEnabled      bool
 }
 
 // RebuildInput contains the authoritative bounded facts available from
@@ -113,7 +115,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	for _, git := range input.Git {
 		repository := strings.TrimSpace(git.Repository)
 		if repository == "" {
-			repository = "default"
+			repository = RootRepositoryKey
 		}
 		state.git[repository] = git.Summary
 	}

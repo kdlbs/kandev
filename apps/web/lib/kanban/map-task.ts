@@ -41,6 +41,11 @@ export type TaskLike = {
     repository_id: string;
     base_branch?: string;
     checkout_branch?: string;
+    branch_policy_id?: string;
+    branch_policy_name?: string;
+    branch_policy_base_branch?: string;
+    branch_policy_branch_template?: string;
+    branch_policy_pull_request_target?: string;
     position?: number;
   }>;
   workspace_folders?: Array<{
@@ -66,8 +71,13 @@ export type TaskLike = {
   primary_executor_id?: string | null;
   primary_executor_type?: string | null;
   primary_executor_name?: string | null;
+  primary_agent_name?: string | null;
+  primary_agent_profile_id?: string | null;
+  labels?: string | string[] | null;
+  origin?: string | null;
   is_remote_executor?: boolean;
   parent_id?: string | null;
+  assignee_user_id?: string;
   updated_at?: string;
   created_at?: string;
   wip_admitted?: boolean;
@@ -106,6 +116,20 @@ function pickId(source: TaskLike): string {
   return (source.id ?? source.task_id ?? "") as string;
 }
 
+function pickLabels(source: TaskLike): string[] {
+  if (Array.isArray(source.labels))
+    return source.labels.filter((label) => typeof label === "string");
+  if (!source.labels) return [];
+  try {
+    const decoded: unknown = JSON.parse(source.labels);
+    return Array.isArray(decoded)
+      ? decoded.filter((label): label is string => typeof label === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function pickPendingAction(action: unknown): TaskPendingAction | null | undefined {
   if (action === null) return null;
   if (action === "clarification" || action === "permission") {
@@ -129,6 +153,11 @@ function pickRepositories(source: TaskLike): KanbanTaskRepository[] | undefined 
     repository_id: r.repository_id,
     base_branch: r.base_branch ?? "",
     checkout_branch: r.checkout_branch,
+    branch_policy_id: r.branch_policy_id,
+    branch_policy_name: r.branch_policy_name,
+    branch_policy_base_branch: r.branch_policy_base_branch,
+    branch_policy_branch_template: r.branch_policy_branch_template,
+    branch_policy_pull_request_target: r.branch_policy_pull_request_target,
     position: r.position ?? idx,
   }));
 }
@@ -194,6 +223,18 @@ export function copyPrimaryExecutorFields(merged: KanbanTask, existing: KanbanTa
   merged.isRemoteExecutor = existing.isRemoteExecutor;
 }
 
+/**
+ * "Unassigned" has one spelling in the store: undefined.
+ *
+ * The wire uses an empty string for it (that is what a PATCH sends to
+ * unassign), so without this the store would hold both "" and undefined for
+ * the same state and every consumer would need to know that.
+ */
+export function pickAssignee(value: string | undefined): string | undefined {
+  return value ? value : undefined;
+}
+
+// eslint-disable-next-line complexity -- Maps the complete task wire contract into the shared Kanban model.
 export function toKanbanTask(source: TaskLike): KanbanTask {
   return {
     id: pickId(source),
@@ -222,7 +263,12 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primaryExecutorId: source.primary_executor_id ?? undefined,
     primaryExecutorType: source.primary_executor_type ?? undefined,
     primaryExecutorName: source.primary_executor_name ?? undefined,
+    primaryAgentProfileId: source.primary_agent_profile_id ?? undefined,
+    primaryAgentName: source.primary_agent_name ?? undefined,
+    labels: pickLabels(source),
+    origin: source.origin ?? undefined,
     isRemoteExecutor: source.is_remote_executor ?? false,
+    assigneeUserId: pickAssignee(source.assignee_user_id),
     parentTaskId: source.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,

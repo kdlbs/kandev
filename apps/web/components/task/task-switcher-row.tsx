@@ -6,6 +6,7 @@ import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
 import { dispatchSidebarRowClick } from "./task-switcher-click";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
+import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
 
 export type SubtaskToggleInfo = {
   subtaskCount: number;
@@ -25,6 +26,7 @@ export type TaskRowProps = {
   showActivityTime?: boolean;
   /** False when the list is grouped by repository and the header already names it. */
   showRepository?: boolean;
+  taskRowPresentation?: SidebarTaskRowPresentation;
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
@@ -100,6 +102,7 @@ type TaskRowItemProps = Pick<
   | "selectedTaskId"
   | "showActivityTime"
   | "showRepository"
+  | "taskRowPresentation"
   | "onSelectTask"
   | "selectedTaskIds"
   | "onToggleSelectTask"
@@ -118,6 +121,7 @@ function TaskRowItem({
   selectedTaskId,
   showActivityTime,
   showRepository,
+  taskRowPresentation,
   onSelectTask,
   selectedTaskIds,
   onToggleSelectTask,
@@ -151,6 +155,7 @@ function TaskRowItem({
       }
       title={task.title}
       autopilot={task.autopilot}
+      priority={task.priority}
       state={task.state}
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
@@ -160,6 +165,7 @@ function TaskRowItem({
       diffStats={task.diffStats}
       comparisonUnavailable={task.comparisonUnavailable}
       isRemoteExecutor={task.isRemoteExecutor}
+      remoteExecutorId={task.remoteExecutorId}
       remoteExecutorType={task.remoteExecutorType}
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}
@@ -172,6 +178,7 @@ function TaskRowItem({
       showActivityTime={showActivityTime}
       repositoryPath={task.repositoryPath}
       showRepository={showRepository}
+      taskRowPresentation={taskRowPresentation}
       prInfo={task.prInfo}
       queuedCount={task.queuedCount}
       wipQueue={task.wipQueue}

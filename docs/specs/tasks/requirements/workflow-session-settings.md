@@ -20,6 +20,8 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.2:** When a fixed step profile differs from the active session profile, Kandev shall create or activate a session for that profile. Kandev shall route the step entry actions to this session. This rule applies to an active CLI passthrough session.
+- **AC-TASKS-WORKFLOW-SESSION-SETTINGS-001.3:** When Kandev cannot validate or prepare a fixed-profile session, it shall not run the destination step on the previous profile. Kandev shall leave the previous session recoverable.
 
 ## Migrated source detail
 
@@ -133,7 +135,7 @@ The backend validates the action on workflow-step create/update and import. Inva
 
 Existing agent capability responses provide the editor's family names, models, and ACP select options. Existing task-session model/configuration mechanisms apply and persist runtime changes.
 
-When an ACP provider's options depend on the selected model, the editor uses the model-aware capability contract in [Dynamic Provider Model Options](../../agents/dynamic-provider-options.md) to replace the baseline option snapshot before saving a rule.
+When an ACP provider's options depend on the selected model, the editor uses the model-aware capability contract in [Dynamic Provider Model Options](../../agents/requirements/dynamic-provider-options.md) to replace the baseline option snapshot before saving a rule.
 
 ## State machine
 

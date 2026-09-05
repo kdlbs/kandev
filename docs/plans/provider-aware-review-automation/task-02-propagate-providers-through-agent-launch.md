@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-scope-task-mcp-tools-by-provider"]
 plan: "plan.md"
-spec: "../../specs/integrations/provider-aware-review-automation.md"
+spec: "../../specs/integrations/requirements/provider-aware-review-automation.md"
 ---
 
 # Task 02: Propagate providers through agent launch

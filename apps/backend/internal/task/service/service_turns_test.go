@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -25,6 +26,18 @@ import (
 
 type nilTaskSessionRepo struct {
 	repository.SessionRepository
+}
+
+type failGetExecutorRunningRepository struct {
+	repository.ExecutorRepository
+	err error
+}
+
+func (r failGetExecutorRunningRepository) GetExecutorRunningBySessionID(
+	context.Context,
+	string,
+) (*models.ExecutorRunning, error) {
+	return nil, r.err
 }
 
 type failGetAfterPublishMetadataRepo struct {
@@ -790,6 +803,22 @@ func createTestEnvironment(t *testing.T, repo *sqliterepo.Repository, envID, tas
 	}
 }
 
+// createTestEnvironmentWithRepos is like createTestEnvironment but seeds the
+// canonical repository inventory atomically with the ready environment.
+// CreateTaskEnvironment requires a ready environment for a repo-backed task
+// to carry its inventory up front, so tests whose task has task_repositories
+// rows must use this instead of a separate CreateTaskEnvironmentRepo call.
+func createTestEnvironmentWithRepos(t *testing.T, repo *sqliterepo.Repository, envID, taskID string, repos []*models.TaskEnvironmentRepo) {
+	t.Helper()
+	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: envID, TaskID: taskID, ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: repos,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment(%s): %v", envID, err)
+	}
+}
+
 func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -913,13 +942,12 @@ func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	createTestEnvironment(t, repo, "env-recovery", "task-123")
-	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
-		ID: "session-worktree-recovery", TaskEnvironmentID: "env-recovery", WorktreeID: "worktree-recovery", RepositoryID: "repo-recovery",
-		BranchSlug: "feature-recovery", WorktreePath: "/tasks/task-recovery/api-feature-recovery", CreatedAt: now,
-	}); err != nil {
-		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
-	}
+	createTestEnvironmentWithRepos(t, repo, "env-recovery", "task-123", []*models.TaskEnvironmentRepo{
+		{
+			ID: "session-worktree-recovery", TaskEnvironmentID: "env-recovery", WorktreeID: "worktree-recovery", RepositoryID: "repo-recovery",
+			BranchSlug: "feature-recovery", WorktreePath: "/tasks/task-recovery/api-feature-recovery", CreatedAt: now,
+		},
+	})
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-recovery")
 	if err != nil {
@@ -959,15 +987,10 @@ func TestGetWorkspaceInfoForSession_ProjectsDistinctWorktreesForSameRepositoryBr
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	createTestEnvironment(t, repo, "env-multi-recovery", "task-123")
-	for _, worktree := range []*models.TaskEnvironmentRepo{
+	createTestEnvironmentWithRepos(t, repo, "env-multi-recovery", "task-123", []*models.TaskEnvironmentRepo{
 		{ID: "session-worktree-one", TaskEnvironmentID: "env-multi-recovery", WorktreeID: "worktree-one", RepositoryID: "repo-multi-recovery", BranchSlug: "feature-one", CreatedAt: now},
 		{ID: "session-worktree-two", TaskEnvironmentID: "env-multi-recovery", WorktreeID: "worktree-two", RepositoryID: "repo-multi-recovery", BranchSlug: "feature-two", CreatedAt: now},
-	} {
-		if err := repo.CreateTaskEnvironmentRepo(ctx, worktree); err != nil {
-			t.Fatalf("CreateTaskEnvironmentRepo %q: %v", worktree.BranchSlug, err)
-		}
-	}
+	})
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-multi-recovery")
 	if err != nil {
@@ -1024,10 +1047,9 @@ func TestGetWorkspaceInfoForSession_UsesRepositoryDefaultBranchIdentity(t *testi
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-default-branch", TaskID: "task-123", TaskEnvironmentID: "env-default-branch", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	createTestEnvironment(t, repo, "env-default-branch", "task-123")
-	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{ID: "session-worktree-default-branch", TaskEnvironmentID: "env-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", BranchSlug: "main", CreatedAt: now}); err != nil {
-		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
-	}
+	createTestEnvironmentWithRepos(t, repo, "env-default-branch", "task-123", []*models.TaskEnvironmentRepo{
+		{ID: "session-worktree-default-branch", TaskEnvironmentID: "env-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", BranchSlug: "main", CreatedAt: now},
+	})
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-default-branch")
 	if err != nil {
@@ -1063,15 +1085,14 @@ func TestGetWorkspaceInfoForSession_UsesHashDisambiguatedBranchIdentities(t *tes
 		{RepositoryID: "repo-hash-branches", BaseBranch: "feature/a", DefaultBranch: "main", PRNumber: 101, Position: 0},
 		{RepositoryID: "repo-hash-branches", BaseBranch: "feature-a", DefaultBranch: "main", PRNumber: 202, Position: 1},
 	})
-	createTestEnvironment(t, repo, "env-hash-branches", "task-123")
+	envRepos := make([]*models.TaskEnvironmentRepo, 0, len(plans))
 	for index, plan := range plans {
-		if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		envRepos = append(envRepos, &models.TaskEnvironmentRepo{
 			ID: fmt.Sprintf("session-worktree-hash-%d", index), TaskEnvironmentID: "env-hash-branches", WorktreeID: fmt.Sprintf("worktree-hash-%d", index),
 			RepositoryID: "repo-hash-branches", BranchSlug: plan.IdentitySlug, CreatedAt: now,
-		}); err != nil {
-			t.Fatalf("CreateTaskEnvironmentRepo %q: %v", plan.IdentitySlug, err)
-		}
+		})
 	}
+	createTestEnvironmentWithRepos(t, repo, "env-hash-branches", "task-123", envRepos)
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-hash-branches")
 	if err != nil {
@@ -1110,10 +1131,9 @@ func TestGetWorkspaceInfoForSession_ProjectsOnlyLifecycleValidRepositories(t *te
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-projection-validity", TaskID: "task-123", TaskEnvironmentID: "env-projection-validity", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	createTestEnvironment(t, repo, "env-projection-validity", "task-123")
-	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{ID: "session-worktree-projection-validity", TaskEnvironmentID: "env-projection-validity", WorktreeID: "worktree-projection-validity", RepositoryID: "repo-provider-recovery", BranchSlug: "main", CreatedAt: now}); err != nil {
-		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
-	}
+	createTestEnvironmentWithRepos(t, repo, "env-projection-validity", "task-123", []*models.TaskEnvironmentRepo{
+		{ID: "session-worktree-projection-validity", TaskEnvironmentID: "env-projection-validity", WorktreeID: "worktree-projection-validity", RepositoryID: "repo-provider-recovery", BranchSlug: "main", CreatedAt: now},
+	})
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-projection-validity")
 	if err != nil {
@@ -1401,6 +1421,200 @@ func TestGetWorkspaceInfoForSession_ExecutorInfo(t *testing.T) {
 	}
 	if info.AgentExecutionID != "agent-exec-abc123" {
 		t.Errorf("expected AgentExecutionID 'agent-exec-abc123', got %q", info.AgentExecutionID)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_KubernetesRunningRecordOwnsExecutorAndCurrentConnection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "recorded-kubernetes", Name: "Kubernetes", Type: models.ExecutorTypeKubernetes,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "in_cluster",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "repointed-local", Name: "Local", Type: models.ExecutorTypeLocal,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s", TaskID: "task-123", ExecutorID: "repointed-local",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-k8s", SessionID: "session-k8s", TaskID: "task-123",
+		ExecutorID: "recorded-kubernetes", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution",
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeconfigPath:        "/old/kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeContext:           "old-context",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "30",
+			lifecycle.MetadataKeyKubernetesNamespace:             "kandev-agents",
+			lifecycle.MetadataKeyKubernetesPodName:               "recorded-pod",
+			lifecycle.MetadataKeyKubernetesPodUID:                "recorded-pod-uid",
+			lifecycle.MetadataKeyKubernetesProfileSnapshot:       "recorded-snapshot",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s")
+
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+	if info.ExecutorType != string(models.ExecutorTypeKubernetes) || info.RuntimeName != agentruntime.RuntimeKubernetes {
+		t.Fatalf("executor projection = type %q runtime %q", info.ExecutorType, info.RuntimeName)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesPodUID]; got != "recorded-pod-uid" {
+		t.Fatalf("recorded Pod UID = %v", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesAuthMode]; got != "in_cluster" {
+		t.Fatalf("auth mode = %v, want current in_cluster", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds]; got != "45" {
+		t.Fatalf("request timeout = %v, want current 45", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesKubeconfigPath]; got != "" {
+		t.Fatalf("kubeconfig path = %v, want authoritative empty", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesKubeContext]; got != "" {
+		t.Fatalf("kube context = %v, want authoritative empty", got)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_KubernetesWithoutRunningRowUsesCurrentConnection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "kubernetes-executor", Name: "Kubernetes", Type: models.ExecutorTypeKubernetes,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeconfigPath:        "/etc/kandev/kubeconfig",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s", TaskID: "task-123", ExecutorID: "kubernetes-executor",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s")
+
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+	if info.ExecutorType != string(models.ExecutorTypeKubernetes) {
+		t.Fatalf("ExecutorType = %q, want Kubernetes", info.ExecutorType)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesKubeconfigPath]; got != "/etc/kandev/kubeconfig" {
+		t.Fatalf("kubeconfig path = %v, want current connection metadata", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesConfigNamespace]; got != "kandev-agents" {
+		t.Fatalf("namespace = %v, want current connection metadata", got)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_KubernetesRunningRecordFailsClosedWithoutExecutor(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s-missing", TaskID: "task-123", ExecutorID: "unrelated-executor",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-k8s-missing", SessionID: "session-k8s-missing", TaskID: "task-123",
+		ExecutorID: "deleted-kubernetes", Runtime: agentruntime.RuntimeKubernetes,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s-missing")
+
+	if err == nil || !strings.Contains(err.Error(), "executor not found") {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_KubernetesRunningRecordFailsClosedAfterExecutorTypeChange(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "changed-kubernetes", Name: "Changed", Type: models.ExecutorTypeLocal,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s-changed", TaskID: "task-123", ExecutorID: "unrelated-executor",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-k8s-changed", SessionID: "session-k8s-changed", TaskID: "task-123",
+		ExecutorID: "changed-kubernetes", Runtime: agentruntime.RuntimeKubernetes,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s-changed")
+
+	if err == nil || !strings.Contains(err.Error(), "executor is no longer Kubernetes") {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_FailsClosedWhenRuntimeInventoryReadFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-inventory-error", TaskID: "task-123",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc.executors = failGetExecutorRunningRepository{
+		ExecutorRepository: repo,
+		err:                errors.New("database unavailable"),
+	}
+
+	_, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-inventory-error")
+
+	if err == nil || !strings.Contains(err.Error(), "load runtime inventory") {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v, want runtime inventory read failure", err)
 	}
 }
 

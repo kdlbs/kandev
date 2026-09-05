@@ -15,6 +15,11 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -103,7 +108,16 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		DefaultEnvironmentID:        normalizeOptionalID(req.DefaultEnvironmentID),
 		DefaultAgentProfileID:       normalizeOptionalID(req.DefaultAgentProfileID),
 		DefaultConfigAgentProfileID: normalizeOptionalID(req.DefaultConfigAgentProfileID),
+		// The tenant comes from the creating identity and from nowhere else.
+		// There is no org field on the request on purpose: a caller must not
+		// be able to place a workspace in another tenant.
+		OrgID: callerOrgID(ctx),
 	}
+	placement, placementErr := s.placementFor(ctx, ownerID, workspace.OrgID)
+	if placementErr != nil {
+		return nil, placementErr
+	}
+	workspace.UnitID = placement
 
 	var kanbanWorkflow *models.Workflow
 	if req.BootstrapKanbanWorkflow {
@@ -129,6 +143,10 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		}
 	}
 
+	if err := s.seedWorkspaceOwnerMember(ctx, workspace); err != nil {
+		return nil, err
+	}
+
 	s.publishWorkspaceEvent(ctx, events.WorkspaceCreated, workspace)
 	s.logger.Info("workspace created", zap.String("workspace_id", workspace.ID), zap.String("name", workspace.Name))
 	if kanbanWorkflow != nil {
@@ -144,7 +162,7 @@ func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspac
 	if err != nil {
 		return nil, err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
+	if scoped := s.workspaceDecision(ctx, workspace); !scoped.CanRead() {
 		return nil, repoerrors.ErrWorkspaceNotFound
 	}
 	return workspace, nil
@@ -156,10 +174,15 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	if err != nil {
 		return nil, err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return nil, repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return nil, err
 	}
 
+	if req.UnitID != nil {
+		if err := s.moveWorkspaceToUnit(ctx, workspace, *req.UnitID); err != nil {
+			return nil, err
+		}
+	}
 	if req.Name != nil {
 		workspace.Name = *req.Name
 	}
@@ -196,8 +219,8 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return err
 	}
 	return s.deleteWorkspace(ctx, workspace, nil)
 }
@@ -209,13 +232,36 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 	if err != nil {
 		return err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return err
 	}
 	if confirmName != workspace.Name {
 		return ErrWorkspaceConfirmNameMismatch
 	}
 	return s.deleteWorkspace(ctx, workspace, &confirmName)
+}
+
+// DeleteOrganizationWorkspaces removes every workspace in one organization
+// through the same lifecycle as an ordinary workspace deletion. Authorization
+// is performed by the operator-only organization controller before this
+// narrow internal seam is called.
+func (s *Service) DeleteOrganizationWorkspaces(ctx context.Context, orgID string) error {
+	if orgID == "" {
+		return nil
+	}
+	workspaces, err := s.workspaces.ListWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("list organization workspaces: %w", err)
+	}
+	for _, workspace := range workspaces {
+		if workspace == nil || workspace.OrgID != orgID {
+			continue
+		}
+		if err := s.deleteWorkspace(ctx, workspace, nil); err != nil {
+			return fmt.Errorf("delete workspace %s: %w", workspace.ID, err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
@@ -452,7 +498,7 @@ func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskClean
 		return
 	}
 	envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}
-	s.runTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup,
+	s.runTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup, true,
 		"task deleted", "failed to stop session on task delete", "task cleanup completed")
 }
 
@@ -502,14 +548,14 @@ func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, erro
 	if err != nil {
 		return nil, err
 	}
-	return filterWorkspacesForCaller(ctx, workspaces), nil
+	return s.filterWorkspacesForCaller(ctx, workspaces), nil
 }
 
 // Workflow operations
 
 // CreateWorkflow creates a new workflow
 func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest) (*models.Workflow, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 		return nil, err
 	}
 	workflow := &models.Workflow{
@@ -753,12 +799,15 @@ func (s *Service) createRepository(
 	localPath string,
 	resolveProvider bool,
 ) (*models.Repository, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 		return nil, err
 	}
 	sourceType := req.SourceType
 	if sourceType == "" {
 		sourceType = sourceTypeLocal
+	}
+	if req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(req.DefaultBranch) {
+		return nil, fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
 	}
 	prefix := strings.TrimSpace(req.WorktreeBranchPrefix)
 	if err := worktree.ValidateBranchPrefix(prefix); err != nil {
@@ -966,10 +1015,20 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		// Backfill default_branch when the caller carries one and the existing
 		// row is still empty. Lets the synchronous add_branch probe persist its
 		// answer onto a previously-empty Repository row (e.g. one created by
-		// an earlier create_task that left default_branch unset).
+		// an earlier create_task that left default_branch unset). Validated
+		// here directly: this value reaches git argv (worktree fetch/pull via
+		// FallbackBaseBranch) on paths that never go through ancestry.Check,
+		// so that defense-in-depth guard does not cover it. Invalid input
+		// skips only this field's backfill rather than failing the whole
+		// find-or-create call, since this is a best-effort backfill.
 		if existing.DefaultBranch == "" && req.DefaultBranch != "" {
-			existing.DefaultBranch = req.DefaultBranch
-			dirty = true
+			if securityutil.IsValidDefaultBranchName(req.DefaultBranch) {
+				existing.DefaultBranch = req.DefaultBranch
+				dirty = true
+			} else {
+				s.logger.Warn("skipping default_branch backfill: invalid branch name",
+					zap.String("repository_id", existing.ID))
+			}
 		}
 		if existing.RemoteURL == "" && req.RemoteURL != "" {
 			existing.RemoteURL = req.RemoteURL
@@ -1054,7 +1113,7 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		return nil, err
 	}
 	if repository != nil {
-		if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
+		if err := s.AuthorizeWorkspaceScope(ctx, repository.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 			return nil, repoerrors.ErrRepositoryNotFound
 		}
 	}
@@ -1181,6 +1240,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 		repository.ProviderName = *req.ProviderName
 	}
 	if req.DefaultBranch != nil {
+		if *req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(*req.DefaultBranch) {
+			return fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
+		}
 		repository.DefaultBranch = *req.DefaultBranch
 	}
 	if req.WorktreeBranchPrefix != nil {
@@ -1224,7 +1286,10 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 		return err
 	}
 	if repository != nil {
-		if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
+		if err := s.AuthorizeWorkspaceScope(ctx, repository.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
+			if IsForbidden(err) {
+				return err
+			}
 			return repoerrors.ErrRepositoryNotFound
 		}
 	}
@@ -1475,8 +1540,43 @@ func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []stri
 
 // Executor operations
 
+var ErrKubernetesAdminRequired = errors.New("administrator identity required for Kubernetes settings")
+
+func requireKubernetesAdmin(ctx context.Context) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || !identity.IsAdmin() {
+		return ErrKubernetesAdminRequired
+	}
+	return nil
+}
+
+func validateExecutorForType(executorType models.ExecutorType, config map[string]string) error {
+	if err := validateExecutorConfig(config); err != nil {
+		return err
+	}
+	if executorType != models.ExecutorTypeKubernetes {
+		return nil
+	}
+	if _, err := agentkubernetes.ParseExecutorConfig(config); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+	}
+	return nil
+}
+
+func validateKubernetesProfileConfig(config map[string]string) error {
+	if _, err := agentkubernetes.ParseProfileConfig(config); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+	}
+	return nil
+}
+
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
-	if err := validateExecutorConfig(req.Config); err != nil {
+	if req.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if err := validateExecutorForType(req.Type, req.Config); err != nil {
 		return nil, err
 	}
 	executor := &models.Executor{
@@ -1505,8 +1605,29 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if err != nil {
 		return nil, err
 	}
+	targetType := executor.Type
+	if req.Type != nil {
+		targetType = *req.Type
+	}
+	if executor.Type == models.ExecutorTypeKubernetes || targetType == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateExecutorUpdateRequest(executor, req); err != nil {
 		return nil, err
+	}
+	if req.Type != nil && *req.Type != executor.Type &&
+		(executor.Type == models.ExecutorTypeKubernetes || *req.Type == models.ExecutorTypeKubernetes) {
+		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
+		if inventoryErr != nil {
+			s.logger.Error("failed to check retained Kubernetes inventory before executor type change",
+				zap.String("executor_id", id), zap.Error(inventoryErr))
+			return nil, inventoryErr
+		}
+		if retained {
+			return nil, ErrActiveTaskSessions
+		}
 	}
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
@@ -1519,8 +1640,16 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 
 // validateExecutorUpdateRequest validates config and system executor constraints.
 func validateExecutorUpdateRequest(executor *models.Executor, req *UpdateExecutorRequest) error {
+	targetType := executor.Type
+	if req.Type != nil {
+		targetType = *req.Type
+	}
 	if req.Config != nil {
-		if err := validateExecutorConfig(req.Config); err != nil {
+		if err := validateExecutorForType(targetType, req.Config); err != nil {
+			return err
+		}
+	} else if targetType == models.ExecutorTypeKubernetes {
+		if err := validateExecutorForType(targetType, executor.Config); err != nil {
 			return err
 		}
 	}
@@ -1566,6 +1695,11 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return err
+		}
+	}
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
 	}
@@ -1577,11 +1711,50 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
+		if inventoryErr != nil {
+			s.logger.Error("failed to check retained Kubernetes inventory for executor",
+				zap.String("executor_id", id), zap.Error(inventoryErr))
+			return inventoryErr
+		}
+		if retained {
+			return ErrActiveTaskSessions
+		}
+	}
 	if err := s.executors.DeleteExecutor(ctx, id); err != nil {
 		return err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
 	return nil
+}
+
+func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
+	running, err := s.executors.ListExecutorsRunning(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range running {
+		if row == nil {
+			continue
+		}
+		currentID := strings.TrimSpace(row.ExecutorID)
+		recordedID, recordedOK := row.Metadata[agentkubernetes.MetadataKeyResourceExecutorID].(string)
+		recordedID = strings.TrimSpace(recordedID)
+		if currentID == executorID {
+			return true, nil
+		}
+		if recordedID == executorID {
+			return true, nil
+		}
+		// Only two matching, nonempty associations can prove that a Kubernetes
+		// row belongs to some other executor. Anything less must block cleanup.
+		if row.Runtime == agentruntime.RuntimeKubernetes &&
+			(currentID == "" || !recordedOK || recordedID == "" || currentID != recordedID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
@@ -1597,13 +1770,21 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if req.ExecutorID == "" {
 		return nil, fmt.Errorf("executor_id is required")
 	}
-	if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
-		return nil, err
-	}
 	// Verify executor exists
 	executor, err := s.executors.GetExecutor(ctx, req.ExecutorID)
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
+	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+		if err := validateKubernetesProfileConfig(req.Config); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
+		return nil, err
 	}
 	if executor.Type == models.ExecutorTypeSprites && !hasSpritesToken(req.EnvVars) {
 		return nil, fmt.Errorf("sprites profiles require %s env var", spritesTokenEnvKey)
@@ -1636,6 +1817,18 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil {
 		return nil, err
+	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+		config := profile.Config
+		if req.Config != nil {
+			config = req.Config
+		}
+		if err := validateKubernetesProfileConfig(config); err != nil {
+			return nil, err
+		}
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name
@@ -1737,6 +1930,15 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	profile, err := s.executors.GetExecutorProfile(ctx, id)
 	if err != nil {
 		return err
+	}
+	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
+		return err
+	}
+	if executor != nil && executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return err
+		}
 	}
 	if err := s.executors.DeleteExecutorProfile(ctx, id); err != nil {
 		return err

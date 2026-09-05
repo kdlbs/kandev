@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/prompt-turn-duration.md"
+spec: "../../specs/ui/requirements/prompt-turn-duration.md"
 ---
 
 # Task 01: Duration helper with unit tests
@@ -25,7 +25,7 @@ spec: "../../specs/ui/prompt-turn-duration.md"
 - **Dependencies:** None.
 - **Parallelism:** sequential.
 - **Inputs:**
-  - Spec: `docs/specs/ui/prompt-turn-duration.md` — `What` duration rule, all `Scenarios`.
+  - Spec: `docs/specs/ui/requirements/prompt-turn-duration.md` — `What` duration rule, all `Scenarios`.
   - Plan: `docs/plans/prompt-turn-duration/plan.md` — Frontend "Duration helper", Tests table.
   - Pattern: `buildPromptHistoryEntries` in `apps/web/lib/prompt-history.ts` shows the shared arithmetic for the completion bound (completion ns minus prompt ns, `BigInt(1_000_000_000)` division, clamp `BigInt(0)`) — reuse only that arithmetic and `epochNanoseconds`; do NOT apply the panel's next-prompt bound; `formatPromptDuration` (already exported, same file) stays as the formatter.
   - `Turn` type: `apps/web/lib/types/http.ts` — `completed_at?: string` is optional.

@@ -256,11 +256,11 @@ export function AppSidebar() {
         )}
         style={{ width: targetWidth }}
       >
+        <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
         <div
           data-testid="app-sidebar-content"
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
           <AppSidebarNavigation collapsed={collapsed} mode={mode} settingsMode={settingsMode} />
           <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={handleToggleSettingsMode} />
         </div>

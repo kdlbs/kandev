@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -32,6 +32,7 @@ export {
 } from "./processed-message-filtering";
 
 const debug = createDebugLogger("messages:process");
+const PROCESSED_PIPELINE_DEBUG_INTERVAL_MS = 250;
 
 function countByType(messages: Message[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -42,31 +43,65 @@ function countByType(messages: Message[]): Record<string, number> {
   return out;
 }
 
-function useDebugProcessedPipeline(args: {
+type ProcessedPipelineDebugArgs = {
   sessionId: string | null;
   messages: Message[];
   visibleMessages: Message[];
   footerActionCount: number;
   groupedItems: RenderItem[];
-}) {
-  const { sessionId, messages, visibleMessages, footerActionCount, groupedItems } = args;
-  useEffect(() => {
-    if (!isDebug()) return;
+};
+
+function useDebugProcessedPipeline(args: ProcessedPipelineDebugArgs) {
+  const latestArgsRef = useRef(args);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const emitLatestDebugSample = () => {
+    const latest = latestArgsRef.current;
     debug("pipeline", {
-      sessionId,
-      input: { count: messages.length, byType: countByType(messages) },
-      afterFilter: { count: visibleMessages.length, byType: countByType(visibleMessages) },
-      droppedByFilter: messages.length - visibleMessages.length,
-      footerActionCount,
-      groupedItemKinds: groupedItems.reduce<Record<string, number>>((acc, item) => {
+      sessionId: latest.sessionId,
+      input: { count: latest.messages.length, byType: countByType(latest.messages) },
+      afterFilter: {
+        count: latest.visibleMessages.length,
+        byType: countByType(latest.visibleMessages),
+      },
+      droppedByFilter: latest.messages.length - latest.visibleMessages.length,
+      footerActionCount: latest.footerActionCount,
+      groupedItemKinds: latest.groupedItems.reduce<Record<string, number>>((acc, item) => {
         acc[item.type] = (acc[item.type] ?? 0) + 1;
         return acc;
       }, {}),
-      turnGroupSizes: groupedItems
+      turnGroupSizes: latest.groupedItems
         .filter((i): i is TurnGroup => i.type === "turn_group")
         .map((g) => ({ turnId: g.turnId, size: g.messages.length })),
     });
-  }, [sessionId, messages, visibleMessages, footerActionCount, groupedItems]);
+  };
+
+  const flushPendingDebugSample = () => {
+    if (timerRef.current === null) return;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+    emitLatestDebugSample();
+  };
+
+  useEffect(() => {
+    if (latestArgsRef.current.sessionId !== args.sessionId) {
+      flushPendingDebugSample();
+    }
+    latestArgsRef.current = args;
+    if (!isDebug()) return;
+    if (timerRef.current !== null) return;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      emitLatestDebugSample();
+    }, PROCESSED_PIPELINE_DEBUG_INTERVAL_MS);
+  }, [args]);
+
+  useEffect(
+    () => () => {
+      flushPendingDebugSample();
+    },
+    [],
+  );
 }
 
 const ACTIVITY_MESSAGE_TYPES: Set<MessageType> = new Set([
@@ -109,6 +144,7 @@ export type GroupedRenderOptions = {
 };
 
 export type ProcessedMessagesOptions = {
+  historyInitialized?: boolean;
   hasOlderMessages?: boolean;
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
@@ -444,9 +480,13 @@ function useVisibleMessages(
 export function shouldShowTaskDescriptionFallback(
   taskDescription: string | null,
   visibleMessages: Message[],
+  options: Pick<ProcessedMessagesOptions, "historyInitialized" | "hasOlderMessages"> = {},
 ): boolean {
   return (
-    Boolean(taskDescription) && !visibleMessages.some((message) => message.author_type === "user")
+    Boolean(taskDescription) &&
+    options.historyInitialized === true &&
+    options.hasOlderMessages === false &&
+    !visibleMessages.some((message) => message.author_type === "user")
   );
 }
 
@@ -498,8 +538,8 @@ export function useProcessedMessages(
   const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
 
   const showTaskDescriptionFallback = useMemo(
-    () => shouldShowTaskDescriptionFallback(taskDescription, visibleMessages),
-    [taskDescription, visibleMessages],
+    () => shouldShowTaskDescriptionFallback(taskDescription, visibleMessages, options),
+    [taskDescription, visibleMessages, options.historyInitialized, options.hasOlderMessages],
   );
   const taskDescriptionMessage: Message | null = useMemo(
     () =>

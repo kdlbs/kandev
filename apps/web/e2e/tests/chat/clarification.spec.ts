@@ -24,6 +24,26 @@ function seedClarificationTask(
   return seedClarificationSession(testPage, apiClient, seedData, title, { scenario });
 }
 
+async function waitForPendingClarificationMessages(
+  apiClient: ApiClient,
+  sessionId: string,
+  expectedCount: number,
+  message: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.filter(
+          (candidate) =>
+            candidate.type === "clarification_request" && candidate.metadata?.status === "pending",
+        ).length;
+      },
+      { message, timeout: 60_000 },
+    )
+    .toBe(expectedCount);
+}
+
 const PLAN_WITH_CLARIFICATION_SCRIPT = [
   'e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"## Plan\\n\\nEdit 1 item","title":"Implementation Plan"})',
   "e2e:delay(100)",
@@ -103,6 +123,57 @@ test.describe("Clarification flow", () => {
     await expect(session.chat).toContainText(/You answered|selected_option/);
   });
 
+  test("shows the header submitting status for a single-question answer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Single Submit Feedback",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    const header = session.clarificationOverlay().getByTestId("clarification-overlay-header");
+    const status = session.clarificationSubmittingStatus();
+    await expect(status).toHaveCount(0);
+
+    let releaseResponse = () => undefined;
+    const heldResponse = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      await heldResponse;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    try {
+      await session.clarificationOption("PostgreSQL").click();
+      await expect(status).toBeVisible();
+      await expect(status).toHaveAttribute("aria-label", "Submitting…");
+      await expect(status).toHaveCount(1);
+      await expect(session.clarificationSkip()).toBeDisabled();
+
+      const statusPrecedesSkip = await header.evaluate((node) => {
+        const submitting = node.querySelector('[data-testid="clarification-submitting-status"]');
+        const skip = node.querySelector('[data-testid="clarification-skip"]');
+        return Boolean(
+          submitting &&
+          skip &&
+          submitting.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      });
+      expect(statusPrecedesSkip).toBe(true);
+    } finally {
+      releaseResponse();
+    }
+
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
+  });
+
   // R2/R11 + W3: a duplicate submit is a 200 with claimed: false, not a 409 —
   // the losing client must apply the winner's own answer instead of stranding
   // the overlay on "pending" or rendering its own (overwritten) submission.
@@ -170,6 +241,13 @@ test.describe("Clarification flow", () => {
       },
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await waitForPendingClarificationMessages(
+      apiClient,
+      task.session_id,
+      1,
+      "custom clarification should be durably pending before navigation",
+    );
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -305,6 +383,14 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "timed-out clarification should be ready for a deferred answer before navigation",
+      timeout: 60_000,
+    });
+
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -321,14 +407,6 @@ test.describe("Clarification flow", () => {
         message: "clarification timeout must not run on_turn_complete auto-advance",
       })
       .toBe(timeoutStep.id);
-
-    await waitForSessionState(apiClient, {
-      taskId: task.id,
-      sessionId: task.session_id,
-      expectedState: "WAITING_FOR_INPUT",
-      message: "timed-out clarification session must remain ready for a deferred answer",
-      timeout: 30_000,
-    });
 
     // Agent moved on; a late custom answer remains editable and goes through
     // the event fallback as a new prompt.
@@ -389,6 +467,14 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "timed-out clarification should be ready for a deferred answer before navigation",
+      timeout: 60_000,
+    });
+
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -397,14 +483,6 @@ test.describe("Clarification flow", () => {
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("Question timed out", { timeout: 30_000 });
     await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 10_000 });
-
-    await waitForSessionState(apiClient, {
-      taskId: task.id,
-      sessionId: task.session_id,
-      expectedState: "WAITING_FOR_INPUT",
-      message: "timed-out clarification session must remain ready for a deferred answer",
-      timeout: 30_000,
-    });
 
     let respondCalls = 0;
     await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
@@ -467,6 +545,54 @@ test.describe("Clarification flow", () => {
       throw new Error("expected both label and description to have bounding boxes");
     }
     expect(descriptionBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
+  });
+
+  test("renders lightweight markdown across active and resolved clarification text", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Markdown",
+      "clarification-markdown",
+    );
+
+    const overlay = session.clarificationOverlay();
+    await expect(overlay).toBeVisible();
+    const card = session.clarificationQuestionCardById("markdown");
+    const firstOption = session.clarificationOption("Postgres");
+
+    await expect(card.getByTestId("clarification-question-title").locator("code")).toHaveText("DB");
+    await expect(card.locator("strong").filter({ hasText: "one" })).toBeVisible();
+    await expect(card.locator("ol > li")).toHaveCount(2);
+    const guidance = card.getByRole("link", { name: "storage guidance" });
+    await expect(guidance).toHaveAttribute("href", "https://example.com/storage");
+    await expect(guidance).toHaveAttribute("rel", "noopener noreferrer");
+
+    await expect(firstOption.getByTestId("clarification-option-label").locator("code")).toHaveText(
+      "Postgres",
+    );
+    await expect(
+      firstOption.getByTestId("clarification-option-description").locator("strong"),
+    ).toHaveText("production");
+    await expect(firstOption.locator("a")).toHaveCount(0);
+
+    const context = session.clarificationContext();
+    await expect(context).toContainText("Keep `context` literal.");
+    await expect(context.locator("code")).toHaveCount(0);
+
+    await firstOption.locator("code").click();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    const resolved = session.activeChat().getByTestId("clarification-request-message");
+    await expect(resolved).toBeVisible();
+    await expect(resolved.locator("code").filter({ hasText: "DB" })).toBeVisible();
+    await expect(resolved.locator("strong").filter({ hasText: "one" })).toBeVisible();
+    await expect(resolved.locator("ol > li")).toHaveCount(2);
+    await expect(resolved.locator("code").filter({ hasText: "Postgres" })).toBeVisible();
   });
 
   test("plan mode + clarification does not leave pointer-events stuck on body", async ({
@@ -852,6 +978,13 @@ test.describe("Multi-question clarification carousel", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+    await waitForPendingClarificationMessages(
+      apiClient,
+      task.session_id,
+      3,
+      "plan clarification bundle should be durably pending before navigation",
+    );
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -946,22 +1079,40 @@ test.describe("Multi-question clarification carousel", () => {
       await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await session.chat.focus();
-    await testPage.keyboard.press("ControlOrMeta+Enter");
-    const submit = session.clarificationSubmit();
-    await expect(submit).toContainText("Submitting");
-    await expect(submit).toBeDisabled();
-    await expect(submit.locator('[role="status"]')).toBeVisible();
-    await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
-    await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
+    try {
+      await session.chat.focus();
+      await testPage.keyboard.press("ControlOrMeta+Enter");
+      const submit = session.clarificationSubmit();
+      const header = session.clarificationOverlay().getByTestId("clarification-overlay-header");
+      const status = session.clarificationSubmittingStatus();
+      await expect(submit).toContainText("Submitting");
+      await expect(submit).toBeDisabled();
+      await expect(status).toBeVisible();
+      await expect(status).toHaveAttribute("aria-label", "Submitting…");
+      await expect(status).not.toHaveAttribute("aria-hidden");
+      await expect(submit).toHaveAttribute("aria-label", "Submit");
+      await expect(submit.locator('[role="status"]')).toHaveCount(0);
+      await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
 
-    await testPage.keyboard.press("ArrowLeft");
-    await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
+      const statusPrecedesSkip = await header.evaluate((node) => {
+        const submitting = node.querySelector('[data-testid="clarification-submitting-status"]');
+        const skip = node.querySelector('[data-testid="clarification-skip"]');
+        return Boolean(
+          submitting &&
+          skip &&
+          submitting.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      });
+      expect(statusPrecedesSkip).toBe(true);
 
-    await testPage.getByTestId("clarification-submit-shortcut").hover();
-    await expect(testPage.getByRole("tooltip", { name: /Submit answers/ })).not.toBeVisible();
+      await testPage.keyboard.press("ArrowLeft");
+      await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");
 
-    releaseResponse();
+      await testPage.getByTestId("clarification-submit-shortcut").hover();
+      await expect(testPage.getByRole("tooltip", { name: /Submit answers/ })).not.toBeVisible();
+    } finally {
+      releaseResponse();
+    }
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
   });
 
@@ -1022,6 +1173,14 @@ test.describe("Multi-question clarification carousel", () => {
       },
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "multi-question clarification should block the agent before navigation",
+      timeout: 60_000,
+    });
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);

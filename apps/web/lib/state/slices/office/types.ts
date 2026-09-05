@@ -505,6 +505,18 @@ import type {
 // --- Slice state & actions ---
 
 /**
+ * One or more refetch types fired together. A single WS event routinely
+ * triggers several types in the same synchronous handler (e.g. `task:<id>`
+ * and `dashboard`); batching them into one trigger object is what lets
+ * `useOfficeRefetch` observe every type instead of only the last write to
+ * survive React's automatic batching of same-tick store updates.
+ */
+export type OfficeRefetchTrigger = {
+  types: string[];
+  timestamp: number;
+};
+
+/**
  * Office collections that belong to one workspace, stored per workspace id
  * rather than as a single current value.
  *
@@ -538,12 +550,12 @@ export type OfficeSliceState = {
     tasks: TasksState;
     meta: OfficeMeta | null;
     isLoading: boolean;
-    // Per-type counters rather than one "last trigger" value: a single WS
-    // handler often fires several distinct types in the same synchronous
-    // call (e.g. `task:${id}` then `dashboard`), and React/Zustand coalesce
-    // those into one render, so a shared last-value field would only ever
-    // let the final type's subscribers see a change. See useOfficeRefetch.
-    refetchTriggers: Record<string, number>;
+    // A single WS handler often fires several distinct types in the same
+    // synchronous call (e.g. `task:${id}` then `dashboard`); batching them
+    // into one OfficeRefetchTrigger object per tick is what lets every
+    // matching subscriber observe its type instead of only the last write
+    // surviving React's automatic batching. See useOfficeRefetch.
+    refetchTrigger: OfficeRefetchTrigger | null;
     routing: RoutingState;
     providerHealth: ProviderHealthSliceState;
     runAttempts: RunAttemptsState;

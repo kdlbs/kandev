@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -20,6 +23,7 @@ type resolverDeliveryMessageCreator struct {
 	publishErr       error
 	claimHasDeadline bool
 	claimContextErr  error
+	claimDeadlineIn  time.Duration
 	restoreCalls     int
 	published        [][]*taskmodels.Message
 }
@@ -41,7 +45,11 @@ func (s *resolverDeliveryMessageCreator) CompleteActiveClarificationBundle(
 	pendingID, status string,
 	responses map[string]interface{},
 ) ([]*taskmodels.Message, bool, error) {
-	_, s.claimHasDeadline = ctx.Deadline()
+	deadline, hasDeadline := ctx.Deadline()
+	s.claimHasDeadline = hasDeadline
+	if hasDeadline {
+		s.claimDeadlineIn = time.Until(deadline)
+	}
 	s.claimContextErr = ctx.Err()
 	stored := s.repo.messages[pendingID]
 	claimed := make([]*taskmodels.Message, 0, len(stored))
@@ -186,9 +194,38 @@ func newResolverDeliveryFixture(
 		&stubAuthorizer{},
 		eventBus,
 		eventBus,
+		nil,
 		logger.Default(),
 	)
 	return resolver, store, repo, creator, eventBus
+}
+
+type resolverOrderingEventBus struct {
+	*stubEventBus
+	onPrimaryPublish func()
+}
+
+func (b *resolverOrderingEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if subject == events.ClarificationPrimaryAnswered && b.onPrimaryPublish != nil {
+		b.onPrimaryPublish()
+	}
+	return b.stubEventBus.Publish(ctx, subject, event)
+}
+
+type resolverAsyncFanoutEventBus struct {
+	*stubEventBus
+	primaryPublishReturned chan struct{}
+	releaseFanout          chan struct{}
+}
+
+func (b *resolverAsyncFanoutEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if subject == events.ClarificationPrimaryAnswered {
+		close(b.primaryPublishReturned)
+		go func() {
+			<-b.releaseFanout
+		}()
+	}
+	return b.stubEventBus.Publish(ctx, subject, event)
 }
 
 func resolverAnswer() Outcome {
@@ -238,6 +275,192 @@ func TestResolverLiveDeliveryRequiresDurableConfirmation(t *testing.T) {
 	}
 	if creator.restoreCalls != 1 {
 		t.Fatalf("restore calls = %d, want 1", creator.restoreCalls)
+	}
+}
+
+func TestResolverLiveDeliveryPublishesPrimaryAnswerBeforeWaiterReturns(t *testing.T) {
+	const pendingID = "pending-live-ordering"
+	message := resolverDeliveryMessage(pendingID, "message-live-ordering", "turn-1")
+	resolver, store, _, _, eventBus := newResolverDeliveryFixture(
+		t, pendingID, []*taskmodels.Message{message},
+	)
+	orderingBus := &resolverOrderingEventBus{stubEventBus: eventBus}
+	resolver.eventBus = orderingBus
+	store.CreateRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Questions: []Question{{
+			ID: "q1", Prompt: "Continue?",
+			Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
+		}},
+	})
+
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
+	waitReturned := make(chan struct{})
+	waitDone := make(chan error, 1)
+	go func() {
+		_, err := store.WaitForResponse(context.Background(), pendingID)
+		close(waitReturned)
+		waitDone <- err
+	}()
+	<-waitEntered
+	store.SetOnWaitEntered(nil)
+
+	eventBeforeWaiterReturn := true
+	eventPublished := make(chan struct{})
+	orderingBus.onPrimaryPublish = func() {
+		select {
+		case <-waitReturned:
+			eventBeforeWaiterReturn = false
+		default:
+		}
+		close(eventPublished)
+	}
+
+	_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, resolverAnswer())
+	if err != nil || !claimed {
+		t.Fatalf("ResolveBundle = claimed %v, err %v; want live delivery", claimed, err)
+	}
+	<-eventPublished
+	if err := <-waitDone; err != nil {
+		t.Fatalf("WaitForResponse: %v", err)
+	}
+	if !eventBeforeWaiterReturn {
+		t.Fatal("primary-answer event was published after the live waiter returned")
+	}
+	if len(eventBus.events) != 1 || eventBus.events[0].Type != events.ClarificationPrimaryAnswered {
+		t.Fatalf("primary-answer events = %d, want exactly 1", len(eventBus.events))
+	}
+}
+
+func TestResolverLiveDeliveryNotifiesWatchdogBeforeWaiterReturns(t *testing.T) {
+	const pendingID = "pending-live-watchdog-notifier"
+	message := resolverDeliveryMessage(pendingID, "message-live-watchdog-notifier", "turn-1")
+	resolver, store, _, _, _ := newResolverDeliveryFixture(t, pendingID, []*taskmodels.Message{message})
+
+	notified := make(chan struct{})
+	resolver.primaryAnsweredNotifier = func(context.Context, PrimaryAnswered) {
+		close(notified)
+	}
+
+	store.CreateRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Questions: []Question{{
+			ID: "q1", Prompt: "Continue?",
+			Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
+		}},
+	})
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
+	waitDone := make(chan error, 1)
+	go func() {
+		_, err := store.WaitForResponse(context.Background(), pendingID)
+		waitDone <- err
+	}()
+	<-waitEntered
+	store.SetOnWaitEntered(nil)
+
+	_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, resolverAnswer())
+	if err != nil || !claimed {
+		t.Fatalf("ResolveBundle = claimed %v, err %v; want live delivery", claimed, err)
+	}
+	var waitErr error
+	select {
+	case waitErr = <-waitDone:
+	case <-time.After(time.Second):
+		t.Fatal("WaitForResponse did not return")
+	}
+	select {
+	case <-notified:
+	default:
+		t.Fatal("live waiter returned before the primary-answer watchdog was notified")
+	}
+	if waitErr != nil {
+		t.Fatalf("WaitForResponse: %v", waitErr)
+	}
+}
+
+// This is reviewer-requested contract coverage for transports whose Publish
+// method returns before subscribers run, such as NATS. The local notifier is
+// the ordering acknowledgement; fan-out delivery is not.
+func TestResolverLiveDeliveryUsesSynchronousNotifierBeforeAsyncFanout(t *testing.T) {
+	const pendingID = "pending-live-watchdog-async-fanout"
+	message := resolverDeliveryMessage(pendingID, "message-live-watchdog-async-fanout", "turn-1")
+	resolver, store, _, _, eventBus := newResolverDeliveryFixture(t, pendingID, []*taskmodels.Message{message})
+	asyncBus := &resolverAsyncFanoutEventBus{
+		stubEventBus:           eventBus,
+		primaryPublishReturned: make(chan struct{}),
+		releaseFanout:          make(chan struct{}),
+	}
+	resolver.eventBus = asyncBus
+	t.Cleanup(func() { close(asyncBus.releaseFanout) })
+
+	notifierEntered := make(chan struct{})
+	releaseNotifier := make(chan struct{})
+	var notifierReturned atomic.Bool
+	resolver.primaryAnsweredNotifier = func(context.Context, PrimaryAnswered) {
+		close(notifierEntered)
+		<-releaseNotifier
+		notifierReturned.Store(true)
+	}
+
+	store.CreateRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Questions: []Question{{
+			ID: "q1", Prompt: "Continue?",
+			Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
+		}},
+	})
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
+	waitDone := make(chan error, 1)
+	go func() {
+		_, err := store.WaitForResponse(context.Background(), pendingID)
+		if !notifierReturned.Load() {
+			t.Errorf("live waiter returned before notifier acknowledgement")
+		}
+		waitDone <- err
+	}()
+	<-waitEntered
+	store.SetOnWaitEntered(nil)
+
+	resolveDone := make(chan error, 1)
+	go func() {
+		_, _, err := resolver.ResolveBundle(context.Background(), pendingID, resolverAnswer())
+		if !notifierReturned.Load() {
+			t.Errorf("resolver returned before notifier acknowledgement")
+		}
+		resolveDone <- err
+	}()
+
+	select {
+	case <-notifierEntered:
+	case <-time.After(time.Second):
+		t.Fatal("synchronous primary-answer notifier was not reached")
+	}
+	select {
+	case <-asyncBus.primaryPublishReturned:
+		t.Fatal("event-bus fan-out started before the synchronous notifier returned")
+	default:
+	}
+
+	close(releaseNotifier)
+	if err := <-resolveDone; err != nil {
+		t.Fatalf("ResolveBundle: %v", err)
+	}
+	if err := <-waitDone; err != nil {
+		t.Fatalf("WaitForResponse: %v", err)
+	}
+	select {
+	case <-asyncBus.primaryPublishReturned:
+	default:
+		t.Fatal("primary-answer fan-out was not published after notifier acknowledgement")
 	}
 }
 
@@ -370,6 +593,40 @@ func TestResolverDetachedResumeUsesFreshBoundedContextAfterCallerCancellation(t 
 	}
 	if len(eventBus.resumeHasDeadline) != 1 || !eventBus.resumeHasDeadline[0] || eventBus.resumeContextErrs[0] != nil {
 		t.Fatalf("resume contexts = deadlines %v errors %v, want fresh bounded context", eventBus.resumeHasDeadline, eventBus.resumeContextErrs)
+	}
+}
+
+// TestResolverClaimUsesShortDedicatedTimeoutNotThePersistenceTimeout covers
+// Defect 3: the interactive claim used to share the generic 30s
+// clarificationPersistenceTimeout with every other durability phase, so a
+// user stuck behind SQLite's single-writer connection pool queue could wait
+// out the full 30s (or, chained with a detached resume/restore retry,
+// 60-75s+) before ever seeing feedback. The claim now gets its own much
+// shorter budget so the caller fails fast into Defect 1's retry affordance
+// instead of a dead wait; every other phase (resume, restore, the loser
+// re-read) is unaffected.
+func TestResolverClaimUsesShortDedicatedTimeoutNotThePersistenceTimeout(t *testing.T) {
+	const pendingID = "pending-claim-timeout"
+	message := resolverDeliveryMessage(pendingID, "message-claim-timeout", "turn-1")
+	resolver, _, _, creator, _ := newResolverDeliveryFixture(t, pendingID, []*taskmodels.Message{message})
+
+	questions := []Question{{
+		ID: "q1", Prompt: "Continue?",
+		Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
+	}}
+	_, claimed, err := resolver.claimAndDeliver(context.Background(), pendingID, "session-1", "task-1", questions, resolverAnswer())
+	if err != nil || !claimed {
+		t.Fatalf("response = claimed %v, err %v", claimed, err)
+	}
+	if !creator.claimHasDeadline {
+		t.Fatal("claim context has no deadline, want a bounded context")
+	}
+	if creator.claimDeadlineIn <= 0 || creator.claimDeadlineIn > clarificationClaimTimeout {
+		t.Fatalf("claim deadline remaining = %v, want (0, %v]", creator.claimDeadlineIn, clarificationClaimTimeout)
+	}
+	if creator.claimDeadlineIn >= clarificationPersistenceTimeout {
+		t.Fatalf("claim deadline remaining = %v, want strictly less than the %v persistence timeout",
+			creator.claimDeadlineIn, clarificationPersistenceTimeout)
 	}
 }
 

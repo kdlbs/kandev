@@ -96,7 +96,6 @@ import {
   resolveLastPromptControls,
   resolveLastPromptEdge,
   shouldAutoScrollToBottom,
-  shouldLoadMoreForTranscriptTarget,
 } from "./message-list-shared";
 
 describe("anchoredBarScrollOffsetPx", () => {
@@ -502,22 +501,6 @@ describe("getFirstUserMessageId", () => {
   });
 });
 
-describe("shouldLoadMoreForTranscriptTarget", () => {
-  const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
-
-  it("keeps loading older pages when the latest loaded page has no user prompt", () => {
-    expect(
-      shouldLoadMoreForTranscriptTarget("last_prompt", [message("reply", "agent")], true),
-    ).toBe(true);
-  });
-
-  it("keeps loading for scroll-to-start until pagination reaches the real first prompt", () => {
-    expect(
-      shouldLoadMoreForTranscriptTarget("start", [message("loaded-prompt", "user")], true),
-    ).toBe(true);
-  });
-});
-
 describe("shouldAutoScrollToBottom", () => {
   const base = {
     isNearBottom: true,
@@ -689,6 +672,42 @@ describe("isElementFullyVisible", () => {
 });
 
 describe("MessageListStatus", () => {
+  it("does not render the older control during routine pagination", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore
+        showLoadingState={false}
+        messagesLoading={false}
+        isInitialLoading={false}
+        messagesCount={1}
+        onLoadMore={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("load-older-messages")).toBeNull();
+  });
+
+  it("renders one explicit retry control during recovery", () => {
+    const onLoadMore = vi.fn();
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore
+        showRecovery
+        showLoadingState={false}
+        messagesLoading={false}
+        isInitialLoading={false}
+        messagesCount={1}
+        onLoadMore={onLoadMore}
+      />,
+    );
+
+    const button = screen.getByTestId("load-older-messages");
+    button.click();
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
   it("renders a conversation loading indicator while existing content remains visible", () => {
     render(
       <MessageListStatus

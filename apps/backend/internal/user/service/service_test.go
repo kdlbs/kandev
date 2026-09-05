@@ -77,6 +77,61 @@ func TestApplyBasicSettingsSystemMetricsDisplayPreservesOmittedFields(t *testing
 	}
 }
 
+func TestApplyBasicSettingsQuickChatTabOrderValidation(t *testing.T) {
+	tooManyWorkspaces := make(map[string][]string, 201)
+	for index := 0; index < 201; index++ {
+		tooManyWorkspaces[fmt.Sprintf("workspace-%d", index)] = []string{"conversation:one"}
+	}
+	tooManyReferences := make([]string, 201)
+	for index := range tooManyReferences {
+		tooManyReferences[index] = fmt.Sprintf("conversation:%d", index)
+	}
+	tooManyBytes := map[string][]string{
+		"workspace-1": {strings.Repeat("x", maxUserPreferenceBlobBytes)},
+	}
+
+	tests := []struct {
+		name    string
+		order   map[string][]string
+		wantErr string
+	}{
+		{
+			name:    "rejects too many workspaces",
+			order:   tooManyWorkspaces,
+			wantErr: "quick_chat_tab_order_by_workspace: max 200 workspaces allowed",
+		},
+		{
+			name: "rejects too many references in one workspace",
+			order: map[string][]string{
+				"workspace-1": tooManyReferences,
+			},
+			wantErr: "quick_chat_tab_order_by_workspace[workspace-1]: max 200 tab references allowed",
+		},
+		{
+			name:    "rejects an oversized serialized order",
+			order:   tooManyBytes,
+			wantErr: "quick_chat_tab_order_by_workspace: max 65536 bytes allowed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{
+				QuickChatTabOrderByWorkspace: map[string][]string{"existing": {"conversation:keep"}},
+			}
+			err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+				QuickChatTabOrderByWorkspace: ptr(tt.order),
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want error containing %q", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(settings.QuickChatTabOrderByWorkspace, map[string][]string{"existing": {"conversation:keep"}}) {
+				t.Fatalf("rejected update changed settings to %#v", settings.QuickChatTabOrderByWorkspace)
+			}
+		})
+	}
+}
+
 // makeLayouts builds n SavedLayout fixtures with distinct IDs and names.
 func makeLayouts(n int) []models.SavedLayout {
 	layouts := make([]models.SavedLayout, n)

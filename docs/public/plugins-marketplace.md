@@ -47,6 +47,8 @@ Open **Settings > Plugins > Browse**. Each plugin shows as a card with its
 name, description, author, categories, source repository link, latest version,
 and GitHub star count. To narrow the list:
 
+![Settings > Plugins > Browse showing the plugin marketplace with search, category, sort, install status, and repository links.](../screenshots/plugin-browse.png)
+
 - **Search**: type in the search box to match plugin name or description.
 - **Category**: filter to a single category with the category dropdown.
 - **Sort**: **Most stars** (default), **Recently updated** (by latest release
@@ -248,7 +250,7 @@ build script (zero-dependency Node) + GitHub Action resolve each listed repo's
 latest release into a full catalog record and publish the generated
 `index.json` to GitHub Pages. Point kandev at that Pages URL. The document
 shape, the build pipeline, and the source data model are specified in the
-[plugin marketplace spec](https://github.com/kdlbs/kandev/blob/main/docs/specs/plugins/marketplace.md).
+[plugin marketplace spec](https://github.com/kdlbs/kandev/blob/main/docs/specs/plugins/requirements/marketplace.md).
 
 Related: [Plugins](plugins.md), [Authoring a
 plugin](plugins-authoring.md), [Plugin manifest

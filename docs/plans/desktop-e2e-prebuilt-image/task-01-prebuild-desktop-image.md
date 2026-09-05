@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/e2e-duration-aware-sharding/spec.md"
+spec: "../../specs/platform/requirements/e2e-duration-aware-sharding.md"
 ---
 
 # Task 01: Prebuild Desktop CI Dependencies
@@ -46,7 +46,7 @@ sequential
 
 ## Inputs
 
-- `docs/specs/e2e-duration-aware-sharding/spec.md`, especially the CI lifecycle
+- `docs/specs/platform/requirements/e2e-duration-aware-sharding.md`, especially the CI lifecycle
   and reliability contract.
 - `docs/plans/desktop-e2e-prebuilt-image/plan.md`, CI image and Tests sections.
 - The `runtime` and `build` patterns in the current CI base Dockerfile and

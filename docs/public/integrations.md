@@ -14,6 +14,14 @@ Integrations let Kandev's backend read and update provider data. They power repo
 3. Test the connection before browsing or enabling watches.
 4. Keep provider API credentials, task Git credentials, and agent credentials separate.
 
+![Three separate integration credential paths from workspace and executor configuration to provider APIs, repository remotes, and the agent CLI.](../screenshots/integrations.svg)
+
+[Open full-size SVG diagram][integrations-diagram]
+
+[integrations-diagram]: ../../docs/screenshots/integrations.svg
+
+The path that fails identifies the configuration surface to inspect. A working provider connection does not prove that a task can push Git changes or that its agent CLI can authenticate.
+
 They do **not** provide every credential a task needs. Keep these paths distinct:
 
 - an integration credential lets the Kandev backend call a provider API;
@@ -29,6 +37,8 @@ A task can therefore display a pull or merge request while its worktree cannot p
 ## Open integration settings
 
 Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a provider. The direct routes are:
+
+![Settings > Workspaces > Default > Integrations showing Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry connections.](../screenshots/settings-integrations.png)
 
 - `/settings/workspace/{workspaceId}/integrations/github`
 - `/settings/workspace/{workspaceId}/integrations/gitlab`
@@ -312,11 +322,19 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 
 ### Automate a linked pull request
 
-For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
+For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge or requeue when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
 
 When GitHub puts a linked pull request in a merge queue, the PR status control shows its queue state. It also shows the queue position and estimated merge time when GitHub provides them. The same status appears in the task summary, the mobile PR chip, and Review.
+
+The existing two automation switches also control merge-queue recovery. Auto-fix sends one actionable queue removal to the linked task agent and counts it as one auto-fix round. Auto-merge submits an eligible pull request through GitHub's queue-aware merge action. If GitHub removes a queue attempt, Kandev records the reason and waits for a new pull-request head before it submits another attempt; it never retries the same head automatically. An active queue entry is adopted when auto-merge is enabled, so enabling the option does not submit a duplicate request. Unknown, manual, and branch-protection removals remain visible but do not start automatic repair.
+
+Each automatic merge request uses the pull-request head that passed the readiness checks. If GitHub reports a different head, Kandev stops the request. After a failed request, Kandev does not automatically repeat the same readiness state.
+
+Use **Retry** to request one new evaluation for the selected linked pull request. Kandev refreshes the pull request and applies all current readiness and GitHub policy rules. **Retry** accepts the evaluation request. It does not report a completed merge.
+
+Use **Refresh** for a state-loading error or another automation error. Refresh loads state only and does not authorize a merge. If GitHub shows an active queue entry or a merged pull request, Kandev marks the attempt accepted. It removes only the obsolete automatic-merge error.
 
 **Your review is requested** matches the GitHub account connected to the task's workspace. The first observation is a quiet baseline. Any later transition to a request for that account wakes the agent, including the first new request after baselining and a re-review request after changes. Clearing a request rearms the next transition. If the workspace's connected GitHub account changes, Kandev quietly rebinds the task and re-establishes every linked PR's baseline; switching accounts does not itself create a prompt.
 
@@ -563,7 +581,7 @@ When editing, a blank secret preserves the saved credential only if the URL, acc
 
 ### Jira issue watches
 
-Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, a blank branch resolves to that repository's default branch. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
+Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, choose its default branch, a local branch such as `main`, or a qualified remote branch such as `origin/main`. Kandev saves the remote name with the selected branch. Before a watcher-created task worktree is made, branch freshness follows the repository's [worktree and branch lifecycle](git-operations.md#managed-worktree-and-branch-lifecycle) policy. **Always pull before creating a new worktree** controls that refresh; selecting `origin/main` does not enable a pull for this watcher. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
 
 The maximum in-flight value defaults to 5. Leave it blank for no cap. A cap defers remaining matches rather than importing them all at once. Each poll fetches only the first 50 JQL matches and does not paginate. Already-seen issues still occupy that provider result window, so a stable broad query can leave later matches unseen indefinitely; narrow the JQL enough that every important issue can enter the first page. Pause the watch before changing a broad query. Jira task-preset prompts can use ticket key, URL, title, and description placeholders from the preset editor.
 

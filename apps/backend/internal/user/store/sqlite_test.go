@@ -167,6 +167,7 @@ func TestScanUserSettingsSidebarDefaults(t *testing.T) {
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
 		CollapsedGroups: []string{},
+		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}
 
 	tests := []struct {
@@ -1273,6 +1274,20 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 		t.Fatalf("get defaults: %v", err)
 	}
 	settings.SidebarActiveViewID = "view-1"
+	settings.SidebarViews = []models.SidebarView{{
+		ID:              "view-1",
+		Name:            "Custom",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "updatedAt", Direction: "desc"},
+		Group:           "workflow",
+		CollapsedGroups: []string{},
+		TaskRow: &models.SidebarTaskRowPresentation{
+			DetailsEnabled: false,
+			DetailOrder:    []string{"repository", "relative_time", "pull_request_number"},
+			VisibleDetails: []string{"repository"},
+			Trailing:       "none",
+		},
+	}}
 	settings.SidebarTaskPrefs = models.SidebarTaskPrefs{
 		PinnedTaskIDs:          []string{"task-1"},
 		OrderedTaskIDs:         []string{"task-2", "task-1"},
@@ -1304,6 +1319,9 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 	}
 	if got.SidebarActiveViewID != "view-1" {
 		t.Fatalf("expected active view to round-trip, got %q", got.SidebarActiveViewID)
+	}
+	if got.SidebarViews[0].TaskRow == nil || got.SidebarViews[0].TaskRow.Trailing != "none" {
+		t.Fatalf("expected sidebar view task row to round-trip, got %+v", got.SidebarViews)
 	}
 	if got.SidebarDraft == nil || got.SidebarDraft.Group != "workflow" {
 		t.Fatalf("expected sidebar draft to round-trip, got %+v", got.SidebarDraft)

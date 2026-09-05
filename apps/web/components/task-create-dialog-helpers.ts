@@ -1,5 +1,5 @@
 import type { useRouter } from "@/lib/routing/client-router";
-import type { Task, Branch, LocalRepository, Repository } from "@/lib/types/http";
+import type { Task, Branch, LocalRepository, Repository, TaskPriority } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
 import type {
@@ -169,6 +169,7 @@ export type BuildCreatePayloadArgs = {
   autopilot?: boolean;
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
+  priority?: TaskPriority;
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -189,6 +190,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     parent_id: args.parentId || undefined,
     workspace_path: args.workspacePath || undefined,
     autopilot: args.autopilot || undefined,
+    priority: args.priority ?? "medium",
     // Dependencies declared at creation time. With edges present the backend
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
@@ -339,6 +341,7 @@ export function buildRepositoriesPayload(opts: {
       if (row.repositoryId) {
         return {
           repository_id: row.repositoryId,
+          ...(row.branchPolicyId ? { branch_policy_id: row.branchPolicyId } : {}),
           base_branch: branches.base_branch,
           checkout_branch: branches.checkout_branch,
           ...fresh,

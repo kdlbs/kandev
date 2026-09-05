@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-rendering-engine-marker"]
 plan: "plan.md"
-spec: "../../specs/ui/webkit-task-dialog-rendering.md"
+spec: "../../specs/ui/requirements/webkit-task-dialog-rendering.md"
 ---
 
 # Task 02: Apply WebKit-Safe Task Dialog Rendering
@@ -69,7 +69,7 @@ Red-Green-Refactor cycle.
 ## Inputs
 
 - Rendering and responsive scenarios in
-  `docs/specs/ui/webkit-task-dialog-rendering.md`.
+  `docs/specs/ui/requirements/webkit-task-dialog-rendering.md`.
 - Root marker contract from Task 01.
 - Shared dialog classes in `apps/packages/ui/src/dialog.tsx`.
 - Create Task sizing in `apps/web/components/task-create-dialog.tsx`.

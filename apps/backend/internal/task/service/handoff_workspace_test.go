@@ -8,6 +8,7 @@ import (
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -242,15 +243,17 @@ func (f *fakeBlockerRepo) ListDependentsForTasks(_ context.Context, blockerTaskI
 // fakeTaskRepo provides the minimal TaskRepository surface AttachWorkspacePolicy
 // uses. It supports GetTask + ListChildren so sibling lookup works.
 type fakeTaskRepo struct {
-	mu       sync.Mutex
-	tasks    map[string]*models.Task
-	children map[string][]string // parentID -> ordered child IDs
+	mu               sync.Mutex
+	tasks            map[string]*models.Task
+	children         map[string][]string // parentID -> ordered child IDs
+	taskEnvironments map[string]*models.TaskEnvironment
 }
 
 func newFakeTaskRepo() *fakeTaskRepo {
 	return &fakeTaskRepo{
-		tasks:    map[string]*models.Task{},
-		children: map[string][]string{},
+		tasks:            map[string]*models.Task{},
+		children:         map[string][]string{},
+		taskEnvironments: map[string]*models.TaskEnvironment{},
 	}
 }
 
@@ -313,6 +316,57 @@ func (f *fakeTaskRepo) ReparentDirectChildren(_ context.Context, oldParentID, ne
 	return nil
 }
 
+func (f *fakeTaskRepo) SetTaskMetadataKey(_ context.Context, taskID, key string, value interface{}) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	task := f.tasks[taskID]
+	if task == nil {
+		return nil
+	}
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	task.Metadata[key] = value
+	return nil
+}
+
+func (f *fakeTaskRepo) GetTaskEnvironment(_ context.Context, id string) (*models.TaskEnvironment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.taskEnvironments[id], nil
+}
+
+func (f *fakeTaskRepo) GetTaskEnvironmentByTaskID(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, env := range f.taskEnvironments {
+		if env != nil && env.TaskID == taskID {
+			return env, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeTaskRepo) TransferTaskEnvironmentOwnership(
+	_ context.Context,
+	envID, expectedTaskID string,
+	expectedGeneration int64,
+	taskID string,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	env := f.taskEnvironments[envID]
+	if env == nil {
+		return nil
+	}
+	if env.TaskID != expectedTaskID || env.OwnershipGeneration != expectedGeneration {
+		return taskrepo.ErrTaskEnvironmentOwnershipChanged
+	}
+	env.TaskID = taskID
+	env.OwnershipGeneration++
+	return nil
+}
+
 func (f *fakeTaskRepo) ListChildrenIncludingArchived(_ context.Context, parentID string) ([]*models.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -358,6 +412,23 @@ func (r *phase4TaskRepo) ListChildrenIncludingArchived(ctx context.Context, pare
 }
 func (r *phase4TaskRepo) ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error {
 	return r.base.ReparentDirectChildren(ctx, oldParentID, newParentID)
+}
+func (r *phase4TaskRepo) SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error {
+	return r.base.SetTaskMetadataKey(ctx, taskID, key, value)
+}
+func (r *phase4TaskRepo) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
+	return r.base.GetTaskEnvironment(ctx, id)
+}
+func (r *phase4TaskRepo) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	return r.base.GetTaskEnvironmentByTaskID(ctx, taskID)
+}
+func (r *phase4TaskRepo) TransferTaskEnvironmentOwnership(
+	ctx context.Context,
+	envID, expectedTaskID string,
+	expectedGeneration int64,
+	taskID string,
+) error {
+	return r.base.TransferTaskEnvironmentOwnership(ctx, envID, expectedTaskID, expectedGeneration, taskID)
 }
 
 // All other TaskRepository methods panic — the AttachWorkspacePolicy

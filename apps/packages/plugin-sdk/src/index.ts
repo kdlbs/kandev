@@ -39,8 +39,10 @@ export interface MainTopBarSlotProps {
  * Context passed to components registered for the `chat-submit-decoration`
  * slot, which renders *over* the chat composer's send button rather than
  * beside it. The host positions the layer against the button's box and makes
- * it `pointer-events-none`; a child that needs interaction opts back in with
- * `pointer-events-auto`.
+ * it `pointer-events-none`. Keep decorations inert when possible; hover or
+ * focus disclosure can observe the host button from an effect. A decoration
+ * renders inside the layer, not beside the button, and `pointer-events-auto`
+ * is a last resort for a separate hit target that does not obstruct send.
  */
 export interface ChatSubmitDecorationSlotProps {
   /** Task the composer belongs to, or null for task-less quick chat. */
@@ -329,6 +331,20 @@ export interface TaskFilterRegistration {
   label: string;
   getOptions(): PluginTaskFilterOption[];
   matches(context: { taskId: string }, selected: string[]): boolean;
+}
+
+export interface TaskListFacetValue {
+  value: string;
+  label: string;
+  color?: string;
+}
+
+/** A synchronous, page-local facet contribution for the host task list. */
+export interface TaskListFacetRegistration {
+  id: string;
+  label: string;
+  getValues(context: { taskId: string; workspaceId?: string }): readonly TaskListFacetValue[];
+  subscribe?(listener: () => void): () => void;
 }
 
 export type PluginStorageScope = "instance" | "workspace" | "task" | "session" | "repository";
@@ -719,6 +735,7 @@ export interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 export type PluginHost = PluginHostApi;

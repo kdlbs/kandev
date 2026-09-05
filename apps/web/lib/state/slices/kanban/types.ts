@@ -86,6 +86,11 @@ export type KanbanState = {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      branch_policy_id?: string;
+      branch_policy_name?: string;
+      branch_policy_base_branch?: string;
+      branch_policy_branch_template?: string;
+      branch_policy_pull_request_target?: string;
       position: number;
     }>;
     workspaceFolders?: Array<{
@@ -116,7 +121,13 @@ export type KanbanState = {
     primaryExecutorId?: string | null;
     primaryExecutorType?: string | null;
     primaryExecutorName?: string | null;
+    primaryAgentProfileId?: string | null;
+    primaryAgentName?: string | null;
+    labels?: string[];
+    origin?: string;
     isRemoteExecutor?: boolean;
+    /** Human assignee (user id). Independent of any agent assignment. */
+    assigneeUserId?: string;
     parentTaskId?: string | null;
     workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
     updatedAt?: string;

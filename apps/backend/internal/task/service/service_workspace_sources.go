@@ -22,14 +22,15 @@ import (
 type WorkspaceSourceKind string
 
 const (
-	WorkspaceSourceRepository WorkspaceSourceKind = "repository"
-	WorkspaceSourceFolder     WorkspaceSourceKind = "folder"
+	WorkspaceSourceRepository       WorkspaceSourceKind = "repository"
+	WorkspaceSourceFolder           WorkspaceSourceKind = "folder"
+	workspaceSourceRemoteProjection models.ExecutorType = "remote"
 )
 
 type WorkspaceSourceInput struct {
-	Kind                                                                                                 WorkspaceSourceKind
-	RepositoryID, LocalPath, GitHubURL, RemoteURL, Provider, ProviderRepoID, ProviderOwner, ProviderName string
-	BaseBranch, CheckoutBranch, DisplayName                                                              string
+	Kind                                                                                                                              WorkspaceSourceKind
+	RepositoryID, LocalPath, GitHubURL, RemoteURL, Provider, ProviderHost, ProviderScope, ProviderRepoID, ProviderOwner, ProviderName string
+	BaseBranch, CheckoutBranch, DisplayName                                                                                           string
 }
 
 type AttachWorkspaceSourcesRequest struct {
@@ -391,7 +392,7 @@ func (s *Service) validateRepositoryWorkspaceSourceInput(ctx context.Context, ta
 }
 
 func (s *Service) resolveRepositoryWorkspaceSource(ctx context.Context, task *models.Task, input WorkspaceSourceInput) (string, string, string, error) {
-	id, base, created, err := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{RepositoryID: input.RepositoryID, LocalPath: input.LocalPath, GitHubURL: input.GitHubURL, RemoteURL: input.RemoteURL, Provider: input.Provider, ProviderRepoID: input.ProviderRepoID, ProviderOwner: input.ProviderOwner, ProviderName: input.ProviderName, BaseBranch: input.BaseBranch, ResolveProviderDefaults: true})
+	id, base, created, err := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{RepositoryID: input.RepositoryID, LocalPath: input.LocalPath, GitHubURL: input.GitHubURL, RemoteURL: input.RemoteURL, Provider: input.Provider, ProviderHost: input.ProviderHost, ProviderScope: input.ProviderScope, ProviderRepoID: input.ProviderRepoID, ProviderOwner: input.ProviderOwner, ProviderName: input.ProviderName, BaseBranch: input.BaseBranch, ResolveProviderDefaults: true})
 	if err != nil {
 		return "", "", "", classifyWorkspaceRepositoryError(err)
 	}
@@ -518,6 +519,9 @@ func WorkspaceSourceRuntimeEntryName(executorType string, repository *models.Rep
 		}
 		return name, nil
 	}
+	if !supportsBranchedWorkspaceSources(executorType) {
+		return "", fmt.Errorf("%w: executor %q cannot materialize repository sources", ErrUnsupportedWorkspaceSource, executorType)
+	}
 	branch := worktree.SanitizeBranchSlug(taskRepository.CheckoutBranch)
 	if branch == "" {
 		branch = worktree.SanitizeBranchSlug(taskRepository.BaseBranch)
@@ -530,6 +534,13 @@ func WorkspaceSourceRuntimeEntryName(executorType string, repository *models.Rep
 
 func isLocalWorkspaceExecutor(executorType string) bool {
 	return executorType == string(models.ExecutorTypeLocal) || executorType == "local_pc"
+}
+
+func supportsBranchedWorkspaceSources(executorType string) bool {
+	t := models.ExecutorType(executorType)
+	// "remote" is the backend materializer's explicit executor-agnostic
+	// projection mode. Unknown persisted executor types still fail closed.
+	return t == "" || t == workspaceSourceRemoteProjection || t == models.ExecutorTypeWorktree || models.IsRemoteExecutorType(t)
 }
 
 func (s *Service) workspaceSourceExecutorType(ctx context.Context, taskID string) (string, error) {

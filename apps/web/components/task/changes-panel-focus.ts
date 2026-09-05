@@ -5,8 +5,13 @@ import type { DockviewApi } from "dockview-react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
 import type { AppState } from "@/lib/state/store";
-import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import type {
+  FileChangeFacet,
+  FileInfo,
+  GitStatusEntry,
+} from "@/lib/state/slices/session-runtime/types";
 import { djb2Hash } from "@/lib/utils/hash";
 
 type DockviewPanel = NonNullable<ReturnType<DockviewApi["getPanel"]>>;
@@ -26,6 +31,7 @@ type GitStatusFingerprintCacheEntry = {
 export type ActivateChangesPanelResult =
   | "activated"
   | "blocked-agent-group"
+  | "blocked-layout"
   | "no-api"
   | "no-panel";
 
@@ -33,7 +39,17 @@ function groupContainsAgentSessionPanel(panel: DockviewPanel): boolean {
   return panel.group.panels.some((p) => p.id === "chat" || p.id.startsWith("session:"));
 }
 
-/** Activate the Changes panel unless it shares a group with agent sessions. */
+function isDefaultChangesGroup(panel: DockviewPanel): boolean {
+  const panelIds = panel.group.panels.map((groupPanel) => groupPanel.id);
+  return panel.group.id === RIGHT_TOP_GROUP && panelIds.length === 2 && panelIds.includes("files");
+}
+
+function isDefaultLayoutProfile(): boolean {
+  const { activeLayoutProfile } = useDockviewStore.getState();
+  return activeLayoutProfile.kind === "built-in" && activeLayoutProfile.id === "default";
+}
+
+/** Activate the Changes panel only in the Default Files and Changes group. */
 export function activateChangesPanel(
   api: DockviewApi | null | undefined,
 ): ActivateChangesPanelResult {
@@ -42,6 +58,8 @@ export function activateChangesPanel(
   const panel = api.getPanel("changes");
   if (!panel) return "no-panel";
   if (groupContainsAgentSessionPanel(panel)) return "blocked-agent-group";
+  if (!isDefaultLayoutProfile()) return "blocked-layout";
+  if (!isDefaultChangesGroup(panel)) return "blocked-layout";
 
   panel.api.setActive();
   return "activated";
@@ -53,6 +71,18 @@ export function autoActivateChangesPanel(): ActivateChangesPanelResult {
 
 const fileFingerprintCache = new WeakMap<FileInfo, string>();
 const gitStatusFingerprintCache = new WeakMap<GitStatusEntry, GitStatusFingerprintCacheEntry>();
+
+function changeFacetFingerprint(facet: FileChangeFacet | undefined): string {
+  if (!facet) return "";
+  return [
+    facet.status,
+    facet.additions ?? 0,
+    facet.deletions ?? 0,
+    facet.old_path ?? "",
+    djb2Hash(facet.diff ?? ""),
+    facet.diff_skip_reason ?? "",
+  ].join(":");
+}
 
 function fileFingerprint(file: FileInfo): string {
   const cached = fileFingerprintCache.get(file);
@@ -67,6 +97,8 @@ function fileFingerprint(file: FileInfo): string {
     file.old_path ?? "",
     djb2Hash(file.diff ?? ""),
     file.diff_skip_reason ?? "",
+    changeFacetFingerprint(file.staged_change),
+    changeFacetFingerprint(file.unstaged_change),
     file.repository_name ?? "",
   ].join(":");
   fileFingerprintCache.set(file, fingerprint);

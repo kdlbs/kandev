@@ -31,6 +31,10 @@ type Repository struct {
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
 	failCutoverAfter string
+	// failGitSnapshotCutoverAfter is a test-only failpoint for the Git snapshot
+	// ownership cutover. It is separate from the worktree failpoint because the
+	// two migrations can be exercised independently in the same repository.
+	failGitSnapshotCutoverAfter string
 	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
 	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
 	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns
@@ -56,8 +60,23 @@ type Repository struct {
 	// insert in its own transaction before attempting the rollup would leave a
 	// row behind here, while the real single-transaction implementation rolls
 	// it back with everything else.
-	failUsageEventRollupAttempts int
-	failUsageEventRollupErr      error
+	// failParticipantSeatReconcileAttempts is a test-only failpoint for the
+	// participant-seat reconciler's AC-OFFICE-REVIEW-SEATS-005.9 bounded
+	// retry loop: while > 0, tryHealParticipantSeatRow reports a synthetic
+	// concurrent-modification retry without touching the database, and
+	// decrements the counter. A genuine SQLite write race is not
+	// reproducible deterministically against this package's
+	// single-connection test repositories (SetMaxOpenConns(1) serializes
+	// all writes), so this stands in for one.
+	failParticipantSeatReconcileAttempts int
+	// failAgentErrorReconcileAttempts is a test-only failpoint for the
+	// on_agent_error reconciler's bounded retry loop (WO-05-2): while > 0,
+	// tryHealAgentErrorRow reports a synthetic concurrent-modification retry
+	// without touching the database, and decrements the counter. Same
+	// rationale as failParticipantSeatReconcileAttempts above.
+	failAgentErrorReconcileAttempts int
+	failUsageEventRollupAttempts    int
+	failUsageEventRollupErr         error
 	// usageEventPreRollupHook is a test-only synchronization seam, called (if
 	// set) inside insertUsageEventAndRollup's transaction at the same point as
 	// the failUsageEventRollup* failpoint - after the ledger row insert
@@ -72,6 +91,12 @@ type Repository struct {
 	// than only the injected failpoint errors). Nil in production and in
 	// every test but the one that sets it.
 	usageEventPreRollupHook func()
+	// stepEntryDispatcher fires a step's session-independent on_enter
+	// sequence after a registered step-transition writer commits. Nil-safe
+	// (see dispatchStepEntry in step_entry_dispatch.go): unset in every
+	// test that doesn't exercise it, and in production until
+	// SetStepEntryDispatcher is called during boot wiring.
+	stepEntryDispatcher StepEntryDispatcher
 }
 
 func (r *Repository) nowUTC() time.Time {

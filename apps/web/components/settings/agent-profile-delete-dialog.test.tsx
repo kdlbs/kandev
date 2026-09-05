@@ -241,3 +241,45 @@ describe("AgentProfileDeleteConflictDialog", () => {
     expect(screen.queryByText(/Delete agent profile/i)).toBeNull();
   });
 });
+
+describe("AgentProfileDeleteConflictDialog layout", () => {
+  it("keeps conflict details scrollable and decisions outside the scroll region", () => {
+    renderConflictDialog({
+      activeSessions: [{ task_id: "t1", task_title: "Live task", is_ephemeral: false }],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+    });
+
+    const dialog = screen.getByTestId("agent-profile-delete-conflict-dialog");
+    const body = screen.getByTestId("agent-profile-delete-conflict-body");
+    const footer = screen.getByTestId("agent-profile-delete-conflict-footer");
+
+    expect(dialog.getAttribute("data-layout")).toBe("contained");
+    expect(dialog.contains(body)).toBe(true);
+    expect(body.contains(footer)).toBe(false);
+    expect(within(footer).getByRole("button", { name: "Cancel" })).toBeTruthy();
+  });
+
+  // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.2, AC-UI-SURFACE-TEXT-HIERARCHY-001.3
+  it("keeps long conflict labels in one left-aligned semantic description", () => {
+    const longTaskTitle = `Profile task ${"x".repeat(320)}`;
+    renderConflictDialog({
+      activeSessions: [{ task_id: "long-task", task_title: longTaskTitle, is_ephemeral: false }],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+    });
+
+    const body = screen.getByTestId("agent-profile-delete-conflict-body");
+    expect(body.className).toContain("min-w-0");
+    expect(body.className).toContain("text-left");
+    expect(body.className).toContain("space-y-2");
+    const directParagraphs = body.querySelectorAll(":scope > p");
+    expect(directParagraphs).toHaveLength(2);
+    expect(directParagraphs[1]?.className).not.toContain("mt-2");
+
+    const taskItem = screen.getByText(longTaskTitle);
+    expect(taskItem.tagName).toBe("LI");
+  });
+});

@@ -69,9 +69,9 @@ running agents unattended.
   start the dependent manually). Kandev never auto-retries a failed
   predecessor and never silently drops the edge.
 - Users declare dependencies in the **task-create dialog** ("Depends on") and
-  manage them afterwards over MCP. The task detail view deliberately has no edge
-  editor: dependencies describe how work was planned, and the surfaces that read
-  them (card badge, chip, graph) stay read-only.
+  manage them afterwards from the **Edit task dialog** or over MCP. The edit
+  dialog behavior is defined in
+  [`task-dependency-detail-editing.md`](task-dependency-detail-editing.md).
 - An open task SHALL show a **dependency chip** in the status row directly above
   its chat composer, alongside the PR status chip. The chip reports both
   directions — the tasks this task is blocked by, and the tasks it blocks — and
@@ -101,7 +101,7 @@ parallel ones. The reuse is part of the contract because the guarantees below
 |---|---|
 | `task_blockers` table + BFS cycle detection (`office/dashboard.AddTaskBlocker`) | The dependency edge store and cycle validator, promoted from Office-only to a core task relationship. |
 | Deferred launch intent (`tasks.metadata.deferred_launch`, claimed atomically) | Storage and idempotent consumption of "start automatically when unblocked". |
-| The single auto-start chokepoint (`orchestrator.autoStartTaskForStep`) | Where the dependency gate lives and where dependency-triggered launches enter, so the existing auto-start claim guard prevents double launches. |
+| Automated launch guards (`orchestrator.autoStartTaskForStep` and `orchestrator.launchStart`) | `autoStartTaskForStep` gates workflow, queue, watcher, and dependency-resolution starts before claims. `launchStart` gates `LaunchSession` auto-starts, including `session.ensure`, and downgrades blocked requests to workspace-only prepare. |
 | WIP admission and queue promotion ([`tasks/wip-limit-pull-system`](wip-limit-pull-system.md)) | Decides whether an unblocked, auto-start-intent task launches now or on promotion. |
 
 Two existing behaviors are intentionally *not* changed:
@@ -419,8 +419,9 @@ Edges and blocking:
 Gating:
 
 - **GIVEN** B depends on an unfinished A and B's workflow step has
-  `on_enter: auto_start_agent`, **WHEN** B is moved into that step, **THEN** no
-  session is created and the skip is logged.
+  `on_enter: auto_start_agent`, **WHEN** B is moved into that step or its task
+  view sends `session.ensure`, **THEN** no agent starts. The move creates no
+  session; focus may create only a workspace-ready `CREATED` session.
 - **GIVEN** B depends on an unfinished A and B is queued for a WIP-limited
   auto-start step, **WHEN** capacity opens and B is promoted, **THEN** B is
   admitted, its queued badge clears, and no session is created.
@@ -570,9 +571,6 @@ MCP:
   A chain is a set of edges between concrete tasks in v1.
 - Gantt or timeline rendering, and estimated-duration modelling.
 - Editing dependencies from the multi-select toolbar or via bulk operations.
-- An edge editor on the task detail view. Declaring dependencies is a planning
-  act that belongs to task creation (or to MCP for an agent decomposing work);
-  the task view only reports them.
 
 ## Implementation plan
 

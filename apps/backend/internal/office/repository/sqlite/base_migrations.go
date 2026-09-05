@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // runMigrations applies idempotent schema migrations for office tables
@@ -36,11 +38,60 @@ func (r *Repository) runMigrations() {
 	// Provider routing tables and replayable column migrations. Fresh
 	// schemas include the columns inline; ALTERs converge existing databases.
 	r.migrateProviderRouting()
+	r.migrateContinuationScope()
+	r.migrateRunOutcome()
+	r.migrateParentWakeIndexes()
+	r.migrateParentWakeReceiptColumns()
+	r.migrate.Apply("task_workspace_groups.ownership_generation",
+		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+}
+
+// migrateContinuationScope adds runs.continuation_scope for databases
+// created before WO-16's claim-time scope persistence. Existing rows receive
+// a scope from their stored context snapshot so queued or claimed taskless
+// runs keep their continuation chain after an upgrade.
+func (r *Repository) migrateContinuationScope() {
+	r.migrate.Apply("runs.continuation_scope",
+		`ALTER TABLE runs ADD COLUMN continuation_scope TEXT NOT NULL DEFAULT ''`)
+	r.backfillContinuationScopes()
+	r.migrate.Apply("runs.failure_scope_status_index",
+		`CREATE INDEX IF NOT EXISTS idx_run_failure_scope_status ON runs(agent_profile_id, continuation_scope, status)`)
+}
+
+func (r *Repository) backfillContinuationScopes() {
+	var legacyRuns []struct {
+		ID              string `db:"id"`
+		AgentProfileID  string `db:"agent_profile_id"`
+		ContextSnapshot string `db:"context_snapshot"`
+	}
+	if err := r.db.Select(&legacyRuns,
+		`SELECT id, agent_profile_id, context_snapshot
+		 FROM runs WHERE continuation_scope = ''`); err != nil {
+		if r.log != nil {
+			r.log.Warn("continuation scope backfill query failed", zap.Error(err))
+		}
+		return
+	}
+	for _, legacyRun := range legacyRuns {
+		scope := models.ContinuationScopeForRun(
+			&models.Run{ContextSnapshot: legacyRun.ContextSnapshot},
+			legacyRun.AgentProfileID,
+		)
+		if _, err := r.db.Exec(r.db.Rebind(`
+			UPDATE runs SET continuation_scope = ?
+			WHERE id = ? AND continuation_scope = ''
+		`), scope, legacyRun.ID); err != nil {
+			if r.log != nil {
+				r.log.Warn("continuation scope backfill update failed",
+					zap.String("run_id", legacyRun.ID), zap.Error(err))
+			}
+		}
+	}
 }
 
 // migrateCostEventContract adds the cache read/write split, turn
 // attribution, and cost-provenance columns to office_cost_events for
-// databases created before this contract (docs/specs/office/costs.md). Every
+// databases created before this contract (docs/specs/office/requirements/costs.md). Every
 // ALTER is nullable with no DEFAULT: a legacy row must read NULL, never 0,
 // because a merged tokens_cached_in cannot be decomposed and an unversioned
 // "0" would be indistinguishable from "no cache activity". Keep this column
@@ -78,6 +129,34 @@ func (r *Repository) migrateRunPayloadIndexes() {
 	r.migrate.Apply(
 		"runs.idx_run_payload_comment_id",
 		runPayloadCommentIDIndexSQL(r.db.DriverName()),
+	)
+}
+
+// migrateParentWakeIndexes adds the tasks(parent_id) index
+// ListStuckParents' three parent_id-correlated subqueries (has-a-live-
+// child, no-non-terminal-child, the child-set-key GROUP_CONCAT) need to
+// avoid a full tasks scan on every 30-second reconciler tick. Also
+// benefits AreAllChildrenTerminal and GetChildSummaries (blockers.go),
+// which query the same shape. Applied via r.migrate (non-fatal) rather
+// than createParentChildWakeReceiptsTable's r.db.Exec: tasks belongs to
+// a different package's schema, so a plain Exec against it is fatal in
+// the minimal single-domain test repos that don't create tasks until
+// after NewWithDB returns.
+func (r *Repository) migrateParentWakeIndexes() {
+	r.migrate.Apply(
+		"idx_tasks_parent_id",
+		`CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)`,
+	)
+}
+
+// migrateParentWakeReceiptColumns adds operation identity for receipts
+// created by workflow-engine dispatch. Existing direct-run receipts keep
+// their delivered_run_id and receive the empty operation id default.
+func (r *Repository) migrateParentWakeReceiptColumns() {
+	r.migrate.Apply(
+		"parent_child_wake_receipts.delivery_operation_id",
+		`ALTER TABLE parent_child_wake_receipts
+		 ADD COLUMN delivery_operation_id TEXT NOT NULL DEFAULT ''`,
 	)
 }
 
@@ -373,6 +452,11 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	// priority-migration fixtures predate them too.
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`)
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`)
+	// Same defensive add for the human assignee (docs/specs/tasks/requirements/human-assignee.md).
+	// It is applied by task/repository/sqlite ensureTeamAccessSchema() before
+	// the office migrations run on a real install, but priority-migration
+	// fixtures seed their own legacy tasks table and never see it.
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`)
 
 	for _, stmt := range taskPriorityMigrationStatements() {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {
@@ -428,12 +512,13 @@ func taskPriorityMigrationStatements() []string {
 			checkout_at TIMESTAMP,
 			checkout_run_id TEXT,
 			external_id TEXT COLLATE BINARY,
-			external_id_settled_at TIMESTAMP
+			external_id_settled_at TIMESTAMP,
+			assignee_user_id TEXT NOT NULL DEFAULT ''
 		)`,
 		// archived_by_cascade_id and external_id/external_id_settled_at are
 		// added to the task schema by task/repository/sqlite/base.go
 		// runMigrations() via idempotent ALTER ADD COLUMN calls that run
-		// BEFORE this office recreate. If the recreate omitted them from the
+		// BEFORE this office recreate, as is assignee_user_id. If the recreate omitted them from the
 		// new shape: archived_by_cascade_id missing would 500
 		// httpArchiveTask -> HandoffService.ArchiveTaskTree (the CAS update
 		// in ArchiveTaskIfActive references it); external_id missing would
@@ -448,7 +533,7 @@ func taskPriorityMigrationStatements() []string {
 			origin, project_id,
 			labels, identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at
+			external_id, external_id_settled_at, assignee_user_id
 		) SELECT
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), title, COALESCE(description,''),
@@ -462,7 +547,8 @@ func taskPriorityMigrationStatements() []string {
 			COALESCE(project_id,''),
 			COALESCE(labels,'[]'), identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at
+			external_id, external_id_settled_at,
+			COALESCE(assignee_user_id,'')
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_priority_new RENAME TO tasks`,

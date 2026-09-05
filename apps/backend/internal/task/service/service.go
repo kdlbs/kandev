@@ -53,11 +53,26 @@ type WorktreeProvider interface {
 	GetAllByTaskID(ctx context.Context, taskID string) ([]*worktree.Worktree, error)
 }
 
+// WorktreeCleanupIdentityProvider captures immutable checkout identities before
+// a durable cleanup snapshot is stored. Implementations that do not provide it
+// remain compatible with legacy cleanup wiring, which uses the older live-state
+// fallback in the worktree manager.
+type WorktreeCleanupIdentityProvider interface {
+	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
+}
+
 // WorktreeBatchCleaner extends WorktreeProvider with batch cleanup.
 type WorktreeBatchCleaner interface {
 	WorktreeProvider
 	// CleanupWorktrees removes multiple worktrees in a single operation.
 	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
+}
+
+// WorktreeArchiveBatchCleaner removes archived task worktrees without deleting
+// the local branches required for later recovery.
+type WorktreeArchiveBatchCleaner interface {
+	WorktreeBatchCleaner
+	CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*worktree.Worktree) error
 }
 
 type worktreeReferenceGuard interface {
@@ -73,6 +88,13 @@ type TaskExecutionStopper interface {
 	// RegisterExecutionStopOwner records exact teardown ownership before a
 	// terminal session mutation. It never replaces the explicit stop call.
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
+}
+
+// synchronousTaskExecutionStopper is an optional cleanup-only extension. The
+// normal StopSession contract schedules process teardown asynchronously, but
+// destructive resource cleanup must wait until the process exits.
+type synchronousTaskExecutionStopper interface {
+	StopSessionSynchronously(ctx context.Context, sessionID, reason string, force bool) error
 }
 
 // TerminalClarificationCanceller expires durable input requests after a task
@@ -207,6 +229,7 @@ type PRTaskResolver interface {
 type StartStepResolver interface {
 	ResolveStartStep(ctx context.Context, workflowID string) (string, error)
 	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
+	ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error)
 }
 
 // StepHistoryRecorder persists an ADR 0015 session-step transition audit
@@ -280,6 +303,7 @@ type Repos struct {
 	GitSnapshots      repository.GitSnapshotRepository
 	RepoEntities      repository.RepositoryEntityRepository
 	RepositorySets    repository.RepositorySetRepository
+	BranchPolicies    repository.RepositoryBranchPolicyRepository
 	RepositoryCleanup repository.RepositoryCleanupRepository
 	Executors         repository.ExecutorRepository
 	Environments      repository.EnvironmentRepository
@@ -295,6 +319,10 @@ type Repos struct {
 // Service provides task business logic
 type Service struct {
 	workspaces                      repository.WorkspaceRepository
+	userDirectory                   UserDirectory
+	unitPlacer                      UnitPlacer
+	unitReach                       UnitReachResolver
+	userOrgs                        func(ctx context.Context, userID string) (string, error)
 	tasks                           repository.TaskRepository
 	taskRepos                       repository.TaskRepoRepository
 	workspaceFolders                repository.TaskWorkspaceFolderRepository
@@ -306,6 +334,7 @@ type Service struct {
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
 	repositorySets                  repository.RepositorySetRepository
+	branchPolicies                  repository.RepositoryBranchPolicyRepository
 	repositoryCleanup               repository.RepositoryCleanupRepository
 	executors                       repository.ExecutorRepository
 	environments                    repository.EnvironmentRepository
@@ -316,6 +345,7 @@ type Service struct {
 	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
+	workspacePolicyAttacher         WorkspacePolicyAttacher
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
@@ -345,21 +375,19 @@ type Service struct {
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
+	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	sessionRunningChecker           SessionRunningChecker
 	remoteBranchLister              RemoteBranchLister
+	repositorySelectionResolver     RepositorySelectionResolver
 	repoCloneLocation               RepoCloneLocation
 	blockers                        BlockerRepository
-	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
-	// two concurrent adds cannot each pass a cycle walk that predates the
-	// other's insert and commit a cycle between them.
-	dependencyEdgeMu       sync.Mutex
-	comments               CommentRepository
-	taskStateActivity      TaskStateActivityLogger
-	secretStore            secrets.SecretStore
-	workspaceSecretDeleter WorkspaceSecretDeleter
-	baseBranchPusher       AgentBaseBranchPusher
-	comparisonTargetPusher AgentComparisonTargetPusher
-	runtimeOverridesMu     sync.Mutex
+	comments                        CommentRepository
+	taskStateActivity               TaskStateActivityLogger
+	secretStore                     secrets.SecretStore
+	workspaceSecretDeleter          WorkspaceSecretDeleter
+	baseBranchPusher                AgentBaseBranchPusher
+	comparisonTargetPusher          AgentComparisonTargetPusher
+	runtimeOverridesMu              sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -401,6 +429,21 @@ type Service struct {
 	pendingActionProjectionMu       sync.Mutex
 	pendingActionProjectionEpoch    string
 	pendingActionProjectionSequence uint64
+	lastPendingActionProjections    map[string]pendingActionProjectionState
+}
+
+// WorkspacePolicyAttacher persists the workspace-group relationship that is
+// required before a newly created child can be returned or launched.
+type WorkspacePolicyAttacher interface {
+	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
+}
+
+// WorkspacePolicyMembershipReleaser removes a task's workspace-group
+// membership after a post-create rollback. It is an optional companion to
+// WorkspacePolicyAttacher because lightweight task-service test harnesses may
+// not persist workspace groups.
+type WorkspacePolicyMembershipReleaser interface {
+	ReleaseWorkspacePolicy(ctx context.Context, taskID, reason string) error
 }
 
 // SetAttachmentService wires the file-backed prompt attachment owner into the
@@ -435,6 +478,12 @@ func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
 	s.workspaceSecretDeleter = deleter
 }
 
+// SetWorkspacePolicyAttacher installs the canonical child-workspace
+// coordinator used by every CreateTask caller.
+func (s *Service) SetWorkspacePolicyAttacher(attacher WorkspacePolicyAttacher) {
+	s.workspacePolicyAttacher = attacher
+}
+
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
@@ -450,6 +499,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		gitSnapshots:          repos.GitSnapshots,
 		repoEntities:          repos.RepoEntities,
 		repositorySets:        repos.RepositorySets,
+		branchPolicies:        repos.BranchPolicies,
 		repositoryCleanup:     repos.RepositoryCleanup,
 		executors:             repos.Executors,
 		environments:          repos.Environments,
@@ -469,6 +519,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		// Focused service tests do not run backend composition. Production
 		// replaces this fallback with a database-allocated generation.
 		pendingActionProjectionEpoch: "1",
+		lastPendingActionProjections: make(map[string]pendingActionProjectionState),
 	}
 }
 
@@ -637,6 +688,13 @@ type RemoteBranchLister interface {
 // SetRemoteBranchLister wires the provider-neutral remote branch source.
 func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
 	s.remoteBranchLister = lister
+}
+
+// SetRepositorySelectionResolver wires server-side inspection for first-use
+// plugin repository selections. The resolver is optional for focused callers;
+// plugin selections fail closed when it is not wired.
+func (s *Service) SetRepositorySelectionResolver(resolver RepositorySelectionResolver) {
+	s.repositorySelectionResolver = resolver
 }
 
 // RepoCloneLocation reports the base path the orchestrator clones repos into

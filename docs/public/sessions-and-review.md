@@ -71,6 +71,16 @@ Every row has **Send Now** for targeted priority. It sends that row directly whe
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
+## View active conversations in Threads
+
+Use **Threads** to read active task conversations side by side without opening each task. Open it from the workspace view control or navigation, or go to **`/threads`**.
+
+Threads shows one column for each task with an active primary agent session. The column header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
+
+On desktop, use the session tabs in a column to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. The selected conversation keeps its normal reply controls, so you can answer the agent without leaving Threads.
+
+Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+
 <details>
 <summary>Let agents coordinate sessions</summary>
 
@@ -119,7 +129,16 @@ the workspace-search shortcuts untouched. Click a mode or press **Tab** /
 search field. File matches are grouped by repository. Hover a mode to see its
 direct shortcut.
 
-Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.
+Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
+
+![Settings > Preferences > Keyboard Shortcuts showing chat input and command panel bindings.](../screenshots/settings-keyboard-shortcuts.png)
+
+Open **Settings > Preferences > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.
+
+When you save a custom default, Kandev reapplies its split proportions to new
+and reset desktop tasks and scales them to the available workbench.
+
+![Settings > Preferences > Layouts showing built-in desktop workbench profiles and the Default layout editor.](../screenshots/settings-layouts.png)
 
 **PR Details** is a reusable Layouts panel whose visibility follows the active task's review association. Without a linked GitHub pull request or GitLab merge request, the tab stays hidden, even when the selected layout includes it. Once a review is linked, Kandev adds PR Details as an inactive tab: beside **Agent** for the built-in Default, or in the group and tab position you configured in the Layouts editor. Closing that tab prevents it from reappearing automatically in the same session. Changing the default applies to task environments without a saved task-specific layout and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
 
@@ -189,6 +208,8 @@ Review compares each submodule with the gitlink commit recorded by its parent an
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
 
 When several pull requests are linked to a task, hover the PR control in the desktop top bar or tap the PR status chip on mobile to open the tabbed CI surface. Each PR tab has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
+
+An automatic-merge error shows **Retry** in the selected PR tab on desktop and mobile. This action requests one new evaluation for that pull request. Kandev applies all current readiness rules before it sends another merge request. Other automation and state-loading errors show **Refresh**. Refresh loads the current state and does not authorize a merge.
 
 <DocsVideo
   webm="./media/feature-guides/diff-line-feedback.webm"

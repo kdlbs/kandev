@@ -7,13 +7,17 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
+import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
 import { cn } from "@/lib/utils";
+import type { TaskPriority } from "@/lib/types/http";
 
 type TaskCreateAdvancedSettingsProps = {
   isCreateMode: boolean;
   isTaskStarted: boolean;
   blockedBy: string[];
   onBlockedByChange: (next: string[]) => void;
+  priority: TaskPriority;
+  onPriorityChange: (next: TaskPriority) => void;
   dependenciesDisabled?: boolean;
 };
 
@@ -22,6 +26,8 @@ export function TaskCreateAdvancedSettings({
   isTaskStarted,
   blockedBy,
   onBlockedByChange,
+  priority,
+  onPriorityChange,
   dependenciesDisabled,
 }: TaskCreateAdvancedSettingsProps) {
   const { t } = useTranslation();
@@ -92,6 +98,12 @@ export function TaskCreateAdvancedSettings({
                 disabled={dependenciesDisabled}
               />
             </div>
+          </div>
+          <div
+            className="md:col-start-2 md:justify-self-start"
+            data-testid="task-create-priority-setting-row"
+          >
+            <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
           </div>
         </div>
       </CollapsibleContent>

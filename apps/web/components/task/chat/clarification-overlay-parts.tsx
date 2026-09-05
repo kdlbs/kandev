@@ -9,6 +9,7 @@ import type { ClarificationOption } from "@/lib/types/http";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { KEYS } from "@/lib/keyboard/constants";
 import { useTranslation } from "react-i18next";
+import { ClarificationMarkdown } from "./clarification-markdown";
 
 // Grow the custom-answer box up to ~6 lines, then scroll internally so the
 // clarification overlay stays compact.
@@ -150,14 +151,18 @@ export function ClarificationOptions({
                 data-testid="clarification-option-label"
                 className="block leading-5 font-medium"
               >
-                {option.label}
+                <ClarificationMarkdown variant="inline" linkBehavior="passive">
+                  {option.label}
+                </ClarificationMarkdown>
               </span>
               {option.description && (
                 <span
                   data-testid="clarification-option-description"
                   className="block text-muted-foreground/80 mt-0.5 text-xs leading-snug"
                 >
-                  {option.description}
+                  <ClarificationMarkdown variant="inline" linkBehavior="passive">
+                    {option.description}
+                  </ClarificationMarkdown>
                 </span>
               )}
             </span>

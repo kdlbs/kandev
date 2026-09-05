@@ -14,6 +14,14 @@ Kandev can coordinate several agents without turning every unit of work into a s
 3. Choose an isolated workspace for concurrent writers or a different repository.
 4. Send bounded messages and keep the human review gate explicit.
 
+![Coordination boundary decision tree with same-session, inherited subtask, new workspace, and multi-repository task choices.](../screenshots/coordination.svg)
+
+[Open full-size SVG diagram][coordination-diagram]
+
+[coordination-diagram]: ../../docs/screenshots/coordination.svg
+
+Start with the smallest boundary that preserves shared context. Increase the boundary only when workflow state, files, repositories, or credentials need isolation.
+
 ## Choose a coordination boundary
 
 | Need                                                                 | Use                                       | Filesystem relationship                    | Independent workflow state |
@@ -115,7 +123,7 @@ Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to
 - Inherited repository attachments deliberately do not copy an explicit checkout branch.
 - An explicit same-repository child uses the inherited base branch. An explicit cross-repository child defaults to that repository's default branch unless `base_branch` is supplied.
 - Every created task must resolve an agent profile, even with `start_agent: false`.
-- Profile precedence when the task lands on a workflow step is the destination step's launch profile first (the step's pinned profile, or the workflow default when the step is unpinned), because that is what the orchestrator launches; it overrides an explicit `agent_profile_id`, and the created task records it. With no explicit `workflow_step_id`, the destination is the workflow's start step, so a workflow with steps still applies its start-step launch profile. Off a workflow step (no workflow, or a workflow with no steps), the order is explicit profile, then parent/current/source task metadata or primary-session profile, then the workspace default.
+- Profile precedence when the task lands on a workflow step is the destination step's launch profile first (the step's pinned profile, or the workflow default when the step is unpinned), because that is what the orchestrator launches; it overrides an explicit `agent_profile_id`, and the created task records it. With no explicit `workflow_step_id`, the destination is the first **Auto-start agent** step for `start_agent: true` and the workflow's start step otherwise, so a workflow with steps still applies that step's launch profile. Off a workflow step (no workflow, or a workflow with no steps), the order is explicit profile, then parent/current/source task metadata or primary-session profile, then the workspace default.
 - If no executor or executor profile is explicit or inherited, task MCP uses the built-in **git-worktree** executor. It does not consult the workspace's **Default Executor** for this fallback.
 - The one-level Kanban depth rule still applies.
 - An ephemeral Quick Chat task cannot be a parent; omit `parent_id` and create a top-level task instead.

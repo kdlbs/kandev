@@ -20,6 +20,7 @@ export type SidebarViewApi = {
   sort: { key: string; direction: string };
   group: string;
   collapsed_groups: string[];
+  task_row?: SidebarTaskRowPresentationApi | null;
 };
 
 export type SidebarViewDraftApi = {
@@ -27,12 +28,54 @@ export type SidebarViewDraftApi = {
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
   sort: { key: string; direction: string };
   group: string;
+  task_row?: SidebarTaskRowPresentationApi | null;
+};
+
+export type SidebarTaskRowPresentationApi = {
+  details_enabled?: boolean;
+  detail_order?: unknown[];
+  visible_details?: unknown[];
+  trailing?: string;
 };
 
 export type SidebarTaskPrefsApi = {
   pinned_task_ids: string[];
   ordered_task_ids: string[];
   subtask_order_by_parent_id: Record<string, string[]>;
+};
+
+export type ThreadTaskScopeApi = {
+  mode: "all" | "selected";
+  task_ids: string[];
+};
+
+export type ThreadViewClauseApi = {
+  id: string;
+  dimension: string;
+  op: string;
+  value: unknown;
+};
+
+export type ThreadViewSortApi = {
+  key: string;
+  direction: string;
+};
+
+export type ThreadViewApi = {
+  id: string;
+  name: string;
+  task_scope: ThreadTaskScopeApi;
+  filters: ThreadViewClauseApi[];
+  sort: ThreadViewSortApi;
+  max_columns: number | null;
+};
+
+export type ThreadViewDraftApi = {
+  base_view_id: string;
+  task_scope: ThreadTaskScopeApi;
+  filters: ThreadViewClauseApi[];
+  sort: ThreadViewSortApi;
+  max_columns: number | null;
 };
 
 export type TaskCreateLastUsedApi = {
@@ -85,6 +128,9 @@ export type UserSettings = {
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
+  thread_views?: ThreadViewApi[];
+  thread_active_view_id?: string;
+  thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown;
@@ -104,7 +150,9 @@ export type UserSettings = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
+  quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
   workflow_ids_with_auto_hide_empty_steps?: string[];
   revision?: number;
@@ -151,6 +199,9 @@ export type UserSettingsUpdatePayload = {
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
+  thread_views?: ThreadViewApi[];
+  thread_active_view_id?: string;
+  thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown[] | null;
@@ -170,7 +221,9 @@ export type UserSettingsUpdatePayload = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
+  quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
   workflow_ids_with_auto_hide_empty_steps?: string[];
 };

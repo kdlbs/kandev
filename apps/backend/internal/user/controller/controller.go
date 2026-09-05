@@ -5,6 +5,7 @@ import (
 	"runtime"
 
 	"github.com/kandev/kandev/internal/user/dto"
+	"github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/user/service"
 )
 
@@ -47,6 +48,38 @@ func (c *Controller) GetUserSettings(ctx context.Context) (dto.UserSettingsRespo
 	}, nil
 }
 
+// GetAgentProfileRecentUse returns the current user's independent operational
+// profile histories.
+func (c *Controller) GetAgentProfileRecentUse(ctx context.Context) ([]dto.AgentProfileRecentUseDTO, error) {
+	records, err := c.svc.GetAgentProfileRecentUse(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]dto.AgentProfileRecentUseDTO, 0, len(records))
+	for _, record := range records {
+		result = append(result, dto.FromAgentProfileRecentUse(record))
+	}
+	return result, nil
+}
+
+// RecordAgentProfileRecentUse records one successful profile launch in the
+// requested operational selector context.
+func (c *Controller) RecordAgentProfileRecentUse(
+	ctx context.Context,
+	contextValue string,
+	req dto.RecordAgentProfileRecentUseRequest,
+) (dto.AgentProfileRecentUseDTO, error) {
+	record, err := c.svc.RecordAgentProfileRecentUse(
+		ctx,
+		models.AgentProfileRecentUseContext(contextValue),
+		req.AgentProfileID,
+	)
+	if err != nil {
+		return dto.AgentProfileRecentUseDTO{}, err
+	}
+	return dto.FromAgentProfileRecentUse(record), nil
+}
+
 // UpdateUserSettings applies a partial settings patch and returns the
 // resulting settings with OS shell options.
 func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserSettingsRequest) (dto.UserSettingsResponse, error) {
@@ -86,6 +119,9 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		SidebarViews:                      req.SidebarViews,
 		SidebarActiveViewID:               req.SidebarActiveViewID,
 		SidebarDraft:                      req.SidebarDraft.ServiceValue(),
+		ThreadViews:                       req.ThreadViews,
+		ThreadActiveViewID:                req.ThreadActiveViewID,
+		ThreadViewDraft:                   req.ThreadViewDraft.ServiceValue(),
 		SidebarTaskPrefs:                  req.SidebarTaskPrefs,
 		TaskCreateLastUsed:                req.TaskCreateLastUsed,
 		JiraSavedViews:                    req.JiraSavedViews.ServiceValue(),
@@ -105,7 +141,9 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		LastSeenDisplay:                   req.LastSeenDisplay,
 		SystemMetricsDisplay:              systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 		AppStatusBarEnabled:               req.AppStatusBarEnabled,
+		ResolveSessionHostnames:           req.ResolveSessionHostnames,
 		AppStatusBarOrder:                 req.AppStatusBarOrder,
+		QuickChatTabOrderByWorkspace:      req.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               req.KanbanHiddenStepIDs,
 		WorkflowIDsWithAutoHideEmptySteps: req.WorkflowIDsWithAutoHideEmptySteps,
 	})

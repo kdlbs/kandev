@@ -19,10 +19,18 @@ export type MessagesState = {
       isLoading: boolean;
       /** Older-page request in flight (set by the shared pagination coordinator). */
       isLoadingMore: boolean;
+      /** True after an authoritative newest-window response or boot payload. */
+      historyInitialized: boolean;
       hasMore: boolean;
       oldestCursor: string | null;
     }
   >;
+};
+
+/** Prompts are fetched independently from the transcript with their own page metadata. */
+export type PromptsState = MessagesState & {
+  /** Incremented when a session is removed to reject stale prompt requests. */
+  generationBySession: Record<string, number>;
 };
 
 export type TurnsState = {
@@ -56,12 +64,24 @@ export type TurnsState = {
 
 export type TaskSessionsState = {
   items: Record<string, TaskSession>;
+  /** Monotonic client event generation used to order live activity against REST refreshes. */
+  activityEpochBySession?: Record<string, number>;
 };
 
 export type TaskSessionsByTaskState = {
   itemsByTaskId: Record<string, TaskSession[]>;
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
+  errorByTaskId?: Record<string, string | null>;
+};
+
+export type PendingActionProjection = Pick<
+  TaskSession,
+  "pending_action" | "pending_action_revision"
+>;
+
+export type PendingActionOrphanProjection = PendingActionProjection & {
+  task_id: string;
 };
 
 export type SessionAgentctlStatus = {
@@ -193,9 +213,11 @@ export type QueueState = {
 
 export type SessionSliceState = {
   messages: MessagesState;
+  messagePrompts: PromptsState;
   turns: TurnsState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
+  pendingActionProjectionsBySessionId: Record<string, PendingActionOrphanProjection>;
   sessionAgentctl: SessionAgentctlState;
   worktrees: WorktreesState;
   sessionWorktreesBySessionId: SessionWorktreesState;
@@ -210,10 +232,15 @@ export type SessionSliceActions = {
   setMessages: (
     sessionId: string,
     messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+    meta?: {
+      historyInitialized?: boolean;
+      hasMore?: boolean;
+      oldestCursor?: string | null;
+    },
   ) => void;
   addMessage: (message: Message) => void;
   updateMessage: (message: Message) => void;
+  updateMessages: (messages: Message[]) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   /**
    * Idempotent full-snapshot merge: reconciles `messages` against the current
@@ -224,16 +251,25 @@ export type SessionSliceActions = {
   mergeMessages: (
     sessionId: string,
     messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+    meta?: {
+      historyInitialized?: boolean;
+      hasMore?: boolean;
+      oldestCursor?: string | null;
+    },
   ) => void;
   prependMessages: (
     sessionId: string,
     messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+    meta?: {
+      historyInitialized?: boolean;
+      hasMore?: boolean;
+      oldestCursor?: string | null;
+    },
   ) => void;
   setMessagesMetadata: (
     sessionId: string,
     meta: {
+      historyInitialized?: boolean;
       hasMore?: boolean;
       isLoading?: boolean;
       isLoadingMore?: boolean;
@@ -242,6 +278,18 @@ export type SessionSliceActions = {
   ) => void;
   /** Sets the session's message-loading flag. */
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
+  replacePromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
+  prependPromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
+  setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
+  setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
@@ -289,11 +337,17 @@ export type SessionSliceActions = {
     sessionId: string,
     pendingAction: TaskPendingAction | null,
     revision?: TaskPendingActionRevision,
+    taskId?: string,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
-  setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
+  setTaskSessionsForTask: (
+    taskId: string,
+    sessions: TaskSession[],
+    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+  ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
+  setTaskSessionsError: (taskId: string, error: string | null) => void;
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
   setWorktree: (worktree: Worktree) => void;
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;

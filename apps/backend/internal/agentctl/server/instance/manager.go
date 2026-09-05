@@ -165,30 +165,31 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		zap.String("workspace_path", req.WorkspacePath))
 
 	overrides := &config.InstanceOverrides{
-		InstanceID:               id,
-		Protocol:                 agent.Protocol(req.Protocol),
-		AgentCommand:             agentCmd,
-		WorkDir:                  req.WorkspacePath,
-		AutoStart:                &autoStart,
-		Env:                      agentEnv,
-		AutoApprovePermissions:   req.AutoApprovePermissions,
-		AgentType:                req.AgentType,
-		McpServers:               mcpServers,
-		SessionID:                req.SessionID,
-		TaskID:                   req.TaskID,
-		DisableAskQuestion:       req.DisableAskQuestion,
-		AssumeMcpSse:             req.AssumeMcpSse,
-		AssumeMcpHttp:            req.AssumeMcpHttp,
-		McpMode:                  req.McpMode,
-		McpProviders:             req.McpProviders,
-		McpProfile:               req.McpProfile,
-		RequiresProcessKill:      req.RequiresProcessKill,
-		StripEnv:                 req.StripEnv,
-		BaseBranches:             req.BaseBranches,
-		ComparisonTargets:        req.ComparisonTargets,
-		RemoteContributions:      req.RemoteContributions,
-		ContributionDestinations: req.ContributionDestinations,
-		WorkspaceSourceRoots:     req.WorkspaceSourceRoots,
+		InstanceID:                 id,
+		Protocol:                   agent.Protocol(req.Protocol),
+		AgentCommand:               agentCmd,
+		WorkDir:                    req.WorkspacePath,
+		AutoStart:                  &autoStart,
+		Env:                        agentEnv,
+		AutoApprovePermissions:     req.AutoApprovePermissions,
+		AgentType:                  req.AgentType,
+		McpServers:                 mcpServers,
+		SessionID:                  req.SessionID,
+		TaskID:                     req.TaskID,
+		DisableAskQuestion:         req.DisableAskQuestion,
+		AssumeMcpSse:               req.AssumeMcpSse,
+		AssumeMcpHttp:              req.AssumeMcpHttp,
+		McpMode:                    req.McpMode,
+		McpProviders:               req.McpProviders,
+		McpProfile:                 req.McpProfile,
+		NamespacesMCPToolsByServer: req.NamespacesMCPToolsByServer,
+		RequiresProcessKill:        req.RequiresProcessKill,
+		StripEnv:                   req.StripEnv,
+		BaseBranches:               req.BaseBranches,
+		ComparisonTargets:          req.ComparisonTargets,
+		RemoteContributions:        req.RemoteContributions,
+		ContributionDestinations:   req.ContributionDestinations,
+		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",
@@ -473,13 +474,27 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("instance %s not found", id)
 	}
+	return m.stopInstance(ctx, id, inst)
+}
+
+func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) error {
 	inst.stopMu.Lock()
 	defer inst.stopMu.Unlock()
 
 	// A concurrent successful stop may have removed the instance while this
 	// caller waited for the per-instance teardown lock.
 	m.mu.Lock()
-	if current, exists := m.instances[id]; !exists || current != inst {
+	current, exists := m.instances[id]
+	if !exists {
+		alreadyStopped := inst.portReleased
+		m.mu.Unlock()
+		if !alreadyStopped {
+			return fmt.Errorf("instance %s not found", id)
+		}
+		m.logger.Debug("StopInstance already completed", zap.String("instance_id", id))
+		return nil
+	}
+	if current != inst {
 		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
 	}

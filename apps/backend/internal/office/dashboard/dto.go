@@ -306,6 +306,10 @@ type RunDetailResponse struct {
 	// context the run dispatcher built at claim time. Surfaced for
 	// debugging.
 	ContextSnapshot string `json:"context_snapshot,omitempty"`
+	// ContinuationScope is the persisted summary scope selected when
+	// the run was created. It lets run inspection show which
+	// continuation-summary chain the run reads and updates.
+	ContinuationScope string `json:"continuation_scope,omitempty"`
 	// OutputSummary mirrors runs.output_summary — the free-form
 	// agent output captured at run finish. Kept alongside ResultJSON
 	// because legacy adapters populate this and not result_json.
@@ -370,6 +374,7 @@ type TaskDTO struct {
 	ParentID               string         `json:"parentId,omitempty"`
 	ProjectID              string         `json:"projectId,omitempty"`
 	AssigneeAgentProfileID string         `json:"assigneeAgentProfileId,omitempty"`
+	AssigneeUserID         string         `json:"assigneeUserId,omitempty"`
 	Labels                 []LabelDTO     `json:"labels"`
 	Children               []*TaskDTO     `json:"children,omitempty"`
 	BlockedBy              []string       `json:"blockedBy,omitempty"`

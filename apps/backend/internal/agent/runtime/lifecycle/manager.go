@@ -79,21 +79,40 @@ type Manager struct {
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
 
-	// mcpHandler is the MCP request dispatcher for handling MCP requests
-	// from agentctl instances through the agent stream.
-	mcpHandler agentctl.MCPHandler
-
 	// sessionAccessCheck enforces per-user workspace scoping on session-scoped
 	// surfaces (opt-in auth). Nil = no scoping. See SetSessionAccessChecker.
 	sessionAccessCheck func(ctx context.Context, sessionID string) error
+
+	// sessionExecCheck enforces the session.exec scope on surfaces that hand
+	// the caller a shell, a file write, or a port preview. Reading a
+	// transcript and running a command in the worktree are different
+	// permissions, so they get different checks.
+	sessionExecCheck func(ctx context.Context, sessionID string) error
 
 	// environmentAccessCheck is the environment-keyed sibling of
 	// sessionAccessCheck, used by the terminal environment-shell route which
 	// resolves executions by environment ID. Nil = no scoping.
 	environmentAccessCheck func(ctx context.Context, environmentID string) error
 
+	// environmentExecCheck enforces session.exec on the environment-keyed
+	// surfaces that tear down or hand out a PTY. environmentAccessCheck is the
+	// read-level sibling used by the SSR terminal lists: listing terminals and
+	// destroying one are different permissions on the same identifier.
+	environmentExecCheck func(ctx context.Context, environmentID string) error
+
+	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, used by
+	// the task-keyed SSR terminal list which reads terminal rows by task ID
+	// without resolving an execution at all. Nil = no scoping.
+	taskAccessCheck func(ctx context.Context, taskID string) error
+
+	// taskEnvironmentAccessCheck authorizes a (task, environment) pair for
+	// surfaces that merge state keyed by both, where authorizing each ID on
+	// its own would not establish that they belong together. Nil = no scoping.
+	taskEnvironmentAccessCheck func(ctx context.Context, taskID, environmentID string) error
+
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
+	remoteRefreshGroup   singleflight.Group
 
 	// Background remote status polling
 	remoteStatusPollInterval time.Duration
@@ -172,9 +191,6 @@ type Manager struct {
 	// managedRuntimeSelections supplies exact versions for host-local managed
 	// npm runtimes. Remote/container runtimes intentionally do not consult it.
 	managedRuntimeSelections managedruntime.SelectionReader
-	// managedRuntimeCacheInvalidator removes one trusted npm execution tree
-	// during bounded host-local startup recovery.
-	managedRuntimeCacheInvalidator ManagedRuntimeCacheInvalidator
 
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
@@ -190,13 +206,6 @@ type ManagedGoCacheEnvironmentProvider interface {
 	ExecutionEnvironment(ctx context.Context) (map[string]string, error)
 }
 
-// ManagedRuntimeCacheInvalidator owns the host npm cache boundary. Lifecycle
-// recovery never discovers or deletes cache paths directly.
-type ManagedRuntimeCacheInvalidator interface {
-	InvalidateExecutionCache(context.Context, string) error
-	InvalidateExecutionCacheVersion(ctx context.Context, packageName, version string) error
-}
-
 // SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
 func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEnvironmentProvider) {
 	m.managedGoCache = provider
@@ -206,12 +215,6 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	m.managedRuntimeSelections = store
-}
-
-// SetManagedRuntimeCacheInvalidator wires the settings-owned exact cache
-// deletion boundary. It is optional for embedded/test managers.
-func (m *Manager) SetManagedRuntimeCacheInvalidator(invalidator ManagedRuntimeCacheInvalidator) {
-	m.managedRuntimeCacheInvalidator = invalidator
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.
@@ -340,6 +343,7 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
+	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 
@@ -348,6 +352,28 @@ func NewManager(
 	}
 
 	return mgr
+}
+
+func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
+	execution, exists := m.executionStore.Get(failure.ExecutionID)
+	if !exists {
+		m.logger.Debug("ignoring stale initial prompt delivery failure",
+			zap.String("execution_id", failure.ExecutionID),
+			zap.Uint64("prompt_generation", failure.PromptGeneration))
+		return
+	}
+	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
+		Type:             "error",
+		Error:            "initial prompt delivery failed",
+		SessionID:        failure.SessionID,
+		PromptGeneration: failure.PromptGeneration,
+		TurnID:           failure.TurnID,
+	})
+	if !settled {
+		m.logger.Debug("ignoring superseded initial prompt delivery failure",
+			zap.String("execution_id", failure.ExecutionID),
+			zap.Uint64("prompt_generation", failure.PromptGeneration))
+	}
 }
 
 // HandleSessionMode routes a session-level mode transition (from the gateway
@@ -403,12 +429,10 @@ func (m *Manager) WorktreeManager() *worktree.Manager {
 // where they are dispatched to this handler. This enables agents to use MCP tools
 // like listing workspaces, boards, tasks, and asking user questions.
 //
-// This must be called before agents start making MCP calls. Typically set during
-// initialization after the MCP handlers are created.
+// Streams resolve the current handler for each request, so recovered streams
+// can connect before startup wiring installs the dispatcher.
 func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
-	m.mcpHandler = handler
-	// Update the stream manager with the handler
-	m.streamManager.mcpHandler = handler
+	m.streamManager.setMCPHandler(handler)
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
@@ -424,7 +448,14 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 // Set once during startup wiring, before agents start making MCP calls. Leave
 // unset to keep dispatch unscoped (single-user instances).
 func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
-	m.streamManager.mcpIdentityScoper = scoper
+	m.streamManager.setMCPIdentityScoper(scoper)
+}
+
+// SetMCPPrincipalScoper installs the trusted in-session MCP principal resolver.
+// The resolver derives automation identity and workspace boundaries from the
+// execution's own task and session, never from the agent request payload.
+func (m *Manager) SetMCPPrincipalScoper(scoper MCPPrincipalScoper) {
+	m.streamManager.setMCPPrincipalScoper(scoper)
 }
 
 // SetSessionAccessChecker installs the per-user session visibility check used
@@ -433,6 +464,22 @@ func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
 // once during startup wiring, before the HTTP server accepts connections.
 func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessionID string) error) {
 	m.sessionAccessCheck = check
+}
+
+// SetSessionExecAccessChecker installs the session.exec check used by the
+// terminal, shell, file-write, VS Code and port-preview surfaces.
+func (m *Manager) SetSessionExecAccessChecker(check func(ctx context.Context, sessionID string) error) {
+	m.sessionExecCheck = check
+}
+
+// CheckSessionExecAccess authorizes an execution-capable session operation.
+// It falls back to the read check when no exec checker is wired, so an
+// unwired build is no more permissive than before this scope existed.
+func (m *Manager) CheckSessionExecAccess(ctx context.Context, sessionID string) error {
+	if m.sessionExecCheck == nil {
+		return m.CheckSessionAccess(ctx, sessionID)
+	}
+	return m.sessionExecCheck(ctx, sessionID)
 }
 
 // SetAttachmentReader wires the backend attachment reader used by prompt
@@ -448,6 +495,36 @@ func (m *Manager) SetAttachmentReader(reader AttachmentReader) {
 // check used by GetOrEnsureExecutionForEnvironment (terminal env-shell route).
 func (m *Manager) SetEnvironmentAccessChecker(check func(ctx context.Context, environmentID string) error) {
 	m.environmentAccessCheck = check
+}
+
+// SetEnvironmentExecAccessChecker installs the session.exec check for the
+// environment-keyed surfaces that destroy or open a PTY.
+func (m *Manager) SetEnvironmentExecAccessChecker(check func(ctx context.Context, environmentID string) error) {
+	m.environmentExecCheck = check
+}
+
+// CheckEnvironmentExecAccess authorizes an execution-capable environment
+// operation. It falls back to the read check when no exec checker is wired,
+// so an unwired build is no more permissive than before this scope existed.
+func (m *Manager) CheckEnvironmentExecAccess(ctx context.Context, taskEnvironmentID string) error {
+	if m.environmentExecCheck == nil {
+		return m.CheckEnvironmentAccess(ctx, taskEnvironmentID)
+	}
+	return m.environmentExecCheck(ctx, taskEnvironmentID)
+}
+
+// SetTaskAccessChecker installs the per-user task visibility check used by
+// the task-keyed SSR terminal route. The checker must return nil for contexts
+// without a request identity (internal callers).
+func (m *Manager) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
+	m.taskAccessCheck = check
+}
+
+// SetTaskEnvironmentAccessChecker installs the per-user check for a
+// (task, environment) pair, used by the task-keyed SSR terminal route which
+// merges terminals from the task with unmanaged shells from the environment.
+func (m *Manager) SetTaskEnvironmentAccessChecker(check func(ctx context.Context, taskID, environmentID string) error) {
+	m.taskEnvironmentAccessCheck = check
 }
 
 // CheckSessionAccess authorizes a session-scoped operation for the ctx
@@ -471,6 +548,29 @@ func (m *Manager) CheckEnvironmentAccess(ctx context.Context, taskEnvironmentID 
 		return nil
 	}
 	return m.environmentAccessCheck(ctx, taskEnvironmentID)
+}
+
+// CheckTaskAccess authorizes a task-scoped operation for the ctx identity.
+// The task-keyed sibling of CheckSessionAccess, for handlers that read
+// task-owned state (the SSR terminal list) without going through an
+// execution. No-op when no checker is set.
+func (m *Manager) CheckTaskAccess(ctx context.Context, taskID string) error {
+	if m.taskAccessCheck == nil {
+		return nil
+	}
+	return m.taskAccessCheck(ctx, taskID)
+}
+
+// CheckTaskEnvironmentAccess authorizes a (task, environment) pair for the ctx
+// identity: both IDs visible, and the environment actually bound to the task.
+// Handlers that merge state keyed by both must use this rather than the two
+// single-ID checks, which pass independently for an unrelated pair. No-op when
+// no checker is set.
+func (m *Manager) CheckTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error {
+	if m.taskEnvironmentAccessCheck == nil {
+		return nil
+	}
+	return m.taskEnvironmentAccessCheck(ctx, taskID, taskEnvironmentID)
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.
@@ -541,4 +641,16 @@ func (m *Manager) DockerClientProvider() func() *docker.Client {
 		}
 		return dockerExec.Client()
 	}
+}
+
+// execAccessCheck returns the check that execution-capable surfaces must pass.
+//
+// It prefers the session.exec checker and falls back to the plain access check
+// when no scoped checker is wired. The fallback is never weaker than the
+// behavior before session.exec existed; production always wires both.
+func (m *Manager) execAccessCheck() func(ctx context.Context, sessionID string) error {
+	if m.sessionExecCheck != nil {
+		return m.sessionExecCheck
+	}
+	return m.sessionAccessCheck
 }

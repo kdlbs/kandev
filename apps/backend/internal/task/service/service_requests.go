@@ -13,6 +13,7 @@ type TaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	BranchPolicyID string `json:"branch_policy_id,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string `json:"local_path,omitempty"`
 	Name           string `json:"name,omitempty"`
@@ -25,6 +26,13 @@ type TaskRepositoryInput struct {
 	ProviderRepoID string `json:"provider_repo_id,omitempty"`
 	ProviderOwner  string `json:"provider_owner,omitempty"`
 	ProviderName   string `json:"provider_name,omitempty"`
+
+	// PreserveBaseBranch keeps an effective branch produced after policy
+	// resolution (for example, the branch created by the local fresh-branch
+	// flow) when task repositories are recreated. It is internal-only: normal
+	// task creation must always anchor a policy-backed repository to the
+	// policy's immutable base branch.
+	PreserveBaseBranch bool `json:"-"`
 
 	// RemoteContribution is server-authored after provider resolution. It is
 	// intentionally excluded from JSON request surfaces; callers must not be
@@ -49,7 +57,13 @@ type TaskRepositoryInput struct {
 	// provider descriptor already authorized by the plugin host. It is never
 	// accepted from REST/MCP JSON; callers must still supply every identity and
 	// exact credential-free clone URL field above.
-	TrustedProviderDescriptor bool `json:"-"`
+	//
+	// A descriptor that arrives without this marker uses the normal built-in
+	// resolver. Plugin descriptors must come through the authenticated plugin
+	// Host Tasks.Create path, which sets this marker only after validating the
+	// active plugin's provider ownership and clone origin.
+	TrustedProviderDescriptor bool                           `json:"-"`
+	BranchPolicySnapshot      *models.RepositoryBranchPolicy `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
@@ -66,11 +80,23 @@ type CreateTaskRequest struct {
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
-	PlanMode       bool                   `json:"plan_mode,omitempty"`
-	IsEphemeral    bool                   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
-	ParentID       string                 `json:"parent_id,omitempty"`
-	Autopilot      bool                   `json:"autopilot,omitempty"`
-	WorkspacePath  string                 `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+	// RecordAgentProfileRecentUse opts this deferred launch into task_create
+	// profile-history attribution. Only the authenticated HTTP/WS selector
+	// surfaces set it; programmatic callers such as MCP must leave it false.
+	RecordAgentProfileRecentUse bool `json:"-"`
+	PlanMode                    bool `json:"plan_mode,omitempty"`
+
+	// StartAgent reports that the caller intends to launch an agent for this
+	// task right away. It only steers step resolution (see resolveWorkflowStep)
+	// — the launch itself is the caller's job, after CreateTask returns.
+	StartAgent    bool   `json:"start_agent,omitempty"`
+	IsEphemeral   bool   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
+	ParentID      string `json:"parent_id,omitempty"`
+	Autopilot     bool   `json:"autopilot,omitempty"`
+	WorkspacePath string `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+	// WorkspacePolicy carries the effective policy resolved by an API adapter.
+	// When omitted, CreateTask derives child defaults from the persisted parent.
+	WorkspacePolicy *WorkspacePolicy `json:"-"`
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
@@ -109,6 +135,10 @@ type UpdateTaskRequest struct {
 	// leaves the relationship untouched; a pointer to "" clears it (un-nests
 	// back to a root task); a non-empty value nests it under that parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. A nil pointer leaves it alone; a
+	// pointer to "" unassigns. It is independent of the agent assignee and
+	// never clears it.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow
@@ -150,6 +180,12 @@ type UpdateWorkspaceRequest struct {
 	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	// Visibility is "private" or "org". Unknown values normalize to private:
+	// unrecognized input must never widen access.
+	Visibility *string `json:"visibility,omitempty"`
+	// UnitID moves the workspace to another organization unit, which is the
+	// only way to change who reaches it.
+	UnitID *string `json:"unit_id,omitempty"`
 }
 
 // FindOrCreateRepositoryRequest contains the data for finding or creating a repository by provider info.
@@ -295,6 +331,8 @@ type ListMessagesRequest struct {
 	Before        string
 	After         string
 	Sort          string
+	AuthorType    string
+	Around        string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script

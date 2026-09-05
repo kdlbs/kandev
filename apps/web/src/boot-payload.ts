@@ -1,7 +1,14 @@
 import type { AppState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
-import type { Repository, RepositorySet, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import type {
+  Repository,
+  RepositoryBranchPolicy,
+  RepositorySet,
+  Task,
+  Workflow,
+  WorkflowStep,
+} from "@/lib/types/http";
 import type { ActivePlugin } from "@/lib/plugins/types";
 
 export type { ActivePlugin };
@@ -16,6 +23,7 @@ export type BootRoute = {
 export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
+  bootId?: string;
   lspAutoInstallPreferenceLanguages?: string[];
   debug?: boolean;
   /**
@@ -43,6 +51,7 @@ export type BootRouteData = {
     steps?: WorkflowStep[];
     repositories?: Repository[];
     repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
   };
   tasksPage?: {
     activeWorkspaceId?: string | null;
@@ -50,6 +59,7 @@ export type BootRouteData = {
     steps?: WorkflowStep[];
     repositories?: Repository[];
     repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
     tasks?: Task[];
     total?: number;
     tasksListSort?: string;
@@ -160,6 +170,7 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
   return {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
+    bootId: readNonEmptyString(value.bootId),
     lspAutoInstallPreferenceLanguages: readStringArray(value.lspAutoInstallPreferenceLanguages),
     debug: value.debug === true ? true : undefined,
     nonProduction: value.nonProduction === true ? true : undefined,

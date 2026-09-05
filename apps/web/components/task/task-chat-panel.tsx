@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- this component composes the complete transcript surface. */
+
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type RefObject } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -15,7 +17,6 @@ import {
   getLastUserMessageId,
   getFirstUserMessageId,
   resolveLastPromptControls,
-  shouldLoadMoreForTranscriptTarget,
 } from "@/components/task/chat/message-list-shared";
 import { AnchoredLastPromptBar } from "@/components/task/chat/anchored-last-prompt-bar";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -33,23 +34,16 @@ import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-un
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
+
+import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
-
-/**
- * Cap on how many extra pages the last-prompt background lookup will fetch
- * (see the `lastPromptLookupPagesRef` effect below) before giving up and
- * falling back to the transcript's manual "Load older messages" pagination.
- * 3 pages of 20 covers a long single agent turn without silently draining
- * an entire long-lived conversation that happens to have no recent user
- * message at all.
- */
-const MAX_LAST_PROMPT_LOOKUP_PAGES = 3;
+import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -65,24 +59,104 @@ function useClarificationKey(agentMessageCount: number) {
 }
 
 /** Scrolls a non-Dockview host target after the message row becomes rendered. */
-function usePendingMessageScroll(
-  messageListRef: RefObject<MessageListHandle | null>,
-  messageId: string | null | undefined,
-  onConsumed: ((messageId: string) => void) | undefined,
-  readinessKey: string,
-) {
+type PendingMessageScrollOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  sessionId: string | null;
+  messageId: string | null | undefined;
+  onConsumed: ((messageId: string) => void) | undefined;
+  readinessKey: string;
+  isInitialMessagesLoading: boolean;
+};
+
+// eslint-disable-next-line max-lines-per-function -- coordinates the target lifecycle, request guard, and retry state.
+export function usePendingMessageScroll({
+  messageListRef,
+  sessionId,
+  messageId,
+  onConsumed,
+  readinessKey,
+  isInitialMessagesLoading,
+}: PendingMessageScrollOptions) {
+  const store = useAppStoreApi();
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [retryVersion, setRetryVersion] = useState(0);
+  const requestedTargetRef = useRef<string | null>(null);
+  const activeRequestRef = useRef<string | null>(null);
+  const targetIdentityRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const retry = useCallback(() => setRetryVersion((version) => version + 1), []);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (!messageId) return;
+    if (!sessionId || !messageId) {
+      targetIdentityRef.current = null;
+      requestedTargetRef.current = null;
+      setIsLoading(false);
+      setHasError(false);
+      return;
+    }
+    const targetIdentity = `${sessionId}\u0000${messageId}`;
+    if (targetIdentityRef.current !== targetIdentity) {
+      targetIdentityRef.current = targetIdentity;
+      requestedTargetRef.current = null;
+    }
+    setHasError(false);
     let attempts = 0;
     let frame = 0;
+    const isCurrentTarget = () =>
+      mountedRef.current && targetIdentityRef.current === targetIdentity;
     const attemptScroll = () => {
+      if (!isCurrentTarget()) return;
       if (
         messageListRef.current?.scrollToMessage(messageId, {
           align: "start",
           behavior: "auto",
         })
       ) {
+        requestedTargetRef.current = null;
         onConsumed?.(messageId);
+        return;
+      }
+      if (isInitialMessagesLoading) return;
+      const loaded = store
+        .getState()
+        .messages.bySession[sessionId]?.some((message) => message.id === messageId);
+      if (!loaded && requestedTargetRef.current !== messageId) {
+        requestedTargetRef.current = messageId;
+        activeRequestRef.current = targetIdentity;
+        setIsLoading(true);
+        void loadMessageWindowAround(
+          sessionId,
+          messageId,
+          () => isCurrentTarget() && requestedTargetRef.current === messageId,
+          store,
+        )
+          .then((result) => {
+            if (!isCurrentTarget() || activeRequestRef.current !== targetIdentity) return;
+            if (result.kind === "deleted-target") {
+              requestedTargetRef.current = null;
+              onConsumed?.(messageId);
+            }
+          })
+          .catch(() => {
+            if (isCurrentTarget() && activeRequestRef.current === targetIdentity) {
+              requestedTargetRef.current = null;
+              setHasError(true);
+            }
+          })
+          .finally(() => {
+            if (activeRequestRef.current === targetIdentity) {
+              activeRequestRef.current = null;
+              if (mountedRef.current) setIsLoading(false);
+            }
+          });
         return;
       }
       attempts += 1;
@@ -90,7 +164,17 @@ function usePendingMessageScroll(
     };
     frame = requestAnimationFrame(attemptScroll);
     return () => cancelAnimationFrame(frame);
-  }, [messageId, messageListRef, onConsumed, readinessKey]);
+  }, [
+    isInitialMessagesLoading,
+    messageId,
+    messageListRef,
+    onConsumed,
+    readinessKey,
+    retryVersion,
+    sessionId,
+    store,
+  ]);
+  return { isLoading, hasError, retry };
 }
 
 /** Computes the render-item key the unread "New" divider should appear
@@ -225,6 +309,11 @@ type TaskChatPanelProps = {
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
   /**
+   * Embedded multi-panel hosts do not own the global workbench or shortcuts.
+   * They keep the conversation and composer, but suppress those side effects.
+   */
+  embedded?: boolean;
+  /**
    * Whether this panel is the one actually on screen — gates the
    * Slack-style unread-divider read tracking (see
    * chat/use-session-read-tracking.ts). Dockview-hosted callers must pass
@@ -279,6 +368,9 @@ export function useScrollTargetConsumption({
   const scrollTarget = useDockviewStore((state) => state.scrollTarget);
   const clearScrollTarget = useDockviewStore((state) => state.clearScrollTarget);
   const clearScrollTargetForOwner = useDockviewStore((state) => state.clearScrollTargetForOwner);
+  const appStore = useAppStoreApi();
+  const [jumpLoading, setJumpLoading] = useState(false);
+  const jumpRequestCount = useRef(0);
   const previousSessionId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -324,11 +416,35 @@ export function useScrollTargetConsumption({
         if (!latest || latest.token !== scrollTarget.token) return;
         if (messageListRef.current?.scrollToMessage(scrollTarget.messageId, { align: "start" })) {
           clearScrollTarget(scrollTarget.token);
+          return;
         }
+        const loaded = appStore
+          .getState()
+          .messages.bySession[
+            scrollTarget.sessionId
+          ]?.some((message) => message.id === scrollTarget.messageId);
+        if (loaded) return;
+        jumpRequestCount.current += 1;
+        setJumpLoading(true);
+        void loadMessageWindowAround(
+          scrollTarget.sessionId,
+          scrollTarget.messageId,
+          () => useDockviewStore.getState().scrollTarget?.token === scrollTarget.token,
+          appStore,
+        )
+          .then((result) => {
+            if (result.kind !== "merged") clearScrollTarget(scrollTarget.token);
+          })
+          .catch(() => clearScrollTarget(scrollTarget.token))
+          .finally(() => {
+            jumpRequestCount.current -= 1;
+            setJumpLoading(jumpRequestCount.current > 0);
+          });
       });
     });
     return () => cancelAnimationFrame(frame);
   }, [
+    appStore,
     clearScrollTarget,
     isInitialMessagesLoading,
     isVisible,
@@ -338,6 +454,7 @@ export function useScrollTargetConsumption({
     resolvedSessionId,
     scrollTarget,
   ]);
+  return jumpLoading;
 }
 
 // eslint-disable-next-line complexity, max-lines-per-function -- composes many sub-panels; each concern already factored into its own hook
@@ -351,6 +468,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
   hideSessionsDropdown,
+  embedded = false,
   isVisible = true,
   panelId = null,
   pendingScrollToMessageId = null,
@@ -364,10 +482,12 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     launchErrorContext?.statusSummary,
   );
 
+  const { t } = useTranslation();
   useSettingsData(true);
   const panelState = useChatPanelState({
     sessionId,
     taskId: taskIdHint,
+    disableWorkbenchEffects: embedded,
     onOpenFile,
     onOpenFileAtLine,
   });
@@ -378,6 +498,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     taskId,
     isWorking,
     messagesLoading,
+    historyRefreshPending,
     isInitialMessagesLoading,
     groupedItems,
     allMessages,
@@ -388,24 +509,30 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
-  const dividerBeforeItemKey = useUnreadDividerBeforeItemKey(
-    resolvedSessionId,
-    isVisible,
-    groupedItems,
-    isInitialMessagesLoading,
-  );
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
     session?.state,
     allMessages,
     footerActionMessages,
   );
-  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
+  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef, {
+    enableFocusShortcut: !embedded,
+  });
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<MessageListHandle>(null);
-  useScrollTargetConsumption({
+  const dividerBeforeItemKey = useUnreadDividerBeforeItemKey(
+    resolvedSessionId,
+    isVisible,
+    groupedItems,
+    isInitialMessagesLoading,
+  );
+  // Kanban previews intentionally pass `isVisible=false` so they do not
+  // advance the read cursor, but their transcript is rendered in a visible
+  // non-Dockview host. Keep read visibility separate from scroll geometry.
+  const transcriptIsVisible = panelId === null || isVisible;
+  const isDockviewJumpLoading = useScrollTargetConsumption({
     resolvedSessionId,
     isVisible,
     panelId,
@@ -413,12 +540,19 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     isInitialMessagesLoading,
     renderedMessageCount: allMessages.length,
   });
-  usePendingMessageScroll(
+  const {
+    isLoading: isPendingJumpLoading,
+    hasError: hasPendingJumpError,
+    retry: retryPendingJump,
+  } = usePendingMessageScroll({
     messageListRef,
-    pendingScrollToMessageId,
-    onPendingScrollConsumed,
-    `${allMessages.length}:${isInitialMessagesLoading}`,
-  );
+    sessionId: resolvedSessionId,
+    messageId: pendingScrollToMessageId,
+    onConsumed: onPendingScrollConsumed,
+    readinessKey: `${allMessages.length}:${isInitialMessagesLoading}`,
+    isInitialMessagesLoading,
+  });
+  const isJumpLoading = isDockviewJumpLoading || isPendingJumpLoading;
   const lastPromptMessageId = useMemo(() => getLastUserMessageId(allMessages), [allMessages]);
   const lastPromptMessage = useMemo(
     () =>
@@ -449,7 +583,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const [isFirstMessageHidden, setIsFirstMessageHidden] = useState(false);
   const showScrollToStartButton =
     showScrollToStart && Boolean(firstMessageId) && isFirstMessageHidden;
-  const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
+  const { loadMoreRaw, hasMore } = useLazyLoadMessages(resolvedSessionId);
   // A paginated session's `firstMessageId` only reflects the oldest message in
   // the currently loaded page while `hasMore` is true — jumping there directly
   // lands on a partial-page boundary, not the transcript's real start. Drain
@@ -474,44 +608,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
     }
   }, [hasMore, firstMessageId]);
-  // Bounded background lookup: the last prompt is usually within a page or
-  // two of a long single agent turn, but a session with no recent user
-  // message at all (e.g. hours of tool-only activity) would otherwise drain
-  // its *entire* history just to power this convenience affordance. Stop
-  // after a handful of pages and fall back to the manual "Load older
-  // messages" pagination the transcript already offers.
-  const lastPromptLookupPagesRef = useRef(0);
-  useEffect(() => {
-    lastPromptLookupPagesRef.current = 0;
-  }, [resolvedSessionId]);
-  useEffect(() => {
-    if (lastPromptMessageId !== null) {
-      lastPromptLookupPagesRef.current = 0;
-      return;
-    }
-    // Never start an older-page lookup against a stale SSR cursor while the
-    // session's initial/refetch load is in flight: both writes independently
-    // update hasMore/oldestCursor, and completion order could regress the
-    // pagination metadata.
-    if (
-      messagesLoading ||
-      isLoadingMore ||
-      lastPromptLookupPagesRef.current >= MAX_LAST_PROMPT_LOOKUP_PAGES
-    )
-      return;
-    if (!shouldLoadMoreForTranscriptTarget("last_prompt", allMessages, hasMore)) return;
-    lastPromptLookupPagesRef.current += 1;
-    void loadMore();
-  }, [
-    allMessages,
-    hasMore,
-    isLoadingMore,
-    loadMore,
-    lastPromptMessageId,
-    messagesLoading,
-    resolvedSessionId,
-  ]);
-  const search = useSessionSearch(resolvedSessionId, loadMore);
+  // Search can target backend rows before the visible transcript boundary.
+  const search = useSessionSearch(resolvedSessionId, loadMoreRaw);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
@@ -534,6 +632,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       ref={panelRef}
       data-testid="session-chat"
       data-panel-kind="session"
+      data-session-id={resolvedSessionId ?? undefined}
       tabIndex={-1}
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
@@ -548,38 +647,67 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             repositories={launchErrorContext.repositories}
           />
         )}
-        <MessageList
-          ref={messageListRef}
-          items={groupedItems}
-          messages={allMessages}
-          footerActionMessages={footerActionMessages}
-          permissionsByToolCallId={permissionsByToolCallId}
-          childrenByParentToolCallId={childrenByParentToolCallId}
-          taskId={taskId ?? undefined}
+        <TaskMarkdownFileLinkProvider
+          taskId={taskId}
           sessionId={resolvedSessionId}
-          messagesLoading={messagesLoading}
-          isWorking={isWorking}
-          sessionState={session?.state}
           worktreePath={getSessionWorkspacePath(session)}
           onOpenFile={onOpenFile}
-          dividerBeforeItemKey={dividerBeforeItemKey}
-          lastPromptMessageId={lastPromptMessageId}
-          onLastPromptEdgeChange={setLastPromptEdge}
-          firstMessageId={firstMessageId}
-          onFirstMessageHiddenChange={setIsFirstMessageHidden}
-          anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-          stickyPromptBar={
-            showAnchoredBar && lastPromptMessage ? (
-              <AnchoredLastPromptBar
-                promptText={lastPromptMessage.content}
-                isVisible={anchoredBarVisible}
-                onScrollUp={scrollToLastPrompt}
-                showScrollToLastPrompt={showScrollToLastPrompt}
-                onHeightChange={setAnchoredBarHeight}
-              />
-            ) : undefined
-          }
-        />
+        >
+          <MessageList
+            ref={messageListRef}
+            items={groupedItems}
+            messages={allMessages}
+            footerActionMessages={footerActionMessages}
+            permissionsByToolCallId={permissionsByToolCallId}
+            childrenByParentToolCallId={childrenByParentToolCallId}
+            taskId={taskId ?? undefined}
+            sessionId={resolvedSessionId}
+            messagesLoading={messagesLoading}
+            historyRefreshPending={historyRefreshPending}
+            isWorking={isWorking}
+            sessionState={session?.state}
+            worktreePath={getSessionWorkspacePath(session)}
+            onOpenFile={onOpenFile}
+            dividerBeforeItemKey={dividerBeforeItemKey}
+            lastPromptMessageId={lastPromptMessageId}
+            onLastPromptEdgeChange={setLastPromptEdge}
+            firstMessageId={firstMessageId}
+            onFirstMessageHiddenChange={setIsFirstMessageHidden}
+            anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+            isVisible={transcriptIsVisible}
+            stickyPromptBar={
+              showAnchoredBar && lastPromptMessage ? (
+                <AnchoredLastPromptBar
+                  promptText={lastPromptMessage.content}
+                  isVisible={anchoredBarVisible}
+                  onScrollUp={scrollToLastPrompt}
+                  showScrollToLastPrompt={showScrollToLastPrompt}
+                  onHeightChange={setAnchoredBarHeight}
+                />
+              ) : undefined
+            }
+          />
+        </TaskMarkdownFileLinkProvider>
+        {isJumpLoading && (
+          <div
+            data-testid="transcript-jump-loading"
+            role="status"
+            aria-live="polite"
+            className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs text-muted-foreground shadow"
+          >
+            {t("task:loading")}
+          </div>
+        )}
+        {hasPendingJumpError && (
+          <button
+            type="button"
+            data-testid="transcript-jump-retry"
+            className="absolute right-3 top-3 min-h-11 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground shadow"
+            onClick={retryPendingJump}
+          >
+            {t("task:retry")}
+          </button>
+        )}
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
       {!isArchived && (
@@ -603,6 +731,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         panelState={panelState}
         isSending={isSending}
         hideSessionsDropdown={hideSessionsDropdown}
+        hidePlanMode={embedded}
         showScrollToLastPrompt={showScrollButton}
         onScrollToLastPrompt={scrollToLastPrompt}
         lastPromptScrollDirection={scrollDirection}
@@ -629,6 +758,7 @@ type ChatFooterProps = {
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
   hideSessionsDropdown?: boolean;
+  hidePlanMode?: boolean;
   showScrollToLastPrompt: boolean;
   onScrollToLastPrompt: () => void;
   lastPromptScrollDirection: "up" | "down";
@@ -656,6 +786,7 @@ function ChatFooter({
   panelState,
   isSending,
   hideSessionsDropdown,
+  hidePlanMode,
   showScrollToLastPrompt,
   onScrollToLastPrompt,
   lastPromptScrollDirection,
@@ -684,6 +815,7 @@ function ChatFooter({
       panelState={panelState}
       isSending={isSending}
       hideSessionsDropdown={hideSessionsDropdown}
+      hidePlanMode={hidePlanMode}
       showScrollToLastPrompt={showScrollToLastPrompt}
       onScrollToLastPrompt={onScrollToLastPrompt}
       lastPromptScrollDirection={lastPromptScrollDirection}

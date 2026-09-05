@@ -30,12 +30,28 @@ function makeParams(
     initialFetchStartRef: { current: null },
     lastFetchedSessionIdRef: { current: null },
     fetchAndStoreMessages,
-    autoBackfillUntilUserMessage: vi.fn().mockResolvedValue(undefined),
-    hasUserOrAgentMessage: vi.fn().mockReturnValue(true),
   };
 }
 
 describe("doFetchMessages", () => {
+  it("settles a tool-only initial fetch without waiting for older history", async () => {
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(
+      vi.fn().mockResolvedValue([
+        {
+          id: "tool-1",
+          type: "tool_call",
+          author_type: "agent",
+        } as Message,
+      ]),
+      setMessagesLoading,
+    );
+
+    await doFetchMessages(params as never);
+
+    expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
   it("keeps the shared loading flag set until overlapping fetches all settle", async () => {
     const first = deferred<Message[]>();
     const second = deferred<Message[]>();
@@ -61,6 +77,22 @@ describe("doFetchMessages", () => {
 
     second.resolve([]);
     await secondFetch;
+    expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
+  it("clears hook gates when an active fetch becomes stale before settling", async () => {
+    const result = deferred<Message[]>();
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(vi.fn().mockReturnValue(result.promise), setMessagesLoading);
+    const isActive = { value: true };
+    const fetch = doFetchMessages({ ...params, isActive: () => isActive.value } as never);
+
+    isActive.value = false;
+    result.resolve([]);
+    await fetch;
+
+    expect(params.setIsLoading).toHaveBeenLastCalledWith(false);
+    expect(params.setIsWaitingForInitialMessages).toHaveBeenLastCalledWith(false);
     expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
   });
 });

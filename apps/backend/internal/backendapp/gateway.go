@@ -12,6 +12,7 @@ import (
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -117,6 +118,7 @@ func provideGateway(
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
 	referenceValidator entityrefs.SubmissionValidator,
+	authSvc *auth.Service,
 	dataDir string,
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
@@ -372,7 +374,15 @@ func provideGateway(
 		gateway.Hub.Broadcast(msg)
 	})
 
-	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
+	// taskRepo is a typed pointer that may be nil here, and a nil pointer in a
+	// non-nil interface would defeat the service's own nil check when it
+	// resolves a notification's owning workspace.
+	var notificationTasks notificationservice.TaskContextReader
+	if taskRepo != nil {
+		notificationTasks = taskRepo
+	}
+	notificationSvc := notificationservice.NewService(
+		notificationRepo, notificationTasks, gateway.Hub, log, notificationAuthEnforced(authSvc))
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
 		_, err = eventBus.Subscribe(events.TurnCompleted, func(ctx context.Context, event *bus.Event) error {
@@ -416,7 +426,8 @@ func provideGateway(
 			}
 			itemType, _ := data["type"].(string)
 			title, _ := data["title"].(string)
-			notificationSvc.HandleInboxItem(ctx, itemType, title)
+			workspaceID, _ := data["workspace_id"].(string)
+			notificationSvc.HandleInboxItem(ctx, workspaceID, itemType, title)
 			return nil
 		})
 		if err != nil {
@@ -575,19 +586,33 @@ func loadTaskGitObservations(
 	if err != nil {
 		return nil, err
 	}
-	sessionIDs := make([]string, 0, len(sessions))
+	environmentIDs := make([]string, 0, len(sessions)+1)
+	seenEnvironmentIDs := make(map[string]struct{}, len(sessions)+1)
 	for _, session := range sessions {
-		if session != nil && session.ID != "" {
-			sessionIDs = append(sessionIDs, session.ID)
+		if session == nil || session.TaskEnvironmentID == "" {
+			continue
+		}
+		if _, seen := seenEnvironmentIDs[session.TaskEnvironmentID]; seen {
+			continue
+		}
+		seenEnvironmentIDs[session.TaskEnvironmentID] = struct{}{}
+		environmentIDs = append(environmentIDs, session.TaskEnvironmentID)
+	}
+	if environment, err := taskRepo.GetTaskEnvironmentByTaskID(ctx, taskID); err != nil {
+		return nil, err
+	} else if environment != nil && environment.ID != "" {
+		if _, seen := seenEnvironmentIDs[environment.ID]; !seen {
+			seenEnvironmentIDs[environment.ID] = struct{}{}
+			environmentIDs = append(environmentIDs, environment.ID)
 		}
 	}
-	snapshots, err := taskRepo.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, environmentIDs)
 	if err != nil {
 		return nil, err
 	}
 	observations := make([]statussummary.GitObservation, 0, len(snapshots))
-	for _, session := range sessions {
-		observation, ok := taskGitObservation(session, snapshots[session.ID])
+	for _, snapshot := range snapshots {
+		observation, ok := taskGitObservation(nil, snapshot)
 		if ok {
 			observations = append(observations, observation)
 		}
@@ -599,10 +624,13 @@ func taskGitObservation(
 	session *models.TaskSession,
 	snapshot *models.GitSnapshot,
 ) (statussummary.GitObservation, bool) {
-	if session == nil || snapshot == nil {
+	if snapshot == nil {
 		return statussummary.GitObservation{}, false
 	}
-	repository := session.ID
+	repository := statussummary.RootRepositoryKey
+	if session != nil {
+		repository = session.ID
+	}
 	if name, ok := snapshot.Metadata["repository_name"].(string); ok && name != "" {
 		repository = name
 	}

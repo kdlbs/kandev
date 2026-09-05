@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -213,6 +214,14 @@ func (h *ExecutorProfileHandlers) httpCreateProfile(c *gin.Context) {
 		EnvVars:       body.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to create executor profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "profile not created"})
 		return
@@ -253,6 +262,14 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 		EnvVars:       body.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to update executor profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "profile not updated"})
 		return
@@ -262,6 +279,10 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 
 func (h *ExecutorProfileHandlers) httpDeleteProfile(c *gin.Context) {
 	if err := h.service.DeleteExecutorProfile(c.Request.Context(), c.Param("profileId")); err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to delete executor profile", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "profile not deleted"})
 		return
@@ -351,6 +372,12 @@ func (h *ExecutorProfileHandlers) wsCreateProfile(ctx context.Context, msg *ws.M
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
+		}
 		h.logger.Error("failed to create executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create profile", nil)
 	}
@@ -403,6 +430,12 @@ func (h *ExecutorProfileHandlers) wsUpdateProfile(ctx context.Context, msg *ws.M
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
+		}
 		h.logger.Error("failed to update executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update profile", nil)
 	}
@@ -418,6 +451,9 @@ func (h *ExecutorProfileHandlers) wsDeleteProfile(ctx context.Context, msg *ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	if err := h.service.DeleteExecutorProfile(ctx, req.ID); err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
 		h.logger.Error("failed to delete executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete profile", nil)
 	}

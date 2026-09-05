@@ -1,11 +1,22 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "@/lib/i18n";
 import {
   ChangeRequestDetail,
   type ChangeRequestDetailModel,
   type ChangeRequestDetailProps,
 } from "./change-request-detail";
+
+const clipboardMocks = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
+
+vi.mock("@/lib/utils/copy-to-clipboard", () => clipboardMocks);
+
+const REQUEST_COPY_TEST_ID = "change-request-copy-url";
+const ARIA_LABEL_ATTRIBUTE = "aria-label";
+const REQUEST_COPY_LABEL = "Copy pull request URL";
+const REQUEST_COPIED_LABEL = "Pull request URL copied";
+const COMMENT_COPIED_LABEL = "Comment URL copied";
 
 const detail: ChangeRequestDetailModel = {
   providerId: "bitbucket",
@@ -73,9 +84,13 @@ function renderDetail(props: Partial<ChangeRequestDetailProps> = {}) {
   );
 }
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.useRealTimers();
+  clipboardMocks.copyToClipboard.mockReset();
+  await act(async () => {
+    await i18n.changeLanguage("en");
+  });
 });
 
 describe("ChangeRequestDetail", () => {
@@ -161,6 +176,84 @@ describe("ChangeRequestDetail interactions", () => {
     });
 
     expect(screen.getByText("Reviews: 2 pending")).toBeTruthy();
+  });
+});
+
+describe("ChangeRequestDetail copy actions", () => {
+  it("copies the request and comment permalinks with transient confirmation", async () => {
+    clipboardMocks.copyToClipboard.mockResolvedValue(true);
+    const detailWithUrls = {
+      ...detail,
+      state: "merged",
+      comments: detail.comments.map((comment) => ({
+        ...comment,
+        url: `https://bitbucket.org/workspace/repo/pull-requests/42#${comment.id}`,
+      })),
+    } as unknown as ChangeRequestDetailModel;
+
+    renderDetail({ detail: detailWithUrls, presentation: "mobile" });
+
+    const requestCopy = screen.getByTestId(REQUEST_COPY_TEST_ID);
+    const rootCopy = screen.getByTestId("change-request-comment-copy-comment-1");
+    const replyCopy = screen.getByTestId("change-request-comment-copy-comment-2");
+
+    fireEvent.click(requestCopy);
+    fireEvent.click(rootCopy);
+    fireEvent.click(replyCopy);
+
+    await waitFor(() => {
+      expect(clipboardMocks.copyToClipboard).toHaveBeenNthCalledWith(1, detailWithUrls.url);
+      expect(clipboardMocks.copyToClipboard).toHaveBeenNthCalledWith(
+        2,
+        "https://bitbucket.org/workspace/repo/pull-requests/42#comment-1",
+      );
+      expect(clipboardMocks.copyToClipboard).toHaveBeenNthCalledWith(
+        3,
+        "https://bitbucket.org/workspace/repo/pull-requests/42#comment-2",
+      );
+      expect(requestCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(REQUEST_COPIED_LABEL);
+      expect(rootCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(COMMENT_COPIED_LABEL);
+    });
+  });
+
+  it("omits copy actions when a request or comment URL is unavailable", () => {
+    const detailWithoutUrls = {
+      ...detail,
+      url: "",
+      comments: detail.comments.map(({ ...comment }) => {
+        delete (comment as { url?: string }).url;
+        return comment;
+      }),
+    } as unknown as ChangeRequestDetailModel;
+
+    renderDetail({ detail: detailWithoutUrls });
+
+    expect(screen.queryByTestId(REQUEST_COPY_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("change-request-comment-copy-comment-1")).toBeNull();
+    expect(screen.queryByTestId("change-request-comment-copy-comment-2")).toBeNull();
+  });
+
+  it("does not show copied confirmation when the clipboard write fails", async () => {
+    clipboardMocks.copyToClipboard.mockResolvedValue(false);
+    renderDetail();
+
+    const requestCopy = screen.getByTestId(REQUEST_COPY_TEST_ID);
+    fireEvent.click(requestCopy);
+
+    await waitFor(() => expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith(detail.url));
+    expect(requestCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(REQUEST_COPY_LABEL);
+  });
+
+  it("updates copy labels when the locale changes", async () => {
+    renderDetail();
+    const requestCopy = screen.getByTestId(REQUEST_COPY_TEST_ID);
+    expect(requestCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(REQUEST_COPY_LABEL);
+
+    await act(async () => {
+      await i18n.changeLanguage("pseudo");
+    });
+
+    expect(requestCopy.getAttribute(ARIA_LABEL_ATTRIBUTE)).toContain("ƥũĺĺ");
   });
 });
 

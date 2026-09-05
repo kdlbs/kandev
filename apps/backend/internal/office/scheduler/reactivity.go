@@ -2,11 +2,14 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 // Canonical lowercase status values used inside the pipeline. Backend
@@ -368,6 +371,16 @@ func (ss *SchedulerService) cascadeBlockersResolved(
 
 // cascadeChildrenCompleted wakes the parent if all its children are now
 // in a terminal state.
+//
+// The wake's idempotency key is a digest over the parent's current child
+// set, not the default {reason}:{taskID}:{agentID} key — that default is
+// permanently unique per (reason, task, agent), so a parent that
+// delegates iteratively (finish wave 1, read the result, fan out wave 2)
+// would only ever be woken for its first wave: wave 2's key would
+// collide with wave 1's already-consumed one. Keying on the child set
+// instead means a new delegation wave — which necessarily adds new child
+// task IDs — produces a distinct key, while a duplicate cascade over the
+// same terminal children still dedupes to the same key.
 func (ss *SchedulerService) cascadeChildrenCompleted(
 	ctx context.Context, task *TaskSnapshot, queue func(string, RunContext),
 ) {
@@ -382,12 +395,51 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 	if err != nil || parentAssignee == "" {
 		return
 	}
+	// ListChildStates is a separate read from AreAllChildrenTerminal, with no
+	// enclosing transaction. A concurrent child insert between the two reads
+	// can produce a snapshot that is no longer all-terminal. Do not queue from
+	// that snapshot. A newly inserted child then adds its ID to the later
+	// terminal snapshot, so that transition can queue a distinct wake.
+	children, err := ss.repo.ListChildStates(ctx, task.ParentID)
+	if err != nil {
+		ss.logger.Error("list child states failed",
+			zap.String("parent_id", task.ParentID), zap.Error(err))
+		return
+	}
+	for _, child := range children {
+		if child.State != "COMPLETED" && child.State != "CANCELLED" {
+			return
+		}
+	}
 	queue(parentAssignee, RunContext{
-		Reason:      RunReasonTaskChildrenCompleted,
-		TaskID:      task.ParentID,
-		WorkspaceID: task.WorkspaceID,
-		ChildTaskID: task.ID,
+		Reason:         RunReasonTaskChildrenCompleted,
+		TaskID:         task.ParentID,
+		WorkspaceID:    task.WorkspaceID,
+		ChildTaskID:    task.ID,
+		IdempotencyKey: childrenCompletedIdempotencyKey(task.ParentID, parentAssignee, children),
 	})
+}
+
+// childrenCompletedIdempotencyKey digests the parent's child ID set
+// (already ordered by id via ListChildStates) into an idempotency key for
+// the task_children_completed wake. See cascadeChildrenCompleted for why
+// this must vary across delegation waves instead of being permanently
+// unique per (parent, agent).
+//
+// Only IDs go into the digest, not each child's state string. By the time
+// this runs, cascadeChildrenCompleted has already confirmed every child is
+// terminal, so a wave is identified by WHICH children exist, not which
+// terminal state each one happens to be in — hashing the state as well
+// would make an unrelated terminal-to-terminal edit (e.g. a cancelled
+// sibling later marked completed by a user) look like a new wave and
+// produce a spurious wake, even though the child set never changed.
+func childrenCompletedIdempotencyKey(parentID, agentID string, children []sqlite.ChildState) string {
+	parts := make([]string, 0, len(children))
+	for _, c := range children {
+		parts = append(parts, c.TaskID)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, ",")))
+	return fmt.Sprintf("%s:%s:%s:%x", RunReasonTaskChildrenCompleted, parentID, agentID, sum)
 }
 
 // allBlockersResolvedExcept returns true if every blocker on `taskID`

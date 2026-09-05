@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-release-desktop-artifacts", "05-signing-and-release-trust", "06-desktop-e2e-smoke"]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 07: Docs and Release Notes
@@ -26,7 +26,7 @@ rtk bash -lc 'cd apps && pnpm format:check'
 
 ## Files Likely Touched
 
-- `docs/specs/desktop-tauri-app/spec.md`
+- `docs/specs/desktop/requirements/desktop-tauri-app.md`
 - `docs/plans/desktop-tauri-app/plan.md`
 - `docs/desktop-tauri-signing.md`
 - `docs/cli.md`

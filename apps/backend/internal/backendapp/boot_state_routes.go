@@ -54,7 +54,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	)
 	state := map[string]any{
 		"workspaces": map[string]any{
-			"items":    workspaceItemStates(workspaces),
+			"items":    b.workspaceItemStates(ctx, workspaces),
 			"activeId": nullString(activeWorkspaceID),
 		},
 	}
@@ -62,7 +62,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 		state["userSettings"] = mapUserSettingsState(settings, activeWorkspaceID)
 	}
 	if activeWorkspaceID == "" {
-		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}, "tasks": []any{}, "total": 0, "tasksListSort": tasksListSort, "tasksListGroup": tasksListGroup}
+		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}, "repositoryBranchPolicies": []any{}, "tasks": []any{}, "total": 0, "tasksListSort": tasksListSort, "tasksListGroup": tasksListGroup}
 	}
 	workflows, err := b.p.taskSvc.ListWorkflows(ctx, activeWorkspaceID, false)
 	if err != nil {
@@ -77,18 +77,20 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	}
 	repositories := b.repositoriesForState(ctx, activeWorkspaceID, state)
 	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
+	repositoryBranchPolicies := b.repositoryBranchPoliciesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
 	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
 	routeData := map[string]any{
-		"activeWorkspaceId": activeWorkspaceID,
-		"workflows":         workflowsToDTOs(workflows),
-		"steps":             steps,
-		"repositories":      repositories,
-		"repositorySets":    repositorySets,
-		"tasks":             tasks,
-		"total":             total,
-		"tasksListSort":     tasksListSort,
-		"tasksListGroup":    tasksListGroup,
+		"activeWorkspaceId":        activeWorkspaceID,
+		"workflows":                workflowsToDTOs(workflows),
+		"steps":                    steps,
+		"repositories":             repositories,
+		"repositorySets":           repositorySets,
+		"repositoryBranchPolicies": repositoryBranchPolicies,
+		"tasks":                    tasks,
+		"total":                    total,
+		"tasksListSort":            tasksListSort,
+		"tasksListGroup":           tasksListGroup,
 	}
 	return state, routeData
 }
@@ -120,7 +122,7 @@ func (b bootStateBuilder) routeContextBootData(ctx context.Context, req *http.Re
 	)
 	state := map[string]any{
 		"workspaces": map[string]any{
-			"items":    workspaceItemStates(workspaces),
+			"items":    b.workspaceItemStates(ctx, workspaces),
 			"activeId": nullString(activeWorkspaceID),
 		},
 	}
@@ -128,7 +130,7 @@ func (b bootStateBuilder) routeContextBootData(ctx context.Context, req *http.Re
 		state["userSettings"] = mapUserSettingsState(settings, activeWorkspaceID)
 	}
 	if activeWorkspaceID == "" {
-		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}}
+		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}, "repositoryBranchPolicies": []any{}}
 	}
 	workflows, err := b.p.taskSvc.ListWorkflows(ctx, activeWorkspaceID, false)
 	if err != nil {
@@ -145,13 +147,15 @@ func (b bootStateBuilder) routeContextBootData(ctx context.Context, req *http.Re
 	}
 	repositories := b.repositoriesForState(ctx, activeWorkspaceID, state)
 	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
+	repositoryBranchPolicies := b.repositoryBranchPoliciesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
 	return state, map[string]any{
-		"activeWorkspaceId": activeWorkspaceID,
-		"workflows":         workflowsToDTOs(workflows),
-		"steps":             steps,
-		"repositories":      repositories,
-		"repositorySets":    repositorySets,
+		"activeWorkspaceId":        activeWorkspaceID,
+		"workflows":                workflowsToDTOs(workflows),
+		"steps":                    steps,
+		"repositories":             repositories,
+		"repositorySets":           repositorySets,
+		"repositoryBranchPolicies": repositoryBranchPolicies,
 	}
 }
 
@@ -167,11 +171,21 @@ func workspaceIDSet(workspaces []*taskmodels.Workspace) map[string]bool {
 }
 
 // workspaceItemStates maps each workspace to its boot state shape.
-func workspaceItemStates(workspaces []*taskmodels.Workspace) []map[string]any {
+// workspaceItemStates maps each workspace to its boot state shape, including
+// the caller's resolved role and scopes.
+//
+// The projection is threaded through here rather than left to the HTTP list
+// endpoint: this is a second, independent serialization path into the same
+// store, and a field added only to the DTO silently never reaches a
+// first-paint render.
+func (b bootStateBuilder) workspaceItemStates(ctx context.Context, workspaces []*taskmodels.Workspace) []map[string]any {
+	access := b.p.taskSvc.ProjectWorkspaceAccess(ctx, workspaces)
 	items := make([]map[string]any, 0, len(workspaces))
 	for _, workspace := range workspaces {
 		if workspace != nil {
-			items = append(items, mapWorkspaceItemState(taskdto.FromWorkspace(workspace)))
+			items = append(items, mapWorkspaceItemState(taskdto.FromWorkspaceWithAccess(
+				workspace, access.Decision(workspace.ID), access.MemberCounts[workspace.ID],
+			)))
 		}
 	}
 	return items
@@ -244,6 +258,64 @@ func (b bootStateBuilder) repositorySetsForState(
 	return items
 }
 
+// repositoryBranchPoliciesForState hydrates the repository-keyed policy slice
+// used by repository settings and the task-create picker.
+func (b bootStateBuilder) repositoryBranchPoliciesForState(
+	ctx context.Context,
+	workspaceID string,
+	state map[string]any,
+) []taskdto.RepositoryBranchPolicyDTO {
+	itemsByRepositoryID := map[string]any{}
+	loadingByRepositoryID := map[string]any{}
+	loadedByRepositoryID := map[string]any{}
+	items := make([]taskdto.RepositoryBranchPolicyDTO, 0)
+	repositories, err := b.p.taskSvc.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		b.logBootError("list repositories for branch policies", err)
+		state["repositoryBranchPolicies"] = map[string]any{
+			"itemsByRepositoryId":   itemsByRepositoryID,
+			"loadingByRepositoryId": loadingByRepositoryID,
+			"loadedByRepositoryId":  loadedByRepositoryID,
+		}
+		return items
+	}
+	policies, err := b.p.taskSvc.ListRepositoryBranchPoliciesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		b.logBootError("list repository branch policies", err)
+		for _, repository := range repositories {
+			if repository == nil {
+				continue
+			}
+			itemsByRepositoryID[repository.ID] = []taskdto.RepositoryBranchPolicyDTO{}
+			loadedByRepositoryID[repository.ID] = false
+			loadingByRepositoryID[repository.ID] = false
+		}
+	} else {
+		policiesByRepositoryID := make(map[string][]*taskmodels.RepositoryBranchPolicy)
+		for _, policy := range policies {
+			if policy != nil {
+				policiesByRepositoryID[policy.RepositoryID] = append(policiesByRepositoryID[policy.RepositoryID], policy)
+			}
+		}
+		for _, repository := range repositories {
+			if repository == nil {
+				continue
+			}
+			dtos := repositoryBranchPoliciesToDTOs(policiesByRepositoryID[repository.ID])
+			itemsByRepositoryID[repository.ID] = dtos
+			loadedByRepositoryID[repository.ID] = true
+			loadingByRepositoryID[repository.ID] = false
+			items = append(items, dtos...)
+		}
+	}
+	state["repositoryBranchPolicies"] = map[string]any{
+		"itemsByRepositoryId":   itemsByRepositoryID,
+		"loadingByRepositoryId": loadingByRepositoryID,
+		"loadedByRepositoryId":  loadedByRepositoryID,
+	}
+	return items
+}
+
 // repositorySetsState is the workspace-keyed slice shape the web store expects.
 // An empty workspace still keys an entry: an absent key reads as "not loaded" to
 // the client hook, which then refetches on every dialog open.
@@ -265,6 +337,16 @@ func repositorySetsToDTOs(sets []*taskmodels.RepositorySet) []taskdto.Repository
 	for _, set := range sets {
 		if set != nil {
 			items = append(items, taskdto.FromRepositorySet(set))
+		}
+	}
+	return items
+}
+
+func repositoryBranchPoliciesToDTOs(policies []*taskmodels.RepositoryBranchPolicy) []taskdto.RepositoryBranchPolicyDTO {
+	items := make([]taskdto.RepositoryBranchPolicyDTO, 0, len(policies))
+	for _, policy := range policies {
+		if policy != nil {
+			items = append(items, taskdto.FromRepositoryBranchPolicy(policy))
 		}
 	}
 	return items
@@ -580,9 +662,13 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"sidebarViews":                      mapSidebarViews(settings.SidebarViews),
 		"sidebarActiveViewId":               nullString(settings.SidebarActiveViewID),
 		"sidebarDraft":                      mapSidebarDraft(settings.SidebarDraft),
+		"threadViews":                       mapThreadViews(settings.ThreadViews),
+		"threadActiveViewId":                nullString(settings.ThreadActiveViewID),
+		"threadViewDraft":                   mapThreadViewDraft(settings.ThreadViewDraft),
 		"sidebarTaskPrefs":                  mapSidebarTaskPrefs(settings.SidebarTaskPrefs),
 		"taskCreateLastUsed":                mapTaskCreateLastUsed(settings.TaskCreateLastUsed),
 		"defaultUtilityAgentId":             nullString(settings.DefaultUtilityAgentID),
+		"defaultUtilityAgentProfileId":      nullString(settings.DefaultUtilityAgentProfileID),
 		"keyboardShortcuts":                 mapStringAny(settings.KeyboardShortcuts),
 		"terminalLinkBehavior":              terminalLinkBehavior(settings.TerminalLinkBehavior),
 		"terminalFontFamily":                nullString(settings.TerminalFontFamily),
@@ -595,7 +681,9 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
 		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"resolveSessionHostnames":           settings.ResolveSessionHostnames,
 		"appStatusBarOrder":                 mapAppStatusBarOrder(settings.AppStatusBarOrder),
+		"quickChatTabOrderByWorkspace":      settings.QuickChatTabOrderByWorkspace,
 		"hiddenWorkflowStepIds":             stringSliceMap(settings.KanbanHiddenStepIDs),
 		"workflowIdsWithAutoHideEmptySteps": stringSlice(settings.WorkflowIDsWithAutoHideEmptySteps),
 		"loaded":                            true,
@@ -616,6 +704,10 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"name":                            workspace.Name,
 		"description":                     workspace.Description,
 		"owner_id":                        workspace.OwnerID,
+		"unit_id":                         workspace.UnitID,
+		"viewer_role":                     workspace.ViewerRole,
+		"scopes":                          workspace.Scopes,
+		"member_count":                    workspace.MemberCount,
 		"default_executor_id":             workspace.DefaultExecutorID,
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
@@ -643,19 +735,21 @@ func mapWorkflowItemState(workflow taskdto.WorkflowDTO) map[string]any {
 // mapKanbanStepState maps a workflow step DTO to the kanban step boot shape.
 func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 	return map[string]any{
-		"id":                    step.ID,
-		"title":                 step.Name,
-		"color":                 defaultString(step.Color, "bg-neutral-400"),
-		"position":              step.Position,
-		"events":                step.Events,
-		"allow_manual_move":     step.AllowManualMove,
-		"prompt":                step.Prompt,
-		"is_start_step":         step.IsStartStep,
-		"show_in_command_panel": step.ShowInCommandPanel,
-		"agent_profile_id":      nullString(step.AgentProfileID),
-		"stage_type":            nullString(step.StageType),
-		"wip_limit":             step.WIPLimit,
-		"pull_from_step_id":     nullString(step.PullFromStepID),
+		"id":                           step.ID,
+		"title":                        step.Name,
+		"color":                        defaultString(step.Color, "bg-neutral-400"),
+		"position":                     step.Position,
+		"events":                       step.Events,
+		"allow_manual_move":            step.AllowManualMove,
+		"prompt":                       step.Prompt,
+		"is_start_step":                step.IsStartStep,
+		"show_in_command_panel":        step.ShowInCommandPanel,
+		"agent_profile_id":             nullString(step.AgentProfileID),
+		"profile_session_start_policy": string(step.ProfileSessionStartPolicy),
+		"profile_session_end_policy":   string(step.ProfileSessionEndPolicy),
+		"stage_type":                   nullString(step.StageType),
+		"wip_limit":                    step.WIPLimit,
+		"pull_from_step_id":            nullString(step.PullFromStepID),
 	}
 }
 
@@ -697,6 +791,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"sessionCount":                task.SessionCount,
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
 		"parentTaskId":                nullString(task.ParentID),
+		"priority":                    task.Priority,
 		"updatedAt":                   task.UpdatedAt,
 		"createdAt":                   task.CreatedAt,
 		// Dependency projection. This mapper is a camelCase whitelist writing
@@ -741,6 +836,7 @@ func mapSidebarViews(views []usermodels.SidebarView) []map[string]any {
 			"sort":            view.Sort,
 			"group":           view.Group,
 			"collapsedGroups": stringSlice(view.CollapsedGroups),
+			"taskRow":         mapSidebarTaskRow(view.TaskRow),
 		})
 	}
 	return result
@@ -756,6 +852,19 @@ func mapSidebarDraft(draft *usermodels.SidebarViewDraft) map[string]any {
 		"filters":    draft.Filters,
 		"sort":       draft.Sort,
 		"group":      draft.Group,
+		"taskRow":    mapSidebarTaskRow(draft.TaskRow),
+	}
+}
+
+func mapSidebarTaskRow(value *usermodels.SidebarTaskRowPresentation) map[string]any {
+	if value == nil {
+		return nil
+	}
+	return map[string]any{
+		"detailsEnabled": value.DetailsEnabled,
+		"detailOrder":    stringSlice(value.DetailOrder),
+		"visibleDetails": stringSlice(value.VisibleDetails),
+		"trailing":       value.Trailing,
 	}
 }
 

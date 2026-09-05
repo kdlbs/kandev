@@ -22,7 +22,7 @@ import (
 var ErrTaskNotFound = errors.New("task not found")
 
 // Automation runs never appear in a task list: they are hidden by their
-// provenance, not by ephemerality (docs/specs/office/automations-settings.md).
+// provenance, not by ephemerality (docs/specs/office/requirements/automations-settings.md).
 // is_ephemeral keeps its original quick-chat meaning, so every list read here
 // pairs the two.
 const (
@@ -237,9 +237,14 @@ type TaskSearchResult struct {
 	ParentID               string `db:"parent_id"`
 	ProjectID              string `db:"project_id"`
 	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
-	Labels                 string `db:"labels"`
-	CreatedAt              string `db:"created_at"`
-	UpdatedAt              string `db:"updated_at"`
+	// AssigneeUserID is the human assignee. It is only projected by the
+	// queries that need it (detail, workspace list); sqlx leaves it zero
+	// for the others rather than failing, so adding a projection later is
+	// additive.
+	AssigneeUserID string `db:"assignee_user_id"`
+	Labels         string `db:"labels"`
+	CreatedAt      string `db:"created_at"`
+	UpdatedAt      string `db:"updated_at"`
 	// IsSystem is true when the task lives in a kandev-managed system
 	// workflow (e.g. the standing coordination task; future routine
 	// tasks). The Office Tasks UI hides these by default and surfaces
@@ -282,6 +287,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
 		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
+		       COALESCE(t.assignee_user_id, '') AS assignee_user_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at,
@@ -529,6 +535,7 @@ func (r *Repository) GetTaskByID(ctx context.Context, taskID string) (*TaskRow, 
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
 		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
+		       COALESCE(t.assignee_user_id, '') AS assignee_user_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at

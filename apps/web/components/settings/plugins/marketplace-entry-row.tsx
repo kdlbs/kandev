@@ -18,10 +18,16 @@ type MarketplaceEntryRowProps = {
   entry: MarketplaceEntry;
   busy: boolean;
   onInstall: (entry: MarketplaceEntry) => void;
+  canManage?: boolean;
 };
 
 /** One catalog card: a neutral tile, metadata, stars, and an install-state action. */
-export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntryRowProps) {
+export function MarketplaceEntryRow({
+  entry,
+  busy,
+  onInstall,
+  canManage = true,
+}: MarketplaceEntryRowProps) {
   return (
     <div
       data-testid={`marketplace-entry-${entry.id}`}
@@ -47,7 +53,12 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
           )}
         </div>
 
-        <MarketplaceEntryAction entry={entry} busy={busy} onInstall={onInstall} />
+        <MarketplaceEntryAction
+          entry={entry}
+          busy={busy}
+          onInstall={onInstall}
+          canManage={canManage}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -104,7 +115,7 @@ function PluginTile({ entry }: { entry: MarketplaceEntry }) {
   );
 }
 
-function MarketplaceEntryAction({ entry, busy, onInstall }: MarketplaceEntryRowProps) {
+function MarketplaceEntryAction({ entry, busy, onInstall, canManage }: MarketplaceEntryRowProps) {
   const { t } = useTranslation();
   if (entry.install_state === "installed") {
     return (
@@ -118,6 +129,7 @@ function MarketplaceEntryAction({ entry, busy, onInstall }: MarketplaceEntryRowP
       </Badge>
     );
   }
+  if (!canManage) return null;
   if (entry.install_state === "update_available") {
     return (
       <Button

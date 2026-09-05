@@ -18,7 +18,7 @@ const (
 )
 
 // Budget period and action-on-exceed constants. See spec
-// docs/specs/office-costs/spec.md for semantics.
+// docs/specs/office/requirements/costs.md for semantics.
 const (
 	budgetPeriodMonthly = "monthly"
 
@@ -191,7 +191,7 @@ func (s *CostService) EvaluateBudget(
 // CheckPreExecutionBudget checks all applicable budget policies before
 // launching an agent session. Returns (allowed, reason, error). Only
 // pause_agent and block_new_tasks return allowed=false (notify_only
-// alerts but does not block). See docs/specs/office-costs/spec.md.
+// alerts but does not block). See docs/specs/office/requirements/costs.md.
 // Implements shared.BudgetChecker.
 func (s *CostService) CheckPreExecutionBudget(
 	ctx context.Context, agentInstanceID, projectID, workspaceID string,
@@ -212,6 +212,40 @@ func (s *CostService) CheckPreExecutionBudget(
 		}
 	}
 	return true, "", nil
+}
+
+// EvaluateProjectBudget evaluates project-scoped budget policies for
+// projectID after a task is reassigned into it — the only budget hook on
+// the reassignment path. Reassignment can move a task's historical spend
+// across the project boundary that GetCostForProjectSince rolls up, so
+// without this the destination project's policies never see the crossing.
+//
+// Only policies with ScopeType==project and ScopeID==projectID are
+// evaluated: reassignment does not change the workspace total, so
+// re-checking scopeWorkspace policies (as CheckBudget does) would emit a
+// duplicate alert on every reassignment in an already over-budget
+// workspace. The source project is not evaluated either — reassignment
+// only lowers its spend, so it can't newly cross a threshold. A no-op
+// projectID (clearing a project) has no destination to evaluate.
+func (s *CostService) EvaluateProjectBudget(ctx context.Context, workspaceID, projectID string) error {
+	if projectID == "" {
+		return nil
+	}
+	policies, err := s.repo.ListBudgetPolicies(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, policy := range policies {
+		if policy.ScopeType != scopeProject || policy.ScopeID != projectID {
+			continue
+		}
+		if _, err := s.evaluatePolicy(ctx, workspaceID, policy); err != nil {
+			s.logger.Error("project budget check failed",
+				zap.String("policy_id", policy.ID),
+				zap.Error(err))
+		}
+	}
+	return nil
 }
 
 func (s *CostService) pauseAgentForBudget(ctx context.Context, agentID string) bool {

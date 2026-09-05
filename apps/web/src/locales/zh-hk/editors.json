@@ -45,6 +45,7 @@
   "openTaskSessionBeforeSending": "傳送給代理程式前請先開啟任務工作階段。",
   "openWith": "開啟方式…",
   "pasteLink": "貼上連結…",
+  "planFormattingToolbar": "計劃格式工具欄",
   "pleaseTryAgain": "請重試。",
   "previewMarkdown": "預覽 Markdown",
   "queuedForTheAgent": "已排隊等待代理程式。",
@@ -86,5 +87,6 @@
   "toggleCode": "切換程式碼",
   "toggleWordWrap": "切換自動換行",
   "underlineCmdU": "下劃線（Cmd+U）",
-  "failedToOpenEditor": "開啟編輯器失敗"
+  "failedToOpenEditor": "開啟編輯器失敗",
+  "downloadFile": "下載檔案"
 }

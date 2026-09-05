@@ -1,5 +1,8 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -239,6 +242,253 @@ test.describe("Session tab management — close behavior", () => {
     // Backend must reflect the deletion — exactly one session remains.
     const { sessions } = await apiClient.listTaskSessions(task.id);
     expect(sessions.map((s) => s.id)).toEqual([session2Id]);
+  });
+
+  test("deleting the active shared-environment session keeps Changes data visible", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Delete Active Session Keeps Changes",
+    );
+    const worktreePath = seedData.repositoryPath;
+    const worktreeBranch = execFileSync("git", ["branch", "--show-current"], {
+      cwd: worktreePath,
+      encoding: "utf8",
+    }).trim();
+    expect(worktreeBranch).toBeTruthy();
+
+    const localChange = "session-delete-change.txt";
+    const remoteChange = "remote-session-delete-change.ts";
+    const localChangePath = path.join(worktreePath, localChange);
+    fs.writeFileSync(localChangePath, "keep this change visible\n");
+
+    try {
+      await apiClient.mockGitHubReset();
+      await apiClient.mockGitHubSetUser("test-user");
+      await apiClient.mockGitHubAddPRs([
+        {
+          number: 3157,
+          title: "Keep Changes visible after session deletion",
+          state: "open",
+          head_branch: worktreeBranch,
+          base_branch: "main",
+          author_login: "test-user",
+          repo_owner: "testorg",
+          repo_name: "testrepo",
+          additions: 1,
+          deletions: 0,
+        },
+      ]);
+      await apiClient.mockGitHubAddPRFiles("testorg", "testrepo", 3157, [
+        {
+          filename: remoteChange,
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -0,0 +1 @@\n+export const kept = true;",
+        },
+      ]);
+      await apiClient.mockGitHubAssociateTaskPR({
+        task_id: task.id,
+        workspace_id: seedData.workspaceId,
+        repository_id: seedData.repositoryId,
+        owner: "testorg",
+        repo: "testrepo",
+        pr_number: 3157,
+        pr_url: "https://github.com/testorg/testrepo/pull/3157",
+        pr_title: "Keep Changes visible after session deletion",
+        head_branch: worktreeBranch,
+        base_branch: "main",
+        author_login: "test-user",
+        additions: 1,
+        deletions: 0,
+      });
+
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.sessionTabBySessionId(session1Id).click();
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+      await session.expandPRChangesSection();
+      await expect(
+        session.prFilesSection().locator(`[data-changes-file="${remoteChange}"]`),
+      ).toBeVisible({ timeout: 20_000 });
+
+      await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+      await session.contextMenuItem("Delete").click();
+      const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+      await expect(confirmation).toBeVisible({ timeout: 5_000 });
+      await confirmation.getByTestId("session-delete-confirm").click();
+
+      await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
+      await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+      await session.expandPRChangesSection();
+      await expect(
+        session.prFilesSection().locator(`[data-changes-file="${remoteChange}"]`),
+      ).toBeVisible({ timeout: 20_000 });
+    } finally {
+      fs.rmSync(localChangePath, { force: true });
+    }
+  });
+
+  test("keeps dirty Changes status after sibling hydration", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    // Attach before setup so the capture also observes the reload-driven
+    // subscriptions used by this regression.
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const { session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Sibling Hydration Keeps Changes",
+    );
+    const localChange = "sibling-hydration-change.txt";
+    const localChangePath = path.join(seedData.repositoryPath, localChange);
+    fs.writeFileSync(localChangePath, "keep this change visible\n");
+
+    const receivedGitEvent = (sessionId: string, fromIndex: number) =>
+      traffic.frames
+        .slice(fromIndex)
+        .some(
+          (frame) =>
+            frame.direction === "received" &&
+            frame.action === "session.git.event" &&
+            frame.sessionId === sessionId,
+        );
+
+    try {
+      traffic.frames.length = 0;
+      const beforeReload = traffic.frames.length;
+      await testPage.reload();
+      await session.waitForLoad();
+
+      await session.sessionTabBySessionId(session1Id).click();
+      await expect
+        .poll(() => receivedGitEvent(session1Id, beforeReload), {
+          timeout: 20_000,
+          message: "waiting for the first sibling git-status hydration",
+        })
+        .toBe(true);
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+
+      await session.sessionTabBySessionId(session2Id).click();
+      await expect
+        .poll(() => receivedGitEvent(session2Id, beforeReload), {
+          timeout: 20_000,
+          message: "waiting for the second sibling git-status hydration",
+        })
+        .toBe(true);
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+    } finally {
+      fs.rmSync(localChangePath, { force: true });
+    }
+  });
+
+  test("does not restore removed Changes files after sibling hydration", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const { session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Sibling Hydration Drops Removed Changes",
+    );
+    const localChange = "sibling-hydration-removed-change.txt";
+    const localChangePath = path.join(seedData.repositoryPath, localChange);
+    fs.writeFileSync(localChangePath, "remove this change\n");
+
+    const environmentFiles = (sessionId: string) =>
+      testPage.evaluate((sid) => {
+        type E2EStoreWindow = Window & {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => {
+              environmentIdBySessionId: Record<string, string>;
+              gitStatus: {
+                byEnvironmentId: Record<string, { files?: Record<string, unknown> } | undefined>;
+              };
+            };
+          };
+        };
+        const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
+        const environmentId = state?.environmentIdBySessionId[sid];
+        if (!environmentId) return null;
+        return state.gitStatus.byEnvironmentId[environmentId]?.files ?? {};
+      }, sessionId);
+
+    try {
+      await session.sessionTabBySessionId(session1Id).click();
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).toBeVisible({ timeout: 20_000 });
+
+      await expect
+        .poll(() => environmentFiles(session1Id), {
+          timeout: 20_000,
+          message: "waiting for the added Changes file to enter the environment store",
+        })
+        .toEqual(expect.objectContaining({ [localChange]: expect.anything() }));
+
+      fs.rmSync(localChangePath);
+      await expect
+        .poll(() => environmentFiles(session1Id), {
+          timeout: 20_000,
+          message: "waiting for the removed Changes file to leave the environment store",
+        })
+        .toEqual({});
+      await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
+
+      traffic.frames.length = 0;
+      await testPage.reload();
+      await session.waitForLoad();
+
+      const receivedGitEvent = (sessionId: string) =>
+        traffic.frames.some(
+          (frame) =>
+            frame.direction === "received" &&
+            frame.action === "session.git.event" &&
+            frame.sessionId === sessionId,
+        );
+
+      await session.sessionTabBySessionId(session1Id).click();
+      await expect
+        .poll(() => receivedGitEvent(session1Id), {
+          timeout: 20_000,
+          message: "waiting for the first sibling git-status hydration after removal",
+        })
+        .toBe(true);
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
+
+      await session.sessionTabBySessionId(session2Id).click();
+      await expect
+        .poll(() => receivedGitEvent(session2Id), {
+          timeout: 20_000,
+          message: "waiting for the second sibling git-status hydration after removal",
+        })
+        .toBe(true);
+      await session.clickTab("Changes");
+      await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
+    } finally {
+      fs.rmSync(localChangePath, { force: true });
+    }
   });
 
   test("deleting then immediately switching tasks does not resurrect the tab", async ({

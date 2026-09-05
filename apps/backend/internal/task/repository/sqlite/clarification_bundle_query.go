@@ -116,14 +116,15 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 	)
 	notParentQuestion := dialect.ExcludeTruthyMetadataPredicate(drv, "m.metadata", "parent_question")
 	nonTerminalSession := nonTerminalSessionPredicate("m")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	currentTurn := fmt.Sprintf(`m.turn_id = (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = m.task_session_id
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
-		  )`, turnAuthorityPredicate(drv, "turn_row"))
+		  )`, predicate, orderBy)
 	return fmt.Sprintf(`
 		SELECT b.pending_id, b.session_id, b.task_id, b.created_at
 		FROM (
@@ -180,7 +181,7 @@ func scanClarificationBundleRows(rows *sql.Rows, isPostgres bool) ([]models.Clar
 }
 
 // visibilityPredicate builds the L1c/L1d three-way disjunction (spec
-// docs/specs/external-question-answering/spec.md, "L1c"/"L1d"): the task's
+// docs/specs/integrations/requirements/external-question-answering.md, "L1c"/"L1d"): the task's
 // workspace_id is empty, names no existing workspace row, or is in the L1a
 // visible set. For an unscoped caller the predicate is satisfied
 // unconditionally, so no clause is added at all.

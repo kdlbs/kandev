@@ -66,6 +66,9 @@ const (
 	RoleAdmin = "admin"
 	// RoleMember is a regular authenticated user.
 	RoleMember = "member"
+	// RoleGuest reaches only workspaces it is an explicit member of. It is
+	// never assigned by migration; an admin grants it deliberately.
+	RoleGuest = "guest"
 
 	// StatusActive marks a user that may log in.
 	StatusActive = "active"
@@ -74,14 +77,35 @@ const (
 	StatusDisabled = "disabled"
 )
 
+// NormalizeRole returns the canonical org role. Admin and guest are accepted
+// as-is; anything else (including empty and unknown values) becomes member,
+// which is the role every pre-guest account already had.
+func NormalizeRole(value string) string {
+	switch value {
+	case RoleAdmin:
+		return RoleAdmin
+	case RoleGuest:
+		return RoleGuest
+	default:
+		return RoleMember
+	}
+}
+
 type User struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	Status      string `json:"status"`
+	// OrgID is the user's tenant. Empty means the account predates
+	// organizations or the tenancy migration has not run.
+	OrgID string `json:"org_id,omitempty"`
+	// IsOperator marks the instance operator tier: managing organizations,
+	// feature toggles and instance configuration. It grants NO access inside
+	// any organization, including the operator's own.
+	IsOperator bool      `json:"is_operator,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type UserSettings struct {
@@ -121,6 +145,9 @@ type UserSettings struct {
 	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
 	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
+	ThreadViews                       []ThreadView                      `json:"thread_views"`
+	ThreadActiveViewID                string                            `json:"thread_active_view_id"`
+	ThreadViewDraft                   *ThreadViewDraft                  `json:"thread_view_draft"`
 	SidebarTaskPrefs                  SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
@@ -140,7 +167,9 @@ type UserSettings struct {
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
+	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                          `json:"workflow_ids_with_auto_hide_empty_steps"`
 	Revision                          int64                             `json:"revision"`
@@ -171,12 +200,13 @@ type SavedLayout struct {
 // The payload is stored and returned as-is; the server does not interpret
 // clause values beyond passing them through.
 type SidebarView struct {
-	ID              string              `json:"id"`
-	Name            string              `json:"name"`
-	Filters         []SidebarViewClause `json:"filters"`
-	Sort            SidebarViewSort     `json:"sort"`
-	Group           string              `json:"group"`
-	CollapsedGroups []string            `json:"collapsed_groups"`
+	ID              string                      `json:"id"`
+	Name            string                      `json:"name"`
+	Filters         []SidebarViewClause         `json:"filters"`
+	Sort            SidebarViewSort             `json:"sort"`
+	Group           string                      `json:"group"`
+	CollapsedGroups []string                    `json:"collapsed_groups"`
+	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
 
 type SidebarViewClause struct {
@@ -192,10 +222,31 @@ type SidebarViewSort struct {
 }
 
 type SidebarViewDraft struct {
-	BaseViewID string              `json:"base_view_id"`
-	Filters    []SidebarViewClause `json:"filters"`
-	Sort       SidebarViewSort     `json:"sort"`
-	Group      string              `json:"group"`
+	BaseViewID string                      `json:"base_view_id"`
+	Filters    []SidebarViewClause         `json:"filters"`
+	Sort       SidebarViewSort             `json:"sort"`
+	Group      string                      `json:"group"`
+	TaskRow    *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+}
+
+// SidebarTaskRowPresentation controls the optional metadata and trailing
+// presentation for a task row in a saved sidebar view.
+type SidebarTaskRowPresentation struct {
+	DetailsEnabled bool     `json:"details_enabled"`
+	DetailOrder    []string `json:"detail_order"`
+	VisibleDetails []string `json:"visible_details"`
+	Trailing       string   `json:"trailing"`
+}
+
+// DefaultSidebarTaskRowPresentation returns the presentation used by the
+// original sidebar layout.
+func DefaultSidebarTaskRowPresentation() *SidebarTaskRowPresentation {
+	return &SidebarTaskRowPresentation{
+		DetailsEnabled: true,
+		DetailOrder:    []string{"relative_time", "repository", "pull_request_number"},
+		VisibleDetails: []string{"relative_time", "repository", "pull_request_number"},
+		Trailing:       "git_changes",
+	}
 }
 
 type SidebarTaskPrefs struct {
@@ -210,4 +261,55 @@ type TaskCreateLastUsed struct {
 	AgentProfileID         string            `json:"agent_profile_id"`
 	ExecutorProfileID      string            `json:"executor_profile_id"`
 	WorkflowIDsByWorkspace map[string]string `json:"workflow_ids_by_workspace"`
+}
+
+// AgentProfileRecentUseContext identifies an operational selector whose
+// profile order is remembered independently from user settings.
+type AgentProfileRecentUseContext string
+
+const (
+	AgentProfileRecentUseTaskCreate  AgentProfileRecentUseContext = "task_create"
+	AgentProfileRecentUseTaskSession AgentProfileRecentUseContext = "task_session"
+	AgentProfileRecentUseQuickChat   AgentProfileRecentUseContext = "quick_chat"
+	AgentProfileRecentUseConfigChat  AgentProfileRecentUseContext = "config_chat"
+)
+
+const (
+	AgentProfileRecentUseMaxProfiles       = 10
+	AgentProfileRecentUseMaxContexts       = 4
+	AgentProfileRecentUseMaxProfileIDBytes = 255
+)
+
+// SupportedAgentProfileRecentUseContexts returns the closed set of contexts
+// that may be persisted for a user.
+func SupportedAgentProfileRecentUseContexts() []AgentProfileRecentUseContext {
+	return []AgentProfileRecentUseContext{
+		AgentProfileRecentUseTaskCreate,
+		AgentProfileRecentUseTaskSession,
+		AgentProfileRecentUseQuickChat,
+		AgentProfileRecentUseConfigChat,
+	}
+}
+
+// IsAgentProfileRecentUseContext reports whether context is supported.
+func IsAgentProfileRecentUseContext(context AgentProfileRecentUseContext) bool {
+	switch context {
+	case AgentProfileRecentUseTaskCreate,
+		AgentProfileRecentUseTaskSession,
+		AgentProfileRecentUseQuickChat,
+		AgentProfileRecentUseConfigChat:
+		return true
+	default:
+		return false
+	}
+}
+
+// AgentProfileRecentUse is the persisted move-to-front history for one user
+// and operational selector context.
+type AgentProfileRecentUse struct {
+	UserID     string                       `json:"user_id"`
+	Context    AgentProfileRecentUseContext `json:"context"`
+	ProfileIDs []string                     `json:"profile_ids"`
+	Revision   int64                        `json:"revision"`
+	UpdatedAt  time.Time                    `json:"updated_at"`
 }

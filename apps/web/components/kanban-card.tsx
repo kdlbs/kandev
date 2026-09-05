@@ -27,6 +27,7 @@ import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { useDetachTask } from "@/hooks/use-detach-task";
+import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import {
   type ForegroundActivity,
   type Repository,
@@ -47,7 +48,18 @@ export interface Task {
   position?: number;
   repositoryId?: string;
   /** All repositories linked to the task; used to render a "+N" chip for multi-repo. */
-  repositories?: Array<{ id: string; repository_id: string; position: number }>;
+  repositories?: Array<{
+    id: string;
+    repository_id: string;
+    base_branch?: string;
+    checkout_branch?: string;
+    branch_policy_id?: string;
+    branch_policy_name?: string;
+    branch_policy_base_branch?: string;
+    branch_policy_branch_template?: string;
+    branch_policy_pull_request_target?: string;
+    position: number;
+  }>;
   sessionCount?: number | null;
   primarySessionId?: string | null;
   /**
@@ -76,6 +88,8 @@ export interface Task {
   primaryExecutorType?: string | null;
   primaryExecutorName?: string | null;
   isRemoteExecutor?: boolean;
+  /** Human assignee (user id); the card renders their name read-only. */
+  assigneeUserId?: string;
   parentTaskId?: string | null;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   updatedAt?: string;
@@ -303,6 +317,7 @@ function useKanbanCardMenus({
   const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
   const dialogs = useKanbanCardDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
+  const updateTaskPriority = useUpdateTaskPriority();
   const detachAnchorRef = useRef<HTMLDivElement>(null);
   const detachFocusReturnRef = useRef<HTMLButtonElement>(null);
   const isDetaching = detachingTaskId === task.id;
@@ -340,6 +355,8 @@ function useKanbanCardMenus({
     isArchiving,
     isDetaching,
     parentTaskId: task.parentTaskId,
+    currentPriority: task.priority,
+    onSelectPriority: (priority: TaskPriority) => void updateTaskPriority(task.id, priority),
     onEdit: onEdit ? () => onEdit(task) : undefined,
     onArchive: onArchive ? requestArchiveConfirmation : undefined,
     onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,

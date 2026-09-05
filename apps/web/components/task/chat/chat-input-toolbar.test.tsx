@@ -89,7 +89,11 @@ vi.mock("./context-popover", () => ({
 }));
 
 vi.mock("./implement-plan-button", () => ({
-  ImplementPlanButton: () => <button type="button">Implement plan</button>,
+  ImplementPlanButton: ({ presentation = "desktop" }: { presentation?: "desktop" | "mobile" }) => (
+    <button type="button" data-testid="mock-implement-plan-button" data-presentation={presentation}>
+      Implement plan
+    </button>
+  ),
 }));
 
 vi.mock("./reset-context-button", () => ({
@@ -111,8 +115,9 @@ import type { ChatSubmitDecorationSlotProps } from "./chat-submit-plugin-decorat
 
 const MOBILE_TOOLBAR_TEST_ID = "mobile-chat-input-toolbar";
 const CANCEL_AGENT_BUTTON_TEST_ID = "cancel-agent-button";
-const SUBMIT_BUTTON_TEST_ID = "submit-message-button";
+const SUBMIT_MESSAGE_BUTTON_TEST_ID = "submit-message-button";
 const DECORATION_PROBE_TEST_ID = "decoration-probe";
+const PRESENTATION_ATTRIBUTE = "data-presentation";
 const SESSION_TIMESTAMP = "2026-01-01T00:00:00Z";
 
 function deferred<T>() {
@@ -316,7 +321,7 @@ describe("ChatInputToolbar cancel button", () => {
     renderFullToolbar({ isAgentBusy: true, canCancelAgent: false });
 
     expect(screen.queryByTestId(CANCEL_AGENT_BUTTON_TEST_ID)).toBeNull();
-    expect(screen.getByTestId(SUBMIT_BUTTON_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID)).toBeTruthy();
     expect(screen.getByText("Queue message")).toBeTruthy();
   });
 
@@ -393,12 +398,61 @@ describe("ChatInputToolbar submit button", () => {
       </StateProvider>,
     );
 
-    expect((screen.getByTestId(SUBMIT_BUTTON_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     expect(screen.getByText("The agent is still being set up.")).toBeTruthy();
   });
 });
 
 describe("ChatInputToolbar responsive wrapper", () => {
+  it("gives mobile composer controls 44px touch targets", () => {
+    responsiveMock.breakpoint = "mobile";
+    renderFullToolbar({
+      hidePlanMode: false,
+      isAgentBusy: true,
+      canCancelAgent: true,
+    });
+
+    for (const testId of [
+      "plan-mode-toggle-button",
+      "chat-attachments-button",
+      "chat-context-button",
+      "cancel-agent-button",
+      SUBMIT_MESSAGE_BUTTON_TEST_ID,
+    ]) {
+      const control = screen.getByTestId(testId);
+      expect(control.className).toContain("min-h-11");
+      expect(control.className).toContain("min-w-11");
+    }
+  });
+
+  it("keeps compact composer geometry on desktop", () => {
+    responsiveMock.breakpoint = "desktop";
+    renderFullToolbar({ hidePlanMode: false });
+
+    for (const testId of [
+      "plan-mode-toggle-button",
+      "chat-attachments-button",
+      "chat-context-button",
+      SUBMIT_MESSAGE_BUTTON_TEST_ID,
+    ]) {
+      const control = screen.getByTestId(testId);
+      expect(control.className).toContain("h-7");
+      expect(control.className).not.toContain("min-h-11");
+      expect(control.className).not.toContain("min-w-11");
+    }
+  });
+
+  it("passes the touch presentation to plan implementation on tablets", () => {
+    responsiveMock.breakpoint = "tablet";
+    renderFullToolbar({ planModeEnabled: true, onImplementPlan: () => {} });
+
+    expect(
+      screen.getByTestId("mock-implement-plan-button").getAttribute(PRESENTATION_ATTRIBUTE),
+    ).toBe("mobile");
+  });
+
   it("routes mobile breakpoints to the compact toolbar without a duplicate sessions control", () => {
     responsiveMock.breakpoint = "mobile";
     renderFullToolbar();
@@ -498,7 +552,7 @@ describe("ChatInputToolbar chat-submit-decoration slot", () => {
     const probe = screen.getByTestId(DECORATION_PROBE_TEST_ID);
     expect(probe.getAttribute("data-task")).toBe("t1");
     expect(probe.getAttribute("data-session")).toBe("s1");
-    expect(probe.getAttribute("data-presentation")).toBe("desktop");
+    expect(probe.getAttribute(PRESENTATION_ATTRIBUTE)).toBe("desktop");
     expect(probe.getAttribute("data-sending")).toBe("true");
     expect(probe.getAttribute("data-disabled")).toBe("true");
     expect(probe.getAttribute("data-plan")).toBe("true");
@@ -514,9 +568,9 @@ describe("ChatInputToolbar chat-submit-decoration slot", () => {
 
       renderMinimalToolbar();
 
-      expect(screen.getByTestId(DECORATION_PROBE_TEST_ID).getAttribute("data-presentation")).toBe(
-        "mobile",
-      );
+      expect(
+        screen.getByTestId(DECORATION_PROBE_TEST_ID).getAttribute(PRESENTATION_ATTRIBUTE),
+      ).toBe("mobile");
     },
   );
 
@@ -526,7 +580,7 @@ describe("ChatInputToolbar chat-submit-decoration slot", () => {
 
     renderFullToolbar();
 
-    expect(screen.getByTestId(DECORATION_PROBE_TEST_ID).getAttribute("data-presentation")).toBe(
+    expect(screen.getByTestId(DECORATION_PROBE_TEST_ID).getAttribute(PRESENTATION_ATTRIBUTE)).toBe(
       "mobile",
     );
   });
@@ -550,7 +604,7 @@ describe("ChatInputToolbar chat-submit-decoration slot", () => {
     renderToolbar(() => {});
 
     expect(screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID)).toBeTruthy();
-    expect(screen.queryByTestId(SUBMIT_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(DECORATION_PROBE_TEST_ID)).toBeNull();
   });
 
@@ -566,7 +620,7 @@ describe("ChatInputToolbar chat-submit-decoration slot", () => {
 
     renderFullToolbar();
 
-    const button = screen.getByTestId(SUBMIT_BUTTON_TEST_ID);
+    const button = screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID);
     const layer = screen.getByTestId("chat-submit-decoration-layer");
     // Same positioned parent as the button: the plugin can size against
     // inset-0 without measuring the DOM.

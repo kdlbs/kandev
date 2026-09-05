@@ -13,6 +13,7 @@ const QUEUE_STATUS_TEST_ID = "pr-merge-queue-status";
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "demo",

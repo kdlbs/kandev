@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-workspace-connection", "02-watcher-dispatch"]
 plan: "plan.md"
-spec: "../../specs/gitlab-integration/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-integration.md"
 ---
 
 # Task 05: GitLab Watch Settings UI
