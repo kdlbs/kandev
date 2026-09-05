@@ -1082,11 +1082,20 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	// Dispatch in its own goroutine: if every worker is parked on one task's
 	// interactive resume budget, sending the remaining job IDs would block
 	// this function on the same wait workersDone below is trying to bound.
+	// The ctx.Done branch matters independently of that: without it, once the
+	// deadline/cancel select case below fires and this function returns, an
+	// undispatched send blocks forever on the unbuffered channel — the
+	// dispatcher (and, transitively, the workers and the wg.Wait goroutine)
+	// outlives both the sweep's own deadline and Stop().
 	go func() {
+		defer close(jobIDs)
 		for taskID := range jobs {
-			jobIDs <- taskID
+			select {
+			case jobIDs <- taskID:
+			case <-ctx.Done():
+				return
+			}
 		}
-		close(jobIDs)
 	}()
 
 	workersDone := make(chan struct{})
@@ -1183,16 +1192,20 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 	}
 	if manualMoveLifecycleCompleted(task) {
 		s.continueManualMoveLifecycle(ctx, taskID)
-		// Both readers of this key (manualMoveLifecyclePending here and its
-		// service_workflow.go twin) treat its presence only as "pending was
-		// already resolved" — persistManualMoveLifecycleCompletion clears
-		// pending in the same write that sets it, so by construction pending
-		// is already gone whenever completed is set. Left in place, the
-		// sweep would replay this continuation and re-list the task on every
-		// future startup forever, even though the lifecycle it marks is
-		// inert.
-		if !manualMoveLifecyclePending(task) {
-			s.clearManualMoveLifecycleCompleted(ctx, taskID)
+		// persistManualMoveLifecycleCompletion sets completed and clears
+		// pending in two separate writes, so a crash or a failed remove
+		// between them can leave both keys set. manualMoveLifecyclePending
+		// is defined as pending && !completed, so it is always false here
+		// and cannot detect that case — check the raw key on a fresh read
+		// instead, so the sweep never resurrects a coexisting pending token
+		// and replays this move's side effects a second time. Left
+		// uncleared otherwise, the completed marker would make the sweep
+		// re-list and re-run this continuation on every future startup.
+		postCompletion, err := s.repo.GetTask(ctx, taskID)
+		if err == nil && postCompletion != nil {
+			if _, stillPending := postCompletion.Metadata[models.MetaKeyManualMoveLifecyclePending]; !stillPending {
+				s.clearManualMoveLifecycleCompleted(ctx, taskID)
+			}
 		}
 	}
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {

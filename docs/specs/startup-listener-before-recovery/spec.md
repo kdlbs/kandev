@@ -111,8 +111,12 @@ socket does not depend on this ordering.
   task times out. Running concurrently with live watcher/scheduler traffic is
   safe because the sweep's operations are already built for concurrent
   delivery — per-task locks (`queuedMoveLifecycleLocks`) and one-shot tokens
-  claimed by an atomic metadata-key removal (`claimTaskEventMetadata`) — and
-  this must be confirmed by test, not by assertion.
+  claimed by an atomic metadata-key removal (`claimTaskEventMetadata`) —
+  confirmed by
+  `TestLifecycleSweepConcurrentWithLiveTaskMovedRunsManualMoveSideEffectsOnce`,
+  which runs the sweep's recovery path concurrently with a live `task.moved`
+  redelivery of the same admitted manual move and asserts the step exit/enter
+  side effects run exactly once.
 - Requests that need a started application are answered with an explicit
   "starting" response rather than by a hung connection or a refused socket.
 - Readiness is observable and distinct from liveness: an operator can tell
