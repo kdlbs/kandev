@@ -81,6 +81,13 @@ type TaskTopBarActionsMenuProps = {
   boardRow: TaskActionsMenuBoardRow | null;
   workspaceId: string | null;
   isArchived?: boolean;
+  /** The subject's own workflow step and executor type, independent of
+   * `boardRow`: the board excludes archived tasks and can lag/miss a
+   * cross-workflow row, but plugin context and the delete confirmation's
+   * executor-specific cleanup copy should not go stale just because the
+   * board row is momentarily or permanently unresolvable. */
+  subjectWorkflowStepId?: string | null;
+  subjectPrimaryExecutorType?: string | null;
 };
 
 /** Tracks in-flight state for a one-shot switch-after-action call, since
@@ -117,6 +124,8 @@ export function TaskTopBarActionsMenu({
   boardRow,
   workspaceId,
   isArchived,
+  subjectWorkflowStepId,
+  subjectPrimaryExecutorType,
 }: TaskTopBarActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const archiveAndSwitch = useArchiveAndSwitchTask();
@@ -134,6 +143,7 @@ export function TaskTopBarActionsMenu({
     isDeleting: deleting.pending,
     onArchive: (opts) => (taskId ? archiving.invoke(taskId, opts) : undefined),
     onDelete: (opts) => (taskId ? deleting.invoke(taskId, opts) : undefined),
+    subjectWorkflowStepId,
   });
   useCloseMenuOnTaskGone(taskId, setOpen, menu.closeDialogs);
 
@@ -156,6 +166,7 @@ export function TaskTopBarActionsMenu({
         isArchiving={archiving.pending}
         isDeleting={deleting.pending}
         menu={menu}
+        subjectExecutorType={subjectPrimaryExecutorType}
       />
     </>
   );

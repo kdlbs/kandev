@@ -7,11 +7,19 @@ import type { Task } from "./kanban-card";
 
 const detachTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "task-1" }));
 const getSubtaskCountMock = vi.hoisted(() => vi.fn().mockResolvedValue({ count: 0 }));
+const archiveTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const deleteTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/lib/api/domains/kanban-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/kanban-api")>(
     "@/lib/api/domains/kanban-api",
   );
-  return { ...actual, detachTask: detachTaskMock, getSubtaskCount: getSubtaskCountMock };
+  return {
+    ...actual,
+    detachTask: detachTaskMock,
+    getSubtaskCount: getSubtaskCountMock,
+    archiveTask: archiveTaskMock,
+    deleteTask: deleteTaskMock,
+  };
 });
 
 afterEach(() => {
@@ -20,6 +28,10 @@ afterEach(() => {
   detachTaskMock.mockClear();
   getSubtaskCountMock.mockClear();
   getSubtaskCountMock.mockResolvedValue({ count: 0 });
+  archiveTaskMock.mockClear();
+  archiveTaskMock.mockResolvedValue(undefined);
+  deleteTaskMock.mockClear();
+  deleteTaskMock.mockResolvedValue(undefined);
 });
 
 vi.mock("./task/preview-session-tabs", () => ({
@@ -243,6 +255,61 @@ describe("TaskPreviewPanel actions menu — terminal activation closes the menu 
     fireEvent.click(screen.getByRole("menuitem", { name: DETACH_MENU_ITEM_NAME }));
 
     expectMenuOpen(false);
+  });
+});
+
+describe("TaskPreviewPanel actions menu — closes on Archive/Delete success (AC-TASKS-TASK-ACTIONS-MENU-003.3)", () => {
+  it("calls onClose once the Archive request resolves, independent of board/snapshot cache state", async () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    renderPanel(<TaskPreviewPanel task={TASK} onClose={onClose} />);
+
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    vi.useRealTimers();
+
+    const confirmation = await screen.findByTestId("task-archive-confirm-popover");
+    fireEvent.click(within(confirmation).getByTestId("archive-task-confirm"));
+
+    await waitFor(() => expect(archiveTaskMock).toHaveBeenCalledWith("task-1", { cascade: false }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("calls onClose once the Delete request resolves", async () => {
+    const onClose = vi.fn();
+    renderPanel(<TaskPreviewPanel task={TASK} onClose={onClose} />);
+
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(deleteTaskMock).toHaveBeenCalledWith("task-1", { cascade: false }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not call onClose when the Archive request rejects", async () => {
+    archiveTaskMock.mockRejectedValueOnce(new Error("network error"));
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    renderPanel(<TaskPreviewPanel task={TASK} onClose={onClose} />);
+
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    vi.useRealTimers();
+
+    const confirmation = await screen.findByTestId("task-archive-confirm-popover");
+    fireEvent.click(within(confirmation).getByTestId("archive-task-confirm"));
+
+    await waitFor(() => expect(archiveTaskMock).toHaveBeenCalledTimes(1));
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
 

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import { pluginRegistry } from "@/lib/plugins/registry";
 import type { AppState } from "@/lib/state/store";
 import { TaskTopBarActionsMenu } from "./task-top-bar-actions-menu";
 import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
@@ -375,6 +376,94 @@ describe("TaskTopBarActionsMenu — board-row loss alone does not close the menu
 
     expectMenuOpen(trigger, true);
     expect(screen.queryByTestId(MOVE_TO_TEST_ID)).toBeNull();
+  });
+});
+
+describe("TaskTopBarActionsMenu — plugin context stays independent of the board row (AC-TASKS-TASK-ACTIONS-MENU-002.4b)", () => {
+  const PLUGIN_ID = "test-plugin-subject-workflow-step";
+
+  afterEach(() => pluginRegistry.unregisterPlugin(PLUGIN_ID));
+
+  it("passes the subject's own workflowStepId to a plugin primary action for an archived subject with no board row", () => {
+    const visible = vi.fn(() => true);
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "primary-action",
+      group: "primary",
+      label: "Plugin primary action",
+      visible,
+      run: vi.fn(),
+    });
+
+    render(
+      <ToastProvider>
+        <StateProvider initialState={{} as never}>
+          <TaskTopBarActionsMenu
+            taskId={TASK_ID}
+            taskTitle="Task 1"
+            boardRow={null}
+            workspaceId="ws-1"
+            isArchived
+            subjectWorkflowStepId="step-last-known"
+          />
+        </StateProvider>
+      </ToastProvider>,
+    );
+
+    expect(visible).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowStepId: "step-last-known" }),
+    );
+  });
+
+  it("falls back to the board row's workflowStepId when no independent subject value is supplied", () => {
+    const visible = vi.fn(() => true);
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "primary-action",
+      group: "primary",
+      label: "Plugin primary action",
+      visible,
+      run: vi.fn(),
+    });
+
+    render(
+      <ToastProvider>
+        <StateProvider initialState={{} as never}>
+          <TaskTopBarActionsMenu
+            taskId={TASK_ID}
+            taskTitle="Task 1"
+            boardRow={RESOLVED_BOARD_ROW}
+            workspaceId="ws-1"
+          />
+        </StateProvider>
+      </ToastProvider>,
+    );
+
+    expect(visible).toHaveBeenCalledWith(expect.objectContaining({ workflowStepId: "step-a" }));
+  });
+});
+
+describe("TaskTopBarActionsMenu — Delete confirmation keeps executor-specific cleanup copy without a board row", () => {
+  it("shows the worktree-specific cleanup effect for an archived subject using the subject's own executor type", async () => {
+    render(
+      <ToastProvider>
+        <StateProvider initialState={{} as never}>
+          <TaskTopBarActionsMenu
+            taskId={TASK_ID}
+            taskTitle="Task 1"
+            boardRow={null}
+            workspaceId="ws-1"
+            isArchived
+            subjectPrimaryExecutorType="worktree"
+          />
+        </StateProvider>
+      </ToastProvider>,
+    );
+
+    const trigger = screen.getByTestId(TRIGGER_TEST_ID);
+    openMenu(trigger);
+    (await screen.findByRole("menuitem", { name: "Delete" })).click();
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("The task's git worktree and its branch will be deleted.");
   });
 });
 

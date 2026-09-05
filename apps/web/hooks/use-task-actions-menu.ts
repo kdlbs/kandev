@@ -177,6 +177,11 @@ type UseTaskActionsMenuArgs = {
   isDeleting?: boolean;
   onArchive: (opts: { cascade: boolean }) => void | Promise<void>;
   onDelete: (opts: { cascade: boolean }) => void | Promise<void>;
+  /** The subject's own workflow step, independent of `boardRow` (AC-002.4b's
+   * plugin task-menu context must not go stale just because the board
+   * excludes the subject, e.g. an archived task). Falls back to
+   * `boardRow?.workflowStepId` for callers with no independent source. */
+  subjectWorkflowStepId?: string | null;
 };
 
 export function useTaskActionsMenu({
@@ -191,6 +196,7 @@ export function useTaskActionsMenu({
   isDeleting,
   onArchive,
   onDelete,
+  subjectWorkflowStepId,
 }: UseTaskActionsMenuArgs) {
   const dialogs = useTaskMenuDialogState();
   const editDialog = useTaskMenuEditDialogState();
@@ -245,7 +251,7 @@ export function useTaskActionsMenu({
     workspaceId: workspaceId ?? "",
     taskId: taskId ?? "",
     taskTitle,
-    workflowStepId: boardRow?.workflowStepId ?? null,
+    workflowStepId: subjectWorkflowStepId ?? boardRow?.workflowStepId ?? null,
     presentation,
   };
 

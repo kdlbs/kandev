@@ -238,6 +238,7 @@ export function resolveTaskIds(task: Task | null) {
     workspaceId: taskValues.workspace_id ?? null,
     projectId: taskValues.project_id ?? null,
     workflowStepId: taskValues.workflow_step_id ?? null,
+    primaryExecutorType: taskValues.primary_executor_type ?? null,
     baseBranch: primaryRepository?.base_branch,
     pullRequestTarget: primaryRepository?.branch_policy_pull_request_target || undefined,
     isArchived: !!taskValues.archived_at,

@@ -84,6 +84,7 @@ function usePreviewActionsMenu(
   taskId: string | null,
   taskTitle: string,
   workspaceId: string | null,
+  onClose: () => void,
 ) {
   const taskCRUD = useTaskCRUD();
   const boardRow = buildBoardRow(task);
@@ -99,8 +100,13 @@ function usePreviewActionsMenu(
     boardRow,
     isArchiving,
     isDeleting,
-    onArchive: (opts) => (task ? taskCRUD.handleArchive(task, opts) : undefined),
-    onDelete: (opts) => (task ? taskCRUD.handleDelete(task, opts) : undefined),
+    // `useTaskCRUD` only prunes `kanban.tasks`, so a task also present in
+    // `kanbanMulti.snapshots` (multi-workflow board view) would otherwise
+    // keep resolving via that snapshot until a WS lifecycle event catches
+    // up, leaving the preview open on an archived/deleted task. Close it
+    // directly on HTTP success instead of depending on cache completeness.
+    onArchive: (opts) => (task ? taskCRUD.handleArchive(task, opts).then(onClose) : undefined),
+    onDelete: (opts) => (task ? taskCRUD.handleDelete(task, opts).then(onClose) : undefined),
   });
 
   return { menu, boardRow, isArchiving, isDeleting };
@@ -236,6 +242,7 @@ export function TaskPreviewPanel({
     taskId,
     taskTitle,
     workspaceId,
+    onClose,
   );
 
   return (

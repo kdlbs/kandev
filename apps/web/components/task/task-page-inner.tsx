@@ -135,6 +135,12 @@ function buildTaskTopBarProps(params: {
     officeTaskHref: params.officeTaskHref,
     onTaskUnarchived: params.onTaskUnarchived,
     actionsMenuBoardRow: params.actionsMenuBoardRow,
+    // The subject's own last-known values, independent of `actionsMenuBoardRow`:
+    // the board excludes archived (and can lag/miss cross-workflow) tasks, so
+    // these stay available for the actions menu's plugin context and
+    // executor-aware confirmation copy even when the board row is unresolvable.
+    subjectWorkflowStepId: taskProps.workflowStepId,
+    subjectPrimaryExecutorType: taskProps.primaryExecutorType,
   };
 }
 

@@ -52,6 +52,10 @@ type TaskTopBarProps = {
   onMoveStart?: () => void;
   onMoveError?: (error: unknown) => void;
   actionsMenuBoardRow?: TaskActionsMenuBoardRow | null;
+  /** The subject task's own values, independent of `actionsMenuBoardRow` (see
+   * `TaskTopBarActionsMenuProps` for why the board row cannot be relied on). */
+  subjectWorkflowStepId?: string | null;
+  subjectPrimaryExecutorType?: string | null;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -76,6 +80,8 @@ const TaskTopBar = memo(function TaskTopBar({
   onMoveStart,
   onMoveError,
   actionsMenuBoardRow,
+  subjectWorkflowStepId,
+  subjectPrimaryExecutorType,
 }: TaskTopBarProps) {
   const { t } = useTranslation();
   // Projects only exist for office-owned tasks, so kanban-mode tasks render no
@@ -132,6 +138,8 @@ const TaskTopBar = memo(function TaskTopBar({
           officeTaskHref={officeTaskHref}
           onTaskUnarchived={onTaskUnarchived}
           actionsMenuBoardRow={actionsMenuBoardRow}
+          subjectWorkflowStepId={subjectWorkflowStepId}
+          subjectPrimaryExecutorType={subjectPrimaryExecutorType}
         />
       }
     />
@@ -371,6 +379,8 @@ function TopBarRight({
   officeTaskHref,
   onTaskUnarchived,
   actionsMenuBoardRow,
+  subjectWorkflowStepId,
+  subjectPrimaryExecutorType,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -385,6 +395,8 @@ function TopBarRight({
   officeTaskHref?: string | null;
   onTaskUnarchived?: (taskId: string) => void;
   actionsMenuBoardRow?: TaskActionsMenuBoardRow | null;
+  subjectWorkflowStepId?: string | null;
+  subjectPrimaryExecutorType?: string | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -440,6 +452,8 @@ function TopBarRight({
         boardRow={actionsMenuBoardRow ?? null}
         workspaceId={workspaceId ?? null}
         isArchived={isArchived}
+        subjectWorkflowStepId={subjectWorkflowStepId}
+        subjectPrimaryExecutorType={subjectPrimaryExecutorType}
       />
     </div>
   );

@@ -38,6 +38,10 @@ type TaskActionsMenuDialogsProps = {
   isArchiving?: boolean;
   isDeleting?: boolean;
   menu: TaskActionsMenuState;
+  /** The subject's own executor type, independent of `boardRow`: falls back
+   * to this for the Archive/Delete confirmations' executor-specific cleanup
+   * copy when the board row is unresolvable (e.g. an archived task). */
+  subjectExecutorType?: string | null;
 };
 
 type TaskActionsMenuEditDialogProps = {
@@ -130,11 +134,13 @@ export function TaskActionsMenuDialogs({
   isArchiving,
   isDeleting,
   menu,
+  subjectExecutorType,
 }: TaskActionsMenuDialogsProps) {
   const repositories = useActiveWorkspaceRepositories();
   const editBoardRow = useLastResolvedBoardRow(taskId, boardRow);
   if (!taskId) return null;
   const linkDialogTask = buildLinkDialogTask(taskId, taskTitle, boardRow);
+  const executorType = boardRow?.primaryExecutorType ?? subjectExecutorType;
 
   return (
     <>
@@ -155,7 +161,7 @@ export function TaskActionsMenuDialogs({
         focusReturnRef={menu.triggerRef}
         taskTitle={taskTitle}
         taskId={taskId}
-        executorType={boardRow?.primaryExecutorType}
+        executorType={executorType}
         isArchiving={isArchiving}
         onOpenChange={menu.setShowArchiveConfirm}
         onConfirm={(values) => menu.onConfirmArchive(values)}
@@ -165,7 +171,7 @@ export function TaskActionsMenuDialogs({
         onOpenChange={menu.setShowDeleteConfirm}
         taskTitle={taskTitle}
         taskId={taskId}
-        executorType={boardRow?.primaryExecutorType}
+        executorType={executorType}
         isDeleting={isDeleting}
         onConfirm={(opts) => menu.onConfirmDelete(opts)}
         focusReturnRef={menu.triggerRef}
