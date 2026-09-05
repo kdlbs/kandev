@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +34,9 @@ const sshStdinEnvReadyTimeout = 30 * time.Second
 // race the environment sat in the pipe buffer, where even the old prelude found
 // it, and the test would have passed against the bug it exists to catch.
 func TestSSHStdinEnvImportReadsStdinToEOF(t *testing.T) {
-	envScript, err := buildSSHEnvInitScript(map[string]string{"KANDEV_TEST_STDIN_ENV": "bar baz"})
+	marker := filepath.Join(t.TempDir(), "command-substitution-ran")
+	wantValue := "bar baz $(touch " + marker + ") `printf backtick` it's\nsecond"
+	envScript, err := buildSSHEnvInitScript(map[string]string{"KANDEV_TEST_STDIN_ENV": wantValue})
 	if err != nil {
 		t.Fatalf("buildSSHEnvInitScript() error = %v", err)
 	}
@@ -43,7 +47,7 @@ func TestSSHStdinEnvImportReadsStdinToEOF(t *testing.T) {
 		}
 		t.Run(shell, func(t *testing.T) {
 			script := `printf '%s\n' ` + sshStdinEnvReadyMarker + " >&2\n" +
-				sshScriptWithEnvironment(`printf '%s\n' "value=${KANDEV_TEST_STDIN_ENV:-unset}"`)
+				sshScriptWithEnvironment(`printf '%s' "$KANDEV_TEST_STDIN_ENV"`)
 			cmd := exec.Command(path, "-c", script)
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
@@ -110,12 +114,17 @@ func TestSSHStdinEnvImportReadsStdinToEOF(t *testing.T) {
 			closeErr := stdin.Close()
 			<-drained
 			waitErr := cmd.Wait()
-			if got := strings.TrimSpace(stdout.String()); got != "value=bar baz" {
+			if got := stdout.String(); got != wantValue {
 				t.Fatalf("%s imported %q, want %q\nwrite: %v\nclose: %v\nexit: %v\nstderr:\n%s",
-					shell, got, "value=bar baz", writeErr, closeErr, waitErr, stderrTail.String())
+					shell, got, wantValue, writeErr, closeErr, waitErr, stderrTail.String())
 			}
 			if waitErr != nil {
 				t.Fatalf("%s exited with %v:\nstdout:\n%s\nstderr:\n%s", shell, waitErr, stdout.String(), stderrTail.String())
+			}
+			if _, statErr := os.Stat(marker); statErr == nil {
+				t.Fatalf("%s evaluated command substitution in the environment value", shell)
+			} else if !os.IsNotExist(statErr) {
+				t.Fatalf("stat command-substitution marker: %v", statErr)
 			}
 		})
 	}
