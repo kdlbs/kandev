@@ -156,11 +156,11 @@ export function getPRStatusColor(pr: TaskPR): string {
   // membership must remain visible while provider checks or mergeability
   // fields hydrate, even when those fields still describe an earlier state.
   if (isPRQueued(pr)) return QUEUED;
-  if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
-    return RED_500;
-  }
   if (isPRDraft(pr)) {
     return MUTED_FOREGROUND;
+  }
+  if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
+    return RED_500;
   }
   const blockerColor = openMergeBlockerColor(pr);
   if (blockerColor) return blockerColor;
