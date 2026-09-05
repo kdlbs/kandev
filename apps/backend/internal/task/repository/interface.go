@@ -150,6 +150,13 @@ type TaskRepository interface {
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
 }
 
+// TaskPriorityRepository updates a task's priority without replacing the
+// complete task row. Implementations use this capability for priority-only
+// mutations so concurrent changes to other task fields are preserved.
+type TaskPriorityRepository interface {
+	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
+}
+
 // TaskStatusSummaryRepository stores the bounded task-level projection used by
 // list and switcher surfaces. Implementations must compare revisions and the
 // semantic payload atomically so retries and concurrent source observations do

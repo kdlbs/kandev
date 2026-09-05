@@ -76,6 +76,19 @@ type pendingTaskTitleSetter interface {
 	SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error)
 }
 
+func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
+	return req != nil &&
+		req.Priority != nil &&
+		req.Title == nil &&
+		req.Description == nil &&
+		req.State == nil &&
+		req.WorkflowStepID == nil &&
+		req.Repositories == nil &&
+		req.Position == nil &&
+		req.Metadata == nil &&
+		req.ParentID == nil
+}
+
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
@@ -1840,6 +1853,33 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 	return task, nil
 }
 
+func (s *Service) tryUpdateTaskPriorityOnly(
+	ctx context.Context,
+	id string,
+	task *models.Task,
+	priority string,
+) (*models.Task, bool, error) {
+	updater, ok := s.tasks.(taskrepo.TaskPriorityRepository)
+	if !ok {
+		return nil, false, nil
+	}
+	if err := updater.UpdateTaskPriority(ctx, id, priority); err != nil {
+		s.logger.Error("failed to update task priority", zap.String("task_id", id), zap.Error(err))
+		return nil, true, err
+	}
+
+	task = s.reloadTaskAfterMutation(ctx, id, task, "update priority")
+	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		s.logger.Error("failed to list task repositories", zap.Error(err))
+	} else {
+		task.Repositories = repos
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	s.logger.Info("task updated", zap.String("task_id", task.ID))
+	return task, true, nil
+}
+
 // hydrateTaskRelations populates the relations every task read is expected
 // to carry — repositories and workspace folders — that a raw
 // repository-layer task struct does not include. Callers that bypass GetTask
@@ -1876,9 +1916,16 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			return nil, err
 		}
 	}
+	if isPriorityOnlyTaskUpdate(req) {
+		updated, handled, err := s.tryUpdateTaskPriorityOnly(ctx, id, task, *req.Priority)
+		if handled {
+			return updated, err
+		}
+	}
 	oldWorkflowStepID := task.WorkflowStepID
 	var oldState *v1.TaskState
 	stateChanged := false
+	parentCleared := false
 
 	if req.Description != nil {
 		task.Description = *req.Description
@@ -1908,7 +1955,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
 		}
 	}
-	parentCleared := false
 	if req.ParentID != nil && *req.ParentID != task.ParentID {
 		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
 			return nil, err

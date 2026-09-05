@@ -7,7 +7,12 @@ import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { TaskItemStatsRow } from "./task-item-stats-row";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
-import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
+import type {
+  ForegroundActivity,
+  TaskPriority,
+  TaskState,
+  TaskSessionState,
+} from "@/lib/types/http";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
@@ -25,6 +30,7 @@ import { TaskStateIcon } from "./task-state-icon";
 type TaskItemProps = {
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
   /**
@@ -171,30 +177,10 @@ function TaskItemTitle({ title }: { title: string }) {
   return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
 }
 
-function TaskItemContent({
-  title,
-  autopilot,
-  taskId,
-  workflowStepId,
-  isRemoteExecutor,
-  remoteExecutorId,
-  remoteExecutorType,
-  remoteExecutorName,
-  primarySessionId,
-  isArchived,
-  isPinned,
-  repositoryPath,
-  prInfo,
-  queuedCount,
-  wipQueue,
-  issueInfo,
-  agentErrorMessage,
-  comparisonUnavailable,
-  resolvedTaskRow,
-  relativeTime,
-}: {
+type TaskItemContentProps = {
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   taskId?: string;
   workflowStepId?: string | null;
   isRemoteExecutor?: boolean;
@@ -213,7 +199,31 @@ function TaskItemContent({
   comparisonUnavailable?: boolean;
   resolvedTaskRow: ResolvedTaskRowPresentation;
   relativeTime?: string;
-}) {
+};
+
+function TaskItemContent({
+  title,
+  autopilot,
+  priority,
+  taskId,
+  workflowStepId,
+  isRemoteExecutor,
+  remoteExecutorId,
+  remoteExecutorType,
+  remoteExecutorName,
+  primarySessionId,
+  isArchived,
+  isPinned,
+  repositoryPath,
+  prInfo,
+  queuedCount,
+  wipQueue,
+  issueInfo,
+  agentErrorMessage,
+  comparisonUnavailable,
+  resolvedTaskRow,
+  relativeTime,
+}: TaskItemContentProps) {
   const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -221,6 +231,7 @@ function TaskItemContent({
         <TaskItemTitle title={title} />
         <TaskItemLeadingBadges
           autopilot={autopilot}
+          priority={priority}
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
@@ -311,6 +322,7 @@ function TaskItemActions({
 export const TaskItem = memo(function TaskItem({
   title,
   autopilot,
+  priority,
   state,
   sessionState,
   foregroundActivity,
@@ -396,6 +408,7 @@ export const TaskItem = memo(function TaskItem({
       <TaskItemContent
         title={title}
         autopilot={autopilot}
+        priority={priority}
         taskId={taskId}
         workflowStepId={workflowStepId}
         isRemoteExecutor={isRemoteExecutor}

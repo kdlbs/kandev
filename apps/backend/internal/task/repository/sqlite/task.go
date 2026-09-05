@@ -516,6 +516,26 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 	return task, err
 }
 
+// UpdateTaskPriority updates only the priority column and its modification
+// timestamp. Priority changes must not write a task snapshot that can carry
+// stale title, metadata, workflow, or position values.
+func (r *Repository) UpdateTaskPriority(ctx context.Context, taskID, priority string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(
+		`UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?`),
+		priority, r.nowUTC(), taskID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	return nil
+}
+
 // UpdateTask updates an existing task. The runner write lands as an
 // upsert/clear on workflow_step_participants inside the same tx as the
 // task UPDATE.

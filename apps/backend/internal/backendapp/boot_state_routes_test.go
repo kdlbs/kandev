@@ -101,6 +101,20 @@ func TestMapKanbanTaskStateIncludesParkedProjection(t *testing.T) {
 	}
 }
 
+// TestMapKanbanTaskStateIncludesPriority regression-tests that
+// mapKanbanTaskState is a camelCase whitelist: a DTO field with no entry here
+// is invisible on the board's first paint, before any WS event arrives.
+func TestMapKanbanTaskStateIncludesPriority(t *testing.T) {
+	task := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:             "task-critical",
+		WorkflowStepID: "step-review",
+		Priority:       "critical",
+	})
+	if task["priority"] != "critical" {
+		t.Fatalf("kanban task priority = %#v, want critical", task["priority"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) {
 	preferences := json.RawMessage(`{"workspace-1":{"mode":"board","filters":{"projectId":"project-2"},"board":{"teamId":"team-2","boardId":"board-2","focusedColumnId":"done"}}}`)
 	state := mapUserSettingsState(userdto.UserSettingsResponse{

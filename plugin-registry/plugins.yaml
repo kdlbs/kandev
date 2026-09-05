@@ -32,6 +32,9 @@ plugins:
   - id: kandev-plugin-kandy
     repo: kdlbs/kandev-plugin-kandy
     categories: [tools]
+  - id: kandev-plugin-task-manager
+    repo: kdlbs/kandev-plugin-task-manager
+    categories: [tools]
   - id: kandev-plugin-slack
     repo: kdlbs/kandev-plugin-slack
     categories: [integrations, automation]
