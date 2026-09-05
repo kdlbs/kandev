@@ -492,6 +492,7 @@ export function dispatchKanbanCardClick(
 
 function KanbanCardFrame({
   task,
+  presentation,
   repositoryChips,
   draggable,
   menu,
@@ -508,6 +509,7 @@ function KanbanCardFrame({
 }: Pick<
   KanbanCardProps,
   | "task"
+  | "presentation"
   | "repositoryChips"
   | "isSelected"
   | "isMultiSelectMode"
@@ -569,6 +571,7 @@ function KanbanCardFrame({
         taskId={task.id}
         executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
+        forceDialog={presentation === "mobile"}
         onOpenChange={menu.setShowArchiveConfirm}
         onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />
@@ -632,6 +635,7 @@ export function KanbanCard({
     <>
       <KanbanCardFrame
         task={task}
+        presentation={presentation}
         repositoryChips={repositoryChips}
         draggable={draggable}
         menu={menu}

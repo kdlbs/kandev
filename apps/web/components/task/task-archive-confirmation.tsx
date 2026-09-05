@@ -39,6 +39,8 @@ export type TaskArchiveConfirmationProps = {
   confirmTestId?: string;
   /** Render a simple confirmation inside an existing action surface. */
   inline?: boolean;
+  /** Use the contained dialog even when classification resolves without descendants. */
+  forceDialog?: boolean;
 };
 
 function ArchiveDescription({
@@ -220,6 +222,7 @@ function ArchiveDialog({ subtaskClassification, ...props }: ArchiveDialogProps) 
 
 type ArchiveConfirmationContentProps = ArchiveDialogProps & {
   confirmTaskArchive: boolean;
+  forceDialog: boolean;
   isFinePointer: boolean;
   taskIsInFlight: boolean;
   anchorRef: RefObject<HTMLElement | null>;
@@ -230,6 +233,7 @@ type ArchiveConfirmationContentProps = ArchiveDialogProps & {
 
 function ArchiveConfirmationContent({
   confirmTaskArchive,
+  forceDialog,
   isFinePointer,
   taskIsInFlight,
   anchorRef,
@@ -241,6 +245,7 @@ function ArchiveConfirmationContent({
 }: ArchiveConfirmationContentProps) {
   const { t } = useTranslation();
   const shouldUseDialog =
+    forceDialog ||
     !confirmTaskArchive ||
     dialogProps.isBulkOperation ||
     subtaskClassification.status === "error" ||
@@ -321,6 +326,7 @@ export function TaskArchiveConfirmation({
   onConfirm,
   confirmTestId = DEFAULT_CONFIRM_TEST_ID,
   inline = false,
+  forceDialog = false,
 }: TaskArchiveConfirmationProps) {
   const { isFinePointer } = useResponsiveBreakpoint();
   const confirmTaskArchive = useAppStore((state) => state.userSettings?.confirmTaskArchive ?? true);
@@ -333,6 +339,7 @@ export function TaskArchiveConfirmation({
   return (
     <ArchiveConfirmationContent
       confirmTaskArchive={confirmTaskArchive}
+      forceDialog={forceDialog}
       isFinePointer={isFinePointer}
       taskIsInFlight={taskIsInFlight}
       anchorRef={anchorRef}
