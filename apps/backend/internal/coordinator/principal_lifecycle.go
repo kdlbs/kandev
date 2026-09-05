@@ -83,13 +83,9 @@ func lookupOrCreateTaskPrincipal(ctx context.Context, store PrincipalLifecycleSt
 		if !errors.Is(err, repoerrors.ErrWorkspaceAgentPrincipalConflict) {
 			return nil, err
 		}
-		principal, err = store.GetWorkspaceAgentPrincipalByContext(ctx, workspaceID, TaskPrincipalInstallationID, logicalKey)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if principal == nil {
-		return nil, fmt.Errorf("ensure task principal: concurrent registration returned no principal")
+		// The conflict winner owns the binding. Do not reload and rebind it
+		// with this admission's session after losing the insert race.
+		return nil, err
 	}
 	return principal, nil
 }

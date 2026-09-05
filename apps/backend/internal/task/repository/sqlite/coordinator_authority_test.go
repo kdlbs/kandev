@@ -136,6 +136,39 @@ func TestWorkspaceAgentPrincipalRejectsAmbiguousActiveBinding(t *testing.T) {
 	}
 }
 
+func TestGetActiveWorkspaceAgentPrincipalForTaskFiltersWorkspaceAndTask(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	for _, workspace := range []*models.Workspace{
+		{ID: "ws-1", Name: "Workspace one"},
+		{ID: "ws-2", Name: "Workspace two"},
+	} {
+		if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+			t.Fatalf("CreateWorkspace %s: %v", workspace.ID, err)
+		}
+	}
+	now := time.Now().UTC()
+	for _, principal := range []*models.WorkspaceAgentPrincipal{
+		{ID: "principal-1", WorkspaceID: "ws-1", PluginInstallationID: "plugin-1", LogicalKey: "task-1", BackingTaskID: "task-1", CreatedAt: now},
+		{ID: "principal-2", WorkspaceID: "ws-2", PluginInstallationID: "plugin-2", LogicalKey: "task-1", BackingTaskID: "task-1", CreatedAt: now},
+		{ID: "principal-3", WorkspaceID: "ws-1", PluginInstallationID: "plugin-3", LogicalKey: "task-2", BackingTaskID: "task-2", CreatedAt: now},
+	} {
+		if err := repo.CreateWorkspaceAgentPrincipal(ctx, principal); err != nil {
+			t.Fatalf("CreateWorkspaceAgentPrincipal %s: %v", principal.ID, err)
+		}
+	}
+	active, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "task-1")
+	if err != nil || active == nil || active.ID != "principal-1" {
+		t.Fatalf("active principal = %#v, %v; want principal-1", active, err)
+	}
+	for _, query := range [][2]string{{"ws-1", "task-missing"}, {"ws-missing", "task-1"}} {
+		active, err = repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, query[0], query[1])
+		if err != nil || active != nil {
+			t.Fatalf("active principal for %v = %#v, %v; want nil,nil", query, active, err)
+		}
+	}
+}
+
 // @covers AC-COORDINATOR-AUTHORITY-002
 func TestCoordinatorGrantRepositoryRevokesGrantAndResolvesAudit(t *testing.T) {
 	repo := newUsageEventsTestRepo(t)
