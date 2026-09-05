@@ -27,7 +27,10 @@ interface ColumnsConfig {
   steps: WorkflowStep[];
   repositories: Repository[];
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => void;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => void;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => void;
   deletingTaskId: string | null;
 }
 
@@ -66,7 +69,7 @@ function TitleCell({
 
 type ActionsCtx = {
   onArchive: (id: string, opts?: { cascade?: boolean }) => void;
-  onDelete: (id: string, opts?: { cascade?: boolean }) => void;
+  onDelete: (id: string, opts?: { cascade?: boolean; discardWorktreeChanges?: boolean }) => void;
   deletingTaskId: string | null;
 };
 
@@ -130,7 +133,9 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         taskId={task.id}
         executorType={task.primary_executor_type}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => ctx.onDelete(task.id, { cascade })}
+        onConfirm={({ cascade, discardWorktreeChanges }) =>
+          ctx.onDelete(task.id, { cascade, discardWorktreeChanges })
+        }
       />
       <TaskArchiveConfirmation
         open={showArchiveConfirm}

@@ -6,14 +6,18 @@ import {
   multiSelectReducer,
   useTaskMultiSelectStore,
 } from "./use-task-multi-select";
-import { useTaskActions, useArchiveAndSwitchTask } from "./use-task-actions";
+import {
+  useTaskActions,
+  useArchiveAndSwitchTask,
+  type TaskActionOptions,
+} from "./use-task-actions";
 import { useTaskRemoval } from "./use-task-removal";
 import { useTaskWorkflowMove } from "./use-task-workflow-move";
 import { useToast } from "@/components/toast-provider";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTranslation } from "react-i18next";
 
-type BulkOpts = { cascade?: boolean };
+type BulkOpts = TaskActionOptions;
 
 /**
  * Bulk archive/delete/move that act on an explicit id list. Archive and delete

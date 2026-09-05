@@ -26,6 +26,7 @@ import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
+import type { TaskActionOptions } from "@/hooks/use-task-actions";
 import { useDetachTask } from "@/hooks/use-detach-task";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import {
@@ -136,8 +137,8 @@ interface KanbanCardProps {
   repositoryChips?: RepositoryChip[];
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
-  onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
-  onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDelete?: (task: Task, opts?: TaskActionOptions) => void;
+  onArchive?: (task: Task, opts?: TaskActionOptions) => void;
   onOpenFullPage?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
@@ -416,7 +417,9 @@ function KanbanCardDialogs({
         taskId={task.id}
         executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
+        onConfirm={({ cascade, discardWorktreeChanges }) =>
+          onDelete?.(task, { cascade, discardWorktreeChanges })
+        }
       />
       <TaskGitHubPRDialog
         workspaceId={workspaceId}

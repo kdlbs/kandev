@@ -137,6 +137,21 @@ each repository, and a Git or snapshot persistence failure does not undo the acc
 
 After creation, Kandev copies any repository-configured files and runs its setup script. Setup-script failure is non-fatal: the worktree remains and the session surfaces a warning. Cleanup scripts run before worktree removal, but their failure also does not prevent removal.
 
+### Deleting a task with local worktree changes
+
+Task deletion checks every owned worktree before it changes the task or starts
+cleanup. If Git reports tracked or untracked changes, deletion stops and the
+task remains visible. The confirmation dialog lists the affected worktrees and
+requires an explicit choice to permanently discard those changes before a
+retry.
+
+With that choice, Kandev removes the worktree and its local changes only after
+it passes the normal path-ownership, Git-registration, checkout-identity,
+shared-reference, and branch-safety checks. A branch with unique commits is
+preserved. If the checkout becomes dirty after admission, cleanup preserves the
+checkout and records a terminal failure instead of retrying the destructive
+operation automatically.
+
 ## Everyday operations
 
 All operations below run in the selected repository workspace.
