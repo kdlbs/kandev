@@ -43,15 +43,15 @@ A focused Chromium reproduction measured a source column at 362.66px before drag
 
 ### Grid end reserve
 
-Update `apps/web/components/kanban/adaptive-desktop-kanban.tsx`. Replace the drag end padding with logical end margin.
+Update `apps/web/components/kanban/adaptive-desktop-kanban.tsx`. Replace the drag end padding with a trailing spacer after the lane grid.
 
-The margin must remain conditional on `isDragging`. It must extend the scrollable area without changing the lane grid content box.
+The spacer must remain conditional on `isDragging`. The lane grid must size to the viewport or its minimum track width before the spacer is appended.
 
 Keep `useKanbanDragScrollAnchor` unchanged. Its source-position capture and `scrollLeft` restoration still own drag anchoring.
 
 ### Regression tests
 
-Update the focused component tests to assert the margin style and the absence of end padding.
+Update the focused component tests to assert the trailing spacer style and the absence of end padding.
 
 Extend `apps/web/e2e/tests/kanban/auto-hide-empty-columns.spec.ts`. Measure a visible column before drag and after drag activation.
 
@@ -64,7 +64,7 @@ The E2E test must fail on the current padding behavior. It must continue through
 | `AC-UI-ADAPTIVE-KANBAN-001.2` | `kanban-grid-template.test.ts` keeps the distributed `minmax(280px, 1fr)` template. |
 | `AC-UI-ADAPTIVE-KANBAN-001.3` | The existing Chromium scenario proves contained horizontal lane scrolling. |
 | `AC-UI-ADAPTIVE-KANBAN-001.4` | The existing Chromium scenario completes drag cancellation and a successful task move. |
-| `AC-UI-ADAPTIVE-KANBAN-001.9` | The Chromium geometry assertion compares the same column before and during drag. |
+| `AC-UI-ADAPTIVE-KANBAN-001.9` | The Chromium scenario compares the same column before and during drag and verifies reserve after overflowing tracks. |
 
 ## E2E tests
 
@@ -80,8 +80,9 @@ No new mobile test is required because this correction changes only `AdaptiveDes
 
 ## Verification results
 
-- The focused component suite passed with 10 tests.
-- The Chromium production-build scenario passed with one test.
+- The focused component suite passed with 10 tests before the review fix.
+- The Chromium production-build scenario passed with one test before the review fix.
+- The review fix adds explicit coverage for overflow-track scroll range.
 - Scoped ESLint, web type checking, and the i18n ratchet passed.
 
 ## Risks

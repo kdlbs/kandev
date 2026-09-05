@@ -20,11 +20,11 @@ system_design:
 
 ## Summary
 
-Move the desktop drag end reserve outside the grid sizing box. Add browser geometry evidence and preserve the current drag-anchor behavior.
+Move the desktop drag end reserve after the overflowing grid tracks. Add browser geometry evidence and preserve the current drag-anchor behavior.
 
 ## In scope
 
-- Replace drag end padding with logical end margin in `AdaptiveDesktopKanban`.
+- Replace drag end padding with a trailing spacer after the lane grid in `AdaptiveDesktopKanban`.
 - Update the focused component tests for the drag-only style.
 - Add a Chromium E2E assertion for stable column width during drag.
 - Keep the existing auto-hidden destination, cancellation, and drop assertions green.
@@ -40,6 +40,7 @@ Move the desktop drag end reserve outside the grid sizing box. Add browser geome
 
 - The regression test fails because the current drag padding changes a column from 362.66px to 280px.
 - A drag with an unchanged rendered step set keeps the source column width within one CSS pixel.
+- A board wider than the viewport retains the full drag reserve after its overflowing tracks.
 - The focused scenario still restores auto-hidden destinations and moves a task into one destination.
 
 ## Verification
@@ -81,7 +82,7 @@ None.
 
 ## Results
 
-- Replaced the drag-only grid end padding with logical end margin.
-- Added component coverage for the margin and the absence of padding.
-- Added a Chromium geometry assertion that permits one CSS pixel of subpixel variation.
-- Verified the focused unit suite, production-build Chromium scenario, scoped ESLint, web type checking, and i18n ratchet.
+- Replaced the drag-only grid end padding with a trailing spacer after the lane grid.
+- Added component coverage for the spacer and the absence of padding.
+- Added Chromium geometry and overflow-track scroll-range assertions.
+- Initial focused unit and production-build Chromium checks passed before review feedback.

@@ -131,3 +131,42 @@ test("auto-hides empty columns without changing drag destinations", async ({
   expect(settledDestinationBox.x + settledDestinationBox.width).toBeGreaterThan(0);
   await expect(kanban.columnByStepId(manuallyHiddenStep.id)).toHaveCount(0);
 });
+
+test("keeps the drag reserve after overflowing minimum-width tracks", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 1440, height: 900 });
+  const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Overflow reserve E2E");
+  const steps = await Promise.all(
+    ["Source", "Second", "Third", "Fourth", "Fifth", "Sixth"].map((title, index) =>
+      apiClient.createWorkflowStep(workflow.id, title, index, { is_start_step: index === 0 }),
+    ),
+  );
+  const task = await apiClient.createTask(seedData.workspaceId, "Overflow reserve sample", {
+    workflow_id: workflow.id,
+    workflow_step_id: steps[0].id,
+  });
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: workflow.id,
+    kanban_hidden_step_ids: {},
+    workflow_ids_with_auto_hide_empty_steps: [],
+  });
+
+  const kanban = new KanbanPage(testPage);
+  await kanban.goto();
+  await expect(kanban.columnByStepId(steps[5].id)).toBeVisible();
+
+  const scrollWindow = testPage.getByTestId("desktop-kanban-scroll-window");
+  const scrollWidthBeforeDrag = await scrollWindow.evaluate((element) => element.scrollWidth);
+  const clientWidth = await scrollWindow.evaluate((element) => element.clientWidth);
+  await beginPointerDrag(testPage, kanban.taskCard(task.id));
+  const scrollWidthDuringDrag = await scrollWindow.evaluate((element) => element.scrollWidth);
+  expect(scrollWidthDuringDrag - scrollWidthBeforeDrag).toBeGreaterThanOrEqual(
+    clientWidth - 280 - 1,
+  );
+  await testPage.keyboard.press("Escape");
+  await testPage.mouse.up();
+});

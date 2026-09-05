@@ -46,8 +46,10 @@ describe("AdaptiveDesktopKanban drag end reserve", () => {
     renderBoard(true);
 
     const grid = screen.getByTestId("desktop-kanban-lane-grid");
-    expect(grid.style.marginInlineEnd).toBe("max(0px, calc(100% - 280px))");
     expect(grid.style.paddingInlineEnd).toBe("");
+    expect(screen.getByTestId("desktop-kanban-drag-end-reserve").getAttribute("aria-hidden")).toBe(
+      "true",
+    );
   });
 });
 
