@@ -687,17 +687,8 @@ func (e *Engine) CancelPending(
 	}, nil
 }
 
-// MarkActive completes the claimed route's starting phase once a concrete
-// launch has actually succeeded. It is the only producer of the durable
-// "active" status, so a startup sweep can tell a healthy idling route apart
-// from one still holding "starting" or "retrying" with no launch in flight.
-// A resumed route (status "retrying") reaches here the same way a freshly
-// claimed one does, since resumePending never advances the generation on its
-// own — this is what lets a resumed-then-successful launch clear "retrying"
-// before MarkActionRequired's same-generation guard can otherwise treat it as
-// still mid-launch. A no-op when the route has already left "starting" or
-// "retrying" (a later generation, a failure transition, or a duplicate
-// call), so it is safe to call unconditionally after a successful launch.
+// MarkActive records a successful launch. It accepts both a fresh starting
+// route and a resumed retry. Other states are unchanged.
 func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGeneration int64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -725,16 +716,9 @@ func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGener
 	return nil
 }
 
-// MarkActionRequired transitions a claimed route to durable action_required,
-// fenced to the caller's known generation. It is the catch-all recovery
-// marker for a launch that claimed a generation but failed before reaching a
-// terminal status of its own, so the recovery UI always has something to act
-// on instead of a route silently stuck at "starting" or "retrying" - both are
-// "generation claimed, launch not yet confirmed" phases. A route a launch has
-// already carried past that point (active) is left untouched, so a later,
-// unrelated failure on a healthy route cannot demote it and offer a fallback
-// the failure classifier explicitly declined. Calling it on a route that is
-// already action_required is a no-op.
+// MarkActionRequired moves an unconfirmed launch to durable action_required.
+// The transition is generation and status fenced. Active and already resolved
+// routes are left unchanged.
 func (e *Engine) MarkActionRequired(
 	ctx context.Context,
 	sessionID string,

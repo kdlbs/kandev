@@ -21,6 +21,8 @@ import (
 
 var ErrDynamicRoutingDisabled = errors.New("dynamic agent routing is disabled")
 
+const dynamicRouteStatusRetrying = "retrying"
+
 // ProfileExecution is the caller-facing result of resolving a logical
 // profile. Concrete callers receive the same ID for both fields. Dynamic
 // callers retain their logical ID while the resolver records the concrete
@@ -359,7 +361,7 @@ func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 		return ProfileExecution{}, dynamic.ErrStaleGeneration
 	}
 	if exists {
-		if state.Status == "retrying" {
+		if state.Status == dynamicRouteStatusRetrying {
 			// A retry can survive a process restart without its in-memory owner.
 			// Reclaim it only when this process does not own the launch.
 			if r.engine.OwnsRetryClaim(sessionID, expectedGeneration) {
@@ -392,7 +394,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 ) (ProfileExecution, error) {
 	if state, exists, err := r.engine.LoadState(ctx, sessionID); err != nil {
 		return ProfileExecution{}, err
-	} else if exists && state.Generation == expectedGeneration && state.Status == "retrying" {
+	} else if exists && state.Generation == expectedGeneration && state.Status == dynamicRouteStatusRetrying {
 		if r.engine.OwnsRetryClaim(sessionID, expectedGeneration) {
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
@@ -440,7 +442,7 @@ func (r *ProfileExecutionResolver) resolveCancelRouteAction(
 	if err != nil {
 		return ProfileExecution{}, err
 	}
-	if exists && state.Generation == expectedGeneration && state.Status == "retrying" {
+	if exists && state.Generation == expectedGeneration && state.Status == dynamicRouteStatusRetrying {
 		if r.engine.OwnsRetryClaim(sessionID, expectedGeneration) {
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
@@ -506,7 +508,7 @@ func (r *ProfileExecutionResolver) executionFromDecisionWithRecovery(
 	decision dynamic.RouteDecision,
 ) (ProfileExecution, error) {
 	execution, err := r.executionFromDecision(ctx, profileID, sessionID, decision)
-	if err == nil || decision.Status != "retrying" {
+	if err == nil || decision.Status != dynamicRouteStatusRetrying {
 		return execution, err
 	}
 	if recoveryErr := r.MarkRouteRecoveryActionRequired(ctx, sessionID, decision.Generation); recoveryErr != nil {
