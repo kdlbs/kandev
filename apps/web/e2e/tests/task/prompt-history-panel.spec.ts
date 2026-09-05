@@ -1,9 +1,13 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-
+import {
+  MIDDLE_PROMPT_MARKER,
+  seedLongPromptHistory,
+} from "../../helpers/prompt-history-long-seed";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const SENTINEL = "sentinel-jump-token-9f3a";
+
 // `formatPromptDuration` shapes: 0s / 5s / 5m 23s / 1h 2m 3s. Elapsed wall
 // time between seeding and sending is uncontrolled, so only the shape is
 // asserted (exact-`0s` stays in fixed-time unit coverage).
@@ -191,5 +195,67 @@ test.describe("Prompt history panel", () => {
       return { elTop: rect.top, listTop: listRect?.top ?? 0 };
     });
     expect(Math.abs(elTop - listTop - targetMargin)).toBeLessThanOrEqual(2);
+  });
+  test("loads and aligns a genuinely unloaded middle prompt on desktop", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const taskId = await seedLongPromptHistory(apiClient, {
+      workspaceId: seedData.workspaceId,
+      agentProfileId: seedData.agentProfileId,
+      workflowId: seedData.workflowId,
+      startStepId: seedData.startStepId,
+      repositoryId: seedData.repositoryId,
+    });
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+    await session.addPanelButton().click();
+    await testPage.getByTestId("add-panel-prompt-history-item").click();
+
+    const panel = testPage.getByTestId("prompt-history-panel");
+    await expect(panel).toBeVisible();
+    const middleRow = panel.locator('[data-testid^="prompt-history-row-"]', {
+      hasText: MIDDLE_PROMPT_MARKER,
+    });
+    await expect(middleRow).toBeAttached({ timeout: 10_000 });
+    const messageId = await middleRow.locator("[data-message-id]").getAttribute("data-message-id");
+    if (!messageId) throw new Error("Middle prompt row has no message id");
+    await expect(testPage.locator(`#msg-${messageId}`)).toHaveCount(0);
+
+    let aroundRequests = 0;
+    await testPage.route("**/api/v1/task-sessions/*/messages*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("around") === messageId) aroundRequests += 1;
+      await route.continue();
+    });
+    await middleRow.locator('[role="button"]').first().click();
+
+    await expect.poll(() => aroundRequests, { timeout: 10_000 }).toBe(1);
+    const chat = session.activeChat();
+    await expect(chat).toBeVisible();
+    const target = chat.locator(`#msg-${messageId}`);
+    await expect(target).toBeAttached({ timeout: 10_000 });
+    const messageList = chat.locator(".chat-message-list").first();
+    await expect
+      .poll(
+        async () => {
+          const targetTop = await target.evaluate((element) => element.getBoundingClientRect().top);
+          const listTop = await messageList.evaluate(
+            (element) => element.getBoundingClientRect().top,
+          );
+          const margin = await target.evaluate(
+            (element) => parseFloat(getComputedStyle(element).scrollMarginTop) || 0,
+          );
+          return Math.abs(targetTop - listTop - margin);
+        },
+        { timeout: 10_000 },
+      )
+      .toBeLessThanOrEqual(2);
+    expect(aroundRequests).toBe(1);
   });
 });
