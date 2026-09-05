@@ -244,6 +244,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 				"agent":    agent.Name,
 				"agent_id": agent.ID,
 			}), runID, "")
+		si.svc.clearAgentWorking(ctx, agent.ID)
 		_ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
 		return
 	}
@@ -506,6 +507,10 @@ func (si *SchedulerIntegration) checkoutTask(ctx context.Context, run *models.Ru
 		return true
 	}
 	if si.isTaskTreeGated(ctx, run.ID, taskID) {
+		// This run may have been requeued after an earlier launch (e.g. a
+		// post-start provider fallback) that left the agent "working" with
+		// no launch/complete cycle left to clear it.
+		si.svc.clearAgentWorking(ctx, agentInstanceID)
 		return false
 	}
 	return si.tryCheckout(ctx, run, taskID, agentInstanceID)
@@ -841,6 +846,7 @@ func (si *SchedulerIntegration) checkBudget(
 		si.logger.Info("run skipped (budget exceeded)",
 			zap.String("run_id", run.ID), zap.String("reason", reason))
 		si.releaseCheckoutIfNeeded(ctx, run)
+		si.svc.clearAgentWorking(ctx, agent.ID)
 		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",

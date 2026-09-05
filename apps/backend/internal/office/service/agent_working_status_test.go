@@ -199,6 +199,60 @@ func TestAgentStatus_ReturnsToIdleWhenNoClaimedRunResolves(t *testing.T) {
 		"after an AgentStopped event whose run does not resolve")
 }
 
+// TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate is the
+// regression test for DR-14 review round 2 Finding 1: a launched run that
+// gets requeued (e.g. a post-start provider fallback calling
+// RequeueRunForNextCandidate) sets the run back to "queued" without ever
+// clearing the agent's "working" status, since that clear only happens on
+// the launch/complete cycle the requeue bypassed. The next scheduler pass
+// for that run must not assume prepareAndLaunch will be reached again — it
+// can terminate at any pre-launch gate (task-tree hold, budget, idle-skip,
+// staleness, retry exhaustion) and must still release the agent.
+//
+// This reproduces the exact chain Review drove against the real scheduler:
+// routed launch -> manual requeue (mirroring RequeueRunForNextCandidate) ->
+// a task-tree hold now gates the run's task -> a second scheduler tick.
+func TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	taskID := "task-requeued-tree-held"
+	agent := launchedWorkingAgent(t, svc, ctx, "worker-requeued-tree-held", taskID)
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "after the first launch")
+
+	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
+
+	// Mirror RequeueRunForNextCandidate (repository/sqlite/run_routing.go):
+	// a post-start provider fallback puts the run back in the queue without
+	// touching agent status.
+	svc.ExecSQL(t, `UPDATE runs SET status = 'queued', session_id = '',
+		claimed_at = NULL, finished_at = NULL WHERE id = ?`, run.ID)
+
+	// A task-tree hold now gates the task, so the re-dispatch pass will
+	// terminate at checkoutTask, before prepareAndLaunch ever re-marks the
+	// agent (or clears it).
+	svc.ExecSQL(t, `INSERT INTO office_task_tree_holds
+		(id, workspace_id, root_task_id, mode, created_at)
+		VALUES ('hold-requeued-tree-held', 'ws-1', ?, ?, CURRENT_TIMESTAMP)`,
+		taskID, models.TreeHoldModePause)
+	svc.ExecSQL(t, `INSERT INTO office_task_tree_hold_members
+		(hold_id, task_id, depth) VALUES ('hold-requeued-tree-held', ?, 0)`, taskID)
+
+	service.RunSchedulerTick(svc, ctx)
+
+	got, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "finished" || got.Outcome == nil || *got.Outcome != service.RunOutcomeTaskTreeHeld {
+		t.Fatalf("run status/outcome = %q/%v, want finished/%q",
+			got.Status, got.Outcome, service.RunOutcomeTaskTreeHeld)
+	}
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after the requeued run was terminated at a pre-launch gate")
+}
+
 func publishLifecycle(
 	t *testing.T, ctx context.Context, eb bus.EventBus,
 	topic, taskID, agentID string,
