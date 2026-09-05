@@ -34,15 +34,18 @@ export async function prepareManagedRuntimeProfile(
     await expect
       .poll(
         async () => {
-          const { agents } = await apiClient.listAvailableAgents();
-          observedAgents = agents
+          const [{ agents: availableAgents }, { agents: persistedAgents }] = await Promise.all([
+            apiClient.listAvailableAgents(),
+            apiClient.listAgents(),
+          ]);
+          observedAgents = availableAgents
             .map((agent) => {
               const runtime = agent.runtime_update;
               const version = runtime?.effective_version ? `@${runtime.effective_version}` : "";
               return `${agent.name}:${agent.available ? "available" : "unavailable"}${version}`;
             })
             .join(", ");
-          const managedAgent = agents.find(
+          const managedAgent = availableAgents.find(
             (agent) =>
               agent.name === MANAGED_RUNTIME_AGENT_NAME &&
               agent.available &&
@@ -50,7 +53,10 @@ export async function prepareManagedRuntimeProfile(
               agent.runtime_update.package &&
               agent.runtime_update.effective_version,
           );
-          agentId = managedAgent?.name ?? "";
+          const persistedAgent = persistedAgents.find(
+            (agent) => agent.name === MANAGED_RUNTIME_AGENT_NAME,
+          );
+          agentId = persistedAgent?.id ?? "";
           packageSpec = managedAgent?.runtime_update
             ? `${managedAgent.runtime_update.package}@${managedAgent.runtime_update.effective_version}`
             : "";
