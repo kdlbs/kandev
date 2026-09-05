@@ -816,6 +816,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		// No-op when no session is running.
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
+			taskdto.EnrichTaskParked(&dto, b.p.orchestratorSvc)
 		}
 		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
 		taskdto.EnrichTaskStatusSummary(&dto, task.ID, statusSummaries)
@@ -1130,6 +1131,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
 			taskdto.EnrichCancellationPending(&dto, b.p.orchestratorSvc)
+			taskdto.EnrichParked(&dto, b.p.orchestratorSvc)
 		}
 		dto.PendingAction = bootPendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionItems[session.ID] = dto

@@ -6,6 +6,7 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconCircleCheck,
+  IconCircleDashed,
   IconCircleFilled,
   IconLoader,
   IconLoader2,
@@ -111,6 +112,17 @@ const TASK_BACKGROUND_ICON: IconConfig = {
 const PENDING_PERMISSION_ICON: IconConfig = {
   Icon: IconShieldQuestion,
   className: STYLE_PERMISSION,
+};
+
+// The parked-on-background-work affordance (docs/specs/parked-board-mvp/spec.md):
+// a session settled to WAITING_FOR_INPUT while a detached background shell it
+// launched is still alive. A violet dashed-circle spinner (IconCircleDashed) —
+// distinct by SHAPE from both the background-running segmented spinner
+// (IconLoader) and the question-mark it replaces, while sharing the violet hue
+// with TASK_BACKGROUND_ICON since both mean "background work is running".
+const TASK_PARKED_ICON: IconConfig = {
+  Icon: IconCircleDashed,
+  className: "text-violet-500 animate-spin",
 };
 
 // The task-level interrupted affordance: the session was mid-turn when the
@@ -246,6 +258,36 @@ export function AutoStartFailedTaskIcon({ className }: { className?: string }) {
 }
 
 /**
+ * Shared parked-on-background-work affordance: the task's session settled to
+ * WAITING_FOR_INPUT while a detached background shell it launched is still
+ * alive (docs/specs/parked-board-mvp/spec.md). Carries the
+ * `task:backgroundWorkIsRunning` tooltip/aria-label and the
+ * `task-state-background-running` test id, so every surface that renders the
+ * parked state presents it consistently.
+ */
+export function BackgroundWorkTaskIcon({ className }: { className?: string }) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={t("task:backgroundWorkIsRunning")}
+          tabIndex={0}
+          className="flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
+        >
+          <IconCircleDashed
+            aria-hidden="true"
+            data-testid="task-state-background-running"
+            className={cn("text-violet-500 animate-spin", className)}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
  * Returns true when the kanban card should show the spinning loader. The task
  * workflow state and the primary session's runtime state are decoupled — the
  * workflow can keep a task in `IN_PROGRESS` after the agent has finished, or
@@ -294,6 +336,16 @@ type TaskStateIconOptions = {
   interrupted?: boolean;
   /** True when a workflow step's auto_start_agent action failed to launch a run. */
   autoStartFailed?: boolean;
+  /**
+   * True when the task's session settled to WAITING_FOR_INPUT while a
+   * detached background shell it launched is still alive
+   * (docs/specs/parked-board-mvp/spec.md). Evaluated after both
+   * foregroundActivity checks (a multi-session task can have one actively
+   * generating session and a separate parked one; generating must still
+   * win) and before WAITING_FOR_INPUT (that precedence is the whole
+   * feature) — see spec §7.4's frozen total order.
+   */
+  parkedOnBackgroundWork?: boolean;
 };
 
 // Interrupted (startup reconciliation marker) and auto-start-failed
@@ -312,6 +364,22 @@ function getMarkerIconOverride(
   return null;
 }
 
+// Explicit "needs me" pending input wins over everything else. Split out of
+// getTaskStateIconConfig to keep that function's branch count under the lint
+// complexity limit.
+function pendingInputTaskIconConfig(
+  hasPendingPermission: boolean,
+  hasPendingClarification: boolean,
+): IconConfig | null {
+  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
+    return PENDING_PERMISSION_ICON;
+  }
+  if (hasPendingClarification) {
+    return TASK_STATE_ICONS.WAITING_FOR_INPUT;
+  }
+  return null;
+}
+
 function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions = {}): IconConfig {
   const {
     hasPendingClarification = false,
@@ -319,18 +387,16 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     hasPendingPermission = false,
     interrupted = false,
     autoStartFailed = false,
+    parkedOnBackgroundWork = false,
   } = options;
-  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
-    return PENDING_PERMISSION_ICON;
-  }
-  if (hasPendingClarification) {
-    return TASK_STATE_ICONS.WAITING_FOR_INPUT;
-  }
   // Explicit pending input wins first. Without it, the task-level
   // MOST-ACTIVE-WINS aggregate sits above the coarse task state, including a
   // stale WAITING_FOR_INPUT state.
+  const pendingInput = pendingInputTaskIconConfig(hasPendingPermission, hasPendingClarification);
+  if (pendingInput) return pendingInput;
   if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
   if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
+  if (parkedOnBackgroundWork) return TASK_PARKED_ICON;
   if (isWaitingForInputState(state)) return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   const markerOverride = getMarkerIconOverride(state, interrupted, autoStartFailed);
   if (markerOverride) return markerOverride;
@@ -356,14 +422,17 @@ export function getTaskStateIcon(
   options: TaskStateIconOptions = {},
 ) {
   const config = getTaskStateIconConfig(state, options);
-  // The interrupted and auto-start-failed affordances carry their own
-  // tooltip and accessible label, so they must render through their shared
+  // The interrupted, auto-start-failed and parked affordances each carry their
+  // own tooltip and accessible label, so they must render through their shared
   // component rather than a bare icon.
   if (config === TASK_INTERRUPTED_ICON) {
     return <InterruptedTaskIcon className={cn("h-4 w-4", className)} />;
   }
   if (config === TASK_AUTO_START_FAILED_ICON) {
     return <AutoStartFailedTaskIcon className={cn("h-4 w-4", className)} />;
+  }
+  if (config === TASK_PARKED_ICON) {
+    return <BackgroundWorkTaskIcon className={cn("h-4 w-4", className)} />;
   }
   return renderConfiguredIcon(config, className);
 }

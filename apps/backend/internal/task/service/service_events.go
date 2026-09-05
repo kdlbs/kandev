@@ -39,6 +39,9 @@ type taskActivitySnapshot struct {
 	activity            v1.ForegroundActivity
 	activeSubagentCount int
 	known               bool
+	// parked is the task-level parked-on-background-work OR, read
+	// independently of the activity aggregate (docs/specs/parked-board-mvp/spec.md).
+	parked bool
 }
 
 // PublishTaskUpdated publishes a task.updated event for the given task.
@@ -528,7 +531,7 @@ func (s *Service) addTaskSessionEventFieldsWithActivity(ctx context.Context, tas
 			zap.String("task_id", taskID), zap.Error(sessionsErr))
 	}
 
-	activity = s.addTaskForegroundActivityEventField(data, activity, sessions, sessionsErr)
+	activity = s.addTaskForegroundActivityEventField(taskID, data, activity, sessions, sessionsErr)
 
 	if sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{taskID}); err == nil {
 		if count, ok := sessionCountMap[taskID]; ok {
@@ -552,7 +555,7 @@ func (s *Service) addTaskSessionEventFieldsWithActivity(ctx context.Context, tas
 	return activity
 }
 
-func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{}, activity *taskActivitySnapshot, sessions []*models.TaskSession, sessionsErr error) *taskActivitySnapshot {
+func (s *Service) addTaskForegroundActivityEventField(taskID string, data map[string]interface{}, activity *taskActivitySnapshot, sessions []*models.TaskSession, sessionsErr error) *taskActivitySnapshot {
 	// Task-level MOST-ACTIVE-WINS activity aggregate.
 	// Present as the value or explicit nil when the aggregate is KNOWN, so a coarse
 	// state change never leaves a stale background-running reading on the client, and
@@ -574,6 +577,7 @@ func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{
 				known:               true,
 			}
 		}
+		activity.parked = s.computeTaskParked(taskID)
 	}
 	if activity.known {
 		if activity.activity != "" {
@@ -583,6 +587,7 @@ func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{
 		}
 		data["active_subagent_count"] = activity.activeSubagentCount
 	}
+	data["parked_on_background_work"] = activity.parked
 	return activity
 }
 

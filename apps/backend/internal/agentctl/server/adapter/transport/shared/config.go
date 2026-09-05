@@ -2,6 +2,12 @@ package shared
 
 import "time"
 
+// RecordTurnStartFunc stamps the time of a prompt dispatch that reaches
+// conn.Prompt, for the parked-on-background-work settle probe (D-1: fires on
+// every non-dropped dispatch — the operator path, mid-turn steering, and the
+// synthetic wakeup path — all of which funnel through sendPrompt).
+type RecordTurnStartFunc func(time.Time)
+
 // DefaultPermissionTimeout is the default timeout for permission requests (5 minutes).
 const DefaultPermissionTimeout = 5 * time.Minute
 
@@ -56,6 +62,11 @@ type Config struct {
 	// NotificationQueueCapacity is the resolved ACP inbound notification queue
 	// capacity. Zero keeps compatibility for directly constructed test configs.
 	NotificationQueueCapacity int
+	// RecordTurnStart stamps process.Manager's turn-start marker, read later
+	// by the parked-on-background-work settle probe. The lifecycle layer omits
+	// this callback when the feature is disabled. May be nil in tests; callers
+	// must guard.
+	RecordTurnStart RecordTurnStartFunc
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

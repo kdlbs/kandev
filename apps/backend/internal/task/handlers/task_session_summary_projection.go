@@ -25,6 +25,7 @@ func (h *TaskHandlers) taskSessionSummariesWithPendingActions(
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
 		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
+		dto.EnrichParkedSummary(&summary, h.parkedProjection)
 		if isInputCapableSession(session) {
 			summary.PendingAction = pendingActionPtr(&session.ID, actions)
 		}

@@ -111,6 +111,7 @@ func buildStandaloneCreateInstanceRequest(
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
+		ParkedOnBackgroundWork:     req.ParkedOnBackgroundWork,
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
