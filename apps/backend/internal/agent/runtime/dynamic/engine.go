@@ -17,6 +17,7 @@ const (
 	routeStatusStarting       = "starting"
 	routeStatusActive         = "active"
 	routeStatusActionRequired = "action_required"
+	routeStatusRetrying       = "retrying"
 )
 
 func WithClock(now func() time.Time) EngineOption {
@@ -685,9 +686,9 @@ func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGener
 // fenced to the caller's known generation. It is the catch-all recovery
 // marker for a launch that claimed a generation but failed before reaching a
 // terminal status of its own, so the recovery UI always has something to act
-// on instead of a route silently stuck at "starting". Like MarkActive, it
-// only transitions a route that is still "starting": a route a launch has
-// already carried past that phase (active) is left untouched, so a later,
+// on instead of a route silently stuck at "starting" or "retrying" - both are
+// "generation claimed, launch not yet confirmed" phases. A route a launch has
+// already carried past that point (active) is left untouched, so a later,
 // unrelated failure on a healthy route cannot demote it and offer a fallback
 // the failure classifier explicitly declined. Calling it on a route that is
 // already action_required is a no-op.
@@ -709,7 +710,7 @@ func (e *Engine) MarkActionRequired(
 	if state.Generation != expectedGeneration {
 		return RouteDecision{}, ErrStaleGeneration
 	}
-	if state.Status == routeStatusStarting {
+	if state.Status == routeStatusStarting || state.Status == routeStatusRetrying {
 		expectedStatus := state.Status
 		state.Status = routeStatusActionRequired
 		state.UpdatedAt = e.now()
@@ -741,7 +742,7 @@ func (e *Engine) resumePending(
 	if state.Generation != expectedGeneration {
 		return RouteDecision{}, ErrStaleGeneration
 	}
-	if force && state.Status == "retrying" {
+	if force && state.Status == routeStatusRetrying {
 		return RouteDecision{}, ErrRecoveryPending
 	}
 	if !force && state.Status != string(routingpolicy.DecisionRetry) && state.Status != string(routingpolicy.DecisionWaitForReset) {
@@ -758,7 +759,7 @@ func (e *Engine) resumePending(
 		return RouteDecision{}, ErrRecoveryNotDue
 	}
 	expectedStatus := state.Status
-	state.Status = "retrying"
+	state.Status = routeStatusRetrying
 	state.UpdatedAt = now
 	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
 		return RouteDecision{}, err

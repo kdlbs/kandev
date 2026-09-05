@@ -404,6 +404,52 @@ func TestEngineMarkActionRequiredIsNoOpOnceRouteIsActive(t *testing.T) {
 	}
 }
 
+// TestEngineMarkActionRequiredFromRetryingTransitionsAtSameGeneration is the
+// regression test restoring the deferred recovery guard in
+// LaunchDynamicRouteAction for the timer-recovery path: persistDynamicPolicyRecovery
+// leaves a resumed route at "retrying" (resume never advances the generation),
+// so a launch that fails after that resume must still reach action_required
+// instead of sticking at "retrying" with a dead Retry/Stop banner.
+func TestEngineMarkActionRequiredFromRetryingTransitionsAtSameGeneration(t *testing.T) {
+	engine := NewEngine()
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 60}
+	profile := Profile{ID: "dynamic-retrying-action-required", Candidates: []Candidate{
+		{ID: "first", Enabled: true, Policies: document},
+	}}
+	initial, err := engine.Select("retrying-action-required-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if _, err := engine.ApplyFailure(
+		"retrying-action-required-session", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
+	); !errors.Is(err, ErrRecoveryPending) {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	resumed, err := engine.ResumePendingNow(context.Background(), "retrying-action-required-session", initial.Generation)
+	if err != nil {
+		t.Fatalf("ResumePendingNow: %v", err)
+	}
+	if resumed.Status != routeStatusRetrying {
+		t.Fatalf("precondition: resumed status = %q, want %q", resumed.Status, routeStatusRetrying)
+	}
+
+	decision, err := engine.MarkActionRequired(
+		context.Background(), "retrying-action-required-session", initial.Generation, "route_action_launch_failed",
+	)
+	if err != nil {
+		t.Fatalf("MarkActionRequired from retrying: %v", err)
+	}
+	if decision.Status != routeStatusActionRequired || decision.Generation != initial.Generation {
+		t.Fatalf("decision = %#v", decision)
+	}
+	state, ok := engine.State("retrying-action-required-session")
+	if !ok || state.Status != routeStatusActionRequired || state.Generation != initial.Generation {
+		t.Fatalf("state after MarkActionRequired = %#v, ok=%v", state, ok)
+	}
+}
+
 func TestBindingFingerprinterUsesOpaqueStableHMACKeys(t *testing.T) {
 	key := []byte("installation-secret")
 	fingerprinter := NewBindingFingerprinter(key)

@@ -363,7 +363,15 @@ func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 		if resumeErr == nil {
 			return r.executionFromDecision(ctx, profileID, sessionID, decision)
 		}
-		if !errors.Is(resumeErr, dynamic.ErrRecoveryPending) && !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
+		// ErrRecoveryPending here means the route is already "retrying" at this
+		// exact generation - someone else (the recovery timer, or a concurrent
+		// manual retry) already claimed this resume. Falling through to
+		// r.resolve would claim a fresh, unfenced-by-status generation and
+		// launch a second, competing successor for the same request.
+		if errors.Is(resumeErr, dynamic.ErrRecoveryPending) {
+			return ProfileExecution{}, dynamic.ErrStaleGeneration
+		}
+		if !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
 			return ProfileExecution{}, resumeErr
 		}
 	}
