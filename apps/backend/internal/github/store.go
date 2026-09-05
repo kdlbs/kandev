@@ -1171,11 +1171,6 @@ func (s *Store) initCoreSchema() error {
 	return err
 }
 
-func (s *Store) initCIRunSchema() error {
-	_, err := s.db.Exec(schemaSQLForDriver(ciRunTablesSQL, s.db.DriverName()))
-	return err
-}
-
 func (s *Store) initAppRegistrationSchema() error {
 	if _, err := s.db.Exec(schemaSQLForDriver(appRegistrationTablesSQL, s.db.DriverName())); err != nil {
 		return fmt.Errorf("initialize GitHub App registration schema: %w", err)
@@ -1278,6 +1273,11 @@ CREATE TRIGGER github_workspace_connections_registration_delete
 BEFORE DELETE ON github_workspace_connections
 FOR EACH ROW EXECUTE FUNCTION github_validate_workspace_connection_registration();
 `
+}
+
+func (s *Store) initCIRunSchema() error {
+	_, err := s.db.Exec(schemaSQLForDriver(ciRunTablesSQL, s.db.DriverName()))
+	return err
 }
 
 func (s *Store) backfillGitHubUserConnectionVersions() error {
@@ -4484,15 +4484,16 @@ func (s *Store) EnsureWorkspaceExecutorDefaults(ctx context.Context, workspaceID
 // DeleteWorkspaceSettings removes the non-secret GitHub settings owned by a
 // workspace after the task repository has deleted the workspace row.
 func (s *Store) DeleteWorkspaceSettings(ctx context.Context, workspaceID string) (err error) {
+	defer func() {
+		workspaceID = strings.TrimSpace(workspaceID)
+		if workspaceID != "" && err == nil {
+			err = s.deleteCIRunWorkspaceData(ctx, workspaceID)
+		}
+	}()
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		return fmt.Errorf("workspace_id is required")
 	}
-	defer func() {
-		if err == nil {
-			err = s.deleteCIRunWorkspaceData(ctx, workspaceID)
-		}
-	}()
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(
 		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`), workspaceID)
 	return err
