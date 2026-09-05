@@ -295,5 +295,6 @@
   "dynamicRouteRetryDescription": "供應商發生錯誤後重試相同候選設定檔。適用於可能暫時恢復的故障。",
   "dynamicRouteTryNextDescription": "本次執行略過此候選設定檔，繼續使用下一個符合條件的設定檔。",
   "dynamicRouteStopDescription": "此候選設定檔失敗後停止路由。工作會等待手動恢復操作。",
-  "dynamicProfileSaved": "動態設定檔已儲存。"
+  "dynamicProfileSaved": "動態設定檔已儲存。",
+  "adminOnly": "只有管理員可以更改代理和代理設定檔。"
 }

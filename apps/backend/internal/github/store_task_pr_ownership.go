@@ -87,11 +87,11 @@ func findTaskPRMemberTx(
 	ctx context.Context, tx *sqlx.Tx, memberTaskID, repositoryID string, prNumber int,
 ) (string, string, bool, error) {
 	var memberID, source string
-	err := tx.QueryRowxContext(ctx, `
+	err := tx.QueryRowxContext(ctx, tx.Rebind(`
 		SELECT id, source
 		FROM github_task_prs
 		WHERE task_id = ? AND repository_id = ? AND pr_number = ? AND detached_at IS NULL
-		LIMIT 1`, memberTaskID, repositoryID, prNumber).Scan(&memberID, &source)
+		LIMIT 1`), memberTaskID, repositoryID, prNumber).Scan(&memberID, &source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", false, nil
 	}
@@ -117,22 +117,22 @@ func findTaskPROwnerStateTx(
 	ctx context.Context, tx *sqlx.Tx, ownerTaskID, repositoryID string, prNumber int,
 ) (taskPROwnerState, error) {
 	var ownerID string
-	err := tx.QueryRowxContext(ctx, `
+	err := tx.QueryRowxContext(ctx, tx.Rebind(`
 		SELECT id
 		FROM github_task_prs
 		WHERE task_id = ? AND repository_id = ? AND pr_number = ? AND detached_at IS NULL
-		LIMIT 1`, ownerTaskID, repositoryID, prNumber).Scan(&ownerID)
+		LIMIT 1`), ownerTaskID, repositoryID, prNumber).Scan(&ownerID)
 	if err == nil {
 		return taskPROwnerActive, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return taskPROwnerAbsent, fmt.Errorf("load owner task PR: %w", err)
 	}
-	err = tx.QueryRowxContext(ctx, `
+	err = tx.QueryRowxContext(ctx, tx.Rebind(`
 		SELECT id
 		FROM github_task_prs
 		WHERE task_id = ? AND repository_id = ? AND pr_number = ?
-		LIMIT 1`, ownerTaskID, repositoryID, prNumber).Scan(&ownerID)
+		LIMIT 1`), ownerTaskID, repositoryID, prNumber).Scan(&ownerID)
 	if err == nil {
 		return taskPROwnerDetached, nil
 	}
@@ -148,11 +148,11 @@ func moveTaskPROwnershipTx(
 	if err := copyTaskPROwnershipStateTx(ctx, tx, memberTaskID, ownerTaskID, repositoryID, prNumber); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE github_task_prs
 		SET task_id = ?, updated_at = ?
 		WHERE id = ? AND task_id = ? AND repository_id = ? AND pr_number = ? AND detached_at IS NULL`,
-		ownerTaskID, time.Now().UTC(), memberID, memberTaskID, repositoryID, prNumber)
+	), ownerTaskID, time.Now().UTC(), memberID, memberTaskID, repositoryID, prNumber)
 	if err != nil {
 		return fmt.Errorf("move task PR to owner: %w", err)
 	}
@@ -167,21 +167,21 @@ func moveTaskPROwnershipTx(
 func detachTaskPROwnershipRowTx(
 	ctx context.Context, tx *sqlx.Tx, memberID, memberTaskID, repositoryID string, prNumber int,
 ) error {
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE github_task_prs
 		SET detached_at = ?, updated_at = ?
-		WHERE id = ? AND task_id = ? AND repository_id = ? AND pr_number = ? AND detached_at IS NULL`,
+		WHERE id = ? AND task_id = ? AND repository_id = ? AND pr_number = ? AND detached_at IS NULL`),
 		time.Now().UTC(), time.Now().UTC(), memberID, memberTaskID, repositoryID, prNumber); err != nil {
 		return fmt.Errorf("detach duplicate task PR: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM github_task_pr_automation_options
-		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, memberTaskID, repositoryID, prNumber); err != nil {
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`), memberTaskID, repositoryID, prNumber); err != nil {
 		return fmt.Errorf("remove duplicate task PR automation options: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM github_task_ci_pr_state
-		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, memberTaskID, repositoryID, prNumber); err != nil {
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`), memberTaskID, repositoryID, prNumber); err != nil {
 		return fmt.Errorf("remove duplicate task PR automation state: %w", err)
 	}
 	return nil
@@ -190,20 +190,21 @@ func detachTaskPROwnershipRowTx(
 func copyTaskPROwnershipStateTx(
 	ctx context.Context, tx *sqlx.Tx, memberTaskID, ownerTaskID, repositoryID string, prNumber int,
 ) error {
-	if _, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO github_task_pr_automation_options (
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO github_task_pr_automation_options (
 			task_id, repository_id, pr_number, auto_fix_enabled, auto_merge_enabled,
 			prompt_on_review_requested, prompt_on_merged, prompt_on_closed, created_at, updated_at
 		)
 		SELECT ?, repository_id, pr_number, auto_fix_enabled, auto_merge_enabled,
 			prompt_on_review_requested, prompt_on_merged, prompt_on_closed, created_at, updated_at
 		FROM github_task_pr_automation_options
-		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+		ON CONFLICT(task_id, repository_id, pr_number) DO NOTHING`),
 		ownerTaskID, memberTaskID, repositoryID, prNumber); err != nil {
 		return fmt.Errorf("copy task PR automation options: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO github_task_ci_pr_state (
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO github_task_ci_pr_state (
 			task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json,
 			last_fix_enqueued_at, last_fix_session_id, auto_fix_round_count, auto_fix_exhausted_at,
 			last_merge_signature, last_merge_attempt_at, last_merge_result, merge_retry_pending,
@@ -220,7 +221,8 @@ func copyTaskPROwnershipStateTx(
 			last_lifecycle_event, last_lifecycle_prompt_at, last_lifecycle_session_id,
 			last_error, last_error_kind, created_at, updated_at
 		FROM github_task_ci_pr_state
-		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+		ON CONFLICT(task_id, repository_id, pr_number) DO NOTHING`),
 		ownerTaskID, memberTaskID, repositoryID, prNumber); err != nil {
 		return fmt.Errorf("copy task PR automation state: %w", err)
 	}
@@ -230,14 +232,14 @@ func copyTaskPROwnershipStateTx(
 func moveTaskPROwnershipStateTx(
 	ctx context.Context, tx *sqlx.Tx, memberTaskID, ownerTaskID, repositoryID string, prNumber int,
 ) error {
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM github_task_pr_automation_options
-		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, memberTaskID, repositoryID, prNumber); err != nil {
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`), memberTaskID, repositoryID, prNumber); err != nil {
 		return fmt.Errorf("remove moved task PR automation options: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM github_task_ci_pr_state
-		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, memberTaskID, repositoryID, prNumber); err != nil {
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`), memberTaskID, repositoryID, prNumber); err != nil {
 		return fmt.Errorf("remove moved task PR automation state: %w", err)
 	}
 	return nil

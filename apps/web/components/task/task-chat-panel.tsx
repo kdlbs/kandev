@@ -43,6 +43,7 @@ import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-wi
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -646,40 +647,47 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             repositories={launchErrorContext.repositories}
           />
         )}
-        <MessageList
-          ref={messageListRef}
-          items={groupedItems}
-          messages={allMessages}
-          footerActionMessages={footerActionMessages}
-          permissionsByToolCallId={permissionsByToolCallId}
-          childrenByParentToolCallId={childrenByParentToolCallId}
-          taskId={taskId ?? undefined}
+        <TaskMarkdownFileLinkProvider
+          taskId={taskId}
           sessionId={resolvedSessionId}
-          messagesLoading={messagesLoading}
-          historyRefreshPending={historyRefreshPending}
-          isWorking={isWorking}
-          sessionState={session?.state}
           worktreePath={getSessionWorkspacePath(session)}
           onOpenFile={onOpenFile}
-          dividerBeforeItemKey={dividerBeforeItemKey}
-          lastPromptMessageId={lastPromptMessageId}
-          onLastPromptEdgeChange={setLastPromptEdge}
-          firstMessageId={firstMessageId}
-          onFirstMessageHiddenChange={setIsFirstMessageHidden}
-          anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-          isVisible={transcriptIsVisible}
-          stickyPromptBar={
-            showAnchoredBar && lastPromptMessage ? (
-              <AnchoredLastPromptBar
-                promptText={lastPromptMessage.content}
-                isVisible={anchoredBarVisible}
-                onScrollUp={scrollToLastPrompt}
-                showScrollToLastPrompt={showScrollToLastPrompt}
-                onHeightChange={setAnchoredBarHeight}
-              />
-            ) : undefined
-          }
-        />
+        >
+          <MessageList
+            ref={messageListRef}
+            items={groupedItems}
+            messages={allMessages}
+            footerActionMessages={footerActionMessages}
+            permissionsByToolCallId={permissionsByToolCallId}
+            childrenByParentToolCallId={childrenByParentToolCallId}
+            taskId={taskId ?? undefined}
+            sessionId={resolvedSessionId}
+            messagesLoading={messagesLoading}
+            historyRefreshPending={historyRefreshPending}
+            isWorking={isWorking}
+            sessionState={session?.state}
+            worktreePath={getSessionWorkspacePath(session)}
+            onOpenFile={onOpenFile}
+            dividerBeforeItemKey={dividerBeforeItemKey}
+            lastPromptMessageId={lastPromptMessageId}
+            onLastPromptEdgeChange={setLastPromptEdge}
+            firstMessageId={firstMessageId}
+            onFirstMessageHiddenChange={setIsFirstMessageHidden}
+            anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+            isVisible={transcriptIsVisible}
+            stickyPromptBar={
+              showAnchoredBar && lastPromptMessage ? (
+                <AnchoredLastPromptBar
+                  promptText={lastPromptMessage.content}
+                  isVisible={anchoredBarVisible}
+                  onScrollUp={scrollToLastPrompt}
+                  showScrollToLastPrompt={showScrollToLastPrompt}
+                  onHeightChange={setAnchoredBarHeight}
+                />
+              ) : undefined
+            }
+          />
+        </TaskMarkdownFileLinkProvider>
         {isJumpLoading && (
           <div
             data-testid="transcript-jump-loading"
