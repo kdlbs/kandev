@@ -17,6 +17,7 @@ import (
 type guardObservingExecutor struct {
 	name               executor.Name
 	onRecoverInstances func(ctx context.Context, records []*models.ExecutorRunning)
+	stopInstanceCalls  int
 }
 
 func (e *guardObservingExecutor) Name() executor.Name               { return e.name }
@@ -25,6 +26,7 @@ func (e *guardObservingExecutor) CreateInstance(context.Context, *ExecutorCreate
 	return nil, nil
 }
 func (e *guardObservingExecutor) StopInstance(context.Context, *ExecutorInstance, bool) error {
+	e.stopInstanceCalls++
 	return nil
 }
 func (e *guardObservingExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {

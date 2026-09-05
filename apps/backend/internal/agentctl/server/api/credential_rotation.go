@@ -177,6 +177,13 @@ type confirmRotationRequest struct {
 	RotationID int64 `json:"rotation_id"`
 }
 
+// afterCredentialRotateAccepted is invoked, if non-nil, immediately after
+// credentials.Rotate succeeds and before ownership.Renew is called in
+// handleCredentialRotate. It exists solely so a test can deterministically
+// reproduce the window a concurrent unowned-shutdown reaper could latch
+// shutdown in between those two calls; always nil in production.
+var afterCredentialRotateAccepted func()
+
 // handleCredentialRotate is the rotate half of the two-phase rotation.
 // Refused once the one-way unowned-shutdown door has fired (AC-003.9): a
 // rotation is the first step of an adoption attempt, and a decided
@@ -194,10 +201,21 @@ func (m *ControlServer) handleCredentialRotate(c *gin.Context) {
 		return
 	}
 
+	if afterCredentialRotateAccepted != nil {
+		afterCredentialRotateAccepted()
+	}
+
 	// A successful rotation -- fresh or an idempotent replay -- renews
 	// ownership: it is the first authenticated operation an adopting
-	// backend issues (design 01, "Unowned shutdown").
-	m.ownership.Renew()
+	// backend issues (design 01, "Unowned shutdown"). A shutdown that
+	// latches in the gap between the IsShuttingDown check above and this
+	// call must still be honored: Renew reports false once that happens,
+	// and this response must not claim success over a server that is
+	// already tearing down.
+	if !m.ownership.Renew() {
+		c.JSON(http.StatusConflict, gin.H{errKey: shuttingDownMessage})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"rotation_id": rotationID,

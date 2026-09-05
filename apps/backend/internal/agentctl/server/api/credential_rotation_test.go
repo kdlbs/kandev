@@ -298,6 +298,26 @@ func TestHandleCredentialRotateRefusedAfterShutdownBegun(t *testing.T) {
 	}
 }
 
+// TestHandleCredentialRotateRefusesWhenShutdownLatchesBetweenAcceptAndRenew
+// pins Review round 2 finding 5: a concurrent unowned-shutdown reaper can
+// latch shutdown in the gap between credentials.Rotate succeeding and
+// ownership.Renew being called -- Renew reports false once that happens, and
+// the handler must not claim success over a server that is already tearing
+// down. Deterministically reproduces that exact window via a test-only hook
+// rather than relying on real goroutine timing.
+func TestHandleCredentialRotateRefusesWhenShutdownLatchesBetweenAcceptAndRenew(t *testing.T) {
+	cs, _, host, port := newRotationTestServer(t)
+	t.Cleanup(func() { afterCredentialRotateAccepted = nil })
+	afterCredentialRotateAccepted = func() { cs.ownership.BeginShutdown() }
+
+	log := logger.Default()
+	client := agentctl.NewControlClient(host, port, log, agentctl.WithControlAuthToken("initial-token"))
+
+	if _, err := client.RotateCredential(t.Context()); err == nil {
+		t.Fatal("RotateCredential racing a shutdown latch = nil error, want a rejection")
+	}
+}
+
 // --- ownership-shutdown operation (AC-EXECUTORS-CONTROL-OWNERSHIP-002.9) ---
 
 // TestHandleOwnershipShutdownAcceptsTheLatestCredentialWithNoPriorRotation

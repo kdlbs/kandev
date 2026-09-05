@@ -107,8 +107,9 @@ func TestStopUnreconstructableRecoveredInstanceFallsBackWithoutRetrySupport(t *t
 	mgr := newRecoveryStopTestManager(t, mock)
 
 	ri := &ExecutorInstance{InstanceID: "exec-1", RuntimeName: executor.NameDocker}
-	// guardObservingExecutor.StopInstance always returns nil; reaching it
-	// without a panic or a call into a nonexistent stopWithRetry is the
-	// assertion here (recoveryStopper type assertion must cleanly fail).
 	mgr.stopUnreconstructableRecoveredInstance(context.Background(), ri)
+
+	if mock.stopInstanceCalls != 1 {
+		t.Fatalf("StopInstance calls = %d, want 1 via the plain fallback path", mock.stopInstanceCalls)
+	}
 }

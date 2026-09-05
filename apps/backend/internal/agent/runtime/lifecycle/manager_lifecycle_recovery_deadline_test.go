@@ -58,6 +58,7 @@ func TestManagerStartTreatsRecordsAsNotRetrackedOnceRecoveryDeadlineElapses(t *t
 				InstanceID:           "exec-1",
 				TaskID:               "task-1",
 				SessionID:            "session-1",
+				AgentProfileID:       "profile-1",
 				RuntimeName:          executor.NameStandalone,
 				StandaloneInstanceID: "standalone-1",
 			},

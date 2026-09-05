@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -78,22 +79,39 @@ func repairLiveStandaloneRecordsAfterOwnServerStopped(ctx context.Context, store
 
 // shutdownControlServerWithRetry issues the ownership-shutdown operation
 // within the same bounded per-attempt timeout and retry count as
-// AC-EXECUTORS-SURVIVAL-002.13 (AC-EXECUTORS-CONTROL-OWNERSHIP-004.7),
-// reusing that criterion's own default (defaultRecoveryReadTimeout/
-// defaultRecoveryReadRetries) rather than threading the operator-configured
-// override through this free function's signature -- every existing caller
-// of this stop already accepts the same default when unconfigured.
-func shutdownControlServerWithRetry(ctx context.Context, client AdoptionControlClient) error {
+// AC-EXECUTORS-SURVIVAL-002.13 (AC-EXECUTORS-CONTROL-OWNERSHIP-004.7), using
+// the operator-configured override when the caller supplies one (a zero
+// timeout or negative retry count falls back to the AC's own two-second/
+// two-retry default, mirroring StandaloneExecutor.stopWithRetry). A
+// dial-level connection-refused error counts as success without consuming a
+// retry: AC-004.7's explicit "already stopping or already absent" carve-out,
+// reached when the target has already exited on its own (e.g. via
+// runUnownedReaper) before this call was ever issued.
+func shutdownControlServerWithRetry(ctx context.Context, client AdoptionControlClient, timeout time.Duration, retries int) error {
+	if timeout <= 0 {
+		timeout = defaultRecoveryReadTimeout
+	}
+	if retries < 0 {
+		retries = defaultRecoveryReadRetries
+	}
+
 	var lastErr error
-	for attempt := 0; attempt <= defaultRecoveryReadRetries; attempt++ {
-		attemptCtx, cancel := context.WithTimeout(ctx, defaultRecoveryReadTimeout)
+	for attempt := 0; attempt <= retries; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 		lastErr = client.ShutdownControlServer(attemptCtx)
 		cancel()
-		if lastErr == nil {
+		if lastErr == nil || isAlreadyAbsentShutdownError(lastErr) {
 			return nil
 		}
 	}
 	return lastErr
+}
+
+// isAlreadyAbsentShutdownError reports whether err is the dial-level
+// connection-refused shape produced when the target control server has
+// already exited before this call reached it.
+func isAlreadyAbsentShutdownError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "connection refused")
 }
 
 // AdoptionControlClient is the subset of agentctl.ControlClient's ownership
@@ -197,6 +215,8 @@ func AttemptAdoptControlServer(
 	newClient AdoptionControlClientFactory,
 	homeDir string,
 	requiredCapabilities []string,
+	recoveryReadTimeout time.Duration,
+	recoveryReadRetries int,
 	log *logger.Logger,
 ) AdoptionOutcome {
 	record, err := store.GetControlServerRecord(ctx)
@@ -222,7 +242,7 @@ func AttemptAdoptControlServer(
 		return AdoptionOutcome{Reason: AdoptionReasonIdentityMismatch, ContactedAt: contactedAt}
 	}
 
-	credential, err := revealControlServerCredential(ctx, secretStore, record.CredentialSecretID)
+	credential, instanceCredential, err := revealAdoptionCredentials(ctx, secretStore, record)
 	if err != nil {
 		return AdoptionOutcome{Reason: AdoptionReasonCredentialUnavailable, ContactedAt: contactedAt}
 	}
@@ -235,21 +255,7 @@ func AttemptAdoptControlServer(
 
 	if !capabilitiesSatisfy(requiredCapabilities, identity.Capabilities) {
 		client.SetAuthToken(rotated.Credential)
-		if stopErr := shutdownControlServerWithRetry(ctx, client); stopErr != nil {
-			// AC-EXECUTORS-CONTROL-OWNERSHIP-004.7: retries exhausted --
-			// record no repair, report no recovered instances (already true,
-			// Adopted stays false below), and leave the server to its own
-			// unowned shutdown; a later backend repairs through the deferred
-			// AC-EXECUTORS-CONTROL-OWNERSHIP-003.5 path once it stops itself.
-			log.Warn("failed to stop incompatible control server after exhausting retries; leaving it to its own unowned shutdown",
-				zap.String("endpoint", record.Endpoint), zap.Error(stopErr))
-		} else if repairStore, ok := store.(staleExecutionRepairStore); ok {
-			// AC-EXECUTORS-CONTROL-OWNERSHIP-004.3: the stop succeeded and a
-			// backend is attached, so repair every live standalone record
-			// immediately rather than deferring to the next start.
-			repairLiveStandaloneRecordsAfterOwnServerStopped(ctx, repairStore, log)
-		}
-		return AdoptionOutcome{Reason: AdoptionReasonCapabilityIncompatible, ContactedAt: contactedAt}
+		return stopIncompatibleControlServer(ctx, client, store, record, recoveryReadTimeout, recoveryReadRetries, contactedAt, log)
 	}
 
 	client.SetAuthToken(rotated.Credential)
@@ -259,12 +265,13 @@ func AttemptAdoptControlServer(
 	}
 
 	updated := &models.ControlServerRecord{
-		Endpoint:           record.Endpoint,
-		ServerIdentity:     identity.ServerIdentity,
-		CredentialSecretID: secretID,
-		Capabilities:       identity.Capabilities,
-		DiagnosticLogPath:  identity.DiagnosticLogPath,
-		CreatedAt:          record.CreatedAt,
+		Endpoint:                   record.Endpoint,
+		ServerIdentity:             identity.ServerIdentity,
+		CredentialSecretID:         secretID,
+		InstanceCredentialSecretID: record.InstanceCredentialSecretID,
+		Capabilities:               identity.Capabilities,
+		DiagnosticLogPath:          identity.DiagnosticLogPath,
+		CreatedAt:                  record.CreatedAt,
 	}
 	if err := store.UpsertControlServerRecord(ctx, updated); err != nil {
 		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: contactedAt}
@@ -286,7 +293,7 @@ func AttemptAdoptControlServer(
 		Adopted:            true,
 		Endpoint:           record.Endpoint,
 		Credential:         rotated.Credential,
-		InstanceCredential: credential,
+		InstanceCredential: instanceCredential,
 		ContactedAt:        contactedAt,
 	}
 }
@@ -313,9 +320,10 @@ func RecordFreshControlServer(
 		return fmt.Errorf("read freshly spawned control server identity: %w", err)
 	}
 
-	var priorSecretID string
+	var priorSecretID, priorInstanceSecretID string
 	if prior, err := store.GetControlServerRecord(ctx); err == nil {
 		priorSecretID = prior.CredentialSecretID
+		priorInstanceSecretID = prior.InstanceCredentialSecretID
 	}
 
 	secretID, err := storeControlServerCredential(ctx, secretStore, priorSecretID, credential)
@@ -323,12 +331,25 @@ func RecordFreshControlServer(
 		return fmt.Errorf("store freshly spawned control server credential: %w", err)
 	}
 
+	// The per-instance static credential starts out equal to the control
+	// credential at generation 0 (design 01: per-instance servers never
+	// rotate their own bearer token), but lives in a secret-store slot of
+	// its own: reusing secretID's slot would let a later rotation's
+	// in-place update silently change the value every already-running
+	// per-instance server still enforces (see
+	// models.ControlServerRecord.InstanceCredentialSecretID).
+	instanceSecretID, err := storeControlServerCredential(ctx, secretStore, priorInstanceSecretID, credential)
+	if err != nil {
+		return fmt.Errorf("store freshly spawned control server instance credential: %w", err)
+	}
+
 	record := &models.ControlServerRecord{
-		Endpoint:           endpoint,
-		ServerIdentity:     identity.ServerIdentity,
-		CredentialSecretID: secretID,
-		Capabilities:       identity.Capabilities,
-		DiagnosticLogPath:  identity.DiagnosticLogPath,
+		Endpoint:                   endpoint,
+		ServerIdentity:             identity.ServerIdentity,
+		CredentialSecretID:         secretID,
+		InstanceCredentialSecretID: instanceSecretID,
+		Capabilities:               identity.Capabilities,
+		DiagnosticLogPath:          identity.DiagnosticLogPath,
 	}
 	return store.UpsertControlServerRecord(ctx, record)
 }
@@ -356,6 +377,8 @@ func ReclaimUnneededControlServer(
 	secretStore secrets.SecretStore,
 	newClient AdoptionControlClientFactory,
 	homeDir string,
+	recoveryReadTimeout time.Duration,
+	recoveryReadRetries int,
 	log *logger.Logger,
 ) {
 	record, err := store.GetControlServerRecord(ctx)
@@ -384,7 +407,7 @@ func ReclaimUnneededControlServer(
 	}
 
 	client.SetAuthToken(credential)
-	if err := shutdownControlServerWithRetry(ctx, client); err != nil {
+	if err := shutdownControlServerWithRetry(ctx, client, recoveryReadTimeout, recoveryReadRetries); err != nil {
 		log.Warn("failed to stop detached control server left by an earlier survival-enabled launch after exhausting retries; leaving it to its own unowned shutdown",
 			zap.String("endpoint", record.Endpoint), zap.Error(err))
 		return
@@ -395,6 +418,59 @@ func ReclaimUnneededControlServer(
 	if repairStore, ok := store.(staleExecutionRepairStore); ok {
 		repairLiveStandaloneRecordsAfterOwnServerStopped(ctx, repairStore, log)
 	}
+}
+
+// stopIncompatibleControlServer stops an authenticated, identified, own
+// server that is missing a required capability and, on success, repairs its
+// live standalone records immediately (AC-EXECUTORS-CONTROL-OWNERSHIP-004.3).
+// Always returns the AdoptionReasonCapabilityIncompatible refusal regardless
+// of whether the stop itself succeeded.
+func stopIncompatibleControlServer(
+	ctx context.Context,
+	client AdoptionControlClient,
+	store AdoptionRecordStore,
+	record *models.ControlServerRecord,
+	recoveryReadTimeout time.Duration,
+	recoveryReadRetries int,
+	contactedAt time.Time,
+	log *logger.Logger,
+) AdoptionOutcome {
+	if stopErr := shutdownControlServerWithRetry(ctx, client, recoveryReadTimeout, recoveryReadRetries); stopErr != nil {
+		// AC-EXECUTORS-CONTROL-OWNERSHIP-004.7: retries exhausted -- record no
+		// repair, report no recovered instances (already true, Adopted stays
+		// false below), and leave the server to its own unowned shutdown; a
+		// later backend repairs through the deferred
+		// AC-EXECUTORS-CONTROL-OWNERSHIP-003.5 path once it stops itself.
+		log.Warn("failed to stop incompatible control server after exhausting retries; leaving it to its own unowned shutdown",
+			zap.String("endpoint", record.Endpoint), zap.Error(stopErr))
+	} else if repairStore, ok := store.(staleExecutionRepairStore); ok {
+		// AC-EXECUTORS-CONTROL-OWNERSHIP-004.3: the stop succeeded and a
+		// backend is attached, so repair every live standalone record
+		// immediately rather than deferring to the next start.
+		repairLiveStandaloneRecordsAfterOwnServerStopped(ctx, repairStore, log)
+	}
+	return AdoptionOutcome{Reason: AdoptionReasonCapabilityIncompatible, ContactedAt: contactedAt}
+}
+
+// revealAdoptionCredentials reveals both secrets an adoption attempt needs:
+// the rotating control-plane credential and, separately, the fixed
+// never-rotated per-instance secret every already-running per-instance
+// agentctl server still enforces (see
+// models.ControlServerRecord.InstanceCredentialSecretID). Reusing the
+// control credential for the latter would report a value that stops
+// matching what per-instance servers accept starting at the second
+// adoption, once rotation overwrites the control credential's own secret
+// slot.
+func revealAdoptionCredentials(ctx context.Context, secretStore secrets.SecretStore, record *models.ControlServerRecord) (credential, instanceCredential string, err error) {
+	credential, err = revealControlServerCredential(ctx, secretStore, record.CredentialSecretID)
+	if err != nil {
+		return "", "", err
+	}
+	instanceCredential, err = revealControlServerCredential(ctx, secretStore, record.InstanceCredentialSecretID)
+	if err != nil {
+		return "", "", err
+	}
+	return credential, instanceCredential, nil
 }
 
 func capabilitiesSatisfy(required, advertised []string) bool {

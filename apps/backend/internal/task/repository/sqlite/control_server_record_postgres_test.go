@@ -29,11 +29,12 @@ func TestPostgresControlServerRecordRoundTrips(t *testing.T) {
 	}
 
 	first := &models.ControlServerRecord{
-		Endpoint:           "127.0.0.1:41123",
-		ServerIdentity:     "server-identity-1",
-		CredentialSecretID: "secret-ref-1",
-		Capabilities:       []string{"resume", "diagnostics"},
-		DiagnosticLogPath:  "/home/kandev/logs/agentctl-diagnostic.log",
+		Endpoint:                   "127.0.0.1:41123",
+		ServerIdentity:             "server-identity-1",
+		CredentialSecretID:         "secret-ref-1",
+		InstanceCredentialSecretID: "instance-secret-ref-1",
+		Capabilities:               []string{"resume", "diagnostics"},
+		DiagnosticLogPath:          "/home/kandev/logs/agentctl-diagnostic.log",
 	}
 	if err := repo.UpsertControlServerRecord(ctx, first); err != nil {
 		t.Fatalf("UpsertControlServerRecord(first): %v", err)
@@ -45,7 +46,8 @@ func TestPostgresControlServerRecordRoundTrips(t *testing.T) {
 		t.Fatalf("GetControlServerRecord: %v", err)
 	}
 	if got.Endpoint != first.Endpoint || got.ServerIdentity != first.ServerIdentity ||
-		got.CredentialSecretID != first.CredentialSecretID || got.DiagnosticLogPath != first.DiagnosticLogPath {
+		got.CredentialSecretID != first.CredentialSecretID || got.DiagnosticLogPath != first.DiagnosticLogPath ||
+		got.InstanceCredentialSecretID != first.InstanceCredentialSecretID {
 		t.Fatalf("got = %#v, want match of %#v", got, first)
 	}
 	if len(got.Capabilities) != 2 || got.Capabilities[0] != "resume" || got.Capabilities[1] != "diagnostics" {

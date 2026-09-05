@@ -58,7 +58,8 @@ func provideAgentctlLauncher(
 		// earlier survival-enabled launch may have left running, rather than
 		// leaving it running unowned until its own unowned-shutdown timer
 		// elapses.
-		lifecycle.ReclaimUnneededControlServer(ctx, store, secretStore, controlClientFactory(log), cfg.ResolvedHomeDir(), log)
+		lifecycle.ReclaimUnneededControlServer(ctx, store, secretStore, controlClientFactory(log), cfg.ResolvedHomeDir(),
+			cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
 	}
 	return spawnFreshAgentctl(ctx, cfg, log, availability, store, secretStore)
 }
@@ -75,7 +76,8 @@ func adoptSurvivingAgentctl(
 	secretStore secrets.SecretStore,
 ) *agentctlLauncherResult {
 	outcome := lifecycle.AttemptAdoptControlServer(ctx, store, secretStore, controlClientFactory(log),
-		cfg.ResolvedHomeDir(), lifecycle.RequiredSurvivalCapabilities, log)
+		cfg.ResolvedHomeDir(), lifecycle.RequiredSurvivalCapabilities,
+		cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
 	if !outcome.Adopted {
 		log.Info("control server adoption did not complete; spawning a fresh one",
 			zap.String("reason", string(outcome.Reason)))

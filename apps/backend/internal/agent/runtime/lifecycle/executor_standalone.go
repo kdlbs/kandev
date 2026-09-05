@@ -25,13 +25,24 @@ const (
 	defaultRecoveryReadRetries = 2
 )
 
-// UnstoppableSessionRecorder retains a session's recovery guard for the rest
-// of this backend's lifetime when AC-EXECUTORS-SURVIVAL-002.16 applies: at
-// least one live instance for that session could not be stopped despite
-// AC-EXECUTORS-SURVIVAL-002.15's bounded retry. Satisfied structurally by
-// *lifecycle.RecoveryGuard (see Manager.RecoveryGuard).
+// UnstoppableSessionRecorder is the recovery-guard sink StandaloneExecutor
+// drives for a session's not-re-tracked outcome during recovery: retains a
+// session's guard for the rest of this backend's lifetime when
+// AC-EXECUTORS-SURVIVAL-002.16 applies (at least one live instance could not
+// be stopped despite AC-EXECUTORS-SURVIVAL-002.15's bounded retry), marks a
+// session whose stop is still resolving when the AC-EXECUTORS-SURVIVAL-003.7
+// recovery deadline elapses mid-retry, and releases that guard once the
+// resolution is known. Satisfied structurally by *lifecycle.RecoveryGuard
+// (see Manager.RecoveryGuard).
 type UnstoppableSessionRecorder interface {
 	RetainAsUnstoppable(sessionID string)
+	// MarkStopInFlight records that sessionID's guard must survive
+	// ReleaseAllExceptRetained until its still-resolving stop is known,
+	// rather than being released at the deadline bound.
+	MarkStopInFlight(sessionID string)
+	// Release drops sessionID's guard once its resolution is known. A no-op
+	// for a session RetainAsUnstoppable has already claimed.
+	Release(sessionID string)
 }
 
 // StandaloneExecutor implements Runtime for standalone agentctl execution.
@@ -453,14 +464,40 @@ func (r *StandaloneExecutor) collectRecoveryStops(
 			for sessionID, n := range pending {
 				if n > 0 {
 					delete(winners, sessionID)
+					// AC-EXECUTORS-SURVIVAL-003.7: this session's stop is still
+					// retrying past the deadline -- its guard must survive
+					// ReleaseAllExceptRetained until drainRecoveryStopsAfterDeadline
+					// below learns the resolution and releases (or retains) it.
+					if r.unstoppableRecorder != nil {
+						r.unstoppableRecorder.MarkStopInFlight(sessionID)
+					}
 				}
 			}
-			go func() {
-				for res := range results {
-					r.handleRecoveryStopResult(res, pending, tracker)
-				}
-			}()
+			go r.drainRecoveryStopsAfterDeadline(results, pending, tracker)
 			return
+		}
+	}
+}
+
+// drainRecoveryStopsAfterDeadline finishes applying every recovery stop
+// outcome still outstanding once collectRecoveryStops has already returned
+// past the AC-EXECUTORS-SURVIVAL-003.7 deadline. Each affected session's
+// MarkStopInFlight guard is released once every one of its pending stops has
+// resolved: either directly here (every loser stopped, nothing left to
+// jointly stop) or by stopWinnerAfterLoserFailure's own terminal Release/
+// RetainAsUnstoppable call -- so the "retain until that stop resolves"
+// exception never outlives the actual resolution. Release is safe to call a
+// second time here even after stopWinnerAfterLoserFailure already resolved
+// the guard: it no-ops for an already-released or already-retained session.
+func (r *StandaloneExecutor) drainRecoveryStopsAfterDeadline(
+	results <-chan recoveryStopOutcome,
+	pending map[string]int,
+	tracker *jointFailureTracker,
+) {
+	for res := range results {
+		r.handleRecoveryStopResult(res, pending, tracker)
+		if r.unstoppableRecorder != nil && pending[res.inst.SessionID] == 0 {
+			r.unstoppableRecorder.Release(res.inst.SessionID)
 		}
 	}
 }
@@ -531,6 +568,9 @@ func (r *StandaloneExecutor) stopWinnerAfterLoserFailure(sessionID string, winne
 	}
 	r.logger.Warn("stopped the winning instance because its losing duplicate could not be stopped; session left not re-tracked",
 		zap.String("instance_id", winner.ID), zap.String("session_id", sessionID))
+	if r.unstoppableRecorder != nil {
+		r.unstoppableRecorder.Release(sessionID)
+	}
 }
 
 // indexRecordsBySession maps every named recovery-inventory record by

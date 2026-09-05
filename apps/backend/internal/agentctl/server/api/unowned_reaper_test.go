@@ -1,6 +1,7 @@
 package api
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -109,4 +110,48 @@ func TestStopUnownedReaperIsIdempotent(t *testing.T) {
 
 	cs.StopUnownedReaper()
 	cs.StopUnownedReaper()
+}
+
+// TestRunUnownedReaperUsesInjectedDecider pins Review round 2 finding 8: the
+// reaper loop must call the injected decideUnownedShutdown hook -- the same
+// atomic check-and-latch ownership.TryBeginShutdownIfUnownedFor is wired to
+// by default -- rather than a hardcoded call to that method. Overriding the
+// hook to a call-counting stub that never fires proves the loop actually
+// consults it every tick instead of a reintroduced separate
+// check-then-latch pair that would leave this package green even with the
+// injection point deleted.
+func TestRunUnownedReaperUsesInjectedDecider(t *testing.T) {
+	cs := newUnownedReaperTestServer(t)
+
+	var calls int
+	var mu sync.Mutex
+	cs.decideUnownedShutdown = func(time.Duration) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		return false
+	}
+
+	cs.reaperWG.Add(1)
+	go cs.runUnownedReaper(time.Hour, 5*time.Millisecond)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := calls
+		mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls < 3 {
+		t.Fatalf("decideUnownedShutdown called %d times, want at least 3", calls)
+	}
+	if cs.ownership.IsShuttingDown() {
+		t.Fatal("ownership.IsShuttingDown() = true, want false since the injected decider always returned false")
+	}
 }

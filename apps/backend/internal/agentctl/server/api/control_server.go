@@ -43,6 +43,14 @@ type ControlServer struct {
 	reaperStop        chan struct{}
 	reaperStopOnce    sync.Once
 	reaperWG          sync.WaitGroup
+
+	// decideUnownedShutdown is the reaper's shutdown decision, defaulted to
+	// ownership.TryBeginShutdownIfUnownedFor. Tests override it to pin the
+	// exact call the reaper makes rather than only observing its side
+	// effects, so reverting to a stale two-call sequence (check then latch,
+	// instead of the atomic check-and-latch) fails a test even though it
+	// would still pass every other reaper assertion.
+	decideUnownedShutdown func(time.Duration) bool
 }
 
 // NewControlServer creates a new ControlServer for instance management.
@@ -69,6 +77,8 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 		unownedPeriod:     unownedPeriod,
 		reaperStop:        make(chan struct{}),
 	}
+
+	cs.decideUnownedShutdown = cs.ownership.TryBeginShutdownIfUnownedFor
 
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
 	cs.router.Use(controlCredentialAuth(cs.credentials, adoptionOnlyPaths, "/health", "/auth/handshake", "/identity"))

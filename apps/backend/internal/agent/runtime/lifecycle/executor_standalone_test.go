@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -594,17 +595,31 @@ func TestStandaloneExecutorRecoverInstancesExhaustingEnumerationRetryRecoversNot
 	}
 }
 
-// fakeUnstoppableRecorder captures RetainAsUnstoppable calls without needing
-// a real RecoveryGuard.
+// fakeUnstoppableRecorder captures RetainAsUnstoppable/MarkStopInFlight/
+// Release calls without needing a real RecoveryGuard.
 type fakeUnstoppableRecorder struct {
-	mu       sync.Mutex
-	retained []string
+	mu             sync.Mutex
+	retained       []string
+	markedInFlight []string
+	released       []string
 }
 
 func (f *fakeUnstoppableRecorder) RetainAsUnstoppable(sessionID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.retained = append(f.retained, sessionID)
+}
+
+func (f *fakeUnstoppableRecorder) MarkStopInFlight(sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markedInFlight = append(f.markedInFlight, sessionID)
+}
+
+func (f *fakeUnstoppableRecorder) Release(sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.released = append(f.released, sessionID)
 }
 
 // TestStandaloneExecutorRecoverInstancesRetriesTransientStopFailure pins
@@ -762,6 +777,71 @@ func TestStandaloneExecutorRecoverInstancesDeadlineDropsPendingSessionAndFinishe
 	defer recorder.mu.Unlock()
 	if recorder.retained[0] != "session-1" {
 		t.Fatalf("retained = %v, want session-1", recorder.retained)
+	}
+}
+
+// TestStandaloneExecutorRecoverInstancesDeadlineMarksGuardInFlightAndReleasesOnResolution
+// pins Review round 2 finding 3 (AC-EXECUTORS-SURVIVAL-002.8/003.7): a
+// session dropped at the recovery deadline because its loser's stop is still
+// in flight must have its guard marked stop-in-flight, so a Start() pass's
+// ReleaseAllExceptRetained leaves it held rather than releasing it while a
+// launch racing the still-resolving stop could still recreate two live
+// agents for the session -- and the guard must actually be released once the
+// background drain learns the stop resolved, not left held forever. Uses the
+// real RecoveryGuard rather than a fake so both state transitions are pinned
+// against the type Manager.Start actually wires in.
+func TestStandaloneExecutorRecoverInstancesDeadlineMarksGuardInFlightAndReleasesOnResolution(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "winner", Port: 5001, SessionID: "session-1"},
+		{ID: "loser", Port: 5002, SessionID: "session-1"},
+	}
+	// Long enough per-attempt timeout to tolerate the delay below, so the
+	// loser's stop eventually succeeds instead of failing on a client-side
+	// timeout -- this test is about the success/resolution path, not the
+	// joint-failure path TestStandaloneExecutorRecoverInstancesJointStopFailureRetainsSessionUnstoppable
+	// already covers.
+	control.deleteDelay["loser"] = 30 * time.Millisecond
+	exec := control.executor(t)
+	exec.SetRecoveryRetryConfig(200*time.Millisecond, 0)
+	guard := NewRecoveryGuard()
+	guard.AcquireOrObserve("session-1")
+	exec.SetUnstoppableSessionRecorder(guard)
+
+	records := []*models.ExecutorRunning{{SessionID: "session-1", AgentExecutionID: "winner"}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	recovered, err := exec.RecoverInstances(ctx, records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none: the loser stop was still unresolved at the deadline", recovered)
+	}
+
+	// Simulate the bulk release a Start() pass performs once every
+	// reconstructed session's outcome is published: it must not release
+	// this session's guard yet, since its stop is still resolving.
+	guard.ReleaseAllExceptRetained()
+	if err := guard.CheckLaunchAllowed("session-1"); !errors.Is(err, ErrSessionRecoveryGuarded) {
+		t.Fatalf("guard state right after the deadline = %v, want still held (ErrSessionRecoveryGuarded)", err)
+	}
+
+	pollDeadline := time.Now().Add(2 * time.Second)
+	for guard.CheckLaunchAllowed("session-1") != nil {
+		if time.Now().After(pollDeadline) {
+			t.Fatal("timed out waiting for the background drain to release the guard")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	control.mu.Lock()
+	deleted := append([]string(nil), control.deleted...)
+	control.mu.Unlock()
+	if len(deleted) != 1 || deleted[0] != "loser" {
+		t.Fatalf("deleted = %v, want only the loser stopped: the winner must be untouched when the loser eventually succeeds", deleted)
 	}
 }
 

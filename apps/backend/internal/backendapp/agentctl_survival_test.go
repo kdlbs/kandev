@@ -184,11 +184,18 @@ func TestAdoptSurvivingAgentctlAdoptsAndUpdatesConfig(t *testing.T) {
 	if err := secretStore.Create(context.Background(), &seedSecret); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
+	var seedInstanceSecret secrets.SecretWithValue
+	seedInstanceSecret.Name = "seed-instance"
+	seedInstanceSecret.Value = "instance-credential"
+	if err := secretStore.Create(context.Background(), &seedInstanceSecret); err != nil {
+		t.Fatalf("seed instance secret: %v", err)
+	}
 
 	endpoint := server.Listener.Addr().String()
 	store := &fakeControlServerStore{record: &models.ControlServerRecord{
-		Endpoint:           endpoint,
-		CredentialSecretID: seedSecret.ID,
+		Endpoint:                   endpoint,
+		CredentialSecretID:         seedSecret.ID,
+		InstanceCredentialSecretID: seedInstanceSecret.ID,
 	}}
 	cfg := &config.Config{}
 	cfg.HomeDir = homeDir
