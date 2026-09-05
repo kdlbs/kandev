@@ -352,10 +352,11 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			// agent, so it never reaches "active" itself — the eventual
 			// StartCreatedSession call does that. But if a route was claimed
 			// below and this launch then fails, nothing else will ever move
-			// it off "starting"; the deferred guard covers both failure
-			// points uniformly. It only fires while the route is still
-			// "starting" (see Engine.MarkActionRequired), so it is a no-op
-			// if a concurrent real launch already marked it active.
+			// it off "starting" or "retrying"; the deferred guard covers both
+			// failure points uniformly. It only fires while the route is
+			// still "starting" or "retrying" (see Engine.MarkActionRequired),
+			// so it is a no-op if a concurrent real launch already marked it
+			// active.
 			var claimedRouteGeneration int64
 			launchOwned := false
 			defer func() {

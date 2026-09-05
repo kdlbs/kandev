@@ -450,6 +450,63 @@ func TestEngineMarkActionRequiredFromRetryingTransitionsAtSameGeneration(t *test
 	}
 }
 
+// TestEngineMarkActiveFromRetryingThenActionRequiredIsNoOp is the regression
+// test for review finding F1: a resumed route (status "retrying") that then
+// launches successfully must reach "active" via MarkActive, exactly as a
+// freshly claimed "starting" route does. Without this, a resumed route stays
+// at "retrying" forever, and MarkActionRequired's starting-or-retrying guard
+// (widened for the resumed-then-FAILED case) would wrongly demote a healthy,
+// successfully launched route on any later unrelated failure.
+func TestEngineMarkActiveFromRetryingThenActionRequiredIsNoOp(t *testing.T) {
+	engine := NewEngine()
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 60}
+	profile := Profile{ID: "dynamic-retrying-active", Candidates: []Candidate{
+		{ID: "first", Enabled: true, Policies: document},
+	}}
+	initial, err := engine.Select("retrying-active-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if _, err := engine.ApplyFailure(
+		"retrying-active-session", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
+	); !errors.Is(err, ErrRecoveryPending) {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	resumed, err := engine.ResumePendingNow(context.Background(), "retrying-active-session", initial.Generation)
+	if err != nil {
+		t.Fatalf("ResumePendingNow: %v", err)
+	}
+	if resumed.Status != routeStatusRetrying {
+		t.Fatalf("precondition: resumed status = %q, want %q", resumed.Status, routeStatusRetrying)
+	}
+
+	if err := engine.MarkActive(context.Background(), "retrying-active-session", initial.Generation); err != nil {
+		t.Fatalf("MarkActive from retrying: %v", err)
+	}
+	state, ok := engine.State("retrying-active-session")
+	if !ok || state.Status != routeStatusActive || state.Generation != initial.Generation {
+		t.Fatalf("state after MarkActive = %#v, ok=%v, want active", state, ok)
+	}
+
+	// A later, unrelated failure that reaches the catch-all guard must not
+	// demote this healthy, successfully launched route.
+	decision, err := engine.MarkActionRequired(
+		context.Background(), "retrying-active-session", initial.Generation, "unrelated_declined_failure",
+	)
+	if err != nil {
+		t.Fatalf("MarkActionRequired on active route: %v", err)
+	}
+	if decision.Status != routeStatusActive {
+		t.Fatalf("decision.Status = %q, want unchanged %q", decision.Status, routeStatusActive)
+	}
+	state, ok = engine.State("retrying-active-session")
+	if !ok || state.Status != routeStatusActive {
+		t.Fatalf("state after no-op MarkActionRequired = %#v, ok=%v, want unchanged active", state, ok)
+	}
+}
+
 func TestBindingFingerprinterUsesOpaqueStableHMACKeys(t *testing.T) {
 	key := []byte("installation-secret")
 	fingerprinter := NewBindingFingerprinter(key)

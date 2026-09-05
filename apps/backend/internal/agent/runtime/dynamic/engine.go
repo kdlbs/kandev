@@ -652,10 +652,14 @@ func (e *Engine) CancelPending(
 // MarkActive completes the claimed route's starting phase once a concrete
 // launch has actually succeeded. It is the only producer of the durable
 // "active" status, so a startup sweep can tell a healthy idling route apart
-// from one still holding "starting" with no launch in flight. A no-op when
-// the route has already left "starting" (a later generation, a failure
-// transition, or a duplicate call), so it is safe to call unconditionally
-// after a successful launch.
+// from one still holding "starting" or "retrying" with no launch in flight.
+// A resumed route (status "retrying") reaches here the same way a freshly
+// claimed one does, since resumePending never advances the generation on its
+// own — this is what lets a resumed-then-successful launch clear "retrying"
+// before MarkActionRequired's same-generation guard can otherwise treat it as
+// still mid-launch. A no-op when the route has already left "starting" or
+// "retrying" (a later generation, a failure transition, or a duplicate
+// call), so it is safe to call unconditionally after a successful launch.
 func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGeneration int64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -669,7 +673,7 @@ func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGener
 	if state.Generation != expectedGeneration {
 		return ErrStaleGeneration
 	}
-	if state.Status != routeStatusStarting {
+	if state.Status != routeStatusStarting && state.Status != routeStatusRetrying {
 		return nil
 	}
 	expectedStatus := state.Status
