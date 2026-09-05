@@ -21,8 +21,10 @@
 //     namespace and aborts when it fails, so relaxing clone/unshare alone is
 //     not enough to make user-namespace sandboxing work.
 //
-// The only changes are the namespace-related syscalls listed above. Every
-// other syscall restriction in Docker's default profile is preserved.
+// The profile also omits optional syscall allows that older Docker/libseccomp
+// daemons cannot load. Those syscalls remain denied by the profile default.
+// Apart from that compatibility filter, every other Docker restriction is
+// preserved.
 package seccomp
 
 import (

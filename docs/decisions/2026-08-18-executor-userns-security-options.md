@@ -33,8 +33,9 @@ The profile is a modified copy of Docker's default seccomp profile (vendored fro
 - `clone3`: the `SCMP_ACT_ERRNO` (ENOSYS) fallback for non-CAP_SYS_ADMIN processes is removed.
 - `mount`, `mount_setattr`, `move_mount`, `open_tree`, `setns`, `umount`, `umount2`, `unshare`: moved from the `CAP_SYS_ADMIN`-gated allow list into the unconditional allow list.
 - `pivot_root`: added to the unconditional allow list. Docker's default profile does not name it in any rule, so it falls through to the profile's `SCMP_ACT_ERRNO` default. `bwrap` calls `pivot_root` immediately after creating its namespace and aborts with `bwrap: pivot_root: Operation not permitted` when it is denied, so relaxing `clone`/`unshare` alone leaves the motivating use case broken. Verified against a live daemon: with `pivot_root` denied, `unshare -U true` succeeds but `bwrap --unshare-user --dev-bind / / true` exits 1; with it allowed, both exit 0.
+- Compatibility: nine optional syscall allows that older Docker/libseccomp daemons cannot load are removed. These syscalls remain denied by the profile default action.
 
-Every other syscall restriction in Docker's default profile is preserved. `kexec_load`, `bpf`, `perf_event_open`, `add_key`, and ~50 other syscalls Docker blocks for good reason remain blocked.
+Apart from that compatibility filter, every other syscall restriction in Docker's default profile is preserved. `kexec_load`, `bpf`, `perf_event_open`, `add_key`, and ~50 other syscalls Docker blocks for good reason remain blocked.
 
 The setting is:
 - **Off by default** — every existing profile produces byte-identical launch config.
@@ -49,7 +50,7 @@ The setting is:
 Maximum flexibility, but it hands every profile editor `seccomp=unconfined`, `apparmor=unconfined`, and `privileged` — the setting becomes an arbitrary container-escape switch rather than a single, reviewed relaxation.
 
 ### Why not `seccomp=unconfined`?
-It would restore `kexec_load`, `bpf`, `perf_event_open`, `add_key`, `open_by_handle_at`, and ~50 other syscalls. The tailored profile is strictly better: it only touches namespace-related syscalls.
+It would restore `kexec_load`, `bpf`, `perf_event_open`, `add_key`, `open_by_handle_at`, and ~50 other syscalls. The tailored profile is strictly better: it only relaxes namespace-related syscalls and removes optional names for older daemon compatibility.
 
 ### Why not `--privileged` or `CapAdd: SYS_ADMIN`?
 These grant real host privilege. User namespaces grant privilege only within the new namespace. Strictly worse for the same outcome.
@@ -69,8 +70,8 @@ Strictly better security, but loading it needs host root and `apparmor_parser`, 
 
 - Agent runtimes that use user namespaces (Codex's `apply_patch`, bwrap-based sandboxing) work inside Kandev container executors without `CAP_SYS_ADMIN` or `--privileged`.
 - Default-off means zero risk for profiles that don't need this.
-- The tailored seccomp profile preserves all other Docker security hardening.
-- The profile is vendored and version-pinned; the delta is test-asserted to be exactly the namespace-related syscalls.
+- The tailored seccomp profile preserves all other Docker security hardening and keeps compatibility-filtered calls denied by default.
+- The profile is vendored and version-pinned; tests assert the namespace additions and compatibility removals.
 
 ### Negative
 

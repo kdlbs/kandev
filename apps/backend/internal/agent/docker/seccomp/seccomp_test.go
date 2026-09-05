@@ -321,8 +321,8 @@ func TestUsernsProfile_OnlyChangedSyscalls(t *testing.T) {
 	defaultUncond := unconditionalAllowSet(t, string(defaultProfileJSON))
 	modifiedUncond := unconditionalAllowSet(t, profileJSON)
 
-	// The expected changes: the namespace syscalls moved from CAP_ADMIN-gated
-	// to unconditional allow.
+	// The expected changes are namespace syscalls moved from CAP_ADMIN-gated to
+	// unconditional allow, plus removal of optional legacy-incompatible allows.
 	for _, sc := range usernsRelaxedSyscalls {
 		if !defaultUncond[sc] && !modifiedUncond[sc] {
 			t.Errorf("expected syscall %q to be added to unconditional allow, but it is not present", sc)
