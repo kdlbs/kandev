@@ -926,6 +926,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
+	assert.NotContains(t, tools, "get_github_rate_limit_kandev")
 	assert.Contains(t, tools, "publish_review_findings_kandev", "native code-review publishing must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
 	assert.Contains(t, tools, "add_workspace_sources_kandev")

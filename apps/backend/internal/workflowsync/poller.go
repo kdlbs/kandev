@@ -62,12 +62,14 @@ func (p *Poller) Stop() {
 	p.started = false
 	p.cancel()
 	p.wg.Wait()
+	p.svc.waitAutomaticSyncs()
 }
 
 // loop waits a full interval before the first sync so boot doesn't hammer
 // the GitHub API, then syncs due configs on every tick.
 func (p *Poller) loop(ctx context.Context) {
 	defer p.wg.Done()
+	defer p.svc.waitAutomaticSyncs()
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {

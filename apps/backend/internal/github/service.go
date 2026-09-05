@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -159,6 +160,7 @@ type Service struct {
 	forkParentCache      *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
+	rateCoordinator      *RateCoordinator
 	promptResolver       PromptResolver
 	tokenClientFactory   func(string) Client
 	ghAccountLister      func(context.Context) ([]GHAccount, error)
@@ -213,6 +215,8 @@ func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID stri
 // NewService creates a new GitHub service.
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	stopCtx, stopCancel := context.WithCancel(context.Background())
+	rateTracker := NewRateTracker(eventBus, log)
+	rateCoordinator := NewRateCoordinator(eventBus, log)
 	service := &Service{
 		client:                  client,
 		authMethod:              authMethod,
@@ -228,7 +232,8 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		repoErrorCache:          newRepoErrorCache(),
 		forkParentCache:         newForkParentCache(),
 		protectionCache:         newBranchProtectionCache(),
-		rateTracker:             NewRateTracker(eventBus, log),
+		rateTracker:             rateTracker,
+		rateCoordinator:         rateCoordinator,
 		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
 		ghAccountLister:         ListGHAccounts,
 		cleanupFailureCounts:    make(map[string]int),
@@ -239,6 +244,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
 		service.resolver.SetRateTracker(service.rateTracker)
+		service.resolver.SetRateCoordinator(service.rateCoordinator)
 		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
 			return NewClient(ctx, secrets, log)
 		})
@@ -246,7 +252,22 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 			return newLegacyGitTransportCredential(ctx, secrets, log)
 		})
 	}
+	// Construction must not perform provider I/O. Reuse an already-cached token
+	// login when available; explicit credential setup resolves unknown logins
+	// with a request context.
+	service.coordinateLegacyClientAtConstruction(client)
 	return service
+}
+
+func (s *Service) coordinateLegacyClientAtConstruction(client Client) {
+	login := "legacy"
+	if tokenClient, ok := client.(*TokenClient); ok && tokenClient != nil {
+		login = strings.TrimSpace(tokenClient.username)
+		if login == "" {
+			login = "legacy"
+		}
+	}
+	s.coordinateLegacyClient(context.Background(), client, login)
 }
 
 // ListGHAccounts returns the configured account source. Production uses the
@@ -295,10 +316,62 @@ func (s *Service) getPromptResolver() PromptResolver {
 // tracker. Centralizing this guards against forgetting the wiring on auth
 // flips (e.g. ConfigureToken), which would otherwise leave PAT calls
 // invisible to the rate-limit UI, health checks, and poller throttling.
-func (s *Service) newPATClient(token string) *PATClient {
+func (s *Service) newPATClient(ctx context.Context, token string) *PATClient {
 	c := NewPATClient(token)
-	attachRateTracker(c, s.rateTracker, s.logger)
+	s.coordinateLegacyClient(ctx, c, "")
 	return c
+}
+
+func (s *Service) coordinateLegacyClient(ctx context.Context, client Client, login string) {
+	if client == nil {
+		return
+	}
+	if s.rateTracker == nil {
+		s.rateTracker = NewRateTracker(nil, s.logger)
+	}
+	if s.rateCoordinator == nil {
+		s.rateCoordinator = NewRateCoordinator(nil, s.logger)
+	}
+	principal := AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared,
+		Login: login, WorkspaceID: "legacy",
+	}
+	tracker, admission := s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
+	wireRateTracker(client, tracker)
+	wireRateAdmission(client, admission)
+	if strings.TrimSpace(login) == "" {
+		login = resolvedLegacyLogin(ctx, client)
+		if login != "" {
+			principal.Login = login
+			tracker, admission = s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
+			wireRateTracker(client, tracker)
+			wireRateAdmission(client, admission)
+		}
+	}
+}
+
+func resolvedLegacyLogin(ctx context.Context, client Client) string {
+	// Only startup clients with a real authenticated identity should make this
+	// probe. Test/fallback clients may embed nil implementations.
+	switch typedClient := client.(type) {
+	case *GHClient:
+		if typedClient == nil {
+			return ""
+		}
+		login, err := typedClient.GetAuthenticatedUser(ctx)
+		if err == nil {
+			return strings.TrimSpace(login)
+		}
+	case *TokenClient:
+		if typedClient == nil {
+			return ""
+		}
+		login, err := typedClient.GetAuthenticatedUser(ctx)
+		if err == nil {
+			return strings.TrimSpace(login)
+		}
+	}
+	return ""
 }
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.

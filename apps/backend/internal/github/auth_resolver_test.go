@@ -4,7 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -23,6 +29,12 @@ func (f *fakeConnectionReader) GetUserConnection(_ context.Context, workspaceID,
 }
 
 type fakeAuthSecrets map[string]string
+
+type legacyIdentityRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f legacyIdentityRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 type repoScopedInstallationProvider struct {
 	clients map[string]Client
@@ -267,6 +279,188 @@ func TestCredentialResolverUsesLegacyOnlyForMigratedSource(t *testing.T) {
 	}
 }
 
+func TestCredentialResolverLegacyIdentityProbeErrors(t *testing.T) {
+	probeErr := errors.New("identity probe failed")
+
+	t.Run("TokenClient error", func(t *testing.T) {
+		client := NewPATClient("legacy-token")
+		client.httpClient.Transport = legacyIdentityRoundTripper(func(req *http.Request) (*http.Response, error) {
+			if req.Context().Err() != nil {
+				return nil, req.Context().Err()
+			}
+			return nil, probeErr
+		})
+		resolver := NewCredentialResolver(nil, nil)
+		resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+			return client, AuthMethodPAT, nil
+		})
+
+		resolved, err := resolver.resolveLegacy(context.Background(), &WorkspaceConnection{}, CredentialPurposeAutomation)
+		if resolved != nil {
+			t.Fatalf("resolved = %+v, want nil", resolved)
+		}
+		if !errors.Is(err, probeErr) {
+			t.Fatalf("err = %v, want identity probe error", err)
+		}
+	})
+
+	t.Run("GHClient error", func(t *testing.T) {
+		newFakeGH(t, ghResponse{Prefix: "api user", Stderr: probeErr.Error(), Exit: 1})
+		resolver := NewCredentialResolver(nil, nil)
+		resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+			return NewGHClient(), AuthMethodPAT, nil
+		})
+
+		resolved, err := resolver.resolveLegacy(context.Background(), &WorkspaceConnection{}, CredentialPurposeAutomation)
+		if resolved != nil {
+			t.Fatalf("resolved = %+v, want nil", resolved)
+		}
+		if err == nil || !strings.Contains(err.Error(), probeErr.Error()) {
+			t.Fatalf("err = %v, want identity probe error", err)
+		}
+	})
+}
+
+func TestCredentialResolverLegacyIdentityProbeCancellation(t *testing.T) {
+	tests := []struct {
+		name   string
+		client func(*testing.T) Client
+	}{
+		{
+			name: "TokenClient",
+			client: func(t *testing.T) Client {
+				client := NewPATClient("legacy-token")
+				client.httpClient.Transport = legacyIdentityRoundTripper(func(req *http.Request) (*http.Response, error) {
+					return nil, req.Context().Err()
+				})
+				return client
+			},
+		},
+		{
+			name: "GHClient",
+			client: func(t *testing.T) Client {
+				newFakeGH(t, ghResponse{Prefix: "api user", Stdout: "ignored", Exit: 0})
+				return NewGHClient()
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := NewCredentialResolver(nil, nil)
+			client := test.client(t)
+			resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+				return client, AuthMethodPAT, nil
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			resolved, err := resolver.resolveLegacy(ctx, &WorkspaceConnection{}, CredentialPurposeAutomation)
+			if resolved != nil {
+				t.Fatalf("resolved = %+v, want nil", resolved)
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v, want context.Canceled", err)
+			}
+		})
+	}
+}
+
+func TestCredentialResolverLegacyIdentityProbeUsesAdmission(t *testing.T) {
+	tests := []struct {
+		name      string
+		client    func(*testing.T, *atomic.Int32) Client
+		calls     func(*testing.T) int
+		wantLogin string
+	}{
+		{
+			name: "TokenClient",
+			client: func(t *testing.T, calls *atomic.Int32) Client {
+				client := NewPATClient("legacy-token")
+				client.httpClient.Transport = legacyIdentityRoundTripper(func(req *http.Request) (*http.Response, error) {
+					calls.Add(1)
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader(`{"login":"legacy-user"}`)),
+					}, nil
+				})
+				return client
+			},
+			calls:     func(*testing.T) int { return 0 },
+			wantLogin: "legacy-user",
+		},
+		{
+			name: "GHClient",
+			client: func(t *testing.T, _ *atomic.Int32) Client {
+				newFakeGH(t, ghResponse{Prefix: "api user -q", Stdout: "legacy-user\n"})
+				return NewGHClient()
+			},
+			calls:     func(t *testing.T) int { return len(readGHInvocations(t, os.Getenv("GH_ARGS_LOG"))) },
+			wantLogin: "legacy-user",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var tokenCalls atomic.Int32
+			tracker := NewRateTracker(nil, nil)
+			tracker.Record(RateSnapshot{
+				Resource: ResourceCore, Remaining: 0, RemainingObserved: true,
+				Limit: 5000, ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now().UTC(),
+			})
+			resolver := NewCredentialResolver(nil, nil)
+			resolver.rateTracker = tracker
+			client := test.client(t, &tokenCalls)
+			resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+				return client, AuthMethodPAT, nil
+			})
+			connection := &WorkspaceConnection{
+				WorkspaceID: "legacy-workspace", GitHubHost: defaultGitHubHost,
+				Login: "legacy-user", Status: ConnectionStatusActive,
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			resolvedCh := make(chan *ResolvedCredential, 1)
+			errCh := make(chan error, 1)
+			go func() {
+				resolved, err := resolver.resolveLegacy(ctx, connection, CredentialPurposeAutomation)
+				resolvedCh <- resolved
+				errCh <- err
+			}()
+
+			select {
+			case <-resolvedCh:
+				t.Fatal("identity probe completed during the primary retry window")
+			case <-time.After(25 * time.Millisecond):
+			}
+			got := test.calls(t)
+			if test.name == "TokenClient" {
+				got = int(tokenCalls.Load())
+			}
+			if got != 0 {
+				t.Fatalf("provider calls during retry window = %d, want zero", got)
+			}
+
+			tracker.Record(RateSnapshot{
+				Resource: ResourceCore, Remaining: 100, RemainingObserved: true,
+				Limit: 5000, ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now().UTC(),
+			})
+			select {
+			case resolved := <-resolvedCh:
+				if resolved == nil || resolved.Principal.Login != test.wantLogin {
+					t.Fatalf("resolved = %+v, want login %q", resolved, test.wantLogin)
+				}
+				if err := <-errCh; err != nil {
+					t.Fatalf("resolve legacy: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("identity probe did not resume after the retry window")
+			}
+		})
+	}
+}
+
 func TestLegacyResolverUsesServiceRateTracker(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-legacy-rate-limit")
@@ -323,6 +517,84 @@ func TestCredentialResolverNamedCLIUsesSelectedLogin(t *testing.T) {
 	}
 	if resolved.Principal.Source != ConnectionSourceGHCLI {
 		t.Fatalf("principal = %+v", resolved.Principal)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.1
+func TestCredentialResolverSameHumanPrincipalSharesRateTrackerAcrossWorkspaces(t *testing.T) {
+	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"first": {
+			WorkspaceID: "first", Source: ConnectionSourceGHCLI, GitHubHost: "github.com",
+			Login: "Shared-User", Status: ConnectionStatusActive, CredentialGeneration: 1,
+		},
+		"second": {
+			WorkspaceID: "second", Source: ConnectionSourceGHCLI, GitHubHost: "GITHUB.COM",
+			Login: "shared-user", Status: ConnectionStatusActive, CredentialGeneration: 9,
+		},
+	}}
+	resolver := NewCredentialResolver(connections, nil)
+	resolver.ghToken = func(context.Context, string, string) (string, error) {
+		return "token", nil
+	}
+
+	first, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "first", Purpose: CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "second", Purpose: CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first.RateTracker != second.RateTracker {
+		t.Fatalf("same upstream login received different trackers: %p != %p", first.RateTracker, second.RateTracker)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-002.2
+func TestCredentialResolverAdmissionBlocksProviderCallDuringRetryWindow(t *testing.T) {
+	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"work": {
+			WorkspaceID: "work", Source: ConnectionSourceGHCLI, GitHubHost: defaultGitHubHost,
+			Login: "shared-user", Status: ConnectionStatusActive, CredentialGeneration: 1,
+		},
+	}}
+	resolver := NewCredentialResolver(connections, nil)
+	resolver.ghToken = func(context.Context, string, string) (string, error) { return "token", nil }
+	resolved, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+		WorkspaceID: "work", Purpose: CredentialPurposeAutomation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"login":"shared-user"}`))
+	}))
+	t.Cleanup(server.Close)
+	client := resolved.Client.(*TokenClient)
+	client.httpClient = &http.Client{
+		Transport: &rewriteTransport{base: server.URL},
+		Timeout:   2 * time.Second,
+	}
+	resolved.RateTracker.ObserveSecondary(
+		ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "fixture",
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	_, err = client.GetAuthenticatedUser(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("GetAuthenticatedUser error = %v, want admission deadline", err)
+	}
+	if requests != 0 {
+		t.Fatalf("provider received %d requests during retry window", requests)
 	}
 }
 
