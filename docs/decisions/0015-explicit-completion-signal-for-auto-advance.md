@@ -1,6 +1,6 @@
 # 0015: Explicit completion signal for auto-advance
 
-**Status:** proposed (amended 2026-08-14)
+**Status:** proposed (amended 2026-08-14, 2026-09-05)
 **Date:** 2026-06-04
 **Area:** backend, frontend
 
@@ -8,6 +8,15 @@
 > [ADR-2026-08-14-current-turn-clarification-ownership](2026-08-14-current-turn-clarification-ownership.md):
 > a detached clarification remains a hard-pause barrier only while its turn remains current.
 > That ownership rule stands independently of this proposal's future status.
+>
+> Amended 2026-09-05: `handoff` now carries one hop beyond the bag into the next step's
+> dispatched prompt, and `blockers` (with `handoff`) now rides the existing step-transition
+> audit metadata alongside `signal_source`/`signal_summary`, retrievable through
+> `GET /sessions/:id/workflow/history`. The "persisted in the bag only, not on the wire" claim
+> below (Mechanism, step 1) describes the signal-publish event only and no longer describes the
+> full lifecycle of either field. See
+> `docs/specs/tasks/requirements/workflow-completion-signal-payload-delivery.md` and its
+> system design for the carry/claim mechanism and the audit-metadata addition.
 
 ## Context
 
