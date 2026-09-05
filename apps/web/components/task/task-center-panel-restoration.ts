@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast-provider";
 import { t } from "@/lib/i18n";
 import { getFileTabKey } from "./task-center-panel-file-tabs";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 export type FileTabRestorationOptions = {
   activeSessionId: string | null;
@@ -52,7 +53,10 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
         isDirty: false,
         isBinary: response.is_binary,
         repo: savedTab.repo,
-        renderedPreview: savedTab.renderedPreview,
+        renderedPreview:
+          getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
+            ? savedTab.renderedPreview
+            : undefined,
       });
     } catch {
       /* skip failed tabs */

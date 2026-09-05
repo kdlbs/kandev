@@ -257,7 +257,7 @@ describe("task-scoped artifact notification storage", () => {
 });
 
 describe("open file tabs storage", () => {
-  const sourcePath = "src/foo.ts";
+  const sourcePath = "README.md";
 
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -267,7 +267,7 @@ describe("open file tabs storage", () => {
     setOpenFileTabs("sess-1", [
       {
         path: sourcePath,
-        name: "foo.ts",
+        name: "README.md",
         repo: "enrichment-commons",
         renderedPreview: true,
         pinned: true,
@@ -277,7 +277,7 @@ describe("open file tabs storage", () => {
     expect(JSON.parse(window.sessionStorage.getItem("kandev.openFiles.sess-1") ?? "null")).toEqual([
       {
         path: sourcePath,
-        name: "foo.ts",
+        name: "README.md",
         repo: "enrichment-commons",
         renderedPreview: true,
         pinned: true,
@@ -287,7 +287,7 @@ describe("open file tabs storage", () => {
     expect(tabs).toHaveLength(1);
     expect(tabs[0]).toEqual({
       path: sourcePath,
-      name: "foo.ts",
+      name: "README.md",
       repo: "enrichment-commons",
       renderedPreview: true,
       pinned: true,
@@ -320,6 +320,18 @@ describe("open file tabs storage", () => {
   it("leaves repo undefined for single-repo tabs", () => {
     setOpenFileTabs("sess-1", [{ path: sourcePath, name: "foo.ts", pinned: true }]);
     expect(getOpenFileTabs("sess-1")[0].repo).toBeUndefined();
+  });
+
+  it("drops obsolete in-place preview state for HTML tabs", () => {
+    setOpenFileTabs("sess-1", [
+      { path: "reports/index.html", name: "index.html", renderedPreview: true, pinned: true },
+    ]);
+
+    expect(getOpenFileTabs("sess-1")[0]).toEqual({
+      path: "reports/index.html",
+      name: "index.html",
+      pinned: true,
+    });
   });
 });
 

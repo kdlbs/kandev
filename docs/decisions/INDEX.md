@@ -250,3 +250,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-06-opt-in-external-e2e-runners | [Opt in selected Linux CI jobs to external runners](2026-09-06-opt-in-external-e2e-runners.md) | accepted | infra, workflow, security | 2026-09-06 |
 | 2026-09-05-bounded-progressive-storage-analysis | [Use bounded progressive storage analysis](2026-09-05-bounded-progressive-storage-analysis.md) | accepted | backend, frontend, protocol | 2026-09-05 |
 | 2026-09-05-script-capable-html-preview-isolation | [Capability-Free Runtime for Script-Capable HTML Preview](2026-09-05-script-capable-html-preview-isolation.md) | proposed | frontend, desktop, security | 2026-09-05 |
+| 2026-09-05-trusted-browser-html-preview | [Treat HTML Preview as Trusted Workspace Code](2026-09-05-trusted-browser-html-preview.md) | accepted | frontend, backend, agentctl, security | 2026-09-05 |

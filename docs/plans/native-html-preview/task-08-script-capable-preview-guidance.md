@@ -1,7 +1,7 @@
 ---
 id: "08-script-capable-preview-guidance"
 title: "Publish script-capable preview guidance"
-status: completed
+status: cancelled
 wave: 4
 depends_on:
   - "07-responsive-preview-surfaces"

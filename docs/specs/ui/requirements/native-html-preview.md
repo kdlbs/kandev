@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ui
 created: 2026-09-04
 owners:
@@ -9,96 +9,93 @@ owners:
 
 ## Overview
 
-Kandev can render Markdown files inside its file surfaces. An HTML file
-currently requires another editor or a separate development server. The UI
-system owns the native HTML preview because it is a reusable file-viewer
-interaction. The preview does not introduce workspace state, an executor
-lifecycle, or a backend workspace-file-serving contract.
+Kandev shall open an `.html` or `.htm` file in a real browser runtime. The user
+does not need to start a development server. The preview shall use
+the current editor buffer as its entry document and shall resolve relative
+assets from the task workspace. Desktop uses the existing Browser panel. Phone
+surfaces use the same proxied page in the focused file viewer.
 
-The approved slice renders the current in-memory file buffer and supports
-inline JavaScript. Source code runs in a capability-free preview runtime and
-never becomes executable code in the Kandev page or its credentialed browser
-origin.
+HTML preview is a trusted-workspace-code feature. Previewed scripts have native
+browser behavior and the authority already granted to Browser-panel content.
+Kandev does not claim that this feature safely executes untrusted HTML. Users
+must trust a document before they preview it.
+
+The UI system owns the reusable file-viewer interaction. Agentctl owns the
+ephemeral static server that makes current-buffer HTML and workspace files
+available to the browser. The existing session port proxy owns routing and
+session authorization across local and remote executors.
 
 ## Terminology
 
-- **Rendered preview:** A view of the current file buffer that replaces the
-  source editor inside the same file surface.
-- **Self-contained HTML:** An `.html` or `.htm` document that uses its own
-  markup, inline styles, and inline scripts. Resources are embedded as
-  `data:` values or preview-runtime-owned `blob:` values. Workspace-relative
-  and remote resources are not part of this contract.
-- **Preview runtime:** The isolated ECMAScript execution environment that
-  exposes a virtual document, bounded timers, and preview events without
-  exposing browser or Kandev authority.
-- **Preview surface:** The scriptless, controlled renderer that displays
-  virtual-document snapshots and forwards user events to the preview runtime.
+- **Entry document:** The current, possibly unsaved, editor buffer selected for
+  preview.
+- **Workspace preview server:** A loopback HTTP server inside agentctl that
+  serves the entry document from memory and relative assets from the workspace.
+- **Preview URL:** The session-scoped port-proxy URL used by the Browser panel
+  or focused mobile viewer.
+- **Trusted workspace code:** Content the user permits to run with the existing
+  Browser-panel sandbox and origin policy. It is not isolated as hostile code.
 
 ## Requirements
 
-### REQ-UI-NATIVE-HTML-PREVIEW-001: Render HTML files in place
+### REQ-UI-NATIVE-HTML-PREVIEW-001: Preview HTML with browser fidelity
 
-**Intent:** Let users inspect a generated or edited HTML document without
-starting a server or leaving Kandev. The file editor remains the source of
-truth.
+**Intent:** Let users inspect a generated or edited HTML document with normal
+browser rendering, relative assets, and browser APIs. A configured
+development-server command is not necessary.
 
 #### Acceptance criteria
 
 - **AC-UI-NATIVE-HTML-PREVIEW-001.1:** When an editable text file ends in
   `.html` or `.htm`, each file editor shall expose an accessible `Preview HTML`
-  action. The action shall appear wherever the equivalent Markdown preview
-  action is available.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.2:** When a user activates `Preview HTML`, the
-  file surface shall replace the source editor with the current buffer's
-  rendered view. The file shall stay open, and the user shall not need to save
-  it. Activating `Show code` shall restore the source editor with its content
-  and dirty state unchanged.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.3:** The rendered preview shall support HTML
-  markup, inline CSS, inline JavaScript, `data:` resources, and preview-runtime-
-  owned `blob:` resources. Inline scripts shall be able to mutate the virtual
-  document and respond to preview events.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.4:** Inline JavaScript shall execute only in
-  the preview runtime. It shall not access the Kandev document, browser
-  origin, cookies, storage, credentials, parent or top-level windows, task or
-  session data, or native browser DOM objects. The visible preview surface
-  shall not execute source scripts or inline event-handler attributes.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.5:** Preview content shall not make outbound
-  network requests. Fetch, XHR, WebSocket, EventSource, service-worker,
-  external-script, external-style, and external-media capabilities shall be
-  unavailable or denied. Only embedded `data:` and preview-runtime-owned
-  `blob:` resources may be rendered.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.6:** Desktop preview state shall remain scoped
-  to the open file and shall survive a same-session page refresh consistently
-  with Markdown preview. A mobile file identity change shall reset the focused
-  viewer to source unless preview was explicitly requested for that file.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.7:** On phone and coarse-pointer surfaces, the
-  focused file viewer shall expose the preview action. Its active touch
-  dimension shall be at least 44 pixels. The rendered document shall stay in
-  the full-height surface without document-level horizontal overflow.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.8:** Adding HTML preview shall not change
+  action. The action shall use each location that has the Markdown preview
+  action.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.2:** Activating `Preview HTML` shall publish
+  the current editor buffer without saving it. The source file shall remain
+  open and retain its content and dirty state.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.3:** On desktop, activation shall open or
+  focus a Browser panel at the preview URL. Repeated activation for the same
+  file shall update the in-memory entry document and refresh or reuse the
+  existing Browser panel instead of creating duplicate panels.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.4:** The preview shall use the native browser
+  engine for markup, CSS, JavaScript, DOM events, and relative workspace assets.
+  Existing Browser-panel iframe, browser, and deployment policies shall control
+  links, forms, media, modules, and network APIs.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.5:** Relative URLs shall resolve from the
+  entry document's workspace directory. The server shall not expose paths
+  outside the selected task workspace or repository scope, including through
+  traversal or symlink escape.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.6:** The preview shall use the existing
+  session-authorized port-proxy path. This path shall support local, Docker,
+  SSH, and Kubernetes task sessions without a second public routing mechanism.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.7:** Before activation, the UI shall make the
+  trusted-code consequence clear. Preview source shall execute only in the
+  Browser-panel or mobile preview iframe and shall never be inserted directly
+  into the Kandev parent document.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.8:** On phone and coarse-pointer surfaces, the
+  focused file viewer shall expose the preview action. The active touch
+  dimension shall be at least 44 pixels. Preview shall occupy the full-height
+  viewer, provide `Show code`, and avoid document-level horizontal overflow.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.9:** Adding HTML preview shall not change
   Markdown sanitization, source editing, saving, downloading, deleting,
-  commenting, or external-editor actions for any file type.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.9:** A preview-initiated navigation shall not
-  replace the preview, change the parent page, open a window, download a file,
-  or issue a network request. This includes static and dynamically-created
-  links, SVG or `xlink` links, forms, meta refresh, location or history APIs,
-  and equivalent virtual-runtime actions.
-- **AC-UI-NATIVE-HTML-PREVIEW-001.10:** If a script throws, requests an
-  unsupported capability, exceeds the execution budget, or causes the runtime
-  to terminate, the preview shall fail closed, show localized recovery copy,
-  and retain a route back to source. It shall never fall back to native
-  browser script execution.
+  commenting, external-editor actions, or explicit development-server flows.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.10:** If the task session or agentctl is not
+  available, the buffer is too large, or the server cannot start, Kandev shall
+  show localized recovery copy. The UI shall preserve source access and permit
+  retry. It shall not silently use another execution model.
+- **AC-UI-NATIVE-HTML-PREVIEW-001.11:** Preview overlays and their server shall
+  be bounded and ephemeral. They shall end with the agentctl instance and shall
+  not persist file contents to Kandev storage. A stale preview URL after an
+  executor restart shall be recoverable by activating `Preview HTML` again.
 
 ## Out of scope
 
-- Resolving workspace-relative CSS, JavaScript, images, fonts, links, or other
-  files.
-- Loading remote network resources from an HTML preview.
-- Exposing the complete browser API, Web Workers, service workers, WebGL,
-  browser storage, or credentialed platform integrations to preview scripts.
-- Rendering an HTML file from a Review diff or reconstructing omitted diff
-  content.
-- Preview inspector annotations, source-console forwarding, or dev-server
-  behavior.
-- Running multi-file applications without their normal development server.
-- Mapping rendered HTML elements back to source lines for review comments.
+- Safely executing hostile or untrusted HTML.
+- A dedicated untrusted-content origin, network egress filtering, or browser
+  capability emulation.
+- Framework build pipelines, hot-module replacement, package installation, or
+  replacing an application's configured development-server command.
+- Rendering HTML reconstructed from a Review diff.
+- Mapping rendered elements to source lines, inspector annotations, or console
+  forwarding beyond existing Browser-panel behavior.
+- Publishing the preview server as a production website or a durable URL.

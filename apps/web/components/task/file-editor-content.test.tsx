@@ -8,8 +8,14 @@ vi.mock("@/hooks/use-editor-resolver", () => ({
 }));
 
 vi.mock("@/components/editors/monaco/monaco-code-editor", () => ({
-  MonacoCodeEditor: (props: { path: string; content: string }) => (
-    <div data-testid="monaco-editor" data-path={props.path} data-content={props.content} />
+  MonacoCodeEditor: (props: { path: string; content: string; onPreviewHtml?: () => void }) => (
+    <div data-testid="monaco-editor" data-path={props.path} data-content={props.content}>
+      {props.onPreviewHtml && (
+        <button type="button" onClick={props.onPreviewHtml}>
+          Preview HTML
+        </button>
+      )}
+    </div>
   ),
 }));
 
@@ -20,12 +26,6 @@ vi.mock("@/components/editors/codemirror/codemirror-code-editor", () => ({
 vi.mock("./markdown-preview-content", () => ({
   MarkdownPreviewContent: (props: { content: string }) => (
     <div data-testid="markdown-preview" data-content={props.content} />
-  ),
-}));
-
-vi.mock("./html-preview-content", () => ({
-  HtmlPreviewContent: (props: { content: string }) => (
-    <div data-testid="html-preview" data-content={props.content} />
   ),
 }));
 
@@ -42,18 +42,22 @@ const baseProps: FileEditorContentProps = {
 };
 
 describe("FileEditorContent preview selection", () => {
-  it("renders HTML preview from the current buffer", () => {
+  it("keeps HTML in the source editor and forwards its preview action", () => {
+    const onPreviewHtml = vi.fn();
     render(
       <FileEditorContent
         {...baseProps}
         previewKind="html"
         renderedPreview
-        onTogglePreview={vi.fn()}
+        onPreviewHtml={onPreviewHtml}
       />,
     );
 
-    expect(screen.getByTestId("html-preview").getAttribute("data-content")).toBe("<h1>Report</h1>");
-    expect(screen.queryByTestId("monaco-editor")).toBeNull();
+    expect(screen.getByTestId("monaco-editor").getAttribute("data-content")).toBe(
+      "<h1>Report</h1>",
+    );
+    screen.getByRole("button", { name: "Preview HTML" }).click();
+    expect(onPreviewHtml).toHaveBeenCalledOnce();
   });
 
   it("keeps Markdown preview selection separate from HTML preview", () => {

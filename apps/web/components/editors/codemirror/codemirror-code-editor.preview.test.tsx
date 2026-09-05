@@ -35,7 +35,7 @@ afterEach(cleanup);
 
 describe("CodeMirrorCodeEditor preview action", () => {
   it("labels and invokes HTML preview", () => {
-    const onTogglePreview = vi.fn();
+    const onPreviewHtml = vi.fn();
     render(
       <TooltipProvider>
         <CodeMirrorCodeEditor
@@ -45,7 +45,7 @@ describe("CodeMirrorCodeEditor preview action", () => {
           isDirty={false}
           isSaving={false}
           previewKind="html"
-          onTogglePreview={onTogglePreview}
+          onPreviewHtml={onPreviewHtml}
           onChange={vi.fn()}
           onSave={vi.fn()}
         />
@@ -53,6 +53,6 @@ describe("CodeMirrorCodeEditor preview action", () => {
     );
 
     screen.getByRole("button", { name: "Preview HTML" }).click();
-    expect(onTogglePreview).toHaveBeenCalledOnce();
+    expect(onPreviewHtml).toHaveBeenCalledOnce();
   });
 });

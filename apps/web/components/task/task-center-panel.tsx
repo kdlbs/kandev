@@ -16,12 +16,11 @@ import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { FileTabContent } from "./file-tab-content";
 import { PassthroughToolbar } from "./passthrough-toolbar";
-import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
+import type { OpenFileTab } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { executeApprove } from "@/lib/services/session-approve";
-import { requestFileContent } from "@/lib/ws/workspace-files";
 import {
   setOpenFileTabs as saveOpenFileTabs,
   getActiveTabForSession,
@@ -37,6 +36,9 @@ import { useNormalizedTaskReviews } from "./review-panel-provider";
 import { useReviewItemSelection } from "./review-selection";
 import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
+import { useTaskCenterHtmlPreview } from "@/hooks/use-task-center-html-preview";
+import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 import type { SelectedDiff } from "./task-layout";
 import { useTranslation } from "react-i18next";
@@ -140,8 +142,13 @@ function useFileTabOperations({
   handleTabChange,
   leftTab,
 }: FileTabOperationsOptions) {
-  const { t } = useTranslation();
   const { toast } = useToast();
+  const openBrowserPanel = useDockviewStore((state) => state.openBrowserPanel);
+  const { handlePreviewHtml, isPublishingHtmlPreview } = useTaskCenterHtmlPreview({
+    activeSessionId,
+    openBrowserPanel,
+    toast,
+  });
 
   const addFileTab = useCallback(
     (fileTab: OpenFileTab) => {
@@ -151,39 +158,11 @@ function useFileTabOperations({
     [setOpenFileTabs, setLeftTab],
   );
 
-  const handleOpenFileFromChat = useCallback(
-    async (filePath: string, repo?: string) => {
-      const client = getWebSocketClient();
-      if (!client || !activeSessionId) return;
-      try {
-        const response: FileContentResponse = await requestFileContent(
-          client,
-          activeSessionId,
-          filePath,
-          repo,
-        );
-        const fileName = filePath.split("/").pop() || filePath;
-        const hash = await calculateHash(response.content);
-        addFileTab({
-          path: filePath,
-          repo,
-          name: fileName,
-          content: response.content,
-          originalContent: response.content,
-          originalHash: hash,
-          isDirty: false,
-          isBinary: response.is_binary,
-        });
-      } catch (error) {
-        toast({
-          title: t("task:failedToOpenFile"),
-          description: error instanceof Error ? error.message : t("task:unknownError"),
-          variant: "error",
-        });
-      }
-    },
-    [activeSessionId, toast, addFileTab],
-  );
+  const handleOpenFileFromChat = useTaskCenterFileOpen({
+    activeSessionId,
+    addFileTab,
+    toast,
+  });
 
   const handleCloseFileTab = useCallback(
     (fileKey: string) => {
@@ -231,6 +210,8 @@ function useFileTabOperations({
     handleCloseFileTab,
     handleFileChange,
     handleRenderedPreviewToggle,
+    handlePreviewHtml,
+    isPublishingHtmlPreview,
     handleFileSave,
     handleFileDelete,
     addFileTab,
@@ -304,7 +285,7 @@ function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: Op
         path,
         name,
         repo,
-        renderedPreview,
+        ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
       })),
     );
   }, [activeSessionId, openFileTabs]);
@@ -439,6 +420,8 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     handleOpenFileFromChat,
     handleFileChange,
     handleRenderedPreviewToggle,
+    handlePreviewHtml,
+    isPublishingHtmlPreview,
     handleFileSave,
     handleFileDelete,
   } = fileTabOps;
@@ -492,6 +475,8 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
             onTogglePreview={() => handleRenderedPreviewToggle(getFileTabKey(tab))}
+            onPreviewHtml={() => handlePreviewHtml(tab.path, tab.repo, tab.content)}
+            isPublishingHtmlPreview={isPublishingHtmlPreview}
           />
         ))}
       </SessionTabs>

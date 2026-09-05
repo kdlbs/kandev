@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-NATIVE-HTML-PREVIEW-001
@@ -8,322 +8,306 @@ requirements:
 
 ## Purpose and boundaries
 
-The UI system owns HTML preview as an extension of Kandev's rendered
-file-viewer interaction. The feature consumes the file content already held in
-the frontend editor buffer. It adds no workspace state, executor lifecycle, or
-workspace-file-serving API.
+Native HTML preview is a one-click static-server workflow built on Kandev's
+existing Browser panel and session port proxy. It favors browser fidelity over
+hostile-content isolation. Agentctl serves the current editor buffer as an
+in-memory entry document and serves relative assets from the selected task
+workspace. The browser then renders that page with its normal HTML, CSS, and
+JavaScript implementation.
 
-Inline JavaScript is an approved preview capability, but it must not execute
-as browser JavaScript in the Kandev page, an operator origin, or a credentialed
-iframe. The design therefore separates three concerns:
-
-1. A capability-free preview runtime executes source scripts against a virtual
-   document.
-2. A scriptless preview surface renders virtual-document snapshots.
-3. A narrow event and snapshot protocol connects the two without exposing
-   Kandev objects or browser authority.
-
-The current `srcDoc` document builder and its navigation neutralization remain
-useful as input normalization and defense in depth. They are not the runtime
-security boundary and must not be extended by adding `allow-scripts`.
+The feature does not create a virtual browser, transform user scripts, or
+introduce a second executor-routing protocol. It also does not make a security
+claim for arbitrary workspace HTML. The user-selected trust model is recorded
+in [ADR-2026-09-05-trusted-browser-html-preview](../../../decisions/2026-09-05-trusted-browser-html-preview.md).
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-UI-NATIVE-HTML-PREVIEW-001` | [Preview eligibility and state](#preview-eligibility-and-state), [Runtime boundary](#runtime-boundary), [Renderer and resource policy](#renderer-and-resource-policy), [Security invariants](#security-invariants), [Responsive contract](#responsive-contract), [Failure and recovery](#failure-and-recovery), [Verification strategy](#verification-strategy) |
+| `REQ-UI-NATIVE-HTML-PREVIEW-001` | [Architecture](#architecture), [Contracts](#contracts), [Control flow](#control-flow), [Trust and security](#trust-and-security), [Responsive contract](#responsive-contract), [Failure and recovery](#failure-and-recovery), [Verification strategy](#verification-strategy) |
 
-## Preview eligibility and state
-
-`apps/web/lib/utils/file-types.ts` defines a small preview-kind resolver for
-editable text files:
+## Architecture
 
 ```text
-.md/.mdx   -> markdown
-.html/.htm -> html
-other      -> none
+File editor current buffer
+        |
+        | POST session-scoped preview request
+        v
+Kandev backend task handler
+        |
+        | authenticated agentctl request
+        v
+Agentctl workspace preview manager
+        |-- in-memory entry-document overlay
+        |-- workspace-rooted static files
+        `-- loopback ephemeral HTTP port
+                     |
+                     | existing session port proxy
+                     v
+          Browser panel / mobile iframe
 ```
 
-Binary classification remains authoritative before preview-kind detection. An
-HTML extension reported as binary is not eligible.
-
-The file state in `FileEditorState`, `OpenFileTab`, and `StoredFileTab` uses a
-format-neutral rendered-preview boolean. Existing persisted `markdownPreview`
-values are accepted as a legacy read alias during restoration so an open
-Markdown preview is not lost across the change. New persistence writes only
-the format-neutral field. Preview kind is derived from the current path rather
-than stored, preventing stale state from selecting the wrong renderer after a
-file identity change.
-
-Both the Dockview file-editor path and the legacy center-panel file-tab path use
-the same derived preview kind and toggle semantics. A dirty buffer remains
-owned by editor state while preview is active. Returning to source restores the
-configured Monaco or CodeMirror editor with that unchanged buffer.
+The existing gateway port proxy remains responsible for session authorization,
+executor reachability, capability cookies for iframe subresources, response
+rewriting, and Browser-panel compatibility. The preview feature adds no public
+listener and no direct browser-to-agentctl connection.
 
 ## Components and responsibilities
 
-- `apps/web/lib/utils/file-types.ts` owns extension-to-preview-kind detection.
-- `apps/web/hooks/use-file-editors.ts` and the file-tab helpers own generic
-  preview state, restoration, and persistence.
-- `apps/web/lib/html-preview/preview-runtime.ts` owns the worker client and
-  validates the runtime message contract.
-- `apps/web/lib/html-preview/preview-runtime.worker.ts` owns the isolated
-  ECMAScript VM, virtual DOM, event dispatch, resource capability checks, and
-  execution budgets.
-- `apps/web/lib/html-preview/preview-runtime-types.ts` owns the structured
-  request, event, snapshot, diagnostic, and failure shapes.
-- `apps/web/lib/html-preview/preview-surface.ts` owns the scriptless renderer.
-  It creates elements and styles through an allowlisted DOM projection and
-  never inserts source HTML with `innerHTML` or `dangerouslySetInnerHTML`.
-- `apps/web/lib/html-preview/html-preview-document.ts` owns source parsing and
-  static navigation normalization. It removes meta refresh and non-fragment
-  `href` or SVG `xlink:href` values before the runtime receives the document.
-  The runtime repeats the policy for DOM mutations.
-- `apps/web/components/task/html-preview-content.tsx` owns the preview header,
-  runtime lifecycle, scriptless surface, localized failure state, and source
-  toggle.
-- Monaco, CodeMirror, Dockview, center-panel, and mobile file-viewer
-  components select the same runtime-backed HTML renderer. They do not create
-  a second execution path.
+### Agentctl
 
-Markdown preview keeps its sanitized React renderer, comment overlays, and
-  source-line behavior. HTML preview does not share the Markdown renderer or
-  comment DOM.
+- A workspace preview manager starts one loopback HTTP server per selected root
+  when it receives the first request. The manager closes every server during
+  agentctl instance teardown. A port identifies one static root, including for
+  multi-repository tasks.
+- The manager stores entry-document overlays by canonical repository-relative
+  path. Publishing the same path replaces its previous buffer and increments a
+  version token.
+- The static handler serves an overlay for an exact entry-document match and
+  otherwise serves files from the selected workspace or repository root.
+- Existing repository path resolution remains authoritative. Request paths are
+  URL-decoded once, cleaned, joined through the workspace path helper, and
+  rejected if the resolved path or symlink target escapes the selected root.
+- Responses use standard MIME detection and `Cache-Control: no-store` so a
+  republished current buffer and edited assets are visible on refresh.
 
-## Runtime boundary
+### Backend
 
-### Execution host
+- A task-session handler authorizes the requested session and validates the
+  request. It also makes sure that agentctl is ready. Then it forwards the
+  request through the existing agentctl client.
+- The backend does not store HTML or proxy asset bytes itself.
+- The response contains the agentctl port, scoped entry path, and version needed
+  to construct a session port-proxy URL.
 
-`PreviewRuntimeWorker` runs in a dedicated Web Worker. It loads a pinned
-ECMAScript engine with no host imports and no direct access to the worker's
-native global object. The engine receives a virtual `window` and `document`
-  object implemented by the runtime, not references to browser objects.
+### Frontend
 
-The implementation must execute all source JavaScript through that engine. It
-must not use native `eval`, `Function`, script elements, inline event-handler
-attributes, or an iframe with `allow-scripts` to execute source code.
+- Preview eligibility remains derived from editable `.html` and `.htm` file
+  paths after binary-file classification.
+- The frontend API publishes the current editor buffer and converts the result
+  into the same port-proxy URL form used by development servers.
+- Desktop calls the existing `openBrowserPanel(url)` action. That action focuses
+  or creates the Browser panel according to existing Dockview behavior.
+- Mobile renders the same URL in the focused file viewer because Dockview is not
+  part of the phone composition.
+- Markdown keeps its sanitized in-place renderer and existing preview state.
 
-The virtual capability surface is intentionally small:
+## Contracts
 
-- DOM nodes, attributes, text, style values, and document mutation;
-- document-ready and user-event dispatch;
-- bounded timers and microtasks;
-- `console` diagnostics that return to the host without source content in
-  production logs; and
-- runtime-owned `Blob` and `URL.createObjectURL` values whose bytes originate
-  from the preview source or VM.
+### Browser-to-backend request
 
-The runtime does not expose native `window`, `location`, `history`, `parent`,
-`top`, `frames`, `navigator`, cookies, local or session storage, IndexedDB,
-cache storage, service workers, Web Workers, WebSockets, `fetch`, XHR,
-EventSource, `sendBeacon`, downloads, or window-opening APIs. Unsupported APIs
-fail closed with a virtual runtime error.
+```http
+POST /api/v1/task-sessions/{sessionID}/html-previews
+Content-Type: application/json
 
-### Message contract
-
-The worker client uses a structured-clone contract with no callback or object
-reference crossing the boundary:
-
-```text
-Load(source: string) -> Ready(snapshot) | Failed(diagnostics)
-Dispatch(event: PreviewEvent) -> Snapshot | Failed(diagnostics)
-Dispose() -> terminated worker
+{
+  "repo": "optional repository identity",
+  "path": "relative/path/index.html",
+  "content": "current editor buffer"
+}
 ```
 
-`PreviewEvent` contains only a supported event type, a virtual node identity,
-and sanitized primitive event data. It never contains a DOM node, task ID,
-session ID, repository path, boot payload, cookie, credential, or arbitrary
-function. Snapshots contain virtual nodes, safe attributes, safe styles,
-runtime-owned resource tokens, and diagnostics. They do not contain executable
-source or host object references.
+The request body is capped at 5 MiB. `path` must be an editable `.html` or
+`.htm` file within the task workspace. `repo` uses the same optional multi-repo
+identity accepted by existing workspace-file operations.
 
-The worker receives only the current file buffer and user events. It never
-receives the Kandev boot payload or data from stores outside the file buffer.
+The successful response is:
 
-### Execution limits
+```json
+{
+  "port": 43127,
+  "path": "/relative/path/index.html",
+  "version": 4
+}
+```
 
-Every load and event turn has a wall-clock and instruction budget. The worker
-also has a bounded virtual heap, timer count, snapshot size, and event queue.
-The VM must expose an interrupt or equivalent termination hook so an infinite
-loop cannot block the application. Exceeding any limit terminates the worker,
-discards its virtual state, and reports a recoverable preview failure.
+The frontend appends the version as a cache-busting query value when opening
+the session port-proxy URL. The port is an implementation detail scoped to the
+live task session, not a durable public identifier.
 
-## Renderer and resource policy
+### Backend-to-agentctl request
 
-The visible preview surface is scriptless. The preferred implementation is a
-Shadow DOM surface mounted by `HtmlPreviewContent`; a scriptless iframe is not
-an alternate execution path. The renderer builds native elements from the
-virtual snapshot and attaches event delegation owned by Kandev. Source scripts
-and inline event-handler attributes are never placed in the browser DOM.
+```http
+POST /api/v1/workspace/html-previews
+Content-Type: application/json
+```
 
-The renderer applies a deny-by-default URL policy:
+The body and response use the same fields. Agentctl repeats size, extension,
+and path validation because the backend is not its trust boundary. Existing
+agentctl authentication applies.
 
-- `data:` resources are allowed for the resource element types covered by the
-  requirements.
-- `blob:` resources are allowed only when the runtime created the token from
-  source-owned or VM-owned bytes.
-- HTTP, HTTPS, protocol-relative, workspace-relative, `javascript:`, `file:`,
-  and unknown URLs are omitted or rendered as inert values.
-- Anchor, area, SVG link, form, meta-refresh, download, and window-opening
-  actions are not given native default behavior.
-- CSS `url()` values are filtered by the same resource policy before a style
-  is adopted into the preview surface.
-- Nested frames, objects, plugins, and workers are omitted or replaced by an
-  inert placeholder.
+### Overlay bounds
 
-The existing navigation neutralizer runs before the source is parsed by the
-runtime. The virtual DOM mutation layer enforces the same rule after scripts
-create or modify nodes. This prevents a script from reintroducing a link after
-the initial parse.
+Each document is limited to 5 MiB. An agentctl instance retains at most 32
+entry-document overlays across its root servers. Replacing an existing path
+does not consume another slot. When the limit is reached, the least recently
+published overlay is evicted. The number of loopback servers is bounded by the
+task's configured workspace and repository roots. Overlay bytes, versions, and
+access metadata live only in memory.
 
-The renderer uses containment and scoped styles so preview markup cannot style
-or traverse the surrounding Kandev UI. It does not rely on CSP's unsupported
-navigation directives, iframe `sandbox` flags, or parent `load` handlers as
-the only enforcement mechanism.
-
-## Security invariants
-
-Workspace HTML is untrusted active content. The following invariants are
-required before this feature can ship:
-
-1. No untrusted source executes in the Kandev page, a native browser script
-   context, or an `allow-scripts` iframe.
-2. The VM has no host imports that reach the browser, Kandev stores, cookies,
-   credentials, filesystem, network, or parent document.
-3. The renderer receives data-only snapshots and never evaluates or inserts
-   source-controlled executable markup.
-4. All static and dynamic resource URLs pass one deny-by-default policy.
-5. All static and dynamic navigation actions are no-ops and produce no
-   browser navigation request.
-6. A worker failure, budget exhaustion, malformed message, or unsupported API
-   fails closed and never falls back to native script execution.
-7. The worker is terminated when the preview closes, the file changes identity,
-   the page leaves the file surface, or a runtime generation is superseded.
-
-This design applies the untrusted-content origin rule in
-[ADR-2026-07-24-operator-owned-agent-launcher-settings](../../../decisions/2026-07-24-operator-owned-agent-launcher-settings.md).
-The execution-specific choice is recorded in the proposed
-[capability-free preview runtime ADR](../../../decisions/2026-09-05-script-capable-html-preview-isolation.md).
+These limits constrain accidental memory growth. They are not a hostile-code
+sandbox and do not constrain resources consumed by browser scripts.
 
 ## Control flow
 
-1. A file surface loads text content into its existing editor state.
-2. The preview-kind resolver derives `html` from an eligible `.html` or `.htm`
-   path.
-3. The source toolbar exposes `Preview HTML`.
-4. The toggle starts a new runtime generation and sends only the current
-   buffer to the worker.
-5. The worker parses the document, normalizes navigation, extracts inline
-   scripts and handlers, executes them in order in the virtual environment,
-   and emits a snapshot.
-6. The scriptless surface renders the snapshot and registers event delegation.
-7. A supported user event becomes a sanitized `Dispatch` message. The worker
-   runs handlers and emits the next snapshot.
-8. `Show code`, file identity changes, runtime failures, and page teardown
-   dispose the worker and restore or retain the source editor according to the
-   existing file-state contract.
+### Desktop
 
-No backend request is made for execution. The only normal content input is the
-file buffer already loaded by the Files surface.
+1. The file editor derives HTML preview eligibility from the current path.
+2. The user activates `Preview HTML` after seeing the trusted-code affordance.
+3. The frontend sends the current buffer, path, and repository identity to the
+   task-session endpoint without saving the file.
+4. The backend authorizes the session and publishes the entry document through
+   agentctl.
+5. Agentctl starts or reuses its workspace preview server and returns its port,
+   path, and new version.
+6. The frontend constructs the existing session port-proxy URL and calls
+   `openBrowserPanel(url)`.
+7. The Browser panel loads the page. Relative subresources traverse the same
+   proxy and are read from the workspace by agentctl.
+8. Repeating the action republishes the buffer and navigates the existing panel
+   to the new versioned URL.
+
+The source editor remains open and dirty throughout. HTML preview is a companion
+browser surface on desktop, not a source-editor replacement.
+
+### Mobile
+
+1. The focused file viewer exposes the same `Preview HTML` action.
+2. Publishing follows the desktop flow.
+3. The focused viewer replaces its code body with a full-height iframe at the
+   returned proxy URL and keeps a `Show code` action outside the iframe.
+4. `Show code`, file identity change, or preview failure restores source without
+   changing its buffer.
+
+## Relative assets and browser fidelity
+
+For an entry document at `site/pages/index.html`, `../styles/site.css` resolves
+to `site/styles/site.css` and `/images/logo.svg` resolves from the selected
+workspace or repository root. Query strings and fragments do not participate
+in filesystem path resolution.
+
+The static server does not rewrite HTML, CSS, JavaScript, or import maps.
+Standard browser behavior covers scripts, modules, DOM APIs, fetch, media,
+forms, canvas, WebGL, and available Browser-panel APIs. An application that requires a build
+step, custom fallback routing, server-side endpoints, or HMR must continue to
+use the configured development-server workflow.
+
+## Trust and security
+
+HTML preview uses the existing Browser-panel iframe policy, including scripts
+and same-origin behavior. It is intentionally a trusted-code workflow.
+
+The following remain required:
+
+1. Preview HTML is never inserted into the Kandev parent DOM.
+2. Browser access always traverses the session-authorized port proxy.
+3. Static file reads stay within the selected workspace or repository root,
+   including after symlink evaluation.
+4. Agentctl listens only on loopback and stops the preview server with the
+   instance.
+5. The UI tells the user that previewing runs workspace code with Browser-panel
+   capabilities.
+6. Logs and errors do not include the HTML buffer.
+
+These controls protect routing and host filesystem scope. They do not isolate
+the user from malicious JavaScript. In deployments where Browser-panel content
+shares an origin with Kandev, previewed code can exercise the authority that
+origin and the Browser panel expose. Operators who cannot trust workspace HTML
+must not enable or use this action until a dedicated-origin mode exists.
+
+## Lifecycle and persistence
+
+- A root's preview server starts on first publish and is reused for the
+  agentctl instance lifetime.
+- Entry overlays are in-memory only and do not save or modify workspace files.
+- Closing a Browser panel does not stop the shared server. Agentctl teardown
+  stops the server.
+- A restored desktop Browser panel can contain a stale port-proxy URL after an
+  executor restart. Activating `Preview HTML` publishes the current buffer to
+  the replacement instance and opens a valid URL.
+- Mobile preview state is scoped to the focused repository-plus-path identity
+  and resets when that identity changes.
 
 ## Responsive contract
 
-- **Desktop outcome and entry point:** Monaco and CodeMirror use the existing
-  eye-icon location in the file toolbar. Preview replaces the editor inside
-  the current Dockview or center-panel tab.
-- **Mobile entry point:** The existing `MobileFileViewerPanel` header exposes
-  the same preview action as a 44-pixel touch target. It remains visible in
-  source mode. The preview toolbar exposes `Show code` and runtime failure
-  recovery.
-- **Nearest shipped exemplar:** Markdown file preview supplies toolbar
-  placement, same-surface transition, mobile focused viewer, and per-file
-  state behavior.
-- **Hierarchy and primary action:** Reading the current file remains the only
-  focal task. No drawer, split view, or secondary navigation surface is added.
-- **Scroll ownership:** The existing file panel remains the vertical owner.
-  The controlled preview surface owns document scrolling and does not add
-  horizontal overflow to Kandev's page or file header.
-- **Shared versus specialized behavior:** Eligibility, state, runtime policy,
-  and toggling are shared across viewports and editor providers. Only the
-  existing responsive file-viewer composition differs.
+- **Desktop entry and outcome:** The existing file toolbar exposes `Preview
+  HTML`. The action opens or focuses the existing Browser panel beside the file
+  editor. It does not introduce another preview panel type.
+- **Phone entry and outcome:** `MobileFileViewerPanel` exposes a minimum
+  44-pixel action target. It shows a focused full-height iframe and puts `Show
+  code` in Kandev-owned chrome.
+- **Nearest shipped exemplars:** The development-server preview button supplies
+  Browser-panel creation and URL behavior. Markdown preview supplies mobile
+  toolbar placement, source recovery, and file-identity reset behavior.
+- **Scroll ownership:** Browser content owns iframe scrolling. Kandev's focused
+  viewer owns its header and must not add page-level horizontal overflow.
+- **Shared behavior:** Eligibility, publication, errors, trust copy, proxy URL,
+  and retry semantics are shared. Only the viewport composition differs.
 
 ## Failure and recovery
 
-- Invalid or incomplete HTML uses runtime parser recovery. The toolbar stays
-  outside the preview surface and always retains `Show code`.
-- A script exception or unsupported API produces a localized diagnostic while
-  retaining the last safe snapshot when possible. No native execution fallback
-  is permitted.
-- A loop, memory pressure event, oversized snapshot, or malformed worker
-  message terminates the runtime generation and shows localized recovery copy.
-- A blocked relative or remote resource becomes inert without a workspace or
-  external request.
-- A blocked static or dynamic navigation is a no-op. The preview remains on
-  the current snapshot and the parent page URL is unchanged.
-- If the runtime cannot initialize, the surface shows localized preview
-  failure copy and a route to source. It never renders the source through an
-  unsandboxed browser path.
+- Invalid paths, unsupported extensions, oversized buffers, and workspace-root
+  escapes return validation errors and do not start or update a preview.
+- A missing or stopped task session returns the existing session-unavailable
+  response. The UI preserves source and shows localized retry guidance.
+- An agentctl start or publish failure leaves the current Browser panel
+  unchanged. Repeating `Preview HTML` retries the whole publish flow.
+- A missing relative asset receives a normal HTTP 404 inside the preview so the
+  browser's native diagnostics remain meaningful.
+- A stale URL after agentctl restart can fail in the Browser panel. Republishing
+  obtains the current ephemeral port and version.
+- The UI never falls back to `srcDoc`, QuickJS, a virtual DOM, or direct file
+  URLs when the server path fails.
 
-## Compatibility and persistence
+## Compatibility and migration
 
-Rendered-preview state remains transient session UI state. It is stored without
-file contents in the existing per-session `sessionStorage` records so a desktop
-page refresh restores the current view. There is no database or cross-session
-preference.
+Remove the QuickJS worker, virtual-DOM renderer, source-navigation normalizer,
+and their dependencies. Existing persisted `markdownPreview` compatibility only
+applies to Markdown. The system ignores persisted HTML in-place preview state.
+The user invokes the Browser-panel action after an upgrade.
 
-Restoration accepts the legacy `markdownPreview` field and normalizes it to the
-new format-neutral field. New records do not dual-write the old name. Mobile
-continues to reset local preview state when the repository-plus-path identity
-changes.
-
-Runtime generations are not persisted. A restored HTML preview starts a fresh
-worker from the restored current buffer; it does not restore script memory,
-timers, event queues, or runtime-owned resource tokens.
+The explicit development-server action remains unchanged. Native HTML preview
+is the zero-configuration static case, while the development-server path
+remains the correct choice for applications with build or backend behavior.
 
 ## Observability
 
-The runtime reports structured local diagnostics for initialization failures,
-unsupported capabilities, budget exhaustion, and worker termination. Logs do
-not include source HTML, script bodies, task identifiers, or credentials.
-Development builds may expose bounded runtime counters and sanitized console
-messages. Production behavior remains fail closed and user-visible through
-localized preview recovery copy.
+Agentctl emits structured lifecycle logs for preview-server start, stop, and
+publish failures. Logs can include the canonical relative path, response status,
+and byte count, but not source content. Existing port-proxy logs and metrics
+continue to cover browser routing.
 
 ## Verification strategy
 
-- Runtime unit tests prove that inline scripts mutate the virtual document,
-  event handlers receive virtual events, and the worker never exposes native
-  browser objects or host imports.
-- Resource-policy tests cover static and dynamically-created `href`, `src`,
-  `srcset`, CSS `url()`, form, meta-refresh, SVG `xlink`, and runtime-owned
-  `blob:` values.
-- Component tests cover runtime lifecycle, data-only snapshot rendering,
-  source restoration, failure recovery, generation disposal, and mobile file
-  identity changes.
-- Desktop Chromium E2E proves an inline script changes visible output and a
-  user event changes virtual state. It also attempts fetch, location changes,
-  dynamic links, meta refresh, form submission, and window opening, and proves
-  that the preview remains visible with no child-frame or external requests.
-- Mobile Chrome E2E proves the same script-capable preview entry point, touch
-  target, source recovery, and document containment.
-- Desktop WebView smoke coverage must repeat the navigation and network denial
-  assertions before release because browser and WebView enforcement differ.
+- Agentctl unit tests cover server start, reuse, and shutdown. They also cover
+  overlays, disk assets, MIME types, no-store headers, path traversal, symlink
+  escape, and missing files.
+- Backend handler and client tests cover session authorization, agentctl
+  readiness, payload bounds, forwarding, errors, and response validation.
+- Frontend API and component tests cover unsaved-buffer publication, Browser
+  panel reuse, versioned URLs, trusted-code copy, errors, retry, source-state
+  preservation, and mobile identity reset.
+- Desktop Chromium E2E proves that an unsaved document runs native JavaScript
+  and loads relative CSS, JavaScript, and images. It also proves use of a native
+  browser API and refresh after a second publish.
+- Mobile Chrome E2E proves the same proxied content, 44-pixel action, full-height
+  containment, `Show code`, and source preservation.
+- Existing development-server and Browser-panel tests guard against regressions
+  in explicit server workflows and generic port-proxy behavior.
 
-## Open design risks
+## Open implementation risks
 
-- The ECMAScript engine and virtual-DOM compatibility surface must be selected
-  and pinned without granting host imports. Engine size and WebView worker
-  support need measurement.
-- The renderer must preserve useful HTML and CSS behavior without using an
-  unsafe HTML sink. Its URL and CSS policy needs adversarial tests.
-- Runtime-owned `blob:` values need explicit byte ownership and cleanup so a
-  source cannot reference an unrelated Kandev blob URL.
-- Execution budgets need values that stop denial-of-service scripts without
-  making ordinary inline interactions unusable.
-- The owner must review the runtime boundary and its browser/WebView evidence
-  before production implementation begins.
+- Every executor lifecycle path must own the agentctl preview server. This
+  ownership prevents ephemeral port leaks after stop or restart.
+- Root-relative and module subresource requests must retain the session proxy
+  capability cookie through redirects and rewritten URLs.
+- Multi-repository tasks must use the same repository identity and path helper
+  as existing workspace-file APIs.
+- Browser-panel URL reuse must not unexpectedly replace an unrelated manual
+  Browser panel. The implementation must follow the current
+  development-server focus/reuse policy and test that behavior.
 
 ## Related decisions
 
 - [ADR-2026-07-24-operator-owned-agent-launcher-settings](../../../decisions/2026-07-24-operator-owned-agent-launcher-settings.md)
-- [ADR-2026-09-05-script-capable-html-preview-isolation](../../../decisions/2026-09-05-script-capable-html-preview-isolation.md)
+- [ADR-2026-09-05-trusted-browser-html-preview](../../../decisions/2026-09-05-trusted-browser-html-preview.md)

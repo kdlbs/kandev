@@ -1,7 +1,7 @@
 ---
 id: "05-script-capable-preview-runtime"
 title: "Build the capability-free preview runtime"
-status: completed
+status: cancelled
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -98,7 +98,8 @@ None. This boundary must exist before UI integration can claim script support.
 - `REQ-UI-NATIVE-HTML-PREVIEW-001.3` through `.6` and `.9`.
 - The runtime boundary, message contract, execution limits, and security
   invariants in the system design.
-- The proposed capability-free preview isolation ADR.
+- The capability-free preview isolation design that this cancelled work order
+  originally implemented.
 
 ## Results
 
