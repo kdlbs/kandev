@@ -27,13 +27,26 @@ type MCPResponse struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
+type backendResponse struct {
+	message   *ws.Message
+	err       error
+	sessionID string
+}
+
+type pendingRequest struct {
+	result    chan backendResponse
+	streamID  string
+	sessionID string
+}
+
 // ChannelBackendClient implements BackendClient using channels.
 // It sends MCP requests through a channel that will be read by the agent stream handler,
 // and receives responses through a callback mechanism.
 type ChannelBackendClient struct {
 	requestCh chan *ws.Message
-	pending   map[string]chan *ws.Message
+	pending   map[string]*pendingRequest
 	pendingMu sync.Mutex
+	sessionID string
 	done      chan struct{}
 	closeOnce sync.Once
 	closeMu   sync.Mutex
@@ -50,8 +63,8 @@ func NewChannelBackendClient(log *logger.Logger) *ChannelBackendClient {
 	}
 	clientLogger = clientLogger.WithFields(zap.String("component", "mcp-backend-client"))
 	return &ChannelBackendClient{
-		requestCh: make(chan *ws.Message, 100),
-		pending:   make(map[string]chan *ws.Message),
+		requestCh: make(chan *ws.Message),
+		pending:   make(map[string]*pendingRequest),
 		done:      make(chan struct{}),
 		logger:    clientLogger,
 	}
@@ -63,22 +76,70 @@ func (c *ChannelBackendClient) GetRequestChannel() <-chan *ws.Message {
 	return c.requestCh
 }
 
+// SetSessionID sets the server-owned session correlation used in bridge logs.
+func (c *ChannelBackendClient) SetSessionID(sessionID string) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	c.sessionID = sessionID
+}
+
 // HandleResponse handles an incoming MCP response from the backend.
 // This should be called by the agent stream handler when it receives a response.
 func (c *ChannelBackendClient) HandleResponse(msg *ws.Message) {
-	c.pendingMu.Lock()
-	ch, ok := c.pending[msg.ID]
-	delete(c.pending, msg.ID)
-	c.pendingMu.Unlock()
-
-	if ok {
-		ch <- msg
+	if c.completeRequest(msg.ID, backendResponse{message: msg}) {
 		return
 	}
 	c.logger.Debug("dropping MCP response with no pending request",
 		zap.String("request_id", msg.ID),
 		zap.String("type", string(msg.Type)),
 		zap.String("action", msg.Action))
+}
+
+// BindRequestToStream records which backend stream delivered a request.
+func (c *ChannelBackendClient) BindRequestToStream(requestID, streamID string) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if pending, ok := c.pending[requestID]; ok {
+		pending.streamID = streamID
+	}
+}
+
+// FailRequest releases one pending request after a transport failure.
+func (c *ChannelBackendClient) FailRequest(requestID string, err error) {
+	c.completeRequest(requestID, backendResponse{err: err})
+}
+
+// FailStreamRequests releases requests delivered by one disconnected stream.
+func (c *ChannelBackendClient) FailStreamRequests(streamID string, err error) {
+	c.pendingMu.Lock()
+	failed := make([]*pendingRequest, 0)
+	for id, pending := range c.pending {
+		if pending.streamID == streamID {
+			delete(c.pending, id)
+			failed = append(failed, pending)
+		}
+	}
+	c.pendingMu.Unlock()
+
+	for _, pending := range failed {
+		pending.result <- backendResponse{err: err, sessionID: pending.sessionID}
+	}
+}
+
+func (c *ChannelBackendClient) completeRequest(requestID string, response backendResponse) bool {
+	c.pendingMu.Lock()
+	pending, ok := c.pending[requestID]
+	if ok {
+		delete(c.pending, requestID)
+	}
+	c.pendingMu.Unlock()
+	if ok {
+		if response.sessionID == "" {
+			response.sessionID = pending.sessionID
+		}
+		pending.result <- response
+	}
+	return ok
 }
 
 // RequestPayload sends a request to the backend and unmarshals the response.
@@ -103,14 +164,16 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	}
 
 	// Create response channel
-	respChan := make(chan *ws.Message, 1)
+	respChan := make(chan backendResponse, 1)
 	c.pendingMu.Lock()
-	c.pending[id] = respChan
+	sessionID := c.sessionID
+	c.pending[id] = &pendingRequest{result: respChan, sessionID: sessionID}
 	c.pendingMu.Unlock()
 
 	c.logger.Debug("sending MCP request through agent stream",
 		zap.String("request_id", id),
 		zap.String("action", action),
+		zap.String("session_id", sessionID),
 		zap.Any("payload", backendPayloadForLog(action, payload)))
 
 	// Ensure cleanup on exit
@@ -130,6 +193,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		c.logger.Debug("MCP request cancelled before send",
 			zap.String("request_id", id),
 			zap.String("action", action),
+			zap.String("session_id", sessionID),
 			zap.Duration("duration", time.Since(start)),
 			zap.Error(ctx.Err()))
 		return ctx.Err()
@@ -137,6 +201,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		c.logger.Warn("timed out sending MCP request to agent stream",
 			zap.String("request_id", id),
 			zap.String("action", action),
+			zap.String("session_id", sessionID),
 			zap.Duration("duration", time.Since(start)))
 		return fmt.Errorf("timeout sending request to agent stream")
 	}
@@ -145,15 +210,17 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 
 	// Wait for response
 	select {
-	case resp, ok := <-respChan:
-		if !ok {
-			// Channel was closed by Reset() - session was cancelled/reset
-			c.logger.Warn("MCP request cancelled by session reset",
+	case response := <-respChan:
+		if response.err != nil {
+			c.logger.Warn("MCP request failed after publication",
 				zap.String("request_id", id),
 				zap.String("action", action),
-				zap.Duration("duration", time.Since(start)))
-			return fmt.Errorf("MCP request cancelled: session reset")
+				zap.String("session_id", response.sessionID),
+				zap.Duration("duration", time.Since(start)),
+				zap.Error(response.err))
+			return response.err
 		}
+		resp := response.message
 		c.logger.Debug("received MCP response from backend",
 			zap.String("request_id", id),
 			zap.String("action", action),
@@ -219,12 +286,18 @@ func backendPayloadForLog(action string, payload interface{}) interface{} {
 // stale requests from a previous session from interfering.
 func (c *ChannelBackendClient) Reset() {
 	c.pendingMu.Lock()
-	defer c.pendingMu.Unlock()
-
-	// Close all pending response channels to unblock waiting goroutines
-	for id, ch := range c.pending {
-		close(ch)
+	pending := make([]*pendingRequest, 0, len(c.pending))
+	for id, request := range c.pending {
 		delete(c.pending, id)
+		pending = append(pending, request)
+	}
+	c.pendingMu.Unlock()
+
+	for _, request := range pending {
+		request.result <- backendResponse{
+			err:       fmt.Errorf("MCP request cancelled: session reset"),
+			sessionID: request.sessionID,
+		}
 	}
 }
 

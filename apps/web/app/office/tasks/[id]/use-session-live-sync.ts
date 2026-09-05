@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useWebSocketClient } from "@/lib/ws/connection";
 import type { ConnectionStatus } from "@/lib/types/connection";
 
 export type SessionLiveSyncParams = {
@@ -23,6 +23,8 @@ export function useSessionLiveSyncSubscriptions({
     [membershipKey],
   );
   const subscriptionsRef = useRef(new Map<string, () => void>());
+  const client = useWebSocketClient();
+  const subscribedClientRef = useRef<typeof client>(null);
 
   useEffect(() => {
     const subscriptions = subscriptionsRef.current;
@@ -30,13 +32,16 @@ export function useSessionLiveSyncSubscriptions({
       for (const unsubscribe of subscriptions.values()) unsubscribe();
       subscriptions.clear();
     };
+    if (subscribedClientRef.current !== client) {
+      clearSubscriptions();
+      subscribedClientRef.current = client;
+    }
 
     if (connectionStatus !== "connected" || !taskId) {
       clearSubscriptions();
       return;
     }
 
-    const client = getWebSocketClient();
     if (!client) {
       clearSubscriptions();
       return;
@@ -52,7 +57,7 @@ export function useSessionLiveSyncSubscriptions({
       if (subscriptions.has(sessionId)) continue;
       subscriptions.set(sessionId, client.subscribeSession(sessionId));
     }
-  }, [connectionStatus, membershipKey, stableSessionIds, taskId]);
+  }, [client, connectionStatus, membershipKey, stableSessionIds, taskId]);
 
   useEffect(
     () => () => {

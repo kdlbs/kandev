@@ -45,6 +45,7 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 			CEOResolver:  svc.engineCEOResolver,
 			Primary:      svc.enginePrimary,
 			TaskSteps:    workflowTargetStepResolver(svc.enginePrimary, svc.engineParticipants),
+			Logger:       svc.logger,
 		}
 		if svc.engineParticipants != nil {
 			r[engine.ActionQueueRunForEachParticipant] = engine.QueueRunForEachParticipantCallback{

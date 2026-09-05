@@ -40,6 +40,7 @@ type ActivePluginPayload struct {
 type RuntimeConfig struct {
 	APIPrefix                         string   `json:"apiPrefix"`
 	WebSocketPath                     string   `json:"webSocketPath"`
+	BootID                            string   `json:"bootId,omitempty"`
 	LSPAutoInstallPreferenceLanguages []string `json:"lspAutoInstallPreferenceLanguages,omitempty"`
 	Debug                             bool     `json:"debug,omitempty"`
 	// NonProduction marks a dev or e2e build. Distinct from Debug (which the SPA

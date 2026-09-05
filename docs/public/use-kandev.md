@@ -74,7 +74,7 @@ The launcher selects the platform runtime, starts the Go backend and agent runti
 
 By default, persistent state is under `~/.kandev`, including the SQLite database, repository materializations, sessions, logs, and backups. `KANDEV_HOME_DIR` relocates that root. `KANDEV_DATABASE_PATH` overrides the database file and moves System snapshots to `backups/` beside that file. Kandev creates its data directory with owner-only permissions and rejects symlinked components in that path, but file permissions do not replace host access controls. Kandev does not move snapshots from another directory automatically.
 
-See the [CLI reference](cli.md) for commands, port and logging flags, data paths, environment variables, and update behavior. Other supported entry points are the [desktop app](desktop-app.md), [service](run-as-a-service.md), and [Docker deployment](docker.md). Read [Security and trust](security.md) before making any installation remotely reachable.
+See the [CLI reference](cli.md) for commands, port and logging flags, data paths, environment variables, and update behavior. Other supported entry points are the [desktop app](desktop-app.md), [service](run-as-a-service.md), and [Docker deployment](docker.md). Follow [Mobile Remote Access](mobile-remote-access.md) for a private phone connection. Read [Security and trust](security.md) before making any installation remotely reachable.
 
 <details>
 <summary>First-run records and onboarding details</summary>
@@ -199,7 +199,7 @@ See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks a
 - Managed GitHub task access (the default) uses task/repository-bound broker leases from the workspace automation connection. GitHub App tokens are minted for the redeemed repository; PAT and named-CLI bearer tokens retain all provider-granted scopes once delivered to the trusted agent subprocess. Personal tokens and the App private key never enter executors. Choose **Inherit executor Git credentials** in the workspace GitHub settings only when task Git and `gh` should use host-visible credentials for Local/Worktree or intentionally configured credentials for remote executors.
 - A profile-supplied `GITHUB_TOKEN` or `GH_TOKEN` is an explicit unmanaged override and bypasses workspace broker selection. Ambient backend tokens and the host-active `gh` account are used only by migration-only **Legacy shared** workspace connections.
 - Repository, executor, and task action scripts are executable configuration. Review them like code.
-- The web app, HTTP API, WebSocket, and external MCP routes currently have no Kandev user-login boundary. Treat anyone who can reach the backend as an operator; keep the whole origin on loopback or a trusted network, or put it behind an authenticated TLS proxy.
+- Authentication is opt-in. When it is disabled, treat anyone who can reach the backend as an operator. Keep the whole origin on loopback or a trusted network, or put it behind an authenticated TLS proxy.
 
 Use the [Security and trust](security.md) guide to choose a local, remote, shared-team, or unattended-automation boundary and to review the deployment checklist.
 

@@ -85,6 +85,16 @@ describe("readBootPayload", () => {
     expect(readBootPayload(win).runtime?.titlePrefix).toBe("TEST");
   });
 
+  it("leaves the title prefix undefined when the runtime block omits it", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { apiPrefix: "/api/v1" } },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.titlePrefix).toBeUndefined();
+  });
+});
+
+describe("readBootPayload runtime metadata", () => {
   it("reads the native folder picker capability from the runtime block", () => {
     const win = {
       __KANDEV_BOOT_PAYLOAD__: {
@@ -96,12 +106,24 @@ describe("readBootPayload", () => {
     expect(readBootPayload(win).runtime?.desktopRuntime).toBe(true);
   });
 
-  it("leaves the title prefix undefined when the runtime block omits it", () => {
+  it("keeps the backend boot identity from the runtime block", () => {
     const win = {
-      __KANDEV_BOOT_PAYLOAD__: { runtime: { apiPrefix: "/api/v1" } },
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { bootId: "boot-123" } },
     } as unknown as Window;
 
-    expect(readBootPayload(win).runtime?.titlePrefix).toBeUndefined();
+    expect(readBootPayload(win)).toMatchObject({ runtime: { bootId: "boot-123" } });
+  });
+
+  it("ignores missing or malformed backend boot identities", () => {
+    const missing = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: {} },
+    } as unknown as Window;
+    const malformed = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { bootId: 123 } },
+    } as unknown as Window;
+
+    expect(readBootPayload(missing).runtime?.bootId).toBeUndefined();
+    expect(readBootPayload(malformed).runtime?.bootId).toBeUndefined();
   });
 });
 

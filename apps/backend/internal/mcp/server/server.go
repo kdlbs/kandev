@@ -37,6 +37,10 @@ type BackendClient interface {
 	RequestPayload(ctx context.Context, action string, payload, result interface{}) error
 }
 
+type backendSessionSetter interface {
+	SetSessionID(sessionID string)
+}
+
 // MCP mode constants control which tools are registered.
 const (
 	// ModeTask registers kanban, plan, and interaction tools (default for task-solving agents).
@@ -222,6 +226,9 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 
 func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context, options ...ServerOption) *Server {
 	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
+	if setter, ok := backend.(backendSessionSetter); ok {
+		setter.SetSessionID(sessionID)
+	}
 	s := &Server{
 		backend:                backend,
 		sessionID:              sessionID,
@@ -1822,7 +1829,7 @@ func (s *Server) registerPlanTools() {
 		mcp.NewTool("create_task_plan_kandev",
 			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). If a plan already exists for this task, this REPLACES ITS ENTIRE CONTENT — same as update_task_plan_kandev through a different door. Read it first with get_task_plan_kandev if you need to preserve any of it."),
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole — there is no partial update or append mode. To preserve prior content, call get_task_plan_kandev first and include its content plus your additions in this call.")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This REPLACES any existing plan whole — there is no partial update or append mode. To preserve prior content, call get_task_plan_kandev first and include its content plus your additions in this call. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
 		s.wrapHandler("create_task_plan_kandev", s.createTaskPlanHandler()),
@@ -1838,7 +1845,7 @@ func (s *Server) registerPlanTools() {
 		mcp.NewTool("update_task_plan_kandev",
 			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). This REPLACES THE ENTIRE PLAN — there is no partial update, append, or section-patch mode. The correct sequence is: call get_task_plan_kandev, then send this call with the full document (prior content plus your changes), never just the new section."),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
-			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions.")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
 		s.wrapHandler("update_task_plan_kandev", s.updateTaskPlanHandler()),

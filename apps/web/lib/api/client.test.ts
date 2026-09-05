@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, fetchBlob, fetchJson, setOnUnauthorized } from "./client";
 
+const reloadMocks = vi.hoisted(() => ({
+  signalBackendReloadRequired: vi.fn(),
+}));
+
+vi.mock("@/lib/platform/backend-reload-coordinator", () => ({
+  signalBackendReloadRequired: (...args: unknown[]) =>
+    reloadMocks.signalBackendReloadRequired(...args),
+}));
+
 const interlockToken = "replayable-per-boot-value";
 const BACKEND_URL = "http://backend.test";
 
@@ -113,6 +122,7 @@ describe("fetchJson", () => {
 describe("ApiError response classification", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    reloadMocks.signalBackendReloadRequired.mockReset();
   });
 
   it("preserves machine-readable error codes from the backend", async () => {
@@ -132,6 +142,54 @@ describe("ApiError response classification", () => {
       name: "ApiError",
       errorCode: "branch_policy_stale",
     });
+  });
+
+  it("handles only the stale settings interlock response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "interim settings interlock required",
+            error_code: "interim_settings_interlock_required",
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(
+      fetchJson("/api/v1/agent-profiles/p1", { baseUrl: BACKEND_URL }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      errorCode: "interim_settings_interlock_required",
+      handled: true,
+    });
+    expect(reloadMocks.signalBackendReloadRequired).toHaveBeenCalledWith(
+      "settings_interlock_rejected",
+    );
+  });
+
+  it("leaves other forbidden responses unhandled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "forbidden" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      fetchJson("/api/v1/agent-profiles/p1", { baseUrl: BACKEND_URL }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      handled: false,
+    });
+    expect(reloadMocks.signalBackendReloadRequired).not.toHaveBeenCalled();
   });
 });
 

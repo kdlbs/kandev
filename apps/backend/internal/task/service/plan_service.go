@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -105,6 +106,29 @@ func (s *PlanService) authorize(ctx context.Context, taskID string) error {
 		return nil
 	}
 	return s.authorizeTask(ctx, taskID)
+}
+
+// validatePlanWrite applies the shared admission checks for a plan write.
+// Authorization runs first so a caller cannot learn the size constraint for a
+// task it cannot access. For an oversized write, the task lookup preserves the
+// existing not_found contract before the size error is returned. The plan
+// storage read and per-task write lock remain after this admission step.
+func (s *PlanService) validatePlanWrite(ctx context.Context, taskID, content string) error {
+	if err := s.authorize(ctx, taskID); err != nil {
+		return err
+	}
+	if len(content) <= MaxPlanContentBytes {
+		return nil
+	}
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	return checkPlanContentSize(content)
 }
 
 // resolveCoalesceWindow returns an explicitly configured window unchanged,
@@ -209,7 +233,7 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (Pl
 	if req.TaskID == "" {
 		return PlanWriteResult{}, ErrTaskIDRequired
 	}
-	if err := s.authorize(ctx, req.TaskID); err != nil {
+	if err := s.validatePlanWrite(ctx, req.TaskID, req.Content); err != nil {
 		return PlanWriteResult{}, err
 	}
 	release := s.locks.acquire(req.TaskID)
@@ -241,7 +265,7 @@ func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (Pl
 	if req.TaskID == "" {
 		return PlanWriteResult{}, ErrTaskIDRequired
 	}
-	if err := s.authorize(ctx, req.TaskID); err != nil {
+	if err := s.validatePlanWrite(ctx, req.TaskID, req.Content); err != nil {
 		return PlanWriteResult{}, err
 	}
 	release := s.locks.acquire(req.TaskID)

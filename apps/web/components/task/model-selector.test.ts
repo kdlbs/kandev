@@ -435,15 +435,58 @@ describe("cross-agent persisted config reconciliation", () => {
     expect(hasCompleteDynamicConfig(session, catalogEntry(advertised, true), noAgents)).toBe(true);
   });
 
-  it("keeps a profile-snapshot key required even when the agent has not advertised it", () => {
+  it("keeps an unadvertised profile-snapshot key required while the catalog is unsettled", () => {
     const session = makeSession({
       metadata: { runtime_config: { config_options: { model: providerModelId } } },
       agent_profile_snapshot: { config_options: { verbosity: "terse" } },
     });
 
     expect(
-      hasCompleteDynamicConfig(session, catalogEntry([modelConfigOption], true), noAgents),
+      hasCompleteDynamicConfig(session, catalogEntry([modelConfigOption], false), noAgents),
     ).toBe(false);
+  });
+
+  it("hydrates when a settled model catalog omits profile options from a prior model", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: {
+          config_options: {
+            effort: "high",
+            fast: "false",
+            mode: "agent",
+            model: providerModelId,
+            optimize_for: "balanced",
+          },
+        },
+        runtime_config_overrides: {
+          model: providerModelId,
+          config_options: { model: providerModelId },
+        },
+      },
+      agent_profile_snapshot: { config_options: { fast: "false" } },
+    });
+    const advertised = [
+      selectOption("mode", "agent"),
+      modelConfigOption,
+      selectOption("optimize_for", "balanced"),
+    ];
+
+    expect(hasCompleteDynamicConfig(session, catalogEntry(advertised, true), noAgents)).toBe(true);
+  });
+
+  it("hydrates when a settled model catalog omits a profile-only option", () => {
+    const session = makeSession({
+      metadata: { runtime_config: { config_options: { model: providerModelId } } },
+      agent_profile_snapshot: { config_options: { fast: "false" } },
+    });
+
+    expect(
+      hasCompleteDynamicConfig(
+        session,
+        catalogEntry([modelConfigOption, selectOption("mode", "agent")], true),
+        noAgents,
+      ),
+    ).toBe(true);
   });
 
   it("still requires persisted-only unadvertised keys while the catalog is unsettled", () => {

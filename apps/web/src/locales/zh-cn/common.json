@@ -77,6 +77,8 @@
   "commandGoToSettingsKeywords": "设置, 偏好, 配置, 通用设置",
   "commandGoToStats": "前往统计",
   "commandGoToStatsKeywords": "统计, 数据分析, 分析, 指标",
+  "commandGoToThreads": "前往对话流",
+  "commandGoToThreadsKeywords": "对话流, 智能体, 实时, 列",
   "commandGroupActions": "操作",
   "commandGroupAgent": "智能体",
   "commandGroupCommands": "命令",

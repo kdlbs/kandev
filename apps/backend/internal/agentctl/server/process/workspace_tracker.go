@@ -151,6 +151,10 @@ type WorkspaceTracker struct {
 	// updateMu prevents concurrent updateGitStatus calls from the two polling loops.
 	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
 	updateMu sync.Mutex
+	// mutationMu serializes final upload target selection and placement. Upload
+	// bytes are staged before this lock, so slow readers do not block other
+	// workspace mutations while the target invariant remains atomic.
+	mutationMu sync.Mutex
 
 	// diagnostic identity is populated by the process manager once the tracker
 	// is attached to an agentctl instance. A tracker can be created before the

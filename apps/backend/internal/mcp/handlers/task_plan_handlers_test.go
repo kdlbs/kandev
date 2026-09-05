@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -217,6 +218,79 @@ func TestMCPPlanCreateReportsMissingTask(t *testing.T) {
 	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
 		t.Fatalf("error payload leaks storage details: %s", out.Payload)
 	}
+}
+
+// TestMCPPlanActionsRejectOversizedContent pins REQ-TASKS-PLAN-CONTENT-SIZE-LIMIT-002:
+// a write over the byte ceiling returns a validation error response, not a
+// success payload with a truncation warning, and the message states the
+// ceiling and the submitted size without instructing a retry.
+func TestMCPPlanActionsRejectOversizedContent(t *testing.T) {
+	h := newMCPPlanTestHandlers(t)
+	ctx := context.Background()
+	oversized := strings.Repeat("a", service.MaxPlanContentBytes+1)
+	payload, err := json.Marshal(map[string]string{
+		"task_id": mcpPlanTaskID,
+		"content": oversized,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	t.Run("create", func(t *testing.T) {
+		out, handleErr := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan, string(payload)))
+		if handleErr != nil {
+			t.Fatalf("handler returned error: %v", handleErr)
+		}
+		if out.Type != ws.MessageTypeError {
+			t.Fatalf("message type = %q, want %q (payload %s)", out.Type, ws.MessageTypeError, out.Payload)
+		}
+		var errPayload ws.ErrorPayload
+		if jsonErr := json.Unmarshal(out.Payload, &errPayload); jsonErr != nil {
+			t.Fatalf("unmarshal error payload: %v", jsonErr)
+		}
+		if errPayload.Code != ws.ErrorCodeValidation {
+			t.Errorf("code = %q, want %q", errPayload.Code, ws.ErrorCodeValidation)
+		}
+		if !strings.Contains(errPayload.Message, "262144") {
+			t.Errorf("message %q does not state the byte ceiling", errPayload.Message)
+		}
+		if !strings.Contains(errPayload.Message, fmt.Sprintf("%d", service.MaxPlanContentBytes+1)) {
+			t.Errorf("message %q does not state the submitted size", errPayload.Message)
+		}
+		if strings.Contains(strings.ToLower(errPayload.Message), "retry") {
+			t.Errorf("message %q must not instruct a retry", errPayload.Message)
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		if _, seedErr := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+			TaskID: mcpPlanTaskID, Content: "small", CreatedBy: "agent",
+		}); seedErr != nil {
+			t.Fatalf("seed CreatePlan: %v", seedErr)
+		}
+		out, handleErr := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan, string(payload)))
+		if handleErr != nil {
+			t.Fatalf("handler returned error: %v", handleErr)
+		}
+		if out.Type != ws.MessageTypeError {
+			t.Fatalf("message type = %q, want %q (payload %s)", out.Type, ws.MessageTypeError, out.Payload)
+		}
+		var errPayload ws.ErrorPayload
+		if jsonErr := json.Unmarshal(out.Payload, &errPayload); jsonErr != nil {
+			t.Fatalf("unmarshal error payload: %v", jsonErr)
+		}
+		if errPayload.Code != ws.ErrorCodeValidation {
+			t.Errorf("code = %q, want %q", errPayload.Code, ws.ErrorCodeValidation)
+		}
+
+		plan, getErr := h.planService.GetPlan(ctx, mcpPlanTaskID)
+		if getErr != nil {
+			t.Fatalf("GetPlan: %v", getErr)
+		}
+		if plan.Content != "small" {
+			t.Fatalf("plan content changed after a rejected write: %q", plan.Content)
+		}
+	})
 }
 
 func TestMCPPlanUpdateReportsMissingTask(t *testing.T) {

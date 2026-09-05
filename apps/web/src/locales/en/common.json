@@ -77,6 +77,8 @@
   "commandGoToSettingsKeywords": "settings, preferences, config, general settings",
   "commandGoToStats": "Go to Stats",
   "commandGoToStatsKeywords": "stats, statistics, analytics, metrics",
+  "commandGoToThreads": "Go to Threads",
+  "commandGoToThreadsKeywords": "threads, agents, live, columns",
   "commandGroupActions": "Actions",
   "commandGroupAgent": "Agent",
   "commandGroupCommands": "Commands",

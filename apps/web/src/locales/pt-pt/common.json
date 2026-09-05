@@ -76,6 +76,8 @@
   "commandGoToSettingsKeywords": "definições, preferências, configuração, definições gerais",
   "commandGoToStats": "Ir para as Estatísticas",
   "commandGoToStatsKeywords": "estatísticas, análises, métricas",
+  "commandGoToThreads": "Ir para Tópicos",
+  "commandGoToThreadsKeywords": "tópicos, agentes, ao vivo, colunas",
   "commandGroupActions": "Ações",
   "commandGroupAgent": "Agente",
   "commandGroupCommands": "Comandos",
