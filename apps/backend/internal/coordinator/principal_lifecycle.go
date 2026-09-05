@@ -24,6 +24,7 @@ func TaskPrincipalLogicalKey(taskID string) string {
 // session is admitted and when an operator grants a normal task authority.
 type PrincipalLifecycleStore interface {
 	GetWorkspaceAgentPrincipalByContext(ctx context.Context, workspaceID, pluginInstallationID, logicalKey string) (*models.WorkspaceAgentPrincipal, error)
+	GetActiveWorkspaceAgentPrincipalForTask(ctx context.Context, workspaceID, taskID string) (*models.WorkspaceAgentPrincipal, error)
 	CreateWorkspaceAgentPrincipal(ctx context.Context, principal *models.WorkspaceAgentPrincipal) error
 	RebindWorkspaceAgentPrincipal(ctx context.Context, id, taskID, sessionID string, updatedAt time.Time) error
 }
@@ -35,6 +36,14 @@ type PrincipalLifecycleStore interface {
 func EnsureTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, workspaceID, taskID, sessionID string) (*models.WorkspaceAgentPrincipal, error) {
 	if store == nil || workspaceID == "" || taskID == "" {
 		return nil, fmt.Errorf("ensure task principal: workspace and task are required")
+	}
+	if active, err := store.GetActiveWorkspaceAgentPrincipalForTask(ctx, workspaceID, taskID); err != nil {
+		return nil, err
+	} else if active != nil {
+		if active.BackingSessionID != sessionID {
+			return nil, fmt.Errorf("ensure task principal: task is bound to another session")
+		}
+		return active, nil
 	}
 	logicalKey := TaskPrincipalLogicalKey(taskID)
 	principal, err := lookupOrCreateTaskPrincipal(ctx, store, workspaceID, taskID, logicalKey, sessionID)

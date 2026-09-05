@@ -23,6 +23,13 @@ type lifecyclePrincipalLookup struct {
 	principal *models.WorkspaceAgentPrincipal
 }
 
+func (l *lifecyclePrincipalLookup) GetActiveWorkspaceAgentPrincipalForTask(context.Context, string, string) (*models.WorkspaceAgentPrincipal, error) {
+	if l.principal == nil || l.principal.RevokedAt != nil {
+		return nil, nil
+	}
+	return l.principal, nil
+}
+
 func (l *lifecyclePrincipalLookup) GetWorkspaceAgentPrincipalByContext(context.Context, string, string, string) (*models.WorkspaceAgentPrincipal, error) {
 	if l.principal == nil {
 		return nil, repoerrors.ErrWorkspaceAgentPrincipalNotFound
@@ -132,4 +139,50 @@ func TestScopePrincipalDoesNotResurrectRevokedTaskPrincipal(t *testing.T) {
 	_, err := resolver.ScopePrincipal(context.Background(), "task-1", "session-1")
 	require.Error(t, err)
 	require.True(t, lookup.principal.RevokedAt.Equal(revokedAt))
+}
+
+func TestScopePrincipalUsesExistingCustomTaskPrincipal(t *testing.T) {
+	lookup := &lifecyclePrincipalLookup{
+		principalLookup: principalLookup{
+			task:      &models.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+			workspace: &models.Workspace{ID: "workspace-1"},
+			session:   &models.TaskSession{ID: "session-1", TaskID: "task-1"},
+		},
+		principal: &models.WorkspaceAgentPrincipal{
+			ID:                   "custom-principal",
+			WorkspaceID:          "workspace-1",
+			PluginInstallationID: "plugin-1",
+			LogicalKey:           "custom-key",
+			BackingTaskID:        "task-1",
+			BackingSessionID:     "session-1",
+		},
+	}
+	resolver := &Resolver{tasks: lookup}
+
+	_, err := resolver.ScopePrincipal(context.Background(), "task-1", "session-1")
+	require.NoError(t, err)
+	require.Equal(t, "custom-principal", lookup.principal.ID)
+}
+
+func TestScopePrincipalRejectsExistingCustomTaskPrincipalOnAnotherSession(t *testing.T) {
+	lookup := &lifecyclePrincipalLookup{
+		principalLookup: principalLookup{
+			task:      &models.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+			workspace: &models.Workspace{ID: "workspace-1"},
+			session:   &models.TaskSession{ID: "session-2", TaskID: "task-1"},
+		},
+		principal: &models.WorkspaceAgentPrincipal{
+			ID:                   "custom-principal",
+			WorkspaceID:          "workspace-1",
+			PluginInstallationID: "plugin-1",
+			LogicalKey:           "custom-key",
+			BackingTaskID:        "task-1",
+			BackingSessionID:     "session-1",
+		},
+	}
+	resolver := &Resolver{tasks: lookup}
+
+	_, err := resolver.ScopePrincipal(context.Background(), "task-1", "session-2")
+	require.Error(t, err)
+	require.Equal(t, "session-1", lookup.principal.BackingSessionID)
 }
