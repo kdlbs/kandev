@@ -76,6 +76,7 @@ signals, and task-scoped scheduling contracts.
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Queued run scheduling](requirements/run-scheduling.md)
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
+- [Task Terminal Persistence](requirements/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
 - [Sidebar Task Editing](requirements/sidebar-task-edit.md)
@@ -142,6 +143,7 @@ signals, and task-scoped scheduling contracts.
 - [Task plan write consistency](system-design/plan-write-consistency.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
+- [Task Terminal Persistence](system-design/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
@@ -158,7 +160,7 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. The six requirements above now have
+Migration remains in progress. The seven requirements above now have
 authoritative, wrapper-free requirement/design pairs. Other migrated files still
 need the same extraction before this system can return to a complete migration
 state.
