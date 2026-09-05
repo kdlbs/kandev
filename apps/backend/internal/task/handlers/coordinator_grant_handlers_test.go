@@ -69,6 +69,44 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 	}
 }
 
+func TestCreateCoordinatorGrantRegistersNormalTaskPrincipal(t *testing.T) {
+	_, repo, svc := newRepositoryHTTPTestRouterWithService(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "normal-task", WorkspaceID: "ws-1", Title: "Normal task"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "admin", Role: authn.RoleAdmin})
+		c.Next()
+	})
+	RegisterCoordinatorGrantRoutes(router, repo, svc, log)
+	body, err := json.Marshal(createGrantRequest{CoordinatorTaskID: "normal-task", ScopeKind: "workspace", Capabilities: "inspect"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/coordinator-grants", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	principal, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "normal-task")
+	if err != nil {
+		t.Fatalf("GetActiveWorkspaceAgentPrincipalForTask: %v", err)
+	}
+	if principal == nil || principal.BackingTaskID != "normal-task" {
+		t.Fatalf("principal = %#v, want a principal bound to normal-task", principal)
+	}
+}
+
 // Reviewer-requested contract coverage: grant and audit routes must never be
 // reachable by an anonymous or non-admin caller.
 func TestCoordinatorGrantRoutesRequireAdmin(t *testing.T) {

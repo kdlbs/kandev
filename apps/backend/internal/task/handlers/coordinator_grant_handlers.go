@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
@@ -314,8 +315,20 @@ func (h *CoordinatorGrantHandlers) httpCreateWorkspaceCoordinatorGrant(c *gin.Co
 		return
 	}
 	if principal == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "coordinator task has no active principal"})
-		return
+		lifecycle, ok := h.repo.(coordinator.PrincipalLifecycleStore)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "coordinator task has no active principal"})
+			return
+		}
+		principal, err = coordinator.EnsureTaskPrincipal(c.Request.Context(), lifecycle, workspaceID, req.CoordinatorTaskID, "")
+		if err != nil {
+			h.abortWithGrantError(c, "register coordinator principal", err)
+			return
+		}
+		if principal == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "coordinator task principal is revoked"})
+			return
+		}
 	}
 
 	now := time.Now()
