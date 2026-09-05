@@ -12,6 +12,7 @@ import {
   setActiveTabForSession,
 } from "@/lib/local-storage";
 import { calculateHash } from "@/lib/utils/file-diff";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSaveDeleteActions } from "./use-file-save-delete";
@@ -26,6 +27,7 @@ import {
   type FileEditorRequestToken,
 } from "./file-editor-state";
 import { scrollEditorIfMounted, setPendingCursorPosition } from "./file-editor-cursor";
+import { useFileHtmlPreview } from "./use-file-html-preview";
 export {
   consumePendingCursorPosition,
   scrollEditorIfMounted,
@@ -108,7 +110,7 @@ function buildPersistedTabs(
         path,
         name,
         ...(repo ? { repo } : {}),
-        ...(renderedPreview ? { renderedPreview } : {}),
+        ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
         pinned: persistAsPinned,
       },
     ];
@@ -183,7 +185,8 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       originalContent: "",
       originalHash: "",
       isDirty: false,
-      renderedPreview: savedTab.renderedPreview,
+      renderedPreview:
+        getFilePreviewKind(savedTab.path) === "markdown" ? savedTab.renderedPreview : undefined,
     });
   }
   for (const savedTab of savedTabs) {
@@ -209,7 +212,10 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         originalHash: hash,
         isDirty: false,
         isBinary: response.is_binary,
-        renderedPreview: savedTab.renderedPreview,
+        renderedPreview:
+          getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
+            ? savedTab.renderedPreview
+            : undefined,
       });
     } catch {
       /* useFileLoader will retry when executor is ready */
@@ -321,6 +327,8 @@ type FileEditorActionsParams = {
   ) => void;
   promotePreviewToPinned: (type: "file-editor") => void;
   setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setPublishingHtmlPreview: React.Dispatch<React.SetStateAction<boolean>>;
+  openBrowserPanel: (url: string) => void;
   toast: ReturnType<typeof useToast>["toast"];
 };
 
@@ -508,6 +516,8 @@ function useFileEditorActions({
   addFileEditorPanel,
   promotePreviewToPinned,
   setSavingFiles,
+  setPublishingHtmlPreview,
+  openBrowserPanel,
   toast,
 }: FileEditorActionsParams) {
   const activeFileRequestRef = useRef<FileEditorRequestToken | null>(null);
@@ -529,6 +539,13 @@ function useFileEditorActions({
     toast,
   });
 
+  const openFileInHtmlPreview = useFileHtmlPreview({
+    activeSessionIdRef,
+    setPublishingHtmlPreview,
+    openBrowserPanel,
+    toast,
+  });
+
   const handleFileChange = useCallback(
     (path: string, newContent: string, repo?: string) =>
       applyFileChange(path, repo, newContent, updateFileState, promotePreviewToPinned),
@@ -545,6 +562,7 @@ function useFileEditorActions({
   return {
     openFile,
     openFileInMarkdownPreview,
+    openFileInHtmlPreview,
     handleFileChange,
     saveFile,
     deleteFileAction,
@@ -557,6 +575,7 @@ export function useFileEditors() {
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { toast } = useToast();
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
+  const [isPublishingHtmlPreview, setIsPublishingHtmlPreview] = useState(false);
 
   const setFileState = useDockviewStore((s) => s.setFileState);
   const updateFileState = useDockviewStore((s) => s.updateFileState);
@@ -564,6 +583,7 @@ export function useFileEditors() {
   const clearFileStates = useDockviewStore((s) => s.clearFileStates);
   const addFileEditorPanel = useDockviewStore((s) => s.addFileEditorPanel);
   const promotePreviewToPinned = useDockviewStore((s) => s.promotePreviewToPinned);
+  const openBrowserPanel = useDockviewStore((s) => s.openBrowserPanel);
   const openFiles = useDockviewStore((s) => s.openFiles);
   const api = useDockviewStore((s) => s.api);
   const gitFileSignaturesRef = useRef<Map<string, string>>(new Map());
@@ -592,6 +612,7 @@ export function useFileEditors() {
   const {
     openFile,
     openFileInMarkdownPreview,
+    openFileInHtmlPreview,
     handleFileChange,
     saveFile,
     deleteFileAction,
@@ -604,6 +625,8 @@ export function useFileEditors() {
     addFileEditorPanel,
     promotePreviewToPinned,
     setSavingFiles,
+    setPublishingHtmlPreview: setIsPublishingHtmlPreview,
+    openBrowserPanel,
     toast,
   });
 
@@ -611,6 +634,8 @@ export function useFileEditors() {
     savingFiles,
     openFile,
     openFileInMarkdownPreview,
+    openFileInHtmlPreview,
+    isPublishingHtmlPreview,
     saveFile,
     deleteFile: deleteFileAction,
     handleFileChange,

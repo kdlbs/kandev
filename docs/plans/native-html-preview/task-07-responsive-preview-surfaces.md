@@ -1,7 +1,7 @@
 ---
 id: "07-responsive-preview-surfaces"
 title: "Wire responsive preview surfaces"
-status: completed
+status: cancelled
 wave: 3
 depends_on:
   - "06-preview-state-and-renderer"

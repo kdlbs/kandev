@@ -126,15 +126,15 @@ describe("MonacoEditorToolbar preview action", () => {
   };
 
   it("labels and invokes HTML preview", () => {
-    const onTogglePreview = vi.fn();
+    const onPreviewHtml = vi.fn();
     render(
       <TooltipProvider>
-        <MonacoEditorToolbar {...baseProps} previewKind="html" onTogglePreview={onTogglePreview} />
+        <MonacoEditorToolbar {...baseProps} previewKind="html" onPreviewHtml={onPreviewHtml} />
       </TooltipProvider>,
     );
 
     screen.getByRole("button", { name: "Preview HTML" }).click();
-    expect(onTogglePreview).toHaveBeenCalledOnce();
+    expect(onPreviewHtml).toHaveBeenCalledOnce();
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo } from "react";
 import { IconCode } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -10,23 +10,18 @@ import {
   ExternalVcsFileLink,
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
+import {
+  getHtmlPreviewPublishErrorKey,
+  type HtmlPreviewPublishErrorCode,
+} from "@/hooks/use-html-preview-publisher";
 import { toRelativePath } from "@/lib/utils";
-import {
-  createPreviewRuntime,
-  type PreviewRuntimeClient,
-} from "@/lib/html-preview/preview-runtime";
-import { PreviewSurface } from "@/lib/html-preview/preview-surface";
-import {
-  PreviewRuntimeError,
-  type PreviewEvent,
-  type PreviewRuntimeFailureCode,
-  type PreviewSnapshot,
-} from "@/lib/html-preview/preview-runtime-types";
 import { useTranslation } from "react-i18next";
 
 type HtmlPreviewContentProps = {
   path: string;
-  content: string;
+  previewUrl?: string | null;
+  isLoading?: boolean;
+  error?: HtmlPreviewPublishErrorCode | null;
   worktreePath?: string;
   sessionId?: string;
   taskId?: string | null;
@@ -34,6 +29,7 @@ type HtmlPreviewContentProps = {
   repositoryName?: string;
   showExternalVcsLink?: boolean;
   onDownload?: () => void;
+  onRetry?: () => void;
   onTogglePreview: () => void;
 };
 
@@ -47,9 +43,10 @@ function HtmlPreviewContentToolbar({
   showExternalVcsLink,
   onDownload,
   onTogglePreview,
-}: Omit<HtmlPreviewContentProps, "content">) {
+}: Omit<HtmlPreviewContentProps, "previewUrl" | "isLoading" | "error" | "onRetry">) {
   const { t } = useTranslation();
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
+  const trustWarning = t("task:htmlPreviewTrustedCode");
 
   return (
     <PanelHeaderBarSplit
@@ -81,13 +78,17 @@ function HtmlPreviewContentToolbar({
                 variant="ghost"
                 onClick={onTogglePreview}
                 aria-label={t("task:showCode")}
+                title={trustWarning}
                 className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
                 data-testid="html-preview-code-toggle"
               >
                 <IconCode className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t("task:showCode")}</TooltipContent>
+            <TooltipContent>
+              <p>{t("task:showCode")}</p>
+              <p className="mt-1 max-w-xs text-muted-foreground">{trustWarning}</p>
+            </TooltipContent>
           </Tooltip>
         </div>
       }
@@ -97,7 +98,9 @@ function HtmlPreviewContentToolbar({
 
 export const HtmlPreviewContent = memo(function HtmlPreviewContent({
   path,
-  content,
+  previewUrl,
+  isLoading = false,
+  error = null,
   worktreePath,
   sessionId,
   taskId,
@@ -105,61 +108,11 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
   repositoryName,
   showExternalVcsLink = true,
   onDownload,
+  onRetry,
   onTogglePreview,
 }: HtmlPreviewContentProps) {
   const { t } = useTranslation();
-  const runtimeRef = useRef<PreviewRuntimeClient | null>(null);
-  const generationRef = useRef(0);
-  const [state, setState] = useState<
-    | { status: "loading" }
-    | { status: "ready"; snapshot: PreviewSnapshot }
-    | { status: "failed"; code: PreviewRuntimeFailureCode }
-  >({ status: "loading" });
-
-  useEffect(() => {
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    const runtime = createPreviewRuntime();
-    runtimeRef.current = runtime;
-    setState({ status: "loading" });
-
-    void runtime.load(content).then(
-      (snapshot) => {
-        if (generationRef.current === generation) setState({ status: "ready", snapshot });
-      },
-      (error: unknown) => {
-        if (generationRef.current !== generation || isSupersededPreviewError(error)) return;
-        const code = error instanceof PreviewRuntimeError ? error.code : "runtime-error";
-        setState({ status: "failed", code });
-      },
-    );
-
-    return () => {
-      if (runtimeRef.current === runtime) runtimeRef.current = null;
-      runtime.dispose();
-    };
-  }, [content]);
-
-  const handleEvent = useCallback((event: PreviewEvent) => {
-    const runtime = runtimeRef.current;
-    const generation = generationRef.current;
-    if (!runtime) return;
-    void runtime.dispatch(event).then(
-      (snapshot) => {
-        if (generationRef.current === generation) setState({ status: "ready", snapshot });
-      },
-      (error: unknown) => {
-        if (generationRef.current !== generation || isSupersededPreviewError(error)) return;
-        const code = error instanceof PreviewRuntimeError ? error.code : "runtime-error";
-        setState({ status: "failed", code });
-      },
-    );
-  }, []);
-
-  const failureMessage = getPreviewFailureMessage(
-    state.status === "failed" ? state.code : "runtime-error",
-    t,
-  );
+  const errorKey = error ? getHtmlPreviewPublishErrorKey(error) : null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" data-testid="html-preview">
@@ -174,11 +127,14 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         onDownload={onDownload}
         onTogglePreview={onTogglePreview}
       />
+      <p
+        data-testid="html-preview-trust-warning"
+        className="shrink-0 border-b border-border/70 bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground"
+      >
+        {t("task:htmlPreviewTrustedCode")}
+      </p>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {state.status === "ready" && (
-          <PreviewSurface snapshot={state.snapshot} onEvent={handleEvent} />
-        )}
-        {state.status === "loading" && (
+        {isLoading && (
           <div
             data-testid="html-preview-loading"
             className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
@@ -186,28 +142,31 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
             {t("task:htmlPreviewLoading")}
           </div>
         )}
-        {state.status === "failed" && (
+        {!isLoading && errorKey && (
           <div
             data-testid="html-preview-error"
-            className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
+            role="alert"
+            className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground"
           >
-            {failureMessage}
+            <p>{t(errorKey)}</p>
+            {onRetry && (
+              <Button type="button" variant="outline" onClick={onRetry}>
+                {t("task:retryHtmlPreview")}
+              </Button>
+            )}
           </div>
+        )}
+        {!isLoading && !errorKey && previewUrl && (
+          <iframe
+            data-testid="html-preview-frame"
+            src={previewUrl}
+            title={t("task:browserPreview")}
+            className="h-full w-full border-0"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            referrerPolicy="no-referrer"
+          />
         )}
       </div>
     </div>
   );
 });
-
-function getPreviewFailureMessage(
-  code: PreviewRuntimeFailureCode,
-  translate: (key: string) => string,
-): string {
-  if (code === "unsupported-capability") return translate("task:htmlPreviewUnsupportedCapability");
-  if (code === "budget-exceeded") return translate("task:htmlPreviewBudgetExceeded");
-  return translate("task:htmlPreviewRuntimeError");
-}
-
-function isSupersededPreviewError(error: unknown): boolean {
-  return error instanceof PreviewRuntimeError && error.code === "superseded";
-}

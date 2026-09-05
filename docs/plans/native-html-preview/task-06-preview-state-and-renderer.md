@@ -1,7 +1,7 @@
 ---
 id: "06-preview-state-and-renderer"
 title: "Integrate the runtime with preview state and renderer"
-status: completed
+status: cancelled
 wave: 2
 depends_on:
   - "05-script-capable-preview-runtime"

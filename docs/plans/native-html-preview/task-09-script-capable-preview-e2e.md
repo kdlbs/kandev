@@ -1,7 +1,7 @@
 ---
 id: "09-script-capable-preview-e2e"
 title: "Prove script execution and isolation in browsers"
-status: completed
+status: cancelled
 wave: 4
 depends_on:
   - "07-responsive-preview-surfaces"

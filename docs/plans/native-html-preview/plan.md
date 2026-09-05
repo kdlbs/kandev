@@ -1,170 +1,173 @@
 ---
 created: 2026-09-05
-status: completed
+status: done
 requirements:
   - REQ-UI-NATIVE-HTML-PREVIEW-001
 system_design:
   - ../../specs/ui/system-design/native-html-preview.md
 legacy_specs: []
 ---
-# Implementation Plan: Script-Capable Native HTML File Preview
+# Implementation Plan: Trusted Browser HTML File Preview
 
 ## Overview
 
-Rework the HTML preview prototype around a capability-free script runtime
-before treating the feature as ready. Inline JavaScript will run in a dedicated
-Web Worker ECMAScript VM with a virtual DOM and bounded host API. A scriptless
-controlled renderer will display data-only snapshots and enforce the same
-resource and navigation policy for static and dynamically-created content.
+Replace the QuickJS and virtual-DOM implementation with a one-click static
+preview server in agentctl. Publish the current editor buffer as an in-memory
+entry document. Serve relative workspace assets from disk. Desktop uses the
+existing Browser panel. Mobile uses the focused file viewer.
 
-The existing preview-state migration, UI placement, localization, and static
-navigation normalizer are reusable work. The current static-only iframe
-implementation and its inert-script tests are not final evidence and remain
-non-ready until the new execution boundary is implemented and reviewed.
+The product owner selected the trusted Browser-panel model. Implementation and
+documentation must state that previewing executes trusted workspace code and
+must not claim hostile-content isolation.
 
 ## Scope
 
 ### In scope
 
-- `.html` and `.htm` preview eligibility for editable text files.
-- Format-neutral rendered-preview state with legacy Markdown restoration.
-- A capability-free worker runtime for inline ECMAScript and virtual DOM
-  mutation.
-- A scriptless safe renderer for runtime snapshots and user-event bridging.
-- Deny-by-default static and dynamic resource and navigation policies.
-- Preview and source toggles in Monaco, CodeMirror, center-panel file tabs,
-  Dockview file editors, and the focused mobile file viewer.
-- Complete localized runtime failure and source-recovery copy.
-- Public guidance for inline scripts, embedded resources, and blocked
-  workspace or remote resources.
-- Focused unit, component, desktop E2E, mobile E2E, and desktop WebView smoke
-  evidence for script execution and isolation.
+- An ephemeral loopback static server owned by each agentctl instance.
+- Bounded in-memory overlays for current, unsaved HTML buffers.
+- Workspace-rooted relative asset serving with traversal and symlink-escape
+  protection.
+- A session-authorized backend publish endpoint and agentctl client contract.
+- Existing session port-proxy routing for every supported executor.
+- Desktop Browser-panel open, focus, reuse, and refresh behavior.
+- A full-height mobile iframe with `Show code` and preserved editor state.
+- Localized trusted-code, progress, error, and retry copy in all locales.
+- Removal of the preview-specific QuickJS and direct parse5 dependencies, the
+  virtual DOM, worker code, and obsolete tests.
+- Public documentation and focused backend, frontend, E2E, and desktop checks.
 
 ### Out of scope
 
-- Workspace-relative or remote assets.
-- Full browser API compatibility, browser storage, workers, service workers,
-  WebGL, credentialed integrations, or multi-file site hosting.
-- Backend workspace-preview routes or a Kandev control-plane API for scripts.
-- HTML preview reconstructed from Review diffs.
-- Browser-panel inspector annotations, source-console forwarding, or rendered
-  element source-line comments.
+- An untrusted-content security boundary or dedicated preview origin.
+- Framework builds, HMR, server-side routes, or package installation.
+- Review-diff previews, source mapping, and new Browser-panel inspector features.
+- Replacing explicit development-server commands for non-static applications.
 
 ## Technical approach
 
-### Capability-free execution boundary
+### Workspace preview server
 
-Implement `PreviewRuntimeWorker` with a pinned ECMAScript engine that accepts
-no host imports. Expose only virtual DOM nodes, bounded timers, supported
-events, console diagnostics, and runtime-owned blob tokens. Do not use native
-`eval`, `Function`, script elements, inline event-handler attributes, or an
-iframe with `allow-scripts`.
+Add a concurrency-safe manager to agentctl. It binds one loopback ephemeral port
+per selected workspace or repository root. The manager publishes up to 32
+current-buffer overlays of at most 5 MiB each. It stops all servers with the
+agentctl instance. Exact overlay paths win over disk content. All responses use
+`Cache-Control: no-store`.
 
-The runtime message contract carries only the file buffer, sanitized events,
-data-only snapshots, and diagnostics. It carries no task, session, repository,
-boot, cookie, credential, or Kandev store data. Enforce instruction, wall-clock,
-heap, timer, event-queue, and snapshot limits and terminate the worker on
-violation.
+The server resolves request paths with the existing repository path helpers and
+rejects traversal, encoded traversal, and symlink targets outside the selected
+root. It does not rewrite document content or emulate browser behavior.
 
-### Snapshot renderer and policy
+### Session publish contract
 
-Render snapshots through a scriptless controlled surface. Create native nodes
-from an allowlisted projection rather than inserting source HTML into the
-Kandev DOM. Filter static and dynamic resource URLs to `data:` and
-preview-runtime-owned `blob:` values. Make links, forms, meta refresh, window
-opening, downloads, and all navigation APIs no-ops.
+Add a task-session endpoint that authenticates the session, ensures agentctl is
+ready, bounds the request, and forwards `{repo, path, content}`. Agentctl repeats
+validation and returns `{port, path, version}`. The frontend builds the existing
+session port-proxy URL and appends the version as a cache buster.
 
-Retain the existing document-builder link and meta-refresh normalization as
-defense in depth. The virtual DOM mutation policy is authoritative after
-scripts run.
+### Responsive UI
 
-### File surfaces and compatibility
+Desktop keeps the source editor open and calls the existing Browser-panel action
+with the preview URL. Repeated activation republishes and reuses the panel.
+Mobile publishes through the same API but renders the URL in its focused viewer,
+with Kandev-owned `Show code` and error controls outside the iframe.
 
-Reuse the existing generic preview state and legacy `markdownPreview` read
-bridge. Replace the current static iframe contract in `HtmlPreviewContent` with
-the runtime lifecycle and snapshot renderer. Keep Markdown rendering,
-comments, editor selection, source restoration, mobile identity reset, and
-other file actions unchanged.
+Before execution, user-facing copy identifies the action as trusted workspace
+code. The iframe uses the existing Browser-panel sandbox policy. The feature
+does not add an isolation claim or browser capability filter.
 
-### Public guidance
+### Migration and documentation
 
-Update `docs/public/developer-tools.md` only when the runtime-backed behavior
-ships. Explain that inline scripts run in a restricted preview runtime, that
-embedded data and preview-owned blob resources are supported, and that
-workspace-relative or remote resources and full browser APIs remain outside the
-contract.
+Delete the worker runtime, virtual DOM, Shadow DOM renderer, navigation
+normalizer, and preview-only QuickJS/direct parse5 dependencies. Keep Markdown
+behavior and explicit development-server controls unchanged. Update public
+guidance to distinguish the zero-configuration static preview from application
+development servers and to state the trust consequence.
 
-## Tests
+## Acceptance evidence
 
 | Acceptance criteria | Evidence |
 | --- | --- |
-| `AC-UI-NATIVE-HTML-PREVIEW-001.1`, `.2`, `.6`, `.7`, `.8` | Existing preview-kind, toolbar, state-restoration, mobile, and Markdown-preservation unit/component coverage, updated for the runtime-backed renderer |
-| `AC-UI-NATIVE-HTML-PREVIEW-001.3`, `.4`, `.10` | Runtime VM, virtual DOM, message-contract, budget, failure, and snapshot-renderer tests prove script capability without native browser execution |
-| `AC-UI-NATIVE-HTML-PREVIEW-001.5`, `.9` | Static and dynamic resource/navigation policy tests cover links, SVG `xlink`, forms, meta refresh, location, history, fetch, XHR, WebSocket, and window APIs |
-
-## E2E tests
-
-- `apps/web/e2e/tests/chat/html-preview.spec.ts` runs under Chromium. It
-  renders an unsaved HTML buffer, proves an inline script changes visible
-  output, dispatches a user event through the runtime, and attempts dynamic
-  network and navigation actions. It proves the preview remains visible and
-  no preview-originated request occurs.
-- `apps/web/e2e/tests/task/mobile-html-preview.spec.ts` runs under
-  `mobile-chrome`. It proves the runtime-backed preview entry point, script
-  output, source recovery, 44-pixel touch target, and document containment.
-- Desktop WebView smoke coverage repeats the no-request and no-navigation
-  assertions before release because WebView policy behavior differs from
-  Chromium.
+| `.1`, `.2`, `.3`, `.7`, `.8`, `.9`, `.10` | Frontend API/component tests plus desktop and mobile E2E for current buffers, panel reuse, trust copy, source preservation, and recovery |
+| `.4`, `.5`, `.11` | Agentctl server tests and browser E2E for native scripts, browser APIs, relative assets, bounds, path containment, eviction, and shutdown |
+| `.6` | Backend handler/client tests plus existing session port-proxy regression coverage |
 
 ## Work orders
 
-### Script-capable delivery
+### Trusted Browser delivery
 
-- [completed] [Task 05: Build the capability-free preview runtime](task-05-script-capable-preview-runtime.md)
-- [completed] [Task 06: Integrate the runtime with the preview state and renderer](task-06-preview-state-and-renderer.md)
-- [completed] [Task 07: Wire responsive preview surfaces](task-07-responsive-preview-surfaces.md)
-- [completed] [Task 08: Publish script-capable preview guidance](task-08-script-capable-preview-guidance.md)
-- [completed] [Task 09: Prove script execution and isolation in browsers](task-09-script-capable-preview-e2e.md)
+- [done] [Task 10: Build the agentctl workspace preview server](task-10-agentctl-workspace-preview-server.md)
+- [done] [Task 11: Add the session publish contract](task-11-session-preview-publish-contract.md)
+- [done] [Task 12: Replace the virtual runtime with Browser-panel UI](task-12-browser-panel-preview-ui.md)
+- [done] [Task 13: Document and prove browser-fidelity preview](task-13-browser-fidelity-docs-and-e2e.md)
 
-### Superseded static prototype work
+### Superseded implementation work
 
-These work orders describe the non-final static-only contract that is present
-in the current PR. They are retained for traceability, but their results do
-not satisfy this plan:
+Tasks 01 through 04 describe the original scriptless prototype. Tasks 05
+through 09 describe the QuickJS and virtual-DOM implementation. They are
+retained for traceability but cancelled because the selected product contract
+is native browser fidelity:
 
 - [cancelled] [Task 01: Establish preview state and sandbox contract](task-01-preview-state-and-sandbox.md)
 - [cancelled] [Task 02: Add responsive HTML preview surfaces](task-02-responsive-html-preview.md)
 - [cancelled] [Task 03: Publish HTML preview guidance](task-03-public-html-preview-guidance.md)
 - [cancelled] [Task 04: Prove responsive HTML preview flows](task-04-responsive-html-preview-e2e.md)
+- [cancelled] [Task 05: Build the capability-free preview runtime](task-05-script-capable-preview-runtime.md)
+- [cancelled] [Task 06: Integrate the runtime with preview state and renderer](task-06-preview-state-and-renderer.md)
+- [cancelled] [Task 07: Wire responsive preview surfaces](task-07-responsive-preview-surfaces.md)
+- [cancelled] [Task 08: Publish script-capable preview guidance](task-08-script-capable-preview-guidance.md)
+- [cancelled] [Task 09: Prove script execution and isolation](task-09-script-capable-preview-e2e.md)
 
-## Verification results
+## Dependency order
 
-The runtime, renderer, component, localization, public-doc, Chromium, mobile,
-and desktop WebView checks pass. The license catalog identifies `parse5@7.3.0`
-and `quickjs-emscripten@0.32.0` as MIT-licensed. The public-doc validator
-reports 43 published pages, and the specification linter passes all files.
+```text
+Task 10 agentctl server
+        |
+        v
+Task 11 session contract
+        |
+        v
+Task 12 responsive UI and runtime removal
+        |
+        v
+Task 13 docs, E2E, and final verification
+```
+
+Tasks 10 and 11 establish the serving and authorization boundary before any UI
+depends on it. Task 12 removes the old runtime only after the end-to-end URL can
+be produced. Task 13 verifies the shipped flow and updates guidance after its
+behavior is stable.
 
 ## Risks
 
-- The chosen ECMAScript engine and virtual-DOM compatibility surface may add
-  bundle weight or fail on one of the supported desktop WebViews.
-- The renderer must preserve useful HTML and CSS behavior without an unsafe HTML
-  sink or an accidental native event handler.
-- Runtime-owned blob URLs need explicit byte ownership and cleanup.
-- Execution budgets must stop denial-of-service scripts without making normal
-  inline interactions unusable.
-- Dynamic CSS and DOM mutations may reintroduce URLs or navigation paths that
-  static source normalization cannot see.
-- Browser and WebView evidence must cover both request suppression and frame
-  persistence. A CSP-only or parent-load-only assertion is insufficient.
+- Same-origin Browser-panel content can exercise Kandev/browser authority. This
+  is an accepted product tradeoff and must remain visible to users.
+- Agentctl server teardown and overlay locking must cover stop, restart, and
+  executor failure paths without leaking listeners or data.
+- Proxy rewriting and capability cookies must preserve relative, root-relative,
+  redirect, module, and fetch requests.
+- Multi-repository roots and symlinks can accidentally widen filesystem access
+  unless existing canonical path helpers are used consistently.
+- Reusing a Browser panel must not replace unrelated manually opened content.
+- Removing runtime packages changes the shared lockfile and generated license
+  catalog. The Markdown renderer still owns transitive parse5 licenses, so the
+  verification must distinguish those from the removed preview dependency.
 
-## Resolved design choices
+## Completion gate
 
-- QuickJS via `quickjs-emscripten@0.32.0` supplies the pinned MIT-licensed
-  ECMAScript VM. `parse5@7.3.0` supplies the pinned MIT-licensed parser.
-- The first capability set is the virtual document, inline styles and scripts,
-  bounded timers and microtasks, five user-event types, and owned blob values.
-- The initial limits are 250,000 instructions, 250 milliseconds, 8 MiB VM
-  memory, 512 KiB stack, 16 timers, 32 queued events, and a 512 KiB snapshot.
-- The visible renderer uses an open Shadow DOM surface and never executes
-  source-controlled markup or scripts in the browser.
+The package is ready to merge after all required checks pass. These checks cover
+the backend, frontend, documentation, localization, E2E, desktop, dependencies,
+licenses, and PR CI. Every review thread must have a disposition before merge.
+
+## Verification results
+
+- Agentctl API tests and race tests passed.
+- Full backend tests passed with the task-host internal config overrides cleared.
+- Focused frontend tests passed: 10 files and 64 tests.
+- Web typecheck, lint, i18n checks, i18n ratchet, license generation, and Vite
+  E2E build passed.
+- Public-doc validation passed: 61 tests and 43 published pages.
+- Raw desktop Chromium and mobile Chrome preview suites passed: 2 tests each.
+- Desktop shell E2E passed.
+- Fresh desktop and mobile screenshots were captured, inspected, and compressed
+  for the pull request.

@@ -156,4 +156,18 @@ describe("task center file restoration", () => {
       renderedPreview: true,
     });
   });
+
+  it("does not restore obsolete in-place preview state for HTML tabs", async () => {
+    mockRequestFileContent.mockResolvedValueOnce({
+      path: "reports/index.html",
+      content: "<h1>Report</h1>",
+      is_binary: false,
+    });
+
+    const tabs = await loadSavedFileTabs("session", [
+      { path: "reports/index.html", name: "index.html", renderedPreview: true, pinned: true },
+    ]);
+
+    expect(tabs?.[0]?.renderedPreview).toBeUndefined();
+  });
 });

@@ -10,11 +10,13 @@ vi.mock("./file-editor-content", () => ({
     renderedPreview,
     worktreePath,
     onTogglePreview,
+    onPreviewHtml,
   }: {
     previewKind?: string;
     renderedPreview?: boolean;
     worktreePath?: string;
     onTogglePreview?: () => void;
+    onPreviewHtml?: () => void;
   }) => (
     <div
       data-testid="file-editor-content"
@@ -25,6 +27,11 @@ vi.mock("./file-editor-content", () => ({
       <button type="button" onClick={onTogglePreview}>
         Toggle preview
       </button>
+      {onPreviewHtml && (
+        <button type="button" onClick={onPreviewHtml}>
+          Preview HTML
+        </button>
+      )}
     </div>
   ),
 }));
@@ -100,5 +107,34 @@ describe("FileTabContent Markdown preview", () => {
     expect(screen.getByTestId("file-editor-content").getAttribute("data-worktree-path")).toBe(
       "/tmp/task-root",
     );
+  });
+});
+
+describe("FileTabContent HTML preview", () => {
+  it("keeps the source tab and forwards the HTML preview action", () => {
+    const onPreviewHtml = vi.fn();
+
+    render(
+      <FileTabContent
+        tab={{
+          ...file,
+          path: "reports/index.html",
+          name: "index.html",
+          content: "<h1>Report</h1>",
+          renderedPreview: false,
+        }}
+        activeSession={null}
+        activeSessionId="session-1"
+        taskId="task-1"
+        isSaving={false}
+        onFileChange={vi.fn()}
+        onFileSave={vi.fn()}
+        onFileDelete={vi.fn()}
+        onPreviewHtml={onPreviewHtml}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview HTML" }));
+    expect(onPreviewHtml).toHaveBeenCalledOnce();
   });
 });

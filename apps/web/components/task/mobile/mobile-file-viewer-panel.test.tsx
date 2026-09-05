@@ -2,6 +2,16 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const htmlPreview = vi.hoisted(() => ({
+  isPublishing: false,
+  url: "http://api.test/port-proxy/session-1/43127/reports/index.html?v=1" as string | null,
+  error: null,
+  publish: vi
+    .fn()
+    .mockResolvedValue("http://api.test/port-proxy/session-1/43127/reports/index.html?v=1"),
+  reset: vi.fn(),
+}));
+
 const state = {
   taskSessions: {
     items: {
@@ -16,6 +26,11 @@ const state = {
   },
   tasks: { activeTaskId: "task-1" },
 };
+const README_CONTENT = "# README";
+const REPORT_CONTENT = "<h1>Report</h1>";
+const README_PATH = "README.md";
+const REPORT_PATH = "reports/index.html";
+const FILE_CONTENT_TEST_ID = "file-content";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (value: typeof state) => unknown) => selector(state),
@@ -29,7 +44,7 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
 }));
 
 vi.mock("../file-viewer-content", () => ({
-  FileViewerContent: () => <span data-testid="file-content" />,
+  FileViewerContent: () => <span data-testid={FILE_CONTENT_TEST_ID} />,
 }));
 vi.mock("../markdown-preview-content", () => ({
   MarkdownPreviewContent: ({ onTogglePreview }: { onTogglePreview: () => void }) => (
@@ -40,14 +55,9 @@ vi.mock("../markdown-preview-content", () => ({
     </div>
   ),
 }));
-vi.mock("../html-preview-content", () => ({
-  HtmlPreviewContent: ({ onTogglePreview }: { onTogglePreview: () => void }) => (
-    <div data-testid="html-preview">
-      <button type="button" onClick={onTogglePreview}>
-        Show code
-      </button>
-    </div>
-  ),
+vi.mock("@/hooks/use-html-preview-publisher", () => ({
+  useHtmlPreviewPublisher: () => htmlPreview,
+  getHtmlPreviewPublishErrorKey: () => "task:htmlPreviewPublishFailed",
 }));
 vi.mock("../file-image-viewer", () => ({ FileImageViewer: () => null }));
 vi.mock("../file-binary-viewer", () => ({
@@ -120,16 +130,16 @@ describe("MobileFileViewerPanel external file action", () => {
   });
 });
 
-describe("MobileFileViewerPanel preview mode", () => {
+describe("MobileFileViewerPanel Markdown preview mode", () => {
   it("opens a Markdown file directly in preview mode when requested", () => {
     render(
       <TooltipProvider>
         <MobileFileViewerPanel
           file={{
-            path: "README.md",
-            name: "README.md",
-            content: "# README",
-            originalContent: "# README",
+            path: README_PATH,
+            name: README_PATH,
+            content: README_CONTENT,
+            originalContent: README_CONTENT,
             originalHash: "hash",
             isDirty: false,
           }}
@@ -141,7 +151,7 @@ describe("MobileFileViewerPanel preview mode", () => {
     );
 
     expect(screen.getByTestId("markdown-preview")).toBeTruthy();
-    expect(screen.queryByTestId("file-content")).toBeNull();
+    expect(screen.queryByTestId(FILE_CONTENT_TEST_ID)).toBeNull();
   });
 
   it("resets preview mode when the same path is opened from another repository", () => {
@@ -149,11 +159,11 @@ describe("MobileFileViewerPanel preview mode", () => {
       <TooltipProvider>
         <MobileFileViewerPanel
           file={{
-            path: "README.md",
-            name: "README.md",
+            path: README_PATH,
+            name: README_PATH,
             repo: "frontend",
-            content: "# README",
-            originalContent: "# README",
+            content: README_CONTENT,
+            originalContent: README_CONTENT,
             originalHash: "hash",
             isDirty: false,
           }}
@@ -170,11 +180,11 @@ describe("MobileFileViewerPanel preview mode", () => {
       <TooltipProvider>
         <MobileFileViewerPanel
           file={{
-            path: "README.md",
-            name: "README.md",
+            path: README_PATH,
+            name: README_PATH,
             repo: "backend",
-            content: "# README",
-            originalContent: "# README",
+            content: README_CONTENT,
+            originalContent: README_CONTENT,
             originalHash: "hash",
             isDirty: false,
           }}
@@ -184,19 +194,21 @@ describe("MobileFileViewerPanel preview mode", () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByTestId("file-content")).toBeTruthy();
+    expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId("markdown-preview")).toBeNull();
   });
+});
 
+describe("MobileFileViewerPanel HTML preview mode", () => {
   it("previews an HTML file and returns to the source viewer", () => {
     render(
       <TooltipProvider>
         <MobileFileViewerPanel
           file={{
-            path: "reports/index.html",
+            path: REPORT_PATH,
             name: "index.html",
-            content: "<h1>Report</h1>",
-            originalContent: "<h1>Report</h1>",
+            content: REPORT_CONTENT,
+            originalContent: REPORT_CONTENT,
             originalHash: "hash",
             isDirty: false,
           }}
@@ -210,8 +222,36 @@ describe("MobileFileViewerPanel preview mode", () => {
     expect(toggle.className).toContain("h-11");
     expect(toggle.className).toContain("w-11");
     fireEvent.click(toggle);
-    expect(screen.getByTestId("html-preview")).toBeTruthy();
+    expect(htmlPreview.publish).toHaveBeenCalledWith({
+      path: REPORT_PATH,
+      repo: undefined,
+      content: REPORT_CONTENT,
+    });
+    expect(screen.getByTestId("html-preview-frame")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Show code" }));
-    expect(screen.getByTestId("file-content")).toBeTruthy();
+    expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
+  });
+
+  it("does not restore persisted in-place preview state for HTML", () => {
+    render(
+      <TooltipProvider>
+        <MobileFileViewerPanel
+          file={{
+            path: REPORT_PATH,
+            name: "index.html",
+            content: REPORT_CONTENT,
+            originalContent: REPORT_CONTENT,
+            originalHash: "hash",
+            isDirty: false,
+          }}
+          sessionId="session-1"
+          onClose={vi.fn()}
+          initialRenderedPreview
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId(FILE_CONTENT_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId("html-preview-frame")).toBeNull();
   });
 });
