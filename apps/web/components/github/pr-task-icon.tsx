@@ -39,6 +39,7 @@ const SKY_400 = CHANGE_REQUEST_STATUS_COLORS.review;
 const EMERALD_400 = CHANGE_REQUEST_STATUS_COLORS.ready;
 const QUEUED = CHANGE_REQUEST_STATUS_COLORS.queued;
 const GREEN_500 = CHANGE_REQUEST_STATUS_COLORS.passing;
+const EMPTY_PRS: TaskPR[] = [];
 
 /** Maps the task-level PR projection to the same visual language as live PRs. */
 export function getPRAggregateStatusColor(state: string | null | undefined): string {
@@ -253,7 +254,7 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
 export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPRInfo }) {
   const prs = useAppStore((state) => getTaskPRsForCurrentWorkspace(state, taskId));
   const hydration = useTaskPRTooltipHydration(taskId, { includeAutomation: true });
-  const fullPRs = Array.isArray(prs) && prs.length > 0 ? prs : [];
+  const fullPRs = normalizeTaskPRs(prs);
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
   // non-array value (e.g. an empty object from a partial hydration). Bail
@@ -269,6 +270,10 @@ export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPR
       automationOptions={hydration.automationOptions}
     />
   );
+}
+
+export function normalizeTaskPRs(prs: unknown): TaskPR[] {
+  return Array.isArray(prs) && prs.length > 0 ? prs : EMPTY_PRS;
 }
 
 type TaskPRIconPresentation = {

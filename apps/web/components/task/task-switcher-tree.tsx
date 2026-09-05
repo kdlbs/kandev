@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { countGroupTasks, type SidebarGroup } from "@/lib/sidebar/apply-view";
 import {
   SortableTaskLevel,
@@ -48,14 +48,20 @@ function TaskTreeNode({
   const subs = ctx.subTasksByParentId.get(task.id);
   const hasSubs = !!subs?.length;
   const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
-  const toggleInfo: SubtaskToggleInfo | undefined =
-    hasSubs && ctx.onToggleSubtasks
-      ? {
-          subtaskCount: countGroupTasks(subs, ctx.subTasksByParentId),
-          subtasksCollapsed: subsHidden,
-          onToggleSubtasks: () => ctx.onToggleSubtasks!(task.id),
-        }
-      : undefined;
+  const handleToggleSubtasks = useCallback(() => {
+    ctx.onToggleSubtasks?.(task.id);
+  }, [ctx.onToggleSubtasks, task.id]);
+  const toggleInfo = useMemo<SubtaskToggleInfo | undefined>(
+    () =>
+      hasSubs && ctx.onToggleSubtasks
+        ? {
+            subtaskCount: countGroupTasks(subs, ctx.subTasksByParentId),
+            subtasksCollapsed: subsHidden,
+            onToggleSubtasks: handleToggleSubtasks,
+          }
+        : undefined,
+    [ctx.onToggleSubtasks, ctx.subTasksByParentId, handleToggleSubtasks, hasSubs, subs, subsHidden],
+  );
   const isRoot = depth === 0;
   const isNestTarget = ctx.nestTargetIds.has(task.id);
   const handle = (
