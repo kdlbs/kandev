@@ -231,4 +231,39 @@ describe("SwimlaneContainer render isolation", () => {
     expect(updated?.steps).toBe(initial?.steps);
     expect(updated?.moveTargetSteps).toBe(initial?.moveTargetSteps);
   });
+
+  it("evicts a cached projection when its workflow leaves the snapshot map", () => {
+    const matchesPluginTaskFilters = vi.fn((taskId: string) => taskId.length > 0);
+    const holder: { current: StoreApi<AppState> | null } = { current: null };
+    renderSwimlanes(holder, matchesPluginTaskFilters);
+
+    const store = holder.current;
+    if (!store) throw new Error(STORE_CAPTURE_ERROR);
+    const snapshotB = store.getState().kanbanMulti.snapshots[WORKFLOW_B];
+    const callsBeforeRemoval = matchesPluginTaskFilters.mock.calls.filter(
+      ([taskId]) => taskId === "task-b",
+    ).length;
+
+    act(() => {
+      store.setState((state) => ({
+        kanbanMulti: {
+          ...state.kanbanMulti,
+          snapshots: { [WORKFLOW_A]: state.kanbanMulti.snapshots[WORKFLOW_A] },
+        },
+      }));
+    });
+    act(() => {
+      store.setState((state) => ({
+        kanbanMulti: {
+          ...state.kanbanMulti,
+          snapshots: { ...state.kanbanMulti.snapshots, [WORKFLOW_B]: snapshotB },
+        },
+      }));
+    });
+
+    const callsAfterRestore = matchesPluginTaskFilters.mock.calls.filter(
+      ([taskId]) => taskId === "task-b",
+    ).length;
+    expect(callsAfterRestore - callsBeforeRemoval).toBe(4);
+  });
 });

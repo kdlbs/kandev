@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
@@ -37,11 +37,18 @@ export function useStableWorkflowList<T extends { id: string }>(workflows: T[]):
   return useStableList(workflows, Object.is);
 }
 
+function stringSetsEqual(previous: Set<string>, value: Set<string>): boolean {
+  if (previous.size !== value.size) return false;
+  for (const item of previous) {
+    if (!value.has(item)) return false;
+  }
+  return true;
+}
+
 export function useStableStringSet(value: Set<string>): Set<string> {
   const previousRef = useRef(value);
   const previous = previousRef.current;
-  const isUnchanged =
-    previous.size === value.size && Array.from(previous).every((item) => value.has(item));
+  const isUnchanged = stringSetsEqual(previous, value);
   if (!isUnchanged) previousRef.current = value;
   return isUnchanged ? previous : value;
 }
@@ -56,6 +63,26 @@ function useStableWorkflowOptions(
       previous.name === next.name &&
       previous.taskCount === next.taskCount,
   );
+}
+
+function useOrderedWorkflowLists(
+  workflowFilter: string | null | undefined,
+  workflows: Parameters<typeof selectWorkflowSwimlanes>[1],
+  snapshots: Record<string, unknown>,
+) {
+  const allOrderedWorkflows = useStableWorkflowList(
+    useMemo(() => selectWorkflowSwimlanes(null, workflows, snapshots), [workflows, snapshots]),
+  );
+  const orderedWorkflows = useStableWorkflowList(
+    useMemo(
+      () =>
+        workflowFilter
+          ? selectWorkflowSwimlanes(workflowFilter, workflows, snapshots)
+          : allOrderedWorkflows,
+      [allOrderedWorkflows, workflowFilter, workflows, snapshots],
+    ),
+  );
+  return { allOrderedWorkflows, orderedWorkflows };
 }
 
 export function useSwimlaneRenderData(
@@ -81,17 +108,18 @@ export function useSwimlaneRenderData(
     () => mapSelectedRepositoryIds(repositories, selectedRepositoryIds),
     [repositories, selectedRepositoryIds],
   );
-  const allOrderedWorkflows = useStableWorkflowList(
-    useMemo(() => selectWorkflowSwimlanes(null, workflows, snapshots), [workflows, snapshots]),
-  );
-  const orderedWorkflows = useStableWorkflowList(
-    useMemo(
-      () => selectWorkflowSwimlanes(workflowFilter, workflows, snapshots),
-      [workflowFilter, workflows, snapshots],
-    ),
+  const { allOrderedWorkflows, orderedWorkflows } = useOrderedWorkflowLists(
+    workflowFilter,
+    workflows,
+    snapshots,
   );
 
   const projectionCacheRef = useRef(new Map<string, TaskProjectionCacheEntry>());
+  useEffect(() => {
+    for (const workflowId of projectionCacheRef.current.keys()) {
+      if (!(workflowId in snapshots)) projectionCacheRef.current.delete(workflowId);
+    }
+  }, [snapshots]);
   const getFilteredTasks = useCallback(
     (workflowId: string) => {
       const snapshot = snapshots[workflowId];

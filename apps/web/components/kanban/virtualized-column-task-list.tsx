@@ -40,10 +40,12 @@ type VirtualizedColumnTaskListProps = {
 
 type VirtualizedKanbanCardProps = Omit<
   VirtualizedColumnTaskListProps,
-  "orderedTasks" | "queuedStartIndex" | "queuedCount"
+  "orderedTasks" | "queuedStartIndex" | "queuedCount" | "deletingTaskId" | "archivingTaskId"
 > & {
   task: Task;
   columnTaskIds: string[];
+  isDeleting: boolean;
+  isArchiving: boolean;
 };
 
 const VirtualizedKanbanCard = memo(function VirtualizedKanbanCard({
@@ -56,8 +58,8 @@ const VirtualizedKanbanCard = memo(function VirtualizedKanbanCard({
   repositories,
   externalLinkAvailability,
   showMaximizeButton,
-  deletingTaskId,
-  archivingTaskId,
+  isDeleting,
+  isArchiving,
   selectedIds,
   onPreviewTask,
   onOpenTask,
@@ -94,8 +96,8 @@ const VirtualizedKanbanCard = memo(function VirtualizedKanbanCard({
       onMove={onMoveTask}
       steps={steps}
       showMaximizeButton={showMaximizeButton}
-      isDeleting={deletingTaskId === task.id}
-      isArchiving={archivingTaskId === task.id}
+      isDeleting={isDeleting}
+      isArchiving={isArchiving}
       isSelected={selectedIds?.has(task.id)}
       selectedIds={selectedIds}
       onToggleSelect={onToggleSelect}
@@ -204,8 +206,8 @@ export function VirtualizedColumnTaskList({
                 repositories={repositories}
                 externalLinkAvailability={stableExternalLinkAvailability}
                 showMaximizeButton={showMaximizeButton}
-                deletingTaskId={deletingTaskId}
-                archivingTaskId={archivingTaskId}
+                isDeleting={deletingTaskId === task.id}
+                isArchiving={archivingTaskId === task.id}
                 selectedIds={selectedIds}
                 onPreviewTask={onPreviewTask}
                 onOpenTask={onOpenTask}

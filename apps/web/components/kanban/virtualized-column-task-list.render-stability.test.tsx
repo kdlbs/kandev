@@ -48,7 +48,15 @@ const HANDLERS = {
 const EXTERNAL_LINK_AVAILABILITY = { jira: false, linear: false, sentry: false };
 const REPOSITORIES: Repository[] = [];
 
-function TaskList({ tasks }: { tasks: Task[] }) {
+function TaskList({
+  tasks,
+  deletingTaskId,
+  archivingTaskId,
+}: {
+  tasks: Task[];
+  deletingTaskId?: string;
+  archivingTaskId?: string;
+}) {
   return (
     <VirtualizedColumnTaskList
       orderedTasks={tasks}
@@ -60,6 +68,8 @@ function TaskList({ tasks }: { tasks: Task[] }) {
       workspaceId="workspace-1"
       repositories={REPOSITORIES}
       externalLinkAvailability={{ ...EXTERNAL_LINK_AVAILABILITY }}
+      deletingTaskId={deletingTaskId}
+      archivingTaskId={archivingTaskId}
       {...HANDLERS}
     />
   );
@@ -79,4 +89,24 @@ describe("VirtualizedColumnTaskList card render isolation", () => {
       unaffectedCard: cardRenderCounts.get(TASK_B.id),
     }).toEqual({ affectedCard: 2, unaffectedCard: 1 });
   });
+
+  it.each(["deletingTaskId", "archivingTaskId"] as const)(
+    "does not rerender sibling cards when %s targets another card",
+    (busyProp) => {
+      const view = render(<TaskList tasks={[TASK_A, TASK_B]} />);
+
+      view.rerender(
+        <TaskList
+          tasks={[TASK_A, TASK_B]}
+          deletingTaskId={busyProp === "deletingTaskId" ? TASK_A.id : undefined}
+          archivingTaskId={busyProp === "archivingTaskId" ? TASK_A.id : undefined}
+        />,
+      );
+
+      expect({
+        affectedCard: cardRenderCounts.get(TASK_A.id),
+        unaffectedCard: cardRenderCounts.get(TASK_B.id),
+      }).toEqual({ affectedCard: 2, unaffectedCard: 1 });
+    },
+  );
 });
