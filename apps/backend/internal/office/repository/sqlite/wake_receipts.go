@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -24,6 +25,15 @@ type StuckParentCandidate struct {
 	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
 	WorkflowStepID         string `db:"workflow_step_id"`
 	ChildSetKey            string `db:"child_set_key"`
+	// NewestChildUpdatedAt is the latest updated_at among the parent's
+	// non-archived children, rendered via dialect.SecondPrecisionText so the
+	// same wall-clock second always produces the same text regardless of
+	// dialect (see ListStuckParents). ChildSetKey alone cannot distinguish a
+	// child that completed, was reopened, and completed again with the same
+	// terminal state from one that was never touched — both produce the
+	// same id:state pairs. This is the generation that changes across a
+	// reopen/re-complete cycle even when ChildSetKey does not.
+	NewestChildUpdatedAt string `db:"newest_child_updated_at"`
 }
 
 // ListStuckParents finds parent tasks that look done from their children's
@@ -64,6 +74,29 @@ type StuckParentCandidate struct {
 //     contract; they require an explicit user retry and must not become a
 //     cron retry loop. A missing referenced run remains eligible because a
 //     cleanup or migration can remove the delivery evidence.
+//   - a third OR arm, newest_child_updated_at != child_generation, re-admits
+//     a candidate whose child_set_key still matches the receipt exactly. A
+//     child that completes, is reopened, and completes again with the same
+//     terminal state produces a byte-identical child_set_key (it encodes
+//     "id:state" only), so the first two arms both stay false and the
+//     re-completion would otherwise never be swept. The edge-triggered path
+//     (cascadeChildrenCompleted) also cannot catch this: its idempotency key
+//     hashes child ids only, so an identical child set collides with the
+//     run it already persisted for the first completion. child_generation
+//     is the newest_child_updated_at value recorded at delivery time, so
+//     this is an equality check between two rendered-text values, not an
+//     ordering comparison against delivered_at: tasks.updated_at is written
+//     by more than one producer in more than one text format (see
+//     recordReceipt), so ordering two differently-formatted strings is
+//     unreliable in a way equality between two same-format strings is not.
+//     Both newest_child_updated_at here and the comparison below against
+//     runs.requested_at go through dialect.SecondPrecisionText rather than
+//     comparing the raw TIMESTAMP columns as text: SQLite's CURRENT_TIMESTAMP
+//     only ever writes whole-second text, but Postgres defaults to
+//     microsecond precision, so an unnormalized comparison against
+//     child_generation (a plain TEXT column) is a type mismatch on Postgres,
+//     and reading the raw value into a Go string would carry driver-specific
+//     formatting the two dialects don't agree on.
 //   - the NOT EXISTS against runs drops a candidate with a queued or
 //     claimed task_children_completed run (still in flight, regardless of
 //     which child set it was requested for — wait for it to resolve rather
@@ -99,6 +132,9 @@ type StuckParentCandidate struct {
 // later (guardAgentStatus in the caller is exactly that — a cheap,
 // redundant closing of that race window, not the primary filter).
 func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit int) ([]StuckParentCandidate, error) {
+	driver := r.ro.DriverName()
+	newestChildUpdatedAtText := dialect.SecondPrecisionText(driver, "MAX(c.updated_at)")
+	requestedAtText := dialect.SecondPrecisionText(driver, "w.requested_at")
 	var rows []StuckParentCandidate
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		WITH stuck AS (
@@ -115,7 +151,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 					) c
 				), '') AS child_set_key,
 				(
-					SELECT MAX(c.updated_at) FROM tasks c
+					SELECT `+newestChildUpdatedAtText+` FROM tasks c
 					WHERE c.parent_id = p.id AND c.archived_at IS NULL
 				) AS newest_child_updated_at
 			FROM tasks p
@@ -134,14 +170,15 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 			        AND c.state NOT IN ('COMPLETED', 'CANCELLED')
 			  )
 		)
-		SELECT s.parent_task_id, s.assignee_agent_profile_id, s.workflow_step_id, s.child_set_key
+		SELECT s.parent_task_id, s.assignee_agent_profile_id, s.workflow_step_id, s.child_set_key,
+		       s.newest_child_updated_at
 		FROM stuck s
 		LEFT JOIN parent_child_wake_receipts r ON r.parent_task_id = s.parent_task_id
 		INNER JOIN agent_profiles ap ON ap.id = s.assignee_agent_profile_id
 		WHERE s.assignee_agent_profile_id != ''
 		  AND ap.status NOT IN ('paused', 'stopped', 'pending_approval')
 		  AND (
-		      r.child_set_key IS NOT s.child_set_key
+		      r.child_set_key IS DISTINCT FROM s.child_set_key
 		      OR (
 		          NOT EXISTS (
 		              SELECT 1 FROM runs delivered
@@ -149,6 +186,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		          )
 		          AND COALESCE(r.delivery_operation_id, '') = ''
 		      )
+		      OR s.newest_child_updated_at != COALESCE(r.child_generation, '')
 		  )
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
@@ -158,7 +196,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		            w.status IN ('queued', 'claimed')
 		            OR (
 		                w.status IN ('finished', 'failed', 'cancelled')
-		                AND w.requested_at >= s.newest_child_updated_at
+		                AND `+requestedAtText+` >= s.newest_child_updated_at
 		            )
 		        )
 		  )
@@ -182,6 +220,10 @@ type WakeReceipt struct {
 	DeliveredRunID      string    `db:"delivered_run_id"`
 	DeliveryOperationID string    `db:"delivery_operation_id"`
 	DeliveredAt         time.Time `db:"delivered_at"`
+	// ChildGeneration is the newest_child_updated_at value that was current
+	// when this receipt was recorded. It is the value ListStuckParents'
+	// third OR arm compares against, not DeliveredAt.
+	ChildGeneration string `db:"child_generation"`
 }
 
 // GetWakeReceipt returns the receipt for a parent task, or nil if none
@@ -190,7 +232,7 @@ func (r *Repository) GetWakeReceipt(ctx context.Context, parentTaskID string) (*
 	var rec WakeReceipt
 	err := r.ro.GetContext(ctx, &rec, r.ro.Rebind(`
 		SELECT parent_task_id, child_set_key, delivered_run_id,
-		       delivery_operation_id, delivered_at
+		       delivery_operation_id, delivered_at, child_generation
 		FROM parent_child_wake_receipts
 		WHERE parent_task_id = ?
 	`), parentTaskID)
@@ -207,23 +249,27 @@ func (r *Repository) GetWakeReceipt(ctx context.Context, parentTaskID string) (*
 // parent task's current child set, using a transaction the caller owns.
 // deliveredRunID is populated by legacy direct-run callers. The workflow
 // engine path uses deliveryOperationID because one trigger can fan out to
-// several runs and the engine owns their admission.
+// several runs and the engine owns their admission. childGeneration is the
+// newest_child_updated_at value the caller admitted this candidate against;
+// ListStuckParents compares it for equality against the parent's current
+// newest_child_updated_at to detect a same-child-set reopen.
 func (r *Repository) UpsertWakeReceiptTx(
 	ctx context.Context, tx *sqlx.Tx,
-	parentTaskID, childSetKey, deliveredRunID, deliveryOperationID string,
+	parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, childGeneration string,
 	deliveredAt time.Time,
 ) error {
 	_, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO parent_child_wake_receipts (
 			parent_task_id, child_set_key, delivered_run_id,
-			delivery_operation_id, delivered_at
-		) VALUES (?, ?, ?, ?, ?)
+			delivery_operation_id, delivered_at, child_generation
+		) VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (parent_task_id) DO UPDATE SET
 			child_set_key = excluded.child_set_key,
 			delivered_run_id = excluded.delivered_run_id,
 			delivery_operation_id = excluded.delivery_operation_id,
-			delivered_at = excluded.delivered_at
-	`), parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, deliveredAt)
+			delivered_at = excluded.delivered_at,
+			child_generation = excluded.child_generation
+	`), parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, deliveredAt, childGeneration)
 	return err
 }
 
@@ -246,6 +292,39 @@ func (r *Repository) GetChildSetKey(ctx context.Context, parentTaskID string) (s
 		return "", err
 	}
 	return formatChildSetKey(rows), nil
+}
+
+// GetChildSetKeyAndGeneration returns both the deterministic child-set key
+// and the generation (newest non-archived child updated_at, rendered via
+// dialect.SecondPrecisionText) for a parent's current children. The edge
+// path (queueChildrenCompletedRun) needs both: the key for the trigger
+// payload identity, the generation as a wakeOperationID input so its
+// operation id matches what the reconciler (ListStuckParents,
+// StuckParentCandidate.NewestChildUpdatedAt) would compute for the same
+// completion wave.
+func (r *Repository) GetChildSetKeyAndGeneration(ctx context.Context, parentTaskID string) (string, string, error) {
+	var rows []childSetKeyRow
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, state
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL
+		ORDER BY id
+	`), parentTaskID); err != nil {
+		return "", "", err
+	}
+
+	driver := r.ro.DriverName()
+	generationText := dialect.SecondPrecisionText(driver, "MAX(updated_at)")
+	var generation sql.NullString
+	if err := r.ro.GetContext(ctx, &generation, r.ro.Rebind(`
+		SELECT `+generationText+`
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL
+	`), parentTaskID); err != nil {
+		return "", "", err
+	}
+
+	return formatChildSetKey(rows), generation.String, nil
 }
 
 // GetChildSetKeyTx is the transaction-scoped counterpart to GetChildSetKey.

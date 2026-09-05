@@ -75,6 +75,28 @@ func NaiveUTCTimestampOf(driver, expr string) string {
 	return fmt.Sprintf("datetime(%s)", expr)
 }
 
+// SecondPrecisionText returns the SQL expression that renders a timestamp
+// expression as portable "YYYY-MM-DD HH:MM:SS" text, truncated to
+// whole-second resolution regardless of the underlying value's native
+// precision. Two ordering or equality comparisons built from this helper on
+// both sides stay valid across dialects: the zero-padded, fixed-width output
+// sorts identically as text or as a timestamp.
+//
+// This exists because SQLite's `CURRENT_TIMESTAMP` only ever writes
+// whole-second text, but Postgres's defaults to microsecond precision — code
+// that stores or compares a `TIMESTAMP`-typed value as free-form text (e.g.
+// scanning it into a Go string) cannot assume the two dialects produce the
+// same string for "the same" wall-clock second without going through this.
+//
+//	SQLite:   strftime('%Y-%m-%d %H:%M:%S', expr)
+//	Postgres: to_char(expr, 'YYYY-MM-DD HH24:MI:SS')
+func SecondPrecisionText(driver, expr string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf("to_char(%s, 'YYYY-MM-DD HH24:MI:SS')", expr)
+	}
+	return fmt.Sprintf("strftime('%%Y-%%m-%%d %%H:%%M:%%S', %s)", expr)
+}
+
 // Now returns the SQL expression for the current timestamp.
 //
 //	SQLite:   datetime('now')
