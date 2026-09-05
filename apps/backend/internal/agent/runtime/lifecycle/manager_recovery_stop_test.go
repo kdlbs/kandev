@@ -5,8 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -76,12 +81,22 @@ func TestStopUnreconstructableRecoveredInstanceUsesBoundedRetryWhenSupported(t *
 }
 
 // TestStopUnreconstructableRecoveredInstanceLogsRetryExhaustion pins that a
-// bounded-retry failure is logged rather than silently dropped -- observed
-// indirectly here by confirming the call still completes without panicking
-// and without falling back to StopInstance.
+// bounded-retry failure is logged rather than silently dropped
+// (AC-EXECUTORS-SURVIVAL-002.4/002.15): the warning must actually be emitted,
+// carrying the instance identity and the underlying error, not just leave the
+// call completing without panicking and without falling back to StopInstance.
 func TestStopUnreconstructableRecoveredInstanceLogsRetryExhaustion(t *testing.T) {
-	backend := &recoveryStoppingExecutor{name: executor.NameStandalone, stopWithRetryErr: errors.New("boom")}
-	mgr := newRecoveryStopTestManager(t, backend)
+	retryErr := errors.New("boom")
+	backend := &recoveryStoppingExecutor{name: executor.NameStandalone, stopWithRetryErr: retryErr}
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatal(err)
+	}
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
 
 	ri := &ExecutorInstance{
 		InstanceID:           "exec-1",
@@ -95,6 +110,18 @@ func TestStopUnreconstructableRecoveredInstanceLogsRetryExhaustion(t *testing.T)
 	}
 	if backend.stopInstanceCalls != 0 {
 		t.Fatalf("StopInstance calls = %d, want 0 even when the retry path fails", backend.stopInstanceCalls)
+	}
+
+	entries := logs.FilterMessage("failed to stop unreconstructable recovered instance after exhausting retries").All()
+	if len(entries) != 1 {
+		t.Fatalf("warn entries = %d, want 1", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if got := fields["instance_id"]; got != "exec-1" {
+		t.Fatalf("instance_id = %v, want exec-1", got)
+	}
+	if got, ok := fields["error"].(string); !ok || got != retryErr.Error() {
+		t.Fatalf("error = %v, want %q", fields["error"], retryErr.Error())
 	}
 }
 
