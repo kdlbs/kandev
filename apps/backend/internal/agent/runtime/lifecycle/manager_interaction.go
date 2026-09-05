@@ -1957,21 +1957,13 @@ func (m *Manager) markCompletedWithTurnIDAndPromptGeneration(
 		return nil
 	}
 
-	// A turn aborted because backend graceful shutdown killed the agent
-	// subprocess is not an agent failure. Treat the terminal error as a benign
-	// stop so the session stays resumable and the UI shows no red error banner.
-	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
-		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage, turnID)
-	}
-	if (exitCode != 0 || errorMessage != "") && isUninitializedStartupExecution(execution) {
-		m.logger.Debug("deferring uninitialized startup process exit to startup owner",
-			zap.String("execution_id", execution.ID),
-			zap.Int("exit_code", exitCode))
-		return nil
-	}
-	if (exitCode != 0 || errorMessage != "") && failureEvidence == nil {
-		evidence := execution.promptAttemptEvidenceSnapshot()
-		failureEvidence = &evidence
+	var handled bool
+	var err error
+	failureEvidence, handled, err = m.handleCompletionSpecialCases(
+		execution, exitCode, errorMessage, turnID, failureEvidence,
+	)
+	if handled {
+		return err
 	}
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -2023,6 +2015,36 @@ func (m *Manager) markCompletedWithTurnIDAndPromptGeneration(
 	m.eventPublisher.publishAgentEventWithTurnID(context.Background(), eventType, execution, turnID)
 
 	return nil
+}
+
+func (m *Manager) handleCompletionSpecialCases(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage, turnID string,
+	failureEvidence *PromptAttemptEvidence,
+) (*PromptAttemptEvidence, bool, error) {
+	if exitCode == 0 && errorMessage == "" {
+		return failureEvidence, false, nil
+	}
+	// A turn aborted because backend graceful shutdown killed the agent
+	// subprocess is not an agent failure. Treat the terminal error as a benign
+	// stop so the session stays resumable and the UI shows no red error banner.
+	if m.IsShuttingDown() {
+		return failureEvidence, true, m.markStoppedDuringShutdown(
+			execution, exitCode, errorMessage, turnID,
+		)
+	}
+	if isUninitializedStartupExecution(execution) {
+		m.logger.Debug("deferring uninitialized startup process exit to startup owner",
+			zap.String("execution_id", execution.ID),
+			zap.Int("exit_code", exitCode))
+		return failureEvidence, true, nil
+	}
+	if failureEvidence == nil {
+		evidence := execution.promptAttemptEvidenceSnapshot()
+		failureEvidence = &evidence
+	}
+	return failureEvidence, false, nil
 }
 
 // isTerminalStatus reports whether a status is a final execution state that
