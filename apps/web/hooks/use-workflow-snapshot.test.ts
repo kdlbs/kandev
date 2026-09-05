@@ -44,13 +44,24 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("@/lib/ssr/mapper", () => ({
-  snapshotToState: (snapshot: { tasks?: Array<{ id: string; auto_start_failed?: boolean }> }) => ({
+  snapshotToState: (snapshot: {
+    tasks?: Array<{
+      id: string;
+      auto_start_failed?: boolean;
+      parked_on_background_work?: boolean;
+      parked_revision?: number;
+      parked_epoch?: number;
+    }>;
+  }) => ({
     kanban: {
       workflowId: "wf-1",
       steps: [],
       tasks: (snapshot.tasks ?? []).map((task) => ({
         id: task.id,
         autoStartFailed: task.auto_start_failed,
+        parkedOnBackgroundWork: task.parked_on_background_work,
+        parkedRevision: task.parked_revision,
+        parkedEpoch: task.parked_epoch,
       })),
     },
   }),
@@ -210,6 +221,53 @@ describe("useWorkflowSnapshot marker races", () => {
       expect.objectContaining({
         kanban: expect.objectContaining({
           tasks: [expect.objectContaining({ id: "task-live-marker", autoStartFailed: true })],
+        }),
+      }),
+    );
+  });
+
+  it("keeps a newer live parked reading when a stale-epoch/revision snapshot finishes later", async () => {
+    // Regression guard mirroring the auto-start marker race above, for the
+    // (parked_epoch, parked_revision) discard rule (spec D1): a REST snapshot
+    // fetch can resolve after a live task.updated has already moved the
+    // parked reading forward, and must never roll it back.
+    let resolveFetch: (snapshot: { steps: unknown[]; tasks: unknown[] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => useWorkflowSnapshot("wf-1"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    mockState.kanban.tasks = [
+      { id: "task-parked", parkedOnBackgroundWork: true, parkedEpoch: 2, parkedRevision: 5 },
+    ];
+    resolveFetch({
+      steps: [],
+      tasks: [
+        {
+          id: "task-parked",
+          parked_on_background_work: false,
+          parked_epoch: 1,
+          parked_revision: 1,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mockHydrate).toHaveBeenCalled());
+    expect(mockHydrate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kanban: expect.objectContaining({
+          tasks: [
+            expect.objectContaining({
+              id: "task-parked",
+              parkedOnBackgroundWork: true,
+              parkedEpoch: 2,
+              parkedRevision: 5,
+            }),
+          ],
         }),
       }),
     );

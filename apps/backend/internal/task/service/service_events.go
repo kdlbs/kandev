@@ -931,6 +931,18 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 	s.publishEventToBus(ctx, eventType, "environment", environment.ID, data)
 }
 
+// PublishMessageEvent is publishMessageEvent's exported form, for callers
+// outside this package that insert a message directly (bypassing
+// CreateMessage) but still need the same message-added/updated event and its
+// session-scoped pending_action projection side effect. The e2e test harness
+// (internal/office/testharness) is the only current caller: it seeds messages
+// straight into the repository so specs can script clarification/permission
+// states deterministically, and without this it never triggers the
+// pending_action recompute a real agent turn would.
+func (s *Service) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+	return s.publishMessageEvent(ctx, eventType, message)
+}
+
 // publishMessageEvent publishes message events to the event bus.
 // Only true system-injected content (wrapped in <kandev-system> tags) is stripped
 // from the visible message content delivered to clients.
