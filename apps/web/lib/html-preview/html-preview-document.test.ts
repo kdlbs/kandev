@@ -41,4 +41,22 @@ describe("buildHtmlPreviewDocument", () => {
     expect(document).toContain("<h1>Incomplete</h1>");
     expect(document).toContain("Content-Security-Policy");
   });
+
+  it("neutralizes document and link navigations while preserving fragments", () => {
+    const document = buildHtmlPreviewDocument(`
+      <meta http-equiv="refresh" content="0;url=https://example.com/redirect">
+      <a id="remote" href="https://example.com/remote">Remote</a>
+      <a id="relative" href="next.html">Relative</a>
+      <a id="fragment" href="#details">Fragment</a>
+      <area id="area" href="/area.html" />
+      <svg><a id="svg" xlink:href="https://example.com/svg">SVG</a></svg>
+    `);
+
+    expect(document).not.toContain('http-equiv="refresh"');
+    expect(document).not.toContain('href="https://example.com/remote"');
+    expect(document).not.toContain('href="next.html"');
+    expect(document).not.toContain('href="/area.html"');
+    expect(document).not.toContain('xlink:href="https://example.com/svg"');
+    expect(document).toContain('id="fragment" href="#details"');
+  });
 });

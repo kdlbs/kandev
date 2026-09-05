@@ -16,8 +16,42 @@ export const HTML_PREVIEW_CSP = [
   "form-action 'none'",
 ].join("; ");
 
+const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
+
+function isSameDocumentFragment(value: string | null): boolean {
+  return value?.trimStart().startsWith("#") ?? false;
+}
+
+function neutralizeLinkNavigation(element: Element): void {
+  const href = element.getAttribute("href");
+  if (href !== null && !isSameDocumentFragment(href)) {
+    element.removeAttribute("href");
+  }
+
+  const namespacedHref = element.getAttributeNS(XLINK_NAMESPACE, "href");
+  const legacyNamespacedHref = element.getAttribute("xlink:href");
+  const xlinkHref = namespacedHref ?? legacyNamespacedHref;
+  if (xlinkHref !== null && !isSameDocumentFragment(xlinkHref)) {
+    element.removeAttributeNS(XLINK_NAMESPACE, "href");
+    element.removeAttribute("xlink:href");
+  }
+}
+
+function neutralizeDocumentNavigation(document: Document): void {
+  for (const meta of document.querySelectorAll("meta")) {
+    if (meta.getAttribute("http-equiv")?.trim().toLowerCase() === "refresh") {
+      meta.remove();
+    }
+  }
+
+  for (const link of document.querySelectorAll("a, area")) {
+    neutralizeLinkNavigation(link);
+  }
+}
+
 export function buildHtmlPreviewDocument(content: string): string {
   const parsed = new DOMParser().parseFromString(content, "text/html");
+  neutralizeDocumentNavigation(parsed);
   const csp = parsed.createElement("meta");
   csp.httpEquiv = "Content-Security-Policy";
   csp.content = HTML_PREVIEW_CSP;

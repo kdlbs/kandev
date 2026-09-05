@@ -115,6 +115,8 @@
     "lowlight": "^3.3.0",
     "mermaid": "^11.12.2",
     "monaco-editor": "^0.55.1",
+    "parse5": "7.3.0",
+    "quickjs-emscripten": "0.32.0",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
     "react-day-picker": "^9.13.0",

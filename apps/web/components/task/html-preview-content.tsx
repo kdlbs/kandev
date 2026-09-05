@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { IconCode } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -11,7 +11,17 @@ import {
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
 import { toRelativePath } from "@/lib/utils";
-import { buildHtmlPreviewDocument } from "@/lib/html-preview/html-preview-document";
+import {
+  createPreviewRuntime,
+  type PreviewRuntimeClient,
+} from "@/lib/html-preview/preview-runtime";
+import { PreviewSurface } from "@/lib/html-preview/preview-surface";
+import {
+  PreviewRuntimeError,
+  type PreviewEvent,
+  type PreviewRuntimeFailureCode,
+  type PreviewSnapshot,
+} from "@/lib/html-preview/preview-runtime-types";
 import { useTranslation } from "react-i18next";
 
 type HtmlPreviewContentProps = {
@@ -98,13 +108,58 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
   onTogglePreview,
 }: HtmlPreviewContentProps) {
   const { t } = useTranslation();
-  const srcDoc = useMemo(() => {
-    try {
-      return buildHtmlPreviewDocument(content);
-    } catch {
-      return null;
-    }
+  const runtimeRef = useRef<PreviewRuntimeClient | null>(null);
+  const generationRef = useRef(0);
+  const [state, setState] = useState<
+    | { status: "loading" }
+    | { status: "ready"; snapshot: PreviewSnapshot }
+    | { status: "failed"; code: PreviewRuntimeFailureCode }
+  >({ status: "loading" });
+
+  useEffect(() => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    const runtime = createPreviewRuntime();
+    runtimeRef.current = runtime;
+    setState({ status: "loading" });
+
+    void runtime.load(content).then(
+      (snapshot) => {
+        if (generationRef.current === generation) setState({ status: "ready", snapshot });
+      },
+      (error: unknown) => {
+        if (generationRef.current !== generation) return;
+        const code = error instanceof PreviewRuntimeError ? error.code : "runtime-error";
+        setState({ status: "failed", code });
+      },
+    );
+
+    return () => {
+      if (runtimeRef.current === runtime) runtimeRef.current = null;
+      runtime.dispose();
+    };
   }, [content]);
+
+  const handleEvent = useCallback((event: PreviewEvent) => {
+    const runtime = runtimeRef.current;
+    const generation = generationRef.current;
+    if (!runtime) return;
+    void runtime.dispatch(event).then(
+      (snapshot) => {
+        if (generationRef.current === generation) setState({ status: "ready", snapshot });
+      },
+      (error: unknown) => {
+        if (generationRef.current !== generation) return;
+        const code = error instanceof PreviewRuntimeError ? error.code : "runtime-error";
+        setState({ status: "failed", code });
+      },
+    );
+  }, []);
+
+  const failureMessage = getPreviewFailureMessage(
+    state.status === "failed" ? state.code : "runtime-error",
+    t,
+  );
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" data-testid="html-preview">
@@ -120,24 +175,35 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         onTogglePreview={onTogglePreview}
       />
       <div className="min-h-0 flex-1 overflow-hidden">
-        {srcDoc ? (
-          <iframe
-            data-testid="html-preview-frame"
-            title={t("task:htmlPreview")}
-            sandbox=""
-            referrerPolicy="no-referrer"
-            srcDoc={srcDoc}
-            className="h-full w-full border-0"
-          />
-        ) : (
+        {state.status === "ready" && (
+          <PreviewSurface snapshot={state.snapshot} onEvent={handleEvent} />
+        )}
+        {state.status === "loading" && (
+          <div
+            data-testid="html-preview-loading"
+            className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
+          >
+            {t("task:htmlPreviewLoading")}
+          </div>
+        )}
+        {state.status === "failed" && (
           <div
             data-testid="html-preview-error"
             className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
           >
-            {t("task:htmlPreviewError")}
+            {failureMessage}
           </div>
         )}
       </div>
     </div>
   );
 });
+
+function getPreviewFailureMessage(
+  code: PreviewRuntimeFailureCode,
+  translate: (key: string) => string,
+): string {
+  if (code === "unsupported-capability") return translate("task:htmlPreviewUnsupportedCapability");
+  if (code === "budget-exceeded") return translate("task:htmlPreviewBudgetExceeded");
+  return translate("task:htmlPreviewRuntimeError");
+}
