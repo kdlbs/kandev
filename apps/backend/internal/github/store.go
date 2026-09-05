@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/persistence"
 )
 
@@ -1163,18 +1164,115 @@ func (s *Store) initCoreSchema() error {
 	if err := s.initAppRegistrationSchema(); err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(ciRunTablesSQL)
+	_, err := s.db.Exec(schemaSQLForDriver(ciRunTablesSQL, s.db.DriverName()))
 	return err
 }
 
 func (s *Store) initAppRegistrationSchema() error {
-	if _, err := s.db.Exec(appRegistrationTablesSQL); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(appRegistrationTablesSQL, s.db.DriverName())); err != nil {
 		return fmt.Errorf("initialize GitHub App registration schema: %w", err)
 	}
 	return nil
+}
+
+func schemaSQLForDriver(schema, driver string) string {
+	timestampType := dialect.TimestampType(driver)
+	schema = strings.ReplaceAll(schema, "TIMESTAMP", timestampType)
+	schema = strings.ReplaceAll(schema, "DATETIME", timestampType)
+	if dialect.IsPostgres(driver) {
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
+		schema = strings.ReplaceAll(schema, "BOOLEAN NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE")
+		if strings.Contains(schema, "CREATE TRIGGER IF NOT EXISTS github_user_connections_registration_insert") {
+			schema = withoutSQLiteGitHubAuthTriggers(schema)
+			schema += postgresGitHubAuthTriggers()
+		}
+	}
+	return schema
+}
+
+func withoutSQLiteGitHubAuthTriggers(schema string) string {
+	start := strings.Index(schema, "\n\tCREATE TRIGGER IF NOT EXISTS github_user_connections_registration_insert")
+	end := strings.Index(schema, "\n\tCREATE TABLE IF NOT EXISTS github_user_connection_versions")
+	if start < 0 || end <= start {
+		return schema
+	}
+	return schema[:start] + schema[end:]
+}
+
+func postgresGitHubAuthTriggers() string {
+	return `
+CREATE OR REPLACE FUNCTION github_validate_user_connection_registration()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $kandev$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM github_workspace_connections workspace
+		WHERE workspace.workspace_id = NEW.workspace_id
+			AND workspace.source = 'github_app_installation'
+			AND workspace.app_registration_id = NEW.app_registration_id
+	) THEN
+		RAISE EXCEPTION 'personal GitHub App registration must match workspace';
+	END IF;
+	RETURN NEW;
+END;
+$kandev$;
+
+CREATE OR REPLACE FUNCTION github_validate_workspace_connection_registration()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $kandev$
+BEGIN
+	IF TG_OP = 'DELETE' THEN
+		IF EXISTS (
+			SELECT 1 FROM github_user_connections personal
+			WHERE personal.workspace_id = OLD.workspace_id
+		) THEN
+			RAISE EXCEPTION 'workspace GitHub App connection still has personal connections';
+		END IF;
+		RETURN OLD;
+	END IF;
+
+	IF EXISTS (
+		SELECT 1 FROM github_user_connections personal
+		WHERE personal.workspace_id = OLD.workspace_id
+			AND (
+				NEW.source <> 'github_app_installation'
+				OR NEW.app_registration_id IS NULL
+				OR personal.app_registration_id <> NEW.app_registration_id
+			)
+	) THEN
+		RAISE EXCEPTION 'workspace GitHub App registration must match personal connections';
+	END IF;
+	RETURN NEW;
+END;
+$kandev$;
+
+DROP TRIGGER IF EXISTS github_user_connections_registration_insert ON github_user_connections;
+CREATE TRIGGER github_user_connections_registration_insert
+BEFORE INSERT ON github_user_connections
+FOR EACH ROW EXECUTE FUNCTION github_validate_user_connection_registration();
+
+DROP TRIGGER IF EXISTS github_user_connections_registration_update ON github_user_connections;
+CREATE TRIGGER github_user_connections_registration_update
+BEFORE UPDATE OF workspace_id, app_registration_id ON github_user_connections
+FOR EACH ROW EXECUTE FUNCTION github_validate_user_connection_registration();
+
+DROP TRIGGER IF EXISTS github_workspace_connections_registration_update ON github_workspace_connections;
+CREATE TRIGGER github_workspace_connections_registration_update
+BEFORE UPDATE OF source, app_registration_id ON github_workspace_connections
+FOR EACH ROW EXECUTE FUNCTION github_validate_workspace_connection_registration();
+
+DROP TRIGGER IF EXISTS github_workspace_connections_registration_delete ON github_workspace_connections;
+CREATE TRIGGER github_workspace_connections_registration_delete
+BEFORE DELETE ON github_workspace_connections
+FOR EACH ROW EXECUTE FUNCTION github_validate_workspace_connection_registration();
+`
 }
 
 func (s *Store) backfillGitHubUserConnectionVersions() error {
@@ -4385,6 +4483,15 @@ func (s *Store) DeleteWorkspaceSettings(ctx context.Context, workspaceID string)
 	if workspaceID == "" {
 		return fmt.Errorf("workspace_id is required")
 	}
+	if err := s.deleteCIRunWorkspaceData(ctx, workspaceID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`), workspaceID)
+	return err
+}
+
+func (s *Store) deleteCIRunWorkspaceData(ctx context.Context, workspaceID string) error {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -4396,7 +4503,6 @@ func (s *Store) DeleteWorkspaceSettings(ctx context.Context, workspaceID string)
 		)`,
 		`DELETE FROM github_ci_run_requests WHERE workspace_id = ?`,
 		`DELETE FROM github_ci_run_grants WHERE workspace_id = ?`,
-		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(statement), workspaceID); err != nil {
 			return err
