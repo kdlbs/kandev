@@ -78,6 +78,8 @@ type UserSettingsDTO struct {
 	QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string                 `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                            `json:"workflow_ids_with_auto_hide_empty_steps"`
+	KanbanSort                        string                              `json:"kanban_sort"`
+	KanbanPriorityFilterTokens        []string                            `json:"kanban_priority_filter_tokens"`
 	Revision                          int64                               `json:"revision"`
 	UpdatedAt                         string                              `json:"updated_at"`
 }
@@ -185,6 +187,8 @@ type UpdateUserSettingsRequest struct {
 	QuickChatTabOrderByWorkspace      *map[string][]string               `json:"quick_chat_tab_order_by_workspace,omitempty"`
 	KanbanHiddenStepIDs               *map[string][]string               `json:"kanban_hidden_step_ids,omitempty"`
 	WorkflowIDsWithAutoHideEmptySteps *[]string                          `json:"workflow_ids_with_auto_hide_empty_steps,omitempty"`
+	KanbanSort                        *string                            `json:"kanban_sort,omitempty"`
+	KanbanPriorityFilterTokens        *[]string                          `json:"kanban_priority_filter_tokens,omitempty"`
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -372,6 +376,8 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		QuickChatTabOrderByWorkspace:      settings.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               settings.KanbanHiddenStepIDs,
 		WorkflowIDsWithAutoHideEmptySteps: append([]string{}, settings.WorkflowIDsWithAutoHideEmptySteps...),
+		KanbanSort:                        settings.KanbanSort,
+		KanbanPriorityFilterTokens:        append([]string{}, settings.KanbanPriorityFilterTokens...),
 		Revision:                          settings.Revision,
 		UpdatedAt:                         settings.UpdatedAt.Format(time.RFC3339),
 	}

@@ -155,6 +155,8 @@ export type UserSettings = {
   quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
   workflow_ids_with_auto_hide_empty_steps?: string[];
+  kanban_sort?: string;
+  kanban_priority_filter_tokens?: string[];
   revision?: number;
   updated_at: string;
 };
@@ -226,4 +228,6 @@ export type UserSettingsUpdatePayload = {
   quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
   workflow_ids_with_auto_hide_empty_steps?: string[];
+  kanban_sort?: string;
+  kanban_priority_filter_tokens?: string[];
 };

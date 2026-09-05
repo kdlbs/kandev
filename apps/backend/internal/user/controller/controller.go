@@ -146,6 +146,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		QuickChatTabOrderByWorkspace:      req.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               req.KanbanHiddenStepIDs,
 		WorkflowIDsWithAutoHideEmptySteps: req.WorkflowIDsWithAutoHideEmptySteps,
+		KanbanSort:                        req.KanbanSort,
+		KanbanPriorityFilterTokens:        req.KanbanPriorityFilterTokens,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

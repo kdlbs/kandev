@@ -303,6 +303,9 @@ function useSwimlaneData(
   const workflowIdsWithAutoHideEmptySteps = useAppStore(
     (state) => state.userSettings.workflowIdsWithAutoHideEmptySteps,
   );
+  const priorityFilterTokens = useAppStore(
+    (state) => state.userSettings.kanbanPriorityFilterTokens,
+  );
 
   const repositories = useMemo(
     () => Object.values(repositoriesByWorkspace).flat() as Repository[],
@@ -332,11 +335,19 @@ function useSwimlaneData(
         searchQuery,
         matchesPluginTaskFilters,
         hiddenStepIds: hiddenSet,
+        priorityFilterTokens,
       });
       cache.set(wfId, projection);
       return projection;
     };
-  }, [snapshots, repoFilter, searchQuery, matchesPluginTaskFilters, hiddenWorkflowStepIds]);
+  }, [
+    snapshots,
+    repoFilter,
+    searchQuery,
+    matchesPluginTaskFilters,
+    hiddenWorkflowStepIds,
+    priorityFilterTokens,
+  ]);
   const getFilteredTasks = useCallback(
     (wfId: string) => getTaskProjection(wfId).visibleTasks,
     [getTaskProjection],

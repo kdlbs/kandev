@@ -69,6 +69,7 @@ type KanbanUpdateTask = {
   description?: string;
   position?: number;
   state?: KanbanTask["state"];
+  priority?: KanbanTask["priority"];
   repository_id?: string;
   repositories?: KanbanTask["repositories"];
   is_ephemeral?: boolean;
@@ -86,7 +87,6 @@ type KanbanUpdateTask = {
   blocks?: KanbanTask["blocks"];
   start_when_unblocked?: boolean;
   startWhenUnblocked?: boolean;
-  priority?: KanbanTask["priority"];
 };
 
 /**
@@ -175,6 +175,9 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               interrupted: existing?.interrupted,
               autoStartFailed: existing?.autoStartFailed,
               foregroundActivity: existing?.foregroundActivity,
+              // A lightweight kanban.update may omit priority entirely; fall
+              // back to the cached value rather than silently downgrading an
+              // already-known priority to unranked. An explicit `null` clears it.
               priority: preserveIfUndefined(task.priority, existing?.priority),
               ...queueFields(task, existing),
               ...dependencyFields(task, existing),
