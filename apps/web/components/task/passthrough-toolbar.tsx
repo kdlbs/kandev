@@ -577,7 +577,7 @@ function PassthroughStatusRow({
             nextStepName={nextStepName}
             onProceed={onProceed}
             isMoving={isMoving}
-            className="h-6 shrink-0"
+            className={`${isTouch ? "min-h-11 min-w-11" : "h-6"} shrink-0`}
             testId="passthrough-proceed-next-step"
           />
         )}
