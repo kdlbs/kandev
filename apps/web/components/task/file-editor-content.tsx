@@ -4,6 +4,7 @@ import { memo } from "react";
 import { useEditorProvider } from "@/hooks/use-editor-resolver";
 import { MonacoCodeEditor } from "@/components/editors/monaco/monaco-code-editor";
 import { CodeMirrorCodeEditor } from "@/components/editors/codemirror/codemirror-code-editor";
+import type { FilePreviewKind } from "@/lib/utils/file-types";
 import { MarkdownPreviewContent } from "./markdown-preview-content";
 
 export type FileEditorContentProps = {
@@ -20,8 +21,11 @@ export type FileEditorContentProps = {
   worktreePath?: string;
   repo?: string;
   enableComments?: boolean;
-  markdownPreview?: boolean;
-  onToggleMarkdownPreview?: () => void;
+  previewKind?: FilePreviewKind;
+  renderedPreview?: boolean;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -32,7 +36,7 @@ export type FileEditorContentProps = {
 export const FileEditorContent = memo(function FileEditorContent(props: FileEditorContentProps) {
   const provider = useEditorProvider("code-editor");
 
-  if (props.markdownPreview && props.onToggleMarkdownPreview) {
+  if (props.renderedPreview && props.previewKind === "markdown" && props.onTogglePreview) {
     return (
       <MarkdownPreviewContent
         path={props.path}
@@ -44,7 +48,7 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
         repositoryName={props.repo}
         enableComments={props.enableComments}
         onDownload={props.onDownload}
-        onTogglePreview={props.onToggleMarkdownPreview}
+        onTogglePreview={props.onTogglePreview}
       />
     );
   }

@@ -6,22 +6,32 @@ import { FileTabContent } from "./file-tab-content";
 
 vi.mock("./file-editor-content", () => ({
   FileEditorContent: ({
-    markdownPreview,
+    previewKind,
+    renderedPreview,
     worktreePath,
-    onToggleMarkdownPreview,
+    onTogglePreview,
+    onPreviewHtml,
   }: {
-    markdownPreview?: boolean;
+    previewKind?: string;
+    renderedPreview?: boolean;
     worktreePath?: string;
-    onToggleMarkdownPreview?: () => void;
+    onTogglePreview?: () => void;
+    onPreviewHtml?: () => void;
   }) => (
     <div
       data-testid="file-editor-content"
-      data-markdown-preview={String(markdownPreview)}
+      data-preview-kind={previewKind}
+      data-rendered-preview={String(renderedPreview)}
       data-worktree-path={worktreePath}
     >
-      <button type="button" onClick={onToggleMarkdownPreview}>
+      <button type="button" onClick={onTogglePreview}>
         Toggle preview
       </button>
+      {onPreviewHtml && (
+        <button type="button" onClick={onPreviewHtml}>
+          Preview HTML
+        </button>
+      )}
     </div>
   ),
 }));
@@ -44,14 +54,14 @@ const file: OpenFileTab = {
   originalContent: "# README",
   originalHash: "hash",
   isDirty: false,
-  markdownPreview: true,
+  renderedPreview: true,
 };
 
 afterEach(cleanup);
 
 describe("FileTabContent Markdown preview", () => {
   it("renders a Markdown tab in preview mode and forwards the toggle", () => {
-    const onToggleMarkdownPreview = vi.fn();
+    const onTogglePreview = vi.fn();
 
     render(
       <FileTabContent
@@ -63,15 +73,18 @@ describe("FileTabContent Markdown preview", () => {
         onFileChange={vi.fn()}
         onFileSave={vi.fn()}
         onFileDelete={vi.fn()}
-        onToggleMarkdownPreview={onToggleMarkdownPreview}
+        onTogglePreview={onTogglePreview}
       />,
     );
 
-    expect(screen.getByTestId("file-editor-content").getAttribute("data-markdown-preview")).toBe(
+    expect(screen.getByTestId("file-editor-content").getAttribute("data-preview-kind")).toBe(
+      "markdown",
+    );
+    expect(screen.getByTestId("file-editor-content").getAttribute("data-rendered-preview")).toBe(
       "true",
     );
     fireEvent.click(screen.getByRole("button", { name: "Toggle preview" }));
-    expect(onToggleMarkdownPreview).toHaveBeenCalledOnce();
+    expect(onTogglePreview).toHaveBeenCalledOnce();
   });
 
   it("uses the effective workspace path for desktop file viewers", () => {
@@ -94,5 +107,34 @@ describe("FileTabContent Markdown preview", () => {
     expect(screen.getByTestId("file-editor-content").getAttribute("data-worktree-path")).toBe(
       "/tmp/task-root",
     );
+  });
+});
+
+describe("FileTabContent HTML preview", () => {
+  it("keeps the source tab and forwards the HTML preview action", () => {
+    const onPreviewHtml = vi.fn();
+
+    render(
+      <FileTabContent
+        tab={{
+          ...file,
+          path: "reports/index.html",
+          name: "index.html",
+          content: "<h1>Report</h1>",
+          renderedPreview: false,
+        }}
+        activeSession={null}
+        activeSessionId="session-1"
+        taskId="task-1"
+        isSaving={false}
+        onFileChange={vi.fn()}
+        onFileSave={vi.fn()}
+        onFileDelete={vi.fn()}
+        onPreviewHtml={onPreviewHtml}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview HTML" }));
+    expect(onPreviewHtml).toHaveBeenCalledOnce();
   });
 });
