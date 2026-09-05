@@ -6,6 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/scriptengine"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // TestKandevBranchCheckoutPostlude_HasInvariantSteps asserts the kandev-
@@ -244,10 +247,25 @@ func TestDefaultPrepareScript_SSHMaterializesPrimaryWorkspace(t *testing.T) {
 // form that sh, bash, and zsh all read the same way.
 func TestManagedScripts_BraceParameterExpansionsBeforeColon(t *testing.T) {
 	unbraced := regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*:`)
+	destination := models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "contributor/kandev", ProviderID: "200", RemoteURL: "https://github.com/contributor/kandev.git",
+		},
+	}
+	destinationScript, err := scriptengine.ContributionDestinationSetupScriptAt(&destination, "/workspace")
+	if err != nil {
+		t.Fatalf("build contribution destination script: %v", err)
+	}
 	scripts := map[string]string{
 		"branch checkout postlude": KandevBranchCheckoutPostlude(),
 		"ssh remote contribution": strings.Join(
 			append(sshRemoteContributionSetupLines(), sshRemoteContributionCheckoutLines()...), "\n"),
+		"ssh contribution destination": destinationScript,
 	}
 	for _, executorType := range []string{"local", "worktree", "local_docker", "k8s", "sprites", executorTypeSSH} {
 		scripts["default prepare script for "+executorType] = DefaultPrepareScript(executorType)
