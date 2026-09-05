@@ -118,6 +118,34 @@ func TestPersistTaskEnvironmentReposForTransitionClearsCompactionMetadataOnRepla
 	}
 }
 
+func TestPersistTaskEnvironmentReposForTransitionClearsMissingIntegrationRef(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	const envID = "env-transition-empty-integration"
+	repo.taskEnvironmentRepos[envID] = []*models.TaskEnvironmentRepo{
+		{
+			ID: "replace", TaskEnvironmentID: envID, RepositoryID: "repo-1", BranchSlug: "main",
+			WorktreeID: "wt-old", WorktreeBranch: "feature/old", WorktreeBranchOwner: "kandev",
+			WorktreeIntegrationRef: "main", Status: taskEnvironmentRepoStatusActive,
+		},
+	}
+
+	if err := exec.persistTaskEnvironmentReposForTransition(context.Background(), envID, []*models.TaskEnvironmentRepo{
+		{
+			RepositoryID: "repo-1", BranchSlug: "main", WorktreeID: "wt-new",
+			WorktreePath: "/new", WorktreeBranch: "feature/new",
+			WorktreeBranchOwner: "kandev", WorktreeIntegrationRef: "",
+		},
+	}, true); err != nil {
+		t.Fatalf("persistTaskEnvironmentReposForTransition: %v", err)
+	}
+
+	row := repo.taskEnvironmentRepos[envID][0]
+	if row.WorktreeIntegrationRef != "" {
+		t.Fatalf("WorktreeIntegrationRef = %q, want empty so cleanup fails closed", row.WorktreeIntegrationRef)
+	}
+}
+
 func TestEnvironmentReposForLaunch_PersistsBranchCompactionMetadata(t *testing.T) {
 	repos := environmentReposForLaunch(
 		&LaunchAgentRequest{},

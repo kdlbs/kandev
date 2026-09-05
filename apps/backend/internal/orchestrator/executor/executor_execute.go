@@ -2798,7 +2798,7 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 	if w.WorktreeBranchOwner != "" || w.WorktreeID == "" {
 		row.WorktreeBranchOwner = w.WorktreeBranchOwner
 	}
-	if w.WorktreeIntegrationRef != "" || w.WorktreeID == "" {
+	if w.WorktreeIntegrationRef != "" || w.WorktreeID == "" || replacePhysical {
 		row.WorktreeIntegrationRef = w.WorktreeIntegrationRef
 	}
 	row.Position = position
@@ -2830,7 +2830,7 @@ func taskEnvironmentRepoNeedsRefresh(row, w *models.TaskEnvironmentRepo, positio
 				row.WorktreePath != w.WorktreePath ||
 				row.WorktreeBranch != w.WorktreeBranch)) ||
 		(w.WorktreeBranchOwner != "" && row.WorktreeBranchOwner != w.WorktreeBranchOwner) ||
-		(w.WorktreeIntegrationRef != "" && row.WorktreeIntegrationRef != w.WorktreeIntegrationRef) ||
+		((w.WorktreeIntegrationRef != "" || replacePhysical) && row.WorktreeIntegrationRef != w.WorktreeIntegrationRef) ||
 		row.Position != position ||
 		row.ErrorMessage != w.ErrorMessage
 }

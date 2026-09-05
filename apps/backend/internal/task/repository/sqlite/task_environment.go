@@ -543,7 +543,7 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	if incoming.WorktreeBranchOwner != "" || incoming.WorktreeID == "" {
 		row.WorktreeBranchOwner = incoming.WorktreeBranchOwner
 	}
-	if incoming.WorktreeIntegrationRef != "" || incoming.WorktreeID == "" {
+	if incoming.WorktreeIntegrationRef != "" || incoming.WorktreeID == "" || replacePhysical {
 		row.WorktreeIntegrationRef = incoming.WorktreeIntegrationRef
 	}
 	row.Position = position

@@ -241,9 +241,6 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
 	}
-	if info.IntegrationRef == "" {
-		info.IntegrationRef = info.BaseBranch
-	}
 	if info.PullBeforeWorktree {
 		refreshRequired, refreshErr := e.shouldRefreshRepositoryForSession(ctx, repo)
 		if refreshErr != nil {

@@ -47,6 +47,31 @@ func TestResolveTaskRepoInfo_PRBaseLookupFailureKeepsStoredBase(t *testing.T) {
 	}
 }
 
+func TestResolveTaskRepoInfo_KeepsMissingIntegrationRefEmpty(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{
+		ID:            "repo-1",
+		WorkspaceID:   "workspace-1",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     t.TempDir(),
+		DefaultBranch: "main",
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	info, err := exec.resolveTaskRepoInfo(context.Background(), &models.TaskRepository{
+		ID:           "task-repo-1",
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		BaseBranch:   "main",
+	})
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfo() error: %v", err)
+	}
+	if info.IntegrationRef != "" {
+		t.Fatalf("IntegrationRef = %q, want empty so cleanup fails closed", info.IntegrationRef)
+	}
+}
+
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11
 func TestResolveTaskRepoInfo_SkipsPRBaseLookupWithoutGitHubPR(t *testing.T) {
 	tests := []struct {
