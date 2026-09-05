@@ -28,6 +28,7 @@ import type { OpenFileTab } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { reviewItemId, useReviewItemSelection } from "../review-selection";
 import { PluginTaskPanel } from "../plugin-task-panel";
 import { PromptHistoryPanelContent } from "../prompt-history-panel-content";
@@ -90,6 +91,8 @@ type SessionMobileLayoutProps = {
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
   isArchived?: boolean;
+  taskCanvases?: Canvas[];
+  onOpenCanvas?: (canvasId: string) => void;
 };
 
 function MobileChatPanelContent({
@@ -523,6 +526,8 @@ type SessionMobileFooterProps = {
   showStatus: boolean;
   onOpenStatus: () => void;
   connectionIssueSeverity: import("@/lib/types/connection").ConnectionIssueSeverity;
+  taskCanvases?: Canvas[];
+  onOpenCanvas?: (canvasId: string) => void;
 };
 
 function SessionMobileFooter({
@@ -536,6 +541,8 @@ function SessionMobileFooter({
   showStatus,
   onOpenStatus,
   connectionIssueSeverity,
+  taskCanvases,
+  onOpenCanvas,
 }: SessionMobileFooterProps) {
   return (
     <>
@@ -554,6 +561,8 @@ function SessionMobileFooter({
         showStatus={showStatus}
         onOpenStatus={onOpenStatus}
         connectionIssueSeverity={connectionIssueSeverity}
+        taskCanvases={taskCanvases}
+        onOpenCanvas={onOpenCanvas}
       />
     </>
   );
@@ -660,6 +669,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         changesBadge={totalChangesCount}
         hasReview={reviews.length > 0}
         showPromptHistory={!isPassthroughMode && effectiveSessionId !== null}
+        taskCanvases={props.taskCanvases}
+        onOpenCanvas={props.onOpenCanvas}
       />
       <SessionTaskSwitcherSheet
         open={isTaskSwitcherOpen}

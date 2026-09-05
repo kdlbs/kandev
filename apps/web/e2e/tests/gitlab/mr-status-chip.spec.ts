@@ -66,6 +66,7 @@ async function openTask(
   testPage: import("@playwright/test").Page,
   session: SessionPage,
   taskId: string,
+  options: { expectedMrCount?: number } = {},
 ) {
   await testPage.goto(`/t/${taskId}`);
   await session.waitForLoad();
@@ -77,7 +78,13 @@ async function openTask(
   await expect(async () => {
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.mrStatusChip()).toBeVisible({ timeout: 5_000 });
+    const chip = session.mrStatusChip();
+    await expect(chip).toBeVisible({ timeout: 5_000 });
+    if (options.expectedMrCount !== undefined) {
+      await expect(chip).toHaveAttribute("data-mr-count", String(options.expectedMrCount), {
+        timeout: 5_000,
+      });
+    }
   }).toPass({ timeout: 30_000 });
 }
 
@@ -145,7 +152,7 @@ test.describe("GitLab MR status chip", () => {
     await linkMR(apiClient, seedData, task.id, AWAITING_IID);
 
     const session = new SessionPage(testPage);
-    await openTask(testPage, session, task.id);
+    await openTask(testPage, session, task.id, { expectedMrCount: 2 });
 
     const chip = session.mrStatusChip();
     await expect(chip).toBeVisible({ timeout: 15_000 });
@@ -283,13 +290,10 @@ test.describe("GitLab MR status chip", () => {
     expect(options.mr_options?.find((o) => o.mr_iid === IDLE_IID)?.auto_fix_enabled).toBe(false);
 
     const session = new SessionPage(testPage);
-    await openTask(testPage, session, task.id);
+    await openTask(testPage, session, task.id, { expectedMrCount: 2 });
 
     const chip = session.mrStatusChip();
     await expect(chip).toBeVisible({ timeout: 15_000 });
-    // The shared workspace MR map hydrates after the task page mounts. Wait
-    // for the persisted two-MR state rather than treating the first visible
-    // chip render as complete.
     await expect(chip).toHaveAttribute("data-mr-count", "2", { timeout: 15_000 });
     const autoFixBadge = chip.getByTestId("mr-status-auto-fix-chip");
     await expect(autoFixBadge).toBeVisible();

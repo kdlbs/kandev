@@ -176,6 +176,10 @@ export type StepType = {
 export type TaskCreateDialogInitialValues = {
   title: string;
   description?: string;
+  /** Create-mode source preset: start without a repository in a scratch workspace. */
+  noRepository?: boolean;
+  /** Create-mode launch hint; the dialog resolves a capable local profile by type. */
+  preferLocalExecutor?: boolean;
   /** Existing task repository rows, including immutable policy snapshots. */
   repositories?: TaskRepositorySnapshot[];
   repositoryId?: string;
@@ -427,6 +431,9 @@ export type DialogFormState = {
   /** No-repo mode: when true the task is created with no repositories. */
   noRepository: boolean;
   setNoRepository: (v: boolean) => void;
+  /** Launch-only hint for choosing a capable direct local executor profile. */
+  preferLocalExecutor: boolean;
+  setPreferLocalExecutor: (v: boolean) => void;
   /** Optional host folder for repo-less tasks; empty means scratch workspace. */
   workspacePath: string;
   setWorkspacePath: (v: string) => void;

@@ -42,6 +42,8 @@ async function openCreationDrawer(page: Page): Promise<Locator> {
   await expect(refresh).toBeVisible();
   await expect(action).toBeVisible();
   const searchControl = search.locator("..");
+  let previousLayoutKey: string | null = null;
+  let stableLayoutReads = 0;
   await expect
     .poll(
       async () => {
@@ -52,11 +54,34 @@ async function openCreationDrawer(page: Page): Promise<Locator> {
         ]);
         if (!searchControlBox || !refreshBox || !actionBox) return false;
         const refreshGap = refreshBox.x - (searchControlBox.x + searchControlBox.width);
-        return (
+        const validLayout =
           searchControlBox.width > refreshBox.width + actionBox.width &&
           refreshGap >= 0 &&
-          refreshGap <= 8
-        );
+          refreshGap <= 8 &&
+          refreshBox.height >= 44 &&
+          actionBox.height >= 44;
+        if (!validLayout) {
+          previousLayoutKey = null;
+          stableLayoutReads = 0;
+          return false;
+        }
+        const layoutKey = [
+          searchControlBox.x,
+          searchControlBox.y,
+          searchControlBox.width,
+          searchControlBox.height,
+          refreshBox.x,
+          refreshBox.y,
+          refreshBox.width,
+          refreshBox.height,
+          actionBox.x,
+          actionBox.y,
+          actionBox.width,
+          actionBox.height,
+        ].join(":");
+        stableLayoutReads = layoutKey === previousLayoutKey ? stableLayoutReads + 1 : 1;
+        previousLayoutKey = layoutKey;
+        return stableLayoutReads >= 2;
       },
       {
         timeout: 15_000,
@@ -64,20 +89,6 @@ async function openCreationDrawer(page: Page): Promise<Locator> {
       },
     )
     .toBe(true);
-  const [searchControlBox, refreshBox, actionBox] = await Promise.all([
-    searchControl.boundingBox(),
-    refresh.boundingBox(),
-    action.boundingBox(),
-  ]);
-  expect(searchControlBox).not.toBeNull();
-  expect(refreshBox).not.toBeNull();
-  expect(actionBox).not.toBeNull();
-  expect(searchControlBox!.width).toBeGreaterThan(refreshBox!.width + actionBox!.width);
-  const refreshGap = refreshBox!.x - (searchControlBox!.x + searchControlBox!.width);
-  expect(refreshGap).toBeGreaterThanOrEqual(0);
-  expect(refreshGap).toBeLessThanOrEqual(8);
-  expect(refreshBox!.height).toBeGreaterThanOrEqual(44);
-  expect(actionBox!.height).toBeGreaterThanOrEqual(44);
   await action.click();
   const drawer = page.getByTestId("create-local-repository-drawer");
   await expect(drawer).toBeVisible();
