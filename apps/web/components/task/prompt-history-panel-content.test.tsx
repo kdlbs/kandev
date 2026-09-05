@@ -238,6 +238,11 @@ function setGeometry(
   }
 }
 
+/** Models the visible panel viewport required by the sentinel geometry guard. */
+function setSentinelGeometry() {
+  setGeometry(screen.getByTestId(SCROLL_TEST_ID), { clientHeight: 400 });
+}
+
 /** Fires the captured ResizeObserver callback recorded for the given element. */
 function fireResize(element: Element) {
   for (const entry of observerEntries) {
@@ -1038,6 +1043,8 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
     expect(screen.getByTestId(SENTINEL_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(LOADING_OLDER_TEST_ID)).toBeNull();
 
+    await act(async () => {});
+    setSentinelGeometry();
     fireIntersection(true);
     await act(async () => {});
     expect(pagination.loadMore).toHaveBeenCalledTimes(1);
@@ -1066,6 +1073,8 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
     // A transcript-owned older-page request is in flight; the panel joins it.
     pagination.isLoadingMore = true;
     rerender(<PromptHistoryPanelContent />);
+    await act(async () => {});
+    setSentinelGeometry();
     fireIntersection(true);
     await act(async () => {});
     expect(pagination.loadMore).toHaveBeenCalledTimes(1);
@@ -1091,6 +1100,8 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
 
     render(<PromptHistoryPanelContent />);
 
+    await act(async () => {});
+    setSentinelGeometry();
     fireIntersection(true);
     // Positive progress re-arms: the still-intersecting sentinel automatically
     // fires the next page after prepend/layout work settles.
@@ -1104,6 +1115,8 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
 
     render(<PromptHistoryPanelContent />);
 
+    await act(async () => {});
+    setSentinelGeometry();
     fireIntersection(true);
     await act(async () => {});
     expect(pagination.loadMore).toHaveBeenCalledTimes(1);
@@ -1415,6 +1428,8 @@ describe("PromptHistoryPanelContent — auto-load loading states", () => {
     pagination.loadMore.mockResolvedValue(0);
     render(<PromptHistoryPanelContent />);
 
+    await act(async () => {});
+    setSentinelGeometry();
     fireIntersection(true);
     await act(async () => {});
     expect(pagination.loadMore).toHaveBeenCalledTimes(1);
