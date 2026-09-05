@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForFiniteAnimations } from "../../helpers/animations";
@@ -7,17 +7,42 @@ import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 const INLINE_CONFIRMATION_TEST_ID = "task-archive-inline-confirmation";
 const TASK_TITLE = "Mobile Kanban archive confirmation";
+type Rgb = readonly [number, number, number];
 
-async function openArchiveMenu(testPage: Page, taskId: string) {
+function parseRgb(value: string): Rgb {
+  const match = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)$/);
+  if (!match) throw new Error(`Expected an RGB color, received ${value}`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function relativeLuminance([red, green, blue]: Rgb): number {
+  const linearize = (channel: number) => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linearize(red) + 0.7152 * linearize(green) + 0.0722 * linearize(blue);
+}
+
+function contrastRatio(foreground: Rgb, background: Rgb): number {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+async function openArchiveMenu(testPage: Page, taskId: string): Promise<Locator> {
   const mobile = new MobileKanbanPage(testPage);
   const card = mobile.taskCard(taskId);
-  await card.getByRole("button", { name: "More options" }).tap();
+  const archiveTrigger = card.getByRole("button", { name: "More options" });
+  await archiveTrigger.tap();
 
   const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible').last();
   await expect(menu).toBeVisible();
   const archiveItem = menu.getByRole("menuitem", { name: "Archive", exact: true });
   await expect(archiveItem).toBeVisible();
   await archiveItem.tap();
+  return archiveTrigger;
 }
 
 test.describe("Mobile Kanban card archive confirmation", () => {
@@ -47,7 +72,7 @@ test.describe("Mobile Kanban card archive confirmation", () => {
     const beforeBox = await card.boundingBox();
     if (!beforeBox) throw new Error("mobile archive task card has no layout box");
 
-    await openArchiveMenu(testPage, task.id);
+    const archiveTrigger = await openArchiveMenu(testPage, task.id);
 
     const dialog = testPage.getByRole("alertdialog", { name: /Archive task/ });
     await expect(dialog).toBeVisible();
@@ -62,18 +87,29 @@ test.describe("Mobile Kanban card archive confirmation", () => {
       caption:
         "After: mobile Kanban uses the contained archive alert dialog without changing card layout.",
     });
-    const [dialogBox, viewport, backgroundColor] = await Promise.all([
+    const [dialogBox, viewport, surfaceColors] = await Promise.all([
       dialog.boundingBox(),
       testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
-      dialog.evaluate((element) => getComputedStyle(element).backgroundColor),
+      dialog.evaluate((element) => {
+        const styles = getComputedStyle(element);
+        return { backgroundColor: styles.backgroundColor, foregroundColor: styles.color };
+      }),
     ]);
     if (!dialogBox) throw new Error("mobile archive dialog has no layout box");
     expect(dialogBox.x).toBeGreaterThanOrEqual(12);
     expect(viewport.width - (dialogBox.x + dialogBox.width)).toBeGreaterThanOrEqual(12);
     expect(dialogBox.y).toBeGreaterThanOrEqual(0);
     expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height);
-    expect(backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
-    expect(backgroundColor).toMatch(/^rgb/);
+    expect(surfaceColors.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+    expect(surfaceColors.backgroundColor).toMatch(/^rgb/);
+    expect(surfaceColors.foregroundColor).toMatch(/^rgb/);
+    expect(relativeLuminance(parseRgb(surfaceColors.backgroundColor))).toBeLessThan(0.1);
+    expect(
+      contrastRatio(
+        parseRgb(surfaceColors.foregroundColor),
+        parseRgb(surfaceColors.backgroundColor),
+      ),
+    ).toBeGreaterThanOrEqual(4.5);
 
     for (const actionName of ["Cancel", "Archive"]) {
       const actionBox = await dialog
@@ -91,6 +127,7 @@ test.describe("Mobile Kanban card archive confirmation", () => {
 
     await dialog.getByRole("button", { name: "Cancel", exact: true }).tap();
     await expect(dialog).not.toBeVisible();
+    await expect(archiveTrigger).toBeFocused();
     await expect(card).toBeVisible();
     expect(testPage.url()).toBe(startUrl);
 

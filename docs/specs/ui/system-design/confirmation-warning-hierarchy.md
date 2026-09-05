@@ -103,8 +103,10 @@ classification alone. The mobile Kanban card opts into the existing full
 board, so a virtualized card row does not grow when a zero-descendant task is
 being archived.
 
-The fine-pointer Kanban card retains the anchored `ActionConfirmPopover`. The
-task-switcher/task-row adapter may explicitly own the coarse-pointer inline
+Fine-pointer desktop and compact-desktop Kanban retain the anchored
+`ActionConfirmPopover`. Coarse-pointer tablet Kanban retains its existing
+coarse-pointer routing, including the current inline zero-descendant surface.
+The task-switcher/task-row adapter may explicitly own the coarse-pointer inline
 confirmation, and command-panel callers that request `inline` retain their
 existing row-owned surface. These callers keep their established focus,
 containment, and action contracts; only the mobile Kanban card changes its

@@ -121,8 +121,10 @@ repository resources, so that I can understand the consequence before acting.
   and inset, use the existing theme tokens, keep its content internally
   scrollable, and expose stacked full-width actions at least 44 CSS px high;
   no inline confirmation shall be inserted between cards or change the card's
-  height, board URL, or selected task. Desktop/tablet Kanban shall retain its
-  anchored archive popover, task-switcher/task-row surfaces shall retain their
+  height, board URL, or selected task. Fine-pointer desktop and compact-desktop
+  Kanban shall retain their anchored archive popover. Coarse-pointer tablet
+  Kanban shall retain its existing routing, including its current inline
+  zero-descendant surface. Task-switcher/task-row surfaces shall retain their
   intentional row-owned coarse-pointer inline confirmation, and a disabled
   archive-confirmation preference shall continue to bypass the surface.
 

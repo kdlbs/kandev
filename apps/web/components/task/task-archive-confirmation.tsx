@@ -201,6 +201,7 @@ function ArchiveClassifyingPopover({
 type ArchiveDialogProps = Pick<
   TaskArchiveConfirmationProps,
   | "onOpenChange"
+  | "focusReturnRef"
   | "taskTitle"
   | "isBulkOperation"
   | "count"
@@ -252,7 +253,13 @@ function ArchiveConfirmationContent({
     subtaskClassification.total > 0;
 
   if (shouldUseDialog) {
-    return <ArchiveDialog {...dialogProps} subtaskClassification={subtaskClassification} />;
+    return (
+      <ArchiveDialog
+        {...dialogProps}
+        focusReturnRef={focusReturnRef}
+        subtaskClassification={subtaskClassification}
+      />
+    );
   }
 
   if (subtaskClassification.status !== "resolved") {
