@@ -94,27 +94,35 @@ intent-derived destination.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.4:** Desktop and mobile task
 creation shall apply the same immediate-launch placement rule.
 
-### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005: Step prompt trigger guidance
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005: Step prompt automatic-start default
 
-**Intent:** Make the difference between step prompt content and automatic step
-entry clear during workflow editing.
+**Intent:** Make a newly authored step prompt run on step entry by default while
+preserving explicit control after that default is applied.
 
 #### Acceptance criteria
 
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1:** When a workflow step
-has a non-empty prompt and no `auto_start_agent` entry action, the workflow
-editor shall show a visible warning. The warning shall state that step entry
-does not send the prompt automatically.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.2:** The warning shall tell
-the user to start the agent manually or enable automatic start.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.3:** The warning shall not
-appear when the prompt is empty or the step has an `auto_start_agent` entry
-action.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** The workflow editor
-shall state that a step prompt replaces the task description unless it contains
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1:** When an editable step
+prompt changes from empty to non-empty through typing, pasting, or a prompt
+template, the workflow editor shall enable the step's `auto_start_agent` entry
+action if it is not already enabled.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.2:** The editor shall show
+the automatically enabled setting immediately, and saving the workflow shall
+persist the prompt and `auto_start_agent` action together.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.3:** After automatic start
+has been enabled for a new prompt, editing that non-empty prompt shall not
+re-enable automatic start if the user explicitly disables it.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** Clearing a step prompt
+shall not remove its `auto_start_agent` action. Entering a new non-empty prompt
+after the field becomes empty shall apply the default again.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** Loading an existing
+non-empty prompt without `auto_start_agent`, or changing an unrelated workflow
+setting, shall not silently enable automatic start.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.6:** The workflow editor
+shall not show a missing-auto-start warning for step prompts. It shall continue
+to state that a step prompt replaces the task description unless it contains
 `{{task_prompt}}`.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** Desktop and mobile
-workflow editors shall show the same guidance without horizontal page overflow.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.7:** Desktop and mobile
+workflow editors shall apply the same default without horizontal page overflow.
 
 ## Migrated source detail
 

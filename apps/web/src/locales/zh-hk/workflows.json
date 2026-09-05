@@ -212,7 +212,6 @@
   "workflowPromptSetHint": "已設定；展開以編輯",
   "workflowInstructionsCollapsed": "工作流程說明",
   "stepPrompt": "步驟提示詞",
-  "stepPromptAutoStartWarning": "此提示詞本身不會啓動代理程式。請手動啓動代理程式，或啓用「自動啓動代理程式」。步驟切換到其他代理程式設定檔時，也可以啓動該提示詞。",
   "stepPromptHelp": "為此步驟中的代理程式提供自訂指令。使用 {{taskPrompt}} 可插入任務描述。",
   "stepPromptPlaceholderExample": "使用 OAuth2 實現用戶身份驗證",
   "stepPromptPlaceholderTaskPrompt": "用戶提供的原始任務描述",

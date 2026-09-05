@@ -5,6 +5,7 @@ import type { WorkflowStep } from "@/lib/types/http";
 import {
   getChildrenCompletedTransitionType,
   HelpTip,
+  inferPromptAutoStartEvents,
   PROMPT_TEMPLATES,
   STEP_COLORS,
 } from "./workflow-pipeline-editor-helpers";
@@ -98,5 +99,42 @@ describe("workflow pipeline editor helpers", () => {
 
   it("defaults all child tasks complete to none when no transition is configured", () => {
     expect(getChildrenCompletedTransitionType({ events: {} } as WorkflowStep)).toBe("none");
+  });
+
+  // @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1 through .5
+  it("adds automatic start when a prompt first becomes non-empty", () => {
+    const step = {
+      events: {
+        on_enter: [{ type: "reset_agent_context" }],
+        on_exit: [{ type: "disable_plan_mode" }],
+      },
+    } as WorkflowStep;
+
+    expect(inferPromptAutoStartEvents(step, "", "Review the changes")).toEqual({
+      on_enter: [{ type: "reset_agent_context" }, { type: "auto_start_agent" }],
+      on_exit: [{ type: "disable_plan_mode" }],
+    });
+  });
+
+  it("does not re-enable automatic start during later prompt edits", () => {
+    const step = { events: { on_enter: [] } } as unknown as WorkflowStep;
+
+    expect(inferPromptAutoStartEvents(step, "Review", "Review carefully")).toBeUndefined();
+  });
+
+  it("does not remove automatic start when the prompt is cleared", () => {
+    const step = {
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    } as WorkflowStep;
+
+    expect(inferPromptAutoStartEvents(step, "Review", "")).toBeUndefined();
+  });
+
+  it("does not duplicate an existing automatic-start action", () => {
+    const step = {
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    } as WorkflowStep;
+
+    expect(inferPromptAutoStartEvents(step, "", "Review")).toBeUndefined();
   });
 });

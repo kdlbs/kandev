@@ -16,6 +16,7 @@ import {
   STEP_COLORS,
   hasOnEnterAction,
   hasOnExitAction,
+  inferPromptAutoStartEvents,
 } from "./workflow-pipeline-editor-helpers";
 import {
   useStepActions,
@@ -470,9 +471,12 @@ export function StepConfigPanel({
   const debouncedUpdateName = useDebouncedCallback((name: string) => {
     onUpdate({ name });
   }, 500);
-  const debouncedUpdatePrompt = useDebouncedCallback((prompt: string) => {
-    onUpdate({ prompt });
-  }, 500);
+
+  const handlePromptChange = (prompt: string) => {
+    const events = inferPromptAutoStartEvents(step, localPrompt, prompt);
+    setLocalPrompt(prompt);
+    onUpdate(events ? { prompt, events } : { prompt });
+  };
 
   const actions = useStepActions({ step, onUpdate });
 
@@ -523,8 +527,7 @@ export function StepConfigPanel({
           step={step}
           savedStep={savedStep}
           localPrompt={localPrompt}
-          onLocalPromptChange={setLocalPrompt}
-          debouncedUpdatePrompt={debouncedUpdatePrompt}
+          onPromptChange={handlePromptChange}
           readOnly={readOnly}
         />
       </div>

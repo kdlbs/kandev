@@ -2,53 +2,37 @@ import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings on mobile", () => {
-  // @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5
-  test("warns when a step prompt has no automatic start", async ({
+  // @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.7
+  test("enables automatic start for a prompt template", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
   }) => {
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile Prompt Guidance");
-    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile Prompt Defaults");
+    await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
       is_start_step: true,
     });
-    await apiClient.updateWorkflowStep(reviewStep.id, { prompt: "Review the changes" });
 
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
-    const card = await page.findWorkflowCard("Mobile Prompt Guidance");
+    const card = await page.findWorkflowCard("Mobile Prompt Defaults");
     const panel = await page.selectStep(card, "Review", true);
-    const warning = panel.getByTestId("workflow-step-prompt-auto-start-warning");
+    const autoStart = panel.getByRole("checkbox", { name: "Auto-start agent" });
 
-    await expect(warning).toBeVisible();
-    await expect(warning).toContainText(
-      "This prompt does not start the agent by itself. Start the agent manually, or enable Auto-start agent.",
-    );
-    await expect(warning).toHaveClass(/bg-muted\/50/);
-    await expect(
-      panel.getByText(
-        "A step prompt replaces the task description unless it contains {{task_prompt}}. Saved prompts are attached as hidden context; editing a saved prompt updates every step that references it. Note: {{task_prompt}} only expands in the step prompt itself, not inside a referenced saved prompt.",
-        { exact: true },
-      ),
-    ).toBeVisible();
+    await expect(autoStart).not.toBeChecked();
+    await panel.getByRole("button", { name: "Plan", exact: true }).tap();
+    await expect(autoStart).toBeChecked();
+    await expect(panel.getByTestId("workflow-step-prompt-auto-start-warning")).toHaveCount(0);
     if (prCapture.capturing) {
-      await warning.scrollIntoViewIfNeeded();
+      await autoStart.scrollIntoViewIfNeeded();
     }
-    await prCapture.screenshot("mobile-step-prompt-auto-start-warning", {
-      caption: "Step prompt guidance remains readable at a phone viewport width.",
+    await prCapture.screenshot("mobile-step-prompt-auto-start-default", {
+      caption: "Prompt templates enable automatic start at a phone viewport width.",
     });
-    const warningBox = await warning.boundingBox();
-    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
-    expect(warningBox).not.toBeNull();
-    expect(warningBox!.x).toBeGreaterThanOrEqual(0);
-    expect(warningBox!.x + warningBox!.width).toBeLessThanOrEqual(viewportWidth);
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
     ).toBe(false);
-
-    await page.setAutoStart(card, "Review", true, true);
-    await expect(warning).toBeHidden();
   });
 
   test("remove sync confirmation keeps 44px inline actions", async ({
