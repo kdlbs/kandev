@@ -199,7 +199,7 @@ func TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt(t *testing.T) {
 		}},
 	}
 	if err := svc.autoStartStepPrompt(
-		context.Background(), "task1", resetSession, step, "successor prompt", false, false,
+		context.Background(), "task1", resetSession, step, "successor prompt", false, false, nil,
 	); err != nil {
 		t.Fatalf("auto-start successor prompt: %v", err)
 	}

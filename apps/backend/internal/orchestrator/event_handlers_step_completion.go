@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -81,6 +82,12 @@ func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromS
 		metadata = map[string]interface{}{
 			"signal_source":  signal.Source,
 			"signal_summary": signal.Summary,
+		}
+		if handoff := strings.TrimSpace(signal.Handoff); handoff != "" {
+			metadata["signal_handoff"] = handoff
+		}
+		if blockers := strings.TrimSpace(signal.Blockers); blockers != "" {
+			metadata["signal_blockers"] = blockers
 		}
 	}
 	trigger := wfmodels.StepTransitionTriggerAutoComplete

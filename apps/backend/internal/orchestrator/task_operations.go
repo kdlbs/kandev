@@ -2487,6 +2487,13 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return nil
 	}
 
+	// Claimed after the actionability decision above, over content that
+	// excludes the handoff text (AC-001.6a), then appended last (AC-001.6).
+	// Queue promotion and manual auto-start dispatch once with no replacement
+	// launch, so no shared stepHandoffOnce is needed here.
+	handoffText, _ := s.claimStepHandoffCarryText(ctx, taskID, workflowStepID)
+	effectivePrompt = appendStepHandoffToPrompt(effectivePrompt, handoffText)
+
 	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
