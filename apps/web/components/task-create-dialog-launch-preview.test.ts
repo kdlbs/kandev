@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   composeLaunchPreviewPrompt,
+  type TaskCreateLaunchIntent,
   resolveTaskCreateLaunchPreview,
 } from "./task-create-dialog-launch-preview";
 import type { StepType } from "./task-create-dialog-types";
@@ -11,11 +12,16 @@ function step(id: string, position: number, overrides: Partial<StepType> = {}): 
   return { id, title: id, position, ...overrides };
 }
 
-function resolve(snapshotSteps: StepType[], fetchedSteps: StepType[] | null = null) {
+function resolve(
+  snapshotSteps: StepType[],
+  fetchedSteps: StepType[] | null = null,
+  launchIntent: TaskCreateLaunchIntent = "start-agent",
+) {
   return resolveTaskCreateLaunchPreview({
     effectiveWorkflowId: WORKFLOW_ID,
     fetchedSteps,
     snapshotSteps,
+    launchIntent,
   });
 }
 
@@ -56,6 +62,23 @@ describe("task-create launch preview", () => {
     });
   });
 
+  it("uses the first positional step for the empty-description plan-mode action", () => {
+    expect(
+      resolve(
+        [
+          step("backlog", 0, { title: "Backlog" }),
+          step("configured", 1, { title: "Configured", is_start_step: true }),
+          step("auto-start", 2, {
+            title: "In Progress",
+            events: { on_enter: [{ type: "auto_start_agent" }] },
+          }),
+        ],
+        null,
+        "plan-mode",
+      ),
+    ).toMatchObject({ stepId: "backlog", stepName: "Backlog" });
+  });
+
   it("uses matching fetched steps and never selects a stale workflow step", () => {
     expect(
       resolve(
@@ -83,6 +106,10 @@ describe("task-create launch preview", () => {
         [step("stale", 0, { workflowId: "old-workflow", title: "Stale workflow" })],
       ),
     ).toMatchObject({ stepId: "selected", stepName: "Selected workflow" });
+  });
+
+  it("treats an empty successful fetch as authoritative over the snapshot", () => {
+    expect(resolve([step("stale-snapshot", 0, { title: "Stale snapshot" })], [])).toBeNull();
   });
 
   it("omits a destination when there is no effective workflow or no step", () => {

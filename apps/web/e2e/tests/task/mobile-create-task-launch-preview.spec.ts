@@ -49,11 +49,13 @@ test.describe("mobile task-create launch prompt preview", () => {
         .getByRole("button", { name: /^Mobile Launch Preview Workflow/ })
         .last()
         .tap();
-      await expect(dialog.getByTestId("task-create-launch-step")).toContainText("In Progress");
+      await dialog.getByTestId("task-description-input").fill("");
+      await expect(dialog.getByTestId("task-create-launch-step")).toContainText("Backlog");
 
       await dialog.getByTestId("task-title-input").fill("Mobile launch preview");
       const description = "Review mobile launch preview";
       await dialog.getByTestId("task-description-input").fill(description);
+      await expect(dialog.getByTestId("task-create-launch-step")).toContainText("In Progress");
 
       const toggle = dialog.getByTestId("task-create-launch-preview-toggle");
       await expect(toggle).toHaveAttribute("aria-label", "Preview launch prompt");

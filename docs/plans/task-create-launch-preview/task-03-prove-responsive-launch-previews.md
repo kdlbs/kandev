@@ -43,8 +43,9 @@ steps differ.
 
 ## Acceptance
 
-- Desktop shows the actual auto-start destination and the correctly composed
-  step prompt after a workflow switch.
+- Desktop shows the first positional destination while the description is empty,
+  then the actual auto-start destination and correctly composed step prompt after
+  a workflow switch and description entry.
 - Mobile completes the same edit, preview, and return-to-edit flow.
 - The mobile icon is at least 44 CSS pixels, and the dialog causes no document
   horizontal overflow.

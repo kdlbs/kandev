@@ -12,7 +12,9 @@ requirements:
 
 The task system owns immediate-launch routing and workflow-step prompt
 composition. The shared task creation dialog presents a pre-creation projection
-of those rules.
+of those rules. The projection follows the action currently available in the
+form: an empty description exposes **Start Plan Mode**, while a nonempty
+description exposes immediate agent-start actions.
 
 This design adds no endpoint, persisted state, or runtime prompt behavior. It
 uses the workflow data that the dialog already receives from boot state or the
@@ -56,13 +58,17 @@ existing fields:
 - `prompt`
 - `workflowId` when the step came from a fallback fetch
 
-The dialog uses matching fetched steps when they exist. Otherwise, it uses the
-selected workflow snapshot. A fetched step from another workflow is never a
-candidate.
+The dialog uses matching fetched steps when they exist. A successful empty fetch
+is authoritative and produces no destination. If the fetch is unavailable, or
+contains only steps from another workflow, the dialog uses the selected workflow
+snapshot. A fetched step from another workflow is never a candidate. The dialog
+refreshes the effective workflow even when it is the visible context workflow so
+that edits made elsewhere do not remain hidden behind a stale snapshot.
 
 ## Launch-step projection
 
-The frontend resolver mirrors `workflow.Service.ResolveAutoStartStep`:
+For a nonempty description, the frontend resolver mirrors
+`workflow.Service.ResolveAutoStartStep`:
 
 1. Sort the effective workflow steps by `position`.
 2. Select the first step whose `on_enter` actions contain
@@ -70,9 +76,11 @@ The frontend resolver mirrors `workflow.Service.ResolveAutoStartStep`:
 3. If none exists, select the first step with `is_start_step`.
 4. If none exists, select the first positional step.
 
-This projection describes the **Start task** and **Start task in plan mode**
-actions. It does not describe **Create without starting agent**, which uses the
-configured start step.
+For an empty description, the resolver selects the first positional step. This
+matches the **Start Plan Mode** path, which does not start an agent immediately.
+The auto-start projection describes the **Start task** and **Start task in plan
+mode** actions when a description is present. It does not describe **Create
+without starting agent**, which uses the configured start step.
 
 ## Prompt composition
 
@@ -128,9 +136,11 @@ flow. This change adds no drawer, route, fixed control, or safe-area boundary.
 
 ## Failure and recovery
 
-If workflow steps are unavailable, the dialog omits the destination and preview
-controls. It does not guess from stale steps, and the remaining form stays
-usable.
+If workflow steps are unavailable, the dialog keeps the selected workflow
+snapshot as a temporary fallback and the remaining form stays usable. A
+successful empty response omits the destination and preview controls rather
+than retaining stale snapshot steps. Workflow identity filtering prevents
+another workflow's fetched steps from becoming candidates.
 
 If steps arrive after the dialog opens, the derived model updates from those
 steps. A workflow change removes any prior preview model before new steps can
@@ -144,8 +154,8 @@ server-owned values.
 
 ## Verification
 
-- Unit tests cover launch routing, stale workflow filtering, and prompt
-  composition.
+- Unit tests cover action-sensitive launch routing, stale workflow filtering,
+  same-workflow refresh, and prompt composition.
 - Component tests cover selector text, toggle state, draft preservation, and
   the no-prompt fallback.
 - Desktop Playwright covers workflow switching and composed preview content.

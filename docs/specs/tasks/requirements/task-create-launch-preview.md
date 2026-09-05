@@ -10,8 +10,11 @@ owners:
 
 ## Overview
 
-The task creation dialog shows the workflow step that **Start task** will enter.
-It can also preview the step prompt after applying the current task prompt.
+The task creation dialog shows the workflow step that the applicable agent-start
+action will enter. With an empty description, the primary action is **Start Plan
+Mode**, which enters the first positional step. Once a description is present,
+the immediate agent-start actions use the workflow auto-start precedence. The
+dialog can also preview the step prompt after applying the current task prompt.
 This preview lets a person review workflow instructions before starting an agent.
 
 The `tasks` system owns this capability because it owns task creation, launch
@@ -20,8 +23,10 @@ task-owned launch decision.
 
 ## Terminology
 
-- **Launch destination:** The workflow step that an immediate agent start will
-  enter. It follows the current backend launch-routing rules.
+- **Launch destination:** The workflow step that the applicable immediate
+  agent-start action will enter. An empty description selects the first
+  positional step for **Start Plan Mode**; a nonempty description follows the
+  auto-start, configured-start, and positional fallback order.
 - **Step prompt:** The prompt template stored on the launch destination.
 - **Composed preview:** The step prompt after the dialog applies substitutions
   that are available before task creation.
@@ -41,16 +46,21 @@ that the workflow destination is not hidden.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.1:** When the workflow selector
   shows a selected workflow, the system shall show the immediate launch
   destination beside the workflow name in muted text.
-- **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.2:** The displayed launch
-  destination shall be the first positional step with an `auto_start_agent`
-  entry action. If no such step exists, it shall use the configured start step,
-  then the first positional step.
+- **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.2:** When the description is empty,
+  the displayed launch destination shall be the first positional step because
+  **Start Plan Mode** uses the plan-mode launch path. When the description is
+  nonempty, the displayed destination shall be the first positional step with
+  an `auto_start_agent` entry action. If no such step exists, it shall use the
+  configured start step, then the first positional step.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.3:** When the selected workflow
   changes, the displayed destination shall update without using steps from the
   previous workflow.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.4:** When the destination is not
   available, the system shall omit the destination text. The workflow selector
   shall remain usable.
+- **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.5:** When the description changes
+  between empty and nonempty, the displayed destination shall update to match
+  the applicable launch path.
 
 ### REQ-TASKS-TASK-CREATE-LAUNCH-PREVIEW-002: Step prompt preview
 
@@ -89,6 +99,8 @@ so that a step template cannot replace my task prompt without notice.
 
 - Selecting a different initial workflow step.
 - Changing backend launch routing or prompt composition.
+- Projecting the **Create without starting agent** destination; that action uses
+  the configured start step and is not an immediate agent start.
 - Showing workflow-level instructions that are separate from the step prompt.
 - Expanding saved-prompt references or generating a task ID before creation.
 - Adding the preview to task chat, session creation, or subtask creation.

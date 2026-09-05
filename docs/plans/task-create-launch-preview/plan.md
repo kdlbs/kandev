@@ -15,6 +15,9 @@ legacy_specs: []
 
 Add a shared frontend projection of the backend immediate-launch rules. Use that
 projection to show the destination step and to preview its composed step prompt.
+The projection must follow the available create action: empty descriptions use
+the plan-mode first step, while nonempty descriptions use immediate agent-start
+routing.
 The pure projection lands first, the UI follows, and responsive E2E tests prove
 the complete flow.
 
@@ -41,12 +44,14 @@ the complete flow.
 ### Launch projection
 
 Add `task-create-dialog-launch-preview.ts` with pure launch-step and prompt
-composition helpers. The step resolver mirrors `ResolveAutoStartStep` and
-filters fetched steps by the effective workflow ID.
+composition helpers. The step resolver uses the first positional step for the
+empty-description plan-mode action, mirrors `ResolveAutoStartStep` for
+nonempty descriptions, and filters fetched steps by the effective workflow ID.
 
-Extend `StepType` and `useWorkflowStepsEffect` so fallback step data retains
-`prompt`. Build one derived launch-preview model in the dialog prop assembly.
-Do not store derived preview data in form state.
+Extend `StepType` and `useWorkflowStepsEffect` so fetched step data retains
+`prompt` and refreshes even for the visible context workflow. Build one derived
+launch-preview model in the dialog prop assembly. Do not store derived preview
+data in form state.
 
 ### Dialog presentation
 
@@ -72,8 +77,9 @@ until task creation.
 
 ## Tests
 
-- `AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.2` maps to resolver tests for
-  auto-start, configured-start, and positional fallbacks.
+- `AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.2` and `.5` map to resolver and
+  prop-builder tests for plan-mode, auto-start, configured-start, and positional
+  fallbacks.
 - `AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.3` maps to stale fetched-step and
   workflow-switch tests.
 - `AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-002.2` through `.5` map to composition
@@ -99,7 +105,8 @@ until task creation.
 
 ## Verification results
 
-- Launch-preview unit and effects tests passed (40 tests).
+- Targeted launch-preview, effects, prop-builder, and selector tests passed
+  (67 tests after review fixup coverage).
 - Task-create component tests passed (43 tests); focused ESLint, typecheck,
   i18n checks, pseudo-catalog sync, and public-doc validators passed.
 - Desktop and mobile focused E2E tests passed (1 each) in host mode.
@@ -109,8 +116,9 @@ until task creation.
 
 - The frontend resolver can drift from backend launch routing. Focused fallback
   tests must encode the backend precedence.
-- A workflow switch can briefly expose stale fetched steps. Every fetched step
-  must match the current effective workflow before use.
+- A workflow switch can briefly expose the snapshot while a fresh fetch is in
+  flight. Every fetched step must match the current effective workflow before
+  use, and a successful empty fetch is authoritative.
 - The preview cannot show server-owned task IDs or saved-prompt expansions.
   Public copy must state this boundary without implying full runtime expansion.
 - Long workflow and step names can crowd the selector on phones. Truncation and

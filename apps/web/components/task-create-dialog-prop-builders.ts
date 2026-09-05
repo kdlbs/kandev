@@ -34,12 +34,14 @@ export function resolveDialogLaunchPreview(
   effectiveWorkflowId: string | null,
   fetchedSteps: DialogFormState["fetchedSteps"],
   snapshots: DialogFormBodyProps["snapshots"],
+  hasDescription: boolean,
 ): TaskCreateLaunchPreview | null {
   if (!isCreateMode) return null;
   return resolveTaskCreateLaunchPreview({
     effectiveWorkflowId,
     fetchedSteps,
     snapshotSteps: effectiveWorkflowId ? snapshots[effectiveWorkflowId]?.steps : undefined,
+    launchIntent: hasDescription ? "start-agent" : "plan-mode",
   });
 }
 
@@ -79,6 +81,7 @@ export function buildDialogFormBodyProps(
       effectiveWorkflowId,
       fs.fetchedSteps,
       setup.snapshots,
+      fs.hasDescription,
     ),
     fs,
     editDependencies: setup.editDependencies,
