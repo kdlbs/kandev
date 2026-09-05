@@ -270,6 +270,12 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
         onEscapeKeyDown={(event) => {
           if (setup.isCreateMode) event.preventDefault();
         }}
+        onCloseAutoFocus={(event) => {
+          const target = props.focusReturnRef?.current;
+          if (!target || !document.contains(target)) return;
+          event.preventDefault();
+          target.focus();
+        }}
         data-testid="create-task-dialog"
         data-webkit-safe-motion="true"
         showCloseButton={false}

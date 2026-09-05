@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   taskId as toTaskId,
   workflowId as toWorkflowId,
@@ -8,6 +9,9 @@ import {
 import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 import { repositorySlug } from "@/lib/repository-slug";
+import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
+import { useAppStore } from "@/components/state-provider";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
@@ -234,6 +238,7 @@ export function resolveTaskIds(task: Task | null) {
     workspaceId: taskValues.workspace_id ?? null,
     projectId: taskValues.project_id ?? null,
     workflowStepId: taskValues.workflow_step_id ?? null,
+    primaryExecutorType: taskValues.primary_executor_type ?? null,
     baseBranch: primaryRepository?.base_branch,
     pullRequestTarget: primaryRepository?.branch_policy_pull_request_target || undefined,
     isArchived: !!taskValues.archived_at,
@@ -259,6 +264,39 @@ function buildPullRequestTargetsByRepository(
     if (slug) targets[slug] = target;
   }
   return targets;
+}
+
+/**
+ * The detail top bar's actions-menu subject: a live board-row lookup against
+ * the workflow snapshots with the flat task list as fallback (the same lookup
+ * `useSidebarTaskEdit` performs), NOT the detail page's own task record. The
+ * page's own record stays loaded on tasks the board has pruned (e.g. after a
+ * peer archives/deletes it, or for a task that was never on any board, such
+ * as an Office-managed task), so using it directly would make the
+ * "unresolved-row" identifier-only tier (AC-TASKS-TASK-ACTIONS-MENU-002.5)
+ * unreachable. Returns null when the subject genuinely has no board row.
+ */
+export function useTaskActionsMenuBoardRow(task: Task | null): TaskActionsMenuBoardRow | null {
+  const taskId = task?.id ?? null;
+  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  return useMemo(() => {
+    if (!taskId) return null;
+    const boardTask = findTaskInSnapshots(taskId, snapshots, kanbanTasks);
+    if (!boardTask) return null;
+    return {
+      id: boardTask.id,
+      title: boardTask.title,
+      description: boardTask.description,
+      workflowStepId: boardTask.workflowStepId,
+      state: boardTask.state,
+      repositoryId: boardTask.repositoryId,
+      repositories: boardTask.repositories,
+      parentTaskId: boardTask.parentTaskId,
+      primaryExecutorType: boardTask.primaryExecutorType,
+      workspaceMode: boardTask.workspaceMode,
+    };
+  }, [taskId, snapshots, kanbanTasks]);
 }
 
 export function resolveTaskPullRequestProps(

@@ -72,7 +72,7 @@ function hydrateCreatedTask(
 }
 
 /** Handle editing an existing task - only update dialog-editable fields. */
-function hydrateEditedTask(
+export function hydrateEditedTask(
   store: ReturnType<typeof useAppStoreApi>,
   task: BackendTask,
   currentKanban: KanbanState,
