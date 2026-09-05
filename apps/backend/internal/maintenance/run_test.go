@@ -1,6 +1,7 @@
 package maintenance
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -12,10 +13,55 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/backendapp/ownershiplock"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+func TestRunDryRunMissingDatabaseCreatesNothing(t *testing.T) {
+	databaseDir := filepath.Join(t.TempDir(), "missing")
+	databasePath := filepath.Join(databaseDir, "kandev.db")
+
+	_, err := Run(context.Background(), t.TempDir(), "sqlite", databasePath, RunOptions{Execute: false}, nil)
+	if err == nil {
+		t.Fatal("Run(dry-run) error = nil, want missing database error")
+	}
+	if _, statErr := os.Stat(databaseDir); !os.IsNotExist(statErr) {
+		t.Fatalf("dry-run created missing database directory; stat err = %v", statErr)
+	}
+}
+
+func TestRunDryRunLegacySchemaDoesNotMigrateOrHeal(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "legacy.db")
+	conn, err := db.OpenSQLite(databasePath)
+	if err != nil {
+		t.Fatalf("open legacy sqlite: %v", err)
+	}
+	if _, err := conn.Exec(`CREATE TABLE legacy_marker (id TEXT PRIMARY KEY)`); err != nil {
+		_ = conn.Close()
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close legacy sqlite: %v", err)
+	}
+
+	before, err := os.ReadFile(databasePath)
+	if err != nil {
+		t.Fatalf("read legacy database before dry-run: %v", err)
+	}
+	_, err = Run(context.Background(), t.TempDir(), "sqlite", databasePath, RunOptions{Execute: false}, nil)
+	if err == nil {
+		t.Fatal("Run(dry-run) error = nil, want unsupported legacy schema error")
+	}
+	after, err := os.ReadFile(databasePath)
+	if err != nil {
+		t.Fatalf("read legacy database after dry-run: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("dry-run changed legacy database bytes")
+	}
+}
 
 // TestRunDryRunReportsCandidatesWithoutMutating is this wave's core dry-run
 // contract test: Analyze must report every category's exact candidate

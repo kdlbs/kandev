@@ -64,7 +64,14 @@ func Run(ctx context.Context, homeDir, databaseDriver, databasePath string, opts
 		defer func() { _ = owner.Close() }()
 	}
 
-	repo, writer, closeConnections, err := openMaintenanceConnections(databasePath, log)
+	var repo *sqlite.Repository
+	var writer *sqlx.DB
+	var closeConnections func() error
+	if opts.Execute {
+		repo, writer, closeConnections, err = openMaintenanceConnections(databasePath, log)
+	} else {
+		repo, closeConnections, err = openMaintenanceReadOnlyConnection(databasePath, log)
+	}
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -83,6 +90,19 @@ func Run(ctx context.Context, homeDir, databaseDriver, databasePath string, opts
 	}
 
 	return runExecuteAndCompact(ctx, writer, closeConnections, databasePath, report, set, opts.Compact)
+}
+
+// openMaintenanceReadOnlyConnection opens an existing SQLite database in
+// read-only mode and deliberately skips repository schema initialization. A
+// missing database or schema that predates the retention queries therefore
+// fails closed without creating, migrating, or healing anything.
+func openMaintenanceReadOnlyConnection(databasePath string, log *logger.Logger) (*sqlite.Repository, func() error, error) {
+	readerConn, err := db.OpenSQLiteReader(databasePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open database for reading: %w", err)
+	}
+	reader := sqlx.NewDb(readerConn, "sqlite3")
+	return sqlite.NewReadOnlyWithDB(reader, log), reader.Close, nil
 }
 
 // acquireExecuteLock takes the same exclusive-access ownership lock a live

@@ -145,6 +145,19 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 	return newRepository(writer, reader, log, false)
 }
 
+// NewReadOnlyWithDB creates a repository over an existing read-only connection
+// without initializing or migrating its schema. Write methods remain guarded by
+// the connection's SQLite read-only mode.
+func NewReadOnlyWithDB(reader *sqlx.DB, log *logger.Logger) *Repository {
+	return &Repository{
+		db:      reader,
+		ro:      reader,
+		ownsDB:  false,
+		log:     log,
+		migrate: db.NewMigrateLogger(reader, log),
+	}
+}
+
 func newRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*Repository, error) {
 	repo := &Repository{
 		db:      writer,
