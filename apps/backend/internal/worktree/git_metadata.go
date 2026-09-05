@@ -15,7 +15,7 @@ import (
 // GitMetadataProjectionVersion changes whenever the shape of the metadata
 // permission contract changes. Hashes are freshness diagnostics only; callers
 // must always resolve the projection again before installing permissions.
-const GitMetadataProjectionVersion = 1
+const GitMetadataProjectionVersion = 2
 
 // ErrGitMetadataProjectionInvalid is returned when checkout metadata cannot
 // prove that it belongs to the checkout being authorized.
@@ -23,18 +23,23 @@ var ErrGitMetadataProjectionInvalid = errors.New("git metadata projection invali
 
 // GitMetadataProjection describes exactly the Git metadata a task checkout
 // needs for ordinary add and commit operations. CommonDir is intentionally not
-// included in WritablePaths: callers must grant only its listed children.
+// included in AgentWritablePaths: callers must grant only its listed children.
 type GitMetadataProjection struct {
-	Version        int
-	CheckoutPath   string
-	GitDir         string
-	CommonDir      string
-	WorktreesDir   string
-	ObjectDir      string
-	CurrentRef     string
-	CurrentRefPath string
-	ReflogPath     string
-	WritablePaths  []string
+	Version            int
+	CheckoutPath       string
+	GitDir             string
+	CommonDir          string
+	WorktreesDir       string
+	ObjectDir          string
+	CurrentRef         string
+	CurrentRefPath     string
+	ReflogPath         string
+	AgentWritablePaths []string
+	// MountSupportPaths are executor-only backing mounts. POSIX requires the
+	// parent directory to be writable for Git's create-and-rename lock protocol,
+	// but these paths must never become agent filesystem-policy grants. The
+	// agent policy reopens only the exact ref, reflog, and lock paths above.
+	MountSupportPaths []string
 	// TrustedCommonDir is derived from the server-owned repository record when
 	// this is a task materialization. It is not a grant itself; revalidation
 	// uses it to reject a checkout whose .git pointer is swapped to another
@@ -175,7 +180,11 @@ func buildGitMetadataProjection(checkout, gitDir, commonDir, worktreeName string
 	if err := rejectSymlinkComponents(objectDir); err != nil {
 		return nil, invalidGitMetadata(err)
 	}
-	paths := []string{gitDir, objectDir}
+	writablePaths := []string{gitDir, objectDir}
+	mountSupportPaths := []string{gitDir}
+	if gitDir != commonDir {
+		mountSupportPaths = append(mountSupportPaths, objectDir)
+	}
 	refPath, reflogPath := "", ""
 	if ref != "" {
 		refPath = filepath.Join(commonDir, filepath.FromSlash(ref))
@@ -187,33 +196,28 @@ func buildGitMetadataProjection(checkout, gitDir, commonDir, worktreeName string
 			return nil, invalidGitMetadata(err)
 		}
 		// Git creates ref.lock and reflog lock siblings before replacing the
-		// current files. Grant their immediate directories as well as the files;
-		// neither directory can be the common Git root because current refs are
-		// constrained to refs/heads/..., and this remains narrower than a common
-		// metadata grant. The ref and reflog files themselves are granted only
-		// when they already exist: a fully packed-refs branch has no loose ref
-		// file, and core.logAllRefUpdates=false leaves no reflog file, so
-		// granting a nonexistent path would give an executor a mount source
-		// that can never be satisfied.
-		paths = append(paths, filepath.Dir(refPath), filepath.Dir(reflogPath))
-		if pathExists(refPath) {
-			paths = append(paths, refPath)
-		}
-		if pathExists(reflogPath) {
-			paths = append(paths, reflogPath)
-		}
+		// current files. Agent policy therefore grants only those four exact
+		// paths. Docker still needs writable backing mounts at the parent
+		// directories for the native create-and-rename protocol; those mount-only
+		// prerequisites are kept separate so they cannot authorize sibling refs.
+		writablePaths = append(writablePaths,
+			refPath, refPath+".lock",
+			reflogPath, reflogPath+".lock",
+		)
+		mountSupportPaths = append(mountSupportPaths, filepath.Dir(refPath), filepath.Dir(reflogPath))
 	}
 	projection := &GitMetadataProjection{
-		Version:        GitMetadataProjectionVersion,
-		CheckoutPath:   checkout,
-		GitDir:         gitDir,
-		CommonDir:      commonDir,
-		WorktreesDir:   filepath.Join(commonDir, "worktrees"),
-		ObjectDir:      objectDir,
-		CurrentRef:     ref,
-		CurrentRefPath: refPath,
-		ReflogPath:     reflogPath,
-		WritablePaths:  uniqueGitMetadataPaths(paths),
+		Version:            GitMetadataProjectionVersion,
+		CheckoutPath:       checkout,
+		GitDir:             gitDir,
+		CommonDir:          commonDir,
+		WorktreesDir:       filepath.Join(commonDir, "worktrees"),
+		ObjectDir:          objectDir,
+		CurrentRef:         ref,
+		CurrentRefPath:     refPath,
+		ReflogPath:         reflogPath,
+		AgentWritablePaths: uniqueGitMetadataPaths(writablePaths),
+		MountSupportPaths:  uniqueGitMetadataPaths(mountSupportPaths),
 	}
 	if worktreeName == "" {
 		projection.WorktreesDir = ""
@@ -295,16 +299,6 @@ func canonicalExistingPath(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Clean(canonical), nil
-}
-
-// pathExists reports whether path currently exists. It is used to decide
-// whether a ref or reflog file itself belongs in WritablePaths: a mount or
-// permission grant for a source that does not exist would never be
-// satisfiable, whereas the file's parent directory (always granted
-// separately) lets Git create it later.
-func pathExists(path string) bool {
-	_, err := os.Lstat(path)
-	return err == nil
 }
 
 func directChildName(parent, child string) (string, error) {
@@ -395,7 +389,9 @@ func uniqueGitMetadataPaths(paths []string) []string {
 }
 
 func projectionHash(p *GitMetadataProjection) string {
-	parts := append([]string{fmt.Sprintf("v%d", p.Version), p.CheckoutPath, p.GitDir, p.CommonDir, p.TrustedCommonDir, p.CurrentRef}, p.WritablePaths...)
+	parts := append([]string{fmt.Sprintf("v%d", p.Version), p.CheckoutPath, p.GitDir, p.CommonDir, p.TrustedCommonDir, p.CurrentRef}, p.AgentWritablePaths...)
+	parts = append(parts, "mount-support")
+	parts = append(parts, p.MountSupportPaths...)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
 }

@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -31,11 +32,11 @@ func TestResolveGitMetadata_LinkedWorktreeContainsOnlyOwnedMetadata(t *testing.T
 	if projection.CurrentRef != "refs/heads/task-branch" {
 		t.Fatalf("CurrentRef = %q", projection.CurrentRef)
 	}
-	if !containsGitMetadataPath(projection.WritablePaths, projection.GitDir) {
-		t.Fatalf("WritablePaths must contain owned GitDir: %#v", projection.WritablePaths)
+	if !containsGitMetadataPath(projection.AgentWritablePaths, projection.GitDir) {
+		t.Fatalf("AgentWritablePaths must contain owned GitDir: %#v", projection.AgentWritablePaths)
 	}
-	if containsGitMetadataPath(projection.WritablePaths, projection.CommonDir) {
-		t.Fatalf("WritablePaths must not contain common .git root: %#v", projection.WritablePaths)
+	if containsGitMetadataPath(projection.AgentWritablePaths, projection.CommonDir) {
+		t.Fatalf("AgentWritablePaths must not contain common .git root: %#v", projection.AgentWritablePaths)
 	}
 	if err := projection.Revalidate(); err != nil {
 		t.Fatalf("Revalidate: %v", err)
@@ -168,6 +169,16 @@ func TestGitMetadataProjectionPreservesNativeIndexLockAndCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	siblingRefPath := filepath.Join(projection.CommonDir, "refs", "heads", "main")
+	siblingReflogPath := filepath.Join(projection.CommonDir, "logs", "refs", "heads", "main")
+	siblingRefBefore, err := os.ReadFile(siblingRefPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	siblingReflogBefore, err := os.ReadFile(siblingReflogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	lockPath := filepath.Join(projection.GitDir, "index.lock")
 	if err := os.WriteFile(lockPath, []byte("held"), 0o600); err != nil {
 		t.Fatal(err)
@@ -196,6 +207,18 @@ func TestGitMetadataProjectionPreservesNativeIndexLockAndCommit(t *testing.T) {
 	}
 	runGitMetadata(t, checkout, "commit", "-m", "task change")
 	runGitMetadata(t, checkout, "fsck", "--strict")
+	for path, before := range map[string][]byte{
+		siblingRefPath:    siblingRefBefore,
+		siblingReflogPath: siblingReflogBefore,
+	} {
+		after, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !bytes.Equal(after, before) {
+			t.Fatalf("task commit mutated sibling metadata %q", path)
+		}
+	}
 }
 
 // TestGitMetadataProjectionRepairsReadOnlyExternalIndexLock reproduces the
@@ -241,7 +264,7 @@ func TestGitMetadataProjectionRepairsReadOnlyExternalIndexLock(t *testing.T) {
 	runGitMetadata(t, checkout, "fsck", "--strict")
 }
 
-func TestGitMetadataProjectionIncludesCurrentRefAndReflogLockDirectories(t *testing.T) {
+func TestGitMetadataProjectionSeparatesExactRefWritesFromMountSupport(t *testing.T) {
 	repo := initGitMetadataRepository(t)
 	checkout := filepath.Join(t.TempDir(), "task-checkout")
 	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
@@ -250,15 +273,25 @@ func TestGitMetadataProjectionIncludesCurrentRefAndReflogLockDirectories(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, lockDirectory := range []string{
+	for _, exactPath := range []string{
+		projection.CurrentRefPath,
+		projection.CurrentRefPath + ".lock",
+		projection.ReflogPath,
+		projection.ReflogPath + ".lock",
+	} {
+		if !containsGitMetadataPath(projection.AgentWritablePaths, exactPath) {
+			t.Fatalf("AgentWritablePaths = %#v, missing exact Git update path %q", projection.AgentWritablePaths, exactPath)
+		}
+	}
+	for _, parent := range []string{
 		filepath.Dir(projection.CurrentRefPath),
 		filepath.Dir(projection.ReflogPath),
 	} {
-		if !containsGitMetadataPath(projection.WritablePaths, lockDirectory) {
-			t.Fatalf("WritablePaths = %#v, missing native lock directory %q", projection.WritablePaths, lockDirectory)
+		if containsGitMetadataPath(projection.AgentWritablePaths, parent) {
+			t.Fatalf("AgentWritablePaths = %#v, grants sibling mutation through parent %q", projection.AgentWritablePaths, parent)
 		}
-		if lockDirectory == projection.CommonDir || lockDirectory == projection.WorktreesDir {
-			t.Fatalf("lock directory must not broaden common metadata access: %q", lockDirectory)
+		if !containsGitMetadataPath(projection.MountSupportPaths, parent) {
+			t.Fatalf("MountSupportPaths = %#v, missing native lock parent %q", projection.MountSupportPaths, parent)
 		}
 	}
 }
@@ -282,7 +315,7 @@ func TestGitMetadataProjectionRejectsSymlinkedObjectsDirectory(t *testing.T) {
 	}
 }
 
-func TestGitMetadataProjectionOmitsNonexistentReflogFileButKeepsItsDirectory(t *testing.T) {
+func TestGitMetadataProjectionUsesExactPathsForPotentialReflogCreation(t *testing.T) {
 	repo := initGitMetadataRepository(t)
 	runGitMetadata(t, repo, "config", "core.logAllRefUpdates", "false")
 	checkout := filepath.Join(t.TempDir(), "task-checkout")
@@ -297,11 +330,14 @@ func TestGitMetadataProjectionOmitsNonexistentReflogFileButKeepsItsDirectory(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if containsGitMetadataPath(projection.WritablePaths, projection.ReflogPath) {
-		t.Fatalf("WritablePaths grants a reflog file that does not exist: %#v", projection.WritablePaths)
+	if !containsGitMetadataPath(projection.AgentWritablePaths, projection.ReflogPath) {
+		t.Fatalf("AgentWritablePaths must authorize only the potential reflog file: %#v", projection.AgentWritablePaths)
 	}
-	if !containsGitMetadataPath(projection.WritablePaths, filepath.Dir(projection.ReflogPath)) {
-		t.Fatalf("WritablePaths must still grant the reflog's parent directory so Git can create it: %#v", projection.WritablePaths)
+	if !containsGitMetadataPath(projection.AgentWritablePaths, projection.ReflogPath+".lock") {
+		t.Fatalf("AgentWritablePaths must authorize only the potential reflog lock: %#v", projection.AgentWritablePaths)
+	}
+	if containsGitMetadataPath(projection.AgentWritablePaths, filepath.Dir(projection.ReflogPath)) {
+		t.Fatalf("AgentWritablePaths must not authorize sibling reflogs through their parent: %#v", projection.AgentWritablePaths)
 	}
 }
 

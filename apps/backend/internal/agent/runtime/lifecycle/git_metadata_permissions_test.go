@@ -123,6 +123,29 @@ func TestStandaloneGitMetadataPreflightRendersCodexPolicy(t *testing.T) {
 	if got := rules[projection.ObjectDir]; got != "write" {
 		t.Fatalf("object directory = %#v, want write", got)
 	}
+	for _, path := range []string{
+		projection.CurrentRefPath,
+		projection.CurrentRefPath + ".lock",
+		projection.ReflogPath,
+		projection.ReflogPath + ".lock",
+	} {
+		if got := rules[path]; got != "write" {
+			t.Fatalf("exact current-branch path %q = %#v, want write", path, got)
+		}
+	}
+	for _, sibling := range []string{
+		filepath.Join(projection.CommonDir, "refs", "heads", "main"),
+		filepath.Join(projection.CommonDir, "refs", "heads", "main.lock"),
+		filepath.Join(projection.CommonDir, "logs", "refs", "heads", "main"),
+		filepath.Join(projection.CommonDir, "logs", "refs", "heads", "main.lock"),
+	} {
+		if got := rules[sibling]; got != nil {
+			t.Fatalf("sibling metadata %q has explicit access %#v, want inherited common-directory read-only", sibling, got)
+		}
+		if got := rules[filepath.Dir(sibling)]; got != nil {
+			t.Fatalf("sibling metadata parent %q has explicit access %#v, want inherited common-directory read-only", filepath.Dir(sibling), got)
+		}
+	}
 }
 
 func TestStandaloneGitMetadataPreflightAllowsMockAgent(t *testing.T) {

@@ -24,6 +24,8 @@ Clone-based executors do not receive a host projection: their canonical checkout
 
 Every executor either attests a narrow native policy, applies a layered container mount plus inner agent policy, mediates the allowed Git operations, or fails before starting the agent with `git_metadata_projection_unsupported`. A failed validation returns `git_metadata_projection_invalid` without source paths in user-facing details.
 
+The projection separates agent authorization from executor backing mounts. `AgentWritablePaths` contains the owned worktree metadata, object store, exact active ref and reflog, and their exact `.lock` siblings. `MountSupportPaths` may contain the ref and reflog parent directories that a POSIX bind mount needs for Git's native create-and-rename protocol, but those paths are executor plumbing and never become agent policy. An executor that consumes mount support paths must also attest and install the exact-path inner policy; otherwise it fails closed. Sibling refs and reflogs therefore inherit read-only access from the common directory even when the container layer needs writable backing directories.
+
 Standalone and ACP agents receive the server-authored additional directories and a compatible filesystem-policy overlay. Docker mounts common metadata read-only, masks sibling worktree administration, and overlays only the owned entry and required writable dependencies. Remote executors resolve their own remote checkout paths and may not import host paths into their policy. Repository-less and read-only environments receive no Git write projection.
 
 | Executor | Git metadata enforcement |

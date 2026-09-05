@@ -36,7 +36,14 @@ func TestGitMetadataMountsMasksSiblingWorktrees(t *testing.T) {
 	}
 	assertGitMount(t, mounts, projection.CommonDir, true, false)
 	assertGitMount(t, mounts, projection.WorktreesDir, false, true)
-	for _, path := range projection.WritablePaths {
+	for _, path := range projection.AgentWritablePaths {
+		if path == projection.CurrentRefPath || path == projection.CurrentRefPath+".lock" ||
+			path == projection.ReflogPath || path == projection.ReflogPath+".lock" {
+			continue
+		}
+		assertGitMount(t, mounts, path, false, false)
+	}
+	for _, path := range projection.MountSupportPaths {
 		assertGitMount(t, mounts, path, false, false)
 	}
 	for _, mount := range mounts {
@@ -51,7 +58,7 @@ func TestGitMetadataMountsMasksSiblingWorktrees(t *testing.T) {
 
 // TestGitMetadataMountsRegularRepositoryHasNoConflictingDuplicateMount covers
 // a regular (non-worktree) repository, where GitDir == CommonDir. Since GitDir
-// is already granted writable via WritablePaths, also adding CommonDir to the
+// is already granted writable via AgentWritablePaths, also adding CommonDir to the
 // read-only set would produce two Docker mounts targeting the same path with
 // contradictory ReadOnly flags.
 func TestGitMetadataMountsRegularRepositoryHasNoConflictingDuplicateMount(t *testing.T) {

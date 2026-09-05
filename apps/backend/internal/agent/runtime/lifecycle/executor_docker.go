@@ -220,8 +220,10 @@ func (r *DockerExecutor) PrepareGitMetadataProjection(_ context.Context, req *Ex
 	if requiresCloneGitMetadataPolicy(req) {
 		return validateRemoteGitMetadataRequest(req)
 	}
-	_, err := gitMetadataMounts(req.GitMetadataProjections)
-	return err
+	if _, err := gitMetadataMounts(req.GitMetadataProjections); err != nil {
+		return err
+	}
+	return prepareGitMetadataFilesystemPolicy(req)
 }
 
 // reportCreateInstanceProgress wires the "Waiting for Docker container" step

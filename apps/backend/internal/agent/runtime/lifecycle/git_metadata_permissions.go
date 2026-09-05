@@ -126,7 +126,7 @@ func gitMetadataFilesystemPolicy(projections []*worktree.GitMetadataProjection) 
 	for _, projection := range projections {
 		add(projection.CommonDir, agents.FilesystemAccessRead)
 		add(projection.WorktreesDir, agents.FilesystemAccessDeny)
-		for _, path := range projection.WritablePaths {
+		for _, path := range projection.AgentWritablePaths {
 			add(path, agents.FilesystemAccessWrite)
 		}
 	}
@@ -184,7 +184,9 @@ func projectionsFromPrepareResult(result *EnvPrepareResult) ([]*worktree.GitMeta
 
 // gitMetadataMounts compiles projections into deterministic layered Docker
 // mounts. The common directory is read-only; its worktrees parent is masked;
-// only the owned entry and ordinary commit dependencies are reopened writable.
+// and only the owned entry and backing paths required by native Git locking are
+// reopened. These backing mounts are not agent authority: Docker preflight must
+// also install the exact-path inner filesystem policy.
 func gitMetadataMounts(projections []*worktree.GitMetadataProjection) ([]docker.MountConfig, error) {
 	if len(projections) == 0 {
 		return nil, nil
@@ -208,7 +210,7 @@ func gitMetadataMounts(projections []*worktree.GitMetadataProjection) ([]docker.
 				worktrees[projection.WorktreesDir] = struct{}{}
 			}
 		}
-		for _, path := range projection.WritablePaths {
+		for _, path := range projection.MountSupportPaths {
 			writable[path] = struct{}{}
 		}
 	}

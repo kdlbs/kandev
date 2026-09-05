@@ -108,6 +108,37 @@ func TestDockerExecutorRejectsClonePolicyWithoutCompatibleAgent(t *testing.T) {
 	}
 }
 
+func TestDockerExecutorHostProjectionInstallsInnerFilesystemPolicy(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	req := &ExecutorCreateRequest{
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+		AgentConfig:            agents.NewCodexACP(),
+		Env: map[string]string{
+			"CODEX_HOME":   t.TempDir(),
+			"CODEX_CONFIG": `{}`,
+		},
+	}
+
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	if err := exec.PrepareGitMetadataProjection(context.Background(), req); err != nil {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v", err)
+	}
+	if !strings.Contains(req.Env["CODEX_CONFIG"], gitMetadataPolicyName) {
+		t.Fatalf("CODEX_CONFIG = %q, want inner Git metadata policy", req.Env["CODEX_CONFIG"])
+	}
+}
+
+func TestDockerExecutorHostProjectionRejectsAgentWithoutInnerPolicy(t *testing.T) {
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	err := exec.PrepareGitMetadataProjection(context.Background(), &ExecutorCreateRequest{
+		GitMetadataProjections: []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)},
+		AgentConfig:            agents.NewClaudeACP(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "filesystem policy") {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want incompatible inner-policy rejection", err)
+	}
+}
+
 func TestDockerExecutorAllowsReconnectWhenClonePolicyRequiresAttestation(t *testing.T) {
 	req := &ExecutorCreateRequest{
 		PreviousExecutionID:    "previous",
