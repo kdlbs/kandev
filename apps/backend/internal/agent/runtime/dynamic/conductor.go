@@ -151,7 +151,10 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 	}
 	var continuation Continuation
 	if request.PrebuiltContinuation != nil {
-		continuation = *request.PrebuiltContinuation
+		continuation = sanitizeContinuation(*request.PrebuiltContinuation)
+		if err := c.persistContinuation(ctx, request.Decision, continuation); err != nil {
+			return ConductorResult{}, err
+		}
 	} else {
 		var err error
 		continuation, err = c.buildContinuation(ctx, request.Continuation)
@@ -385,10 +388,19 @@ func (c *Conductor) AcceptsGeneration(sessionID string, generation int64) bool {
 }
 
 func (c *Conductor) buildContinuation(ctx context.Context, input ContinuationInput) (Continuation, error) {
+	var (
+		continuation Continuation
+		err          error
+	)
 	if c.continuationBuilder != nil {
-		return c.continuationBuilder(ctx, input)
+		continuation, err = c.continuationBuilder(ctx, input)
+	} else {
+		continuation = BuildBoundedContinuation(input)
 	}
-	return BuildBoundedContinuation(input), nil
+	if err != nil {
+		return Continuation{}, err
+	}
+	return sanitizeContinuation(continuation), nil
 }
 
 type ContinuationInput struct {
@@ -543,11 +555,9 @@ var anchorLiterals = []string{"authorization:", "bearer", "password", "secret", 
 
 // maxAnchorSeparatorBytes bounds how much pure whitespace
 // precedingAnchorAtRisk treats as "the anchor's own \s separator" before its
-// value, as opposed to the already-accepted, unbounded anchor-to-value gap
-// (a distinct, documented tradeoff: an anchor more than
-// redactionLookbackBytes of whitespace before its value is not covered by
-// this retreat). A handful of bytes comfortably covers realistic separators
-// like "Authorization:\n" or "Bearer   ".
+// value. A handful of bytes covers realistic separators like
+// "Authorization:\n" or "Bearer   ". Longer separators are handled by the
+// bounded forward scan in skipBisectedRunForward.
 const maxAnchorSeparatorBytes = 8
 
 // precedingAnchorAtRisk returns the start of an anchorLiterals entry that a
@@ -595,42 +605,6 @@ func isAllRedactionBoundaryBytes(s string) bool {
 		}
 	}
 	return true
-}
-
-// skipBisectedRunForward returns pos unchanged unless a window boundary at
-// pos would either bisect a literal credential anchor or land just past one
-// separated only by its own \s (see precedingAnchorAtRisk) — in which case
-// it retreats to the anchor's start so the anchor is included whole rather
-// than excluded: excluding it here would leave its value in the window with
-// no anchor to trigger its rule, an orphaned value that no other rule
-// matches. Failing that, it returns pos unchanged unless pos sits strictly
-// inside an ordinary run of non-whitespace bytes that continues across pos
-// (i.e. both raw[pos-1] and raw[pos] are non-whitespace) — the signature of
-// a token bisected by a window cut landing at pos with no clean line
-// boundary nearby. When that happens, it advances to just past the nearest
-// whitespace byte at or after pos, excluding the bisected fragment from the
-// window entirely. That forward scan is bounded by redactionLookbackBytes;
-// if no whitespace is found within that bound, it gives up at the bound.
-func skipBisectedRunForward(raw string, pos int) int {
-	if pos <= 0 || pos >= len(raw) {
-		return pos
-	}
-	if start := precedingAnchorAtRisk(raw, pos); start >= 0 {
-		return start
-	}
-	if isRedactionBoundaryByte(raw[pos-1]) || isRedactionBoundaryByte(raw[pos]) {
-		return pos
-	}
-	limit := pos + redactionLookbackBytes
-	if limit > len(raw) {
-		limit = len(raw)
-	}
-	for i := pos; i < limit; i++ {
-		if isRedactionBoundaryByte(raw[i]) {
-			return i + 1
-		}
-	}
-	return limit
 }
 
 // skipBisectedRunBackward is skipBisectedRunForward's mirror for a window's
@@ -686,6 +660,8 @@ func boundedConversation(userMessages []string, conversation string) string {
 // original prompt remains first so providers that do not understand the
 // optional package still receive the user's request.
 func ContinuationPrompt(prompt string, continuation Continuation) string {
+	prompt = strings.TrimSpace(routingerr.Sanitize(prompt))
+	continuation = sanitizeContinuation(continuation)
 	fields := make([]string, 0, 7)
 	if continuation.TaskDescription != "" {
 		fields = append(fields, "Task: "+continuation.TaskDescription)

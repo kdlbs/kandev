@@ -356,7 +356,7 @@ func TestSanitizedTailRetainsAnchorBisectedAtWindowStart(t *testing.T) {
 	const credential = "hunter2xy"
 	const marker = "BENIGN-KEEP-MARKER"
 
-	for splitAt := 1; splitAt < len(anchor); splitAt++ {
+	for splitAt := 0; splitAt < len(anchor); splitAt++ {
 		const prefixLen = 100000
 		// rawLen is chosen so windowStartWithLookback's floor
 		// (len(raw)-maxRedactionInputBytes-redactionLookbackBytes) lands
@@ -381,8 +381,8 @@ func TestSanitizedTailRetainsAnchorBisectedAtWindowStart(t *testing.T) {
 		raw := prefix + anchor + credential + "\n" + suffix + " " + marker
 
 		floor := len(raw) - maxRedactionInputBytes - redactionLookbackBytes
-		if floor <= prefixLen || floor >= prefixLen+len(anchor) {
-			t.Fatalf("splitAt=%d: floor %d not inside the anchor [%d,%d)", splitAt, floor, prefixLen, prefixLen+len(anchor))
+		if floor < prefixLen || floor >= prefixLen+len(anchor) {
+			t.Fatalf("splitAt=%d: floor %d not at or inside the anchor [%d,%d)", splitAt, floor, prefixLen, prefixLen+len(anchor))
 		}
 
 		got := sanitizedTail(raw, conversationUserBudget)
@@ -583,6 +583,44 @@ func TestSanitizedTailRedactsAnchorSeparatedFromValueAtWindowCut(t *testing.T) {
 			}
 			if !strings.Contains(got, marker) {
 				t.Fatalf("sanitizedTail dropped the benign marker (vacuous pass risk): %q", got)
+			}
+		})
+	}
+}
+
+// TestSanitizedTailDropsValueAfterAnchorBeyondLookback proves that a
+// credential with an unusually large whitespace separator cannot leave a
+// short value orphaned when the anchor falls outside the bounded scan window.
+// The whole input is still redacted correctly, but the continuation window
+// starts inside the separator and must not forward the bare value.
+func TestSanitizedTailDropsValueAfterAnchorBeyondLookback(t *testing.T) {
+	const (
+		anchor     = "Authorization:"
+		credential = "hunter2xy"
+		marker     = "BENIGN-KEEP-MARKER"
+	)
+	prefix := strings.Repeat("p", redactionLookbackBytes+1024)
+	separator := strings.Repeat("\n", redactionLookbackBytes+4096)
+	filler := strings.Repeat("a", 260000)
+	if strings.Contains(routingerr.Redact(anchor+separator+credential), credential) {
+		t.Fatal("precondition failed: intact anchored credential was not redacted")
+	}
+
+	tail := credential + "\n" + filler + " " + marker
+	for name, raw := range map[string]string{
+		"anchor_before_separator": prefix + anchor + separator + tail,
+		"separator_before_anchor": prefix + separator + anchor + credential + "\n" + filler + " " + marker,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if len(raw) <= maxRedactionInputBytes {
+				t.Fatalf("test input must exceed maxRedactionInputBytes, got %d bytes", len(raw))
+			}
+			got := sanitizedTail(raw, conversationUserBudget)
+			if leaked := rawValueSuffix(credential, got); leaked != "" {
+				t.Fatalf("sanitizedTail retained a raw credential suffix %q: %q", leaked, got)
+			}
+			if !strings.Contains(got, marker) {
+				t.Fatalf("sanitizedTail dropped the benign marker: %q", got)
 			}
 		})
 	}
