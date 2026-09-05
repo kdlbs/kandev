@@ -103,7 +103,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       "GET",
       "/api/v1/executor-profiles/default-script?type=local_docker",
     );
-    expect(defaultScriptResponse.ok()).toBe(true);
+    expect(defaultScriptResponse.ok).toBe(true);
     const { prepare_script: defaultPrepareScript } = (await defaultScriptResponse.json()) as {
       prepare_script: string;
     };
