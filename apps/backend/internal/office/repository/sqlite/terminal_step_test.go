@@ -46,6 +46,10 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 	seedParticipantTask(t, repo, "task-early-done", "step-early-done")
 	seedParticipantTask(t, repo, "task-mixed-last", "step-mixed-last")
 	seedParticipantTask(t, repo, "task-no-step", "")
+	// step-deleted-xyz is never seeded into workflow_steps: this reproduces a
+	// task left behind by DeleteStep, which clears queued_for_step_id but not
+	// workflow_step_id for a task actually sitting on the deleted step.
+	seedParticipantTask(t, repo, "task-dangling-step", "step-deleted-xyz")
 
 	cases := []struct {
 		name        string
@@ -77,4 +81,11 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("dangling workflow_step_id fails closed with an error, not hasStep=false", func(t *testing.T) {
+		_, _, err := repo.IsTaskWorkflowStepTerminal(ctx, "task-dangling-step")
+		if err == nil {
+			t.Fatal("IsTaskWorkflowStepTerminal: want error for a dangling workflow_step_id, got nil")
+		}
+	})
 }

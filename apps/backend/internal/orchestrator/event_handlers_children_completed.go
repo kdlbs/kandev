@@ -122,6 +122,15 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 // that lock: whichever delivery gets there first does the write and fires
 // the side effects below; a second, now-redundant delivery finds the task
 // already terminal and returns without calling the seam a second time.
+//
+// The lock is released as soon as the write (or redirect) is durable and
+// before any of the side effects below run, for the same reason the caller
+// releases taskRuntimeStateMu early: processParentChildrenCompletedForTaskState
+// walks up into the parent's own on_children_completed handling, which can
+// itself reach this same lock family (for an Office parent) or
+// lockChildCompletionOperation. Holding this task's lock across that call
+// would invert lock order against a concurrent completion elsewhere in the
+// same ancestry and risk deadlock.
 func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, taskID string) {
 	if s.officeTaskStatusUpdater == nil {
 		// No seam wired (partial wiring, or a test): skip the write rather
@@ -130,16 +139,17 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 	}
 
 	unlock := s.lockOfficeTerminalCompletion(taskID)
-	defer unlock()
 
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
+		unlock()
 		s.logger.Warn("terminal step completion: failed to reload office task",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
 	}
 	if models.IsTerminalTaskState(task.State) {
+		unlock()
 		return
 	}
 	oldState := task.State
@@ -150,6 +160,7 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 	})
 	var pending *dashboard.ApprovalsPendingError
 	if err != nil {
+		unlock()
 		if !errors.As(err, &pending) {
 			s.logger.Warn("terminal step completion: office status update failed",
 				zap.String("task_id", task.ID),
@@ -157,6 +168,8 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 		}
 		return
 	}
+	unlock()
+
 	task.State = v1.TaskStateCompleted
 	task.UpdatedAt = time.Now().UTC()
 	s.publishTaskUpdated(ctx, task)

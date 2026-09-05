@@ -97,17 +97,37 @@ type ParticipantWriteOutcome string
 // Returns (false, false, nil) when the task has no resolvable step — a
 // task with no workflow step at all is not the same fact as a task sitting
 // on a genuine non-terminal step, and callers must not conflate the two.
+//
+// A task can also carry a nonempty workflow_step_id that no longer resolves:
+// DeleteStep clears queued_for_step_id references but deliberately leaves
+// tasks.workflow_step_id alone for tasks that were actually sitting on the
+// deleted step, so that reference goes dangling. That is not the same fact
+// as "no step" either — treating it as hasStep=false would let a task whose
+// step vanished out from under it bypass the position gate entirely, so this
+// case returns an error instead and lets the caller fail closed.
 func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error) {
+	var stepID sql.NullString
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT workflow_step_id FROM tasks WHERE id = ?
+	`), taskID).Scan(&stepID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if !stepID.Valid || stepID.String == "" {
+		return false, false, nil
+	}
+
 	var workflowID string
 	var position int
 	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT ws.workflow_id, ws.position
-		FROM tasks t
-		JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-		WHERE t.id = ?
-	`), taskID).Scan(&workflowID, &position)
+		SELECT workflow_id, position FROM workflow_steps WHERE id = ?
+	`), stepID.String).Scan(&workflowID, &position)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, false, nil
+		return false, false, fmt.Errorf(
+			"workflow step %q referenced by task %q no longer exists", stepID.String, taskID)
 	}
 	if err != nil {
 		return false, false, err
