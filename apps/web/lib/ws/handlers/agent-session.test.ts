@@ -124,11 +124,7 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
-function makeActivityMessage(
-  payload: Omit<TaskSessionActivityChangedPayload, "active_subagent_count"> & {
-    active_subagent_count?: number;
-  },
-) {
+function makeActivityMessage(payload: TaskSessionActivityChangedPayload) {
   return {
     id: "m",
     type: "notification" as const,
