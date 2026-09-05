@@ -1,10 +1,7 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildStoppedBannerProps,
-  shouldHideChatInputForLaunchError,
-  shouldRenderStoppedSessionBanner,
-} from "./chat-input-container";
+import { buildStoppedBannerProps } from "./chat-input-container";
+import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 import { useComposerProps } from "./use-composer-props";
 
 function composerArgs(errorMessage: string) {

@@ -2,7 +2,7 @@
 
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import { isMatchingTaskLaunchError } from "@/components/task/chat/types";
+import { isTaskLaunchErrorVisibleForSession } from "@/components/task/chat/types";
 import { isTypedTaskLaunchError, TaskLaunchErrorEntry } from "./task-launch-error-entry";
 
 type TaskChatLaunchErrorProps = {
@@ -23,9 +23,7 @@ export function TaskChatLaunchError({
 }: TaskChatLaunchErrorProps) {
   const candidate = statusSummary?.active_error;
   const error =
-    isTypedTaskLaunchError(candidate) &&
-    (sessionId === undefined ||
-      isMatchingTaskLaunchError(candidate, { sessionId, errorStamp: candidate.stamp }))
+    isTypedTaskLaunchError(candidate) && isTaskLaunchErrorVisibleForSession(candidate, sessionId)
       ? candidate
       : null;
 

@@ -21,6 +21,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { t } from "@/lib/i18n";
+import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -165,24 +166,6 @@ export function shouldShowCancelAgent(
   if (!pendingClarification) return isAgentBusy;
   return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
     ?.agent_disconnected;
-}
-
-export function shouldRenderStoppedSessionBanner(input: {
-  isFailed: boolean;
-  isCompleted: boolean;
-  executorUnavailable: boolean;
-  launchErrorOwned?: boolean;
-}): boolean {
-  return (
-    !input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable)
-  );
-}
-
-export function shouldHideChatInputForLaunchError(input: {
-  isFailed: boolean;
-  launchErrorOwned?: boolean;
-}): boolean {
-  return input.launchErrorOwned === true && input.isFailed;
 }
 
 function buildEditorAreaProps(

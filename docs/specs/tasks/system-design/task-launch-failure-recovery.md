@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001
 created: 2026-08-24
-updated: 2026-09-05
+updated: 2026-09-06
 owners:
   - cfl12
 ---
@@ -132,7 +132,13 @@ branch. It creates a unique task branch from the verified pull-request ref.
 
 This rule also applies when two pull requests reuse the same source-branch
 name. A local branch from the first pull request cannot block the second pull
-request.
+request. A fallback branch uses a task-owned deterministic suffix and a
+bounded retry sequence, so an existing fallback branch cannot make launch fail
+because of one random-name collision.
+
+The manager sets `origin/<source-branch>` as upstream only when that ref points
+to the verified pull-request start point. A remote branch with different
+history is never attached as the worktree upstream.
 
 If Kandev cannot fetch or verify the pull-request ref, preparation fails with a
 typed `workspace_checkout_failed` error. The error retains the existing

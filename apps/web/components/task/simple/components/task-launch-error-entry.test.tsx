@@ -43,11 +43,15 @@ vi.mock("@/components/task/task-launch-branch-picker", () => ({
 const TASK_ID = "task-1";
 const TASK_REPOSITORY_ID = "task-repo-1";
 const ERROR_STAMP = "launch-stamp-1";
+const WORKSPACE_ID = "workspace-1";
+const OCCURRED_AT = "2026-08-19T10:00:00Z";
+const ERROR_ENTRY_TEST_ID = "task-launch-error-entry";
+const RETRY_LAUNCH_BUTTON_TEST_ID = "task-launch-retry_launch-button";
 
 const error: TaskStatusSummaryActiveError = {
   task_repository_id: TASK_REPOSITORY_ID,
   stamp: ERROR_STAMP,
-  occurred_at: "2026-08-19T10:00:00Z",
+  occurred_at: OCCURRED_AT,
   preview: "The selected base branch is not available.",
   category: "base_branch_missing",
   recovery_actions: ["retry_default", "pick_base_branch", "mark_review_done"],
@@ -93,7 +97,7 @@ describe("TaskLaunchErrorEntry", () => {
     const checkoutError: TaskStatusSummaryActiveError = {
       session_id: "session-1",
       stamp: "checkout-stamp-1",
-      occurred_at: "2026-08-19T10:00:00Z",
+      occurred_at: OCCURRED_AT,
       preview: "The workspace could not be prepared for this launch.",
       details: "The pull request head was fetched into its isolated ref.",
       category: "workspace_checkout_failed",
@@ -101,14 +105,14 @@ describe("TaskLaunchErrorEntry", () => {
     };
 
     render(
-      <TaskLaunchErrorEntry taskId={TASK_ID} workspaceId="workspace-1" error={checkoutError} />,
+      <TaskLaunchErrorEntry taskId={TASK_ID} workspaceId={WORKSPACE_ID} error={checkoutError} />,
     );
 
     expect(screen.getByText(checkoutError.preview)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /show details/i }));
     expect(screen.getByText(checkoutError.details!)).toBeTruthy();
-    expect(screen.getByTestId("task-launch-retry_launch-button")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("task-launch-retry_launch-button"));
+    expect(screen.getByTestId(RETRY_LAUNCH_BUTTON_TEST_ID)).toBeTruthy();
+    fireEvent.click(screen.getByTestId(RETRY_LAUNCH_BUTTON_TEST_ID));
 
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
     expect(requestMock).toHaveBeenCalledWith("task.launch.recover", {
@@ -124,40 +128,86 @@ describe("TaskLaunchErrorEntry", () => {
     render(
       <TaskLaunchErrorEntry
         taskId={TASK_ID}
-        workspaceId="workspace-1"
+        workspaceId={WORKSPACE_ID}
         error={{ ...error, recovery_actions: ["retry_launch"] }}
       />,
     );
 
-    fireEvent.click(screen.getByTestId("task-launch-retry_launch-button"));
+    fireEvent.click(screen.getByTestId(RETRY_LAUNCH_BUTTON_TEST_ID));
 
     await waitFor(() => expect(screen.getByTestId("task-launch-recovery-error")).toBeTruthy());
     expect(toastMock).not.toHaveBeenCalled();
+  });
+
+  it("clears a recovery failure when a newer launch error arrives", async () => {
+    requestMock.mockRejectedValueOnce(new Error("recovery failed"));
+    const { rerender } = render(
+      <TaskLaunchErrorEntry
+        taskId={TASK_ID}
+        workspaceId={WORKSPACE_ID}
+        error={{ ...error, recovery_actions: ["retry_launch"] }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(RETRY_LAUNCH_BUTTON_TEST_ID));
+    await waitFor(() => expect(screen.getByTestId("task-launch-recovery-error")).toBeTruthy());
+
+    rerender(
+      <TaskLaunchErrorEntry
+        taskId={TASK_ID}
+        workspaceId={WORKSPACE_ID}
+        error={{
+          ...error,
+          stamp: "launch-stamp-2",
+          recovery_actions: ["retry_launch"],
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.queryByTestId("task-launch-recovery-error")).toBeNull());
   });
 
   it("renders a typed summary error without recovery actions", () => {
     render(
       <TaskChatLaunchError
         taskId={TASK_ID}
-        workspaceId="workspace-1"
+        workspaceId={WORKSPACE_ID}
         statusSummary={{
           revision: 1,
-          updated_at: "2026-08-19T10:00:00Z",
+          updated_at: OCCURRED_AT,
           active_error: { ...error, recovery_actions: [] },
         }}
       />,
     );
 
-    expect(screen.getByTestId("task-launch-error-entry")).toBeTruthy();
+    expect(screen.getByTestId(ERROR_ENTRY_TEST_ID)).toBeTruthy();
     expect(screen.getByText(error.preview)).toBeTruthy();
     expect(screen.queryByTestId("task-launch-retry_default-button")).toBeNull();
+  });
+
+  it("renders a task-wide launch error while a prior session is selected", () => {
+    render(
+      <TaskChatLaunchError
+        taskId={TASK_ID}
+        workspaceId={WORKSPACE_ID}
+        sessionId="prior-session"
+        statusSummary={{
+          revision: 1,
+          updated_at: OCCURRED_AT,
+          active_error: { ...error, recovery_actions: ["mark_review_done"] },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId(ERROR_ENTRY_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId("task-launch-mark_review_done-button")).toBeTruthy();
   });
 
   it("renders the bounded preview and sends the exact task recovery payload", async () => {
     render(
       <TaskLaunchErrorEntry
         taskId={TASK_ID}
-        workspaceId="workspace-1"
+        workspaceId={WORKSPACE_ID}
         repositories={[
           {
             id: TASK_REPOSITORY_ID,
@@ -173,7 +223,7 @@ describe("TaskLaunchErrorEntry", () => {
       />,
     );
 
-    expect(screen.getByTestId("task-launch-error-entry")).toBeTruthy();
+    expect(screen.getByTestId(ERROR_ENTRY_TEST_ID)).toBeTruthy();
     expect(screen.getByText(error.preview)).toBeTruthy();
     fireEvent.click(screen.getByTestId("task-launch-retry_default-button"));
 
@@ -190,7 +240,7 @@ describe("TaskLaunchErrorEntry", () => {
     render(
       <TaskLaunchErrorEntry
         taskId={TASK_ID}
-        workspaceId="workspace-1"
+        workspaceId={WORKSPACE_ID}
         repositories={[]}
         error={error}
       />,
@@ -211,7 +261,7 @@ describe("TaskLaunchErrorEntry", () => {
     render(
       <TaskLaunchErrorEntry
         taskId={TASK_ID}
-        workspaceId="workspace-1"
+        workspaceId={WORKSPACE_ID}
         repositories={[]}
         error={error}
       />,
@@ -233,13 +283,13 @@ describe("TaskLaunchErrorEntry", () => {
       <>
         <TaskLaunchErrorEntry
           taskId={TASK_ID}
-          workspaceId="workspace-1"
+          workspaceId={WORKSPACE_ID}
           repositories={[]}
           error={error}
         />
         <TaskLaunchErrorEntry
           taskId={TASK_ID}
-          workspaceId="workspace-1"
+          workspaceId={WORKSPACE_ID}
           repositories={[]}
           error={error}
         />
@@ -256,6 +306,6 @@ describe("TaskLaunchErrorEntry", () => {
       expect(buttons[1].getAttribute("disabled")).not.toBeNull();
     });
     resolveRequest?.({ ok: true });
-    await waitFor(() => expect(screen.queryAllByTestId("task-launch-error-entry")).toHaveLength(2));
+    await waitFor(() => expect(screen.queryAllByTestId(ERROR_ENTRY_TEST_ID)).toHaveLength(2));
   });
 });

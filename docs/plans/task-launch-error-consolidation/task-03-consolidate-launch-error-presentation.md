@@ -48,7 +48,7 @@ Give desktop and phone users the same cause, details, and valid recovery.
 
 ```bash
 cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm exec vitest run components/task/simple/components/task-launch-error-entry.test.tsx components/task/chat/message-list-footer.test.tsx components/task/chat/session-stopped-banner.test.tsx lib/ws/handlers/empty-turn-notice.test.ts
+cd apps/web && pnpm exec vitest run components/task/simple/components/task-launch-error-entry.test.tsx components/task/chat/chat-input-container.test.tsx components/task/chat/message-list-footer.test.tsx components/task/chat/session-stopped-banner.test.tsx components/task/chat/stopped-banner-props.test.ts components/task/chat/types.test.ts lib/ws/handlers/empty-turn-notice.test.ts
 cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet
 cd apps/web && pnpm e2e:run tests/task/launch-failure-recovery.spec.ts
 cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-launch-failure-recovery.spec.ts
@@ -102,3 +102,5 @@ Task 02.
   `pnpm run i18n:ratchet` passed.
 - Managed Playwright coverage passed: desktop launch-failure recovery 3/3 and
   mobile launch-failure recovery 2/2.
+- Review-remediation coverage passed: 7 focused Vitest files and 75 tests,
+  including composer ownership and launch-error recovery-state reset.

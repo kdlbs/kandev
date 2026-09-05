@@ -190,6 +190,24 @@ export function isSubagentMessage(message: Message): boolean {
 
 export type TaskLaunchErrorIdentity = Pick<TaskStatusSummaryActiveError, "session_id" | "stamp">;
 
+export function shouldRenderStoppedSessionBanner(input: {
+  isFailed: boolean;
+  isCompleted: boolean;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}): boolean {
+  return (
+    !input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable)
+  );
+}
+
+export function shouldHideChatInputForLaunchError(input: {
+  isFailed: boolean;
+  launchErrorOwned?: boolean;
+}): boolean {
+  return input.launchErrorOwned === true && input.isFailed;
+}
+
 /** Matches one rendered error surface to the task-owned launch error. */
 export function isMatchingTaskLaunchError(
   activeError: TaskLaunchErrorIdentity | null | undefined,
@@ -200,6 +218,16 @@ export function isMatchingTaskLaunchError(
     (activeError.session_id ?? null) === (candidate.sessionId ?? null) &&
     activeError.stamp === candidate.errorStamp
   );
+}
+
+/** A task-wide launch error stays visible while any prior session is selected. */
+export function isTaskLaunchErrorVisibleForSession(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  sessionId: string | null | undefined,
+): boolean {
+  if (!activeError?.stamp) return false;
+  if (sessionId === undefined || activeError.session_id == null) return true;
+  return activeError.session_id === sessionId;
 }
 
 /** Messages that are only useful while a launch failure has no typed owner. */

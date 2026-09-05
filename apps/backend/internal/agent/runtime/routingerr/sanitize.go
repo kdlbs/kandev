@@ -1,6 +1,9 @@
 package routingerr
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // MaxRawExcerptBytes caps the sanitized excerpt before persistence.
 const MaxRawExcerptBytes = 4096
@@ -37,13 +40,64 @@ var redactions = []redaction{
 	{regexp.MustCompile(`/home/[^/\s]+/`), "/home/<redacted>/"},
 }
 
-// Sanitize redacts likely credentials, normalizes home paths, and truncates
-// to MaxRawExcerptBytes. The function is idempotent: applying it twice
-// equals applying it once.
+var (
+	localUnixPathPattern    = regexp.MustCompile(`/(?:[^/\s"']+/)+[^\r\n"']+`)
+	localWindowsPathPattern = regexp.MustCompile(`(?i)[A-Z]:[\\/][^\r\n"']+`)
+)
+
+func redactLocalPaths(s string) string {
+	s = localWindowsPathPattern.ReplaceAllStringFunc(s, func(path string) string {
+		if len(path) >= 4 && path[2:4] == "//" {
+			return path
+		}
+		return "[path-redacted]"
+	})
+	matches := localUnixPathPattern.FindAllStringIndex(s, -1)
+	if len(matches) == 0 {
+		return s
+	}
+
+	var redacted strings.Builder
+	redacted.Grow(len(s))
+	last := 0
+	for _, match := range matches {
+		start, end := match[0], match[1]
+		redacted.WriteString(s[last:start])
+		path := s[start:end]
+		if start >= 2 && s[start-2:start] == ":/" {
+			redacted.WriteString(path)
+			last = end
+			continue
+		}
+		redacted.WriteString(redactUnixPath(path))
+		last = end
+	}
+	redacted.WriteString(s[last:])
+	return redacted.String()
+}
+
+func redactUnixPath(path string) string {
+	if strings.Contains(path, "[path-redacted]") {
+		return path
+	}
+	switch {
+	case strings.HasPrefix(path, "/Users/"):
+		return "/Users/<redacted>/[path-redacted]"
+	case strings.HasPrefix(path, "/home/"):
+		return "/home/<redacted>/[path-redacted]"
+	default:
+		return "[path-redacted]"
+	}
+}
+
+// Sanitize redacts likely credentials and local paths, then truncates to
+// MaxRawExcerptBytes. The function is idempotent: applying it twice equals
+// applying it once.
 func Sanitize(s string) string {
 	for _, r := range redactions {
 		s = r.pattern.ReplaceAllString(s, r.replace)
 	}
+	s = redactLocalPaths(s)
 	if len(s) > MaxRawExcerptBytes {
 		s = s[:MaxRawExcerptBytes]
 	}

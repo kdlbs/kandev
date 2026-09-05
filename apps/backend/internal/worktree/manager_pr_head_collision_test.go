@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,6 +27,11 @@ func TestCreateWorktreePRHeadCollisionPreservesLocalBranch(t *testing.T) {
 	runGit(t, remoteClone, "commit", "-m", "second PR head")
 	secondPRHeadSHA := strings.TrimSpace(runGit(t, remoteClone, "rev-parse", "HEAD"))
 	runGit(t, remoteClone, "push", "origin", "HEAD:"+pullHeadRef(3408))
+	runGit(t, remoteClone, "push", "origin", "main:refs/heads/"+branch)
+	runGit(t, repoPath, "fetch", "origin", "refs/heads/"+branch+":refs/remotes/origin/"+branch)
+
+	collisionBranch := branch + "-" + TaskDirSuffix("task-pr-3408")
+	runGit(t, repoPath, "branch", collisionBranch, "main")
 
 	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
 	if err != nil {
@@ -48,8 +54,8 @@ func TestCreateWorktreePRHeadCollisionPreservesLocalBranch(t *testing.T) {
 		t.Fatalf("Create() should materialize the exact PR head: %v", err)
 	}
 
-	if wt.Branch == branch || !strings.HasPrefix(wt.Branch, branch+"-") {
-		t.Fatalf("PR worktree should use a unique branch when the named branch exists, got %q", wt.Branch)
+	if wt.Branch != collisionBranch+"-1" {
+		t.Fatalf("PR worktree should retry a colliding task branch, got %q, want %q", wt.Branch, collisionBranch+"-1")
 	}
 	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", branch)); got != firstPRHeadSHA {
 		t.Fatalf("local branch SHA = %q, want preserved SHA %q", got, firstPRHeadSHA)
@@ -59,5 +65,10 @@ func TestCreateWorktreePRHeadCollisionPreservesLocalBranch(t *testing.T) {
 	}
 	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "refs/remotes/origin/pr/3408")); got != secondPRHeadSHA {
 		t.Fatalf("stored PR ref SHA = %q, want %q", got, secondPRHeadSHA)
+	}
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "@{upstream}")
+	cmd.Dir = wt.Path
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("PR worktree should not track a divergent source branch, got %q", strings.TrimSpace(string(out)))
 	}
 }

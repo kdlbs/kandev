@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   IconAlertTriangle,
   IconCheck,
@@ -32,6 +32,10 @@ function useTaskLaunchRecovery({
 }: Pick<TaskLaunchErrorEntryProps, "taskId" | "error">) {
   const [pendingAction, setPendingAction] = useState<TaskLaunchRecoveryAction | null>(null);
   const [recoveryError, setRecoveryError] = useState(false);
+
+  useEffect(() => {
+    setRecoveryError(false);
+  }, [error.stamp]);
 
   const sendRecovery = async (action: TaskLaunchRecoveryAction, baseBranch?: string) => {
     const client = getWebSocketClient();

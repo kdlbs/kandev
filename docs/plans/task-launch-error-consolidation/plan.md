@@ -57,7 +57,9 @@ status, and a stopped-session recovery banner from the same failed start.
 Update `apps/backend/internal/worktree/manager_lifecycle.go` to fetch a
 pull-request head into a PR-scoped internal ref. Verify that ref before worktree
 creation. If a same-named local branch has unrelated history, create a unique
-task branch from the verified ref.
+task branch from the verified ref using a task-owned suffix and bounded
+collision retries. Set a source-branch upstream only when its commit matches
+the verified PR start point.
 
 Keep the named local branch unchanged. Continue to use the existing Git
 admission, timeout, and non-interactive environment.
@@ -109,7 +111,8 @@ content without an inner scroll region. Base-branch selection keeps the existing
 - `apps/backend/internal/orchestrator/task_launch_recovery_test.go` covers
   authorized, stale, and failed `retry_launch` requests.
 - Frontend tests cover one-owner arbitration, the details disclosure, action
-  payloads, and preservation of unrelated runtime errors.
+  payloads, launch-error ownership in the composer, recovery-state reset, and
+  preservation of unrelated runtime errors.
 
 ## E2E tests
 
@@ -135,6 +138,9 @@ These tests map to
   models, status summary, and executor packages, plus 11 targeted task-launch
   recovery tests.
 - Frontend focused coverage passed: 10 Vitest files and 152 tests.
+- Review-remediation frontend coverage passed: 7 Vitest files and 75 tests,
+  including task-wide launch-error visibility, composer ownership, and
+  recovery-state reset.
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and
   `pnpm run i18n:ratchet` passed.
 - Managed Playwright coverage passed: desktop launch-failure recovery 3/3 and

@@ -76,6 +76,9 @@ None.
 - Added a PR-scoped `origin/pr/<N>` fetch ref with verification and typed
   `ErrWorkspaceCheckoutFailed` failures.
 - PR worktrees now create a unique local branch when the requested source name
-  already exists, without resetting or updating that branch.
+  already exists, without resetting or updating that branch. The fallback
+  uses a task-owned suffix and bounded retries for branch-name collisions.
+- PR worktrees only track the source branch when its remote-tracking commit
+  matches the verified PR head.
 - Recreate restores deleted PR branches from the isolated ref.
 - Verification passed: `go test ./internal/worktree` (368 passed).

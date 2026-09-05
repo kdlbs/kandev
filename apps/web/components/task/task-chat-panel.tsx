@@ -44,7 +44,7 @@ import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error"
 import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
-import { isMatchingTaskLaunchError } from "@/components/task/chat/types";
+import { isTaskLaunchErrorVisibleForSession } from "@/components/task/chat/types";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 
 /** Returns a `clarificationKey` that increments each time a pending
@@ -514,10 +514,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const activeLaunchError = launchStatusSummary?.active_error;
   const launchErrorOwned = Boolean(
     isTypedTaskLaunchError(activeLaunchError) &&
-    isMatchingTaskLaunchError(activeLaunchError, {
-      sessionId: resolvedSessionId,
-      errorStamp: activeLaunchError.stamp,
-    }),
+    isTaskLaunchErrorVisibleForSession(activeLaunchError, resolvedSessionId),
   );
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
