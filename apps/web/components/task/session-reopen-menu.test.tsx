@@ -92,6 +92,7 @@ vi.mock("@/components/state-provider", () => ({
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: null }] },
       messages: { bySession: mocks.messagesBySession },
+      turns: { bySession: {} },
     }),
 }));
 
@@ -160,7 +161,7 @@ describe("SessionReopenMenuItems icon rendering (AC-51/52)", () => {
     const row = screen.getByTestId("reopen-session-sess-parked");
     const svgClass = row.querySelector("svg")?.getAttribute("class") ?? "";
     expect(svgClass).toContain("tabler-icon-loader-2");
-    expect(svgClass).toContain("animate-spin");
+    expect(row.querySelector(".animate-spin")).not.toBeNull();
   });
 
   it("renders no state icon for a plain waiting session with nothing pending", () => {

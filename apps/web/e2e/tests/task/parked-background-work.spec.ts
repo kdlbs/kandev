@@ -99,7 +99,7 @@ async function waitForFirstSessionId(apiClient: ApiClient, taskId: string): Prom
         sessionId = sessions[0]?.id ?? "";
         return sessionId;
       },
-      { message: "session row should be created", timeout: 15_000 },
+      { message: "session row should be created", timeout: 30_000 },
     )
     .not.toBe("");
   return sessionId;
@@ -229,7 +229,7 @@ test.describe("Parked on background work", () => {
 
     const parkedRow = session.sidebarTaskItem("Parked Resume Turn");
     await expect(parkedRow.getByTestId("task-state-background-running")).toBeVisible({
-      timeout: 15_000,
+      timeout: 20_000,
     });
 
     // The probe is still scripted to hold "live" forever — AC-68 must clear

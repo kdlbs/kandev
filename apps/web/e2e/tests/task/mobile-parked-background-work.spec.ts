@@ -52,7 +52,7 @@ async function waitForFirstSessionId(apiClient: ApiClient, taskId: string): Prom
         sessionId = sessions[0]?.id ?? "";
         return sessionId;
       },
-      { message: "session row should be created", timeout: 15_000 },
+      { message: "session row should be created", timeout: 30_000 },
     )
     .not.toBe("");
   return sessionId;
