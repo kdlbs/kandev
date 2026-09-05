@@ -364,8 +364,22 @@ func TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects(t *testing
 	svc.SetOfficeTaskStatusUpdater(&recordingOfficeStatusUpdater{repo: repo})
 	events := &recordingTaskEventPublisher{}
 	svc.SetTaskEventPublisher(events)
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterDone <- struct{}{}:
+		default:
+		}
+	}
 
 	svc.markTaskCompletedForTerminalStep(ctx, "office-done-fx", "child_done")
+	// The parent's on_children_completed transition launches its own step's
+	// session prep on a detached goroutine (launchProcessOnEnter); join it
+	// before reading events/parent state below, or those reads race the
+	// goroutine's own writes (recordingTaskEventPublisher is not
+	// synchronized, matching event_handlers_children_completed_test.go's
+	// waitForChildrenCompletedOnEnter pattern for the same trigger).
+	waitForChildrenCompletedOnEnter(t, onEnterDone)
 
 	// The parent's own on_children_completed transition legitimately
 	// republishes task.updated for the parent itself; only assert on the
@@ -516,6 +530,13 @@ func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *tes
 	svc.SetOfficeTaskStatusUpdater(updater)
 	events := &recordingTaskEventPublisher{}
 	svc.SetTaskEventPublisher(events)
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterDone <- struct{}{}:
+		default:
+		}
+	}
 
 	// Delivery A: reaches the seam first and blocks inside it, holding the
 	// per-task completion lock with the task row still IN_PROGRESS.
@@ -551,6 +572,12 @@ func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *tes
 	}
 	waitOrFatal(doneA, "delivery A")
 	waitOrFatal(doneB, "delivery B")
+	// The winning delivery's parent on_children_completed transition launches
+	// its own step's session prep on a detached goroutine
+	// (launchProcessOnEnter); join it before reading events below, or the
+	// read races that goroutine's writes to the shared, unsynchronized
+	// recordingTaskEventPublisher.
+	waitForChildrenCompletedOnEnter(t, onEnterDone)
 
 	if got := updater.calls.Load(); got != 1 {
 		t.Fatalf("seam calls = %d, want exactly 1: a duplicate delivery must not re-run the status pipeline", got)
