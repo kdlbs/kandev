@@ -4,16 +4,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { CSS, type Transform } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
-import {
-  IconAlertCircle,
-  IconArrowsMaximize,
-  IconDots,
-  IconLock,
-  IconSubtask,
-  IconUsersGroup,
-} from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
-import { AssigneeBadge } from "@/components/kanban-card-assignee-badge";
+import { IconArrowsMaximize, IconDots, IconUsersGroup } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
@@ -25,10 +16,14 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import {
+  KanbanCardBadges,
+  KanbanCardRelationship,
+  RepoChipRow,
+} from "@/components/kanban-card-status-strip";
 import { KanbanCardPriorityIndicator } from "@/components/kanban-card-priority-indicator";
-import { RepoChipRow } from "@/components/kanban-card-repository-chips";
 import { CardTitle } from "@/components/kanban-card-title";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -117,127 +112,6 @@ export function KanbanCardBody({
       <KanbanCardBadges task={task} />
       <TaskCardTags task={task} />
     </>
-  );
-}
-
-function KanbanCardRelationship({ task }: { task: Task }) {
-  const { t } = useTranslation();
-  const parentTitle = useAppStore((s) => {
-    if (!task.parentTaskId) return null;
-    return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
-  });
-
-  if (!task.parentTaskId) return null;
-  const relationshipTitle = parentTitle ?? "Subtask";
-
-  return (
-    <div
-      data-testid="task-parent-relationship"
-      title={relationshipTitle}
-      className="mt-1 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
-    >
-      <IconSubtask className="h-3 w-3 shrink-0" />
-      <span className="shrink-0 font-medium">{t("kanban:subtaskOf")}</span>
-      <span className="min-w-0 truncate">{relationshipTitle}</span>
-    </div>
-  );
-}
-
-function KanbanCardBadges({ task }: { task: Task }) {
-  const { t } = useTranslation();
-  const showRow = hasCardBadges(task);
-
-  if (!showRow) return null;
-
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
-      {task.blocked && <BlockedBadge task={task} />}
-      {task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
-      {task.queuedForStepId && (
-        <Badge
-          variant="secondary"
-          className="text-xs h-5"
-          title={t("kanban:queuedForStep", {
-            step:
-              task.queuedForStepTitle ??
-              t("kanban:workflowStepFallback", { stepId: task.queuedForStepId }),
-          })}
-        >
-          {t("kanban:queuedForStep", {
-            step: task.queuedForStepTitle ?? t("kanban:nextCapacity"),
-          })}
-        </Badge>
-      )}
-      {task.sessionCount && task.sessionCount > 1 && (
-        <Badge variant="secondary" className="text-xs h-5">
-          {t("kanban:sessionCount", { count: task.sessionCount })}
-        </Badge>
-      )}
-      {task.reviewStatus === "pending" && task.state !== "IN_PROGRESS" && (
-        <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
-          <IconAlertCircle className="h-3.5 w-3.5" />
-          <span className="text-[10px] font-medium">{t("kanban:approvalRequired")}</span>
-        </div>
-      )}
-      {task.reviewStatus === "changes_requested" && (
-        <Badge
-          variant="outline"
-          className="border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-950/50 text-xs h-5"
-        >
-          {t("kanban:changesRequested")}
-        </Badge>
-      )}
-    </div>
-  );
-}
-
-/**
- * Blocked badge — the card-level signal that this task will not start on its
- * own. Distinguishes a failed predecessor (chain halted, needs a human) from
- * merely pending ones, because those need different actions from the user.
- *
- * The predecessor list is on the payload already, so the title needs no fetch.
- * The count is rendered as text rather than hover-only so the state is readable
- * on a touch device.
- */
-function BlockedBadge({ task }: { task: Task }) {
-  const { t } = useTranslation();
-  const count = task.dependsOn?.length ?? 0;
-  const failed = task.blockedReason === "failed";
-  const names = (task.dependsOn ?? []).map((ref) => ref.title || ref.id).join(", ");
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        // Same pill formula as the dependency chip above the composer: rounded
-        // outline, 10% tint, 35% border, colour as the text. Keeps the two
-        // surfaces for one concept looking like one thing.
-        "h-5 gap-1 rounded-full px-2 text-xs font-medium leading-none",
-        failed
-          ? "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
-          : "border-primary/35 bg-primary/10 text-primary",
-      )}
-      title={
-        failed
-          ? t("kanban:blockedPredecessorFailed", { tasks: names })
-          : t("kanban:blockedByTasksTitle", { tasks: names })
-      }
-      data-testid="kanban-card-blocked-badge"
-    >
-      <IconLock className="h-3 w-3" />
-      {failed ? t("kanban:blockedFailed") : t("kanban:blockedByCount", { count })}
-    </Badge>
-  );
-}
-
-function hasCardBadges(task: Task): boolean {
-  return Boolean(
-    (task.sessionCount && task.sessionCount > 1) ||
-    task.reviewStatus === "changes_requested" ||
-    task.reviewStatus === "pending" ||
-    task.queuedForStepId ||
-    task.assigneeUserId ||
-    task.blocked,
   );
 }
 

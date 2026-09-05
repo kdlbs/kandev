@@ -5,7 +5,7 @@ import { StateProvider } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
-import { Graph2StepNode } from "./graph2-step-node";
+import { Graph2StepNode, Graph2UnassignedStepMarker } from "./graph2-step-node";
 
 afterEach(() => {
   cleanup();
@@ -36,11 +36,30 @@ function renderCurrentNode(foregroundActivity?: ForegroundActivity | null) {
         hasPrev={false}
         hasNext={false}
         onMoveTask={() => undefined}
-        onOpenTask={() => undefined}
       />
     </StateProvider>,
   );
 }
+
+describe("Graph2StepNode — current step tooltip", () => {
+  it("carries the full step title as a native tooltip, matching the past/future pills", () => {
+    const { container } = renderCurrentNode(null);
+    const button = container.querySelector("button");
+    expect(button?.getAttribute("title")).toBe(STEP_TITLE);
+  });
+});
+
+describe("Graph2UnassignedStepMarker — tooltip", () => {
+  it("carries its own copy as a native tooltip, same as every other pill", () => {
+    const { getByTestId } = render(
+      <StateProvider>
+        <Graph2UnassignedStepMarker />
+      </StateProvider>,
+    );
+    const marker = getByTestId("graph2-step-node-unassigned");
+    expect(marker.getAttribute("title")).toBe(marker.textContent);
+  });
+});
 
 describe("Graph2StepNode — task-level background-running affordance", () => {
   it("shows the background spinner (IconLoader) for a background-running task, not the done check", () => {
@@ -79,7 +98,6 @@ describe("Graph2StepNode — auto-start-failed marker", () => {
             hasPrev={false}
             hasNext={false}
             onMoveTask={() => undefined}
-            onOpenTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
@@ -131,7 +149,6 @@ describe("Graph2StepNode — waiting-for-input variants", () => {
           hasPrev={false}
           hasNext={false}
           onMoveTask={() => undefined}
-          onOpenTask={() => undefined}
         />
       </StateProvider>,
     );
@@ -152,8 +169,85 @@ describe("Graph2StepNode — waiting-for-input variants", () => {
   });
 });
 
-describe("Graph2StepNode — hidden destination disclosure", () => {
-  function renderNextMove(nextStepHidden: boolean) {
+describe("Graph2StepNode — past/future step pills", () => {
+  const PAST_STEP: WorkflowStep = { id: "step-0", title: "Triage", color: "#888" };
+  const FUTURE_STEP: WorkflowStep = { id: "step-2", title: "Review", color: "#888" };
+
+  function renderPill(phase: "past" | "future", onMoveTask = vi.fn()) {
+    const step = phase === "past" ? PAST_STEP : FUTURE_STEP;
+    const result = render(
+      <StateProvider>
+        <TooltipProvider delayDuration={0}>
+          <Graph2StepNode
+            step={step}
+            phase={phase}
+            task={makeTask()}
+            hasPrev={false}
+            hasNext={false}
+            onMoveTask={onMoveTask}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+    return { step, onMoveTask, unmount: result.unmount };
+  }
+
+  function getNode(phase: "past" | "future") {
+    return screen.getByTestId(`graph2-step-node-${phase}`);
+  }
+
+  it("renders a completed step as a labelled pill showing its title", () => {
+    const { step } = renderPill("past");
+    expect(getNode("past").textContent).toContain(step.title);
+  });
+
+  it("renders a not-yet-reached step as a labelled pill showing its title", () => {
+    const { step } = renderPill("future");
+    expect(getNode("future").textContent).toContain(step.title);
+  });
+
+  it("carries the full step title as a native tooltip, since the pill's own label truncates", () => {
+    const { step: pastStep } = renderPill("past");
+    expect(getNode("past").getAttribute("title")).toBe(pastStep.title);
+
+    const { step: futureStep } = renderPill("future");
+    expect(getNode("future").getAttribute("title")).toBe(futureStep.title);
+  });
+
+  it("does not color a completed step's check green — the icon shape carries the done signal, not a third hue", () => {
+    renderPill("past");
+    const check = getNode("past").querySelector(".tabler-icon-check");
+    expect(check?.getAttribute("class")).not.toContain("text-green-500");
+  });
+
+  it("renders completed and not-yet-reached pills with visually distinct styling", () => {
+    const { unmount } = renderPill("past");
+    const pastClassName = getNode("past").className;
+    unmount();
+
+    renderPill("future");
+    const futureClassName = getNode("future").className;
+
+    expect(pastClassName).not.toBe(futureClassName);
+  });
+
+  it("is not individually focusable, so tab stop count does not grow with step count", () => {
+    renderPill("past");
+    const node = getNode("past");
+    expect(node.tagName).not.toBe("BUTTON");
+    expect(node.getAttribute("role")).not.toBe("button");
+    expect(node.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("is not a click target for moving the task", () => {
+    const { onMoveTask } = renderPill("past");
+    fireEvent.click(getNode("past"));
+    expect(onMoveTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("Graph2StepNode — move-control destination disclosure", () => {
+  function renderNextMove() {
     render(
       <StateProvider>
         <TooltipProvider delayDuration={0}>
@@ -165,9 +259,7 @@ describe("Graph2StepNode — hidden destination disclosure", () => {
             hasNext
             nextStepId="step-done"
             nextStepTitle="Done"
-            nextStepHidden={nextStepHidden}
             onMoveTask={() => undefined}
-            onOpenTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
@@ -177,15 +269,10 @@ describe("Graph2StepNode — hidden destination disclosure", () => {
     return screen.getByRole("button", { name: "Move to Done" });
   }
 
-  it("shows the destination tooltip only when the destination is hidden", async () => {
-    const hiddenTargetButton = renderNextMove(true);
-    fireEvent.focus(hiddenTargetButton);
+  it("AC-UI-PIPELINE-ROW-001.7: always shows the destination tooltip on focus", async () => {
+    const targetButton = renderNextMove();
+    fireEvent.focus(targetButton);
     await waitFor(() => expect(screen.getByRole("tooltip").textContent).toBe("Move to Done"));
-
-    cleanup();
-    const visibleTargetButton = renderNextMove(false);
-    fireEvent.focus(visibleTargetButton);
-    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("exposes move controls when the current node receives keyboard focus", () => {
@@ -200,9 +287,7 @@ describe("Graph2StepNode — hidden destination disclosure", () => {
             hasNext
             nextStepId="step-done"
             nextStepTitle="Done"
-            nextStepHidden
             onMoveTask={() => undefined}
-            onOpenTask={() => undefined}
           />
         </TooltipProvider>
       </StateProvider>,
@@ -211,28 +296,5 @@ describe("Graph2StepNode — hidden destination disclosure", () => {
     fireEvent.focus(screen.getByRole("button", { name: STEP_TITLE }));
 
     expect(screen.getByRole("button", { name: "Move to Done" })).not.toBeNull();
-  });
-});
-
-describe("Graph2StepNode — pill click routes through onOpenTask", () => {
-  it("calls onOpenTask and does not navigate directly on its own", () => {
-    const onOpenTask = vi.fn();
-    render(
-      <StateProvider>
-        <Graph2StepNode
-          step={STEP}
-          phase="current"
-          task={makeTask()}
-          hasPrev={false}
-          hasNext={false}
-          onMoveTask={() => undefined}
-          onOpenTask={onOpenTask}
-        />
-      </StateProvider>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: STEP_TITLE }));
-
-    expect(onOpenTask).toHaveBeenCalledWith(makeTask());
   });
 });

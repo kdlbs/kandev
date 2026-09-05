@@ -45,14 +45,12 @@ describe("getStepMoveTargets", () => {
     { id: "done", title: "Done" },
   ] as WorkflowStep[];
 
-  it("flags only a hidden neighboring destination for tooltip disclosure", () => {
-    const result = getStepMoveTargets([moveTargets[1], moveTargets[2]], moveTargets, "review");
+  it("resolves the adjacent move destinations' titles", () => {
+    const result = getStepMoveTargets(moveTargets, "review");
 
     expect(result).toMatchObject({
       prevStepTitle: "Backlog",
-      prevStepHidden: true,
       nextStepTitle: "Done",
-      nextStepHidden: false,
     });
   });
 });

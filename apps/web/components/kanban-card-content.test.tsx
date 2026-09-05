@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mockAppState = {
   workspaces: { activeId: "ws-1" },
   kanban: { tasks: [] as Array<{ id: string; title: string; parentTaskId?: string }> },
-  kanbanMulti: { snapshots: {} as Record<string, { tasks: Array<{ id: string }> }> },
+  kanbanMulti: {
+    snapshots: {} as Record<string, { tasks: Array<{ id: string; title: string }> }>,
+  },
   taskPRs: { byTaskId: {} as Record<string, unknown> },
 };
 
@@ -21,6 +23,7 @@ vi.mock("@/components/gitlab/mr-task-icon", () => ({
 }));
 
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { t } from "@/lib/i18n";
 import { KanbanCardBody, renderTaskStatusIcon } from "./kanban-card-content";
 import type { Task } from "./kanban-card";
 
@@ -50,6 +53,7 @@ function SlotPropsProbe({ testId, slotProps }: { testId: string; slotProps?: unk
 afterEach(() => {
   cleanup();
   mockAppState.kanban.tasks = [];
+  mockAppState.kanbanMulti.snapshots = {};
   pluginRegistry.unregisterPlugin(NOTES_PLUGIN_ID);
   pluginRegistry.unregisterPlugin(SECOND_PLUGIN_ID);
 });
@@ -214,5 +218,31 @@ describe("KanbanCardBody — title hover card gating", () => {
     render(<KanbanCardBody task={TASK} repositoryChips={[]} enableTitleHover />);
     const title = screen.getByTestId(TITLE_TEST_ID);
     expect(title.closest('[data-testid="task-title-preview-trigger"]')).not.toBeNull();
+  });
+});
+
+describe("KanbanCardBody — parent relationship (KanbanCardRelationship)", () => {
+  const CHILD_TASK: Task = { ...TASK, id: "task-2", parentTaskId: "root-1" };
+
+  it("resolves the parent title from the active board", () => {
+    mockAppState.kanban.tasks = [{ id: "root-1", title: "Root task" }];
+    render(<KanbanCardBody task={CHILD_TASK} repositoryChips={[]} />);
+    const relationship = screen.getByTestId("task-parent-relationship");
+    expect(relationship.textContent).toContain("Root task");
+  });
+
+  it("resolves the parent title from a loaded cross-workflow snapshot when the parent isn't on the active board", () => {
+    mockAppState.kanbanMulti.snapshots = {
+      "wf-2": { tasks: [{ id: "root-1", title: "Snapshot Root" }] },
+    };
+    render(<KanbanCardBody task={CHILD_TASK} repositoryChips={[]} />);
+    const relationship = screen.getByTestId("task-parent-relationship");
+    expect(relationship.textContent).toContain("Snapshot Root");
+  });
+
+  it("falls back to the localized generic label when the parent title cannot be resolved", () => {
+    render(<KanbanCardBody task={CHILD_TASK} repositoryChips={[]} />);
+    const relationship = screen.getByTestId("task-parent-relationship");
+    expect(relationship.textContent).toContain(t("task:subtask"));
   });
 });

@@ -1,10 +1,16 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { t } from "@/lib/i18n";
 import { ORPHAN_STEP_ID } from "./swimlane-kanban-content";
-import { getGraph2DisplayState, SwimlaneGraph2Content } from "./swimlane-graph2-content";
+import {
+  getGraph2DisplayState,
+  sortGraph2Tasks,
+  SwimlaneGraph2Content,
+} from "./swimlane-graph2-content";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 
@@ -57,21 +63,25 @@ describe("SwimlaneGraph2Content auto-hidden steps", () => {
   ) {
     return render(
       createElement(
-        StateProvider,
+        ToastProvider,
         null,
-        createElement(TooltipProvider, {
-          delayDuration: 0,
-          children: createElement(SwimlaneGraph2Content, {
-            workflowId: "wf-1",
-            steps: visibleSteps,
-            moveTargetSteps,
-            tasks,
-            onPreviewTask: () => undefined,
-            onOpenTask: () => undefined,
-            onEditTask: () => undefined,
-            onDeleteTask: () => undefined,
+        createElement(
+          StateProvider,
+          null,
+          createElement(TooltipProvider, {
+            delayDuration: 0,
+            children: createElement(SwimlaneGraph2Content, {
+              workflowId: "wf-1",
+              steps: visibleSteps,
+              moveTargetSteps,
+              tasks,
+              onPreviewTask: () => undefined,
+              onOpenTask: () => undefined,
+              onEditTask: () => undefined,
+              onDeleteTask: () => undefined,
+            }),
           }),
-        }),
+        ),
       ),
     );
   }
@@ -102,5 +112,150 @@ describe("SwimlaneGraph2Content auto-hidden steps", () => {
 
     expect(screen.getByTestId("pipeline-auto-hidden-empty-state")).toBeTruthy();
     expect(screen.queryByText("No tasks")).toBeNull();
+  });
+});
+
+describe("sortGraph2Tasks (AC-UI-PIPELINE-ROW-005.1)", () => {
+  it("sorts by displayed-step-index ascending", () => {
+    const sorted = sortGraph2Tasks(
+      [makeTask("on-done", "done"), makeTask("on-todo", "todo")],
+      steps,
+    );
+    expect(sorted.map((t) => t.id)).toEqual(["on-todo", "on-done"]);
+  });
+
+  it("breaks a step-index tie by position ascending, treating an absent position as 0", () => {
+    const sorted = sortGraph2Tasks(
+      [
+        makeTask("second", "todo", 2),
+        { ...makeTask("no-position", "todo"), position: undefined } as Task,
+        makeTask("first", "todo", 1),
+      ],
+      steps,
+    );
+    expect(sorted.map((t) => t.id)).toEqual(["no-position", "first", "second"]);
+  });
+
+  it("breaks a step-index and position tie by task id ascending", () => {
+    const sorted = sortGraph2Tasks([makeTask("b", "todo", 0), makeTask("a", "todo", 0)], steps);
+    expect(sorted.map((t) => t.id)).toEqual(["a", "b"]);
+  });
+
+  it("sorts the no-resolvable-current-step group last, after every task with a resolvable step", () => {
+    const sorted = sortGraph2Tasks(
+      [makeTask("unassigned", ""), makeTask("on-done", "done"), makeTask("on-todo", "todo")],
+      steps,
+    );
+    expect(sorted.map((t) => t.id)).toEqual(["on-todo", "on-done", "unassigned"]);
+  });
+
+  it("breaks a tie between two or more no-resolvable-current-step tasks by position then id, identically regardless of arrival order", () => {
+    const zTask = makeTask("z-task", "", 5);
+    const aTask = makeTask("a-task", "", 1);
+
+    const order1 = sortGraph2Tasks([zTask, aTask], steps);
+    const order2 = sortGraph2Tasks([aTask, zTask], steps);
+
+    expect(order1.map((t) => t.id)).toEqual(["a-task", "z-task"]);
+    expect(order2.map((t) => t.id)).toEqual(["a-task", "z-task"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const input = [makeTask("on-done", "done"), makeTask("on-todo", "todo")];
+    const originalOrder = input.map((t) => t.id);
+    sortGraph2Tasks(input, steps);
+    expect(input.map((t) => t.id)).toEqual(originalOrder);
+  });
+});
+
+describe("SwimlaneGraph2Content — row order follows the deterministic sort", () => {
+  function renderPipeline(tasks: Task[]) {
+    return render(
+      createElement(
+        ToastProvider,
+        null,
+        createElement(
+          StateProvider,
+          null,
+          createElement(TooltipProvider, {
+            delayDuration: 0,
+            children: createElement(SwimlaneGraph2Content, {
+              workflowId: "wf-1",
+              steps,
+              moveTargetSteps: steps,
+              tasks,
+              onPreviewTask: () => undefined,
+              onOpenTask: () => undefined,
+              onEditTask: () => undefined,
+              onDeleteTask: () => undefined,
+            }),
+          }),
+        ),
+      ),
+    );
+  }
+
+  it("renders rows in displayed-step-index order with the unassigned group last", () => {
+    const { container } = renderPipeline([
+      makeTask("unassigned", ""),
+      makeTask("on-done", "done"),
+      makeTask("on-todo", "todo"),
+    ]);
+
+    const rowIds = Array.from(container.querySelectorAll('[data-testid^="pipeline-task-"]')).map(
+      (el) => el.getAttribute("data-testid"),
+    );
+    expect(rowIds).toEqual([
+      "pipeline-task-on-todo",
+      "pipeline-task-on-done",
+      "pipeline-task-unassigned",
+    ]);
+  });
+});
+
+describe("SwimlaneGraph2Content — forwards selectedIds to the row's shared task menu", () => {
+  function renderWithSelection(tasks: Task[], selectedIds: Set<string>) {
+    return render(
+      createElement(
+        ToastProvider,
+        null,
+        createElement(
+          StateProvider,
+          null,
+          createElement(TooltipProvider, {
+            delayDuration: 0,
+            children: createElement(SwimlaneGraph2Content, {
+              workflowId: "wf-1",
+              steps,
+              moveTargetSteps: steps,
+              tasks,
+              onPreviewTask: () => undefined,
+              onOpenTask: () => undefined,
+              onEditTask: () => undefined,
+              onDeleteTask: () => undefined,
+              selectedIds,
+              onToggleSelect: () => undefined,
+            }),
+          }),
+        ),
+      ),
+    );
+  }
+
+  it("suppresses the detach entry while acting on a multi-task selection, matching the Kanban card", async () => {
+    const child = { ...makeTask("child", "todo"), parentTaskId: "parent-1" } as Task;
+    const sibling = makeTask("sibling", "todo");
+    renderWithSelection([child, sibling], new Set(["child", "sibling"]));
+
+    const row = screen.getByTestId("pipeline-task-child");
+    const trigger = within(row).getByRole("button", { name: t("kanban:moreOptions") });
+    fireEvent.pointerDown(trigger, { button: 0, pointerId: 1 });
+    fireEvent.click(trigger);
+
+    await waitFor(() => expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0));
+    // Without selectedIds reaching the row, the shared menu never learns more
+    // than one task is selected and offers "Detach from parent" as if this
+    // were a single-task action — an accidental bulk detach.
+    expect(screen.queryByTestId("task-context-detach")).toBeNull();
   });
 });
