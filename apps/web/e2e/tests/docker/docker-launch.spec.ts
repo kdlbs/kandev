@@ -99,15 +99,24 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     const { executors } = await apiClient.listExecutors();
     const dockerExec = executors.find((e) => e.type === "local_docker");
     expect(dockerExec?.id).toBeTruthy();
+    const defaultScriptResponse = await apiClient.rawRequest(
+      "GET",
+      "/api/v1/executor-profiles/default-script?type=local_docker",
+    );
+    expect(defaultScriptResponse.ok()).toBe(true);
+    const { prepare_script: defaultPrepareScript } = (await defaultScriptResponse.json()) as {
+      prepare_script: string;
+    };
+    const slowPrepareScript = `sleep 20\n${defaultPrepareScript}`;
     const profile = await apiClient.createExecutorProfile(dockerExec!.id, {
       name: "E2E Docker Slow",
       config: { image_tag: E2E_IMAGE_TAG },
-      prepare_script: "sleep 20",
+      prepare_script: slowPrepareScript,
       cleanup_script: "",
       env_vars: seedData.gitConfigEnvVars,
     });
     const persistedProfile = await apiClient.getExecutorProfile(dockerExec!.id, profile.id);
-    expect(persistedProfile.prepare_script).toBe("sleep 20");
+    expect(persistedProfile.prepare_script).toBe(slowPrepareScript);
 
     try {
       const task = await apiClient.createTask(seedData.workspaceId, "Docker Slow Progress", {

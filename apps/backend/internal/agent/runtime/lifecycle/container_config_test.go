@@ -295,6 +295,33 @@ func TestBuildContainerConfigBoundsPrepareScriptBeforeAgentctl(t *testing.T) {
 	}
 }
 
+func TestBuildContainerConfigMutableCloneStartsAgentctlAfterPrepareFailure(t *testing.T) {
+	cm := newCMTest(t)
+	got, err := cm.buildContainerConfig(ContainerConfig{
+		AgentConfig:                    newConfigStubAgent(),
+		InstanceID:                     "0123456789abcdef",
+		TaskID:                         "task-1",
+		PrepareScript:                  "exit 42",
+		RequiresCloneGitMetadataPolicy: true,
+	})
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	for _, value := range got.Env {
+		if strings.HasPrefix(value, "KANDEV_REQUIRE_GIT_METADATA_ATTESTATION=") {
+			t.Fatalf("container environment must not make prepare failure bypass lifecycle attestation: %q", value)
+		}
+	}
+	bootstrap := got.Entrypoint[2]
+	if strings.Contains(bootstrap, `exit "$prep_rc"`) {
+		t.Fatalf("prepare failure exits before trusted agentctl can attest the checkout: %s", bootstrap)
+	}
+	if !strings.Contains(bootstrap, "exec /usr/local/bin/agentctl") {
+		t.Fatalf("bootstrap does not start trusted agentctl after prepare failure: %s", bootstrap)
+	}
+}
+
 func TestCloneGitMetadataPrepareScriptAttestsCanonicalWorkspace(t *testing.T) {
 	script := cloneGitMetadataPrepareScript("git clone https://example.test/repo /workspace")
 	if !strings.Contains(script, "git clone https://example.test/repo /workspace") {

@@ -524,9 +524,6 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	if config.PrepareScript != "" {
 		env = append(env, "KANDEV_PREPARE_SCRIPT="+config.PrepareScript)
 	}
-	if config.RequiresCloneGitMetadataPolicy {
-		env = append(env, "KANDEV_REQUIRE_GIT_METADATA_ATTESTATION=1")
-	}
 
 	// We always launch agentctl as the container's main process and fan out the
 	// agent subprocess from there via the agentctl HTTP API. This frees user-built
@@ -537,9 +534,9 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// agentctl receives the agent command later via the CreateInstance API.
 	//
 	// Prepare runs in a subshell so its `set -e` (most prepare scripts opt in)
-	// can't kill the bootstrap before exec'ing agentctl. If prepare fails, we
-	// still bring agentctl up so the host can connect, surface the failure, and
-	// the user can debug from the Executor Settings popover.
+	// can't kill the bootstrap before exec'ing agentctl. Agentctl is the trusted
+	// control plane lifecycle uses to attest the prepared checkout; the agent
+	// child is started only after that attestation and policy installation pass.
 	//
 	prepareTimeout := formatCoreutilsTimeout(constants.SetupScriptTimeout)
 	//nolint:dupword // shell branches contain repeated `fi` tokens.
@@ -556,9 +553,6 @@ if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
 	  timeout -s TERM -k 1s ` + prepareTimeout + ` sh -c 'eval "$KANDEV_PREPARE_SCRIPT"'
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then
-    if [ "${KANDEV_REQUIRE_GIT_METADATA_ATTESTATION:-}" = "1" ]; then
-      exit "$prep_rc"
-    fi
     echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2
   fi
 fi
