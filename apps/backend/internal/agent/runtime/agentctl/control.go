@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -405,6 +406,17 @@ func (c *ControlClient) GetIdentity(ctx context.Context) (*IdentityInfo, error) 
 	return &info, nil
 }
 
+// ErrOwnershipCredentialSuperseded indicates the control server rejected an
+// ownership-claim request because the presented credential is no longer
+// current (HTTP 401) -- distinct from a transient failure (network error,
+// 5xx). This is not the same backend's credential being stale from a
+// renewal it initiated: a rotation this backend performs always leaves it
+// holding the replacement, so a rejection here means some other party
+// rotated the credential out from under it, most likely a second backend
+// that adopted the server. Callers must not retry on this error
+// (AC-EXECUTORS-CONTROL-OWNERSHIP-002.3).
+var ErrOwnershipCredentialSuperseded = errors.New("ownership claim rejected: credential superseded")
+
 // ClaimOwnership establishes or renews this backend's ownership of the
 // control server. It carries no instance identity: a server with zero
 // instances is still owned. Refused (non-nil error) once the server's
@@ -421,6 +433,9 @@ func (c *ControlClient) ClaimOwnership(ctx context.Context) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return ErrOwnershipCredentialSuperseded
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to claim ownership: status %d", resp.StatusCode)
 	}

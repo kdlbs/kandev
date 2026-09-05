@@ -638,3 +638,52 @@ func TestListInstances_FailureModes(t *testing.T) {
 		})
 	}
 }
+
+// TestClaimOwnership_UnauthorizedReturnsSupersededSentinel pins
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.3: a 401 response must be distinguished
+// from any other failure via ErrOwnershipCredentialSuperseded, so a caller
+// like OwnershipRenewer can tell "credential is no longer current" apart
+// from a transient failure it should retry.
+func TestClaimOwnership_UnauthorizedReturnsSupersededSentinel(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusUnauthorized, `{"error":"invalid auth token"}`))
+	t.Cleanup(srv.Close)
+
+	err := newTestControlClient(t, srv).ClaimOwnership(context.Background())
+	if !errors.Is(err, ErrOwnershipCredentialSuperseded) {
+		t.Fatalf("error = %v, want errors.Is(err, ErrOwnershipCredentialSuperseded)", err)
+	}
+}
+
+func TestClaimOwnership_OtherFailureModesDoNotReturnSupersededSentinel(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		wantErr string
+	}{
+		{"internal server error", http.StatusInternalServerError, "failed to claim ownership: status 500"},
+		{"not found", http.StatusNotFound, "failed to claim ownership: status 404"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(jsonResponder(tc.status, `{}`))
+			t.Cleanup(srv.Close)
+
+			err := newTestControlClient(t, srv).ClaimOwnership(context.Background())
+			if errors.Is(err, ErrOwnershipCredentialSuperseded) {
+				t.Fatalf("error = %v, want NOT errors.Is(err, ErrOwnershipCredentialSuperseded)", err)
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestClaimOwnership_SuccessReturnsNilError(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusOK, `{}`))
+	t.Cleanup(srv.Close)
+
+	if err := newTestControlClient(t, srv).ClaimOwnership(context.Background()); err != nil {
+		t.Fatalf("ClaimOwnership() error = %v, want nil", err)
+	}
+}

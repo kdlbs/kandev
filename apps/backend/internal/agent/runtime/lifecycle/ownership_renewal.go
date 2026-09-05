@@ -2,11 +2,13 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -91,9 +93,39 @@ func (r *OwnershipRenewer) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := r.claimer.ClaimOwnership(ctx); err != nil {
+				if errors.Is(err, agentctl.ErrOwnershipCredentialSuperseded) {
+					// AC-EXECUTORS-CONTROL-OWNERSHIP-002.3: a superseded
+					// credential means some other party rotated it out from
+					// under this backend (most likely a second backend that
+					// adopted the server). Retrying would keep presenting a
+					// credential that can never succeed again, and this loop
+					// must not mint or fetch a replacement on its own -- only
+					// a fresh adoption may do that. Stop instead of looping
+					// back to the ticker.
+					r.logger.Error("ownership renewal claim rejected: credential superseded; stopping renewal loop without retry",
+						zap.Error(err))
+					r.stopSelf()
+					return
+				}
 				r.logger.Warn("ownership renewal claim failed; will retry on the next interval",
 					zap.Error(err))
 			}
 		}
 	}
+}
+
+// stopSelf marks the renewer stopped from within its own loop goroutine.
+// Unlike Stop, it must not call wg.Wait(): the loop goroutine invoking this
+// is exactly what wg is waiting on, so waiting here would deadlock. A
+// concurrent explicit Stop() call remains safe: it will see r.started
+// already false and return immediately, or it will call the (idempotent)
+// cancel and then wg.Wait(), which unblocks as soon as this goroutine
+// returns.
+func (r *OwnershipRenewer) stopSelf() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cancel != nil {
+		r.cancel()
+	}
+	r.started = false
 }
