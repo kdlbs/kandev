@@ -20,7 +20,7 @@ system_design:
 
 ## Summary
 
-Replace the single `noCompatibleAgent` boolean with a derived three-way
+Replace the single `noCompatibleAgent` boolean with a derived compatibility
 `AgentCompatState` and teach the agent autopick to replace a selection that
 became incompatible after an executor switch. Both changes are pure logic with
 unit tests and do not touch rendering.
@@ -31,6 +31,9 @@ unit tests and do not touch rendering.
   `task-create-dialog-computed.ts`; return `agentCompatState` and
   `selectedAgentProfileName` from `useExecutorProfileCompat` and
   `useDialogComputed`; keep `noCompatibleAgent` derived from the state.
+- Keep an unlocked disabled or dynamic-off selection in a distinct
+  `selected-unavailable` state while a compatible alternative exists. Preserve
+  the `none-compatible` behavior for a locked disabled profile.
 - Add the replacement gate to `getAgentAutopickGate` and the `replaces` field
   to the `pick` decision in `task-create-dialog-autopick.ts`; log `replaces`
   in the autopick debug fields.
@@ -46,8 +49,10 @@ unit tests and do not touch rendering.
 ## Acceptance
 
 - `computeAgentCompatState` returns `selected-incompatible` when the effective
-  agent is absent from a non-empty compatible list, `none-compatible` only when
-  the list is empty with an executor selected, and `compatible` otherwise.
+  agent fails the executor credential check, `selected-unavailable` for an
+  unlocked disabled or dynamic-off selection when another compatible profile
+  exists, `none-compatible` when no profile passes (including a locked disabled
+  profile), and `compatible` otherwise.
 - With an executor selected, auth loaded, no workflow lock, and a non-empty
   compatible list that lacks the current selection,
   `decideAgentProfileAutopick` returns a `pick` whose `replaces` is the current
@@ -119,3 +124,7 @@ None.
 - `pnpm exec vitest run` on the four named files: 4 files, 66 tests passed.
   `pnpm run typecheck`: clean. `pnpm exec eslint --max-warnings 0` on the three
   production files: clean.
+
+Follow-up verification added the `selected-unavailable` state for unlocked
+disabled or dynamic-off selections with an alternative, plus submit-guard
+coverage in `task-create-dialog-setup.test.ts`.

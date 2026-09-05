@@ -28,6 +28,8 @@ only how the task-create dialog reacts to that rule.
   selected executor profile.
 - **Workflow-locked agent:** The agent profile that the selected workflow pins
   for new tasks. The user cannot change it inside the dialog.
+- **Unavailable selection:** A selected profile that is disabled or blocked
+  because dynamic agent routing is off, while another compatible profile exists.
 - **Preference order:** The existing pre-selection order for the agent profile:
   the last-used profile, then the workspace default, then the first compatible
   profile.
@@ -54,7 +56,8 @@ without reopening the dialog or guessing which credential is missing.
   profile is not compatible with the selected executor profile, the workflow
   does not lock the agent, and at least one compatible profile exists, the
   dialog shall replace the selection with a compatible profile chosen by the
-  preference order.
+  preference order. Until the replacement applies, an unavailable selection
+  shall show a truthful pending state and keep the start action disabled.
 - **AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.3:** When the selected agent
   profile is compatible with a newly selected executor profile, the dialog
   shall keep that selection.
@@ -72,13 +75,14 @@ without reopening the dialog or guessing which credential is missing.
   user cannot change the locked agent. A workflow that locks a disabled
   profile keeps the behavior in
   [Disable an Agent Profile](../../agents/requirements/profile-disable.md).
-- **AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6:** The dialog shall not state
-  that no compatible agent profile exists while at least one compatible profile
-  exists.
+- **AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6:** Except for the disabled
+  workflow-locked profile behavior in 001.5, the dialog shall not state that no
+  compatible agent profile exists while at least one compatible profile exists.
 - **AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.7:** When the start action is
   disabled because of agent compatibility, its explanation shall match the
-  shown state: the no-compatible message for the state in 001.4, and a message
-  naming the agent profile and executor profile for the state in 001.5.
+  shown state: the no-compatible message for the state in 001.4, a message
+  naming the agent profile and executor profile for the state in 001.5, or an
+  unavailable-selection message while an automatic replacement is pending.
 - **AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.8:** An automatic replacement
   under 001.2 shall not change the user's stored last-used agent profile. Only a
   manual selection or a successful task creation records that preference.

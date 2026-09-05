@@ -23,24 +23,25 @@ system_design:
 
 Render the agent column and the footer's disabled reason from
 `agentCompatState`. Keep the selector visible whenever a compatible profile
-exists, add the incompatible note for the unlocked and workflow-locked cases,
-and add the copy in every locale.
+exists, add truthful notes for unavailable and incompatible selections, and add
+the copy in every locale.
 
 ## In scope
 
 - `AgentColumn` in `task-create-dialog-form-body.tsx` branches per the
   presentation table; extract an `IncompatibleAgentNote` component carrying
-  `data-testid="agent-profile-incompatible-note"` and the credentials link.
+  `data-testid="agent-profile-incompatible-note"` and the credentials link,
+  plus an unavailable-selection note.
 - `buildFormBodyProps` in `task-create-dialog-prop-builders.ts` forwards
   `agentCompatState`, `selectedAgentProfileName`, and `effectiveWorkflowName`;
   extend `DialogFormBodyProps` and `CreateEditSelectorsProps`.
 - `task-create-dialog-footer.tsx`: add `REASON_SELECTED_AGENT_INCOMPATIBLE`,
-  return it for `selected-incompatible`, and resolve it with the agent name.
+  add `REASON_SELECTED_AGENT_UNAVAILABLE`, and resolve both state-specific
+  reasons with the agent name.
 - Locale keys `agentNotConfiguredOnExecutor`,
-  `workflowAgentNotConfiguredOnExecutor`, and
-  `selectedAgentNotConfiguredFor` in `en`, `pt-pt`, `zh-cn`; regenerate
-  `zh-hk` and `zh-tw` with `pnpm run i18n:zh-hant` and `pseudo` with
-  `pnpm run i18n:pseudo`.
+  `workflowAgentNotConfiguredOnExecutor`, `selectedAgentNotConfiguredFor`,
+  `selectedAgentProfileFallback`, `selectedAgentProfileFallbackInline`, and
+  `selectedAgentProfileUnavailable` in every locale.
 - Component and footer tests listed under Verification.
 
 ## Out of scope
@@ -58,7 +59,8 @@ and add the copy in every locale.
   the workflow, the agent profile, and the executor profile, links to
   `/settings/executors/<id>`, and no selector is rendered.
 - `computeDisabledReason` returns `REASON_SELECTED_AGENT_INCOMPATIBLE` for
-  `selected-incompatible` and `REASON_NO_COMPATIBLE_AGENT` for
+  `selected-incompatible`, `REASON_SELECTED_AGENT_UNAVAILABLE` for
+  `selected-unavailable`, and `REASON_NO_COMPATIBLE_AGENT` for
   `none-compatible`; `pnpm run i18n:check` passes with the new keys.
 
 ## Verification
@@ -132,3 +134,7 @@ Task 01.
   files, dialog and setup tests: 7 files, 116 tests passed. `pnpm run
   i18n:check`: all checks pass. `pnpm run typecheck`: clean. `pnpm exec eslint
   --max-warnings 0` on the six production files and five test files: clean.
+
+Follow-up verification added the unavailable-selection note, state-specific
+footer reason, and separate inline fallback copy. All six locale catalogs pass
+the i18n checks.

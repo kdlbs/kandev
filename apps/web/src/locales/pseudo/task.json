@@ -896,6 +896,8 @@
   "workflowAgentNotConfiguredOnExecutor": "Ţĥē {{workflow}} ŵōŕķƒĺōŵ ũśēś {{agent}}, ŵĥĩćĥ ĩś ńōţ ćōńƒĩĝũŕēď ōń {{target}}.",
   "selectedAgentNotConfiguredFor": "{{agent}} ĩś ńōţ ćōńƒĩĝũŕēď ōń {{target}}. Ćōńƒĩĝũŕē àĝēńţ ćŕēďēńţĩàĺś ĩń Śēţţĩńĝś → Ēxēćũţōŕś.",
   "selectedAgentProfileFallback": "Ţĥē śēĺēćţēď àĝēńţ ƥŕōƒĩĺē",
+  "selectedAgentProfileFallbackInline": "ţĥē śēĺēćţēď àĝēńţ ƥŕōƒĩĺē",
+  "selectedAgentProfileUnavailable": "{{agent}} ĩś ũńàvàĩĺàƀĺē. Śēĺēćţ à ćōḿƥàţĩƀĺē àĝēńţ ƥŕōƒĩĺē.",
   "noContent": "Ńō ćōńţēńţ",
   "noDecisionYet": "Ńō ďēćĩśĩōń ŷēţ",
   "noDependency": "Ńō ďēƥēńďēńćŷ",

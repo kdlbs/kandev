@@ -294,6 +294,7 @@ export const REASON_AGENT = "task:reasonSelectAgent";
 export const REASON_DESCRIPTION = "task:reasonAddSessionDescription";
 export const REASON_NO_COMPATIBLE_AGENT = "task:noCompatibleAgentProfileFor";
 export const REASON_SELECTED_AGENT_INCOMPATIBLE = "task:selectedAgentNotConfiguredFor";
+export const REASON_SELECTED_AGENT_UNAVAILABLE = "task:selectedAgentProfileUnavailable";
 export const REASON_LOADING_DEPENDENCIES = "task:loadingDependencies";
 
 /**
@@ -319,6 +320,9 @@ export function resolveDisabledReason(
 function compatReason(props: TaskCreateDialogFooterProps): string | null {
   if (props.agentCompatState === "selected-incompatible") {
     return REASON_SELECTED_AGENT_INCOMPATIBLE;
+  }
+  if (props.agentCompatState === "selected-unavailable") {
+    return REASON_SELECTED_AGENT_UNAVAILABLE;
   }
   if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
   return null;

@@ -43,10 +43,11 @@ second, compatible agent type, then restarts it back to the baseline.
   start action is disabled.
 - Keep the existing empty-state case green.
 - Add `apps/web/e2e/tests/task/mobile-create-task-agent-compatibility.spec.ts`
-  driving the same workflow-locked flow through `MobileKanbanPage` at the
-  configured phone device. Assert the note is visible, the link is tappable,
-  the start action is disabled, and `document.documentElement.scrollWidth`
-  does not exceed the viewport width.
+  driving both the workflow-locked and unlocked replacement flows through
+  `MobileKanbanPage` at the configured phone device. Assert the note is visible,
+  the credentials link is tappable, the start action is disabled or enabled as
+  expected, and `document.documentElement.scrollWidth` does not exceed the
+  viewport width.
 
 ## Out of scope
 
@@ -58,7 +59,8 @@ second, compatible agent type, then restarts it back to the baseline.
 - The desktop workflow-locked case passes and the existing Docker empty-state
   case still passes.
 - The mobile spec passes under the `mobile-chrome` project with no document
-  horizontal overflow.
+  horizontal overflow, and the replacement scenario proves the compatible
+  profile is selected after the executor change.
 
 ## Verification
 
@@ -120,3 +122,7 @@ Task 02.
 - `pnpm e2e:raw tests/task/create-task.spec.ts`: 17 passed (2.8 m).
   `pnpm e2e:raw --project=mobile-chrome
   tests/task/mobile-create-task-agent-compatibility.spec.ts`: 1 passed.
+
+Follow-up verification: the updated mobile spec ran against a fresh production
+build with 2 tests passed. The executor mutations use one touch selection each,
+and the locked flow taps the credentials link and verifies the settings route.

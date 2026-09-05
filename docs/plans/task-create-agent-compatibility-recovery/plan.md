@@ -54,13 +54,17 @@ profile and a non-empty compatible list fails before the fix because
 
 ### In scope
 
-- A three-way agent compatibility state derived in the dialog's computed hook.
+- A compatibility state derived in the dialog's computed hook, including a
+  truthful pending state for an unavailable selection.
 - Automatic replacement of an incompatible, non-locked selection using the
   existing preference order.
 - Selector kept visible whenever a compatible profile exists.
 - A workflow-locked message naming workflow, agent, and executor.
+- Canonical submit preflight for the form, Ctrl/Cmd+Enter shortcut, and
+  programmatic composer path.
 - Footer disabled reasons that match the shown state.
-- Translated copy in all five locales plus the regenerated pseudo locale.
+- Translated copy in all five locales plus the regenerated pseudo locale,
+  including sentence-start and inline fallback forms.
 - Desktop and mobile Playwright evidence for the user-visible states.
 
 ### Out of scope
@@ -90,19 +94,25 @@ profile and a non-empty compatible list fails before the fix because
 ### Presentation and copy (`task-create-dialog-form-body.tsx`, `task-create-dialog-prop-builders.ts`, `task-create-dialog-footer.tsx`, locales)
 
 - `AgentColumn` branches on `agentCompatState` and `workflowAgentLocked` per
-  the presentation table in the system design. The new note carries
-  `data-testid="agent-profile-incompatible-note"` and reuses the credentials
-  link markup from `NoCompatibleAgentState`.
+  the presentation table in the system design. The incompatible note carries
+  `data-testid="agent-profile-incompatible-note"`; an unavailable selection
+  uses a separate truthful note and keeps the selector visible.
 - `buildFormBodyProps` forwards `agentCompatState`, `selectedAgentProfileName`,
   and `effectiveWorkflowName` (looked up from `setup.workflows` by
   `computed.effectiveWorkflowId`).
-- `computeDisabledReason` returns `REASON_SELECTED_AGENT_INCOMPATIBLE` for the
-  `selected-incompatible` state; `resolveDisabledReason` accepts the agent
-  name.
+- `computeDisabledReason` returns state-specific keys for
+  `selected-incompatible` and `selected-unavailable`; `resolveDisabledReason`
+  accepts the agent name.
 - Add `agentNotConfiguredOnExecutor`, `workflowAgentNotConfiguredOnExecutor`,
-  and `selectedAgentNotConfiguredFor` to `task.json` in `en`, `pt-pt`, `zh-cn`,
-  then run `pnpm run i18n:zh-hant` for `zh-hk` and `zh-tw` and
-  `pnpm run i18n:pseudo` for `pseudo`.
+  `selectedAgentNotConfiguredFor`, `selectedAgentProfileFallback`,
+  `selectedAgentProfileFallbackInline`, and `selectedAgentProfileUnavailable`
+  to every `task.json` catalog.
+
+### Submit preflight (`task-create-dialog-setup.ts`, setup tests)
+
+- Pass the derived compatibility block into the canonical guarded submit
+  handler, so the form, Ctrl/Cmd+Enter shortcut, and programmatic submit cannot
+  bypass the footer's disabled state.
 
 ### End-to-end evidence (`apps/web/e2e/tests/task/`)
 
@@ -118,20 +128,22 @@ profile and a non-empty compatible list fails before the fix because
   picked on the default executor and replaced by the Codex profile after
   switching to Docker; and a workflow that pins the seeded profile shows the
   workflow-locked note on Docker.
-- Mobile: add `mobile-create-task-agent-compatibility.spec.ts` for the
-  workflow-locked flow at a phone viewport, asserting the note, the link, the
-  disabled start action, and no horizontal document overflow.
+- Mobile: cover both the workflow-locked flow and the unlocked automatic
+  replacement at a phone viewport. Assert the note, the tappable credentials
+  link, the disabled or enabled start action, and no horizontal document
+  overflow.
 
 ## Tests
 
 | Acceptance criterion | Evidence |
 | --- | --- |
-| 001.1, 001.6 | `task-create-dialog-computed.test.ts`: `computeAgentCompatState` returns `selected-incompatible`, not `none-compatible`, when a compatible profile exists. `task-create-dialog-form-body.test.tsx`: `CreateEditSelectors` renders the selector and the note, never the empty state, in that state. |
+| 001.1, 001.6 | `task-create-dialog-computed.test.ts`: `computeAgentCompatState` returns `selected-incompatible` or `selected-unavailable`, not a false `none-compatible`, when a compatible profile exists. `task-create-dialog-form-body.test.tsx`: `CreateEditSelectors` renders the selector and a truthful note, never the empty state, in those states. |
 | 001.2, 001.8 | `task-create-dialog-effects.test.ts`: `decideAgentProfileAutopick` returns a pick with `replaces` for an incompatible non-locked selection and honors last-used, default, and first order; `useDefaultSelectionsEffect` calls `setAgentProfileId` with the replacement and never calls `syncTaskCreateLastUsed`. |
 | 001.3 | `task-create-dialog-effects.test.ts`: `decideAgentProfileAutopick` skips with `already-set` when the selection is compatible. |
 | 001.4 | Existing `CreateEditSelectors` empty-state test in `task-create-dialog-form-body.test.tsx` and the existing Docker E2E case. |
 | 001.5 | `task-create-dialog-form-body.test.tsx`: workflow-locked note names workflow, agent, and executor, with the credentials link. `task-create-dialog-effects.test.ts`: no replacement when the workflow locks the agent. |
 | 001.7 | `task-create-dialog-footer.test.ts`: `computeDisabledReason` and `resolveDisabledReason` for both states. |
+| Submit guard | `task-create-dialog-setup.test.ts`: form and keyboard submission are prevented for `selected-incompatible` and `none-compatible`. |
 | 001.9 | Mobile Playwright spec below. |
 
 ## E2E tests
@@ -141,7 +153,8 @@ profile and a non-empty compatible list fails before the fix because
 | Docker executor without credentials shows the empty state and disables start (existing). | 001.4 | `tests/task/create-task.spec.ts`, `chromium` |
 | Seeded agent picked on the default executor is replaced by the compatible Codex profile after switching to Docker; no empty state or note; start enabled. | 001.1, 001.2, 001.6 | `tests/task/create-task.spec.ts`, `chromium` |
 | Workflow-locked agent on a Docker executor without credentials shows the workflow note, keeps the link, disables start. | 001.5, 001.6, 001.7 | `tests/task/create-task.spec.ts`, `chromium` |
-| Same workflow-locked flow on a phone viewport, note wraps, no horizontal overflow. | 001.9 | `tests/task/mobile-create-task-agent-compatibility.spec.ts`, `mobile-chrome` |
+| Same workflow-locked flow on a phone viewport, note wraps, link is tapped, no horizontal overflow. | 001.9 | `tests/task/mobile-create-task-agent-compatibility.spec.ts`, `mobile-chrome` |
+| Unlocked incompatible selection is replaced on a phone and start becomes enabled. | 001.1, 001.2, 001.6, 001.9 | `tests/task/mobile-create-task-agent-compatibility.spec.ts`, `mobile-chrome` |
 
 ## Work orders
 
@@ -204,3 +217,18 @@ rendered result of Task 02 against the production build.
   state. AC 001.5 and the design derivation record the precedence.
 - Reverified: the nine dialog test files (137 tests), typecheck, eslint, i18n
   ratchet, prettier, and the specification linter.
+
+### Follow-up remediation
+
+- The guarded submit handler now applies the compatibility block to form,
+  Ctrl/Cmd+Enter, and programmatic submissions. A focused setup test covers
+  both selected-incompatible and none-compatible states.
+- The compatibility model now distinguishes `selected-unavailable` for an
+  unlocked disabled or dynamic-off selection with a compatible alternative.
+  The selector stays visible, submit stays disabled, and the autopick can
+  replace the selection without showing a false empty state.
+- Added sentence-start and inline fallback locale keys, unavailable-state
+  copy in all catalogs, and updated the requirements and system design.
+- Focused Vitest: 8 files, 136 tests passed. Typecheck, ESLint, i18n check and
+  ratchet, E2E sleep ratchet, specification lint, architecture lint, and the
+  production-build mobile E2E spec (2 tests) passed.

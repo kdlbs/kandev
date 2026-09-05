@@ -319,4 +319,17 @@ describe("computeDisabledReason — agent compatibility states", () => {
     expect(text).toContain("Fly");
     expect(text).toContain("credentials");
   });
+
+  it("uses an unavailable-agent reason while an unlocked selection is replaced", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({
+          noCompatibleAgent: true,
+          agentCompatState: "selected-unavailable" as never,
+          selectedAgentProfileName: "Disabled agent",
+        }),
+        KIND_START,
+      ),
+    ).toBe("task:selectedAgentProfileUnavailable");
+  });
 });

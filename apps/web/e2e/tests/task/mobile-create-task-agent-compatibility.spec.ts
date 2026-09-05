@@ -49,13 +49,15 @@ test.describe("Task creation agent compatibility on mobile", () => {
       await dialog.getByTestId("task-description-input").fill("workflow-locked on a phone");
 
       const executorSelector = dialog.getByTestId("executor-profile-selector");
-      await expect(async () => {
-        await executorSelector.tap();
-        await testPage.getByRole("option", { name: /Mobile Docker Locked Auth/i }).click();
-        await expect(executorSelector).toContainText("Mobile Docker Locked Auth", {
-          timeout: 1_000,
-        });
-      }).toPass({ timeout: 10_000 });
+      await expect(executorSelector).toBeVisible();
+      await expect(executorSelector).toBeEnabled();
+      await executorSelector.tap();
+      const executorOption = testPage.getByRole("option", {
+        name: /Mobile Docker Locked Auth/i,
+      });
+      await expect(executorOption).toBeVisible();
+      await executorOption.tap();
+      await expect(executorSelector).toContainText("Mobile Docker Locked Auth");
 
       const note = dialog.getByTestId("agent-profile-incompatible-note");
       await expect(note).toBeVisible();
@@ -70,8 +72,80 @@ test.describe("Task creation agent compatibility on mobile", () => {
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth),
       ).toBeLessThanOrEqual(MOBILE_WIDTH);
+      await link.tap();
+      await expect(testPage).toHaveURL(
+        new RegExp(`/settings/executors/${scenario.dockerProfileId}(?:\\?.*)?$`),
+      );
     } finally {
       await workflow.cleanup();
+      await scenario.cleanup();
+      await backend.restart();
+    }
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.1
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.2
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.9
+  test("replaces an incompatible selection on a phone", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    await backend.restart({ KANDEV_MOCK_PROVIDERS: "codex-acp" });
+    const scenario = await seedIncompatibleAgentScenario(
+      apiClient,
+      testPage,
+      seedData.agentProfileId,
+      {
+        executor: "E2E Mobile Docker Replace Agent",
+        dockerProfile: "Mobile Docker Codex Only",
+        compatibleProfile: "Mobile Codex Compatible",
+      },
+    );
+
+    try {
+      await testPage.setViewportSize({ width: MOBILE_WIDTH, height: 844 });
+      const mobile = new MobileKanbanPage(testPage);
+      await mobile.goto();
+      await mobile.mobileFab.tap();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByTestId("task-title-input").fill("Mobile replacement task");
+      await dialog.getByTestId("task-description-input").fill("executor switch on a phone");
+
+      const agentSelector = dialog.getByTestId("agent-profile-selector");
+      if (!(await agentSelector.textContent())?.includes(scenario.seedProfileName)) {
+        await agentSelector.tap();
+        const seedOption = testPage
+          .getByRole("option", { name: new RegExp(scenario.seedProfileName) })
+          .first();
+        await expect(seedOption).toBeVisible();
+        await seedOption.tap();
+      }
+      await expect(agentSelector).toContainText(scenario.seedProfileName);
+
+      const executorSelector = dialog.getByTestId("executor-profile-selector");
+      await expect(executorSelector).toBeVisible();
+      await expect(executorSelector).toBeEnabled();
+      await executorSelector.tap();
+      const executorOption = testPage.getByRole("option", {
+        name: /Mobile Docker Codex Only/i,
+      });
+      await expect(executorOption).toBeVisible();
+      await executorOption.tap();
+      await expect(executorSelector).toContainText("Mobile Docker Codex Only");
+
+      await expect(agentSelector).toContainText(scenario.secondAgentDisplayName);
+      await expect(agentSelector).not.toContainText(scenario.seedProfileName);
+      await expect(dialog.getByTestId("agent-profile-empty-state")).toHaveCount(0);
+      await expect(dialog.getByTestId("agent-profile-incompatible-note")).toHaveCount(0);
+      await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled();
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(MOBILE_WIDTH);
+    } finally {
       await scenario.cleanup();
       await backend.restart();
     }

@@ -228,11 +228,19 @@ export type StoreSelections = {
  *   compatible:            no executor selected, nothing selected yet, or the
  *                          selection passes the executor's credential check.
  *   selected-incompatible: a compatible profile exists but the selected one
- *                          fails the check (e.g. executor switched after the
- *                          agent was chosen, or a workflow pins it).
+ *                          fails the executor credential check (e.g. executor
+ *                          switched after the agent was chosen, or a workflow
+ *                          pins it).
+ *   selected-unavailable: a compatible profile exists, but the current
+ *                         selection is disabled or unavailable because dynamic
+ *                         routing is off.
  *   none-compatible:       an executor is selected and no profile passes.
  */
-export type AgentCompatState = "compatible" | "selected-incompatible" | "none-compatible";
+export type AgentCompatState =
+  | "compatible"
+  | "selected-incompatible"
+  | "selected-unavailable"
+  | "none-compatible";
 
 export type DialogComputedValues = {
   isPassthroughProfile: boolean;
@@ -258,7 +266,7 @@ export type DialogComputedValues = {
   selectedExecutorProfileName: string | null;
   /** True whenever `agentCompatState` is not `compatible`; gates submission. */
   noCompatibleAgent: boolean;
-  /** Three-way compatibility of the effective agent profile with the selected executor profile. */
+  /** Compatibility state of the effective agent profile with the selected executor profile. */
   agentCompatState: AgentCompatState;
   /** Label of the effective agent profile (null when none is selected or it is unknown). */
   selectedAgentProfileName: string | null;

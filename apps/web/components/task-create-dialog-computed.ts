@@ -155,7 +155,7 @@ export type AgentCompatInput = {
 };
 
 /**
- * Three-way compatibility of the effective agent selection with the selected
+ * Compatibility of the effective agent selection with the selected
  * executor profile. Pure so the dialog's empty state, note, and footer reason
  * can be tested without rendering.
  *
@@ -164,7 +164,9 @@ export type AgentCompatInput = {
  * user cannot change the agent, so the note has to name the workflow and the
  * agent rather than the generic empty state. A locked profile that is not
  * selectable at all (disabled) is not a credential problem and stays on the
- * empty state.
+ * empty state when locked. An unlocked unavailable selection is distinct while
+ * an enabled alternative exists, so the dialog does not claim that no profile
+ * is compatible during automatic replacement.
  */
 export function computeAgentCompatState(input: AgentCompatInput): AgentCompatState {
   const { selectedExecutorProfile, compatibleAgentProfiles, selectedAgentProfileId } = input;
@@ -176,7 +178,12 @@ export function computeAgentCompatState(input: AgentCompatInput): AgentCompatSta
   const selectable = input.selectedAgentProfile
     ? isSelectableAgentProfile(input.selectedAgentProfile, input.dynamicRoutingEnabled)
     : true;
-  if (!selectable) return "none-compatible";
+  if (!selectable) {
+    if (input.workflowAgentLocked || compatibleAgentProfiles.length === 0) {
+      return "none-compatible";
+    }
+    return "selected-unavailable";
+  }
   if (input.workflowAgentLocked) return "selected-incompatible";
   return compatibleAgentProfiles.length === 0 ? "none-compatible" : "selected-incompatible";
 }

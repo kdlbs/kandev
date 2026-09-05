@@ -40,18 +40,26 @@ The design uses, and does not own, two adjacent contracts:
   `decideAgentProfileAutopick` gains a replacement path for a selected profile
   that is no longer compatible. `useAgentProfileAutopickEffect` applies it.
 - `apps/web/components/task-create-dialog-form-body.tsx`: `AgentColumn` renders
-  the selector, the empty state, or the incompatible note per state.
+  the selector, the empty state, the unavailable note, or the incompatible note
+  per state.
 - `apps/web/components/task-create-dialog-prop-builders.ts`: forwards the
   state, the selected agent profile label, and the effective workflow name.
 - `apps/web/components/task-create-dialog-footer.tsx`: `computeDisabledReason`
   returns a state-specific reason key, and `resolveDisabledReason` fills the
   agent and executor names.
+- `apps/web/components/task-create-dialog-setup.ts`: the guarded submit handler
+  applies the compatibility block to form, keyboard shortcut, and programmatic
+  submissions.
 - Locale catalogs `apps/web/src/locales/<locale>/task.json` own the copy.
 
 ## Data and contracts
 
 ```ts
-export type AgentCompatState = "compatible" | "selected-incompatible" | "none-compatible";
+export type AgentCompatState =
+  | "compatible"
+  | "selected-incompatible"
+  | "selected-unavailable"
+  | "none-compatible";
 ```
 
 `computeAgentCompatState` derives the state from the selected executor profile,
@@ -64,8 +72,10 @@ routing feature flag:
    empty, otherwise `compatible`.
 3. The effective agent id is in `compatibleAgentProfiles`: `compatible`.
 4. The selected row exists but is not selectable (disabled, or a dynamic
-   profile while routing is off): `none-compatible`. A locked disabled profile
-   is a profile-disable outcome, not a credential problem.
+   profile while routing is off): `selected-unavailable` when another
+   compatible profile exists. A locked disabled profile, or an unavailable
+   selection with no alternative, is `none-compatible`. A locked disabled
+   profile is a profile-disable outcome, not a credential problem.
 5. The workflow locks the agent: `selected-incompatible`, even when
    `compatibleAgentProfiles` is empty, so the locked note names the workflow
    and agent instead of the generic empty state.
@@ -103,6 +113,7 @@ last-used, workspace default, first compatible.
 | `none-compatible` | any | `agent-profile-empty-state` with `task:noCompatibleAgentProfilesFor` and the credentials link. |
 | `selected-incompatible` | no | Selector with the compatible options plus `agent-profile-incompatible-note` with `task:agentNotConfiguredOnExecutor` and the credentials link. This state is transient until the replacement applies. |
 | `selected-incompatible` | yes | `agent-profile-incompatible-note` with `task:workflowAgentNotConfiguredOnExecutor` (workflow, agent, executor) and the credentials link. No selector. |
+| `selected-unavailable` | no | Selector with the compatible options plus `agent-profile-unavailable-note` with `task:selectedAgentProfileUnavailable`. This state is transient until the replacement applies. |
 
 The credentials link keeps its existing target
 `/settings/executors/<executor-profile-id>`.
@@ -113,6 +124,8 @@ Footer reason keys:
   (`task:noCompatibleAgentProfileFor`).
 - `selected-incompatible`: new `REASON_SELECTED_AGENT_INCOMPATIBLE`
   (`task:selectedAgentNotConfiguredFor`, with `agent` and `target`).
+- `selected-unavailable`: new `REASON_SELECTED_AGENT_UNAVAILABLE`
+  (`task:selectedAgentProfileUnavailable`, with `agent`).
 
 New `task` namespace keys, added in `en`, `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`,
 and regenerated `pseudo`:
@@ -122,6 +135,11 @@ and regenerated `pseudo`:
   {{agent}}, which is not configured on {{target}}."
 - `selectedAgentNotConfiguredFor`: "{{agent}} is not configured on {{target}}.
   Configure agent credentials in Settings → Executors."
+- `selectedAgentProfileFallback`: capitalized fallback for a sentence start.
+- `selectedAgentProfileFallbackInline`: lowercase fallback for the workflow
+  sentence where the agent name is not at the start.
+- `selectedAgentProfileUnavailable`: "{{agent}} is unavailable. Select a
+  compatible agent profile."
 
 ### Mobile composition
 
@@ -143,7 +161,8 @@ already drives the executor profile selector on a phone viewport.
 3. `useAgentProfileAutopickEffect` evaluates the replacement gate. A pick is
    applied through `setAgentProfileId` on the next microtask, the same deferral
    the existing autopick uses. The effect does not call
-   `syncTaskCreateLastUsed`, so the stored last-used agent stays untouched.
+   `syncTaskCreateLastUsed`, so the stored last-used agent stays untouched. The
+   submit gate stays closed while an unavailable selection is visible.
 4. `AgentColumn` renders per the presentation table, and the footer resolves
    the disabled reason.
 
@@ -163,6 +182,9 @@ shown until the user changes the workflow or configures the credentials.
   is empty, so the replacement gate does not fire and a valid selection is not
   cleared. The existing `agentProfilesLoading` guard keeps the empty state
   hidden while profiles load.
+- An unlocked disabled or dynamic-off selection with a compatible alternative:
+  the dialog shows the unavailable note, blocks submit, and waits for the
+  autopick replacement. It does not show the no-compatible empty state.
 
 ## Persistence
 

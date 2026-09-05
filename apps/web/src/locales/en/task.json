@@ -896,6 +896,8 @@
   "workflowAgentNotConfiguredOnExecutor": "The {{workflow}} workflow uses {{agent}}, which is not configured on {{target}}.",
   "selectedAgentNotConfiguredFor": "{{agent}} is not configured on {{target}}. Configure agent credentials in Settings → Executors.",
   "selectedAgentProfileFallback": "The selected agent profile",
+  "selectedAgentProfileFallbackInline": "the selected agent profile",
+  "selectedAgentProfileUnavailable": "{{agent}} is unavailable. Select a compatible agent profile.",
   "noContent": "No content",
   "noDecisionYet": "No decision yet",
   "noDependency": "No dependency",

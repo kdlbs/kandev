@@ -135,7 +135,13 @@ function IncompatibleAgentNote({
 }) {
   const { t } = useTranslation();
   const target = useExecutorTarget(executorProfileName);
-  const agent = agentName ?? t("task:selectedAgentProfileFallback");
+  const agent =
+    agentName ??
+    t(
+      workflowName
+        ? "task:selectedAgentProfileFallbackInline"
+        : "task:selectedAgentProfileFallback",
+    );
   const copy = workflowName
     ? t("task:workflowAgentNotConfiguredOnExecutor", { workflow: workflowName, agent, target })
     : t("task:agentNotConfiguredOnExecutor", { agent, target });
@@ -156,6 +162,26 @@ function IncompatibleAgentNote({
       >
         {t("task:configureCredentials")}
       </Link>
+    </div>
+  );
+}
+
+function UnavailableAgentNote({
+  agentName,
+  visible,
+}: {
+  agentName: string | null;
+  visible: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!visible) return null;
+  const agent = agentName ?? t("task:selectedAgentProfileFallback");
+  return (
+    <div
+      className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+      data-testid="agent-profile-unavailable-note"
+    >
+      <span>{t("task:selectedAgentProfileUnavailable", { agent })}</span>
     </div>
   );
 }
@@ -199,6 +225,7 @@ function AgentColumn({
     );
   }
   const selectedIncompatible = settled && agentCompatState === "selected-incompatible";
+  const selectedUnavailable = settled && agentCompatState === "selected-unavailable";
   if (selectedIncompatible && workflowAgentLocked) {
     return (
       <IncompatibleAgentNote
@@ -228,6 +255,7 @@ function AgentColumn({
           executorProfileId={executorProfileId}
         />
       )}
+      <UnavailableAgentNote agentName={selectedAgentProfileName} visible={selectedUnavailable} />
       {workflowAgentLocked && (
         <p className="text-[11px] text-muted-foreground mt-1">{t("task:agentSetByWorkflow")}</p>
       )}

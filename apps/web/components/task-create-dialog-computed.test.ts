@@ -311,6 +311,31 @@ describe("computeAgentCompatState", () => {
     ).toBe("none-compatible");
   });
 
+  it("keeps an unlocked disabled selection distinct when an alternative exists", () => {
+    const disabled = profile("disabled", false);
+    expect(
+      state({
+        selectedAgentProfileId: disabled.id,
+        selectedAgentProfile: disabled,
+        workflowAgentLocked: false,
+        compatibleAgentProfiles: [cursor],
+      }),
+    ).toBe("selected-unavailable");
+  });
+
+  it("keeps an unlocked dynamic selection distinct when routing is disabled", () => {
+    const dynamic = { ...profile("dynamic"), kind: "dynamic" } satisfies AgentProfileOption;
+    expect(
+      state({
+        selectedAgentProfileId: dynamic.id,
+        selectedAgentProfile: dynamic,
+        workflowAgentLocked: false,
+        dynamicRoutingEnabled: false,
+        compatibleAgentProfiles: [cursor],
+      }),
+    ).toBe("selected-unavailable");
+  });
+
   it("treats an unknown selected id as a credential problem when a compatible profile exists", () => {
     expect(state({ selectedAgentProfileId: "gone", selectedAgentProfile: null })).toBe(
       "selected-incompatible",
