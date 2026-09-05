@@ -41,6 +41,8 @@ and safe when runtimes or task rows are already gone.
   system shall return a typed conflict and preserve the task, worktree, branch,
   and local changes without a cleanup retry.
 - **AC-TASKS-RUNTIME-CLEANUP-001.12:** When discard consent is present, the
-  system shall remove dirty owned worktrees after all ownership, path,
-  registration, branch, and commit identity checks pass. The existing unique
-  branch preservation rule shall remain active.
+  system shall remove dirty owned worktrees only after the pinned no-follow
+  path handle confirms the exact owned path, no shared active environment
+  reference exists, and all ownership, path, registration, branch, and commit
+  identity checks pass. The existing unique branch preservation rule shall
+  remain active.

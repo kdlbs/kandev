@@ -93,8 +93,9 @@ describe("TaskDeleteConfirmDialog", () => {
     await waitFor(() => expect(mockGetSubtaskCount).toHaveBeenCalledWith("task-1"));
     expect(screen.queryByTestId("delete-cascade-checkbox")).toBeNull();
 
+    fireEvent.click(screen.getByTestId(DISCARD_CHECKBOX_TESTID));
     fireEvent.click(screen.getByTestId("confirm"));
-    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: false });
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: true });
   });
 
   it("shows the cascade checkbox when the task has subtasks; defaults to unchecked", async () => {
@@ -284,6 +285,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
       />,
     );
     expect(screen.getByText(/Any running agent sessions will be stopped/i)).toBeTruthy();
+    expect(screen.getByTestId(DISCARD_CHECKBOX_TESTID)).toBeTruthy();
   });
 });
 

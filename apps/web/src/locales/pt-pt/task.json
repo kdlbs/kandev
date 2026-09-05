@@ -342,7 +342,7 @@
   "deleteTasksTitle_other": "Eliminar {{count}} tarefas",
   "deletesTheCurrentTaskEnvironmentContainer": "Elimina o ambiente atual da tarefa (contentor, sandbox e/ou worktree) e força a criação de um novo na próxima execução.",
   "deleting": "A eliminar...",
-  "discardWorktreeChanges": "Eliminar permanentemente as alterações preparadas e não preparadas",
+  "discardWorktreeChanges": "Eliminar permanentemente as alterações rastreadas e não rastreadas",
   "discardWorktreeChangesDescription": "O worktree da tarefa e as respetivas alterações locais serão removidos.",
   "deliverTheseCommentsToTheCli": "Entrega estes comentários no stdin do agente CLI como uma única mensagem; não é preciso abrir a caixa de chat. O agente recebe o mesmo markdown que resultaria de os anteceder a uma mensagem escrita.",
   "deny": "Negar",

@@ -32,5 +32,18 @@ func newTaskDeleteDirtyWorktreeError(dirty []worktree.DirtyWorktree) error {
 }
 
 func isDirtyWorktreeCleanupError(err error) bool {
+	// A dirty refusal is terminal only when it is the sole cleanup failure.
+	// Joined errors can also contain retryable environment or remote cleanup
+	// failures that must keep their retry schedule.
+	if err == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		return len(causes) == 1 && isDirtyWorktreeCleanupError(causes[0])
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return isDirtyWorktreeCleanupError(wrapped.Unwrap())
+	}
 	return errors.Is(err, worktree.ErrDirtyWorktreeCleanup)
 }

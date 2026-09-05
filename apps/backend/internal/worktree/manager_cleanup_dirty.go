@@ -34,11 +34,13 @@ func (m *Manager) InspectDirtyWorktrees(
 	dirty := make([]DirtyWorktree, 0)
 	seen := make(map[string]struct{}, len(worktrees))
 	for _, wt := range worktrees {
-		if wt == nil || strings.TrimSpace(wt.ID) == "" ||
-			strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
+		if wt == nil || strings.TrimSpace(wt.ID) == "" {
 			continue
 		}
 		m.enrichCleanupWorktreeFromCache(wt)
+		if strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
+			continue
+		}
 		key := wt.RepositoryPath + "\x00" + filepath.Clean(wt.Path)
 		if _, ok := seen[key]; ok {
 			continue
@@ -85,15 +87,22 @@ func (m *Manager) InspectDirtyWorktrees(
 func parseDirtyWorktreeFiles(status string) []string {
 	seen := make(map[string]struct{})
 	files := make([]string, 0)
+	skipNext := false
 	for _, record := range strings.Split(status, "\x00") {
-		if len(record) < 4 {
+		if skipNext {
+			skipNext = false
 			continue
 		}
-		path := strings.TrimSpace(record[3:])
-		if arrow := strings.LastIndex(path, " -> "); arrow >= 0 {
-			path = path[arrow+4:]
+		if len(record) < 4 || record[2] != ' ' {
+			continue
 		}
-		path = strings.Trim(path, "\"")
+		if record[0] == 'R' || record[0] == 'C' {
+			// With -z, Git emits the rename/copy origin path as the next
+			// NUL-delimited field without an XY status prefix. The destination
+			// above is the path users need to review before discarding.
+			skipNext = true
+		}
+		path := record[3:]
 		if path == "" {
 			continue
 		}

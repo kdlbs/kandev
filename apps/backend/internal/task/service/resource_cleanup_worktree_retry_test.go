@@ -67,8 +67,12 @@ func TestDeleteTaskRejectsDirtyWorktreeBeforeMutation(t *testing.T) {
 	if err := svc.DeleteTask(ctx, taskID); err == nil {
 		t.Fatal("DeleteTask succeeded without discard consent")
 	}
-	if _, err := repo.GetTask(ctx, taskID); err != nil {
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
 		t.Fatalf("dirty delete removed task: %v", err)
+	}
+	if task == nil {
+		t.Fatal("dirty delete removed task")
 	}
 	var cleanupJobs int
 	if err := repo.DB().QueryRowContext(ctx, `
@@ -216,5 +220,16 @@ func TestDirtyWorktreeCleanupRefusalBecomesTerminalAfterAdmission(t *testing.T) 
 	}
 	if got.NextAttemptAt != nil {
 		t.Fatalf("terminal cleanup scheduled retry at %v", got.NextAttemptAt)
+	}
+}
+
+func TestDirtyWorktreeCleanupMixedFailureRemainsRetryable(t *testing.T) {
+	dirtyErr := fmt.Errorf("cleanup worktrees: %w", worktree.ErrDirtyWorktreeCleanup)
+	mixedErr := errors.Join(dirtyErr, errors.New("temporary environment cleanup failure"))
+	if isDirtyWorktreeCleanupError(mixedErr) {
+		t.Fatal("mixed cleanup failure was classified as a sole dirty-worktree refusal")
+	}
+	if !isDirtyWorktreeCleanupError(dirtyErr) {
+		t.Fatal("wrapped dirty-worktree refusal was not classified as terminal")
 	}
 }

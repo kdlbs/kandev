@@ -139,6 +139,10 @@ repository resources, so that I can understand the consequence before acting.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.11:** At phone widths, the discard
   selection shall remain inside the existing centered dialog and its scrolling
   body. Its label shall provide a touch target of at least 44 CSS px.
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.11:** When the task's executor
+  projection is absent but task-owned worktree state may remain after the last
+  session ends, the delete confirmation shall fail closed by showing the same
+  explicit discard selection.
 
 ## Out of scope
 

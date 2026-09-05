@@ -44,6 +44,8 @@ and mobile.
 - A typed dirty-worktree conflict that lists every affected worktree.
 - Explicit discard consent in the HTTP, service, and durable cleanup contracts.
 - Forced cleanup that bypasses only the clean-checkout refusal.
+- Forced cleanup that bypasses only the cleanliness check, while preserving
+  every other cleanup audit.
 - Immediate terminal classification if an unconsented dirty checkout is found
   after task mutation.
 - One shared, localized discard choice for every task-delete surface.

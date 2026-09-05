@@ -74,7 +74,9 @@ the primitive already preserves 16px viewport insets.
 can remove a worktree. This includes a worktree executor, a bulk selection with
 a worktree executor, or a cascade that can include child worktrees. The label
 states that tracked and untracked files will be permanently removed. The delete
-action remains disabled until the user selects this outcome.
+action remains disabled until the user selects this outcome. When the task's
+executor projection is absent, the dialog fails closed and shows the same
+choice because a retained task-owned worktree may outlive its last session.
 
 Each full surface uses an auto/minmax/auto layout: title in the first row, one
 `minmax(0, 1fr)` body containing description, cleanup consequences, warning,
@@ -201,7 +203,10 @@ Unknown executor types retain the generic running session effect.
 
 ## Persistence
 
-None. This is a client-side presentation-only change.
+The browser does not persist discard selection or consent. Backend
+cleanup-snapshot persistence, the `discard_worktree_changes` contract, and
+typed HTTP 409 handling are defined in
+[Dirty worktree task deletion](../../tasks/system-design/dirty-worktree-deletion.md).
 
 ## Observability
 

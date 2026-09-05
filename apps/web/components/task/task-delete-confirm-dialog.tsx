@@ -46,6 +46,8 @@ type TaskDeleteConfirmDialogProps = {
   executorType?: string | null;
   /** Executor types of the tasks being deleted (bulk). */
   executorTypes?: Array<string | null | undefined>;
+  /** Require discard consent when the task's retained worktree state is unknown. */
+  requireDiscardConsent?: boolean;
   onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
   confirmTestId?: string;
 };
@@ -148,6 +150,95 @@ function TaskDeleteAction({
   );
 }
 
+function useTaskDeleteDialogState(onOpenChange: (open: boolean) => void) {
+  const [cascade, setCascade] = useState(false);
+  const [discardWorktreeChanges, setDiscardWorktreeChanges] = useState(false);
+  const handleOpenChange = (next: boolean) => {
+    if (!next) {
+      setCascade(false);
+      setDiscardWorktreeChanges(false);
+    }
+    onOpenChange(next);
+  };
+  return {
+    cascade,
+    setCascade,
+    discardWorktreeChanges,
+    setDiscardWorktreeChanges,
+    handleOpenChange,
+  };
+}
+
+function hasPotentialWorktree(
+  isBulkOperation: boolean | undefined,
+  executorType: string | null | undefined,
+  executorTypes: Array<string | null | undefined> | undefined,
+) {
+  if (isBulkOperation) {
+    return (
+      executorTypes == null ||
+      executorTypes.some((type) => type == null || hasWorktreeExecutor(type))
+    );
+  }
+  return executorType == null || hasWorktreeExecutor(executorType);
+}
+
+function shouldRequireDiscardConsent(
+  explicit: boolean,
+  hasWorktree: boolean,
+  subtaskCount: number,
+) {
+  return explicit || hasWorktree || subtaskCount > 0;
+}
+
+function TaskDeleteDialogOptions({
+  isInFlight,
+  isBulkOperation,
+  safeCount,
+  storeInFlight,
+  requiresDiscardConsent,
+  discardWorktreeChanges,
+  setDiscardWorktreeChanges,
+  isDeleting,
+  subtaskCount,
+  cascade,
+  setCascade,
+}: {
+  isInFlight?: boolean;
+  isBulkOperation?: boolean;
+  safeCount: number;
+  storeInFlight: boolean;
+  requiresDiscardConsent: boolean;
+  discardWorktreeChanges: boolean;
+  setDiscardWorktreeChanges: (checked: boolean) => void;
+  isDeleting?: boolean;
+  subtaskCount: number;
+  cascade: boolean;
+  setCascade: (checked: boolean) => void;
+}) {
+  return (
+    <>
+      {(isInFlight || storeInFlight) && (
+        <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
+      )}
+      <DiscardWorktreeChangesOption
+        enabled={requiresDiscardConsent}
+        checked={discardWorktreeChanges}
+        onCheckedChange={setDiscardWorktreeChanges}
+        disabled={isDeleting}
+      />
+      {subtaskCount > 0 && (
+        <CascadeOption
+          count={subtaskCount}
+          checked={cascade}
+          onCheckedChange={setCascade}
+          disabled={isDeleting}
+        />
+      )}
+    </>
+  );
+}
+
 export function TaskDeleteConfirmDialog({
   open,
   onOpenChange,
@@ -160,6 +251,7 @@ export function TaskDeleteConfirmDialog({
   isInFlight,
   executorType,
   executorTypes,
+  requireDiscardConsent = false,
   onConfirm,
   confirmTestId,
 }: TaskDeleteConfirmDialogProps) {
@@ -175,22 +267,20 @@ export function TaskDeleteConfirmDialog({
     ? getBulkCleanupSummary(executorTypes ?? [])
     : getCleanupSummary(executorType);
 
-  const [cascade, setCascade] = useState(false);
-  const [discardWorktreeChanges, setDiscardWorktreeChanges] = useState(false);
+  const {
+    cascade,
+    setCascade,
+    discardWorktreeChanges,
+    setDiscardWorktreeChanges,
+    handleOpenChange,
+  } = useTaskDeleteDialogState(onOpenChange);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
   const storeInFlight = useTaskInFlight(taskId, taskIds, open);
-  const hasWorktree = isBulkOperation
-    ? (executorTypes ?? []).some((type) => hasWorktreeExecutor(type))
-    : hasWorktreeExecutor(executorType);
-  const requiresDiscardConsent = hasWorktree || subtaskCount > 0;
-
-  const handleOpenChange = (next: boolean) => {
-    if (!next) {
-      setCascade(false);
-      setDiscardWorktreeChanges(false);
-    }
-    onOpenChange(next);
-  };
+  const requiresDiscardConsent = shouldRequireDiscardConsent(
+    requireDiscardConsent,
+    hasPotentialWorktree(isBulkOperation, executorType, executorTypes),
+    subtaskCount,
+  );
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
@@ -205,23 +295,19 @@ export function TaskDeleteConfirmDialog({
               <TaskCleanupConsequences summary={cleanup} />
             </div>
           </AlertDialogDescription>
-          {(isInFlight || storeInFlight) && (
-            <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
-          )}
-          <DiscardWorktreeChangesOption
-            enabled={requiresDiscardConsent}
-            checked={discardWorktreeChanges}
-            onCheckedChange={setDiscardWorktreeChanges}
-            disabled={isDeleting}
+          <TaskDeleteDialogOptions
+            isInFlight={isInFlight}
+            isBulkOperation={isBulkOperation}
+            safeCount={safeCount}
+            storeInFlight={storeInFlight}
+            requiresDiscardConsent={requiresDiscardConsent}
+            discardWorktreeChanges={discardWorktreeChanges}
+            setDiscardWorktreeChanges={setDiscardWorktreeChanges}
+            isDeleting={isDeleting}
+            subtaskCount={subtaskCount}
+            cascade={cascade}
+            setCascade={setCascade}
           />
-          {subtaskCount > 0 && (
-            <CascadeOption
-              count={subtaskCount}
-              checked={cascade}
-              onCheckedChange={setCascade}
-              disabled={isDeleting}
-            />
-          )}
         </div>
         <AlertDialogFooter className={TASK_CONFIRM_FOOTER_CLASS}>
           <AlertDialogCancel className={TASK_CONFIRM_ACTION_CLASS}>
