@@ -170,6 +170,35 @@ func TestRequestTaskChanges_QueuesAssigneeRun(t *testing.T) {
 	}
 }
 
+// TestRequestTaskChanges_TwoRoundsQueueDistinctRuns verifies that two
+// changes-requested decisions against the same task within the
+// idempotency window each queue their own assignee run: the
+// idempotency key is derived from the decision, not from the static
+// (reason, task, agent) tuple, so a second round is never deduped away.
+func TestRequestTaskChanges_TwoRoundsQueueDistinctRuns(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTaskWithAssignee(t, deps.db, "ch2", "ws-d", "C2", "in_review", 2, "asg-1")
+	mustAddParticipant(t, deps, "ch2", "agent-rev", models.ParticipantRoleReviewer)
+
+	q := &stubApprovalQueuer{}
+	deps.svc.SetApprovalReactivityQueuer(q)
+
+	if _, err := deps.svc.RequestTaskChanges(context.Background(),
+		models.DeciderTypeAgent, "agent-rev", "ch2", "round one"); err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if _, err := deps.svc.RequestTaskChanges(context.Background(),
+		models.DeciderTypeAgent, "agent-rev", "ch2", "round two"); err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+	if len(q.runs) != 2 {
+		t.Fatalf("runs = %d, want 2: %#v", len(q.runs), q.runs)
+	}
+	if q.runs[0].IdempotencyKey == q.runs[1].IdempotencyKey {
+		t.Fatalf("expected distinct idempotency keys, got %q twice", q.runs[0].IdempotencyKey)
+	}
+}
+
 // TestApproveTask_QueuesReadyToCloseOnFinalApproval — when the last
 // approver approves and the task is in_review, the assignee wakes
 // with task_ready_to_close.
