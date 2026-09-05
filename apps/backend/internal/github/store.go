@@ -48,10 +48,16 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 		db: writer, ro: reader,
 		appLifecycleLocks: make(map[string]*appRegistrationLifecycleLock),
 	}
-	s.freshInstall = !s.tableExists("github_workspace_settings") &&
-		!s.tableExists("github_workspace_connections")
-	legacyUpgrade := s.tableExists("github_workspace_settings") &&
-		!s.tableExists("github_workspace_connections")
+	settingsExists, err := dbutil.TableExists(s.db, "github_workspace_settings")
+	if err != nil {
+		return nil, fmt.Errorf("probe GitHub workspace settings schema: %w", err)
+	}
+	connectionsExists, err := dbutil.TableExists(s.db, "github_workspace_connections")
+	if err != nil {
+		return nil, fmt.Errorf("probe GitHub workspace connections schema: %w", err)
+	}
+	s.freshInstall = !settingsExists && !connectionsExists
+	legacyUpgrade := settingsExists && !connectionsExists
 	if err := s.initSchema(legacyUpgrade); err != nil {
 		return nil, fmt.Errorf("github schema init: %w", err)
 	}
