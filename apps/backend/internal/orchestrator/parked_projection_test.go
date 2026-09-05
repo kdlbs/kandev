@@ -575,14 +575,18 @@ func TestParkedProjectionOrdering_ProbeCallSitesFollowTurnCompletion(t *testing.
 	body := text[fnStart : fnStart+fnEnd]
 
 	completeIdx := strings.Index(body, "s.completeTurnForStreamEvent(")
-	waitingIdx := strings.Index(body, "s.setSessionWaitingForInputIfRequestedWithHook(")
+	waitingIdx := strings.Index(body, "s.setSessionWaitingForInputAfterComplete(")
 	if completeIdx < 0 || waitingIdx < 0 {
-		t.Fatalf("expected both calls in handleCompleteStreamEventWithGuardRelease; completeTurnForStreamEvent=%d setSessionWaitingForInputIfRequestedWithHook=%d", completeIdx, waitingIdx)
+		t.Fatalf("expected both calls in handleCompleteStreamEventWithGuardRelease; completeTurnForStreamEvent=%d setSessionWaitingForInputAfterComplete=%d", completeIdx, waitingIdx)
 	}
 	if completeIdx >= waitingIdx {
 		t.Fatal("completeTurnForStreamEvent (which triggers session.turn_finished) must run before " +
-			"setSessionWaitingForInputIfRequested (which triggers the parked-projection probe via " +
+			"setSessionWaitingForInputAfterComplete (which triggers the parked-projection probe via " +
 			"onSessionStateChangedForParkedProjection) — F7 ordering regressed")
+	}
+	if !strings.Contains(text, "func (s *Service) setSessionWaitingForInputAfterComplete(") ||
+		!strings.Contains(text, "s.setSessionWaitingForInputIfRequestedWithHook(") {
+		t.Fatal("expected the completion helper to invoke the parked-projection state hook")
 	}
 
 	hookSrc, err := os.ReadFile("parked_projection.go")
