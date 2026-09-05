@@ -4086,17 +4086,31 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 // handleUpdateTaskPlan updates an existing task plan.
+//
+// Mode validity is checked before anything else, ahead of PlanService's own
+// task-reach authorization (AC-TASKS-PLAN-APPEND-001.7): the tool's schema
+// already publishes the two accepted values, so rejecting an unrecognized
+// one discloses nothing about the target task. Replace mode keeps today's
+// "empty content" rejection here, before the service call; append's content
+// checks run inside PlanService.UpdatePlan, after authorization, because
+// AC-TASKS-PLAN-APPEND-001.7 orders task-reach authorization ahead of
+// content validity for that mode.
 func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID    string `json:"task_id"`
 		Title     string `json:"title"`
 		Content   string `json:"content"`
 		CreatedBy string `json:"created_by"`
+		Mode      string `json:"mode"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.Content == "" {
+	mode, err := service.ParsePlanWriteMode(req.Mode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	if mode == service.PlanWriteModeReplace && req.Content == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
 	}
 
@@ -4110,7 +4124,8 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		Title:              req.Title,
 		Content:            req.Content,
 		CreatedBy:          createdBy,
-		EvaluateTruncation: true,
+		EvaluateTruncation: mode == service.PlanWriteModeReplace,
+		Mode:               mode,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)

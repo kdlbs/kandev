@@ -163,6 +163,12 @@ type CreatePlanRequest struct {
 	// write path does not, since the browser plan editor already shows the
 	// user a diff and revision history before they save.
 	EvaluateTruncation bool
+	// Mode selects replace-vs-append composition
+	// (REQ-TASKS-PLAN-APPEND-001). Only UpdatePlan's callers populate
+	// PlanWriteModeAppend; upsertPlan only composes when requireExistingHead
+	// is true, so this field is inert on the CreatePlan path regardless of
+	// what a caller sets it to.
+	Mode PlanWriteMode
 }
 
 // PlanWriteResult is returned by CreatePlan/UpdatePlan. Plan is always
@@ -258,14 +264,29 @@ type UpdatePlanRequest struct {
 	AuthorName         string
 	ForceNewRevision   bool
 	EvaluateTruncation bool
+	Mode               PlanWriteMode
 }
 
 // UpdatePlan updates an existing plan (errors if missing).
+//
+// Append mode's admission checks deliberately do not call validatePlanWrite:
+// AC-TASKS-PLAN-APPEND-001.7 orders task-reach authorization before content
+// validity, and the size limit for an append is measured against the
+// composed content inside upsertPlan's lock, not the submitted fragment
+// (AC-TASKS-PLAN-APPEND-007.1) — validatePlanWrite's pre-lock size check
+// would measure the wrong thing and run at the wrong point in that order.
 func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (PlanWriteResult, error) {
 	if req.TaskID == "" {
 		return PlanWriteResult{}, ErrTaskIDRequired
 	}
-	if err := s.validatePlanWrite(ctx, req.TaskID, req.Content); err != nil {
+	if req.Mode == PlanWriteModeAppend {
+		if err := s.authorize(ctx, req.TaskID); err != nil {
+			return PlanWriteResult{}, err
+		}
+		if err := validateAppendFragment(req.Content); err != nil {
+			return PlanWriteResult{}, err
+		}
+	} else if err := s.validatePlanWrite(ctx, req.TaskID, req.Content); err != nil {
 		return PlanWriteResult{}, err
 	}
 	release := s.locks.acquire(req.TaskID)
@@ -305,6 +326,26 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	headPlan, headState := s.readPlanHead(readCtx, req.TaskID)
 	if requireExistingHead && headState == planHeadAbsent {
 		return planWriteOutcome{}, ErrTaskPlanNotFound
+	}
+
+	// Compose from this same read rather than reading HEAD again: a second
+	// read would reopen the window AC-TASKS-PLAN-APPEND-003.1 closes between
+	// an append's read and its commit. requireExistingHead is false for
+	// CreatePlan, so this never runs there even if a caller set Mode anyway.
+	if requireExistingHead && req.Mode == PlanWriteModeAppend {
+		if headState == planHeadUnknown {
+			return planWriteOutcome{}, ErrPlanContentReadFailed
+		}
+		req.Content = composePlanAppend(headPlan.Content, req.Content)
+		if err := checkPlanContentSize(req.Content); err != nil {
+			return planWriteOutcome{}, err
+		}
+		// The truncation guard cannot fire on an append by construction (the
+		// composed content always contains the stored content in full), and
+		// must not force a revision split on its account either
+		// (AC-TASKS-PLAN-APPEND-004.1/004.2) — skip it at the source rather
+		// than trust every caller to leave this unset.
+		req.EvaluateTruncation = false
 	}
 
 	req, preserveTitle, preserveCreatedBy := s.resolveHeadFallbacks(ctx, req, headPlan, headState, requireExistingHead)
