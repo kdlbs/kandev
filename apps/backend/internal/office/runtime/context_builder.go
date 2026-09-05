@@ -20,10 +20,20 @@ type RunSnapshotStore interface {
 	) error
 }
 
+// DecisionSeatResolver reports whether an agent currently holds a decision
+// seat (reviewer or approver) at a task's current workflow step. Implemented
+// by *service.Service via HoldsDecisionSeat, mirroring the authorization
+// RecordAgentDecision itself applies, so the runtime capability can never
+// over- or under-state who can actually record a decision.
+type DecisionSeatResolver interface {
+	HoldsDecisionSeat(ctx context.Context, taskID, agentProfileID string) (bool, error)
+}
+
 // ContextBuilder builds the runtime context for a claimed run.
 type ContextBuilder struct {
 	Agents shared.AgentReader
 	Runs   RunSnapshotStore
+	Seats  DecisionSeatResolver
 }
 
 // Build resolves the agent identity and capabilities for a run.
@@ -42,6 +52,7 @@ func (b *ContextBuilder) Build(ctx context.Context, run *models.Run) (RunContext
 	taskID := payload["task_id"]
 	sessionID := firstNonEmpty(run.SessionID, payload["session_id"])
 	caps := FromAgent(agent).WithTaskScope(taskID)
+	caps.CanRecordStepDecision = b.resolveDecisionSeat(ctx, taskID, agent.ID)
 	runCtx := RunContext{
 		WorkspaceID:  agent.WorkspaceID,
 		AgentID:      agent.ID,
@@ -52,6 +63,20 @@ func (b *ContextBuilder) Build(ctx context.Context, run *models.Run) (RunContext
 		Capabilities: caps,
 	}
 	return runCtx, nil
+}
+
+// resolveDecisionSeat reports whether the agent holds a decision seat for
+// taskID. A taskless run, a missing resolver, or a lookup error all deny the
+// capability rather than granting it speculatively.
+func (b *ContextBuilder) resolveDecisionSeat(ctx context.Context, taskID, agentID string) bool {
+	if taskID == "" || b.Seats == nil {
+		return false
+	}
+	held, err := b.Seats.HoldsDecisionSeat(ctx, taskID, agentID)
+	if err != nil {
+		return false
+	}
+	return held
 }
 
 // BuildAndPersist builds context and stores its serialized snapshot on the run.

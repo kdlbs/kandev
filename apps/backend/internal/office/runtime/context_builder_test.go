@@ -3,10 +3,13 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
+
+var errBoom = errors.New("boom")
 
 func TestContextBuilderBuildsAndPersistsRuntimeSnapshot(t *testing.T) {
 	agents := &recordingAgentReader{
@@ -95,4 +98,79 @@ func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshot(
 		SessionID:     sessionID,
 	})
 	return nil
+}
+
+type stubSeatResolver struct {
+	held bool
+	err  error
+}
+
+func (r *stubSeatResolver) HoldsDecisionSeat(_ context.Context, _, _ string) (bool, error) {
+	return r.held, r.err
+}
+
+func buildTestRunContext(t *testing.T, seats DecisionSeatResolver) RunContext {
+	t.Helper()
+	agents := &recordingAgentReader{
+		agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: "ws-1", Role: models.AgentRoleWorker},
+	}
+	builder := ContextBuilder{Agents: agents, Runs: &recordingRunSnapshotStore{}, Seats: seats}
+	run := &models.Run{
+		ID:             "run-1",
+		AgentProfileID: "agent-1",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"task-1"}`,
+	}
+	runCtx, err := builder.Build(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	return runCtx
+}
+
+func TestContextBuilderGrantsRecordStepDecisionForSeatHolder(t *testing.T) {
+	runCtx := buildTestRunContext(t, &stubSeatResolver{held: true})
+	if !runCtx.Capabilities.CanRecordStepDecision {
+		t.Fatal("expected seat holder to be granted record_step_decision")
+	}
+}
+
+func TestContextBuilderDeniesRecordStepDecisionForNonHolder(t *testing.T) {
+	runCtx := buildTestRunContext(t, &stubSeatResolver{held: false})
+	if runCtx.Capabilities.CanRecordStepDecision {
+		t.Fatal("expected non-holder to be denied record_step_decision")
+	}
+}
+
+func TestContextBuilderDeniesRecordStepDecisionWhenResolverNil(t *testing.T) {
+	runCtx := buildTestRunContext(t, nil)
+	if runCtx.Capabilities.CanRecordStepDecision {
+		t.Fatal("expected nil resolver to deny record_step_decision")
+	}
+}
+
+func TestContextBuilderDeniesRecordStepDecisionOnResolverError(t *testing.T) {
+	runCtx := buildTestRunContext(t, &stubSeatResolver{held: true, err: errBoom})
+	if runCtx.Capabilities.CanRecordStepDecision {
+		t.Fatal("expected resolver error to deny record_step_decision")
+	}
+}
+
+func TestContextBuilderDeniesRecordStepDecisionForTasklessRun(t *testing.T) {
+	agents := &recordingAgentReader{
+		agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: "ws-1", Role: models.AgentRoleWorker},
+	}
+	builder := ContextBuilder{
+		Agents: agents,
+		Runs:   &recordingRunSnapshotStore{},
+		Seats:  &stubSeatResolver{held: true},
+	}
+	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Reason: "heartbeat", Payload: "{}"}
+	runCtx, err := builder.Build(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if runCtx.Capabilities.CanRecordStepDecision {
+		t.Fatal("expected taskless run to deny record_step_decision")
+	}
 }

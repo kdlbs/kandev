@@ -3,21 +3,22 @@ package runtime
 
 // Capabilities describes what an agent run may do through the runtime action surface.
 type Capabilities struct {
-	CanPostComments     bool     `json:"post_comment"`
-	CanUpdateTaskStatus bool     `json:"update_task_status"`
-	CanCreateTasks      bool     `json:"create_task"`
-	CanCreateSubtasks   bool     `json:"create_subtask"`
-	CanCreateAgents     bool     `json:"create_agent"`
-	CanListProjects     bool     `json:"list_projects"`
-	CanCreateProjects   bool     `json:"create_project"`
-	CanRequestApproval  bool     `json:"request_approval"`
-	CanReadMemory       bool     `json:"read_memory"`
-	CanWriteMemory      bool     `json:"write_memory"`
-	CanListSkills       bool     `json:"list_skills"`
-	CanSpawnAgentRun    bool     `json:"spawn_agent_run"`
-	CanModifyAgents     bool     `json:"modify_agents"`
-	CanDeleteSkills     bool     `json:"delete_skills"`
-	AllowedTaskIDs      []string `json:"allowed_task_ids"`
+	CanPostComments       bool     `json:"post_comment"`
+	CanUpdateTaskStatus   bool     `json:"update_task_status"`
+	CanCreateTasks        bool     `json:"create_task"`
+	CanCreateSubtasks     bool     `json:"create_subtask"`
+	CanCreateAgents       bool     `json:"create_agent"`
+	CanListProjects       bool     `json:"list_projects"`
+	CanCreateProjects     bool     `json:"create_project"`
+	CanRequestApproval    bool     `json:"request_approval"`
+	CanReadMemory         bool     `json:"read_memory"`
+	CanWriteMemory        bool     `json:"write_memory"`
+	CanListSkills         bool     `json:"list_skills"`
+	CanSpawnAgentRun      bool     `json:"spawn_agent_run"`
+	CanModifyAgents       bool     `json:"modify_agents"`
+	CanDeleteSkills       bool     `json:"delete_skills"`
+	CanRecordStepDecision bool     `json:"record_step_decision"`
+	AllowedTaskIDs        []string `json:"allowed_task_ids"`
 }
 
 // RunContext is the identity and capability envelope for one agent execution.

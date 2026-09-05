@@ -11,20 +11,21 @@ const WildcardTaskScope = "*"
 // Runtime capability keys. These are the stable syscall vocabulary exposed to
 // run tokens, prompts, and runtime API handlers.
 const (
-	CapabilityPostComment      = "post_comment"
-	CapabilityUpdateTaskStatus = "update_task_status"
-	CapabilityCreateTask       = "create_task"
-	CapabilityCreateSubtask    = "create_subtask"
-	CapabilityCreateAgent      = "create_agent"
-	CapabilityListProjects     = "list_projects"
-	CapabilityCreateProject    = "create_project"
-	CapabilityRequestApproval  = "request_approval"
-	CapabilityReadMemory       = "read_memory"
-	CapabilityWriteMemory      = "write_memory"
-	CapabilityListSkills       = "list_skills"
-	CapabilitySpawnAgentRun    = "spawn_agent_run"
-	CapabilityModifyAgents     = "modify_agents"
-	CapabilityDeleteSkills     = "delete_skills"
+	CapabilityPostComment        = "post_comment"
+	CapabilityUpdateTaskStatus   = "update_task_status"
+	CapabilityCreateTask         = "create_task"
+	CapabilityCreateSubtask      = "create_subtask"
+	CapabilityCreateAgent        = "create_agent"
+	CapabilityListProjects       = "list_projects"
+	CapabilityCreateProject      = "create_project"
+	CapabilityRequestApproval    = "request_approval"
+	CapabilityReadMemory         = "read_memory"
+	CapabilityWriteMemory        = "write_memory"
+	CapabilityListSkills         = "list_skills"
+	CapabilitySpawnAgentRun      = "spawn_agent_run"
+	CapabilityModifyAgents       = "modify_agents"
+	CapabilityDeleteSkills       = "delete_skills"
+	CapabilityRecordStepDecision = "record_step_decision"
 )
 
 // Allows reports whether the named runtime capability is granted.
@@ -58,6 +59,8 @@ func (c Capabilities) Allows(key string) bool {
 		return c.CanModifyAgents
 	case CapabilityDeleteSkills:
 		return c.CanDeleteSkills
+	case CapabilityRecordStepDecision:
+		return c.CanRecordStepDecision
 	default:
 		return false
 	}
@@ -87,6 +90,7 @@ func (c Capabilities) AllowedKeys() []string {
 		CapabilitySpawnAgentRun,
 		CapabilityModifyAgents,
 		CapabilityDeleteSkills,
+		CapabilityRecordStepDecision,
 	}
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -119,5 +123,10 @@ func FromAgent(agent *models.AgentInstance) Capabilities {
 		CanSpawnAgentRun:    shared.HasPermission(perms, shared.PermCanAssignTasks),
 		CanModifyAgents:     shared.HasPermission(perms, shared.PermCanCreateAgents),
 		CanDeleteSkills:     false,
+		// CanRecordStepDecision is never derived here: FromAgent has no task
+		// context, and authority for this capability is the run's workflow
+		// participant seat, not an agent-level permission. ContextBuilder.Build
+		// grants it after resolving the seat.
+		CanRecordStepDecision: false,
 	}
 }
