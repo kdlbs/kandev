@@ -148,6 +148,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_MOCK_LINEAR", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_OFFICE", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_AUTH", class: "exclusion"},
+		{envVar: "KANDEV_FEATURES_CANVASES", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY", class: "exclusion"},

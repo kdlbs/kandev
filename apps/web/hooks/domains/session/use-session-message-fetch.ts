@@ -1,9 +1,78 @@
-import type { MutableRefObject } from "react";
+import { useEffect, type MutableRefObject } from "react";
 
 import type { useAppStoreApi } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
 
 type SessionMessageStore = ReturnType<typeof useAppStoreApi>;
+
+export type SessionHydrationGeneration = {
+  key: string;
+  sessionId: string;
+  readiness: Promise<void>;
+};
+export type SessionHydrationRef = MutableRefObject<SessionHydrationGeneration | null>;
+
+export function useInitialMessageLoadingState(
+  taskSessionId: string | null,
+  messageCount: number,
+  initialFetchStartRef: MutableRefObject<number | null>,
+  lastFetchedSessionIdRef: MutableRefObject<string | null>,
+  setIsWaitingForInitialMessages: (value: boolean) => void,
+) {
+  useEffect(() => {
+    if (!taskSessionId) {
+      initialFetchStartRef.current = null;
+      lastFetchedSessionIdRef.current = null;
+      setIsWaitingForInitialMessages(false);
+      return;
+    }
+    if (messageCount > 0) {
+      setIsWaitingForInitialMessages(false);
+      return;
+    }
+    if (initialFetchStartRef.current === null) {
+      initialFetchStartRef.current = Date.now();
+      setIsWaitingForInitialMessages(true);
+    }
+  }, [
+    taskSessionId,
+    messageCount,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+    setIsWaitingForInitialMessages,
+  ]);
+}
+
+export function getHydratedMessagesForGeneration(
+  hydrationRef: SessionHydrationRef | undefined,
+  sessionId: string,
+  readiness: Promise<void>,
+  hydrationKey: string | undefined,
+  store: SessionMessageStore,
+): Message[] | undefined {
+  const generation = hydrationRef?.current;
+  if (
+    !hydrationKey ||
+    !generation ||
+    generation.key !== hydrationKey ||
+    generation.sessionId !== sessionId ||
+    generation.readiness !== readiness
+  ) {
+    return undefined;
+  }
+  return store.getState().messages.bySession[sessionId] ?? [];
+}
+
+export function recordHydratedGeneration(
+  hydrationRef: SessionHydrationRef | undefined,
+  sessionId: string,
+  readiness: Promise<void>,
+  hydrationKey: string | undefined,
+): void {
+  if (hydrationRef && hydrationKey) {
+    hydrationRef.current = { key: hydrationKey, sessionId, readiness };
+  }
+}
 
 // Multiple lifecycle paths can hydrate the same session concurrently (for
 // example, the initial mount and a visibility refresh). Keep the shared
@@ -40,9 +109,13 @@ type DoFetchMessagesParams = {
     sessionId: string,
     store: SessionMessageStore,
     isActive?: () => boolean,
+    hydrationRef?: SessionHydrationRef,
+    hydrationKey?: string,
   ) => Promise<Message[]>;
   onError?: (error: unknown) => void;
   isActive?: () => boolean;
+  hydrationRef?: SessionHydrationRef;
+  hydrationKey?: string;
 };
 
 export async function doFetchMessages({
@@ -55,6 +128,8 @@ export async function doFetchMessages({
   fetchAndStoreMessages,
   onError,
   isActive,
+  hydrationRef,
+  hydrationKey,
 }: DoFetchMessagesParams): Promise<void> {
   if (isInactive(isActive)) return;
   beginSessionFetch(taskSessionId);
@@ -65,7 +140,13 @@ export async function doFetchMessages({
     setIsWaitingForInitialMessages(true);
   }
   try {
-    const fetched = await fetchAndStoreMessages(taskSessionId, store, isActive);
+    const fetched = await fetchAndStoreMessages(
+      taskSessionId,
+      store,
+      isActive,
+      hydrationRef,
+      hydrationKey,
+    );
     if (isInactive(isActive)) return;
     lastFetchedSessionIdRef.current = taskSessionId;
     if (fetched.length > 0) setIsWaitingForInitialMessages(false);
