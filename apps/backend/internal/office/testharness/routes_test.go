@@ -66,7 +66,7 @@ func seedTask(t *testing.T, db *sqlx.DB, taskID string) {
 func newRouter(t *testing.T, repo *sqliterepo.Repository, eb bus.EventBus) *gin.Engine {
 	t.Helper()
 	r := gin.New()
-	RegisterRoutes(r, repo, nil, nil, nil, eb, logger.Default(), nil)
+	RegisterRoutes(r, repo, nil, nil, nil, eb, logger.Default(), nil, nil)
 	return r
 }
 
@@ -121,7 +121,7 @@ func TestSeedCostEventPreservesOutputTokenPresence(t *testing.T) {
 		t.Fatalf("new office repo: %v", err)
 	}
 	router := gin.New()
-	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default(), nil)
+	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default(), nil, nil)
 
 	post := func(body map[string]any) {
 		t.Helper()

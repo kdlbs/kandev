@@ -591,6 +591,21 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 	return s.StartTurn(ctx, sessionID)
 }
 
+// PublishTurnStarted is publishTurnEvent(events.TurnStarted, ...)'s exported
+// form, for callers outside this package that insert a turn directly
+// (bypassing StartTurn/ReserveTurn) but still need the frontend's
+// turns.bySession to learn about it. The e2e test harness
+// (internal/office/testharness) is the only current caller: it seeds turns
+// with caller-controlled timestamps to construct D1 turn-ordering scenarios,
+// which StartTurn's always-now stamping cannot produce. Without this, a
+// message attached to a harness-seeded turn the frontend has never observed
+// via turn.started is silently excluded by D1's turn-scoped
+// clarification/permission detection.
+func (s *Service) PublishTurnStarted(ctx context.Context, turn *models.Turn) error {
+	// had_output is only meaningful on turn.completed; omit it here too.
+	return s.publishTurnEvent(events.TurnStarted, turn, nil)
+}
+
 // publishTurnEvent publishes a turn event to the event bus. hadOutput reports
 // whether the turn produced any agent output; it is only meaningful for
 // turn.completed events (the frontend uses it to surface an "empty turn"
