@@ -72,6 +72,7 @@ signals, and task-scoped scheduling contracts.
 - [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
 - [Quick Chat Agent Titles](requirements/quick-chat-agent-titles.md)
 - [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
+- [Recoverable cross-task delivery](requirements/recoverable-cross-task-delivery.md)
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Queued run scheduling](requirements/run-scheduling.md)

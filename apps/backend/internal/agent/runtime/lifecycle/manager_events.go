@@ -137,7 +137,9 @@ func (m *Manager) handleCompleteEventMarkState(
 		// shows no red error banner. MarkCompleted applies the same guard, but
 		// routing here keeps the misleading "marking as failed" WARN out of logs.
 		if m.IsShuttingDown() {
-			_ = m.markStoppedDuringShutdown(execution, 1, errorMsg, event.TurnID)
+			_ = m.markStoppedDuringShutdownWithPromptGeneration(
+				execution, 1, errorMsg, event.PromptGeneration, event.TurnID,
+			)
 			return
 		}
 		m.logger.Warn("error completion received, marking execution as failed",
@@ -149,7 +151,9 @@ func (m *Manager) handleCompleteEventMarkState(
 			zap.Any("event_data", event.Data),
 			zap.String("agent_command", execution.AgentCommand),
 			zap.String("acp_session_id", execution.ACPSessionID))
-		if err := m.markCompletedWithTurnID(execution.ID, 1, errorMsg, event.TurnID, failureEvidence); err != nil {
+		if err := m.markCompletedWithTurnIDAndPromptGeneration(
+			execution.ID, 1, errorMsg, event.TurnID, failureEvidence, event.PromptGeneration,
+		); err != nil {
 			m.logger.Error("failed to mark execution as failed after error completion",
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
@@ -306,7 +310,9 @@ func (m *Manager) finishPromptCompletion(
 		return
 	}
 
-	m.persistExecutorRunning(context.Background(), claim.execution)
+	m.persistExecutorRunningWithPromptGeneration(
+		context.Background(), claim.execution, event.PromptGeneration,
+	)
 	execution.promptLifecycleMu.Unlock()
 	if claim.publishRunning {
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)

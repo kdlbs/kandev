@@ -118,6 +118,20 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	return result, err
 }
 
+// SetInitialPromptAcceptedCallback binds a receipt callback before an already
+// prepared execution starts its first agent process. It must be called before
+// StartAgentProcess, because only dispatchInitialPrompt observes this callback.
+func (m *Manager) SetInitialPromptAcceptedCallback(_ context.Context, executionID string, callback func()) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	execution.promptLifecycleMu.Lock()
+	execution.initialPromptAccepted = callback
+	execution.promptLifecycleMu.Unlock()
+	return nil
+}
+
 // SteerAgentWithDispatchCallback delivers a steer: it hands the prompt into a
 // turn that is still generating rather than serializing behind it. It mirrors
 // PromptAgentWithDispatchCallback's activity accounting; only the underlying
@@ -1671,6 +1685,12 @@ func (m *Manager) updateStatusAndPersist(ctx context.Context, executionID string
 // BeginPrompt advances prompt ownership and marks the execution running before dispatch.
 func (m *Manager) BeginPrompt(executionID string) (uint64, error) {
 	generation, err := m.executionStore.BeginPrompt(executionID)
+	if errors.Is(err, ErrPromptGenerationUnknown) {
+		if restoreErr := m.restoreRecoveredPromptGeneration(context.Background(), executionID); restoreErr != nil {
+			return 0, restoreErr
+		}
+		generation, err = m.executionStore.BeginPrompt(executionID)
+	}
 	if err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {
 			return 0, fmt.Errorf("execution %q not found", executionID)
@@ -1679,9 +1699,34 @@ func (m *Manager) BeginPrompt(executionID string) (uint64, error) {
 	}
 
 	if updated, exists := m.executionStore.Get(executionID); exists {
-		m.persistExecutorRunning(context.Background(), updated)
+		if err := m.persistExecutorRunningResult(context.Background(), updated); err != nil {
+			return 0, fmt.Errorf("persist prompt generation: %w", err)
+		}
 	}
 	return generation, nil
+}
+
+func (m *Manager) restoreRecoveredPromptGeneration(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok {
+		return ErrPromptGenerationUnknown
+	}
+	prior, err := reader.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+	if err != nil {
+		return fmt.Errorf("reload recovered prompt generation: %w", err)
+	}
+	if prior == nil || prior.AgentExecutionID != executionID {
+		return ErrPromptGenerationUnknown
+	}
+	generation := promptGenerationFromMetadata(prior.Metadata)
+	if generation == 0 {
+		return ErrPromptGenerationUnknown
+	}
+	return m.executionStore.restoreRecoveredPromptGeneration(executionID, generation)
 }
 
 // OwnsPromptGeneration reports whether a ready event's immutable execution and
@@ -1883,6 +1928,18 @@ func (m *Manager) markCompletedWithTurnID(
 	errorMessage, turnID string,
 	failureEvidence *PromptAttemptEvidence,
 ) error {
+	return m.markCompletedWithTurnIDAndPromptGeneration(
+		executionID, exitCode, errorMessage, turnID, failureEvidence, 0,
+	)
+}
+
+func (m *Manager) markCompletedWithTurnIDAndPromptGeneration(
+	executionID string,
+	exitCode int,
+	errorMessage, turnID string,
+	failureEvidence *PromptAttemptEvidence,
+	promptGeneration uint64,
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -1900,21 +1957,13 @@ func (m *Manager) markCompletedWithTurnID(
 		return nil
 	}
 
-	// A turn aborted because backend graceful shutdown killed the agent
-	// subprocess is not an agent failure. Treat the terminal error as a benign
-	// stop so the session stays resumable and the UI shows no red error banner.
-	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
-		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage, turnID)
-	}
-	if (exitCode != 0 || errorMessage != "") && isUninitializedStartupExecution(execution) {
-		m.logger.Debug("deferring uninitialized startup process exit to startup owner",
-			zap.String("execution_id", execution.ID),
-			zap.Int("exit_code", exitCode))
-		return nil
-	}
-	if (exitCode != 0 || errorMessage != "") && failureEvidence == nil {
-		evidence := execution.promptAttemptEvidenceSnapshot()
-		failureEvidence = &evidence
+	var handled bool
+	var err error
+	failureEvidence, handled, err = m.handleCompletionSpecialCases(
+		execution, exitCode, errorMessage, turnID, failureEvidence,
+	)
+	if handled {
+		return err
 	}
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1939,7 +1988,11 @@ func (m *Manager) markCompletedWithTurnID(
 	// row kept claiming a `running`/`starting` process after it had exited
 	// (#1597). Re-stamping here leaves the row truthful (terminal
 	// status + fresh last_seen_at) the moment the process is gone.
-	m.persistExecutorRunning(context.Background(), execution)
+	if promptGeneration > 0 {
+		m.persistExecutorRunningWithPromptGeneration(context.Background(), execution, promptGeneration)
+	} else {
+		m.persistExecutorRunning(context.Background(), execution)
+	}
 	m.releaseActivity(executionActivityKey(executionID))
 
 	m.logger.Info("execution completed",
@@ -1962,6 +2015,36 @@ func (m *Manager) markCompletedWithTurnID(
 	m.eventPublisher.publishAgentEventWithTurnID(context.Background(), eventType, execution, turnID)
 
 	return nil
+}
+
+func (m *Manager) handleCompletionSpecialCases(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage, turnID string,
+	failureEvidence *PromptAttemptEvidence,
+) (*PromptAttemptEvidence, bool, error) {
+	if exitCode == 0 && errorMessage == "" {
+		return failureEvidence, false, nil
+	}
+	// A turn aborted because backend graceful shutdown killed the agent
+	// subprocess is not an agent failure. Treat the terminal error as a benign
+	// stop so the session stays resumable and the UI shows no red error banner.
+	if m.IsShuttingDown() {
+		return failureEvidence, true, m.markStoppedDuringShutdown(
+			execution, exitCode, errorMessage, turnID,
+		)
+	}
+	if isUninitializedStartupExecution(execution) {
+		m.logger.Debug("deferring uninitialized startup process exit to startup owner",
+			zap.String("execution_id", execution.ID),
+			zap.Int("exit_code", exitCode))
+		return failureEvidence, true, nil
+	}
+	if failureEvidence == nil {
+		evidence := execution.promptAttemptEvidenceSnapshot()
+		failureEvidence = &evidence
+	}
+	return failureEvidence, false, nil
 }
 
 // isTerminalStatus reports whether a status is a final execution state that
@@ -1987,6 +2070,18 @@ func isTerminalStatus(status v1.AgentStatus) bool {
 // orchestrator does not process the same stop twice.
 func (m *Manager) markStoppedDuringShutdown(
 	execution *AgentExecution, exitCode int, errorMessage string, turnIDs ...string,
+) error {
+	return m.markStoppedDuringShutdownWithPromptGeneration(
+		execution, exitCode, errorMessage, 0, turnIDs...,
+	)
+}
+
+func (m *Manager) markStoppedDuringShutdownWithPromptGeneration(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage string,
+	promptGeneration uint64,
+	turnIDs ...string,
 ) error {
 	applied := false
 	err := m.executionStore.WithLock(execution.ID, func(exec *AgentExecution) {
@@ -2015,7 +2110,11 @@ func (m *Manager) markStoppedDuringShutdown(
 		zap.String("error", errorMessage))
 
 	execution.EndSessionSpan()
-	m.persistExecutorRunning(context.Background(), execution)
+	if promptGeneration > 0 {
+		m.persistExecutorRunningWithPromptGeneration(context.Background(), execution, promptGeneration)
+	} else {
+		m.persistExecutorRunning(context.Background(), execution)
+	}
 	m.releaseActivity(executionActivityKey(execution.ID))
 
 	turnID := ""

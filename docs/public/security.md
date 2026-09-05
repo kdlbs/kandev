@@ -181,6 +181,8 @@ Repository content, task attachments, issue and pull-request text, Slack message
 
 Task MCP is scoped to an active Kandev agent session, but it can still create or mutate tasks and coordinate other sessions. External MCP exposes configuration and task-management tools without Kandev authentication. Review every client's live tool list and approval policy before connecting it.
 
+`settle_stale_session_kandev` has a narrower authority boundary than `stop_task_kandev`. The server injects the caller task and session identity, then permits a recovery request only within the same workspace from another session on the target task, the direct parent task, or a verified spawn supervisor recorded when the session was created. Relation alone is insufficient: the exact requested turn must have a quiet, eligible completion intent and no prompt reservation or successor. Authorized attempts are audited with identities and normalized evidence codes; denied attempts are security-logged without retaining prompt content.
+
 ## Operational checklist
 
 Before shared or remote use, confirm:

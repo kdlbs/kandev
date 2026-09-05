@@ -75,7 +75,8 @@ type Repository interface {
 	// session. Returns nil, nil if the queue is empty.
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
-	// ReserveHead returns the lowest-position entry. Ordinary entries are
+	// ReserveHead returns the newest workflow-control entry when one exists,
+	// otherwise the lowest-position ordinary entry. Ordinary entries are
 	// atomically deleted, matching TakeHead. Durable lifecycle entries remain
 	// stored until AcknowledgeByID is called after executor acceptance.
 	ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
@@ -92,7 +93,7 @@ type Repository interface {
 	// visible pending entry remains. Reserved lifecycle rows do not count.
 	PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error)
 
-	// ReserveHeadIfAutoRun reads the policy and reserves the FIFO head in one
+	// ReserveHeadIfAutoRun reads the policy and reserves the control-priority head in one
 	// per-session transaction. The returned bool is false only when Auto-run is
 	// OFF; nil with true means the enabled queue is empty.
 	ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error)

@@ -185,7 +185,7 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 	if queuedMsg.QueuedBy != "" && coalesceKey != "" {
 		queuedBy = queuedMsg.QueuedBy
 	}
-	if isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"]) {
+	if isDurableLifecyclePrompt(queuedMsg) {
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
@@ -667,6 +667,10 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
+	// Normal provider lifecycle completion is the authoritative successful
+	// settlement of a matching completion signal. Keep the worker only for the
+	// missing-ready path; it must not later relabel this intent as superseded.
+	defer s.settleCompletionIntentForProviderTurn(ctx, data.SessionID, turnAtEventFire)
 
 	// A move_task_kandev call during this turn deferred the actual move to
 	// avoid racing on_enter against the running turn. Apply it now: the move
@@ -773,6 +777,10 @@ func isLifecycleAutomationOrigin(origin interface{}) bool {
 	return origin == githubPRAutomationOrigin || origin == mrAutomationOrigin
 }
 
+func isDurableLifecyclePrompt(queuedMsg *messagequeue.QueuedMessage) bool {
+	return queuedMsg != nil && (isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"]) || queuedMsg.IsWorkflowControl())
+}
+
 func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, attachments []v1.MessageAttachment) error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	if s.messageCreator == nil || alreadyRecorded {
@@ -821,7 +829,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			s.onQueuedMessageExecutionComplete()
 		}
 	}()
-	lifecyclePrompt := isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"])
+	lifecyclePrompt := isDurableLifecyclePrompt(queuedMsg)
 
 	claimEntryID, handoffDone := s.claimQueuedMessageHandoff(
 		promptCtx, callerSessionID, queuedMsg, reservation,
@@ -843,6 +851,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			zap.String("session_id", callerSessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID))
+		s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
 		return
 	}
 
@@ -885,6 +894,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 				zap.String("session_id", callerSessionID),
 				zap.String("task_id", queuedMsg.TaskID),
 				zap.String("queue_id", queuedMsg.ID))
+			s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
 			return
 		}
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
@@ -894,17 +904,32 @@ func (s *Service) executeQueuedMessageWithReservation(
 	// worker already claimed the handoff before visible side effects; promptTask
 	// revalidates that ownership while it marks the session RUNNING.
 	afterClaim := s.queuedLifecycleAfterClaim(promptCtx, queuedMsg, attachments, lifecyclePrompt)
+	afterDispatch := s.queuedDeliveryAfterDispatch(promptCtx, reservedSessionID, queuedMsg)
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		promptTaskOptions{
 			claimEntryID:    claimEntryID,
 			lifecyclePrompt: lifecyclePrompt,
 			afterClaim:      afterClaim,
+			afterDispatch:   afterDispatch,
 		})
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg,
 		lifecyclePrompt, userMessageRecorded, err,
 	)
+}
+
+func (s *Service) queuedDeliveryAfterDispatch(ctx context.Context, sessionID string, queuedMsg *messagequeue.QueuedMessage) func() error {
+	if queuedMsg == nil || !queuedMsg.IsDurableLifecycle() {
+		return nil
+	}
+	return func() error {
+		if err := s.messageQueue.AcknowledgeQueued(ctx, sessionID, queuedMsg.ID); err != nil {
+			return err
+		}
+		s.publishQueueStatusEvent(ctx, sessionID)
+		return nil
+	}
 }
 
 func (s *Service) queuedLifecycleAfterClaim(
@@ -972,7 +997,7 @@ func (s *Service) finishQueuedMessageExecution(
 		)
 		return
 	}
-	if lifecyclePrompt {
+	if lifecyclePrompt || queuedMsg.IsReservedLifecycleDelivery() {
 		s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
 	}
 }
@@ -1011,15 +1036,14 @@ func (s *Service) handleQueuedMessageExecutionError(
 		return
 	}
 
-	// TODO: Implement dead letter queue for failed queued messages
-	// Currently, failed messages are lost. Consider:
-	// 1. Retry mechanism with exponential backoff
-	// 2. Persist failed messages to database for manual recovery
-	// 3. Notification to user about failed queue execution
-	s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
+	// Keep the only durable payload available for a later prompt boundary or
+	// explicit recovery. A generic dispatch failure is not evidence that the
+	// sender's report/prompt is safe to discard.
+	s.logger.Warn("queued message execution failed; preserving for recovery",
 		zap.String("session_id", callerSessionID),
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Int("content_length", len(queuedMsg.Content)))
+	s.requeueMessage(ctx, queuedMsg, "queued-message-recoverable")
 }
 
 // claimQueuedMessageHandoff resolves direct/test reservations and claims the
@@ -1079,6 +1103,9 @@ func (s *Service) lifecycleQueuedDispatchIsCurrent(
 ) bool {
 	task, err := s.repo.GetTask(ctx, queuedMsg.TaskID)
 	if err != nil || task == nil || task.ArchivedAt != nil {
+		return false
+	}
+	if queuedMsg.IsWorkflowControl() && !s.workflowControlDeliveryIsCurrent(ctx, queuedMsg, task) {
 		return false
 	}
 	dispatchTracked := s.isQueuedDispatchInFlight(queuedMsg.SessionID)

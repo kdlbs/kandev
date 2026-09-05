@@ -959,16 +959,17 @@ func resolveTaskPRMergeQueueState(tp *TaskPR, status *PRStatus) taskPRMergeQueue
 	if status == nil || status.PR == nil {
 		return queue
 	}
-	if strings.EqualFold(status.PR.State, prStateMerged) || strings.EqualFold(status.PR.State, prStateClosed) {
+	switch {
+	case strings.EqualFold(status.PR.State, prStateMerged), strings.EqualFold(status.PR.State, prStateClosed):
 		queue.state, queue.position, queue.estimate = "", nil, nil
 		queue.entryID, queue.entryHeadSHA = "", ""
-	} else if status.mergeQueuePopulated {
+	case status.mergeQueuePopulated:
 		queue.state = normalizeMergeQueueState(status.MergeQueueState)
 		queue.position = positiveIntPtr(status.MergeQueuePosition)
 		queue.estimate = nonNegativeIntPtr(status.MergeQueueEstimatedTimeToMergeSeconds)
 		queue.entryID = status.MergeQueueEntryID
 		queue.entryHeadSHA = status.MergeQueueEntryHeadSHA
-	} else {
+	default:
 		// REST and gh CLI status reads do not expose merge-queue fields. They
 		// are still authoritative for the absence of an active entry once the
 		// PR itself was fetched, so do not let an old GraphQL entry identifier

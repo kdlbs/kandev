@@ -164,6 +164,15 @@ type TaskRepository interface {
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
 }
 
+// TaskStepTransitionRepository reads authoritative workflow-step ledger
+// identities. It remains separate from TaskRepository so older adapters can
+// continue serving ordinary task reads while transition-keyed consumers opt in.
+type TaskStepTransitionRepository interface {
+	// GetLatestTaskStepTransition returns the greatest committed ledger ID for
+	// taskID, or nil when the task has no workflow-step history.
+	GetLatestTaskStepTransition(ctx context.Context, taskID string) (*models.TaskStepTransition, error)
+}
+
 // TaskPriorityRepository updates a task's priority without replacing the
 // complete task row. Implementations use this capability for priority-only
 // mutations so concurrent changes to other task fields are preserved.
@@ -337,6 +346,57 @@ type TurnRepository interface {
 	AbandonTurn(ctx context.Context, id string) error
 	CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error)
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+}
+
+// CompletionIntentRepository persists exact-turn completion ownership. Its
+// compare-and-set transition prevents duplicate provider and reconciler events
+// from settling the same intent twice.
+type CompletionIntentRepository interface {
+	CreateOrGetCompletionIntent(ctx context.Context, intent *models.CompletionIntent) (created bool, stored *models.CompletionIntent, err error)
+	GetCompletionIntent(ctx context.Context, id string) (*models.CompletionIntent, error)
+	// GetCompletionIntentForTurn returns the completion intent bound to one
+	// exact session turn, when a normal provider ready/completed lifecycle
+	// event needs to settle it before the recovery worker runs.
+	GetCompletionIntentForTurn(ctx context.Context, sessionID, turnID string) (*models.CompletionIntent, error)
+	// ListDueCompletionIntents returns pending intents whose quiet grace has
+	// elapsed, in eligible-time order. The bounded reconciler uses this indexed
+	// query instead of scanning all running sessions after a restart.
+	ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error)
+	CountPendingCompletionIntents(ctx context.Context) (int, error)
+	// RearmCompletionIntent moves the quiet-grace deadline forward after
+	// observed foreground or tool activity, but never revives a claimed intent.
+	RearmCompletionIntent(ctx context.Context, id string, activityAt, eligibleAt time.Time) (bool, error)
+	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
+	// ClaimCompletionIntentForSettlement performs the pending -> settling
+	// compare-and-set and stamps eligible_at with a bounded settling lease
+	// deadline, so a process that crashes mid-settlement leaves a claim that
+	// ReclaimAbandonedSettlingCompletionIntents can recover instead of one
+	// that is invisible to every scan forever.
+	ClaimCompletionIntentForSettlement(ctx context.Context, id string, now, leaseUntil time.Time) (bool, error)
+	// ReleaseCompletionIntentSettlingClaim returns a claimed intent to pending
+	// immediately (eligible_at reset to now), for in-process code that already
+	// knows its own settlement attempt failed transiently.
+	ReleaseCompletionIntentSettlingClaim(ctx context.Context, id string, now time.Time) (bool, error)
+	// ReclaimAbandonedSettlingCompletionIntents returns every settling intent
+	// whose lease has expired back to pending. Must run before every due scan,
+	// including the startup scan, so a crash mid-settlement cannot strand a
+	// turn coarse-RUNNING forever.
+	ReclaimAbandonedSettlingCompletionIntents(ctx context.Context, now time.Time) (int, error)
+	// TransitionCompletionIntentWithControlEvent atomically finishes a
+	// completion intent's terminal transition and records its authorized
+	// session-control audit event in one transaction, so a crash between the
+	// two can never leave a settled turn with no audit trail.
+	TransitionCompletionIntentWithControlEvent(
+		ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time,
+		event *models.SessionControlEvent,
+	) (bool, error)
+}
+
+// SessionControlEventRepository stores authorized stale-turn control attempts.
+// Denied requests are deliberately not written: they are security-log only to
+// avoid creating a durable write-amplification primitive for untrusted callers.
+type SessionControlEventRepository interface {
+	CreateSessionControlEvent(ctx context.Context, event *models.SessionControlEvent) error
 }
 
 // SessionRepository handles task session lifecycle and workflow-session relationships.

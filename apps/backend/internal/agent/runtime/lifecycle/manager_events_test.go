@@ -149,6 +149,69 @@ func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
 	t.Fatal("no complete stream event published")
 }
 
+func TestHandleCompleteEvent_NumberedTerminalOutcomesPersistAndPublish(t *testing.T) {
+	tests := []struct {
+		name          string
+		shutdown      bool
+		error         bool
+		wantStatus    v1.AgentStatus
+		wantEventType string
+	}{
+		{name: "success", wantStatus: v1.AgentStatusReady, wantEventType: events.AgentReady},
+		{name: "error", error: true, wantStatus: v1.AgentStatusFailed, wantEventType: events.AgentFailed},
+		{name: "shutdown error", shutdown: true, error: true, wantStatus: v1.AgentStatusStopped, wantEventType: events.AgentStopped},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr, eventBus := createTestManagerWithTracking()
+			mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
+			if tt.shutdown {
+				mgr.shuttingDown.Store(true)
+			}
+			execution := createTestExecution("exec-numbered-terminal", "task-1", "session-1")
+			if err := mgr.executionStore.Add(execution); err != nil {
+				t.Fatalf("add execution: %v", err)
+			}
+			generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+			if err != nil {
+				t.Fatalf("begin prompt: %v", err)
+			}
+
+			event := &agentctl.AgentEvent{
+				Type:             streams.EventTypeComplete,
+				PromptGeneration: generation,
+				Data:             map[string]any{"is_error": tt.error},
+			}
+			if tt.error {
+				event.Error = "terminal error"
+			}
+
+			done := make(chan struct{})
+			go func() {
+				mgr.handleCompleteEvent(execution, event)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("numbered terminal completion blocked while persisting execution")
+			}
+
+			got, found := mgr.GetExecution(execution.ID)
+			if !found {
+				t.Fatal("execution was removed")
+			}
+			if got.Status != tt.wantStatus {
+				t.Fatalf("status = %s, want %s", got.Status, tt.wantStatus)
+			}
+			if !containsSubject(publishedSubjects(eventBus), tt.wantEventType) {
+				t.Fatalf("published subjects = %v, want %s", publishedSubjects(eventBus), tt.wantEventType)
+			}
+		})
+	}
+}
+
 func TestHandleAgentEvent_RecordsStreamedAssistantTextForResumeContext(t *testing.T) {
 	mgr, _ := createTestManagerWithTracking()
 	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())

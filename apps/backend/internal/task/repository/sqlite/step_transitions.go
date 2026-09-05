@@ -3,12 +3,51 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+// GetLatestTaskStepTransition returns the last committed task-step ledger row
+// by its monotonic database identity. Ordering by occurred_at would let a
+// clock correction select an older move and dispatch the wrong step.
+func (r *Repository) GetLatestTaskStepTransition(ctx context.Context, taskID string) (*models.TaskStepTransition, error) {
+	transition := &models.TaskStepTransition{}
+	var sessionID, fromWorkflowID, fromWorkflowStepID, toWorkflowID, toWorkflowStepID sql.NullString
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id, task_id, session_id, from_workflow_id, from_workflow_step_id,
+		       to_workflow_id, to_workflow_step_id, occurred_at
+		FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), taskID).Scan(
+		&transition.ID,
+		&transition.TaskID,
+		&sessionID,
+		&fromWorkflowID,
+		&fromWorkflowStepID,
+		&toWorkflowID,
+		&toWorkflowStepID,
+		&transition.OccurredAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get latest task step transition: %w", err)
+	}
+	transition.SessionID = sessionID.String
+	transition.FromWorkflowID = fromWorkflowID.String
+	transition.FromWorkflowStepID = fromWorkflowStepID.String
+	transition.ToWorkflowID = toWorkflowID.String
+	transition.ToWorkflowStepID = toWorkflowStepID.String
+	return transition, nil
+}
 
 // stepTransitionTx is satisfied by both *sql.Tx and *sqlx.Tx, the two
 // transaction types the mutation paths in this package use.

@@ -50,21 +50,32 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
+			var promptGeneration uint64
+			promptGenerationUnknown := true
+			if reader, ok := m.runningWriter.(executorRunningReader); ok {
+				prior, readErr := reader.GetExecutorRunningBySessionID(ctx, ri.SessionID)
+				if readErr == nil && prior != nil && prior.AgentExecutionID == ri.InstanceID {
+					promptGeneration = promptGenerationFromMetadata(prior.Metadata)
+					promptGenerationUnknown = promptGeneration == 0
+				}
+			}
 			execution := &AgentExecution{
-				ID:                   ri.InstanceID,
-				TaskID:               ri.TaskID,
-				SessionID:            ri.SessionID,
-				ContainerID:          ri.ContainerID,
-				ContainerIP:          ri.ContainerIP,
-				WorkspacePath:        ri.WorkspacePath,
-				RuntimeName:          ri.RuntimeName,
-				Status:               v1.AgentStatusRunning,
-				StartedAt:            time.Now(),
-				metadata:             ri.Metadata,
-				agentctl:             ri.Client,
-				standaloneInstanceID: ri.StandaloneInstanceID,
-				standalonePort:       ri.StandalonePort,
-				promptDoneCh:         make(chan PromptCompletionSignal, 1),
+				ID:                      ri.InstanceID,
+				TaskID:                  ri.TaskID,
+				SessionID:               ri.SessionID,
+				ContainerID:             ri.ContainerID,
+				ContainerIP:             ri.ContainerIP,
+				WorkspacePath:           ri.WorkspacePath,
+				RuntimeName:             ri.RuntimeName,
+				Status:                  v1.AgentStatusRunning,
+				StartedAt:               time.Now(),
+				metadata:                ri.Metadata,
+				agentctl:                ri.Client,
+				standaloneInstanceID:    ri.StandaloneInstanceID,
+				standalonePort:          ri.StandalonePort,
+				promptDoneCh:            make(chan PromptCompletionSignal, 1),
+				promptGeneration:        promptGeneration,
+				promptGenerationUnknown: promptGenerationUnknown,
 			}
 			// Create trace span for the recovered session
 			_, recoverySpan := tracing.TraceSessionRecovered(

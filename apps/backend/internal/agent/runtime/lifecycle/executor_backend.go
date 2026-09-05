@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -293,6 +295,9 @@ const (
 	// task-supplied metadata can never enable it, because that would let a
 	// task arm a destructive remote operation its profile never approved.
 	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
+	// MetadataKeyPromptGeneration preserves prompt ownership across backend
+	// restarts so a recovered execution cannot reuse an earlier generation.
+	MetadataKeyPromptGeneration = "prompt_generation"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -374,6 +379,33 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyWorktreeBranch:           true,
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
+	MetadataKeyPromptGeneration:         true,
+}
+
+func promptGenerationFromMetadata(metadata map[string]interface{}) uint64 {
+	raw, ok := metadata[MetadataKeyPromptGeneration]
+	if !ok {
+		return 0
+	}
+	switch value := raw.(type) {
+	case uint64:
+		return value
+	case float64:
+		if value > 0 && value <= math.MaxUint64 && math.Trunc(value) == value {
+			return uint64(value)
+		}
+	case json.Number:
+		parsed, err := strconv.ParseUint(value.String(), 10, 64)
+		if err == nil {
+			return parsed
+		}
+	case string:
+		parsed, err := strconv.ParseUint(value, 10, 64)
+		if err == nil {
+			return parsed
+		}
+	}
+	return 0
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
