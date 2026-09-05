@@ -174,8 +174,9 @@ const (
 )
 
 func (CodexStrategy) BuildPassthroughMCP(servers []types.McpServer, _ PassthroughPaths) (PassthroughArtifacts, error) {
-	args := make([]string, 0, len(servers)*4)
-	for _, srv := range servers {
+	deduped := codexDedupeByName(servers)
+	args := make([]string, 0, len(deduped)*4)
+	for _, srv := range deduped {
 		if srv.Name == "" {
 			continue
 		}
@@ -189,6 +190,67 @@ func (CodexStrategy) BuildPassthroughMCP(servers []types.McpServer, _ Passthroug
 		return PassthroughArtifacts{}, nil
 	}
 	return PassthroughArtifacts{Args: args}, nil
+}
+
+// codexDedupeByName collapses multiple entries sharing the same Name down to
+// a single entry, applying the same "first surviving wins" semantics the
+// ACP-side filterMcpServersByCapabilities uses: HTTP / streamable_http beat
+// SSE, and first occurrence wins ties. Codex evaluates `-c mcp_servers.<n>.<k>`
+// overrides in argv order and the last value for each key wins, so emitting
+// both kandev/http and kandev/sse would silently leave the SSE URL in effect
+// and the agent would either fail to load the kandev MCP server or reach the
+// wrong transport. This function preserves insertion order otherwise so the
+// stable -c argv ordering stays predictable for callers that diff it.
+func codexDedupeByName(servers []types.McpServer) []types.McpServer {
+	if len(servers) <= 1 {
+		return servers
+	}
+	seen := make(map[string]int, len(servers))
+	out := make([]types.McpServer, 0, len(servers))
+	for _, srv := range servers {
+		if srv.Name == "" {
+			out = append(out, srv)
+			continue
+		}
+		if idx, ok := seen[srv.Name]; ok {
+			if codexPreferRemoteOver(srv.Type, out[idx].Type) {
+				out[idx] = srv
+			}
+			continue
+		}
+		seen[srv.Name] = len(out)
+		out = append(out, srv)
+	}
+	return out
+}
+
+// codexPreferRemoteOver reports whether a candidate transport type should
+// replace an existing one for the same server name. HTTP / streamable_http
+// are modern and Codex loads them natively; SSE is the legacy fallback, so
+// HTTP beats SSE regardless of the order the entries appear in. stdio is
+// never displaced by a remote entry (and vice versa) — they coexist under
+// different names by design.
+func codexPreferRemoteOver(candidate, current string) bool {
+	candRemote := isRemoteMCPTransport(candidate)
+	currRemote := isRemoteMCPTransport(current)
+	if candRemote != currRemote {
+		return candRemote
+	}
+	if !candRemote {
+		return false
+	}
+	// Both remote: a non-SSE candidate displaces a legacy SSE entry so the
+	// HTTP-beats-SSE contract holds even when the SSE entry arrives first.
+	return current == string(ServerTypeSSE) && candidate != string(ServerTypeSSE)
+}
+
+func isRemoteMCPTransport(t string) bool {
+	switch t {
+	case string(ServerTypeHTTP), string(ServerTypeStreamableHTTP), string(ServerTypeSSE):
+		return true
+	default:
+		return false
+	}
 }
 
 func (CodexStrategy) Describe() string {
