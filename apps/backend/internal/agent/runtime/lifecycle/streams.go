@@ -34,6 +34,7 @@ type StreamCallbacks struct {
 type StreamManager struct {
 	logger     *logger.Logger
 	callbacks  StreamCallbacks
+	mcpMu      sync.RWMutex
 	mcpHandler agentctl.MCPHandler
 	// mcpIdentityScoper scopes in-session MCP dispatches to the owner of the
 	// stream's task. Nil leaves dispatch unscoped (single-user instances and

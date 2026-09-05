@@ -565,4 +565,3 @@ no step in this order can regress a shipped feature.
 - [GitLab workflow sync requirements](../../integrations/requirements/gitlab-workflow-sync.md)
   is the shipped provider contract this design reuses and whose write-back
   exclusion it follows.
-

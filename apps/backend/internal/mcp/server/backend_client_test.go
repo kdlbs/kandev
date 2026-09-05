@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -50,6 +51,79 @@ func TestChannelBackendClientCloseReleasesPublishedRequest(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("published request remained blocked after client close")
 	}
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.2
+func TestChannelBackendClientDoesNotQueueRequestWithoutStreamConsumer(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	t.Cleanup(cancel)
+
+	err := client.RequestPayload(ctx, "test.action", nil, nil)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	select {
+	case msg := <-client.GetRequestChannel():
+		t.Fatalf("request %q was queued without a stream consumer", msg.ID)
+	default:
+	}
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.5
+func TestChannelBackendClientDisconnectOnlyFailsRequestsOwnedByThatStream(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+
+	oldErrCh := make(chan error, 1)
+	go func() {
+		oldErrCh <- client.RequestPayload(context.Background(), "old.action", nil, nil)
+	}()
+	oldRequest := <-client.GetRequestChannel()
+	client.BindRequestToStream(oldRequest.ID, "old-stream")
+
+	newErrCh := make(chan error, 1)
+	go func() {
+		newErrCh <- client.RequestPayload(context.Background(), "new.action", nil, nil)
+	}()
+	newRequest := <-client.GetRequestChannel()
+	client.BindRequestToStream(newRequest.ID, "new-stream")
+
+	client.FailStreamRequests("old-stream", errors.New("agent stream disconnected"))
+	require.EqualError(t, <-oldErrCh, "agent stream disconnected")
+	select {
+	case err := <-newErrCh:
+		t.Fatalf("replacement stream request completed early: %v", err)
+	default:
+	}
+
+	response, err := ws.NewResponse(newRequest.ID, newRequest.Action, nil)
+	require.NoError(t, err)
+	client.HandleResponse(response)
+	require.NoError(t, <-newErrCh)
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.7
+func TestChannelBackendClientTerminalFailureLogIncludesConfiguredSession(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	client := NewChannelBackendClient(log)
+	t.Cleanup(client.Close)
+	_ = New(client, "session-log", "task-log", 0, log, "", false, ModeTask)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, nil)
+	}()
+	request := <-client.GetRequestChannel()
+	client.BindRequestToStream(request.ID, "failed-stream")
+	client.FailStreamRequests("failed-stream", errors.New("agent stream disconnected"))
+	require.EqualError(t, <-errCh, "agent stream disconnected")
+
+	entries := observed.FilterMessage("MCP request failed after publication").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, "session-log", entries[0].ContextMap()["session_id"])
 }
 
 func TestChannelBackendClientRedactsPluginInvocationPayload(t *testing.T) {

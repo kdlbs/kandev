@@ -1,8 +1,7 @@
 "use client";
 
 import { getBackendConfig } from "@/lib/config";
-import { fetchJson } from "@/lib/api/client";
-import { readInterimSettingsInterlockToken } from "@/src/boot-payload";
+import { ApiError, fetchJson } from "@/lib/api/client";
 import type {
   Agent,
   AgentProfile,
@@ -20,7 +19,6 @@ import type { AgentProfileKind } from "@/lib/types/agent-profile";
 type ProfilePermissions = Record<PermissionKey, boolean>;
 
 const { apiBaseUrl } = getBackendConfig();
-const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
 
 type DynamicProfilePayload = {
   version: number;
@@ -193,53 +191,67 @@ export type DeleteProfileResult =
       automations: AutomationReference[];
       utilityAgents: UtilityAgentReference[];
     }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; handled?: boolean };
 
-// eslint-disable-next-line complexity
 export async function deleteAgentProfileAction(
   id: string,
   force?: boolean,
 ): Promise<DeleteProfileResult> {
   const url = `${apiBaseUrl}/api/v1/agent-profiles/${id}${force ? "?force=true" : ""}`;
-  const token = readInterimSettingsInterlockToken();
-  const response = await fetch(url, {
-    method: "DELETE",
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { [interimSettingsInterlockHeader]: token } : {}),
-    },
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    // A 409 is active sessions, referencing watchers, routing tier mappings, or a mix.
-    // Treat any non-empty list as the conflict signal — a watcher-only
-    // conflict (the new self-heal path) must still pop the dialog.
-    if (
-      response.status === 409 &&
-      (body.active_sessions ||
-        body.watchers ||
-        body.routing_tiers ||
-        body.automations ||
-        body.utility_agents)
-    ) {
-      return {
-        status: "conflict",
-        activeSessions: body.active_sessions ?? [],
-        watchers: body.watchers ?? [],
-        routingTiers: body.routing_tiers ?? [],
-        automations: body.automations ?? [],
-        utilityAgents: body.utility_agents ?? [],
-      };
-    }
-    // i18n-exempt: server-provided error text, or an HTTP status diagnostic when
-    // the server sent none. The toast title around it is translated.
+  try {
+    await agentSettingsRequest<void>(url, { method: "DELETE" });
+    return { status: "ok" };
+  } catch (error) {
+    return deleteAgentProfileError(error);
+  }
+}
+
+type DeleteProfileErrorBody = {
+  error?: string;
+  active_sessions?: ActiveSessionInfo[];
+  watchers?: WatcherReference[];
+  routing_tiers?: RoutingTierReference[];
+  automations?: AutomationReference[];
+  utility_agents?: UtilityAgentReference[];
+};
+
+function readDeleteProfileErrorBody(value: unknown): DeleteProfileErrorBody {
+  return value && typeof value === "object" ? (value as DeleteProfileErrorBody) : {};
+}
+
+function hasDeleteProfileConflict(body: DeleteProfileErrorBody): boolean {
+  return Boolean(
+    body.active_sessions ||
+    body.watchers ||
+    body.routing_tiers ||
+    body.automations ||
+    body.utility_agents,
+  );
+}
+
+function deleteAgentProfileError(error: unknown): DeleteProfileResult {
+  const apiError = error instanceof ApiError ? error : undefined;
+  const body = apiError ? readDeleteProfileErrorBody(apiError.body) : {};
+  // A 409 is active sessions, referencing watchers, routing tier mappings, or a mix.
+  // Treat any non-empty list as the conflict signal — a watcher-only
+  // conflict (the new self-heal path) must still pop the dialog.
+  if (apiError?.status === 409 && hasDeleteProfileConflict(body)) {
     return {
-      status: "error",
-      message: body?.error || `Request failed: ${response.status} ${response.statusText}`,
+      status: "conflict",
+      activeSessions: body.active_sessions ?? [],
+      watchers: body.watchers ?? [],
+      routingTiers: body.routing_tiers ?? [],
+      automations: body.automations ?? [],
+      utilityAgents: body.utility_agents ?? [],
     };
   }
-  return { status: "ok" };
+  // i18n-exempt: server-provided error text, or an HTTP status diagnostic when
+  // the server sent none. The toast title around it is translated.
+  return {
+    status: "error",
+    message: error instanceof Error ? error.message : "Request failed",
+    ...(apiError?.handled ? { handled: true } : {}),
+  };
 }
 
 export async function getAgentProfileMcpConfigAction(

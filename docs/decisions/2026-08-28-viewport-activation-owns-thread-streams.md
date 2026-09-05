@@ -71,4 +71,3 @@ preload-entry list hydration repair missed compact events.
 - **Fully virtualize task shells now.** Rejected for this delivery because the
   expensive work is transcript and subscription fan-out. Stable shells are a
   smaller and simpler scroll contract.
-

@@ -2524,6 +2524,11 @@ func (s *Service) prepareWorkflowReplacementSession(
 		WorkflowStepID: dbTask.WorkflowStepID,
 		StartAgent:     false,
 	}); err != nil {
+		// resolveDynamicLaunchExecution above may have claimed newSession's
+		// route generation as "starting"; nothing else transitions it if this
+		// workspace-only attach then fails. Safe to call unconditionally: it
+		// only fires while that generation is still "starting".
+		s.markDynamicRouteActionRequired(ctx, sessionID, newSession.RouteGeneration, "workflow_replacement_launch_failed")
 		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
 	}
 
@@ -5471,6 +5476,8 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		historyTrigger = wfmodels.StepTransitionTriggerTurnStart
 	case engine.TriggerOnChildrenCompleted:
 		historyTrigger = wfmodels.StepTransitionTriggerChildrenCompleted
+	case engine.TriggerOnAgentError:
+		historyTrigger = wfmodels.StepTransitionTriggerAgentError
 	}
 	s.recordAutoStepTransition(ctx, session.ID, result.FromStepID, result.ToStepID, consumedSignal, historyTrigger)
 

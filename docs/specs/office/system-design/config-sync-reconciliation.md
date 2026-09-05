@@ -529,4 +529,3 @@ write leaves a correct manifest beside a stale status the next run overwrites.
 | Release fails partway on config delete | Stops at the failing entity; entities already released stay released and have no manifest row; config retained; retry resumes from the remainder. |
 | Manifest names an entity deleted out of band | Manifest entry dropped, run continues. |
 | Delete of a nonexistent config | Succeeds with no effect. |
-
