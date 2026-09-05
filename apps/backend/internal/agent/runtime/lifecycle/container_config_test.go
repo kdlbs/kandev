@@ -14,7 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-func TestGitMetadataMountsMasksSiblingWorktrees(t *testing.T) {
+func TestGitMetadataMountsRejectsHostProjectionWithoutExactMediation(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "repo")
 	runContainerGit(t, "", "init", "-b", "main", repo)
 	runContainerGit(t, repo, "config", "user.email", "test@example.com")
@@ -30,38 +30,15 @@ func TestGitMetadataMountsMasksSiblingWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mounts, err := gitMetadataMounts([]*worktree.GitMetadataProjection{projection})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertGitMount(t, mounts, projection.CommonDir, true, false)
-	assertGitMount(t, mounts, projection.WorktreesDir, false, true)
-	for _, path := range projection.AgentWritablePaths {
-		if path == projection.CurrentRefPath || path == projection.CurrentRefPath+".lock" ||
-			path == projection.ReflogPath || path == projection.ReflogPath+".lock" {
-			continue
-		}
-		assertGitMount(t, mounts, path, false, false)
-	}
-	for _, path := range projection.MountSupportPaths {
-		assertGitMount(t, mounts, path, false, false)
-	}
-	for _, mount := range mounts {
-		if mount.Source == repo || mount.Target == repo {
-			t.Fatalf("source checkout must not be mounted: %#v", mount)
-		}
-		if mount.Target == projection.CommonDir && !mount.ReadOnly {
-			t.Fatalf("common git root must not be writable: %#v", mount)
-		}
+	_, err = gitMetadataMounts([]*worktree.GitMetadataProjection{projection})
+	if err == nil || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("gitMetadataMounts() error = %v, want fail-closed exact-mediation rejection", err)
 	}
 }
 
-// TestGitMetadataMountsRegularRepositoryHasNoConflictingDuplicateMount covers
-// a regular (non-worktree) repository, where GitDir == CommonDir. Since GitDir
-// is already granted writable via AgentWritablePaths, also adding CommonDir to the
-// read-only set would produce two Docker mounts targeting the same path with
-// contradictory ReadOnly flags.
-func TestGitMetadataMountsRegularRepositoryHasNoConflictingDuplicateMount(t *testing.T) {
+// Regular host projections are rejected too: their ref/reflog parent mounts
+// would give agentctl-managed commands access to sibling refs.
+func TestGitMetadataMountsRejectsRegularHostProjectionWithoutExactMediation(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "repo")
 	runContainerGit(t, "", "init", "-b", "main", repo)
 	runContainerGit(t, repo, "config", "user.email", "test@example.com")
@@ -78,20 +55,9 @@ func TestGitMetadataMountsRegularRepositoryHasNoConflictingDuplicateMount(t *tes
 	if projection.GitDir != projection.CommonDir {
 		t.Fatalf("test fixture must be a regular repository: GitDir=%q CommonDir=%q", projection.GitDir, projection.CommonDir)
 	}
-	mounts, err := gitMetadataMounts([]*worktree.GitMetadataProjection{projection})
-	if err != nil {
-		t.Fatal(err)
+	if _, err := gitMetadataMounts([]*worktree.GitMetadataProjection{projection}); err == nil || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("gitMetadataMounts() error = %v, want fail-closed exact-mediation rejection", err)
 	}
-	targets := make(map[string]int, len(mounts))
-	for _, mount := range mounts {
-		targets[mount.Target]++
-	}
-	for target, count := range targets {
-		if count > 1 {
-			t.Fatalf("mount target %q used %d times, want exactly 1: %#v", target, count, mounts)
-		}
-	}
-	assertGitMount(t, mounts, projection.GitDir, false, false)
 }
 
 func runContainerGit(t *testing.T, dir string, args ...string) {
@@ -102,16 +68,6 @@ func runContainerGit(t *testing.T, dir string, args ...string) {
 	if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
-}
-
-func assertGitMount(t *testing.T, mounts []docker.MountConfig, target string, readOnly, tmpfs bool) {
-	t.Helper()
-	for _, mount := range mounts {
-		if mount.Target == target && mount.ReadOnly == readOnly && mount.Tmpfs == tmpfs {
-			return
-		}
-	}
-	t.Fatalf("missing mount target=%q readOnly=%t tmpfs=%t: %#v", target, readOnly, tmpfs, mounts)
 }
 
 // TestBuildContainerConfig_MutableCloneOmitsHostGitMetadataMounts guards the

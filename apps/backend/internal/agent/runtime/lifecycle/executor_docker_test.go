@@ -108,7 +108,7 @@ func TestDockerExecutorRejectsClonePolicyWithoutCompatibleAgent(t *testing.T) {
 	}
 }
 
-func TestDockerExecutorHostProjectionInstallsInnerFilesystemPolicy(t *testing.T) {
+func TestDockerExecutorRejectsLinkedWorktreeProjectionWithoutExactMountMediation(t *testing.T) {
 	projection := newLinkedGitMetadataProjection(t)
 	req := &ExecutorCreateRequest{
 		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
@@ -120,22 +120,34 @@ func TestDockerExecutorHostProjectionInstallsInnerFilesystemPolicy(t *testing.T)
 	}
 
 	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
-	if err := exec.PrepareGitMetadataProjection(context.Background(), req); err != nil {
-		t.Fatalf("PrepareGitMetadataProjection() error = %v", err)
+	if err := exec.PrepareGitMetadataProjection(context.Background(), req); err == nil || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want fail-closed exact-mediation rejection", err)
 	}
-	if !strings.Contains(req.Env["CODEX_CONFIG"], gitMetadataPolicyName) {
-		t.Fatalf("CODEX_CONFIG = %q, want inner Git metadata policy", req.Env["CODEX_CONFIG"])
+	if req.Env["CODEX_CONFIG"] != `{}` {
+		t.Fatalf("failed Docker preflight mutated CODEX_CONFIG = %q", req.Env["CODEX_CONFIG"])
 	}
 }
 
-func TestDockerExecutorHostProjectionRejectsAgentWithoutInnerPolicy(t *testing.T) {
+func TestDockerHostProjectionPreflightReturnsStableUnsupportedCode(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		GitMetadataProjections: []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)},
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_HOME": t.TempDir(), "CODEX_CONFIG": `{}`},
+	}
+	err := preflightGitMetadataProjection(context.Background(), NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger()), req)
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("preflight error = %v, want stable unsupported code and recovery guidance", err)
+	}
+}
+
+func TestDockerExecutorHostProjectionRejectsBeforeInnerPolicyNegotiation(t *testing.T) {
 	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	err := exec.PrepareGitMetadataProjection(context.Background(), &ExecutorCreateRequest{
 		GitMetadataProjections: []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)},
 		AgentConfig:            agents.NewClaudeACP(),
 	})
-	if err == nil || !strings.Contains(err.Error(), "filesystem policy") {
-		t.Fatalf("PrepareGitMetadataProjection() error = %v, want incompatible inner-policy rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want exact-mediation rejection", err)
 	}
 }
 

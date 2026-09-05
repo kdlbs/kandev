@@ -191,6 +191,9 @@ func gitMetadataMounts(projections []*worktree.GitMetadataProjection) ([]docker.
 	if len(projections) == 0 {
 		return nil, nil
 	}
+	if err := rejectDockerHostGitMetadataProjections(projections); err != nil {
+		return nil, err
+	}
 	common := make(map[string]struct{}, len(projections))
 	worktrees := make(map[string]struct{}, len(projections))
 	writable := make(map[string]struct{}, len(projections)*4)
@@ -225,6 +228,22 @@ func gitMetadataMounts(projections []*worktree.GitMetadataProjection) ([]docker.
 		mounts = append(mounts, docker.MountConfig{Source: path, Target: path})
 	}
 	return mounts, nil
+}
+
+// Docker host projections cannot satisfy the exact-path contract. Git's
+// create-and-rename locking requires writable ref and reflog parent mounts,
+// but those mounts are also writable to agentctl-managed shells and workspace
+// commands that do not inherit the agent's inner filesystem policy. Failing
+// closed keeps those commands from mutating sibling refs; clone-in-container
+// launches remain supported because their metadata is discovered and governed
+// entirely inside the container.
+func rejectDockerHostGitMetadataProjections(projections []*worktree.GitMetadataProjection) error {
+	for _, projection := range projections {
+		if projection == nil || projection.Revalidate() != nil {
+			return errors.New(gitMetadataProjectionInvalid)
+		}
+	}
+	return unsupportedGitMetadataProjection("Docker cannot provide exact Git metadata mediation for host projections; use clone-inside Docker or start a new session")
 }
 
 func sortedGitMetadataPaths(paths map[string]struct{}) []string {
