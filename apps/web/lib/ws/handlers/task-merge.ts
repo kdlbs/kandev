@@ -99,6 +99,13 @@ export function mergeTaskUpdate(
     payloadKey: "parent_id",
     taskField: "parentTaskId",
   });
+  // Same contract for the human assignee: a lightweight update that does not
+  // mention it must not read as "unassigned". Without this, taking a task over
+  // showed the new owner until the next unrelated event, then blanked.
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "assignee_user_id",
+    taskField: "assigneeUserId",
+  });
   preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "primary_session_id",
     taskField: "primarySessionId",
