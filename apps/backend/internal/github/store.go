@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 
 	dbutil "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/persistence"
 )
+
+import "github.com/jackc/pgx/v5/pgconn"
 
 // Store provides SQLite persistence for GitHub integration data.
 type Store struct {
