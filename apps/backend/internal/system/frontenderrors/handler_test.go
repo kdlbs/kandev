@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
+// @covers AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.18
 func TestHandlerLogsBoundedStructuredFrontendError(t *testing.T) {
 	router, observed := newHandlerTestRouter(t, "user-1")
 	body := `{
@@ -52,6 +53,64 @@ func TestHandlerLogsBoundedStructuredFrontendError(t *testing.T) {
 	}
 	if fields["url"] != "http://localhost/settings/system/logs" {
 		t.Fatalf("logged url = %#v", fields["url"])
+	}
+}
+
+// @covers AC-PLATFORM-EXPECTED-RUNTIME-LOG-SEVERITY-001.17
+func TestHandlerLogsBackendReloadDiagnosticAtInfo(t *testing.T) {
+	for _, signal := range []string{"boot_id_changed", "settings_interlock_rejected"} {
+		t.Run(signal, func(t *testing.T) {
+			router, observed := newHandlerTestRouter(t, "user-1")
+			body := `{
+				"client_timestamp":"2026-09-05T15:52:11.255Z",
+				"source":"backend-reload",
+				"task_id":"task-123",
+				"title":"` + signal + `",
+				"url":"http://localhost/t/task-123"
+			}`
+
+			response := performFrontendErrorRequest(router, body)
+			if response.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+
+			entries := observed.All()
+			if len(entries) != 1 {
+				t.Fatalf("logged entries = %d, want 1", len(entries))
+			}
+			entry := entries[0]
+			if entry.Level != zapcore.InfoLevel || entry.Message != "frontend backend reload required" {
+				t.Fatalf("entry = %s %q", entry.Level, entry.Message)
+			}
+			fields := entry.ContextMap()
+			if fields["source"] != "backend-reload" || fields["title"] != signal {
+				t.Fatalf("structured fields = %#v", fields)
+			}
+		})
+	}
+}
+
+func TestHandlerRejectsInvalidBackendReloadReports(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "unknown signal", body: `{"source":"backend-reload","title":"other"}`},
+		{name: "error data", body: `{"source":"backend-reload","title":"boot_id_changed","stack":"toast stack"}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			router, observed := newHandlerTestRouter(t, "user-1")
+			response := performFrontendErrorRequest(router, test.body)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d, body = %s",
+					response.Code, http.StatusBadRequest, response.Body.String())
+			}
+			if observed.Len() != 0 {
+				t.Fatalf("invalid request produced %d log entries", observed.Len())
+			}
+		})
 	}
 }
 
