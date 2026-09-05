@@ -4,14 +4,50 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+func TestHandleStopTask_CoordinatorGrantUsesCurrentSessionAndResolvesAudit(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: sender.WorkspaceID, PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		BackingTaskID: sender.ID, BackingSessionID: "sender-sess-1", CreatedAt: now,
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(context.Background(), principal); err != nil {
+		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
+	}
+	if err := repo.CreateCoordinatorGrant(context.Background(), &models.CoordinatorGrant{
+		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: sender.WorkspaceID,
+		ScopeKind: coordinator.ScopeWorkspace, ScopeID: sender.WorkspaceID, Capabilities: "orchestrate", GrantedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateCoordinatorGrant: %v", err)
+	}
+	stopper := &recordingTaskStopper{result: orchestrator.CoordinatorTaskStopResult{Status: orchestrator.CoordinatorTaskStopStatusStopped}}
+	h := stopTaskTestHandler(t, map[string]*models.Task{sender.ID: sender, target.ID: target}, nil, stopper)
+	h.SetCoordinatorAuthority(coordinator.New(repo, func() bool { return true }))
+
+	response, err := h.handleStopTask(context.Background(), makeWSMessage(t, ws.ActionMCPStopTask, map[string]interface{}{
+		"task_id": target.ID, "sender_task_id": sender.ID, "sender_session_id": "sender-sess-1",
+	}))
+	if err != nil || response.Type != ws.MessageTypeResponse {
+		t.Fatalf("handleStopTask = %#v, %v; want response", response, err)
+	}
+	events, err := repo.ListCoordinatorAuditEvents(context.Background(), sender.WorkspaceID, sender.ID, 10)
+	if err != nil || len(events) != 1 || events[0].Result != "ok" || events[0].PrincipalID != principal.ID {
+		t.Fatalf("audit events = %#v, %v; want resolved principal audit", events, err)
+	}
+}
 
 type recordingTaskStopper struct {
 	result orchestrator.CoordinatorTaskStopResult

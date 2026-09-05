@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -56,6 +57,15 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	workspaceID, err := r.resolvePrincipalWorkspace(ctx, task)
 	if err != nil {
 		return nil, err
+	}
+	if lifecycle, ok := r.tasks.(coordinator.PrincipalLifecycleStore); ok {
+		principal, err := coordinator.EnsureTaskPrincipal(ctx, lifecycle, workspaceID, taskID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("bind MCP task principal: %w", err)
+		}
+		if principal == nil {
+			return nil, fmt.Errorf("bind MCP task principal: principal is revoked")
+		}
 	}
 
 	automationID, surface, err := principalSurface(task)

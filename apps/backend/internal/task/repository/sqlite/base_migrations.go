@@ -51,6 +51,7 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 func (r *Repository) runMigrations() error {
+	r.migrate.Apply("task_coordinator_audit_events.principal_id", `ALTER TABLE task_coordinator_audit_events ADD COLUMN principal_id TEXT NOT NULL DEFAULT ''`)
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}

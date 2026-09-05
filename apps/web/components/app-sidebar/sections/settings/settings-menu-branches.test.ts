@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { WORKSPACE_SETTINGS_TABS } from "@/lib/settings/workspace-settings-tabs";
+
 import {
   buildAgentsBranch,
   buildBranchRoot,
@@ -13,6 +15,13 @@ import {
 } from "./settings-menu-branches";
 
 const WORKSPACE_ID = "ws-1";
+
+// Derive expected tabs from the source of truth, not hardcoded literals,
+// so a new tab does not need a maintenance update here.
+const EXPECTED_WORKSPACE_TAB_HREFS = WORKSPACE_SETTINGS_TABS.filter(
+  ({ tab }) => tab !== "overview",
+).map(({ tab }) => `/settings/workspaces/${WORKSPACE_ID}/${tab}`);
+
 const WORKSPACES_HREF = "/settings/workspaces";
 const EXECUTORS_HREF = "/settings/executors";
 const WORKSPACES = [{ id: WORKSPACE_ID, name: "Main Workspace" }];
@@ -71,13 +80,7 @@ describe("buildWorkspacesBranch", () => {
     const [workspace] = buildWorkspacesBranch(WORKSPACES);
 
     expect(workspace.href).toBe(`/settings/workspaces/${WORKSPACE_ID}`);
-    expect(hrefsOf(workspace.children ?? [])).toEqual([
-      `/settings/workspaces/${WORKSPACE_ID}/repositories`,
-      `/settings/workspaces/${WORKSPACE_ID}/workflows`,
-      `/settings/workspaces/${WORKSPACE_ID}/integrations`,
-      `/settings/workspaces/${WORKSPACE_ID}/automations`,
-      `/settings/workspaces/${WORKSPACE_ID}/secrets`,
-    ]);
+    expect(hrefsOf(workspace.children ?? [])).toEqual(EXPECTED_WORKSPACE_TAB_HREFS);
   });
 
   it("goes one level deeper for integrations, the menu's deepest branch", () => {

@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -318,7 +319,14 @@ type Handlers struct {
 
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
-	agentPermissionSvc AgentPermissionService
+	agentPermissionSvc   AgentPermissionService
+	coordinatorAuthority *coordinator.Authority
+}
+
+// SetCoordinatorAuthority installs the optional, centrally evaluated task
+// authority boundary. Leaving it nil preserves direct-parent-only behavior.
+func (h *Handlers) SetCoordinatorAuthority(authority *coordinator.Authority) {
+	h.coordinatorAuthority = authority
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -1991,16 +1999,19 @@ func (h *Handlers) handleAddWorkspaceSources(ctx context.Context, msg *ws.Messag
 	if response != nil {
 		return response, nil
 	}
-	_, isChildTarget, response := h.authorizeWorkspaceSourceTarget(ctx, msg, req, caller)
+	_, isChildTarget, decision, response := h.authorizeWorkspaceSourceTarget(ctx, msg, req, caller)
 	if response != nil {
 		return response, nil
 	}
 	attachReq := service.AttachWorkspaceSourcesRequest{TaskID: req.TaskID, Sources: sources}
-	if isChildTarget {
+	if isChildTarget && decision.Basis == coordinator.BasisDirectParent {
 		attachReq.ExpectedParentID = caller.ID
 		attachReq.ExpectedParentWorkspaceID = caller.WorkspaceID
 	}
 	result, err := h.taskSvc.AttachWorkspaceSources(ctx, attachReq)
+	if finishErr := h.finishCoordinatorAction(ctx, decision, err); finishErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record workspace source attachment", nil)
+	}
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, classifyWorkspaceSourceError(err), "Failed to attach workspace sources: "+err.Error(), nil)
 	}
@@ -2063,22 +2074,27 @@ func (h *Handlers) verifyWorkspaceSourceCaller(ctx context.Context, msg *ws.Mess
 	return caller, nil
 }
 
-func (h *Handlers) authorizeWorkspaceSourceTarget(ctx context.Context, msg *ws.Message, req addWorkspaceSourcesRequest, caller *models.Task) (*models.Task, bool, *ws.Message) {
+func (h *Handlers) authorizeWorkspaceSourceTarget(ctx context.Context, msg *ws.Message, req addWorkspaceSourcesRequest, caller *models.Task) (*models.Task, bool, coordinator.Decision, *ws.Message) {
 	target, err := h.taskSvc.GetTask(ctx, req.TaskID)
 	if err != nil {
 		if errors.Is(err, taskrepository.ErrTaskNotFound) {
-			return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
+			return nil, false, coordinator.Decision{}, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
 		}
-		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to load target task")
+		return nil, false, coordinator.Decision{}, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to load target task")
 	}
 	if target == nil {
-		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
+		return nil, false, coordinator.Decision{}, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
 	}
 	isChildTarget := req.TaskID != req.CallerTaskID
-	if isChildTarget && !canDirectParentAccess(caller, target) {
-		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources")
+	decision := coordinator.Decision{}
+	if isChildTarget {
+		var authErr error
+		decision, authErr = h.authorizeCoordinatorAction(ctx, caller, target, req.CallerSessionID, "add_workspace_sources", coordinator.CapabilityOrchestrate)
+		if authErr != nil || !decision.Allowed {
+			return nil, false, decision, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources")
+		}
 	}
-	return target, isChildTarget, nil
+	return target, isChildTarget, decision, nil
 }
 
 func newWorkspaceSourceError(msg *ws.Message, code, message string) *ws.Message {
@@ -2623,9 +2639,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// its request was rejected. Omitted or "queued" keeps the default
 	// queue-and-wait behavior documented on message_task_kandev, even for
 	// a parent sender.
-	isParentToChild := targetTask.ParentID != "" && targetTask.ParentID == senderTask.ID
 	wantsInterrupt := req.DeliveryMode == deliveryModeInterrupt
-	if wantsInterrupt && !isParentToChild {
+	interruptDecision := coordinator.Decision{}
+	if wantsInterrupt {
+		interruptDecision, err = h.authorizeCoordinatorAction(ctx, senderTask, targetTask, req.SenderSessionID, "message_interrupt", coordinator.CapabilityOrchestrate)
+	}
+	if wantsInterrupt && (err != nil || !interruptDecision.Allowed) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
@@ -2633,6 +2652,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		// Claim the durable question before dispatch. A failed status update after
 		// delivery would make a retry send the same answer a second time.
 		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
+			_ = h.finishCoordinatorAction(ctx, interruptDecision, err)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
 		}
 	}
@@ -2655,6 +2675,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// primary is terminal is pinned too, or the idle dispatch path re-resolves
 	// it straight back to that terminal primary.
 	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, pinnedTarget)
+	if finishErr := h.finishCoordinatorAction(ctx, interruptDecision, err); finishErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record message interrupt", nil)
+	}
 	if err != nil {
 		if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {

@@ -462,6 +462,10 @@ type FeaturesConfig struct {
 	// can regress without notice.
 	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
 
+	// CoordinatorTaskAuthority gates operator-granted, task-scoped coordination
+	// authority. It is disabled in every profile until an operator explicitly
+	// enables the feature for a controlled installation.
+	CoordinatorTaskAuthority bool `mapstructure:"coordinator_task_authority" json:"coordinatorTaskAuthority"`
 	// OfficeSessionIdentity keys an Office task's session identity on the run's
 	// own agent instead of the task's runner seat, and binds an agent's
 	// decision re-evaluation to its own calling session instead of the task's

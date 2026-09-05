@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -829,6 +830,35 @@ func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *test
 	assert.Empty(t, orch.interruptCalls)
 	assert.Empty(t, orch.promptCalls)
 	assert.Empty(t, orch.startCreatedCalls)
+}
+
+func TestHandleMessageTask_CoordinatorGrantInterruptsAndResolvesAudit(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: sender.WorkspaceID, PluginInstallationID: "plugin-1", LogicalKey: "coordinator",
+		BackingTaskID: sender.ID, BackingSessionID: "sender-sess-1", CreatedAt: now,
+	}
+	require.NoError(t, repo.CreateWorkspaceAgentPrincipal(context.Background(), principal))
+	require.NoError(t, repo.CreateCoordinatorGrant(context.Background(), &models.CoordinatorGrant{
+		ID: "grant-1", PrincipalID: principal.ID, WorkspaceID: sender.WorkspaceID,
+		ScopeKind: coordinator.ScopeWorkspace, ScopeID: sender.WorkspaceID, Capabilities: "orchestrate", GrantedAt: now,
+	}))
+	h, orch := newMessageTaskHandler(t, svc)
+	h.SetCoordinatorAuthority(coordinator.New(repo, func() bool { return true }))
+
+	response, err := h.handleMessageTask(context.Background(), makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayloadWithMode(target.ID, "stop now", sender.ID, "interrupt")))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Len(t, orch.interruptCalls, 1)
+	require.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
+	events, err := repo.ListCoordinatorAuditEvents(context.Background(), sender.WorkspaceID, sender.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "ok", events[0].Result)
+	require.Equal(t, principal.ID, events[0].PrincipalID)
 }
 
 // TestHandleMessageTask_InvalidDeliveryMode_Rejected pins plain input

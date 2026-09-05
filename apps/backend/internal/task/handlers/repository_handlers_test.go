@@ -466,8 +466,12 @@ func newRepositoryHTTPTestRouterWithService(t *testing.T) (*gin.Engine, *taskrep
 	}
 	eventBus := bus.NewMemoryEventBus(log)
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		RepoEntities: repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		WorkspaceFolders: repo,
+		Workflows:        repo,
+		RepoEntities:     repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	router := gin.New()
 	NewRepositoryHandlers(svc, log).registerHTTP(router)

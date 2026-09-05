@@ -12,6 +12,7 @@ export const defaultFeatureFlags = {
   dynamicAgentRouting: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
+  coordinatorTaskAuthority: false,
   officeSessionIdentity: false,
 } as const;
 
