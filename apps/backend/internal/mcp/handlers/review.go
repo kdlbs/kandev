@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/review"
 	"github.com/kandev/kandev/internal/task/models"
@@ -41,11 +43,13 @@ func (h *Handlers) registerReviewHandlers(d mcpActionRegistrar) int {
 		return 0
 	}
 	d.RegisterFunc(ws.ActionMCPPublishReviewFindings, h.handlePublishReviewFindings)
+	d.RegisterFunc(ws.ActionMCPListReviewFindings, h.handleListReviewFindings)
+	d.RegisterFunc(ws.ActionMCPResolveReviewFinding, h.handleResolveReviewFinding)
 	d.RegisterFunc(ws.ActionTaskReviewGet, h.handleGetTaskReview)
 	d.RegisterFunc(ws.ActionTaskReviewFindingUpdate, h.handleUpdateReviewFinding)
 	d.RegisterFunc(ws.ActionTaskReviewClear, h.handleClearTaskReview)
 	d.RegisterFunc(ws.ActionTaskReviewCancel, h.handleCancelTaskReview)
-	registered := 5
+	registered := 7
 	if h.reviewRunner != nil {
 		d.RegisterFunc(ws.ActionTaskReviewRun, h.handleRunTaskReview)
 		registered++
@@ -137,6 +141,137 @@ func (h *Handlers) handlePublishReviewFindings(ctx context.Context, msg *ws.Mess
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
 		"run_id":        run.ID,
 		"finding_count": len(findings),
+	})
+}
+
+// reviewFindingWire is the spec-defined shape shared by list_review_findings_kandev
+// and resolve_review_finding_kandev (AC-TWS-003.4 / AC-TWS-004.11). It exists
+// because models.TaskReviewFinding tags ResolvedAt `omitempty`, which drops the
+// key entirely for an unresolved finding; ResolvedAt has no omitempty here so it
+// renders as JSON null instead, giving every finding the same key set.
+type reviewFindingWire struct {
+	ID             string     `json:"id"`
+	RunID          string     `json:"run_id"`
+	RepositoryName string     `json:"repository_name"`
+	FilePath       string     `json:"file_path"`
+	StartLine      int        `json:"start_line"`
+	EndLine        int        `json:"end_line"`
+	Side           string     `json:"side"`
+	Severity       string     `json:"severity"`
+	Category       string     `json:"category"`
+	Title          string     `json:"title"`
+	Body           string     `json:"body"`
+	Suggestion     string     `json:"suggestion"`
+	Status         string     `json:"status"`
+	ResolvedAt     *time.Time `json:"resolved_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+func toReviewFindingWire(f *models.TaskReviewFinding) reviewFindingWire {
+	return reviewFindingWire{
+		ID:             f.ID,
+		RunID:          f.RunID,
+		RepositoryName: f.RepositoryName,
+		FilePath:       f.FilePath,
+		StartLine:      f.StartLine,
+		EndLine:        f.EndLine,
+		Side:           f.Side,
+		Severity:       string(f.Severity),
+		Category:       f.Category,
+		Title:          f.Title,
+		Body:           f.Body,
+		Suggestion:     f.Suggestion,
+		Status:         string(f.Status),
+		ResolvedAt:     f.ResolvedAt,
+		CreatedAt:      f.CreatedAt,
+	}
+}
+
+func toReviewFindingWireList(findings []*models.TaskReviewFinding) []reviewFindingWire {
+	out := make([]reviewFindingWire, 0, len(findings))
+	for _, f := range findings {
+		out = append(out, toReviewFindingWire(f))
+	}
+	return out
+}
+
+// handleListReviewFindings returns a task's review findings, filtered by
+// status (default open) and optionally severity (REQ-TWS-003).
+func (h *Handlers) handleListReviewFindings(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID   string `json:"task_id"`
+		Status   string `json:"status"`
+		Severity string `json:"severity"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+
+	result, err := h.reviewService.ListFindings(ctx, service.ListFindingsRequest{
+		TaskID:   req.TaskID,
+		Status:   req.Status,
+		Severity: req.Severity,
+	})
+	if err != nil {
+		var accessDenied *service.ErrReviewAccessDenied
+		switch {
+		case errors.As(err, &accessDenied):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+		case errors.Is(err, service.ErrInvalidReviewFindingFilter):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		case errors.Is(err, service.ErrTaskIDRequired):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		default:
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list review findings: "+err.Error(), nil)
+		}
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"findings":      toReviewFindingWireList(result.Findings),
+		"total_matched": result.TotalMatched,
+		"truncated":     result.Truncated,
+	})
+}
+
+// handleResolveReviewFinding closes out (or reopens) one finding, authorized
+// against the finding's own owning task (REQ-TWS-004).
+func (h *Handlers) handleResolveReviewFinding(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		FindingID string `json:"finding_id"`
+		Status    string `json:"status"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.FindingID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "finding_id is required", nil)
+	}
+	status := models.ReviewFindingStatus(strings.ToLower(strings.TrimSpace(req.Status)))
+	if !models.ValidReviewFindingStatus(status) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"status must be one of open, resolved, dismissed", nil)
+	}
+
+	finding, err := h.reviewService.ResolveFinding(ctx, service.ResolveFindingRequest{
+		FindingID: req.FindingID,
+		Status:    status,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrReviewFindingNotFound):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Review finding not found", nil)
+		case errors.Is(err, service.ErrInvalidReviewFinding):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		default:
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resolve review finding: "+err.Error(), nil)
+		}
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"finding": toReviewFindingWire(finding),
 	})
 }
 

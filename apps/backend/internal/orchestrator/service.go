@@ -368,6 +368,10 @@ type sessionExecutorStore interface {
 	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error)
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
+	// CountStepEntries returns the number of committed task_step_transitions
+	// rows for (taskID, workflowStepID) — the recorded entry count that backs
+	// the {step_entry_number} prompt placeholder (REQ-TWS-001).
+	CountStepEntries(ctx context.Context, taskID, workflowStepID string) (int, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
