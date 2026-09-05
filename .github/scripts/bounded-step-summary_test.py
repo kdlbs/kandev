@@ -71,6 +71,35 @@ class BoundedStepSummaryTest(unittest.TestCase):
             rendered,
         )
 
+    def test_invalid_utf8_input_is_rejected(self) -> None:
+        # Contract coverage for the writer's existing UTF-8 validation.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "generated-summary.md"
+            output = tmp_path / "github-step-summary.md"
+            source.write_bytes(b"valid prefix\xff")
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SCRIPT),
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                    "--diagnostics-label",
+                    "backend-test-results-1",
+                    "--diagnostics-url",
+                    "https://github.example.test/kdlbs/kandev/actions/runs/123#artifacts",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("UnicodeDecodeError", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
