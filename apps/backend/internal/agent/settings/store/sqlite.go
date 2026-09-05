@@ -95,6 +95,7 @@ func (r *sqliteRepository) initSchema() error {
 		status TEXT NOT NULL DEFAULT 'idle'
 			CHECK (status IN ('idle','working','paused','stopped','pending_approval')),
 		pause_reason TEXT NOT NULL DEFAULT '',
+		working_run_id TEXT NOT NULL DEFAULT '',
 		last_run_finished_at TIMESTAMP,
 		max_concurrent_sessions INTEGER NOT NULL DEFAULT 1,
 		cooldown_sec INTEGER NOT NULL DEFAULT 0,
@@ -211,6 +212,7 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
 		{"agent_profiles.custom_prompt", `ALTER TABLE agent_profiles ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`},
 		{"agent_profiles.status", `ALTER TABLE agent_profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'`},
 		{"agent_profiles.pause_reason", `ALTER TABLE agent_profiles ADD COLUMN pause_reason TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.working_run_id", `ALTER TABLE agent_profiles ADD COLUMN working_run_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_profiles.last_run_finished_at", `ALTER TABLE agent_profiles ADD COLUMN last_run_finished_at TIMESTAMP`},
 		{"agent_profiles.max_concurrent_sessions", `ALTER TABLE agent_profiles ADD COLUMN max_concurrent_sessions INTEGER NOT NULL DEFAULT 1`},
 		{"agent_profiles.cooldown_sec", `ALTER TABLE agent_profiles ADD COLUMN cooldown_sec INTEGER NOT NULL DEFAULT 0`},

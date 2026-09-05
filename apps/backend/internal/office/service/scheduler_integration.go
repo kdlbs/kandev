@@ -244,7 +244,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 				"agent":    agent.Name,
 				"agent_id": agent.ID,
 			}), runID, "")
-		si.svc.clearAgentWorking(ctx, agent.ID)
+		si.svc.clearAgentWorking(ctx, agent.ID, runID)
 		_ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
 		return
 	}
@@ -348,7 +348,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	// adapter has been invoked, by which point a fast run's completion
 	// event may already have been processed — a mark-after-launch would
 	// race that reset and strand the agent showing "working" forever.
-	si.svc.markAgentWorking(ctx, agent)
+	si.svc.markAgentWorking(ctx, agent, run.ID)
 	if !si.launchAgent(ctx, run, agent, taskID, execCfg.Type, launchCtx) {
 		// No adapter was invoked, so no AgentCompleted/AgentStopped/
 		// AgentFailed event will ever arrive to clear the status — every
@@ -356,7 +356,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		// routing dispatch error, legacy start failure) must clear here.
 		// The underlying CAS makes this a safe no-op on paths that already
 		// cleared it themselves (e.g. HandleAgentFailure).
-		si.svc.clearAgentWorking(ctx, agent.ID)
+		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 	}
 }
 
@@ -510,7 +510,7 @@ func (si *SchedulerIntegration) checkoutTask(ctx context.Context, run *models.Ru
 		// This run may have been requeued after an earlier launch (e.g. a
 		// post-start provider fallback) that left the agent "working" with
 		// no launch/complete cycle left to clear it.
-		si.svc.clearAgentWorking(ctx, agentInstanceID)
+		si.svc.clearAgentWorking(ctx, agentInstanceID, run.ID)
 		return false
 	}
 	return si.tryCheckout(ctx, run, taskID, agentInstanceID)
@@ -846,7 +846,7 @@ func (si *SchedulerIntegration) checkBudget(
 		si.logger.Info("run skipped (budget exceeded)",
 			zap.String("run_id", run.ID), zap.String("reason", reason))
 		si.releaseCheckoutIfNeeded(ctx, run)
-		si.svc.clearAgentWorking(ctx, agent.ID)
+		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",

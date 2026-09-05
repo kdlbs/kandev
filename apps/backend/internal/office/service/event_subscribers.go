@@ -389,7 +389,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 			// marked the run terminal before this event landed. There is no
 			// run left to reach stampRunFinished, but the agent may still
 			// be sitting at "working" from the launch that produced it.
-			s.clearAgentWorking(ctx, data.AgentProfileID)
+			// Scoped to data.RunID so a stale/duplicate event for this
+			// finished run can't clobber a successor run's live status.
+			s.clearAgentWorking(ctx, data.AgentProfileID, data.RunID)
 			return nil
 		}
 		return err
@@ -412,7 +414,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	// eventually reclaims it, instead of releasing a lock for a run that
 	// never actually reached a terminal state.
 	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
-		s.clearAgentWorking(ctx, run.AgentProfileID)
+		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)
@@ -648,7 +650,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 			// Same reasoning as handleAgentCompleted's ErrNoRows exit: no
 			// claimed run resolves, so nothing reaches HandleAgentFailure's
 			// clear, but the agent may still be "working" from the launch.
-			s.clearAgentWorking(ctx, data.AgentProfileID)
+			// Scoped to data.RunID for the same reason.
+			s.clearAgentWorking(ctx, data.AgentProfileID, data.RunID)
 			return nil
 		}
 		return err

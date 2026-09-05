@@ -177,6 +177,8 @@ func TestAgentStatus_NotLeftWorkingWhenLaunchNeverHappened(t *testing.T) {
 // terminal, or a late/duplicate delivery, makes it resolve to sql.ErrNoRows.
 // handleAgentCompleted (shared by AgentCompleted and AgentStopped) must
 // still clear "working" on that exit — it never reaches stampRunFinished.
+// The event carries the run's own id so the run-scoped clear (see
+// TestAgentStatus_StaleEventDoesNotClobberSuccessorRun) still matches it.
 func TestAgentStatus_ReturnsToIdleWhenNoClaimedRunResolves(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
@@ -187,16 +189,72 @@ func TestAgentStatus_ReturnsToIdleWhenNoClaimedRunResolves(t *testing.T) {
 		t.Fatalf("register subscribers: %v", err)
 	}
 
-	agent := launchedWorkingAgent(t, svc, ctx, "worker-no-claimed-run", "task-working-no-claim")
+	taskID := "task-working-no-claim"
+	agent := launchedWorkingAgent(t, svc, ctx, "worker-no-claimed-run", taskID)
 	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "before the event")
+	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
 
-	// No run carries this task/agent pair in `claimed` state (e.g. the run
-	// already left `claimed` via another path, or this is a duplicate
-	// delivery), so resolveLifecycleRun returns sql.ErrNoRows.
-	publishLifecycle(t, ctx, eb, events.AgentStopped, "task-with-no-claimed-run", agent.ID)
+	// The run already left `claimed` via another path (e.g.
+	// ReapStaleCheckouts), so resolveLifecycleRun's GetClaimedRunByID(run.ID)
+	// returns sql.ErrNoRows even though the event names this exact run.
+	svc.ExecSQL(t, `UPDATE runs SET status = 'finished' WHERE id = ?`, run.ID)
+
+	event := bus.NewEvent(events.AgentStopped, "test", map[string]string{
+		"task_id":          taskID,
+		"run_id":           run.ID,
+		"session_id":       "session-" + agent.ID,
+		"agent_profile_id": agent.ID,
+	})
+	if err := eb.Publish(ctx, events.AgentStopped, event); err != nil {
+		t.Fatalf("publish agent stopped: %v", err)
+	}
 
 	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
-		"after an AgentStopped event whose run does not resolve")
+		"after an AgentStopped event whose own run no longer resolves as claimed")
+}
+
+// TestAgentStatus_StaleEventDoesNotClobberSuccessorRun is the interleaving
+// regression: a stale/duplicate terminal event for a run that already left
+// "claimed" must not reset an agent a SUCCESSOR run has since marked
+// working. Before the working/idle CAS was run-scoped, this exact sequence
+// flipped a live run's agent back to "idle" mid-run.
+func TestAgentStatus_StaleEventDoesNotClobberSuccessorRun(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	svc.SetSyncHandlers(true)
+	ctx := context.Background()
+	eb := bus.NewMemoryEventBus(logger.Default())
+	if err := svc.RegisterEventSubscribers(eb); err != nil {
+		t.Fatalf("register subscribers: %v", err)
+	}
+
+	taskID := "task-working-stale-vs-successor"
+	agent := launchedWorkingAgent(t, svc, ctx, "worker-stale-vs-successor", taskID)
+	runA := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "after run A launches")
+
+	// Run A leaves `claimed` via another path, and a successor run B has
+	// since been marked working for the same agent. Exercising the full
+	// requeue/re-claim/re-launch path is covered by
+	// TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate; here the
+	// successor's ownership is seeded directly so this test isolates the
+	// stale-event race.
+	svc.ExecSQL(t, `UPDATE runs SET status = 'finished' WHERE id = ?`, runA.ID)
+	svc.ExecSQL(t, `UPDATE agent_profiles SET working_run_id = 'run-b-successor' WHERE id = ?`, agent.ID)
+
+	// Run A's own late/duplicate terminal event now arrives.
+	event := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"task_id":          taskID,
+		"run_id":           runA.ID,
+		"session_id":       "session-" + agent.ID,
+		"agent_profile_id": agent.ID,
+	})
+	if err := eb.Publish(ctx, events.AgentCompleted, event); err != nil {
+		t.Fatalf("publish agent completed: %v", err)
+	}
+
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking,
+		"after run A's stale event: run B's working status must survive")
 }
 
 // TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate is the

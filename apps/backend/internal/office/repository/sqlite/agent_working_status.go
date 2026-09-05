@@ -16,45 +16,56 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
-// MarkAgentWorking transitions an agent from "idle" to "working". Returns
-// true when this call performed the transition.
+// MarkAgentWorking transitions an agent from "idle" to "working" and records
+// runID as the run that owns the transition. Returns true when this call
+// performed the transition.
 //
 // Scoped to status = 'idle' so it cannot overwrite a status a concurrent
 // writer set between the scheduler's isAgentActive check and the launch
 // (a user pausing the agent, a budget pause, an approval gate). A false
 // return therefore means "the agent was not idle" and is not an error: the
 // run still launches, exactly as it did before this status existed.
-func (r *Repository) MarkAgentWorking(ctx context.Context, id string) (bool, error) {
-	return r.swapAgentStatus(ctx, id, "idle", "working")
-}
-
-// ClearAgentWorking transitions an agent from "working" back to "idle".
-// Returns true when this call performed the transition.
-//
-// Scoped to status = 'working' so it is a no-op for an agent that has
-// already moved on. This is what makes it safe to call from every terminal
-// path (success, failure, cancellation, and the never-launched branches)
-// without ordering constraints between them.
-func (r *Repository) ClearAgentWorking(ctx context.Context, id string) (bool, error) {
-	return r.swapAgentStatus(ctx, id, "working", "idle")
-}
-
-// swapAgentStatus performs a conditional status update, matching
-// UpdateAgentStatusFields' office-row scoping. pause_reason is deliberately
-// left untouched: neither transition here is a pause, and clearing the
-// column would erase a reason another writer owns.
-func (r *Repository) swapAgentStatus(ctx context.Context, id, from, to string) (bool, error) {
+func (r *Repository) MarkAgentWorking(ctx context.Context, id, runID string) (bool, error) {
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
-		SET status = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND `+agentInstanceFilter+`
-	`), to, time.Now().UTC(), id, from)
+		SET status = 'working', working_run_id = ?, updated_at = ?
+		WHERE id = ? AND status = 'idle' AND `+agentInstanceFilter+`
+	`), runID, time.Now().UTC(), id)
 	if err != nil {
 		return false, err
 	}
+	return rowsChanged(res)
+}
+
+// ClearAgentWorking transitions an agent from "working" back to "idle", but
+// only when runID matches the run recorded by MarkAgentWorking. Returns true
+// when this call performed the transition.
+//
+// The runID match is what keeps a stale or duplicate terminal event for a
+// finished run from clobbering a successor run's live "working" status: once
+// a new run has re-marked the agent working, its runID no longer matches the
+// old event's, so the old event's clear becomes a no-op instead of an
+// incorrect reset. Combined with the status = 'working' scope, this is also
+// what makes the call safe to repeat from every terminal path (success,
+// failure, cancellation, and the never-launched branches) without ordering
+// constraints between them.
+func (r *Repository) ClearAgentWorking(ctx context.Context, id, runID string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET status = 'idle', working_run_id = '', updated_at = ?
+		WHERE id = ? AND status = 'working' AND working_run_id = ? AND `+agentInstanceFilter+`
+	`), time.Now().UTC(), id, runID)
+	if err != nil {
+		return false, err
+	}
+	return rowsChanged(res)
+}
+
+func rowsChanged(res sql.Result) (bool, error) {
 	rows, err := res.RowsAffected()
 	if err != nil {
 		return false, err

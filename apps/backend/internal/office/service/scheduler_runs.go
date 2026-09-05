@@ -137,7 +137,7 @@ func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
 			zap.String("agent_id", run.AgentProfileID),
 			zap.Error(err))
 	}
-	s.clearAgentWorking(ctx, run.AgentProfileID)
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 }
 
 // publishRunProcessed emits an OfficeRunProcessed bus event with the
