@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // Workspace-mode and ordering constants used across handoff plumbing.
@@ -205,13 +206,10 @@ func (p WorkspacePolicy) NeedsAttachment() bool {
 }
 
 // RelatedTask is the lightweight projection of a task surfaced through the
-// list_related_tasks_kandev MCP tool. Document keys are precomputed so an
-// agent can decide what to fetch without a follow-up list call. Description
-// is included so a coordinating agent can read dependency metadata (e.g. a
-// "Depends on:" line) from a related task — including a CREATED sibling that
-// has no session yet — without an unbounded list_tasks call. The relation
-// graph itself is the bound: only parent/children/siblings/blockers are ever
-// projected, so descriptions never leak from unrelated tasks.
+// list_related_tasks_kandev MCP tool. The compact projection is safe to
+// return for an authorized task-tree read. Descriptions and document keys are
+// attached only after the caller separately passes the document-read guard
+// for each node; verbose mode controls descriptions, not authorization.
 type RelatedTask struct {
 	ID            string             `json:"id"`
 	Identifier    string             `json:"identifier,omitempty"`
@@ -223,6 +221,7 @@ type RelatedTask struct {
 	AssigneeLabel string             `json:"assignee_label,omitempty"`
 	DocumentKeys  []string           `json:"document_keys,omitempty"`
 	PRs           []v1.TaskPRSummary `json:"prs,omitempty"`
+	source        *models.Task
 }
 
 // RelatedTasks bundles every relation surface for a single task.
@@ -628,11 +627,141 @@ func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID,
 	return s.ListRelated(ctx, targetTaskID)
 }
 
+// ListRelatedForRequest applies the MCP-facing compact-versus-sensitive read
+// policy. Its scope is an attested backend field: callers cannot turn an
+// ordinary relation read into workspace-tree access through tool arguments.
+func (s *HandoffService) ListRelatedForRequest(ctx context.Context, req RelatedReadRequest) (*RelatedTasks, error) {
+	if req.TargetTaskID == "" {
+		return nil, ErrDocumentTaskRequired
+	}
+	if err := s.authorizeRelatedRead(ctx, req); err != nil {
+		return nil, err
+	}
+	related, err := s.listRelated(ctx, req.TargetTaskID, s.toRelatedCompact)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enrichRelatedSensitiveFields(ctx, req.CallerTaskID, related, req.Verbose); err != nil {
+		return nil, err
+	}
+	return related, nil
+}
+
+// GetTaskRelations returns a compact, workspace-scoped relationship graph for
+// plugin Host API callers. It is deliberately independent from the MCP
+// coordinator read scope: plugins receive neither descriptions nor document
+// keys, and foreign relationship edges are omitted.
+func (s *HandoffService) GetTaskRelations(ctx context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error) {
+	if workspaceID == "" || taskID == "" {
+		return nil, ErrDocumentTaskRequired
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return nil, repository.ErrTaskNotFound
+		}
+		return nil, err
+	}
+	if task == nil || task.WorkspaceID != workspaceID {
+		return nil, repository.ErrTaskNotFound
+	}
+	related, err := s.ListRelated(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return taskRelationsFromRelated(related, workspaceID), nil
+}
+
+func taskRelationsFromRelated(related *RelatedTasks, workspaceID string) *pluginsdk.TaskRelations {
+	if related == nil || related.Task.WorkspaceID != workspaceID {
+		return nil
+	}
+	out := &pluginsdk.TaskRelations{
+		Task:      relationTaskFromRelated(related.Task),
+		Children:  relationTasksFromRelated(related.Children, workspaceID),
+		Siblings:  relationTasksFromRelated(related.Siblings, workspaceID),
+		Blockers:  relationTasksFromRelated(related.Blockers, workspaceID),
+		BlockedBy: relationTasksFromRelated(related.BlockedBy, workspaceID),
+	}
+	if related.Parent != nil && related.Parent.WorkspaceID == workspaceID {
+		parent := relationTaskFromRelated(*related.Parent)
+		out.Parent = &parent
+	}
+	return out
+}
+
+func relationTaskFromRelated(task RelatedTask) pluginsdk.RelationTask {
+	return pluginsdk.RelationTask{
+		ID:          task.ID,
+		WorkspaceID: task.WorkspaceID,
+		Identifier:  task.Identifier,
+		Title:       task.Title,
+		State:       task.State,
+	}
+}
+
+func relationTasksFromRelated(tasks []*RelatedTask, workspaceID string) []pluginsdk.RelationTask {
+	out := make([]pluginsdk.RelationTask, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil && task.WorkspaceID == workspaceID {
+			out = append(out, relationTaskFromRelated(*task))
+		}
+	}
+	return out
+}
+
+func (s *HandoffService) authorizeRelatedRead(ctx context.Context, req RelatedReadRequest) error {
+	caller, err := s.tasks.GetTask(ctx, req.CallerTaskID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
+		}
+		return err
+	}
+	target, err := s.tasks.GetTask(ctx, req.TargetTaskID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
+		}
+		return err
+	}
+	if caller == nil || target == nil {
+		return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
+	}
+	if caller.WorkspaceID != target.WorkspaceID {
+		return relatedReadDenied(RelatedReadDenialTargetUnavailable, "target belongs to another workspace")
+	}
+	relationReadable, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, req.CallerTaskID, req.TargetTaskID)
+	if err != nil {
+		return err
+	}
+	if req.Verbose && !relationReadable {
+		if req.Scope == RelatedReadScopeWorkspaceTaskTree {
+			return relatedReadDenied(RelatedReadDenialVerboseDocumentScopeNeeded, "workspace-tree scope cannot read verbose documents")
+		}
+		return relatedReadDenied(RelatedReadDenialScopeRequired, "target is not relation-readable")
+	}
+	if !relationReadable && req.Scope != RelatedReadScopeWorkspaceTaskTree {
+		return relatedReadDenied(RelatedReadDenialScopeRequired, "target is not relation-readable")
+	}
+	return nil
+}
+
+func relatedReadDenied(reason RelatedReadDenialReason, internalReason string) error {
+	return &RelatedReadAccessError{Reason: reason, InternalReason: internalReason}
+}
+
 // ListRelated returns the parent, children, siblings, blockers, and
 // blocked-by tasks for taskID. Document keys are populated for the task
 // itself plus every related task so an agent can shop for documents in
 // one call.
 func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*RelatedTasks, error) {
+	return s.listRelated(ctx, taskID, s.toRelated)
+}
+
+type relatedTaskProjector func(context.Context, *models.Task) RelatedTask
+
+func (s *HandoffService) listRelated(ctx context.Context, taskID string, project relatedTaskProjector) (*RelatedTasks, error) {
 	if taskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
@@ -645,7 +774,7 @@ func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*Relat
 	}
 
 	out := &RelatedTasks{
-		Task:      s.toRelated(ctx, self),
+		Task:      project(ctx, self),
 		Children:  []*RelatedTask{},
 		Siblings:  []*RelatedTask{},
 		Blockers:  []*RelatedTask{},
@@ -655,7 +784,7 @@ func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*Relat
 	if self.ParentID != "" {
 		parent, err := s.tasks.GetTask(ctx, self.ParentID)
 		if err == nil && parent != nil {
-			ref := s.toRelated(ctx, parent)
+			ref := project(ctx, parent)
 			out.Parent = &ref
 		}
 	}
@@ -664,13 +793,13 @@ func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*Relat
 	if err != nil {
 		return nil, err
 	}
-	out.Children = s.toRelatedSlice(ctx, children)
+	out.Children = s.toRelatedSlice(ctx, children, project)
 
 	siblings, err := s.tasks.ListSiblings(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	out.Siblings = s.toRelatedSlice(ctx, siblings)
+	out.Siblings = s.toRelatedSlice(ctx, siblings, project)
 
 	if s.blockers != nil {
 		bs, err := s.blockers.ListTaskBlockers(ctx, taskID)
@@ -679,15 +808,39 @@ func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*Relat
 			for _, b := range bs {
 				ids = append(ids, b.BlockerTaskID)
 			}
-			out.Blockers = s.toRelatedByIDs(ctx, ids)
+			out.Blockers = s.toRelatedByIDs(ctx, ids, project)
 		}
 		bbIDs, err := s.blockers.ListTasksBlockedBy(ctx, taskID)
 		if err == nil {
-			out.BlockedBy = s.toRelatedByIDs(ctx, bbIDs)
+			out.BlockedBy = s.toRelatedByIDs(ctx, bbIDs, project)
 		}
 	}
 
-	return out, nil
+	return relatedTasksInWorkspace(out, self.WorkspaceID), nil
+}
+
+func relatedTasksInWorkspace(related *RelatedTasks, workspaceID string) *RelatedTasks {
+	if related == nil {
+		return nil
+	}
+	if related.Parent != nil && related.Parent.WorkspaceID != workspaceID {
+		related.Parent = nil
+	}
+	related.Children = relatedTasksInWorkspaceSlice(related.Children, workspaceID)
+	related.Siblings = relatedTasksInWorkspaceSlice(related.Siblings, workspaceID)
+	related.Blockers = relatedTasksInWorkspaceSlice(related.Blockers, workspaceID)
+	related.BlockedBy = relatedTasksInWorkspaceSlice(related.BlockedBy, workspaceID)
+	return related
+}
+
+func relatedTasksInWorkspaceSlice(tasks []*RelatedTask, workspaceID string) []*RelatedTask {
+	filtered := make([]*RelatedTask, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil && task.WorkspaceID == workspaceID {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
 }
 
 // GetDocumentForCaller fetches a document on targetTaskID after enforcing
@@ -775,6 +928,7 @@ func (s *HandoffService) toRelated(ctx context.Context, t *models.Task) RelatedT
 		WorkspaceID:   t.WorkspaceID,
 		ParentID:      t.ParentID,
 		AssigneeLabel: t.AssigneeAgentProfileID,
+		source:        t,
 	}
 	if s.docsRepo != nil {
 		docs, err := s.docsRepo.ListDocuments(ctx, t.ID)
@@ -787,24 +941,72 @@ func (s *HandoffService) toRelated(ctx context.Context, t *models.Task) RelatedT
 	return rt
 }
 
-func (s *HandoffService) toRelatedSlice(ctx context.Context, tasks []*models.Task) []*RelatedTask {
+func (s *HandoffService) toRelatedCompact(_ context.Context, t *models.Task) RelatedTask {
+	return RelatedTask{
+		ID:            t.ID,
+		Identifier:    t.Identifier,
+		Title:         t.Title,
+		State:         string(t.State),
+		WorkspaceID:   t.WorkspaceID,
+		ParentID:      t.ParentID,
+		AssigneeLabel: t.AssigneeAgentProfileID,
+		source:        t,
+	}
+}
+
+func (s *HandoffService) toRelatedSlice(ctx context.Context, tasks []*models.Task, project relatedTaskProjector) []*RelatedTask {
 	out := make([]*RelatedTask, 0, len(tasks))
 	for _, t := range tasks {
-		rt := s.toRelated(ctx, t)
+		rt := project(ctx, t)
 		out = append(out, &rt)
 	}
 	return out
 }
 
-func (s *HandoffService) toRelatedByIDs(ctx context.Context, ids []string) []*RelatedTask {
+func (s *HandoffService) toRelatedByIDs(ctx context.Context, ids []string, project relatedTaskProjector) []*RelatedTask {
 	out := make([]*RelatedTask, 0, len(ids))
 	for _, id := range ids {
 		t, err := s.tasks.GetTask(ctx, id)
 		if err != nil || t == nil {
 			continue
 		}
-		rt := s.toRelated(ctx, t)
+		rt := project(ctx, t)
 		out = append(out, &rt)
 	}
 	return out
+}
+
+func (s *HandoffService) enrichRelatedSensitiveFields(ctx context.Context, callerTaskID string, related *RelatedTasks, verbose bool) error {
+	for _, task := range relatedTaskPointers(related) {
+		if task == nil || task.source == nil {
+			continue
+		}
+		allowed, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, callerTaskID, task.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			continue
+		}
+		if verbose {
+			task.Description = task.source.Description
+		}
+		if s.docsRepo != nil {
+			docs, err := s.docsRepo.ListDocuments(ctx, task.ID)
+			if err == nil {
+				for _, doc := range docs {
+					task.DocumentKeys = append(task.DocumentKeys, doc.Key)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func relatedTaskPointers(related *RelatedTasks) []*RelatedTask {
+	all := []*RelatedTask{&related.Task, related.Parent}
+	all = append(all, related.Children...)
+	all = append(all, related.Siblings...)
+	all = append(all, related.Blockers...)
+	return append(all, related.BlockedBy...)
 }

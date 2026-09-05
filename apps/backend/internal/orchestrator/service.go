@@ -1491,6 +1491,12 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 	s.executor.SetAttachmentReader(reader)
 }
 
+// SetCoordinatorProfileResolver wires the persisted Office CEO identity into
+// the executor's backend-owned MCP profile derivation.
+func (s *Service) SetCoordinatorProfileResolver(resolver executor.CoordinatorProfileResolver) {
+	s.executor.SetCoordinatorProfileResolver(resolver)
+}
+
 // SetLaunchAttachmentClaimer wires staged-descriptor admission into the
 // unified session launch boundary.
 func (s *Service) SetLaunchAttachmentClaimer(claimer LaunchAttachmentClaimer) {

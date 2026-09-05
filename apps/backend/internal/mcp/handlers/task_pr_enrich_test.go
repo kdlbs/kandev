@@ -120,7 +120,9 @@ func TestHandleListRelatedTasks_IncludesAssociatedPRs(t *testing.T) {
 		}},
 	}
 
-	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{"task_id": "task-rel"})
+	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
+		"task_id": "task-rel", "caller_task_id": "task-rel", "caller_session_id": "session-rel",
+	})
 	resp, err := h.handleListRelatedTasks(ctx, msg)
 	require.NoError(t, err)
 
@@ -130,6 +132,36 @@ func TestHandleListRelatedTasks_IncludesAssociatedPRs(t *testing.T) {
 	assert.Equal(t, 99, payload.Task.PRs[0].Number)
 	assert.Equal(t, "merged", payload.Task.PRs[0].State)
 	require.NotNil(t, payload.Task.PRs[0].MergedAt, "merged_at should be surfaced")
+}
+
+func TestHandleListRelatedTasks_ReturnsNonLeakingStructuredDenial(t *testing.T) {
+	_, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-a", Name: "A", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-b", Name: "B", CreatedAt: now, UpdatedAt: now}))
+	for _, task := range []*models.Task{
+		{ID: "caller", WorkspaceID: "ws-a", WorkflowID: "wf", Title: "Caller", State: v1.TaskStateCreated, CreatedAt: now, UpdatedAt: now},
+		{ID: "foreign", WorkspaceID: "ws-b", WorkflowID: "wf", Title: "Foreign secret", State: v1.TaskStateCreated, CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, repo.CreateTask(ctx, task))
+	}
+	h := &Handlers{handoffSvc: service.NewHandoffService(repo, nil, nil, nil, nil, testLogger(t)), logger: testLogger(t).WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
+		"task_id": "foreign", "caller_task_id": "caller", "caller_session_id": "session-caller",
+		"related_read_scope": "workspace-task-tree",
+	})
+	resp, err := h.handleListRelatedTasks(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeForbidden, payload.Code)
+	assert.Equal(t, "related task access denied", payload.Message)
+	assert.Equal(t, "target_unavailable", payload.Details["reason"])
+	assert.NotContains(t, string(resp.Payload), "foreign")
+	assert.NotContains(t, string(resp.Payload), "Foreign secret")
 }
 
 func TestEnrichRelatedTasksWithPRs(t *testing.T) {

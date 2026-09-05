@@ -2,12 +2,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -50,6 +52,54 @@ func TestChannelBackendClientCloseReleasesPublishedRequest(t *testing.T) {
 		require.EqualError(t, err, "MCP backend client is closed")
 	case <-time.After(time.Second):
 		t.Fatal("published request remained blocked after client close")
+	}
+}
+
+// TestChannelBackendClientPreservesStructuredErrorDetails is a regression test
+// for a bug where a backend error response's structured Details (e.g. a
+// related-task-read denial's "reason") were discarded, leaving MCP tool
+// callers with only a flattened "backend error [CODE]: message" string and no
+// way to branch on the denial reason programmatically.
+func TestChannelBackendClientPreservesStructuredErrorDetails(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, nil)
+	}()
+
+	var reqMsg *ws.Message
+	select {
+	case reqMsg = <-client.GetRequestChannel():
+	case <-time.After(time.Second):
+		t.Fatal("request was not published")
+	}
+
+	errPayload := ws.ErrorPayload{
+		Code:    "FORBIDDEN",
+		Message: "related task access denied",
+		Details: map[string]interface{}{"reason": "related_task_scope_required"},
+	}
+	payloadBytes, err := json.Marshal(errPayload)
+	require.NoError(t, err)
+	client.HandleResponse(&ws.Message{
+		ID:      reqMsg.ID,
+		Type:    ws.MessageTypeError,
+		Action:  reqMsg.Action,
+		Payload: payloadBytes,
+	})
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		var backendErr *BackendError
+		require.ErrorAs(t, err, &backendErr)
+		assert.Equal(t, "FORBIDDEN", backendErr.Code)
+		assert.Equal(t, "related task access denied", backendErr.Message)
+		assert.Equal(t, "related_task_scope_required", backendErr.Details["reason"])
+	case <-time.After(time.Second):
+		t.Fatal("RequestPayload did not return")
 	}
 }
 

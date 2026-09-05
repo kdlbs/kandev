@@ -44,4 +44,3 @@ package. A low-level work order does not need an artificial browser test.
 
 Reference acceptance-criterion IDs from tests when that reference improves
 traceability.
-

@@ -227,12 +227,9 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			zap.String("type", string(resp.Type)),
 			zap.Duration("duration", time.Since(start)))
 		if resp.Type == ws.MessageTypeError {
-			var ep struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			}
+			var ep ws.ErrorPayload
 			if json.Unmarshal(resp.Payload, &ep) == nil {
-				return fmt.Errorf("backend error [%s]: %s", ep.Code, ep.Message)
+				return &BackendError{Code: ep.Code, Message: ep.Message, Details: ep.Details}
 			}
 			return fmt.Errorf("backend error: %s", string(resp.Payload))
 		}

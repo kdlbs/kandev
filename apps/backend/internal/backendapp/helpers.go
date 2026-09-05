@@ -766,6 +766,9 @@ func registerRoutes(p routeParams) {
 		p.officeRepo, p.officeRepo, p.log)
 	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
+	if p.services.Plugins != nil {
+		p.services.Plugins.SetTaskRelationsSource(handoffSvc)
+	}
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
 	// satisfied by adapters that delegate to existing services.

@@ -80,6 +80,38 @@ func TestDispatcherBackendClient_ErrorResponse(t *testing.T) {
 	assert.Contains(t, err.Error(), "boom")
 }
 
+// TestDispatcherBackendClient_ErrorResponsePreservesDetails is a regression
+// test for a bug where a backend error response's structured Details (e.g. a
+// related-task-read denial's "reason") were discarded, leaving MCP tool
+// callers with only a flattened "backend error [CODE]: message" string and no
+// way to branch on the denial reason programmatically.
+func TestDispatcherBackendClient_ErrorResponsePreservesDetails(t *testing.T) {
+	log := newTestLogger(t)
+
+	errPayload, _ := json.Marshal(map[string]any{
+		"code":    "FORBIDDEN",
+		"message": "related task access denied",
+		"details": map[string]any{"reason": "related_task_scope_required"},
+	})
+	respMsg := &ws.Message{
+		ID:      "x",
+		Action:  "test.action",
+		Type:    ws.MessageTypeError,
+		Payload: errPayload,
+	}
+
+	d := &fakeDispatcher{resp: respMsg}
+	client := NewDispatcherBackendClient(d, log)
+
+	err := client.RequestPayload(context.Background(), "test.action", nil, nil)
+	require.Error(t, err)
+	var backendErr *BackendError
+	require.ErrorAs(t, err, &backendErr)
+	assert.Equal(t, "FORBIDDEN", backendErr.Code)
+	assert.Equal(t, "related task access denied", backendErr.Message)
+	assert.Equal(t, "related_task_scope_required", backendErr.Details["reason"])
+}
+
 func TestDispatcherBackendClient_DispatchError(t *testing.T) {
 	log := newTestLogger(t)
 
