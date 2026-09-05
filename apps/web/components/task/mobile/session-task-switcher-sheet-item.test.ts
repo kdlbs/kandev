@@ -48,4 +48,30 @@ describe("toSheetItem repository projection", () => {
     expect(item.repositories).toEqual(["owner/repo-a", "owner/repo-b"]);
     expect(item.repositoryLinks).toHaveLength(3);
   });
+
+  it("carries task priority into the phone task drawer row", () => {
+    const item = toSheetItem(task({ priority: "critical" }), emptyCtx());
+
+    expect(item.priority).toBe("critical");
+  });
+});
+
+describe("toSheetItem remote executor projection", () => {
+  it("carries the exact remote executor scope onto the mobile sheet row", () => {
+    const item = toSheetItem(
+      task({
+        isRemoteExecutor: true,
+        primaryExecutorId: "executor-1",
+        primaryExecutorType: "k8s",
+        primaryExecutorName: "Cluster executor",
+        primarySessionId: "session-1",
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.remoteExecutorId).toBe("executor-1");
+    expect(item.remoteExecutorType).toBe("k8s");
+    expect(item.remoteExecutorName).toBe("Cluster executor");
+    expect(item.primarySessionId).toBe("session-1");
+  });
 });

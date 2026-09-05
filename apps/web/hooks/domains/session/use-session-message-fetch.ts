@@ -78,8 +78,8 @@ export async function doFetchMessages({
   } finally {
     if (endSessionFetch(taskSessionId)) {
       store.getState().setMessagesLoading(taskSessionId, false);
+      setIsLoading(false);
     }
-    if (isInactive(isActive)) return;
-    setIsLoading(false);
+    setIsWaitingForInitialMessages(false);
   }
 }

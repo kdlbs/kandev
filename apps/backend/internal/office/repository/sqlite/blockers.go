@@ -39,6 +39,64 @@ func (r *Repository) DeleteTaskBlocker(ctx context.Context, taskID, blockerTaskI
 	return err
 }
 
+// ReplaceTaskBlockers atomically replaces the direct blockers for taskID.
+// Existing edges stay in place so their creation timestamps remain stable;
+// only omitted edges are deleted and new edges are inserted.
+func (r *Repository) ReplaceTaskBlockers(ctx context.Context, taskID string, blockerTaskIDs []string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var existing []string
+	if err := tx.SelectContext(ctx, &existing, tx.Rebind(
+		`SELECT blocker_task_id FROM task_blockers WHERE task_id = ?`), taskID); err != nil {
+		return err
+	}
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, blockerTaskID := range existing {
+		existingSet[blockerTaskID] = struct{}{}
+	}
+	desiredSet := make(map[string]struct{}, len(blockerTaskIDs))
+	for _, blockerTaskID := range blockerTaskIDs {
+		desiredSet[blockerTaskID] = struct{}{}
+	}
+
+	for blockerTaskID := range existingSet {
+		if _, keep := desiredSet[blockerTaskID]; keep {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(
+			`DELETE FROM task_blockers WHERE task_id = ? AND blocker_task_id = ?`),
+			taskID, blockerTaskID); err != nil {
+			return err
+		}
+	}
+	for _, blockerTaskID := range blockerTaskIDs {
+		if _, alreadyExists := existingSet[blockerTaskID]; alreadyExists {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			INSERT INTO task_blockers (task_id, blocker_task_id, created_at)
+			VALUES (?, ?, ?)
+		`), taskID, blockerTaskID, time.Now().UTC()); err != nil {
+			return err
+		}
+		existingSet[blockerTaskID] = struct{}{}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
 // ListTasksBlockedBy returns task IDs that are blocked by the given task.
 // This is the reverse direction of ListTaskBlockers; results are ordered by
 // insertion time so callers see a stable list.

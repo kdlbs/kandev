@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@kandev/ui/input";
-import { IconDownload, IconMessageDots, IconPencil, IconTrash } from "@tabler/icons-react";
+import { IconMessageDots } from "@tabler/icons-react";
 import { AlertDialog } from "@kandev/ui/alert-dialog";
 import {
   ContextMenu,
@@ -17,6 +17,7 @@ import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-p
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTranslation } from "react-i18next";
 import type { FileTreeNode } from "@/lib/types/backend";
+import { FileContextMenuItems } from "./file-context-menu-items";
 import type { FileInfo } from "@/lib/state/store";
 import { removeNodeFromTree, renameNodeInTree, treeContainsPath } from "./file-tree-utils";
 import { createFileDeleteAction, type FileDeleteAction } from "./file-delete-action";
@@ -62,59 +63,6 @@ function removeSuccessfullyDeletedPaths(
     }
   });
   return nextTree;
-}
-
-type FileContextMenuItemsProps = {
-  node: FileTreeNode;
-  isBulk: boolean;
-  selectedCount: number;
-  onDeleteFile?: (path: string) => Promise<boolean>;
-  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
-  onDownloadFile?: (path: string) => Promise<boolean>;
-  onStartRename: () => void;
-  onDelete: (event: Event) => void;
-};
-
-function FileContextMenuItems({
-  node,
-  isBulk,
-  selectedCount,
-  onDeleteFile,
-  onRenameFile,
-  onDownloadFile,
-  onStartRename,
-  onDelete,
-}: FileContextMenuItemsProps) {
-  const { t } = useTranslation();
-  const deleteLabel = isBulk
-    ? t("task:deleteItemsLabel", { count: selectedCount })
-    : t("task:delete");
-  const showRename = !!onRenameFile && !isBulk;
-  const download = !node.is_dir && !isBulk ? onDownloadFile : undefined;
-  return (
-    <>
-      {onDeleteFile && (
-        <ContextMenuItem variant="destructive" onSelect={onDelete}>
-          <IconTrash className="h-3.5 w-3.5" />
-          {deleteLabel}
-        </ContextMenuItem>
-      )}
-      {showRename && onDeleteFile && <ContextMenuSeparator />}
-      {showRename && (
-        <ContextMenuItem onSelect={onStartRename}>
-          <IconPencil className="h-3.5 w-3.5" />
-          {t("task:rename")}
-        </ContextMenuItem>
-      )}
-      {download && (showRename || onDeleteFile) && <ContextMenuSeparator />}
-      {download && (
-        <ContextMenuItem onSelect={() => void download(node.path)}>
-          <IconDownload className="h-3.5 w-3.5" />
-          {t("task:download")}
-        </ContextMenuItem>
-      )}
-    </>
-  );
 }
 
 function ChatContextMenuItem({
@@ -240,6 +188,7 @@ type FileContextMenuSurfaceProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   onStartRename: () => void;
   onAddToChatContext?: (node: FileTreeNode) => void;
   selectedCount: number;
@@ -263,6 +212,7 @@ function FileContextMenuSurface({
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
+  onUploadFilesHere,
   onStartRename,
   onAddToChatContext,
   selectedCount,
@@ -313,6 +263,7 @@ function FileContextMenuSurface({
             onDeleteFile={onDeleteFile}
             onRenameFile={onRenameFile}
             onDownloadFile={onDownloadFile}
+            onUploadFilesHere={onUploadFilesHere}
             onStartRename={handleStartRename}
             onDelete={onDelete}
           />
@@ -354,6 +305,7 @@ export function FileContextMenu({
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
+  onUploadFilesHere,
   onStartRename,
   onAddToChatContext,
   selectedCount = 0,
@@ -368,6 +320,7 @@ export function FileContextMenu({
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   onStartRename: () => void;
   onAddToChatContext?: (node: FileTreeNode) => void;
   selectedCount?: number;
@@ -380,7 +333,8 @@ export function FileContextMenu({
   const isBulk = selectedCount > 1;
   // A bulk selection would make a single-node "Open in <editor>" ambiguous.
   const showOpenInEditor = !isBulk && canOpenNodeInEditor(editorActions, node);
-  const hasFileActions = !!onDeleteFile || !!onRenameFile || !!onDownloadFile;
+  const hasFileActions =
+    !!onDeleteFile || !!onRenameFile || !!onDownloadFile || !!onUploadFilesHere;
   const showAddToChatContext = !isBulk && !!onAddToChatContext;
   const fallbackAnchorRef = useRef<HTMLElement>(null);
   const anchorRef = providedAnchorRef ?? fallbackAnchorRef;
@@ -422,6 +376,7 @@ export function FileContextMenu({
       onDeleteFile={onDeleteFile}
       onRenameFile={onRenameFile}
       onDownloadFile={onDownloadFile}
+      onUploadFilesHere={onUploadFilesHere}
       onStartRename={onStartRename}
       onAddToChatContext={onAddToChatContext}
       selectedCount={selectedCount}

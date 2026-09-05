@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -230,6 +231,22 @@ func (h *ParentWakeReconciler) recordReceipt(
 }
 
 func wakeOperationID(parentTaskID, childSetKey string) string {
-	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + childSetKey))
+	// A completion wave is identified by the child IDs, not by the terminal
+	// state each child reached. A terminal-to-terminal edit (for example,
+	// CANCELLED to COMPLETED) must not create a new parent wake. The receipt
+	// keeps the full state-aware key for recovery, so strip only the state
+	// suffix when deriving the operation identity.
+	childIDs := make([]string, 0)
+	for _, child := range strings.Split(childSetKey, ",") {
+		if child == "" {
+			continue
+		}
+		if separator := strings.LastIndexByte(child, ':'); separator >= 0 {
+			child = child[:separator]
+		}
+		childIDs = append(childIDs, child)
+	}
+	canonicalChildSet := strings.Join(childIDs, ",")
+	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + canonicalChildSet))
 	return fmt.Sprintf("task_children_completed:%s:%s", parentTaskID, hex.EncodeToString(sum[:]))
 }

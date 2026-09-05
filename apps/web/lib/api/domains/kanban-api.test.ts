@@ -3,6 +3,7 @@ import {
   attachTaskWorkspaceSources,
   detachTask,
   listTasksByWorkspace,
+  updateTask,
   updateTaskPortForwarding,
 } from "./kanban-api";
 
@@ -32,6 +33,27 @@ describe("detachTask", () => {
     expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/child-1/detach`);
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
+  });
+});
+
+describe("updateTask", () => {
+  it("carries priority as a partial-update field", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "task-1", priority: "critical" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await updateTask("task-1", { priority: "critical" }, { baseUrl: API_BASE_URL });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1`);
+    expect(init).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ priority: "critical" }),
+    });
   });
 });
 

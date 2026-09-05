@@ -12,6 +12,10 @@ import { isMermaidContent } from "@/components/editors/tiptap/tiptap-mermaid-ext
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useAppStore } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
+import {
+  resolveMarkdownFileTarget,
+  type MarkdownFileRootAlias,
+} from "@/lib/markdown/file-link-target";
 
 /** Shared remark plugins used by all markdown renderers */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,6 +60,7 @@ type MarkdownCodeProps = {
 export type MarkdownFileLinkContextValue = {
   worktreePath?: string | null;
   onOpenFile?: (path: string) => void;
+  fileRootAliases?: readonly MarkdownFileRootAlias[];
 };
 
 export const MarkdownFileLinkContext = createContext<MarkdownFileLinkContextValue>({});
@@ -63,89 +68,6 @@ export const MarkdownTaskContext = createContext<string | null>(null);
 
 function isBlockCode(rawContent: string, hasLanguage: boolean): boolean {
   return hasLanguage || rawContent.includes("\n");
-}
-
-const WEB_TLD_EXTENSIONS = new Set(["ai", "app", "cloud", "co", "com", "dev", "io", "net", "org"]);
-
-function looksLikeFilePath(path: string): boolean {
-  const lastSegment = path.split("/").pop() ?? "";
-  if (!lastSegment.includes(".") || path.endsWith("/")) return false;
-  const extension = lastSegment.split(".").pop() ?? "";
-  if (!/^[a-z0-9]{1,8}$/i.test(extension)) return false;
-  return !WEB_TLD_EXTENSIONS.has(extension.toLowerCase());
-}
-
-function isExternalHref(href: string): boolean {
-  return /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//");
-}
-
-function stripHashAndQuery(href: string): string {
-  return href.split(/[?#]/, 1)[0] ?? "";
-}
-
-// Strip a trailing source-location / omp read selector so a file link resolves
-// to the bare path: ":42", ":42:5", and omp ranges like ":16-20", ":50+150",
-// ":5-16,960-973", ":2-4:raw", ":raw", ":conflicts".
-function stripSourceLocationSuffix(path: string): string {
-  const part = String.raw`\d+(?:[-+]\d+)?(?:,\d+(?:[-+]\d+)?)*|raw|conflicts`;
-  return path.replace(new RegExp(`:(?:${part})(?::(?:${part}))*$`), "");
-}
-
-function decodeHrefPath(href: string): string | null {
-  try {
-    return stripSourceLocationSuffix(decodeURIComponent(stripHashAndQuery(href)));
-  } catch {
-    return null;
-  }
-}
-
-function hasParentTraversal(path: string): boolean {
-  return path.split("/").includes("..");
-}
-
-function looksLikeHostAbsolutePath(path: string): boolean {
-  return /^\/(?:[A-Za-z]:|Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path);
-}
-
-function firstAbsoluteSegment(path: string): string | null {
-  const first = path.replace(/^\/+/, "").split("/")[0];
-  return first || null;
-}
-
-function resolveAbsoluteMarkdownFileHref(path: string, worktreePath: string | null | undefined) {
-  const normalizedRoot = worktreePath?.replace(/\\/g, "/").replace(/\/$/, "");
-  const normalizedPath = path.replace(/\\/g, "/");
-  if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)) {
-    const relativePath = normalizedPath.slice(normalizedRoot.length + 1);
-    return looksLikeFilePath(relativePath) ? relativePath : null;
-  }
-  if (
-    normalizedRoot &&
-    firstAbsoluteSegment(normalizedPath) === firstAbsoluteSegment(normalizedRoot)
-  ) {
-    return null;
-  }
-  if (looksLikeHostAbsolutePath(normalizedPath)) return null;
-  const rootRelativePath = normalizedPath.replace(/^\/+/, "");
-  return looksLikeFilePath(rootRelativePath) ? rootRelativePath : null;
-}
-
-function resolveMarkdownFileHref(
-  href: string | undefined,
-  worktreePath: string | null | undefined,
-) {
-  if (!href || href.startsWith("#") || isExternalHref(href)) return null;
-
-  const path = decodeHrefPath(href);
-  if (!path || path.startsWith("~/") || hasParentTraversal(path)) return null;
-
-  if (path.startsWith("/")) {
-    return resolveAbsoluteMarkdownFileHref(path, worktreePath);
-  }
-
-  const normalizedPath = path.replace(/\\/g, "/").replace(/^\.\//, "");
-  if (normalizedPath.startsWith("../")) return null;
-  return looksLikeFilePath(normalizedPath) ? normalizedPath : null;
 }
 
 type MarkdownLinkProps = {
@@ -158,17 +80,24 @@ function MarkdownFileAnchor({
   children,
   worktreePath,
   openFile,
+  fileRootAliases,
 }: MarkdownLinkProps & {
   worktreePath: string | null | undefined;
   openFile: (path: string) => void;
+  fileRootAliases?: readonly MarkdownFileRootAlias[];
 }) {
-  const filePath = resolveMarkdownFileHref(href, worktreePath);
-  const isInternal = !!filePath || href?.startsWith("/") || href?.startsWith("#");
+  const target = resolveMarkdownFileTarget(href, {
+    workspaceRoot: worktreePath,
+    fileRootAliases,
+  });
+  const filePath = target?.kind === "file" ? target.path : null;
+  const isBlocked = target?.kind === "blocked";
+  const isInternal = !!target || href?.startsWith("/") || href?.startsWith("#");
 
-  const handleClick = filePath
+  const handleClick = target
     ? (event: MouseEvent<HTMLAnchorElement>) => {
         event.preventDefault();
-        openFile(filePath);
+        if (filePath) openFile(filePath);
       }
     : undefined;
 
@@ -178,21 +107,34 @@ function MarkdownFileAnchor({
       target={isInternal ? "_self" : "_blank"}
       rel={isInternal ? undefined : "noopener noreferrer"}
       onClick={handleClick}
+      aria-disabled={isBlocked ? true : undefined}
     >
       {children}
     </a>
   );
 }
 
-function MarkdownFallbackLink(props: MarkdownLinkProps) {
+function MarkdownFallbackLink(
+  props: MarkdownLinkProps & {
+    worktreePath?: string | null;
+    fileRootAliases?: readonly MarkdownFileRootAlias[];
+  },
+) {
   const { openFile } = usePanelActions();
-  const worktreePath = useAppStore((state) => {
+  const activeWorktreePath = useAppStore((state) => {
     const sessionId = state.tasks.activeSessionId;
     if (!sessionId) return null;
     return getSessionWorkspacePath(state.taskSessions.items[sessionId]);
   });
 
-  return <MarkdownFileAnchor {...props} worktreePath={worktreePath} openFile={openFile} />;
+  return (
+    <MarkdownFileAnchor
+      {...props}
+      worktreePath={props.worktreePath ?? activeWorktreePath}
+      fileRootAliases={props.fileRootAliases}
+      openFile={openFile}
+    />
+  );
 }
 
 function MarkdownLink(props: MarkdownLinkProps) {
@@ -202,11 +144,18 @@ function MarkdownLink(props: MarkdownLinkProps) {
       <MarkdownFileAnchor
         {...props}
         worktreePath={linkContext.worktreePath}
+        fileRootAliases={linkContext.fileRootAliases}
         openFile={linkContext.onOpenFile}
       />
     );
   }
-  return <MarkdownFallbackLink {...props} />;
+  return (
+    <MarkdownFallbackLink
+      {...props}
+      worktreePath={linkContext.worktreePath}
+      fileRootAliases={linkContext.fileRootAliases}
+    />
+  );
 }
 
 function MarkdownCode({ className, children }: MarkdownCodeProps) {

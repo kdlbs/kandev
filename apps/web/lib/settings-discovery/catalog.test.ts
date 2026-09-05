@@ -7,6 +7,14 @@ import { SETTINGS_DISCOVERY_DEFINITIONS, SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } f
 import { resolveSettingsDiscovery } from "./resolve";
 
 const GITHUB_CONNECTION_ID = "integration-github-connection";
+const STORAGE_DISCOVERY_IDS = [
+  "system-storage-actions",
+  "system-storage-schedule",
+  "system-storage-workspaces",
+  "system-storage-go-cache",
+  "system-storage-docker",
+  "system-storage-quarantine",
+] as const;
 const STABLE_CONTROL_IDS = [
   "appearance-color-theme",
   "appearance-rich-output-motion",
@@ -133,12 +141,35 @@ describe("settings discovery catalog invariants", () => {
   });
 });
 
+describe("system discovery page ownership", () => {
+  it("assigns storage sections to the standalone Storage page", () => {
+    const byId = new Map(SETTINGS_DISCOVERY_DEFINITIONS.map((entry) => [entry.id, entry]));
+
+    expect(byId.get("system-storage")).toMatchObject({
+      kind: "page",
+      labelKey: "system:storageTitle",
+      href: "/settings/system/storage",
+      order: 625,
+    });
+    for (const id of STORAGE_DISCOVERY_IDS) {
+      expect(byId.get(id)).toMatchObject({
+        parentId: "system-storage",
+        href: "/settings/system/storage",
+      });
+    }
+    expect(byId.get("system-database")?.parentId).toBe("system-data-storage");
+    expect(byId.get("system-backups")?.parentId).toBe("system-data-storage");
+    expect(byId.get("system-logs")?.parentId).toBe("system-data-storage");
+  });
+});
+
 describe("resolveSettingsDiscovery dynamic entries", () => {
   it("uses the capitalized Settings navigation labels for workspace pages", () => {
     const resolved = resolveSettingsDiscovery({
       t: (key) => t(key),
       showAccount: false,
       showUsers: false,
+      showOrganizations: false,
       workspaces: [{ id: "workspace-1", name: "Main Workspace" }],
       agents: [],
       executors: [],
@@ -156,6 +187,7 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
       t: translate,
       showAccount: true,
       showUsers: true,
+      showOrganizations: false,
       workspaces: [{ id: "workspace / one", name: "Main Workspace" }],
       agents: [
         {
@@ -201,6 +233,7 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
       t: translate,
       showAccount: false,
       showUsers: false,
+      showOrganizations: false,
       workspaces: [{ id: "workspace-1", name: "Personal value" }],
       agents: [],
       executors: [],
@@ -221,6 +254,7 @@ describe("resolveSettingsDiscovery visibility", () => {
       t: translate,
       showAccount: false,
       showUsers: false,
+      showOrganizations: false,
       workspaces: [],
       agents: [],
       executors: [],
@@ -229,6 +263,7 @@ describe("resolveSettingsDiscovery visibility", () => {
       t: translate,
       showAccount: true,
       showUsers: true,
+      showOrganizations: false,
       workspaces: [],
       agents: [],
       executors: [],
@@ -247,6 +282,7 @@ describe("resolveSettingsDiscovery visibility", () => {
       t: translate,
       showAccount: false,
       showUsers: false,
+      showOrganizations: false,
       workspaces: [],
       agents: [],
       executors: [],
@@ -255,6 +291,7 @@ describe("resolveSettingsDiscovery visibility", () => {
       t: translate,
       showAccount: false,
       showUsers: false,
+      showOrganizations: false,
       workspaces: [{ id: "workspace-1", name: "Main" }],
       agents: [],
       executors: [],

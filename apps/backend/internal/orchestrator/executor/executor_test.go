@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -604,6 +605,59 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	}
 }
 
+func TestLaunchPreparedSessionFailsClosedWhenRuntimeInventoryReadFails(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*mockRepository)
+	}{
+		{
+			name: "row read",
+			setup: func(repo *mockRepository) {
+				repo.getExecutorRunningFunc = func(context.Context, string) (*models.ExecutorRunning, error) {
+					return nil, errors.New("database unavailable")
+				}
+			},
+		},
+		{
+			name: "presence check",
+			setup: func(repo *mockRepository) {
+				repo.hasExecutorRunningFunc = func(context.Context, string) (bool, error) {
+					return false, errors.New("database unavailable")
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newMockRepository()
+			repo.sessions["session-inventory-error"] = &models.TaskSession{
+				ID: "session-inventory-error", TaskID: "task-inventory-error",
+				AgentProfileID: "profile-123", State: models.TaskSessionStateCreated,
+				StartedAt: time.Now(), UpdatedAt: time.Now(),
+			}
+			test.setup(repo)
+			launchCalled := false
+			exec := newTestExecutor(t, &mockAgentManager{
+				launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					launchCalled = true
+					return &LaunchAgentResponse{}, nil
+				},
+			}, repo)
+
+			_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+				ID: "task-inventory-error", WorkspaceID: "workspace-123",
+			}, "session-inventory-error", LaunchOptions{AgentProfileID: "profile-123"})
+
+			if err == nil || !strings.Contains(err.Error(), "runtime inventory") {
+				t.Fatalf("LaunchPreparedSession() error = %v, want runtime inventory failure", err)
+			}
+			if launchCalled {
+				t.Fatal("runtime launched after authoritative inventory read failure")
+			}
+		})
+	}
+}
+
 func TestLaunchPreparedSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T) {
 	repo := newMockRepository()
 	persistErr := errors.New("inventory write failed")
@@ -719,6 +773,50 @@ func TestLaunchPreparedSession_PersistsResolvedExecutorID(t *testing.T) {
 	}
 	if stored.ExecutorID != models.ExecutorIDLocalDocker {
 		t.Fatalf("ExecutorID = %q, want %q", stored.ExecutorID, models.ExecutorIDLocalDocker)
+	}
+}
+
+func TestLaunchPreparedSession_UsesPersistedKubernetesExecutorConnectionConfig(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-k8s"] = &models.TaskSession{
+		ID: "session-k8s", TaskID: "task-k8s", AgentProfileID: "profile-123",
+		ExecutorID: "executor-k8s", State: models.TaskSessionStateCreated,
+		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	wantConfig := map[string]string{
+		lifecycle.MetadataKeyKubernetesAuthMode:              "kubeconfig",
+		lifecycle.MetadataKeyKubernetesKubeconfigPath:        "/etc/kandev/kind.yaml",
+		lifecycle.MetadataKeyKubernetesKubeContext:           "kind-kandev",
+		lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+		lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+	}
+	repo.executors["executor-k8s"] = &models.Executor{
+		ID: "executor-k8s", Type: models.ExecutorTypeKubernetes,
+		Status: models.ExecutorStatusActive, Config: wantConfig,
+	}
+	var launched *LaunchAgentRequest
+	exec := newTestExecutor(t, &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launched = req
+			return &LaunchAgentResponse{AgentExecutionID: "execution-k8s", Status: v1.AgentStatusStarting}, nil
+		},
+	}, repo)
+
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: "task-k8s", WorkspaceID: "workspace-1",
+	}, "session-k8s", LaunchOptions{AgentProfileID: "profile-123"})
+
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession() error = %v", err)
+	}
+	if launched == nil {
+		t.Fatal("LaunchAgent was not called")
+	}
+	if launched.ExecutorType != string(models.ExecutorTypeKubernetes) {
+		t.Fatalf("ExecutorType = %q, want k8s", launched.ExecutorType)
+	}
+	if !reflect.DeepEqual(launched.ExecutorConfig, wantConfig) {
+		t.Fatalf("ExecutorConfig = %#v, want %#v", launched.ExecutorConfig, wantConfig)
 	}
 }
 
@@ -2314,6 +2412,67 @@ func TestStartAgentProcessAsync_MarksStartingSessionRunning(t *testing.T) {
 	}
 	if task.State != v1.TaskStateInProgress {
 		t.Fatalf("task state = %q, want IN_PROGRESS", task.State)
+	}
+}
+
+func TestStartAgentProcessAsyncNotifiesAfterProcessStart(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+	exec := newTestExecutor(t, &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error { return nil },
+	}, repo)
+	started := make(chan struct{})
+	exec.SetOnAgentProcessStarted(func(_ context.Context, taskID, sessionID, executionID string) {
+		if taskID != "task-123" || sessionID != "session-123" || executionID != "exec-456" {
+			t.Errorf("process-start callback args = (%q, %q, %q)", taskID, sessionID, executionID)
+		}
+		close(started)
+	})
+
+	exec.startAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456")
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for process start")
+	}
+}
+
+func TestStartAgentProcessAsyncNotifiesAfterProcessStartFailure(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+	startErr := errors.New("process bootstrap failed")
+	stopped := make(chan struct{})
+	exec := newTestExecutor(t, &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error { return startErr },
+		stopAgentFunc:         func(context.Context, string, bool) error { close(stopped); return nil },
+	}, repo)
+	failed := make(chan error, 1)
+	exec.SetOnAgentProcessStartFailed(func(_ context.Context, taskID, sessionID, executionID string, err error) {
+		if taskID != "task-123" || sessionID != "session-123" || executionID != "exec-456" {
+			t.Errorf("process-start failure callback args = (%q, %q, %q)", taskID, sessionID, executionID)
+		}
+		failed <- err
+	})
+
+	exec.startAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456")
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for failed process cleanup")
+	}
+	select {
+	case err := <-failed:
+		if !errors.Is(err, startErr) {
+			t.Fatalf("process-start callback error = %v, want %v", err, startErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for process-start failure callback")
 	}
 }
 

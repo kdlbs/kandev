@@ -10,6 +10,7 @@ const recentTasksMock = vi.hoisted(() => ({
 }));
 const getRecentTasksMock = vi.hoisted(() => vi.fn());
 const searchMock = vi.hoisted(() => ({ value: "" }));
+const preferredViewMock = vi.hoisted(() => ({ value: "list" }));
 
 vi.mock("@/components/kanban-with-preview", () => ({
   KanbanWithPreview: kanbanWithPreviewMock,
@@ -18,7 +19,7 @@ vi.mock("@/components/onboarding-dialog", () => ({
   OnboardingDialog: () => null,
 }));
 vi.mock("@/hooks/use-task-listing-view", () => ({
-  useTaskListingView: () => ({ preferredView: "list" }),
+  useTaskListingView: () => ({ preferredView: preferredViewMock.value }),
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ replace: replaceMock }),
@@ -49,6 +50,7 @@ afterEach(() => {
   startupPageMock.value = "task_overview";
   recentTasksMock.entries = [];
   searchMock.value = "";
+  preferredViewMock.value = "list";
 });
 
 describe("PageClient", () => {
@@ -99,6 +101,27 @@ describe("PageClient", () => {
 
     expect(markup).toContain("Opening last task…");
     expect(getRecentTasksMock).not.toHaveBeenCalled();
+  });
+
+  it("restores Threads in the resolved workspace", async () => {
+    preferredViewMock.value = "threads";
+
+    render(<PageClient workspaceId="workspace-1" />);
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith("/threads?workspace=workspace-1");
+    });
+  });
+
+  it("stays on the board when the remembered view is Kanban", async () => {
+    preferredViewMock.value = "kanban";
+
+    render(<PageClient workspaceId="workspace-1" />);
+
+    await waitFor(() => {
+      expect(kanbanWithPreviewMock).toHaveBeenCalled();
+    });
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 
   it("keeps an explicit overview entry from resuming the last task", async () => {

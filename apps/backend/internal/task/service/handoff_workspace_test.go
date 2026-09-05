@@ -8,6 +8,7 @@ import (
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -346,12 +347,23 @@ func (f *fakeTaskRepo) GetTaskEnvironmentByTaskID(_ context.Context, taskID stri
 	return nil, nil
 }
 
-func (f *fakeTaskRepo) TransferTaskEnvironmentToTask(_ context.Context, envID, taskID string) error {
+func (f *fakeTaskRepo) TransferTaskEnvironmentOwnership(
+	_ context.Context,
+	envID, expectedTaskID string,
+	expectedGeneration int64,
+	taskID string,
+) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if env := f.taskEnvironments[envID]; env != nil {
-		env.TaskID = taskID
+	env := f.taskEnvironments[envID]
+	if env == nil {
+		return nil
 	}
+	if env.TaskID != expectedTaskID || env.OwnershipGeneration != expectedGeneration {
+		return taskrepo.ErrTaskEnvironmentOwnershipChanged
+	}
+	env.TaskID = taskID
+	env.OwnershipGeneration++
 	return nil
 }
 
@@ -410,8 +422,13 @@ func (r *phase4TaskRepo) GetTaskEnvironment(ctx context.Context, id string) (*mo
 func (r *phase4TaskRepo) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	return r.base.GetTaskEnvironmentByTaskID(ctx, taskID)
 }
-func (r *phase4TaskRepo) TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error {
-	return r.base.TransferTaskEnvironmentToTask(ctx, envID, taskID)
+func (r *phase4TaskRepo) TransferTaskEnvironmentOwnership(
+	ctx context.Context,
+	envID, expectedTaskID string,
+	expectedGeneration int64,
+	taskID string,
+) error {
+	return r.base.TransferTaskEnvironmentOwnership(ctx, envID, expectedTaskID, expectedGeneration, taskID)
 }
 
 // All other TaskRepository methods panic — the AttachWorkspacePolicy

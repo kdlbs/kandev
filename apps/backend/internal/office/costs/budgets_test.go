@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // repoAgents adapts the office repository to shared.AgentReader +
@@ -41,6 +42,16 @@ func (a *repoAgents) UpdateAgentStatusFields(ctx context.Context, agentID, statu
 
 func newBudgetTestService(t *testing.T) (*costs.CostService, *sqlite.Repository, func(string, ...interface{})) {
 	t.Helper()
+	return newBudgetTestServiceWithActivity(t, &noopActivity{})
+}
+
+// newBudgetTestServiceWithActivity is the same setup as newBudgetTestService
+// but lets project-scope tests supply a spy activity logger to observe which
+// budget.alert / budget.exceeded rows fire.
+func newBudgetTestServiceWithActivity(
+	t *testing.T, activity shared.ActivityLogger,
+) (*costs.CostService, *sqlite.Repository, func(string, ...interface{})) {
+	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -54,6 +65,7 @@ func newBudgetTestService(t *testing.T) (*costs.CostService, *sqlite.Repository,
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
+		project_id TEXT DEFAULT '',
 		state TEXT NOT NULL DEFAULT 'TODO',
 		title TEXT DEFAULT '',
 		description TEXT DEFAULT '',
@@ -70,7 +82,7 @@ func newBudgetTestService(t *testing.T) (*costs.CostService, *sqlite.Repository,
 	}
 	log := logger.Default()
 	agents := &repoAgents{repo: repo}
-	svc := costs.NewCostService(repo, log, &noopActivity{}, agents, agents)
+	svc := costs.NewCostService(repo, log, activity, agents, agents)
 
 	execSQL := func(query string, args ...interface{}) {
 		t.Helper()
@@ -79,6 +91,41 @@ func newBudgetTestService(t *testing.T) (*costs.CostService, *sqlite.Repository,
 		}
 	}
 	return svc, repo, execSQL
+}
+
+// insertBudgetTestTask inserts a minimal task row carrying a project_id, so
+// project-scoped cost rollups (which join office_cost_events to tasks on
+// project_id) resolve. Agent-scoped tests don't need this: GetCostForAgentSince
+// reads office_cost_events directly with no join.
+func insertBudgetTestTask(t *testing.T, execSQL func(string, ...interface{}), taskID, workspaceID, projectID string) {
+	t.Helper()
+	execSQL(
+		`INSERT INTO tasks (id, workspace_id, project_id) VALUES (?, ?, ?)`,
+		taskID, workspaceID, projectID,
+	)
+}
+
+// budgetActivityCall records one LogActivity invocation observed by
+// budgetActivitySpy.
+type budgetActivityCall struct {
+	action     string
+	targetType string
+	targetID   string
+}
+
+// budgetActivitySpy implements shared.ActivityLogger and records every call,
+// so project-budget tests can assert exactly which alerts fired without
+// depending on evaluatePolicy's return value (EvaluateProjectBudget only
+// returns an error).
+type budgetActivitySpy struct {
+	calls []budgetActivityCall
+}
+
+func (s *budgetActivitySpy) LogActivity(_ context.Context, _, _, _, action, targetType, targetID, _ string) {
+	s.calls = append(s.calls, budgetActivityCall{action: action, targetType: targetType, targetID: targetID})
+}
+
+func (s *budgetActivitySpy) LogActivityWithRun(_ context.Context, _, _, _, _, _, _, _, _, _ string) {
 }
 
 func createBudgetTestAgent(t *testing.T, repo *sqlite.Repository, wsID, agentID string) {
@@ -335,4 +382,180 @@ func TestCheckPreExecutionBudget_PauseAgentBlocks(t *testing.T) {
 	if allowed {
 		t.Error("pause_agent exceedence must block")
 	}
+}
+
+// TestEvaluateProjectBudget_AlertAtThreshold covers the reassignment defect:
+// a project-scoped notify_only policy must fire budget.alert when evaluated
+// directly, without waiting for a future cost event or agent launch.
+func TestEvaluateProjectBudget_AlertAtThreshold(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+
+	policy := &models.BudgetPolicy{
+		WorkspaceID:       "ws-1",
+		ScopeType:         "project",
+		ScopeID:           "proj-1",
+		LimitSubcents:     1000,
+		Period:            "monthly",
+		AlertThresholdPct: 80,
+		ActionOnExceed:    "notify_only",
+	}
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
+	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(850))
+
+	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
+		t.Fatalf("EvaluateProjectBudget: %v", err)
+	}
+
+	if !hasBudgetActivity(spy.calls, "budget.alert", "proj-1") {
+		t.Errorf("expected budget.alert for proj-1, got calls=%+v", spy.calls)
+	}
+}
+
+// TestEvaluateProjectBudget_ExceededAtLimit covers the limit-exceeded branch.
+func TestEvaluateProjectBudget_ExceededAtLimit(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+
+	policy := &models.BudgetPolicy{
+		WorkspaceID:       "ws-1",
+		ScopeType:         "project",
+		ScopeID:           "proj-1",
+		LimitSubcents:     500,
+		Period:            "monthly",
+		AlertThresholdPct: 80,
+		ActionOnExceed:    "notify_only",
+	}
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
+	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(600))
+
+	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
+		t.Fatalf("EvaluateProjectBudget: %v", err)
+	}
+
+	if !hasBudgetActivity(spy.calls, "budget.exceeded", "proj-1") {
+		t.Errorf("expected budget.exceeded for proj-1, got calls=%+v", spy.calls)
+	}
+}
+
+// TestEvaluateProjectBudget_PauseAgentPolicyDoesNotPause locks in the design
+// decision: a project-scoped pause_agent policy never pauses an agent.
+// evaluatePolicy only pauses when ScopeType==agent, so this reuses that
+// existing gate rather than adding new pause logic for project scope. The
+// agent instance shares its ID with the policy's ScopeID so a regression
+// that mistakenly treated ScopeID as an agent ID would find and pause it.
+func TestEvaluateProjectBudget_PauseAgentPolicyDoesNotPause(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, repo, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+
+	createBudgetTestAgent(t, repo, "ws-1", "proj-1")
+
+	policy := &models.BudgetPolicy{
+		WorkspaceID:       "ws-1",
+		ScopeType:         "project",
+		ScopeID:           "proj-1",
+		LimitSubcents:     500,
+		Period:            "monthly",
+		AlertThresholdPct: 80,
+		ActionOnExceed:    "pause_agent",
+	}
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
+	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(600))
+
+	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
+		t.Fatalf("EvaluateProjectBudget: %v", err)
+	}
+
+	agent, err := repo.GetAgentInstance(ctx, "proj-1")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.Status == "paused" {
+		t.Error("project-scoped pause_agent policy must not pause an agent")
+	}
+}
+
+// TestEvaluateProjectBudget_WorkspacePoliciesNotEvaluated locks in the
+// decision to skip scope=workspace policies: reassignment doesn't change the
+// workspace total, so re-evaluating them would emit a duplicate alert row on
+// every reassignment in an already over-budget workspace.
+func TestEvaluateProjectBudget_WorkspacePoliciesNotEvaluated(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+
+	policy := &models.BudgetPolicy{
+		WorkspaceID:       "ws-1",
+		ScopeType:         "workspace",
+		ScopeID:           "",
+		LimitSubcents:     500,
+		Period:            "monthly",
+		AlertThresholdPct: 80,
+		ActionOnExceed:    "notify_only",
+	}
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
+	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(600))
+
+	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
+		t.Fatalf("EvaluateProjectBudget: %v", err)
+	}
+
+	if len(spy.calls) != 0 {
+		t.Errorf("expected no activity for workspace-scoped policies, got calls=%+v", spy.calls)
+	}
+}
+
+// TestEvaluateProjectBudget_EmptyProjectIDSkips covers clearing a project
+// (projectID=="") — there is no destination to evaluate.
+func TestEvaluateProjectBudget_EmptyProjectIDSkips(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+
+	policy := &models.BudgetPolicy{
+		WorkspaceID:       "ws-1",
+		ScopeType:         "project",
+		ScopeID:           "proj-1",
+		LimitSubcents:     500,
+		Period:            "monthly",
+		AlertThresholdPct: 80,
+		ActionOnExceed:    "notify_only",
+	}
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
+	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(600))
+
+	if err := svc.EvaluateProjectBudget(ctx, "ws-1", ""); err != nil {
+		t.Fatalf("EvaluateProjectBudget: %v", err)
+	}
+
+	if len(spy.calls) != 0 {
+		t.Errorf("expected no activity when projectID is empty, got calls=%+v", spy.calls)
+	}
+}
+
+func hasBudgetActivity(calls []budgetActivityCall, action, targetID string) bool {
+	for _, c := range calls {
+		if c.action == action && c.targetID == targetID {
+			return true
+		}
+	}
+	return false
 }

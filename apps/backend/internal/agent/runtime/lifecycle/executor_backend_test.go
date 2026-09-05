@@ -36,6 +36,42 @@ func TestShouldPersistMetadataKey(t *testing.T) {
 	}
 }
 
+func TestKubernetesRuntimeMetadataKeysPersistWithoutLocalForward(t *testing.T) {
+	persistent := []string{
+		"auth_mode",
+		"kubeconfig_path",
+		"kube_context",
+		"namespace",
+		"request_timeout_seconds",
+		"kubernetes_namespace",
+		"kubernetes_pod_name",
+		"kubernetes_pod_uid",
+		"kubernetes_main_container",
+		"kubernetes_platform",
+		"kubernetes_workspace_mode",
+		"kubernetes_pvc_name",
+		"kubernetes_pvc_uid",
+		"kubernetes_pvc_created",
+		"kubernetes_agentctl_remote_port",
+		MetadataKeyKubernetesResourceExecutorID,
+		MetadataKeyKubernetesResourceProfileID,
+		MetadataKeyKubernetesResourceInstanceID,
+		MetadataKeyKubernetesResourceTaskID,
+		MetadataKeyKubernetesResourceSessionID,
+		MetadataKeyKubernetesResourceEnvironmentID,
+		"kubernetes_executor_config_hash",
+		"kubernetes_profile_config_hash",
+		"kubernetes_template_hash",
+		MetadataKeyKubernetesProfileSnapshot,
+	}
+	for _, key := range persistent {
+		require.True(t, ShouldPersistMetadataKey(key), "%s must survive same-session restart", key)
+		require.True(t, IsSessionScopedMetadataKey(key), "%s must not leak to a sibling session", key)
+	}
+	require.False(t, ShouldPersistMetadataKey("kubernetes_local_forward_port"),
+		"local forwards are process-local and must rotate after restart")
+}
+
 func TestFilterPersistentMetadata(t *testing.T) {
 	t.Run("nil input returns nil", func(t *testing.T) {
 		require.Nil(t, FilterPersistentMetadata(nil))

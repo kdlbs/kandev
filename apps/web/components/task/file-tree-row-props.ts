@@ -18,6 +18,7 @@ export type TreeNodeRowProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
@@ -57,6 +58,7 @@ function rowIdentity(props: TreeNodeRowProps): unknown[] {
     props.onDeleteFile,
     props.onRenameFile,
     props.onDownloadFile,
+    props.onUploadFilesHere,
     props.setTree,
     props.isSelectedFn,
     props.onSelect,

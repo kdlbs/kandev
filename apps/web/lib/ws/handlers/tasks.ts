@@ -59,6 +59,12 @@ function preservePrimaryExecutorFields(
   if (!hasPayloadField(payload, "is_remote_executor")) {
     merged.isRemoteExecutor = existing.isRemoteExecutor;
   }
+  if (!hasPayloadField(payload, "primary_agent_profile_id")) {
+    merged.primaryAgentProfileId = existing.primaryAgentProfileId;
+  }
+  if (!hasPayloadField(payload, "primary_agent_name")) {
+    merged.primaryAgentName = existing.primaryAgentName;
+  }
 }
 
 // A lightweight task.updated may omit an unchanged field; only an explicit
@@ -80,6 +86,7 @@ function preserveOmittedField<K extends keyof KanbanTask>(
   }
 }
 
+// eslint-disable-next-line complexity -- Merges sparse task events while preserving every omitted cached field.
 function mergeTaskUpdate(
   existing: KanbanTask | undefined,
   nextTask: KanbanTask,
@@ -93,6 +100,13 @@ function mergeTaskUpdate(
   preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "parent_id",
     taskField: "parentTaskId",
+  });
+  // Same contract for the human assignee: a lightweight update that does not
+  // mention it must not read as "unassigned". Without this, taking a task over
+  // showed the new owner until the next unrelated event, then blanked.
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "assignee_user_id",
+    taskField: "assigneeUserId",
   });
   if (!hasPayloadField(payload, "primary_session_id") && nextTask.primarySessionId === undefined) {
     merged.primarySessionId = existing.primarySessionId;
@@ -111,6 +125,8 @@ function mergeTaskUpdate(
   }
   preservePrimaryExecutorFields(existing, merged, payload);
   if (!hasPayloadField(payload, "metadata")) merged.metadata = existing.metadata;
+  if (!hasPayloadField(payload, "labels")) merged.labels = existing.labels;
+  if (!hasPayloadField(payload, "origin")) merged.origin = existing.origin;
   if (
     !hasPayloadField(payload, "task_pending_action") &&
     nextTask.taskPendingAction === undefined

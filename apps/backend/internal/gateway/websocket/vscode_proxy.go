@@ -56,7 +56,7 @@ func (h *VscodeProxyHandler) HandleVscodeProxy(c *gin.Context) {
 	// caller is authenticated, not that they own this session. This proxy
 	// resolves the execution by a bare in-memory lookup (and a per-session
 	// cache), so authorize here before anything is served.
-	if err := h.lifecycleMgr.CheckSessionAccess(c.Request.Context(), sessionID); err != nil {
+	if err := h.lifecycleMgr.CheckSessionExecAccess(c.Request.Context(), sessionID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
@@ -126,7 +126,8 @@ func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*ht
 		return nil, fmt.Errorf("session not found")
 	}
 
-	agentctlClient := execution.GetAgentCtlClient()
+	agentctlClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentctlClient == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl client not available"})
 		return nil, fmt.Errorf("agentctl client not available")

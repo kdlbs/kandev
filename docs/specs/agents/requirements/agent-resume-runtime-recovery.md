@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-27
-updated: 2026-09-01
+updated: 2026-09-02
 owners:
   - Kandev
 ---
@@ -42,6 +42,7 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.4:** A user can select read-only workspace restore after a manual resume failure. Kandev does not silently replace a manual Resume request with read-only restore.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.5:** Desktop, narrow desktop, and mobile task views use the existing inline alert and chat recovery patterns. Recovery actions remain reachable by keyboard and touch without horizontal overflow.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.6:** A Retry recovery control is disabled while its recovery request is in flight on every recovery surface. A repeated attempt cannot create overlapping `session.recover` requests.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.7:** When task navigation changes the active task while an automatic session-status or recovery request is in flight, the task view ignores the result owned by the prior task-session identity. An error from the prior identity does not appear on the newly selected task. Each navigation cycle invalidates prior attempts even when the task-session pair later repeats.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003: Explicit continuation after branch loss
 
@@ -112,6 +113,8 @@ without repairing it.
 - A failed resume stays visible with the backend cause and a recovery action.
 - An automatic read-only restore states that resume failed and that the
   restored workspace is read-only.
+- A task selected during navigation does not show a session-status or recovery
+  error produced for the task that was previously active.
 - A confirmed missing branch offers explicit continuation on a new branch from
   the task base branch. The same conversation continues, but lost code does
   not return.
@@ -189,6 +192,14 @@ without repairing it.
   workspace is read-only.
 - **GIVEN** automatic resume and read-only restore both fail, **WHEN** the task
   view loads, **THEN** it shows both failure causes.
+- **GIVEN** navigation selects a session on another task while the prior
+  task's automatic session-status request remains unresolved, **WHEN** the
+  prior result arrives after the current request starts, **THEN** the current
+  task ignores the prior result and does not show its recovery error.
+- **GIVEN** navigation leaves a task-session pair and then returns to the same
+  pair while the first request remains unresolved, **WHEN** the first result
+  arrives after the return request starts, **THEN** the returned task ignores
+  the obsolete result and keeps the return request's state.
 - **GIVEN** the stored worktree branch is absent locally and on its configured
   remote, **WHEN** Resume fails, **THEN** the UI offers **Continue on a new
   branch** and does not run it automatically.

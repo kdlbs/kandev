@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/planinjection"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -101,16 +102,12 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in
-// containers or remote sandboxes (Docker variants + Sprites). These are the
-// same executors that need explicitly configured remote credentials and the
-// kandev-managed feature branch propagated through env metadata.
+// containers or remote sandboxes (Docker variants, Sprites, and Kubernetes).
+// These are the same executors that need explicitly configured remote
+// credentials and the kandev-managed feature branch propagated through env
+// metadata.
 func isContainerizedExecutor(executorType string) bool {
-	switch models.ExecutorType(executorType) {
-	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
-		return true
-	default:
-		return false
-	}
+	return models.IsContainerizedExecutorType(models.ExecutorType(executorType))
 }
 
 // executorNeedsResolvedCredentials reports whether an executor runs the agent
@@ -141,6 +138,9 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 				updateCtx, taskID, sessionID, agentExecutionID, err,
 				escalateTaskOnFailure, fromResume,
 			)
+			if e.onAgentProcessStartFailed != nil {
+				e.onAgentProcessStartFailed(updateCtx, taskID, sessionID, agentExecutionID, err)
+			}
 			return
 		}
 		if _, terminal := e.stopStartedExecutionIfSessionTerminal(
@@ -153,6 +153,9 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 		}
 
 		onSuccess(updateCtx)
+		if e.onAgentProcessStarted != nil {
+			e.onAgentProcessStarted(updateCtx, taskID, sessionID, agentExecutionID)
+		}
 	}()
 }
 
@@ -1159,6 +1162,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if session.TaskID != task.ID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	if strings.TrimSpace(executorID) == "" {
+		// PrepareSession already persisted the selected executor. Launch calls
+		// that omit the option must retain that selection so the authoritative
+		// connection config reaches lifecycle instead of falling back to the
+		// workspace default (or an empty config).
+		executorID = strings.TrimSpace(session.ExecutorID)
+	}
 	if opts.McpMode == "" {
 		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
 		if err != nil {
@@ -1173,7 +1183,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		opts.McpProfile = &profileContext
 	}
 
-	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
+	}
 	if running != nil && running.ExecutionProfileID != "" &&
 		running.ExecutionProfileID != agentProfileID {
 		if running.AgentExecutionID != "" {
@@ -1212,7 +1225,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// execution was lost (e.g. backend restart). The full LaunchAgent path below
 	// will create a new execution and lifecycle.persistExecutorRunning will
 	// overwrite the stale row.
-	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
+	hasRunning, hasRunningErr := e.repo.HasExecutorRunningRow(ctx, sessionID)
+	if hasRunningErr != nil {
+		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
+	}
 	if hasRunning {
 		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
 		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
@@ -1255,6 +1271,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired, existingEnv)
 	if err != nil {
 		return nil, err
+	}
+	if existingEnv != nil && existingEnv.TaskID != task.ID && existingEnv.ExecutorType != "" && existingEnv.ExecutorType != req.ExecutorType {
+		return nil, fmt.Errorf("%w: inherited task environment belongs to executor %q, launch selected %q", models.ErrWorkspaceReuseUnsafe, existingEnv.ExecutorType, req.ExecutorType)
 	}
 	if execCfg.ExecutorID != "" {
 		session.ExecutorID = execCfg.ExecutorID
@@ -1714,6 +1733,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.ExecutorConfig = execConfig.ExecutorCfg
 		req.SetupScript = execConfig.SetupScript
 	}
+	prepareExecutorTransition(req, existingEnv)
 	// A task environment is reusable only by the executor type that owns it.
 	// If the caller selected a different profile, this launch must provision
 	// the new backend instead of attaching to the old environment. Resolve this
@@ -2223,17 +2243,33 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 		return prompt
 	}
 
-	// Build the plan section if a plan exists.
+	// Build the plan section if a plan exists. The composed document is the
+	// content verbatim (this site does not trim it); containment runs before
+	// the reducer so the reducer's guarantees hold over the contained text.
 	var planSection string
-	plan, err := e.repo.GetTaskPlan(ctx, taskID)
-	if err == nil && plan != nil && plan.Content != "" {
-		planSection = fmt.Sprintf("\nThe task has an implementation plan:\n\n%s\n", plan.Content)
-	}
-
-	e.logger.Info("injecting session handover context",
+	logFields := []zap.Field{
 		zap.String("task_id", taskID),
 		zap.String("session_id", currentSessionID),
-		zap.Int("previous_sessions", previousCount))
+		zap.Int("previous_sessions", previousCount),
+	}
+	plan, err := e.repo.GetTaskPlan(ctx, taskID)
+	if err == nil && plan != nil {
+		composed := planinjection.ContainTags(plan.Content)
+		reducedPlan, reduced, omitted := planinjection.Reduce(composed, planinjection.HandoverBudget)
+		if reducedPlan != "" {
+			planSection = fmt.Sprintf("\nThe task has an implementation plan:\n\n%s\n", reducedPlan)
+		}
+		if reduced {
+			logFields = append(logFields,
+				zap.String("site", "handover"),
+				zap.Int("plan_input_bytes", len(composed)),
+				zap.Int("plan_output_bytes", len(reducedPlan)),
+				zap.Int("plan_sections_omitted", omitted),
+			)
+		}
+	}
+
+	e.logger.Info("injecting session handover context", logFields...)
 
 	return sysprompt.InjectSessionHandover(previousCount, planSection, prompt)
 }
@@ -2282,17 +2318,27 @@ func (e *Executor) persistTaskEnvironment(
 	defer mu.Unlock()
 
 	// Re-fetch under the lock — a sibling launch for the same task may have
-	// just created the env and released the lock. Without this we'd still
-	// see existingEnv == nil from the original call and try to create a
-	// duplicate.
-	if existingEnv == nil {
-		fresh, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
-		if err != nil {
-			return fmt.Errorf("load task environment before persistence: %w", err)
+	// just created or rebound the env and released the lock. The launch-local
+	// snapshot remains useful for detecting a stale writer, but never becomes
+	// the source of truth for the update.
+	launchEnvID, launchEnvExecutorType := "", ""
+	launchHadEnvironment := existingEnv != nil
+	if existingEnv != nil {
+		launchEnvID = existingEnv.ID
+		launchEnvExecutorType = existingEnv.ExecutorType
+	}
+	fresh, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load task environment before persistence: %w", err)
+	}
+	if fresh != nil {
+		if launchHadEnvironment && (fresh.ID != launchEnvID || (launchEnvExecutorType != "" && fresh.ExecutorType != launchEnvExecutorType)) {
+			return fmt.Errorf("%w: task environment changed while launch was in progress", models.ErrWorkspaceReuseUnsafe)
 		}
-		if fresh != nil {
-			existingEnv = fresh
+		if !launchHadEnvironment && fresh.ExecutorType != "" && fresh.ExecutorType != req.ExecutorType {
+			return fmt.Errorf("%w: task environment was claimed by executor %q before this launch completed", models.ErrWorkspaceReuseUnsafe, fresh.ExecutorType)
 		}
+		existingEnv = fresh
 	}
 
 	workspacePath := computeWorkspacePath(req, resp)
@@ -2335,7 +2381,21 @@ func (e *Executor) persistTaskEnvironment(
 		// empty paths (e.g. before the worktree resolved) stayed permanently
 		// broken. Sandbox ID gets refreshed too in case a fallback created a
 		// new sprite.
-		if workspacePath != "" {
+		executorTransition := existingEnv.ExecutorType != "" && existingEnv.ExecutorType != req.ExecutorType
+		if executorTransition {
+			// Rebind the one durable environment row only after the target
+			// executor has launched successfully. Clear backend-specific handles
+			// before applying response values so a local launch cannot later
+			// project an old container, sprite, or worktree runtime as current.
+			existingEnv.ExecutorType = req.ExecutorType
+			existingEnv.ExecutorID = execCfg.ExecutorID
+			existingEnv.ExecutorProfileID = session.ExecutorProfileID
+			existingEnv.WorkspacePath = workspacePath
+			existingEnv.ContainerID = ""
+			existingEnv.ContainerBootstrapNonceSecretID = ""
+			existingEnv.ContainerControlAuthTokenSecretID = ""
+			existingEnv.SandboxID = ""
+		} else if workspacePath != "" {
 			existingEnv.WorkspacePath = workspacePath
 		}
 		if resp.ContainerID != "" {
@@ -2383,11 +2443,6 @@ func (e *Executor) persistTaskEnvironment(
 		// reader observes a ready environment with an empty inventory for a
 		// repo-backed task — exactly the state the guards elsewhere in this PR
 		// exist to prevent (see validateReuseEnvironmentInventory).
-		if err := e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, repos); err != nil {
-			existingEnv.Status = previousStatus
-			existingEnv.MaterializationSessionID = previousMaterializationSessionID
-			return err
-		}
 		repoBacked := e.taskIsRepoBacked(ctx, taskID)
 		// A sibling can finish while the initial materializer still owns a
 		// CREATING environment. In that case the owner remains responsible for
@@ -2413,14 +2468,27 @@ func (e *Executor) persistTaskEnvironment(
 			existingEnv.Status = models.TaskEnvironmentStatusReady
 		}
 		existingEnv.MaterializationSessionID = ""
-		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
-			existingEnv.Status = previousStatus
-			existingEnv.MaterializationSessionID = previousMaterializationSessionID
-			e.logger.Warn("failed to update task environment",
-				zap.String("task_id", taskID),
-				zap.String("env_id", existingEnv.ID),
-				zap.Error(err))
-			return fmt.Errorf("update task environment: %w", err)
+		if persister, ok := e.repo.(taskEnvironmentTransitionPersister); ok {
+			if err := persister.PersistTaskEnvironmentTransition(ctx, existingEnv, repos, executorTransition); err != nil {
+				existingEnv.Status = previousStatus
+				existingEnv.MaterializationSessionID = previousMaterializationSessionID
+				return fmt.Errorf("persist task environment transition: %w", err)
+			}
+		} else {
+			if err := e.persistTaskEnvironmentReposForTransition(ctx, existingEnv.ID, repos, executorTransition); err != nil {
+				existingEnv.Status = previousStatus
+				existingEnv.MaterializationSessionID = previousMaterializationSessionID
+				return err
+			}
+			if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
+				existingEnv.Status = previousStatus
+				existingEnv.MaterializationSessionID = previousMaterializationSessionID
+				e.logger.Warn("failed to update task environment",
+					zap.String("task_id", taskID),
+					zap.String("env_id", existingEnv.ID),
+					zap.Error(err))
+				return fmt.Errorf("update task environment: %w", err)
+			}
 		}
 		bindSessionToTaskEnvironment(session, existingEnv)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
@@ -2593,7 +2661,11 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 // task), including cases where stale or legacy rows need the successful launch
 // result written back for the next handoff.
 func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string, repos []*models.TaskEnvironmentRepo) error {
-	if envID == "" || len(repos) == 0 {
+	return e.persistTaskEnvironmentReposForTransition(ctx, envID, repos, false)
+}
+
+func (e *Executor) persistTaskEnvironmentReposForTransition(ctx context.Context, envID string, repos []*models.TaskEnvironmentRepo, replacePhysical bool) error {
+	if envID == "" || (!replacePhysical && len(repos) == 0) {
 		return nil
 	}
 	existing, err := e.repo.ListTaskEnvironmentRepos(ctx, envID)
@@ -2603,71 +2675,126 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 			zap.Error(err))
 		return fmt.Errorf("list task environment repositories: %w", err)
 	}
-	byKey := make(map[string]*models.TaskEnvironmentRepo, len(existing))
+	byKey, legacyFlatByRepo := indexTaskEnvironmentRepos(existing)
+	matched := make(map[string]struct{}, len(repos))
+	for position, w := range repos {
+		if err := e.persistOneTaskEnvironmentRepoTransition(
+			ctx, envID, w, position, replacePhysical, byKey, legacyFlatByRepo, matched,
+		); err != nil {
+			return err
+		}
+	}
+	if !replacePhysical {
+		return nil
+	}
+	return e.tombstoneOmittedTaskEnvironmentRepos(ctx, existing, matched)
+}
+
+func indexTaskEnvironmentRepos(rows []*models.TaskEnvironmentRepo) (map[string]*models.TaskEnvironmentRepo, map[string]*models.TaskEnvironmentRepo) {
+	byKey := make(map[string]*models.TaskEnvironmentRepo, len(rows))
 	legacyFlatByRepo := make(map[string]*models.TaskEnvironmentRepo)
-	for _, row := range existing {
-		key := row.RepositoryID + "\x00" + row.BranchSlug
-		byKey[key] = row
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		byKey[row.RepositoryID+"\x00"+row.BranchSlug] = row
 		if row.RepositoryID != "" && row.BranchSlug == "" {
 			legacyFlatByRepo[row.RepositoryID] = row
 		}
 	}
-	for i, w := range repos {
-		if w.RepositoryID == "" {
+	return byKey, legacyFlatByRepo
+}
+
+func (e *Executor) persistOneTaskEnvironmentRepoTransition(
+	ctx context.Context,
+	envID string,
+	w *models.TaskEnvironmentRepo,
+	position int,
+	replacePhysical bool,
+	byKey map[string]*models.TaskEnvironmentRepo,
+	legacyFlatByRepo map[string]*models.TaskEnvironmentRepo,
+	matched map[string]struct{},
+) error {
+	if w == nil || w.RepositoryID == "" {
+		return nil
+	}
+	key := w.RepositoryID + "\x00" + w.BranchSlug
+	row := byKey[key]
+	if row == nil && w.BranchSlug != "" {
+		row = legacyFlatByRepo[w.RepositoryID]
+		if row != nil {
+			delete(legacyFlatByRepo, w.RepositoryID)
+			byKey[key] = row
+		}
+	}
+	if row != nil {
+		matched[row.ID] = struct{}{}
+		return e.refreshTaskEnvironmentRepo(ctx, row, w, position, replacePhysical)
+	}
+	row = &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: envID,
+		RepositoryID:      w.RepositoryID,
+		BranchSlug:        w.BranchSlug,
+		WorktreeID:        w.WorktreeID,
+		WorktreePath:      w.WorktreePath,
+		WorktreeBranch:    w.WorktreeBranch,
+		Position:          position,
+		ErrorMessage:      w.ErrorMessage,
+	}
+	if createErr := e.repo.CreateTaskEnvironmentRepo(ctx, row); createErr != nil {
+		e.logger.Warn("failed to persist task environment repo",
+			zap.String("env_id", envID),
+			zap.String("repository_id", w.RepositoryID),
+			zap.Error(createErr))
+		return fmt.Errorf("persist task environment repository %q: %w", w.RepositoryID, createErr)
+	}
+	return nil
+}
+
+func (e *Executor) tombstoneOmittedTaskEnvironmentRepos(
+	ctx context.Context,
+	existing []*models.TaskEnvironmentRepo,
+	matched map[string]struct{},
+) error {
+	deletedAt := time.Now().UTC()
+	for _, row := range existing {
+		if row == nil || row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusDeleted {
 			continue
 		}
-		key := w.RepositoryID + "\x00" + w.BranchSlug
-		if row := byKey[key]; row != nil {
-			if err := e.refreshTaskEnvironmentRepo(ctx, row, w, i); err != nil {
-				return err
-			}
+		if _, ok := matched[row.ID]; ok {
 			continue
 		}
-		if w.BranchSlug != "" {
-			if row := legacyFlatByRepo[w.RepositoryID]; row != nil {
-				if err := e.refreshTaskEnvironmentRepo(ctx, row, w, i); err != nil {
-					return err
-				}
-				delete(legacyFlatByRepo, w.RepositoryID)
-				byKey[key] = row
-				continue
-			}
-		}
-		row := &models.TaskEnvironmentRepo{
-			TaskEnvironmentID: envID,
-			RepositoryID:      w.RepositoryID,
-			BranchSlug:        w.BranchSlug,
-			WorktreeID:        w.WorktreeID,
-			WorktreePath:      w.WorktreePath,
-			WorktreeBranch:    w.WorktreeBranch,
-			Position:          i,
-			ErrorMessage:      w.ErrorMessage,
-		}
-		if createErr := e.repo.CreateTaskEnvironmentRepo(ctx, row); createErr != nil {
-			e.logger.Warn("failed to persist task environment repo",
-				zap.String("env_id", envID),
-				zap.String("repository_id", w.RepositoryID),
-				zap.Error(createErr))
-			return fmt.Errorf("persist task environment repository %q: %w", w.RepositoryID, createErr)
+		row.Status = taskEnvironmentRepoStatusDeleted
+		row.DeletedAt = &deletedAt
+		if err := e.repo.UpdateTaskEnvironmentRepo(ctx, row); err != nil {
+			return fmt.Errorf("delete omitted task environment repository %q: %w", row.RepositoryID, err)
 		}
 	}
 	return nil
 }
 
-func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *models.TaskEnvironmentRepo, position int) error {
-	if !taskEnvironmentRepoNeedsRefresh(row, w, position) {
+func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *models.TaskEnvironmentRepo, position int, replacePhysical bool) error {
+	if !taskEnvironmentRepoNeedsRefresh(row, w, position, replacePhysical) &&
+		(!replacePhysical || (row.Status == taskEnvironmentRepoStatusActive && row.DeletedAt == nil)) {
 		return nil
 	}
 	row.BranchSlug = w.BranchSlug
 	// Concrete launch results populate the physical tuple together; inventory-only
 	// rows have no WorktreeID and must not replace it.
-	if w.WorktreeID != "" {
+	if replacePhysical || w.WorktreeID != "" {
 		row.WorktreeID = w.WorktreeID
 		row.WorktreePath = w.WorktreePath
 		row.WorktreeBranch = w.WorktreeBranch
 	}
 	row.Position = position
 	row.ErrorMessage = w.ErrorMessage
+	if replacePhysical {
+		// A later successful transition can recreate a slot that an earlier
+		// replace-mode transition tombstoned. Reactivate the matching row so the
+		// canonical inventory does not remain permanently excluded from reuse.
+		row.Status = taskEnvironmentRepoStatusActive
+		row.DeletedAt = nil
+	}
 	if err := e.repo.UpdateTaskEnvironmentRepo(ctx, row); err != nil {
 		e.logger.Warn("failed to update task environment repo",
 			zap.String("env_id", row.TaskEnvironmentID),
@@ -2679,9 +2806,9 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 	return nil
 }
 
-func taskEnvironmentRepoNeedsRefresh(row, w *models.TaskEnvironmentRepo, position int) bool {
+func taskEnvironmentRepoNeedsRefresh(row, w *models.TaskEnvironmentRepo, position int, replacePhysical bool) bool {
 	return row.BranchSlug != w.BranchSlug ||
-		(w.WorktreeID != "" &&
+		((replacePhysical || w.WorktreeID != "") &&
 			(row.WorktreeID != w.WorktreeID ||
 				row.WorktreePath != w.WorktreePath ||
 				row.WorktreeBranch != w.WorktreeBranch)) ||

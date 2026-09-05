@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/repository"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,9 +29,20 @@ import (
 )
 
 type mockRepository struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	scriptsByRepo map[string][]*models.RepositoryScript
 	sessions      map[string]*models.TaskSession
 	executors     map[string]*models.Executor
+}
+
+func (m *mockRepository) HasUserPromptHistory(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockRepository) ClaimInitialPromptFallback(context.Context, string) (bool, error) {
+	return true, nil
 }
 
 func (m *mockRepository) DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error) {

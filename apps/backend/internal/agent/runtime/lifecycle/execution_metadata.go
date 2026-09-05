@@ -1,5 +1,7 @@
 package lifecycle
 
+import "reflect"
+
 // AgentExecution.metadata is written and read from unrelated goroutines: the
 // launch path caches resolved profile env and MCP artifacts on it, the prompt
 // path stores model overrides, and the stop path (RemoveExecution ->
@@ -92,4 +94,43 @@ func (e *AgentExecution) MetadataSnapshot() map[string]interface{} {
 		snapshot[key] = value
 	}
 	return snapshot
+}
+
+// mergeMetadataWithRollback applies a scoped metadata update and returns a
+// compare-and-restore rollback. A key is restored only while it still contains
+// the value applied here, so a concurrent writer is never overwritten by a
+// failed remote refresh.
+func (e *AgentExecution) mergeMetadataWithRollback(metadata map[string]interface{}) func() {
+	if e == nil || len(metadata) == 0 {
+		return func() {}
+	}
+	e.metadataMu.Lock()
+	if e.metadata == nil {
+		e.metadata = make(map[string]interface{}, len(metadata))
+	}
+	prior := make(map[string]interface{}, len(metadata))
+	priorExists := make(map[string]bool, len(metadata))
+	applied := make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
+		prior[key], priorExists[key] = e.metadata[key]
+		e.metadata[key] = value
+		applied[key] = value
+	}
+	e.metadataMu.Unlock()
+
+	return func() {
+		e.metadataMu.Lock()
+		defer e.metadataMu.Unlock()
+		for key, appliedValue := range applied {
+			current, exists := e.metadata[key]
+			if !exists || !reflect.DeepEqual(current, appliedValue) {
+				continue
+			}
+			if priorExists[key] {
+				e.metadata[key] = prior[key]
+			} else {
+				delete(e.metadata, key)
+			}
+		}
+	}
 }

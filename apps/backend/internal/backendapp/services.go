@@ -96,6 +96,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}))
 	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repos.Task),
+		dynamicruntime.WithCircuitLogger(log.Zap()),
 	)
 	if err := dynamicCircuits.Restore(context.Background()); err != nil {
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
@@ -158,6 +159,33 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		},
 	)
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
+	// Workspace membership needs to resolve colleague names and reject
+	// disabled or unknown accounts before writing a row.
+	taskSvc.SetUserDirectory(newUserDirectoryAdapter(repos.UserAccounts))
+	// The default organization is named generically: an instance has no
+	// company name to borrow, and an operator renames it in one click.
+	const defaultOrgName = "Default organization"
+	orgSvc, orgErr := buildOrgService(cfg, dbPool, repos, taskSvc, log)
+	if orgErr != nil {
+		return nil, nil, fmt.Errorf("initialize organizations: %w", orgErr)
+	}
+	// The tenancy migration runs once at boot: it creates the default
+	// organization and puts every pre-tenancy user and workspace into it.
+	if _, err := orgSvc.EnsureDefaultOrg(context.Background(), defaultOrgName); err != nil {
+		return nil, nil, fmt.Errorf("organization migration: %w", err)
+	}
+	// The unit tree is built after the tenancy migration, which is what stamps
+	// organization ids: placing a workspace before it knows its organization
+	// would put it under the wrong root.
+	unitSvc, unitErr := buildOrgUnitService(dbPool, repos.Task, repos.UserAccounts, log)
+	if unitErr != nil {
+		return nil, nil, fmt.Errorf("initialize organization units: %w", unitErr)
+	}
+	taskSvc.SetUnitPlacer(unitSvc)
+	taskSvc.SetUnitReach(unitSvc)
+	// Deleting an organization must take its unit tree with it.
+	orgSvc.SetUnitDeleter(unitSvc)
+
 	taskSvc.SetSecretStore(userSecretStore)
 	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
 		taskSvc.SetWorkspaceSecretDeleter(deleter)
@@ -308,6 +336,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		DynamicProfileResolver:   dynamicResolver,
 		DynamicBindingResolver:   dynamicBindingResolver,
 		Task:                     taskSvc,
+		Org:                      orgSvc,
+		OrgUnits:                 unitSvc,
 		User:                     userSvc,
 		Editor:                   editorSvc,
 		Prompts:                  promptSvc,

@@ -20,10 +20,14 @@ Authentication is a **runtime feature toggle**: the same system as the other fea
 ## What changes when authentication is on
 
 - Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`. The signed-in user is shown in the bottom-left of the sidebar, with a log-out menu.
-- **Workspaces become per-user.** You only see workspaces you own, including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup.
+- **Workspaces become per-user by default.** You only see workspaces you own, including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup. A workspace can then be shared with colleagues on purpose: see [Team Access](team-access.md).
 - Secrets are per-user. A **Global** secret is user-global across that user's workspaces; a **Workspace** secret belongs to one of their workspaces. With authentication disabled, Global is install-global. Executors and agent profiles remain shared across the instance, so they can reference Global secrets only; repositories may bind Global or same-workspace secrets.
-- Admins manage users and instance settings, but do **not** see other users' workspaces.
+- Admins manage users and instance settings, but do **not** see other users' private workspaces. Admin is a management role, not a visibility role.
 - Programmatic clients (external MCP, scripts) authenticate with personal access tokens.
+
+## Sharing work with a team
+
+Authentication makes each person's work private. To give a team a shared board without a shared login, see [Team Access](team-access.md): workspace visibility, member roles, and scoped permissions.
 
 ## Enabling authentication
 
@@ -51,7 +55,7 @@ A server that listens on non-loopback interfaces with authentication disabled lo
 
 Roles: `admin` (user management, authentication settings, destructive system operations, feature toggles) and `member` (everything else, scoped to their own workspaces).
 
-Install-wide data in `Settings > System > Data & storage` follows the same split. Members can read the database stats, the backup listing, and the storage usage, policy, run history, and quarantine contents. Creating, downloading, restoring, and deleting a backup is admin only, because a backup is a copy of the whole database and downloading one would export every user's workspaces. Changing storage settings, adopting a Go cache, and running an analysis, cleanup, or quarantine restore/purge are admin only for the same reason database vacuum, optimize, and reset are: they act on the whole install.
+Install-wide data in `Settings > System > Data & Logs` and `Settings > System > Storage` follows the same split. Members can read the database stats, the backup listing, and the storage usage, policy, run history, and quarantine contents. Creating, downloading, restoring, and deleting a backup is admin only, because a backup is a copy of the whole database and downloading one would export every user's workspaces. Changing storage settings, adopting a Go cache, and running an analysis, cleanup, or quarantine restore/purge are admin only for the same reason database vacuum, optimize, and reset are: they act on the whole install.
 
 ## Personal access tokens
 

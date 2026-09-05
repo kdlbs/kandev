@@ -166,7 +166,14 @@ function SessionTabItem({
       )}
       {tab.renderContextMenu ? (
         <ContextMenu>
-          <ContextMenuTrigger asChild>{tabTarget}</ContextMenuTrigger>
+          {/* `display: contents` keeps this wrapper out of layout while giving
+              ContextMenuTrigger's `asChild` Slot a DOM node of its own to clone
+              onto — otherwise, when tabTarget is the bare TabsTrigger (no
+              tab.content), the Slot's own data-state (open/closed) overwrites
+              TabsTrigger's data-state (active/inactive) on the same node. */}
+          <ContextMenuTrigger asChild>
+            <div className="contents">{tabTarget}</div>
+          </ContextMenuTrigger>
           {tab.renderContextMenu(closeAnchorRef)}
         </ContextMenu>
       ) : (

@@ -73,7 +73,10 @@ test.describe("Large file tree virtualization", () => {
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
 
-    await testPage.getByRole("button", { name: "New file" }).click();
+    const createMenu = testPage.getByTestId("files-create-menu");
+    await expect(createMenu).toBeVisible({ timeout: 15_000 });
+    await createMenu.click();
+    await testPage.getByRole("menuitem", { name: "New file" }).click();
     const input = testPage.getByPlaceholder("filename...");
     await expect(input).toBeVisible({ timeout: 15_000 });
     await expect(input).toBeFocused({ timeout: 5_000 });

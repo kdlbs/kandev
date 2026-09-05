@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -25,6 +26,18 @@ import (
 
 type nilTaskSessionRepo struct {
 	repository.SessionRepository
+}
+
+type failGetExecutorRunningRepository struct {
+	repository.ExecutorRepository
+	err error
+}
+
+func (r failGetExecutorRunningRepository) GetExecutorRunningBySessionID(
+	context.Context,
+	string,
+) (*models.ExecutorRunning, error) {
+	return nil, r.err
 }
 
 type failGetAfterPublishMetadataRepo struct {
@@ -1408,6 +1421,200 @@ func TestGetWorkspaceInfoForSession_ExecutorInfo(t *testing.T) {
 	}
 	if info.AgentExecutionID != "agent-exec-abc123" {
 		t.Errorf("expected AgentExecutionID 'agent-exec-abc123', got %q", info.AgentExecutionID)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_KubernetesRunningRecordOwnsExecutorAndCurrentConnection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "recorded-kubernetes", Name: "Kubernetes", Type: models.ExecutorTypeKubernetes,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "in_cluster",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "repointed-local", Name: "Local", Type: models.ExecutorTypeLocal,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s", TaskID: "task-123", ExecutorID: "repointed-local",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-k8s", SessionID: "session-k8s", TaskID: "task-123",
+		ExecutorID: "recorded-kubernetes", Runtime: agentruntime.RuntimeKubernetes,
+		AgentExecutionID: "recorded-execution",
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeconfigPath:        "/old/kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeContext:           "old-context",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "30",
+			lifecycle.MetadataKeyKubernetesNamespace:             "kandev-agents",
+			lifecycle.MetadataKeyKubernetesPodName:               "recorded-pod",
+			lifecycle.MetadataKeyKubernetesPodUID:                "recorded-pod-uid",
+			lifecycle.MetadataKeyKubernetesProfileSnapshot:       "recorded-snapshot",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s")
+
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+	if info.ExecutorType != string(models.ExecutorTypeKubernetes) || info.RuntimeName != agentruntime.RuntimeKubernetes {
+		t.Fatalf("executor projection = type %q runtime %q", info.ExecutorType, info.RuntimeName)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesPodUID]; got != "recorded-pod-uid" {
+		t.Fatalf("recorded Pod UID = %v", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesAuthMode]; got != "in_cluster" {
+		t.Fatalf("auth mode = %v, want current in_cluster", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds]; got != "45" {
+		t.Fatalf("request timeout = %v, want current 45", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesKubeconfigPath]; got != "" {
+		t.Fatalf("kubeconfig path = %v, want authoritative empty", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesKubeContext]; got != "" {
+		t.Fatalf("kube context = %v, want authoritative empty", got)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_KubernetesWithoutRunningRowUsesCurrentConnection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "kubernetes-executor", Name: "Kubernetes", Type: models.ExecutorTypeKubernetes,
+		Config: map[string]string{
+			lifecycle.MetadataKeyKubernetesAuthMode:              "kubeconfig",
+			lifecycle.MetadataKeyKubernetesKubeconfigPath:        "/etc/kandev/kubeconfig",
+			lifecycle.MetadataKeyKubernetesConfigNamespace:       "kandev-agents",
+			lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s", TaskID: "task-123", ExecutorID: "kubernetes-executor",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s")
+
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+	if info.ExecutorType != string(models.ExecutorTypeKubernetes) {
+		t.Fatalf("ExecutorType = %q, want Kubernetes", info.ExecutorType)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesKubeconfigPath]; got != "/etc/kandev/kubeconfig" {
+		t.Fatalf("kubeconfig path = %v, want current connection metadata", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyKubernetesConfigNamespace]; got != "kandev-agents" {
+		t.Fatalf("namespace = %v, want current connection metadata", got)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_KubernetesRunningRecordFailsClosedWithoutExecutor(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s-missing", TaskID: "task-123", ExecutorID: "unrelated-executor",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-k8s-missing", SessionID: "session-k8s-missing", TaskID: "task-123",
+		ExecutorID: "deleted-kubernetes", Runtime: agentruntime.RuntimeKubernetes,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s-missing")
+
+	if err == nil || !strings.Contains(err.Error(), "executor not found") {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_KubernetesRunningRecordFailsClosedAfterExecutorTypeChange(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: "changed-kubernetes", Name: "Changed", Type: models.ExecutorTypeLocal,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-k8s-changed", TaskID: "task-123", ExecutorID: "unrelated-executor",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-k8s-changed", SessionID: "session-k8s-changed", TaskID: "task-123",
+		ExecutorID: "changed-kubernetes", Runtime: agentruntime.RuntimeKubernetes,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-k8s-changed")
+
+	if err == nil || !strings.Contains(err.Error(), "executor is no longer Kubernetes") {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v", err)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_FailsClosedWhenRuntimeInventoryReadFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-inventory-error", TaskID: "task-123",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc.executors = failGetExecutorRunningRepository{
+		ExecutorRepository: repo,
+		err:                errors.New("database unavailable"),
+	}
+
+	_, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-inventory-error")
+
+	if err == nil || !strings.Contains(err.Error(), "load runtime inventory") {
+		t.Fatalf("GetWorkspaceInfoForSession() error = %v, want runtime inventory read failure", err)
 	}
 }
 

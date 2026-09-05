@@ -27,9 +27,8 @@ type QueueOutcome string
 const (
 	// QueueOutcomeQueued means a new runs row was inserted.
 	QueueOutcomeQueued QueueOutcome = "queued"
-	// QueueOutcomeDeduped means an existing row with the same
-	// IdempotencyKey already exists within the dedupe window, so nothing
-	// was inserted.
+	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
+	// already exists in the durable queue identity, so nothing was inserted.
 	QueueOutcomeDeduped QueueOutcome = "deduped"
 	// QueueOutcomeCoalesced means the request was merged into an existing
 	// queued row for the same agent + reason within the coalescing
@@ -92,6 +91,13 @@ type DecisionInfo struct {
 	DeciderID   string
 	Role        string
 	Comment     string
+
+	// SupersededAt is non-nil once a rework round has superseded this row
+	// (workflow_step_decisions.superseded_at). ListStepDecisions returns
+	// superseded rows alongside active ones so timelines render full history;
+	// a caller that needs only the currently-decided state must filter on
+	// this field itself rather than treating a non-empty result as "decided".
+	SupersededAt *time.Time
 }
 
 // ParticipantStore reads the workflow_step_participants table for an engine

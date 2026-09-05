@@ -78,11 +78,14 @@ type SwitchWorkflowCallback struct {
 }
 
 // DispatchTriggerFn is the closure SwitchWorkflowCallback uses to fire
-// on_exit / on_enter on the supplied (taskID, sessionID, trigger).
+// on_exit / on_enter on the supplied (taskID, sessionID, trigger). The source
+// step ID is carried explicitly because on_enter runs after the task row has
+// moved to the destination step, while source-owned session retirement still
+// has to use the step being left.
 //
 // The closure is responsible for building HandleInput; in production it
 // wraps Engine.HandleTrigger.
-type DispatchTriggerFn func(ctx context.Context, taskID, sessionID string, trigger Trigger, operationID string) error
+type DispatchTriggerFn func(ctx context.Context, taskID, sessionID string, trigger Trigger, operationID, sourceStepID string) error
 
 // Execute satisfies ActionCallback.
 func (c SwitchWorkflowCallback) Execute(ctx context.Context, in ActionInput) (ActionResult, error) {
@@ -106,7 +109,7 @@ func (c SwitchWorkflowCallback) Execute(ctx context.Context, in ActionInput) (Ac
 	// orchestration when the caller drives evaluation.
 	if c.Dispatch != nil {
 		exitOpID := fmt.Sprintf("%s:switch_workflow:on_exit", in.OperationID)
-		if err := c.Dispatch(ctx, in.State.TaskID, in.State.SessionID, TriggerOnExit, exitOpID); err != nil {
+		if err := c.Dispatch(ctx, in.State.TaskID, in.State.SessionID, TriggerOnExit, exitOpID, workflowSwitchSourceStepID(in)); err != nil {
 			return ActionResult{}, fmt.Errorf("switch_workflow on_exit: %w", err)
 		}
 	}
@@ -128,11 +131,18 @@ func (c SwitchWorkflowCallback) Execute(ctx context.Context, in ActionInput) (Ac
 	// Fire on_enter on the new step.
 	if c.Dispatch != nil {
 		enterOpID := fmt.Sprintf("%s:switch_workflow:on_enter", in.OperationID)
-		if err := c.Dispatch(ctx, in.State.TaskID, in.State.SessionID, TriggerOnEnter, enterOpID); err != nil {
+		if err := c.Dispatch(ctx, in.State.TaskID, in.State.SessionID, TriggerOnEnter, enterOpID, workflowSwitchSourceStepID(in)); err != nil {
 			return ActionResult{}, fmt.Errorf("switch_workflow on_enter: %w", err)
 		}
 	}
 	return ActionResult{}, nil
+}
+
+func workflowSwitchSourceStepID(in ActionInput) string {
+	if in.State.CurrentStepID != "" {
+		return in.State.CurrentStepID
+	}
+	return in.Step.ID
 }
 
 // Compile-time interface assertions.

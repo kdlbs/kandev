@@ -122,7 +122,8 @@ func (h *ShellHandlers) wsShellStatus(ctx context.Context, msg *ws.Message) (*ws
 	}
 
 	// Get shell status from agentctl
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"available": false,
@@ -175,7 +176,9 @@ func (h *ShellHandlers) wsShellSubscribe(ctx context.Context, msg *ws.Message) (
 	// This ensures client gets current shell state without duplicate broadcasts
 	// Shell output streaming is handled by the lifecycle manager via event bus
 	buffer := ""
-	if client := execution.GetAgentCtlClient(); client != nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client != nil {
 		if b, err := client.ShellBuffer(ctx); err == nil {
 			buffer = b
 		}
@@ -566,7 +569,9 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 	// GetOrEnsureExecutionForEnvironment where the check normally runs. Without
 	// this, an empty task_id plus a foreign task_environment_id stopped another
 	// user's terminal.
-	if err := h.lifecycleMgr.CheckEnvironmentAccess(ctx, req.TaskEnvironmentID); err != nil {
+	// Exec scope, not read: this path tears a PTY down. A caller who may only
+	// list terminals must not be able to stop one.
+	if err := h.lifecycleMgr.CheckEnvironmentExecAccess(ctx, req.TaskEnvironmentID); err != nil {
 		return nil, errors.New("task environment not found")
 	}
 

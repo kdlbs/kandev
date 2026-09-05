@@ -42,6 +42,8 @@ func (r *Repository) runMigrations() {
 	r.migrateRunOutcome()
 	r.migrateParentWakeIndexes()
 	r.migrateParentWakeReceiptColumns()
+	r.migrate.Apply("task_workspace_groups.ownership_generation",
+		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases
@@ -450,6 +452,11 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	// priority-migration fixtures predate them too.
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`)
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`)
+	// Same defensive add for the human assignee (docs/specs/tasks/requirements/human-assignee.md).
+	// It is applied by task/repository/sqlite ensureTeamAccessSchema() before
+	// the office migrations run on a real install, but priority-migration
+	// fixtures seed their own legacy tasks table and never see it.
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`)
 
 	for _, stmt := range taskPriorityMigrationStatements() {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {
@@ -505,12 +512,13 @@ func taskPriorityMigrationStatements() []string {
 			checkout_at TIMESTAMP,
 			checkout_run_id TEXT,
 			external_id TEXT COLLATE BINARY,
-			external_id_settled_at TIMESTAMP
+			external_id_settled_at TIMESTAMP,
+			assignee_user_id TEXT NOT NULL DEFAULT ''
 		)`,
 		// archived_by_cascade_id and external_id/external_id_settled_at are
 		// added to the task schema by task/repository/sqlite/base.go
 		// runMigrations() via idempotent ALTER ADD COLUMN calls that run
-		// BEFORE this office recreate. If the recreate omitted them from the
+		// BEFORE this office recreate, as is assignee_user_id. If the recreate omitted them from the
 		// new shape: archived_by_cascade_id missing would 500
 		// httpArchiveTask -> HandoffService.ArchiveTaskTree (the CAS update
 		// in ArchiveTaskIfActive references it); external_id missing would
@@ -525,7 +533,7 @@ func taskPriorityMigrationStatements() []string {
 			origin, project_id,
 			labels, identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at
+			external_id, external_id_settled_at, assignee_user_id
 		) SELECT
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), title, COALESCE(description,''),
@@ -539,7 +547,8 @@ func taskPriorityMigrationStatements() []string {
 			COALESCE(project_id,''),
 			COALESCE(labels,'[]'), identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at
+			external_id, external_id_settled_at,
+			COALESCE(assignee_user_id,'')
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_priority_new RENAME TO tasks`,

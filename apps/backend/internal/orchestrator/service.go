@@ -18,6 +18,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -308,6 +309,13 @@ type repoStore interface {
 type sessionExecutorStore interface {
 	// Session
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	// HasUserPromptHistory reads the durable prompt sequence without scanning
+	// the session transcript. Empty workflow steps use it to decide whether the
+	// task description is still eligible as the initial prompt.
+	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
+	// ClaimInitialPromptFallback atomically reserves the first prompt slot for
+	// an empty workflow-step task-description fallback.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error)
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
@@ -583,7 +591,10 @@ type Service struct {
 
 	// sessionAccessCheck enforces per-user workspace scoping on the
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
-	sessionAccessCheck func(ctx context.Context, sessionID string) error
+	sessionAccessCheck  func(ctx context.Context, sessionID string) error
+	sessionControlCheck func(ctx context.Context, sessionID string) error
+	sessionPromptCheck  func(ctx context.Context, sessionID string) error
+	taskPromptCheck     func(ctx context.Context, taskID string) error
 
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
 	// entry points that name a task rather than a session (session.launch,
@@ -640,6 +651,12 @@ type Service struct {
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
 	workflowStore  *workflowStore
+	// agentErrorDeps bundles the engine, callback registry and store the
+	// on_agent_error dispatch reads, published as one atomic value by
+	// initWorkflowEngine so a dispatch racing a Set* reinit never pairs a new
+	// engine with a stale registry or store (see agentErrorDispatchDeps' own
+	// doc comment).
+	agentErrorDeps atomic.Pointer[agentErrorDispatchDeps]
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
 	childCompletionLocksMu sync.Mutex
 	childCompletionLocks   map[string]*childCompletionOperationLock
@@ -662,6 +679,30 @@ type Service struct {
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
+	// officeStalledSignals dedupes the Office stranded-signal surfacing so a
+	// still-stranded signal is reported once, not on every 30-second reaper
+	// tick. Keyed by session ID, step ID and the signal's SignaledAt, so a
+	// genuinely new signal on the same session reports again. Deliberately
+	// in-memory: the surfaced state is derived and cheap to recompute, and a
+	// backend restart re-reporting each stranded signal once is preferable to
+	// a schema migration. Pruned against the live session set at the end of
+	// every complete scan, so it cannot outgrow the active-session list.
+	officeStalledSignals sync.Map
+	// officeDecisionWaiting dedupes the Office decision-waiting surfacing on
+	// the same terms as officeStalledSignals above. Keyed by task ID and step
+	// ID, so a task that moves on and later returns to a decision step (a
+	// rejection round) is reported again while a task sitting still is
+	// reported once. Pruned against the live candidate set at the end of
+	// every complete scan.
+	officeDecisionWaiting sync.Map
+	// officeStallDependenciesMu protects detector dependencies that are wired
+	// after Service.Start while the idle reaper can already read them.
+	officeStallDependenciesMu sync.RWMutex
+	// officeRunInFlight answers whether a task still has a queued or claimed
+	// run, the decision-waiting detector's false-positive guard. Nil until
+	// wired (SetOfficeRunInFlightReader); the detector reports nothing and
+	// counts a skip while it is.
+	officeRunInFlight officeRunInFlightReader
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -947,6 +988,11 @@ type Service struct {
 	// execution. Claims expire with the same bounded grace period used for
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
+	// parkedProfileSwitchStops remembers exact executions whose deliberate
+	// parked-switch lifecycle event was already consumed. It is a short-lived
+	// duplicate-delivery optimization; the durable consumed tombstone lives in
+	// session metadata.
+	parkedProfileSwitchStops sync.Map
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
 	// The spec allows at most one in-flight steer per session; a second attempt
@@ -1102,6 +1148,27 @@ type Service struct {
 	ciAutomationCancel  context.CancelFunc
 	ciAutomationStopped bool
 	ciAutomationWorkers sync.WaitGroup
+
+	// dynamicSuccessorWorkers owns the detached dynamic fallback launches. The
+	// launch has to leave the agent.failed dispatch to avoid the prompt
+	// lifecycle deadlock, but a detached goroutine must still stop mutating
+	// session state once Stop begins, so it runs under a service-owned context
+	// instead of an unbounded context.WithoutCancel.
+	dynamicSuccessorMu      sync.Mutex
+	dynamicSuccessorCtx     context.Context
+	dynamicSuccessorCancel  context.CancelFunc
+	dynamicSuccessorStopped bool
+	dynamicSuccessorWorkers sync.WaitGroup
+}
+
+func (s *Service) officeStallDependencies() (
+	engine.ParticipantStore,
+	engine.DecisionStore,
+	officeRunInFlightReader,
+) {
+	s.officeStallDependenciesMu.RLock()
+	defer s.officeStallDependenciesMu.RUnlock()
+	return s.engineParticipants, s.engineDecisions, s.officeRunInFlight
 }
 
 type RouteAction string
@@ -1112,6 +1179,10 @@ const (
 	RouteActionSkip       RouteAction = "skip"
 	RouteActionCancelWait RouteAction = "cancel_wait"
 	RouteActionStop       RouteAction = "stop"
+
+	// RouteActionLaunchFailedReason marks a task-session projection whose
+	// successor launch failed before durable recovery could be confirmed.
+	RouteActionLaunchFailedReason = "route_action_launch_failed"
 )
 
 type RouteActionRequest struct {
@@ -1271,6 +1342,7 @@ func NewService(
 	// Create the service (watcher will be created after we have handlers)
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
 	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
+	dynamicSuccessorCtx, dynamicSuccessorCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1292,6 +1364,8 @@ func NewService(
 		sendNowCancel:                sendNowCancel,
 		ciAutomationCtx:              ciAutomationCtx,
 		ciAutomationCancel:           ciAutomationCancel,
+		dynamicSuccessorCtx:          dynamicSuccessorCtx,
+		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
@@ -1355,6 +1429,8 @@ func NewService(
 	})
 	exec.SetLaunchFailureReviewEligibility(s.resolveLaunchFailureReviewEligibility)
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
+	exec.SetOnAgentProcessStarted(s.handleAgentProcessStarted)
+	exec.SetOnAgentProcessStartFailed(s.handleAgentProcessStartFailed)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
 	}
@@ -1560,6 +1636,11 @@ func (s *Service) authorizeSession(ctx context.Context, sessionID string) error 
 		return nil
 	}
 	return s.sessionAccessCheck(ctx, sessionID)
+}
+
+// SetSessionControlChecker installs the session.control boundary.
+func (s *Service) SetSessionControlChecker(check func(ctx context.Context, sessionID string) error) {
+	s.sessionControlCheck = check
 }
 
 // SessionTaskID returns the task that owns a session, or "" when the session
@@ -1803,6 +1884,11 @@ func (s *Service) initWorkflowEngine() {
 	// dependencies those methods wire in after Service creation.
 	options := append([]engine.Option{engine.WithLogger(s.logger)}, s.engineOptions...)
 	s.workflowEngine = engine.New(store, callbacks, options...)
+	s.agentErrorDeps.Store(&agentErrorDispatchDeps{
+		engine:   s.workflowEngine,
+		registry: callbacks,
+		store:    store,
+	})
 }
 
 // SetEngineRunQueue wires the engine's RunQueueAdapter dependency. Used
@@ -1816,14 +1902,18 @@ func (s *Service) SetEngineRunQueue(adapter engine.RunQueueAdapter) {
 
 // SetEngineParticipantStore wires the engine's ParticipantStore.
 func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
+	s.officeStallDependenciesMu.Lock()
 	s.engineParticipants = store
+	s.officeStallDependenciesMu.Unlock()
 	s.engineOptions = append(s.engineOptions, engine.WithParticipantStore(store))
 	s.reinitWorkflowEngine()
 }
 
 // SetEngineDecisionStore wires the engine's DecisionStore.
 func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
+	s.officeStallDependenciesMu.Lock()
 	s.engineDecisions = store
+	s.officeStallDependenciesMu.Unlock()
 	s.engineOptions = append(s.engineOptions, engine.WithDecisionStore(store))
 	s.reinitWorkflowEngine()
 }
@@ -2435,6 +2525,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
 	s.resetCIAutomationWorkers()
+	s.resetDynamicSuccessorWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -2454,6 +2545,15 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	// Recover routes orphaned at "starting" by a launch failure that never
+	// reached a terminal route status. Must run before
+	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former
+	// normalizes every STARTING/RUNNING session to WAITING_FOR_INPUT, which
+	// would make every orphaned route look like a terminal, already-explained
+	// session and hide it from this sweep; the latter can begin dispatching
+	// new launches, which would let a genuinely in-flight claim race this
+	// snapshot of "starting" routes.
+	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
@@ -2548,6 +2648,10 @@ func (s *Service) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("stopping orchestrator service")
+	// Stop detached dynamic successors before the scheduler and watcher. Their
+	// workers can otherwise observe the shutdown only after those components
+	// have already stopped, and may launch or recover a session during teardown.
+	s.stopDynamicSuccessorWorkers()
 	s.stopDynamicPolicyRecovery()
 
 	// Stop components in reverse order
@@ -2631,6 +2735,7 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	for _, running := range runningExecutors {
 		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
 			remoteRecords = append(remoteRecords, executor.RemoteStatusPollRequest{
+				TaskID:           running.TaskID,
 				SessionID:        running.SessionID,
 				Runtime:          running.Runtime,
 				AgentExecutionID: running.AgentExecutionID,

@@ -179,6 +179,9 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         submitShortcut={submitShortcut}
         composerCapability={props.composerCapability}
         composerSurface={props.composerSurface}
+        presentation={
+          responsiveBreakpoint.isMobile || responsiveBreakpoint.isTablet ? "mobile" : "desktop"
+        }
       />
     );
   }
