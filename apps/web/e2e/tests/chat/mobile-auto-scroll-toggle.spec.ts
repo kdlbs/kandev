@@ -4,6 +4,27 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { waitForStableActiveSession } from "../../helpers/session-store";
+import { routeMainWebSocketWithMessageListResponseHold } from "../../helpers/ws-response-hold";
+
+const MOBILE_END_TOLERANCE_PX = 10;
+
+function mobileOverflowScript(prefix: string): string {
+  return Array.from(
+    { length: 30 },
+    (_, index) =>
+      `e2e:message("${prefix} ${index + 1} - lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua")`,
+  ).join("\n");
+}
+
+async function switchMobileTask(testPage: Page, title: string): Promise<void> {
+  await testPage.getByTestId("mobile-session-menu").tap();
+  const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+  const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
+  await expect(taskRow).toBeVisible({ timeout: 15_000 });
+  await taskRow.tap();
+  await expect(sheet).not.toBeVisible({ timeout: 10_000 });
+}
 
 /**
  * Seed a task whose mock-agent script emits enough distinct messages to
@@ -78,6 +99,118 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await expect
       .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
       .toBeLessThan(25);
+  });
+
+  test("task switch places cached history before its refresh settles", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile cached transcript A",
+      seedData.agentProfileId,
+      {
+        description: mobileOverflowScript("Mobile environment A history"),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const taskB = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile cached transcript B",
+      seedData.agentProfileId,
+      {
+        description: mobileOverflowScript("Mobile environment B history"),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!taskA.session_id || !taskB.session_id) {
+      throw new Error("createTaskWithAgent did not return both session ids");
+    }
+    await waitForSessionDone(apiClient, taskA.id, taskA.session_id, "mobile task A should finish");
+    await waitForSessionDone(apiClient, taskB.id, taskB.session_id, "mobile task B should finish");
+
+    const refreshHold = await routeMainWebSocketWithMessageListResponseHold(testPage);
+    await testPage.goto(`/t/${taskA.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    const list = session.activeChat().locator(".chat-message-list");
+    await expect
+      .poll(async () => list.evaluate((element) => element.scrollHeight - element.clientHeight), {
+        timeout: 15_000,
+        message: "mobile task A transcript should overflow",
+      })
+      .toBeGreaterThan(200);
+
+    await switchMobileTask(testPage, "Mobile cached transcript B");
+    await waitForStableActiveSession(testPage, taskB.session_id);
+    refreshHold.holdNextLatestWindow(taskA.session_id);
+    await switchMobileTask(testPage, "Mobile cached transcript A");
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    await expect.poll(refreshHold.heldCount, { timeout: 5_000 }).toBe(1);
+    await expect
+      .poll(
+        async () =>
+          list.evaluate(
+            (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+          ),
+        {
+          timeout: 2_000,
+          message: "mobile cached transcript should be at the bottom before refresh release",
+        },
+      )
+      .toBeLessThan(MOBILE_END_TOLERANCE_PX);
+    refreshHold.releaseHeldResponse();
+    await expect
+      .poll(async () =>
+        list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+      )
+      .toBeLessThan(MOBILE_END_TOLERANCE_PX);
+
+    const targetScrollTop = await list.evaluate((element) => {
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
+      element.dispatchEvent(new Event("scroll"));
+      return element.scrollTop;
+    });
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await switchMobileTask(testPage, "Mobile cached transcript B");
+    await waitForStableActiveSession(testPage, taskB.session_id);
+    refreshHold.holdNextLatestWindow(taskA.session_id);
+    await switchMobileTask(testPage, "Mobile cached transcript A");
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    await expect.poll(refreshHold.heldCount, { timeout: 5_000 }).toBe(1);
+    await expect
+      .poll(
+        async () =>
+          Math.abs((await list.evaluate((element) => element.scrollTop)) - targetScrollTop),
+        {
+          timeout: 2_000,
+          message:
+            "mobile cached transcript should restore its saved position before refresh release",
+        },
+      )
+      .toBeLessThanOrEqual(20);
+    refreshHold.releaseHeldResponse();
+    await expect
+      .poll(async () =>
+        Math.abs((await list.evaluate((element) => element.scrollTop)) - targetScrollTop),
+      )
+      .toBeLessThanOrEqual(20);
+
+    const documentWidth = await testPage.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(documentWidth.scrollWidth).toBeLessThanOrEqual(documentWidth.clientWidth);
   });
 
   test("is reachable and toggles by touch", async ({ testPage, apiClient, seedData }) => {
