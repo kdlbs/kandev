@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KanbanDisplayDropdown } from "./kanban-display-dropdown";
-import { KANBAN_PRIORITY_TOKENS } from "@/lib/kanban/task-priority";
+import { TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
 
 const { useKanbanDisplaySettingsMock } = vi.hoisted(() => ({
   useKanbanDisplaySettingsMock: vi.fn(),
@@ -206,7 +206,7 @@ describe("KanbanDisplayDropdown — board sort and priority filter", () => {
     openDropdown();
 
     expect(screen.getByTestId("display-board-sort")).not.toBeNull();
-    KANBAN_PRIORITY_TOKENS.forEach((token) => {
+    TASK_PRIORITY_TOKENS.forEach((token) => {
       expect(screen.getByTestId(`display-priority-filter-option-${token}`)).not.toBeNull();
     });
   });

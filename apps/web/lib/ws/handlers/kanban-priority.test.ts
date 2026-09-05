@@ -135,7 +135,9 @@ describe("kanban.update handler — priority preservation", () => {
     const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
     expect(task?.priority).toBeNull();
   });
+});
 
+describe("kanban.update handler — priority preservation in the multi-workflow snapshot", () => {
   it("preserves priority in kanbanMulti snapshot", () => {
     const store = makeStore({
       kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [] },

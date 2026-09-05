@@ -191,8 +191,6 @@ type CreateTaskOpts = {
   description?: string;
   workflow_id?: string;
   workflow_step_id?: string;
-  /** One of critical/high/medium/low. Omitted leaves the service default (medium). */
-  priority?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
   repository_ids?: string[];
@@ -534,7 +532,7 @@ export class ApiClient {
 
   /** Change a task's priority via the same PATCH path the priority-picker
    *  uses, so the update travels over `task.updated` WS to an open board. */
-  async updateTaskPriority(taskId: string, priority: string): Promise<void> {
+  async updateTaskPriority(taskId: string, priority: TaskPriority): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { priority });
   }
 
@@ -545,11 +543,6 @@ export class ApiClient {
    *  desired object. */
   async updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { metadata });
-  }
-
-  /** Simulates a REST API caller (or another browser client) setting priority. */
-  async updateTaskPriority(taskId: string, priority: TaskPriority): Promise<void> {
-    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { priority });
   }
 
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {

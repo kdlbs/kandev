@@ -7,7 +7,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import { sortIdsByDisplayOrder, type DisplayOrderTask } from "@/lib/kanban/task-order";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { getEffectiveView } from "@/lib/kanban/view-registry";
-import { sortWorkflowStepsByPosition } from "@/lib/kanban/auto-hide-empty-columns";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { taskMatchesPriorityFilter } from "@/lib/kanban/priority-filter-tokens";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPriority } from "@/lib/types/http";
