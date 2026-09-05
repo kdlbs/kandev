@@ -59,6 +59,9 @@ func TestValidateFixtureRejectsForbiddenPayloadShapes(t *testing.T) {
 		"absolute path Users":                "wrote to /Users/alice/.config/kandev/token",
 		"absolute path home":                 "wrote to /home/alice/.config/kandev/token",
 		"absolute path var":                  "wrote to /var/secrets/kandev/token",
+		"absolute path Users, mixed case":    "wrote to /USERS/alice/.config/kandev/token",
+		"absolute path home, mixed case":     "wrote to /HOME/alice/.config/kandev/token",
+		"absolute path var, mixed case":      "wrote to /VAR/secrets/kandev/token",
 		"email address":                      "contact ops@example.com for access",
 		"rfc4122 uuid":                       "account 4b1f6f1a-4a2b-4c3d-8e9f-0123456789ab is suspended",
 	}
