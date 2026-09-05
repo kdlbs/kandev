@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
 
@@ -42,14 +42,16 @@ const SEARCH_PATH = "src/components/chat-input.tsx";
 
 function renderSearchResults({
   showTouchActions = false,
+  searchResults = [SEARCH_PATH],
   onAddToChatContext = vi.fn(),
 }: {
   showTouchActions?: boolean;
+  searchResults?: string[];
   onAddToChatContext?: (node: FileTreeNode) => void;
 } = {}) {
   const props: Parameters<typeof FileBrowserContentArea>[0] = {
     isSearchActive: true,
-    searchResults: [SEARCH_PATH],
+    searchResults,
     isSessionFailed: false,
     sessionError: null,
     loadState: "loaded",
@@ -109,5 +111,25 @@ describe("file browser search result context actions", () => {
         is_dir: false,
       }),
     );
+  });
+
+  it("anchors every touch action to a multi-result row with reserved name space", () => {
+    const searchResults = [
+      "src/components/long-first-search-result.tsx",
+      "src/components/long-second-search-result.tsx",
+    ];
+    renderSearchResults({ showTouchActions: true, searchResults });
+
+    const rows = screen.getAllByTestId("file-search-result");
+    const triggers = screen.getAllByTestId("file-tree-node-actions");
+    expect(rows).toHaveLength(searchResults.length);
+    expect(triggers).toHaveLength(searchResults.length);
+    for (const row of rows) {
+      expect(row.className).toContain("relative");
+      expect(row.className).toContain("pr-11");
+      expect(within(row).getByText(/long-.*-search-result/).parentElement?.className).toContain(
+        "min-w-0",
+      );
+    }
   });
 });

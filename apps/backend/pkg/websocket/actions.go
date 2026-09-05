@@ -227,6 +227,7 @@ const (
 	ActionSessionMessageUpdated         = "session.message.updated"
 	ActionSessionMessageDeleted         = "session.message.deleted"
 	ActionSessionStateChanged           = "session.state_changed"
+	ActionSessionPendingActionChanged   = "session.pending_action_changed"
 	ActionSessionActivityChanged        = "session.activity_changed"
 	ActionSessionCancellationChanged    = "session.cancellation_changed"
 	ActionTaskStatusSummaryUpdated      = "task.status_summary.updated"
@@ -366,6 +367,7 @@ const (
 	ActionUserSettingsUpdate               = "user.settings.update"
 	ActionUserSettingsUpdated              = "user.settings.updated"
 	ActionUserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
+	ActionSessionHostnameResolved          = "auth.session.hostname.resolved"
 
 	// ActionPluginUserStateUpdated notifies the writing user's other WS
 	// connections that one of their per-user plugin storage keys changed

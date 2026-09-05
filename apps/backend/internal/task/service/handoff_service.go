@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/taskdependencies"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -20,6 +21,7 @@ import (
 // in sync with internal/mcp/handlers/workspace_policy.go.
 const (
 	workspaceModeInheritParent = "inherit_parent"
+	workspaceModeNewWorkspace  = "new_workspace"
 	workspaceModeSharedGroup   = "shared_group"
 	orderingSequential         = "sequential"
 )
@@ -48,6 +50,47 @@ type WorkspaceGroupRepo interface {
 	// produces a worktree on disk.
 	MarkWorkspaceMaterialized(ctx context.Context, id string, m orchmodels.MaterializedWorkspace) error
 	UpdateWorkspaceGroupRestoreStatus(ctx context.Context, id, status, errStr string) error
+}
+
+type workspaceGroupCleanupGenerationRepository interface {
+	ClaimWorkspaceGroupCleanup(ctx context.Context, id string, generation int64) (bool, error)
+	CompleteWorkspaceGroupCleanup(
+		ctx context.Context,
+		id string,
+		generation int64,
+		status, errStr string,
+		cleanedAt *time.Time,
+	) (bool, error)
+}
+
+func claimWorkspaceGroupCleanup(
+	ctx context.Context,
+	repo WorkspaceGroupRepo,
+	group *orchmodels.WorkspaceGroup,
+) (bool, error) {
+	if guarded, ok := repo.(workspaceGroupCleanupGenerationRepository); ok {
+		return guarded.ClaimWorkspaceGroupCleanup(ctx, group.ID, group.OwnershipGeneration)
+	}
+	err := repo.UpdateWorkspaceGroupCleanupStatus(
+		ctx, group.ID, orchmodels.WorkspaceCleanupStatusPending, "", nil,
+	)
+	return err == nil, err
+}
+
+func completeWorkspaceGroupCleanup(
+	ctx context.Context,
+	repo WorkspaceGroupRepo,
+	group *orchmodels.WorkspaceGroup,
+	status, errStr string,
+	cleanedAt *time.Time,
+) error {
+	if guarded, ok := repo.(workspaceGroupCleanupGenerationRepository); ok {
+		_, err := guarded.CompleteWorkspaceGroupCleanup(
+			ctx, group.ID, group.OwnershipGeneration, status, errStr, cleanedAt,
+		)
+		return err
+	}
+	return repo.UpdateWorkspaceGroupCleanupStatus(ctx, group.ID, status, errStr, cleanedAt)
 }
 
 // SessionWorktreeReader is the slim repository surface HandoffService
@@ -207,6 +250,7 @@ type HandoffService struct {
 	cleaner            WorkspaceCleaner
 	runCanceller       RunCanceller
 	eventPublisher     TaskEventPublisher
+	vacancyReconciler  VacatedStepReconciler
 	resourceCleaner    TaskResourceCleaner
 	taskAccessCheck    func(ctx context.Context, taskID string) error
 	comments           CommentReader
@@ -229,6 +273,20 @@ type HandoffService struct {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskDeleted(ctx context.Context, task *models.Task)
+}
+
+// VacatedStepReconciler backfills capacity in a workflow step after admitted
+// work leaves it.
+type VacatedStepReconciler interface {
+	ReconcileVacatedStep(ctx context.Context, vacatedStepID string)
+}
+
+type cascadeArchiveTaskRepository interface {
+	ArchiveTaskIfActiveWithVacatedStep(ctx context.Context, id, cascadeID string) (string, bool, error)
+}
+
+type cascadeDeleteTaskRepository interface {
+	DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error)
 }
 
 // taskSessionCancellationPublisher is the optional event side effect paired
@@ -260,6 +318,12 @@ func (s *HandoffService) SetWorkspaceCleaner(c WorkspaceCleaner) {
 // (legacy and test wiring).
 func (s *HandoffService) SetTaskEventPublisher(p TaskEventPublisher) {
 	s.eventPublisher = p
+}
+
+// SetVacatedStepReconciler wires post-mutation WIP capacity reconciliation.
+// Archive and delete remain committed if reconciliation cannot fill a slot.
+func (s *HandoffService) SetVacatedStepReconciler(r VacatedStepReconciler) {
+	s.vacancyReconciler = r
 }
 
 // TaskResourceCleaner tears down a task's runtime resources (container,
@@ -384,15 +448,33 @@ func (s *HandoffService) AttachWorkspacePolicy(ctx context.Context, taskID, pare
 	if !pol.NeedsAttachment() {
 		return nil
 	}
-	if err := s.attachWorkspaceGroup(ctx, taskID, parentID, pol); err != nil {
-		return err
-	}
 	if pol.ParentOrdering == orderingSequential && parentID != "" {
 		if err := s.attachSequentialBlocker(ctx, taskID, parentID); err != nil {
 			return err
 		}
 	}
-	return nil
+	return s.attachWorkspaceGroup(ctx, taskID, parentID, pol)
+}
+
+// ReleaseWorkspacePolicy removes the task's active workspace-group
+// membership after a create rollback. The membership audit row is retained,
+// and normal group cleanup evaluation runs so a group created solely for the
+// failed task cannot remain active forever.
+func (s *HandoffService) ReleaseWorkspacePolicy(ctx context.Context, taskID, reason string) error {
+	if s.wsGroups == nil || taskID == "" {
+		return nil
+	}
+	group, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if group == nil {
+		return nil
+	}
+	if err := s.wsGroups.ReleaseWorkspaceGroupMember(ctx, group.ID, taskID, reason, ""); err != nil {
+		return err
+	}
+	return s.evaluateWorkspaceGroupCleanup(ctx, group.ID)
 }
 
 func (s *HandoffService) attachWorkspaceGroup(ctx context.Context, taskID, parentID string, pol WorkspacePolicy) error {
@@ -487,6 +569,8 @@ func (s *HandoffService) attachSequentialBlocker(ctx context.Context, taskID, pa
 	mu := s.parentLock.lockFor(parentID)
 	mu.Lock()
 	defer mu.Unlock()
+	edgesUnlock := taskdependencies.AcquireMutationLock()
+	defer edgesUnlock()
 
 	siblings, err := s.tasks.ListChildren(ctx, parentID)
 	if err != nil {

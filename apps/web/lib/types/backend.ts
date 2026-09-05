@@ -110,6 +110,8 @@ export type TaskEventPayload = {
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  primary_agent_name?: string | null;
+  primary_agent_profile_id?: string | null;
   // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
   // absent/null when no session is running.
   foreground_activity?: ForegroundActivity | null;
@@ -118,6 +120,8 @@ export type TaskEventPayload = {
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
   updated_at?: string;
+  created_at?: string;
+  labels?: string | string[] | null;
   is_ephemeral: boolean;
   /** Task origin (e.g. "manual", "automation_run"). */
   origin?: string;
@@ -365,6 +369,12 @@ export type UserSettingsUpdatedPayload = Omit<
   repository_ids: string[];
 };
 
+export type SessionHostnameResolvedPayload = {
+  ip: string;
+  hostname: string;
+  resolved_at: string | null;
+};
+
 // Session runtime payload types (extracted to reduce file size)
 export {
   type AuthMethodInfoPayload,
@@ -484,6 +494,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
       "user.agent_profile_recent_use.updated",
       AgentProfileRecentUseApiRecord
     >;
+    "auth.session.hostname.resolved": BackendMessage<
+      "auth.session.hostname.resolved",
+      SessionHostnameResolvedPayload
+    >;
 
     "secrets.created": BackendMessage<"secrets.created", SecretListItem>;
     "secrets.updated": BackendMessage<"secrets.updated", SecretListItem>;
@@ -516,6 +530,7 @@ export type {
   TaskSessionStateChangedPayload,
   TaskSessionActivityChangedPayload,
   TaskSessionCancellationChangedPayload,
+  SessionPendingActionChangedPayload,
   TaskSessionNotificationPayload,
   TaskSessionAgentctlPayload,
   TurnEventPayload,

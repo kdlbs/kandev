@@ -25,6 +25,7 @@ This repair spec amends [Dynamic Agent Routing](dynamic-agent-routing.md). It tu
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001.4:** **GIVEN** a utility call attached to task session `S`, **WHEN** two calls start, **THEN** they use different `utility:` route identities and neither consumes task route state.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001.5:** **GIVEN** two concrete profiles share one proven credential binding, **WHEN** one opens a quota circuit, **THEN** new selections skip that resource and a single expired probe controls recovery.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001.6:** **GIVEN** the flag is disabled, **WHEN** a task picker is opened, **THEN** dynamic profiles are absent while existing dynamic settings and sessions are retained.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001.7:** **GIVEN** the flag is disabled, **WHEN** the backend restarts with a persisted `retry_wait` or `waiting_for_reset` route, **THEN** no recovery timer is armed and no provider is launched, while the durable route state is retained.
 
 ## Migrated source detail
 
@@ -51,6 +52,10 @@ repair.
 - Every utility invocation receives a unique transient route identity, even
   when its template is attached to a task session. Utility fallback also
   requires the same explicit pre-result evidence.
+- The flag gates the durable recovery scheduler and the manual route-action
+  launch path, not only new-route selection. A disabled flag refuses to arm a
+  recovery timer, refuses to resume a due wait, and refuses a manual launch,
+  leaving the persisted route state untouched.
 
 ## Shared health contract
 
@@ -92,6 +97,10 @@ repair.
   single expired probe controls recovery.
 - **GIVEN** the flag is disabled, **WHEN** a task picker is opened, **THEN**
   dynamic profiles are absent while existing dynamic settings and sessions are
+  retained.
+- **GIVEN** the flag is disabled, **WHEN** the backend restarts with a
+  persisted `retry_wait` or `waiting_for_reset` route, **THEN** no recovery
+  timer is armed and no provider is launched, while the durable route state is
   retained.
 
 ## Scope boundary

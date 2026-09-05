@@ -41,6 +41,12 @@ import (
 
 // newTestTaskService creates a real task service with a temporary file-backed SQLite DB for integration tests.
 // Returns the service and the raw repo (for seeding data).
+type testWorkspacePolicyAttacher struct{}
+
+func (testWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, service.WorkspacePolicy) error {
+	return nil
+}
+
 func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository) {
 	svc, repo, _ := newTestTaskServiceWithEventBus(t)
 	return svc, repo
@@ -101,6 +107,7 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 		Environments:     repo,
 		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	return svc, repo, eventBus
 }
 
@@ -152,6 +159,7 @@ func newTestTaskServiceWithWorkflowDB(t *testing.T) (
 		Environments:     repo,
 		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
 	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo, sqlxDB

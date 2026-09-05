@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/hostnames"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -85,6 +86,7 @@ import (
 	officeapprovals "github.com/kandev/kandev/internal/office/approvals"
 	officechannels "github.com/kandev/kandev/internal/office/channels"
 	officeconfig "github.com/kandev/kandev/internal/office/config"
+	officeconfigsync "github.com/kandev/kandev/internal/office/configsync"
 	officecosts "github.com/kandev/kandev/internal/office/costs"
 	officemodelsdev "github.com/kandev/kandev/internal/office/costs/modelsdev"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
@@ -415,6 +417,37 @@ func startServices( //nolint:cyclop
 		return false
 	}
 	warnIfExposedWithoutAuth(cfg, services.Auth, log)
+	hostnameStore, err := hostnames.NewStore(dbPool.Writer(), dbPool.Reader())
+	if err != nil {
+		log.Error("Failed to initialize session hostname cache", zap.Error(err))
+		return false
+	}
+	hostnameResolver := hostnames.NewResolver(
+		hostnameStore,
+		func(settingsCtx context.Context, userID string) (bool, error) {
+			settings, err := repos.User.GetUserSettings(settingsCtx, userID)
+			if err != nil {
+				return false, err
+			}
+			return settings.ResolveSessionHostnames, nil
+		},
+		services.Auth.SessionIPs,
+		eventBus,
+		log,
+	)
+	hostnameResolver.Start(ctx)
+	addCleanup(hostnameResolver.Close)
+	hostnameSettingsSubscription, err := eventBus.QueueSubscribe(
+		events.UserSettingsUpdated,
+		"session-hostname-resolver",
+		hostnameResolver.HandleUserSettingsUpdated,
+	)
+	if err != nil {
+		log.Error("Failed to subscribe session hostname resolver to user settings", zap.Error(err))
+		return false
+	}
+	addCleanup(hostnameSettingsSubscription.Unsubscribe)
+	services.SessionHostnameResolver = hostnameResolver
 
 	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
 		// Agent registry seeding is a hard prerequisite for every
@@ -756,6 +789,16 @@ func startAgentInfrastructure(
 		workflowSyncPoller.Start(ctx)
 		addRuntimeCleanup(func() error { workflowSyncPoller.Stop(); return nil })
 		log.Info("Workflow sync poller started")
+	}
+
+	// Start Office config sync poller: periodically pulls agent/skill/
+	// project/routine definition files from each workspace's configured
+	// GitHub or GitLab repo and reconciles Office's tables with them.
+	if services.OfficeSvcs != nil && services.OfficeSvcs.ConfigSync != nil {
+		officeConfigSyncPoller := officeconfigsync.NewPoller(services.OfficeSvcs.ConfigSync, log)
+		officeConfigSyncPoller.Start(ctx)
+		addRuntimeCleanup(func() error { officeConfigSyncPoller.Stop(); return nil })
+		log.Info("Office config sync poller started")
 	}
 
 	// Start the plugin system's event delivery and health monitor
@@ -1392,6 +1435,9 @@ func wireOfficeSvcsDependencies(
 	officeSessionTerm := orchestratorSvc.OfficeSessionTerminator()
 	services.OfficeSvcs.Dashboard.SetSessionTerminator(officeSessionTerm)
 	services.OfficeSvcs.Agents.SetSessionTerminator(officeSessionTerm)
+	if services.OfficeSvcs.ConfigSync != nil {
+		services.OfficeSvcs.ConfigSync.SetSessionTerminator(officeSessionTerm)
+	}
 	// Wire the failure notifier so reassignments auto-dismiss the
 	// prior (task, agent) inbox entry.
 	services.OfficeSvcs.Dashboard.SetFailureNotifier(services.Office)
@@ -2052,6 +2098,7 @@ func buildOfficeFeatureServices(
 	schedulerSvc := officescheduler.NewSchedulerService(repo, log, services.Office)
 	labelSvc := officelabels.NewLabelService(repo)
 	gitMgr := configloader.NewGitManager(cfgLoader.BasePath(), cfgLoader, log)
+	configSyncSvc := initOfficeConfigSyncService(repo, services.GitHub, services.GitLab, log)
 
 	return &office.Services{
 		Agents:       agentSvc,
@@ -2062,6 +2109,7 @@ func buildOfficeFeatureServices(
 		Approvals:    approvalSvc,
 		Channels:     channelSvc,
 		Config:       configSvc,
+		ConfigSync:   configSyncSvc,
 		Dashboard:    dashboardSvc,
 		Documents:    documentSvc,
 		Labels:       labelSvc,
@@ -2073,6 +2121,30 @@ func buildOfficeFeatureServices(
 		GitManager:   gitMgr,
 		KandevHome:   homeDir,
 	}
+}
+
+// initOfficeConfigSyncService wires the Office config sync service. Either
+// integration may be nil; a workspace configured for the unavailable one
+// gets an actionable failure at sync time rather than the service failing to
+// boot (same non-fatal convention as initWorkflowSyncService). Returns nil
+// only if the store itself fails to initialize.
+func initOfficeConfigSyncService(
+	repo *officesqlite.Repository, githubSvc *githubpkg.Service, gitlabSvc *gitlabpkg.Service, log *logger.Logger,
+) *officeconfigsync.Service {
+	var githubClients officeconfigsync.GitHubClientProvider
+	if githubSvc != nil {
+		githubClients = githubSvc
+	}
+	var gitlabClients officeconfigsync.GitLabClientProvider
+	if gitlabSvc != nil {
+		gitlabClients = gitlabSvc
+	}
+	svc, _, err := officeconfigsync.Provide(repo.Writer(), repo.ReaderDB(), repo, githubClients, gitlabClients, log)
+	if err != nil {
+		log.Warn("office config sync service initialization failed (non-fatal)", zap.Error(err))
+		return nil
+	}
+	return svc
 }
 
 // buildOfficeDashboardService constructs the dashboard service and wires

@@ -8,7 +8,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | --- | --- | --- | --- |
 | Agents | [README](agents/README.md) | complete | 27 requirements, 17 designs |
 | Auth | [README](auth/README.md) | complete | 7 requirements, 2 designs |
-| CLI | [README](cli/README.md) | complete | 2 requirements, 0 designs |
+| CLI | [README](cli/README.md) | complete | 3 requirements, 1 designs |
 | Costs | [README](costs/README.md) | complete | 2 requirements, 0 designs |
 | Desktop | [README](desktop/README.md) | complete | 1 requirements, 1 designs |
 | Executors | [README](executors/README.md) | complete | 3 requirements, 6 designs |

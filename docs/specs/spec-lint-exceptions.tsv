@@ -3,4 +3,5 @@ docs/specs/cross-workspace-task-handoff/spec.md	109154
 docs/specs/office-task-content-editing/spec.md	84103
 docs/specs/task-cost-ledger/spec.md	91931
 docs/specs/task-delivery-ledger/spec.md	157207
+docs/specs/workflow-on-agent-error-dispatch/spec.md	64431
 docs/specs/workflow-on-enter-action-dispatch/spec.md	116827

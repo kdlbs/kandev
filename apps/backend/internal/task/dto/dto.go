@@ -194,6 +194,7 @@ type TaskDTO struct {
 	PrimaryExecutorType         *string                  `json:"primary_executor_type,omitempty"`
 	PrimaryExecutorName         *string                  `json:"primary_executor_name,omitempty"`
 	PrimaryAgentName            *string                  `json:"primary_agent_name,omitempty"`
+	PrimaryAgentProfileID       *string                  `json:"primary_agent_profile_id,omitempty"`
 	PrimaryWorkingDirectory     *string                  `json:"primary_working_directory,omitempty"`
 	PrimarySessionState         *string                  `json:"primary_session_state,omitempty"`
 	PrimarySessionPendingAction *string                  `json:"primary_session_pending_action"`
@@ -801,7 +802,7 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, models.ReviewStatusNone, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
@@ -814,6 +815,7 @@ func FromTaskWithSessionInfo(
 	primaryExecutorType *string,
 	primaryExecutorName *string,
 	primaryAgentName *string,
+	primaryAgentProfileID *string,
 	primaryWorkingDirectory *string,
 	primarySessionState *string,
 	primarySessionPendingAction *string,
@@ -873,6 +875,7 @@ func FromTaskWithSessionInfo(
 		PrimaryExecutorType:         primaryExecutorType,
 		PrimaryExecutorName:         primaryExecutorName,
 		PrimaryAgentName:            primaryAgentName,
+		PrimaryAgentProfileID:       primaryAgentProfileID,
 		PrimaryWorkingDirectory:     primaryWorkingDirectory,
 		PrimarySessionState:         primarySessionState,
 		PrimarySessionPendingAction: primarySessionPendingAction,

@@ -119,6 +119,13 @@ type taskEnvironmentMaterializationFinalizer interface {
 	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
 }
 
+// taskEnvironmentTransitionPersister commits an existing environment rebind
+// and its repository inventory as one durable operation. Legacy adapters may
+// omit it and use the compatibility persistence path in executor_execute.go.
+type taskEnvironmentTransitionPersister interface {
+	PersistTaskEnvironmentTransition(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, bool) error
+}
+
 // workspaceBindingTaskSessionCreator elects the single materializing session
 // and inserts its creating environment in the same transaction as the session.
 // It is optional for lightweight test/legacy stores; production repositories
@@ -735,6 +742,15 @@ type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSes
 // its default FAILED state updates.
 type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) (handled bool)
 
+// AgentProcessStartedFunc is called after the agent process starts
+// successfully and the executor has run its normal success callback.
+type AgentProcessStartedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string)
+
+// AgentProcessStartFailedFunc is called after the executor has handled a
+// failed process start. It lets an owning subsystem settle any durable claim
+// that was made before the asynchronous start began.
+type AgentProcessStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error)
+
 // LaunchFailedFunc is called when session launch fails before the agent starts.
 // repositoryID identifies the repository whose launch failed. Useful for
 // creating repository-scoped user-facing status messages tied to launch errors.
@@ -845,6 +861,10 @@ type Executor struct {
 	// delegates failure handling to this callback, allowing the orchestrator
 	// to detect auth errors and treat them as recoverable.
 	onAgentStartFailed AgentStartFailedFunc
+	// Callback after a process start succeeds or fails. These callbacks run
+	// after the executor's normal lifecycle bookkeeping.
+	onAgentProcessStarted     AgentProcessStartedFunc
+	onAgentProcessStartFailed AgentProcessStartFailedFunc
 
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
@@ -1148,6 +1168,18 @@ func (e *Executor) SetPRBaseResolver(resolver PRBaseResolver) {
 // recoverable instead of terminal failures.
 func (e *Executor) SetOnAgentStartFailed(fn AgentStartFailedFunc) {
 	e.onAgentStartFailed = fn
+}
+
+// SetOnAgentProcessStarted sets a callback invoked after asynchronous process
+// startup succeeds and the session has been reconciled to RUNNING.
+func (e *Executor) SetOnAgentProcessStarted(fn AgentProcessStartedFunc) {
+	e.onAgentProcessStarted = fn
+}
+
+// SetOnAgentProcessStartFailed sets a callback invoked after asynchronous
+// process startup fails and the normal failure handler has run.
+func (e *Executor) SetOnAgentProcessStartFailed(fn AgentProcessStartFailedFunc) {
+	e.onAgentProcessStartFailed = fn
 }
 
 // SetOnPrimarySessionSet sets a callback for when the first session for a task

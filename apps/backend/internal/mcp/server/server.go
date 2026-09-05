@@ -37,6 +37,10 @@ type BackendClient interface {
 	RequestPayload(ctx context.Context, action string, payload, result interface{}) error
 }
 
+type backendSessionSetter interface {
+	SetSessionID(sessionID string)
+}
+
 // MCP mode constants control which tools are registered.
 const (
 	// ModeTask registers kanban, plan, and interaction tools (default for task-solving agents).
@@ -223,6 +227,9 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 
 func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context, options ...ServerOption) *Server {
 	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
+	if setter, ok := backend.(backendSessionSetter); ok {
+		setter.SetSessionID(sessionID)
+	}
 	s := &Server{
 		backend:                backend,
 		sessionID:              sessionID,

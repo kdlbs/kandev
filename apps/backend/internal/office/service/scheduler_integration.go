@@ -937,6 +937,15 @@ func (si *SchedulerIntegration) buildPromptContext(
 		}
 	}
 
+	if reason == RunReasonTaskChangesRequested {
+		pc.ReviewFeedback = parsed["decision_comment"]
+		if pc.ReviewFeedback == "" {
+			// Keep compatibility with older queued runs that used the
+			// generic feedback field before decision_comment was added.
+			pc.ReviewFeedback = parsed["feedback"]
+		}
+	}
+
 	if reason == RunReasonTaskComment {
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
 	}

@@ -24,6 +24,17 @@ type labelFetcher interface {
 	ListLabelsForTasks(ctx context.Context, taskIDs []string) (map[string][]*sqlite.Label, error)
 }
 
+// ActiveSourceChecker reports whether a workspace has an Office config sync
+// source configured, so Handler can refuse the git write routes that would
+// otherwise race a second reconciler over the same workspace files
+// (AC-OFFICE-CONFIG-SYNC-005.2/005.2b). Declared locally so this package
+// gains no import to internal/office/configsync; the composition root
+// (internal/office/routes.go) supplies the real implementation via
+// configsync.Service.HasActiveSource.
+type ActiveSourceChecker interface {
+	HasActiveSource(ctx context.Context, workspaceID string) (bool, error)
+}
+
 // Handler provides HTTP handlers for dashboard, inbox, activity, run,
 // task search, git, and meta routes.
 type Handler struct {
@@ -33,6 +44,7 @@ type Handler struct {
 	runDetail    RunDetailRepo
 	agentSummary AgentSummaryRepository
 	handoff      *taskservice.HandoffService
+	guard        ActiveSourceChecker
 	logger       *logger.Logger
 }
 
@@ -46,12 +58,15 @@ type Handler struct {
 // handoff may be nil in tests that never exercise the agent-caller comment
 // read branch; an agent request against a nil handoff responds 503 rather
 // than panicking (mirrors the runDetail/agentSummary nil-dependency pattern).
-func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, log *logger.Logger) *Handler {
+// guard may be nil (no config sync service wired), in which case no
+// workspace is ever treated as having an active config sync source.
+func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, guard ActiveSourceChecker, log *logger.Logger) *Handler {
 	h := &Handler{
 		svc:     svc,
 		labels:  labelRepo,
 		gitMgr:  gitMgr,
 		handoff: handoff,
+		guard:   guard,
 		logger:  log.WithFields(zap.String("component", "office-dashboard-handler")),
 	}
 	if r, ok := labelRepo.(RunDetailRepo); ok {
@@ -64,8 +79,8 @@ func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloa
 }
 
 // RegisterRoutes registers all dashboard-related routes on the given router group.
-func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, log *logger.Logger) {
-	h := NewHandler(svc, labelRepo, gitMgr, handoff, log)
+func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, guard ActiveSourceChecker, log *logger.Logger) {
+	h := NewHandler(svc, labelRepo, gitMgr, handoff, guard, log)
 
 	api.GET("/meta", h.getMeta)
 	api.GET("/workspaces/:wsId/dashboard", h.getDashboard)

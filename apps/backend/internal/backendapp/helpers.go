@@ -764,6 +764,7 @@ func registerRoutes(p routeParams) {
 	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
+	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
@@ -781,11 +782,20 @@ func registerRoutes(p routeParams) {
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	handoffSvc.SetVacatedStepReconciler(p.taskSvc)
 	// Per-user scoping for the cascade is installed by
 	// TaskHandlers.SetHandoffService, which is the call that makes the archive /
 	// delete routes prefer the cascade over the guarded Service methods.
 	if p.services.Office != nil {
 		p.services.Office.SetWorkspaceGroupCleaner(handoffSvc)
+	}
+	// Config sync's own tables (office_config_sync_configs,
+	// office_config_sync_manifest) have no FK/cascade onto the workspace
+	// row, so DeleteWorkspace must release them explicitly or the poller
+	// keeps running against — and resurrecting entities into — a deleted
+	// workspace (see the "Workspace deletion side tables" convention).
+	if p.services.Office != nil && p.services.OfficeSvcs != nil && p.services.OfficeSvcs.ConfigSync != nil {
+		p.services.Office.SetConfigSyncCleaner(p.services.OfficeSvcs.ConfigSync)
 	}
 	// Cascade archive/delete must tear down runtime resources
 	// (container, sandbox, worktree, executor_running rows) for every
@@ -853,7 +863,7 @@ func registerRoutes(p routeParams) {
 	registerTaskRoutes(p, planService, handoffSvc)
 	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {
-		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
+		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.services.SessionHostnameResolver, p.log)
 	}
 
 	// /health is a liveness probe: it answers 200 unconditionally, matching
@@ -1041,9 +1051,13 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	if route.Route == webapp.RouteTaskDetail && routeData == nil && canLoadTaskDetailFallback(req, p.authSvc) {
 		bootStateBuilder{p: p}.addHomeKanbanRouteState(ctx, req, initialState)
 	}
+	runtime := webRuntimeConfig(p.devMode, p.webTitlePrefix, req)
+	if p.systemSvc != nil && p.systemSvc.Info != nil {
+		runtime.BootID = p.systemSvc.Info.Info().BootID
+	}
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode, p.webTitlePrefix, req),
+		runtime,
 		initialState,
 	)
 	payload.RouteData = routeData
@@ -1278,7 +1292,8 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.router, p.gateway.Dispatcher, p.taskSvc,
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
-	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	taskhandlers.RegisterWorkspaceFileRoutes(p.router, processHandlers)
 	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
 	if p.services.Share != nil {
