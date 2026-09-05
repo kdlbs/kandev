@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeagentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -583,6 +584,60 @@ func TestSetSessionPlanMode(t *testing.T) {
 func TestProcessOnExit(t *testing.T) {
 	ctx := context.Background()
 
+	t.Run("runs workflow scripts in order for the source session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		processes := &workflowScriptProcessFake{}
+		runner := newWorkflowScriptRunner(&workflowScriptRunStoreFake{}, processes, &workflowScriptMessageFake{}, testLogger())
+		agentManager := &mockAgentManager{getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-source", nil
+		}}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+		svc.workflowScripts = runner
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		step := &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
+			Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{
+				{Type: wfmodels.OnExitRunScript, Config: map[string]interface{}{
+					"command": "./cleanup.sh", "timeout_seconds": 1, "failure_policy": "continue",
+				}},
+			}},
+		}
+
+		if err := svc.processOnExit(ctx, "t1", session, step, "transition-1"); err != nil {
+			t.Fatalf("processOnExit: %v", err)
+		}
+		if len(processes.starts) != 1 || processes.starts[0].SessionID != "s1" || processes.starts[0].ExecutionID != "execution-source" {
+			t.Fatalf("source process binding = %+v", processes.starts)
+		}
+	})
+
+	t.Run("returns a blocking script failure to the transition caller", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		processes := &workflowScriptProcessFake{process: &runtimeagentctl.ProcessInfo{
+			ID: "process-failed", SessionID: "s1", Status: "failed", ExitCode: ptr(9),
+		}}
+		runner := newWorkflowScriptRunner(&workflowScriptRunStoreFake{}, processes, &workflowScriptMessageFake{}, testLogger())
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.workflowScripts = runner
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		step := &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
+			Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{
+				{Type: wfmodels.OnExitRunScript, Config: map[string]interface{}{
+					"command": "./cleanup.sh", "timeout_seconds": 1, "failure_policy": "block",
+				}},
+			}},
+		}
+
+		err := svc.processOnExit(ctx, "t1", session, step, "transition-1")
+		var blocked *WorkflowScriptBlockedError
+		if !errors.As(err, &blocked) {
+			t.Fatalf("error = %v, want WorkflowScriptBlockedError", err)
+		}
+	})
+
 	t.Run("no actions is a no-op", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
@@ -596,7 +651,9 @@ func TestProcessOnExit(t *testing.T) {
 		}
 
 		// Should not panic or modify anything
-		svc.processOnExit(ctx, "t1", session, step)
+		if err := svc.processOnExit(ctx, "t1", session, step, "transition-1"); err != nil {
+			t.Fatalf("processOnExit: %v", err)
+		}
 	})
 
 	t.Run("disable_plan_mode clears plan mode", func(t *testing.T) {
@@ -619,7 +676,9 @@ func TestProcessOnExit(t *testing.T) {
 			},
 		}
 
-		svc.processOnExit(ctx, "t1", session, step)
+		if err := svc.processOnExit(ctx, "t1", session, step, "transition-1"); err != nil {
+			t.Fatalf("processOnExit: %v", err)
+		}
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
@@ -649,7 +708,9 @@ func TestProcessOnExit(t *testing.T) {
 			},
 		}
 
-		svc.processOnExit(ctx, "t1", session, step)
+		if err := svc.processOnExit(ctx, "t1", session, step, "transition-1"); err != nil {
+			t.Fatalf("processOnExit: %v", err)
+		}
 
 		// plan_mode should still be set
 		updated, _ := repo.GetTaskSession(ctx, "s1")

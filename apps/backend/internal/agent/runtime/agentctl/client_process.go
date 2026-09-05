@@ -11,6 +11,7 @@ import (
 
 // StartProcessRequest contains the parameters for starting a process.
 type StartProcessRequest struct {
+	RequestID      string            `json:"request_id,omitempty"`
 	SessionID      string            `json:"session_id"`
 	Kind           ProcessKind       `json:"kind"`
 	ScriptName     string            `json:"script_name,omitempty"`
@@ -18,6 +19,7 @@ type StartProcessRequest struct {
 	WorkingDir     string            `json:"working_dir"`
 	Env            map[string]string `json:"env,omitempty"`
 	BufferMaxBytes int64             `json:"buffer_max_bytes,omitempty"`
+	Timeout        time.Duration     `json:"timeout,omitempty"`
 }
 
 // ProcessOutputChunk is a single chunk of process output.
@@ -29,17 +31,18 @@ type ProcessOutputChunk struct {
 
 // ProcessInfo contains information about a running or completed process.
 type ProcessInfo struct {
-	ID         string               `json:"id"`
-	SessionID  string               `json:"session_id"`
-	Kind       ProcessKind          `json:"kind"`
-	ScriptName string               `json:"script_name,omitempty"`
-	Command    string               `json:"command"`
-	WorkingDir string               `json:"working_dir"`
-	Status     ProcessStatus        `json:"status"`
-	ExitCode   *int                 `json:"exit_code,omitempty"`
-	StartedAt  time.Time            `json:"started_at"`
-	UpdatedAt  time.Time            `json:"updated_at"`
-	Output     []ProcessOutputChunk `json:"output,omitempty"`
+	ID              string               `json:"id"`
+	SessionID       string               `json:"session_id"`
+	Kind            ProcessKind          `json:"kind"`
+	ScriptName      string               `json:"script_name,omitempty"`
+	Command         string               `json:"command"`
+	WorkingDir      string               `json:"working_dir"`
+	Status          ProcessStatus        `json:"status"`
+	ExitCode        *int                 `json:"exit_code,omitempty"`
+	StartedAt       time.Time            `json:"started_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
+	Output          []ProcessOutputChunk `json:"output,omitempty"`
+	OutputTruncated bool                 `json:"output_truncated,omitempty"`
 }
 
 type startProcessResponse struct {

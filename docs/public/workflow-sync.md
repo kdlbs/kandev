@@ -108,6 +108,8 @@ workflows:
 
 Commit the file, then use **Sync now**. The status card reports created, updated, deleted, warning, or unchanged results.
 
+`run_script` actions are portable workflow definitions, so sync reads and stores their command, timeout, policy, and order like any other supported event action. Sync never executes a script. A later task lifecycle can execute it in the session and executor workspace selected by that task. Review synchronized workflow files as executable code and grant repository and executor access only to workflows you trust.
+
 ## Reconciliation rules
 
 A synced workflow is keyed by its exact repository `source_path` and exact workflow `name`. A matched workflow keeps its database ID. Within it, steps are matched by exact name and keep their IDs, so tasks remain attached when a prompt, color, event, WIP rule, profile, or position changes.

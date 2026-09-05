@@ -12,6 +12,7 @@ import (
 type MachineState struct {
 	TaskID          string
 	SessionID       string
+	ExecutionID     string
 	WorkflowID      string
 	CurrentStepID   string
 	SessionState    string
@@ -35,6 +36,10 @@ type ActionInput struct {
 	// idempotency key (e.g. queue_run) should derive theirs from this
 	// value combined with action-specific salt.
 	OperationID string
+	// ActionPosition is the zero-based position in the trigger's ordered
+	// action list. Durable action coordinators include it in their occurrence
+	// identity so multiple scripts on one trigger remain distinct.
+	ActionPosition int
 	// EntryID is the step-transition ledger row's own identifier for the
 	// arrival being dispatched, set only by DispatchStepEntry. Callbacks
 	// that need a durable, entry-scoped idempotency key (queue_run,
@@ -107,6 +112,10 @@ type HandleInput struct {
 
 // HandleResult summarizes engine work for a trigger.
 type HandleResult struct {
+	// OperationID is the stable identity supplied for this trigger evaluation.
+	// Orchestrators use it to bind ordered side effects, such as workflow
+	// scripts, to the same physical trigger occurrence as the transition.
+	OperationID  string
 	Transitioned bool
 	FromStepID   string
 	ToStepID     string
@@ -295,7 +304,7 @@ func (e *Engine) processActions(
 		}
 	}
 
-	result := HandleResult{DataPatch: dataPatch, ActionCount: len(actions)}
+	result := HandleResult{OperationID: in.OperationID, DataPatch: dataPatch, ActionCount: len(actions)}
 	if targetStepID != "" && targetStepID != state.CurrentStepID {
 		if !in.EvaluateOnly {
 			if err := e.applyTransition(ctx, in, state, targetStepID); err != nil {
@@ -352,7 +361,7 @@ func (e *Engine) evaluateActions(
 ) (string, map[string]any, error) {
 	var targetStepID string
 	dataPatch := map[string]any{}
-	for _, action := range actions {
+	for position, action := range actions {
 		if filter != nil && !filter(action.Kind) {
 			continue
 		}
@@ -369,7 +378,7 @@ func (e *Engine) evaluateActions(
 			targetStepID = resolvedTarget
 			continue
 		}
-		if err := e.executeCallback(ctx, in, state, step, action, dataPatch); err != nil {
+		if err := e.executeCallback(ctx, in, state, step, action, position, dataPatch); err != nil {
 			return "", nil, err
 		}
 	}
@@ -386,6 +395,7 @@ func (e *Engine) executeCallback(
 	state MachineState,
 	step StepSpec,
 	action Action,
+	position int,
 	dataPatch map[string]any,
 ) error {
 	callback, ok := e.callbacks.Get(action.Kind)
@@ -393,13 +403,14 @@ func (e *Engine) executeCallback(
 		return nil
 	}
 	res, err := callback.Execute(ctx, ActionInput{
-		Trigger:     in.Trigger,
-		State:       state,
-		Step:        step,
-		Action:      action,
-		Payload:     in.Payload,
-		OperationID: in.OperationID,
-		EntryID:     in.EntryID,
+		Trigger:        in.Trigger,
+		State:          state,
+		Step:           step,
+		Action:         action,
+		Payload:        in.Payload,
+		OperationID:    in.OperationID,
+		ActionPosition: position,
+		EntryID:        in.EntryID,
 	})
 	if err != nil {
 		return err

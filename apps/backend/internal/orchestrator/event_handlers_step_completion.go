@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -226,8 +228,16 @@ func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskI
 	}
 
 	// Drive the transition via the engine path. It will re-read the bag
-	// and consume it through the same code path the inline turn-end uses.
-	s.processOnTurnCompleteViaEngine(ctx, taskID, session)
+	// and consume it through the same code path the inline turn-end uses. The
+	// signal timestamp is the durable occurrence identity for this recovery
+	// path, so a duplicate bus delivery cannot create a second script run.
+	operationID := fmt.Sprintf("step-completion-signal:%s:%s:%s", taskID, sessionID, stepID)
+	if signal, ok := models.LoadPendingStepSignal(session.Metadata); ok {
+		if !signal.SignaledAt.IsZero() {
+			operationID = fmt.Sprintf("%s:%s", operationID, signal.SignaledAt.UTC().Format(time.RFC3339Nano))
+		}
+	}
+	s.processOnTurnCompleteViaEngine(ctx, taskID, session, operationID)
 }
 
 // parseStepCompletionEvent extracts (task_id, session_id, step_id) from a

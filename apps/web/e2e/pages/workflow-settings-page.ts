@@ -36,6 +36,41 @@ export class WorkflowSettingsPage {
     return this.page.getByTestId(`workflow-card-${workflowId}`);
   }
 
+  /** The focused-editor link rendered for a persisted workflow. */
+  workflowEditorLink(workflowId: string): Locator {
+    return this.page.getByTestId(`edit-workflow-${workflowId}`);
+  }
+
+  /** The route-level focused workflow editor. */
+  get editor(): Locator {
+    return this.page.getByTestId("workflow-editor");
+  }
+
+  /** A focused editor step node by persisted or draft identity. */
+  editorStep(stepId: string, mobile = false): Locator {
+    return this.page.getByTestId(
+      `${mobile ? "workflow-editor-mobile-step" : "workflow-editor-step"}-${stepId}`,
+    );
+  }
+
+  /** A lifecycle action list within the focused editor. */
+  editorActionList(trigger: "on_enter" | "on_turn_start" | "on_turn_complete" | "on_exit") {
+    return this.page.getByTestId(`workflow-action-list-${trigger}`);
+  }
+
+  /** The focused script editor for a lifecycle trigger. */
+  editorScript(trigger: "on_enter" | "on_turn_start" | "on_turn_complete" | "on_exit") {
+    return this.page.getByTestId(`workflow-script-editor-${trigger}`);
+  }
+
+  /** The focused action editor within a lifecycle action list. */
+  editorAction(
+    trigger: "on_enter" | "on_turn_start" | "on_turn_complete" | "on_exit",
+    index: number,
+  ): Locator {
+    return this.page.getByTestId(`workflow-action-editor-${trigger}-${index}`);
+  }
+
   /** Find a workflow card by the name shown in its input field using its current value. */
   async findWorkflowCard(
     name: string,

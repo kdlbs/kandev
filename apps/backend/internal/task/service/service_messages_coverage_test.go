@@ -186,6 +186,30 @@ func TestCreateMessageWithCompletedTurnRecordsClosedTurn(t *testing.T) {
 	}
 }
 
+func TestCreateMessageIdempotentWithCompletedTurnKeepsCallerID(t *testing.T) {
+	svc, _, repo := newMessageTestService(t)
+	message, err := svc.CreateMessageIdempotent(context.Background(), "script-message-1", &CreateMessageRequest{
+		TaskSessionID: "sess-msg",
+		Content:       "script output",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeScriptExecution),
+		CompletedTurn: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateMessageIdempotent: %v", err)
+	}
+	if message.ID != "script-message-1" {
+		t.Fatalf("message ID = %q, want caller-owned ID", message.ID)
+	}
+	turn, err := repo.GetTurn(context.Background(), message.TurnID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if turn.CompletedAt == nil || turn.Metadata[models.TurnMetaKeyLifecycleOnly] != true {
+		t.Fatalf("turn = %+v, want a completed lifecycle-only turn", turn)
+	}
+}
+
 func TestCreateMessageFailsWhenSessionIsUnknown(t *testing.T) {
 	svc, bus, _ := newMessageTestService(t)
 

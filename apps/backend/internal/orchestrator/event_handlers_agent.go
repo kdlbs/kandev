@@ -696,7 +696,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// Check for workflow transition based on session's current step.
 	// Uses the engine when available; falls back to legacy evaluation.
 	// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+	completionOperationID := turnAtEventFire
+	if completionOperationID == "" {
+		completionOperationID = fmt.Sprintf("agent-ready:%s:%s:%d", data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	}
+	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session, completionOperationID)
 
 	// When a workflow transition occurred (e.g. Work → Review), the new step's
 	// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
@@ -1284,6 +1288,15 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		return
 	}
 
+	completionOperationID, turnErr := s.peekActiveTurnID(ctx, data.SessionID)
+	if turnErr != nil {
+		s.logger.Debug("could not capture active turn for agent.completed workflow occurrence",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(turnErr))
+	}
+	if completionOperationID == "" {
+		completionOperationID = fmt.Sprintf("agent-completed:%s:%s:%d", data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	}
+
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
@@ -1308,7 +1321,7 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		return
 	}
 
-	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session, completionOperationID)
 
 	// Agent-exit path: processOnTurnCompleteViaEngine handles normal
 	// on_turn_complete transitions. If it did not transition, ensure the

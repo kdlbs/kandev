@@ -113,6 +113,7 @@ var actionKindConstants = map[ActionKind]ActionKind{
 	ActionKind("ActionQueueRunForEachParticipant"): ActionQueueRunForEachParticipant,
 	ActionKind("ActionQueueRun"):                   ActionQueueRun,
 	ActionKind("ActionEnsureParticipantSeat"):      ActionEnsureParticipantSeat,
+	ActionKind("ActionRunScript"):                  ActionRunScript,
 }
 
 // fakeEntryDispatchStore is a minimal TransitionStore fake for

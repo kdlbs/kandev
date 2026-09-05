@@ -564,6 +564,11 @@ type Service struct {
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 
+	// workflowScripts owns durable workflow-bound command admission and its
+	// task-chat projection. It is optional until the runtime and task
+	// repository are wired by backend composition.
+	workflowScripts *workflowScriptRunner
+
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
 	transientRetryMessages TransientRetryMessageService
@@ -1477,6 +1482,31 @@ func NewService(
 // If not set: Agent messages won't be saved to the database (events will still be published).
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
+	if s.workflowScripts != nil {
+		writer, _ := mc.(workflowScriptMessageWriter)
+		s.workflowScripts.messages = writer
+	}
+}
+
+// SetWorkspaceProcessRunner wires the runtime-owned managed-process seam for
+// workflow scripts. Keeping the repository and message seams optional keeps
+// focused orchestrator tests and partial compositions unchanged.
+func (s *Service) SetWorkspaceProcessRunner(runner agentruntime.WorkspaceProcessRunner) {
+	if runner == nil {
+		s.workflowScripts = nil
+		s.initWorkflowEngine()
+		return
+	}
+	runStore, ok := s.repo.(workflowScriptRunStore)
+	if !ok {
+		s.logger.Warn("workflow scripts disabled: repository lacks script-run storage")
+		s.workflowScripts = nil
+		s.initWorkflowEngine()
+		return
+	}
+	writer, _ := s.messageCreator.(workflowScriptMessageWriter)
+	s.workflowScripts = newWorkflowScriptRunner(runStore, runner, writer, s.logger)
+	s.initWorkflowEngine()
 }
 
 // SetTransientRetryMessageService wires the task service used to retire
@@ -2564,6 +2594,18 @@ func (s *Service) Start(ctx context.Context) error {
 	// this sweep a chain stalls silently across a restart. Runs after the WIP
 	// reconciler so an admitted-by-promotion task is already eligible.
 	s.reconcileDependencyLaunchesOnStartup(ctx)
+	// Workflow script runs cross request and process lifetimes. Reconcile them
+	// only after the normal session/runtime recovery has rebuilt the execution
+	// lookup used for session binding.
+	if s.workflowScripts != nil {
+		if err := s.workflowScripts.Reconcile(ctx); err != nil {
+			s.logger.Error("failed to reconcile workflow script runs on startup", zap.Error(err))
+			s.mu.Lock()
+			s.running = false
+			s.mu.Unlock()
+			return err
+		}
+	}
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -2648,6 +2690,13 @@ func (s *Service) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("stopping orchestrator service")
+	if s.workflowScripts != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := s.workflowScripts.Stop(ctx); err != nil {
+			s.logger.Error("failed to stop workflow scripts", zap.Error(err))
+		}
+		cancel()
+	}
 	// Stop detached dynamic successors before the scheduler and watcher. Their
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.

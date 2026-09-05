@@ -31,6 +31,7 @@ func (r *Repository) initSchema() error {
 		r.initGitSchema,
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
+		r.initWorkflowScriptRunsSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,

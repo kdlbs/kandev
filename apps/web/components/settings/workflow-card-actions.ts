@@ -23,7 +23,6 @@ import {
   listWorkflowStepsAction,
   getStepTaskCount,
   getWorkflowTaskCount,
-  exportWorkflowAction,
   bulkMoveTasks,
 } from "@/app/actions/workspaces";
 
@@ -239,6 +238,7 @@ type PersistWorkflowDraftParams = {
   draftSteps: WorkflowStep[];
   savedSteps: WorkflowStep[];
   progress: WorkflowDraftSaveProgress;
+  deletedStepIds?: string[];
 };
 
 export async function persistWorkflowDraft({
@@ -246,6 +246,7 @@ export async function persistWorkflowDraft({
   draftSteps,
   savedSteps,
   progress,
+  deletedStepIds = [],
 }: PersistWorkflowDraftParams): Promise<{ workflow: Workflow; steps: WorkflowStep[] }> {
   const isNewWorkflow = workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   const persistedWorkflow = await ensurePersistedWorkflow(workflow, progress);
@@ -260,6 +261,7 @@ export async function persistWorkflowDraft({
   await createMissingSteps(updatedWorkflow.id, draftSteps, progress.stepIds);
   const remappedSteps = remapWorkflowDraftSteps(draftSteps, updatedWorkflow.id, progress.stepIds);
   await updateChangedSteps(remappedSteps, savedSteps);
+  await deleteRemovedSteps(deletedStepIds, isNewWorkflow);
   if (remappedSteps.length > 0) {
     await reorderWorkflowStepsAction(
       updatedWorkflow.id,
@@ -267,6 +269,11 @@ export async function persistWorkflowDraft({
     );
   }
   return { workflow: updatedWorkflow, steps: remappedSteps };
+}
+
+async function deleteRemovedSteps(stepIds: string[], isNewWorkflow: boolean) {
+  if (isNewWorkflow) return;
+  for (const stepId of stepIds) await deleteWorkflowStepAction(stepId);
 }
 
 async function ensurePersistedWorkflow(
@@ -629,30 +636,4 @@ export function useStepDeleteHandlers({
   };
 
   return { handleMigrateAndDeleteStep, handleDeleteStepAndTasks };
-}
-
-type WorkflowExportActionsParams = {
-  workflowId: string;
-  setExportYaml: (yaml: string) => void;
-  setExportOpen: (open: boolean) => void;
-  toast: ReturnType<typeof useToast>["toast"];
-};
-
-export async function handleExportWorkflow({
-  workflowId,
-  setExportYaml,
-  setExportOpen,
-  toast,
-}: WorkflowExportActionsParams) {
-  try {
-    const yamlText = await exportWorkflowAction(workflowId);
-    setExportYaml(yamlText);
-    setExportOpen(true);
-  } catch (error) {
-    toast({
-      title: t("workflows:failedToExportWorkflow"),
-      description: fallbackErrorMessage(error),
-      variant: "error",
-    });
-  }
 }

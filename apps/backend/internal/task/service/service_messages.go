@@ -158,6 +158,15 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	if err != nil {
 		return nil, err
 	}
+	if req.CompletedTurn && req.TurnID == "" {
+		turn, turnErr := s.createCompletedTurn(ctx, session)
+		if turnErr != nil {
+			return nil, turnErr
+		}
+		copyRequest := *req
+		copyRequest.TurnID = turn.ID
+		req = &copyRequest
+	}
 
 	message, err := s.buildMessage(ctx, id, req, session)
 	if err != nil {

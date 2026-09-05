@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
 import { useRouter } from "@/lib/routing/client-router";
+import Link from "@/components/routing/app-link";
 import { IconGripVertical, IconArrowsShuffle } from "@tabler/icons-react";
 import {
   DndContext,
@@ -27,12 +28,7 @@ import { WorkflowSyncSection } from "@/components/settings/workflow-sync-section
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useToast } from "@/components/toast-provider";
 import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-settings";
-import {
-  deleteWorkflowAction,
-  exportAllWorkflowsAction,
-  importWorkflowsAction,
-  reorderWorkflowsAction,
-} from "@/app/actions/workspaces";
+import { deleteWorkflowAction, reorderWorkflowsAction } from "@/app/actions/workspaces";
 import {
   agentProfileId as toAgentProfileId,
   type Workflow,
@@ -42,7 +38,12 @@ import {
 } from "@/lib/types/http";
 import { WorkflowDialogs } from "@/app/settings/workspace/workspace-workflows-dialogs";
 import { useWorkflowCreation } from "@/app/settings/workspace/use-workflow-creation";
+import { useWorkflowImportExport } from "@/app/settings/workspace/use-workflow-import-export";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
+import {
+  newWorkflowEditorPath,
+  workflowEditorPath,
+} from "@/components/settings/workflow-editor/workflow-editor-paths";
 
 type WorkspaceWorkflowsClientProps = {
   workspace: Workspace | null;
@@ -55,6 +56,7 @@ type WorkspaceWorkflowsClientProps = {
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
 type WorkflowActionsArgs = {
+  router: ReturnType<typeof useRouter>;
   workspace: Workspace | null;
   workflowItems: Workflow[];
   savedWorkflowItems: Workflow[];
@@ -72,92 +74,6 @@ type WorkflowSavedParams = {
   finalizeIdentity: boolean;
 };
 
-function useWorkflowImportExport(
-  workspace: Workspace | null,
-  workflowItems: Workflow[],
-  router: ReturnType<typeof useRouter>,
-  toast: ReturnType<typeof useToast>["toast"],
-) {
-  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
-  const [exportYaml, setExportYaml] = useState("");
-  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
-  const [importYaml, setImportYaml] = useState("");
-  const [importLoading, setImportLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleExportAll = async () => {
-    if (!workspace) return;
-    try {
-      // Export only the workflows shown in this settings view (kanban-only —
-      // office workflows are filtered out upstream).
-      // Workflow import/export is kanban-only by design (ADR-0004).
-      const exportIds = workflowItems.map((wf) => wf.id);
-      const yamlText = await exportAllWorkflowsAction(workspace.id, exportIds);
-      setExportYaml(yamlText);
-      setIsExportDialogOpen(true);
-    } catch (error) {
-      toast({
-        title: translate("workflows:failedToExportWorkflows"),
-        description: error instanceof Error ? error.message : translate("common:requestFailed"),
-        variant: "error",
-      });
-    }
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setImportYaml(event.target?.result as string);
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  };
-
-  const handleImport = async () => {
-    if (!workspace || !importYaml.trim()) return;
-    setImportLoading(true);
-    try {
-      const result = await importWorkflowsAction(workspace.id, importYaml.trim());
-      const created = result.created ?? [];
-      const skipped = result.skipped ?? [];
-      const parts: string[] = [];
-      if (created.length > 0)
-        parts.push(translate("workflows:importCreated", { names: created.join(", ") }));
-      if (skipped.length > 0)
-        parts.push(translate("workflows:importSkipped", { names: skipped.join(", ") }));
-      toast({ title: translate("workflows:importCompleteTitle"), description: parts.join(". ") });
-      setIsImportDialogOpen(false);
-      setImportYaml("");
-      if (created.length > 0) router.refresh();
-    } catch (error) {
-      toast({
-        title: translate("workflows:failedToImportWorkflows"),
-        description: error instanceof Error ? error.message : translate("workflows:invalidYaml"),
-        variant: "error",
-      });
-    } finally {
-      setImportLoading(false);
-    }
-  };
-
-  return {
-    isExportDialogOpen,
-    setIsExportDialogOpen,
-    exportYaml,
-    isImportDialogOpen,
-    setIsImportDialogOpen,
-    importYaml,
-    setImportYaml,
-    importLoading,
-    fileInputRef,
-    handleExportAll,
-    handleFileUpload,
-    handleImport,
-  };
-}
-
 export function hasNewerWorkflowMetadata(current: Workflow, savedFrom: Workflow) {
   return (
     current.name !== savedFrom.name ||
@@ -173,6 +89,7 @@ function mergeSavedWorkflow(current: Workflow, submitted: Workflow, saved: Workf
 }
 
 function useWorkflowActions({
+  router,
   workspace,
   workflowItems,
   savedWorkflowItems,
@@ -186,6 +103,9 @@ function useWorkflowActions({
     workflowItems,
     workflowTemplates,
     setWorkflowItems,
+    onCreateWorkflow: ({ name, templateId }) => {
+      if (workspace) router.push(newWorkflowEditorPath(workspace.id, { name, templateId }));
+    },
   });
 
   const handleUpdateWorkflow = (
@@ -374,6 +294,7 @@ function WorkflowList({
     () => new Map(savedWorkflowItems.map((workflow) => [workflow.id, workflow])),
     [savedWorkflowItems],
   );
+  const { t } = useTranslation();
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -404,22 +325,35 @@ function WorkflowList({
               isDirty={orderDirtyIds.has(workflow.id)}
               readOnly={isImproveWorkspace}
             >
-              <WorkflowCard
-                workflow={workflow}
-                savedWorkflow={savedWorkflowsById.get(workflow.id)}
-                isWorkflowDirty={isWorkflowDirty(workflow)}
-                isOrderDirty={orderDirtyIds.has(workflow.id)}
-                initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
-                otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
-                isImproveWorkspace={isImproveWorkspace}
-                onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
-                onDeleteWorkflow={async () => {
-                  await onDelete(workflow.id);
-                }}
-                onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
-                onWorkflowSaved={onWorkflowSaved}
-                onDiscardWorkflow={() => onDiscard(workflow.id)}
-              />
+              <div className="min-w-0 space-y-2">
+                {!workflow.id.startsWith(TEMP_WORKFLOW_PREFIX) && (
+                  <div className="flex justify-end">
+                    <Link
+                      href={workflowEditorPath(workflow.workspace_id, workflow.id)}
+                      className="min-h-11 cursor-pointer rounded-md px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10"
+                      data-testid={`edit-workflow-${workflow.id}`}
+                    >
+                      {t("workflows:editWorkflow")}
+                    </Link>
+                  </div>
+                )}
+                <WorkflowCard
+                  workflow={workflow}
+                  savedWorkflow={savedWorkflowsById.get(workflow.id)}
+                  isWorkflowDirty={isWorkflowDirty(workflow)}
+                  isOrderDirty={orderDirtyIds.has(workflow.id)}
+                  initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
+                  otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
+                  isImproveWorkspace={isImproveWorkspace}
+                  onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
+                  onDeleteWorkflow={async () => {
+                    await onDelete(workflow.id);
+                  }}
+                  onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
+                  onWorkflowSaved={onWorkflowSaved}
+                  onDiscardWorkflow={() => onDiscard(workflow.id)}
+                />
+              </div>
             </SortableWorkflowItem>
           ))}
         </div>
@@ -584,6 +518,7 @@ function useWorkspaceWorkflowsPage(
 
   const importExport = useWorkflowImportExport(workspace, workflowItems, router, toast);
   const actions = useWorkflowActions({
+    router,
     workspace,
     workflowItems,
     savedWorkflowItems,

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -76,6 +77,9 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 			Logger: svc.logger,
 		}
 	}
+	if svc.workflowScripts != nil {
+		r[engine.ActionRunScript] = &runWorkflowScriptCallback{svc: svc}
+	}
 	return r
 }
 
@@ -93,6 +97,47 @@ func workflowTargetStepResolver(
 		return resolver
 	}
 	return nil
+}
+
+type runWorkflowScriptCallback struct {
+	svc *Service
+}
+
+func (c *runWorkflowScriptCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
+	if c == nil || c.svc == nil || c.svc.workflowScripts == nil || in.Action.RunScript == nil {
+		return engine.ActionResult{}, nil
+	}
+	trigger, ok := workflowScriptTrigger(in.Trigger)
+	if !ok {
+		return engine.ActionResult{}, fmt.Errorf("workflow script trigger %q is unsupported", in.Trigger)
+	}
+	occurrenceID := in.EntryID
+	if occurrenceID == "" {
+		occurrenceID = in.OperationID
+	}
+	if occurrenceID == "" {
+		return engine.ActionResult{}, errors.New("workflow script occurrence identity is required")
+	}
+	err := c.svc.workflowScripts.Execute(ctx, workflowScriptExecutionRequest{
+		TaskID: in.State.TaskID, WorkflowID: in.State.WorkflowID,
+		WorkflowStepID: in.Step.ID, WorkflowStepName: in.Step.Name,
+		Trigger: trigger, ActionPosition: in.ActionPosition, OccurrenceID: occurrenceID,
+		SessionID: in.State.SessionID, ExecutionID: in.State.ExecutionID, Action: *in.Action.RunScript,
+	})
+	return engine.ActionResult{}, err
+}
+
+func workflowScriptTrigger(trigger engine.Trigger) (taskmodels.WorkflowScriptRunTrigger, bool) {
+	switch trigger {
+	case engine.TriggerOnEnter:
+		return taskmodels.WorkflowScriptRunTriggerOnEnter, true
+	case engine.TriggerOnTurnComplete:
+		return taskmodels.WorkflowScriptRunTriggerOnTurnComplete, true
+	case engine.TriggerOnExit:
+		return taskmodels.WorkflowScriptRunTriggerOnExit, true
+	default:
+		return "", false
+	}
 }
 
 // switchWorkflowDispatcher returns the closure SwitchWorkflowCallback uses
