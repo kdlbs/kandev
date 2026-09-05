@@ -11,10 +11,15 @@ import {
 } from "@/components/task/chat/file-attachment";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
+import { TaskCreateLaunchPreviewToggle } from "./task-create-dialog-launch-preview-control";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
+import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-preview";
 import type { PluginComposerSlotProps } from "@/lib/plugins/types";
 
 const TOAST_MESSAGE_TEST_ID = "toast-message";
+const LAUNCH_PREVIEW_TOGGLE_TEST_ID = "task-create-launch-preview-toggle";
+const DESCRIPTION_INPUT_TEST_ID = "task-description-input";
+const ORIGINAL_PROMPT = "keep this prompt";
 
 vi.mock("@/components/task/chat/file-attachment", async () => {
   const actual = await vi.importActual<typeof import("@/components/task/chat/file-attachment")>(
@@ -75,7 +80,11 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderTaskFormInputs(initial: string, strict = false) {
+function renderTaskFormInputs(
+  initial: string,
+  strict = false,
+  launchPreview: TaskCreateLaunchPreview | null = null,
+) {
   const ref = createRef<TaskFormInputsHandle>();
   const form = (
     <TaskFormInputs
@@ -85,12 +94,91 @@ function renderTaskFormInputs(initial: string, strict = false) {
       onDescriptionChange={() => {}}
       onKeyDown={() => {}}
       descriptionValueRef={ref}
+      launchPreview={launchPreview}
     />
   );
   const utils = render(strict ? <StrictMode>{form}</StrictMode> : form, { wrapper: Wrapper });
-  const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
+  const textarea = screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement;
   return { ...utils, textarea, ref };
 }
+
+describe("TaskFormInputs launch prompt preview", () => {
+  const launchPreview: TaskCreateLaunchPreview = {
+    stepId: "step-1",
+    stepName: "In Progress",
+    stepPrompt: "Run {{task_prompt}} for {task_id}",
+  };
+
+  it("toggles a composed read-only preview without changing the draft", () => {
+    const { textarea, ref } = renderTaskFormInputs(ORIGINAL_PROMPT, false, launchPreview);
+    const toggle = screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID);
+
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+
+    expect(screen.queryByTestId(DESCRIPTION_INPUT_TEST_ID)).toBeNull();
+    expect(screen.getByTestId("task-create-launch-preview-content").textContent).toContain(
+      `Run ${ORIGINAL_PROMPT} for {task_id}`,
+    );
+    expect(ref.current?.getValue()).toBe(ORIGINAL_PROMPT);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(toggle);
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
+      ORIGINAL_PROMPT,
+    );
+    expect(textarea).not.toBe(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID));
+    expect(ref.current?.getValue()).toBe(ORIGINAL_PROMPT);
+  });
+
+  it("does not render a preview toggle without a nonempty step prompt", () => {
+    renderTaskFormInputs(ORIGINAL_PROMPT, false, {
+      ...launchPreview,
+      stepPrompt: "   ",
+    });
+
+    expect(screen.queryByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID)).toBeNull();
+  });
+
+  it("returns to the editor when the launch preview model disappears", () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    const renderForm = (preview: TaskCreateLaunchPreview | null) => (
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription={ORIGINAL_PROMPT}
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        launchPreview={preview}
+      />
+    );
+    const view = render(renderForm(launchPreview), { wrapper: Wrapper });
+
+    fireEvent.click(screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID));
+    view.rerender(renderForm(null));
+
+    expect(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId("task-create-launch-preview-content")).toBeNull();
+    expect(screen.queryByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID)).toBeNull();
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
+      ORIGINAL_PROMPT,
+    );
+  });
+});
+
+describe("TaskCreateLaunchPreviewToggle", () => {
+  it("keeps a disabled toggle tooltip trigger focusable", () => {
+    render(<TaskCreateLaunchPreviewToggle active={false} disabled onToggle={() => undefined} />, {
+      wrapper: Wrapper,
+    });
+
+    const toggle = screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID);
+    expect(toggle.getAttribute("disabled")).not.toBeNull();
+    expect(toggle.parentElement?.getAttribute("tabindex")).toBe("0");
+    expect(toggle.parentElement?.classList.contains("inline-flex")).toBe(true);
+  });
+});
 
 describe("TaskFormInputs mention keyboard routing", () => {
   it("handles Escape in capture before a target listener stops the bubble phase", () => {

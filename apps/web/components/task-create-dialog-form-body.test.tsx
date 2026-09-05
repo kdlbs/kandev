@@ -7,6 +7,7 @@ import {
   WorkflowSection,
 } from "./task-create-dialog-form-body";
 import type { DialogFormState, TaskFormInputsHandle } from "./task-create-dialog-types";
+import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-preview";
 
 afterEach(cleanup);
 
@@ -199,6 +200,30 @@ function makeFs(): DialogFormState {
     setWorkspacePath: () => {},
   };
 }
+
+describe("DialogPromptSection launch preview", () => {
+  it("forwards the launch preview to the prompt composer", () => {
+    taskFormInputsCalls.length = 0;
+    const launchPreview: TaskCreateLaunchPreview = {
+      stepId: "step-1",
+      stepName: "In Progress",
+      stepPrompt: "Run {{task_prompt}}",
+    };
+
+    render(
+      <DialogPromptSection
+        isSessionMode={false}
+        isTaskStarted={false}
+        initialDescription="Original prompt"
+        fs={makeFs()}
+        handleKeyDown={(() => {}) as never}
+        launchPreview={launchPreview}
+      />,
+    );
+
+    expect(taskFormInputsCalls.at(-1)?.launchPreview).toEqual(launchPreview);
+  });
+});
 
 describe("DialogPromptSection (CLI-mode parity)", () => {
   it("keeps a started task prompt locked", () => {
