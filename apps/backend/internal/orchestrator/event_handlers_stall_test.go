@@ -520,6 +520,64 @@ func TestHandleAgentStalled_AdvisoryStallStopsNothing(t *testing.T) {
 	}
 }
 
+// TestHandleAgentStalled_NeverStartedSkipsTeardownWhenFailedNotPersisted covers
+// the review finding that a rejected/failed FAILED-transition CAS must not be
+// followed by a forced process kill: killing the process without a durable
+// FAILED record would leave the session claiming RUNNING with no process and
+// no way for handleAgentStopped to reconcile it (stopNeverStartedExecution
+// claims teardown ownership first, so the resulting agent.stopped event is
+// ignored as already-owned).
+func TestHandleAgentStalled_NeverStartedSkipsTeardownWhenFailedNotPersisted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	writeFailure := errors.New("database is read-only")
+	svc.repo = failSessionStateUpdateRepo{repoStore: repo, err: writeFailure}
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	agentMgr.mu.Lock()
+	stopCalls := len(agentMgr.stopAgentWithReasonArgs)
+	agentMgr.mu.Unlock()
+	if stopCalls != 0 {
+		t.Fatalf("StopAgentWithReason calls = %d, want 0 when the FAILED transition did not persist", stopCalls)
+	}
+
+	after, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session after handling stall: %v", err)
+	}
+	if after.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING (unchanged) since the FAILED write never persisted", after.State)
+	}
+}
+
 func TestStallNoticeContentFallsBackWithoutTool(t *testing.T) {
 	if got := stallNoticeContent(lifecycle.AgentStalledPayload{}); got != "Still waiting for the agent." {
 		t.Fatalf("stallNoticeContent() = %q, want generic fallback", got)

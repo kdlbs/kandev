@@ -26,7 +26,11 @@ in that state postponed its own detection indefinitely.
 ## Decision
 
 Three rules, which are one rule seen from three sides: a record of terminal work
-must correspond to no running process.
+must eventually correspond to no running process. Rule 2's teardown is
+detached and force-bounded at 30 seconds (`neverStartedStopTimeout`), so a
+window exists between the `FAILED` write and the process actually exiting; a
+retried or later stop (Rule 3) is what closes that window if the bounded
+attempt itself fails.
 
 1. **The inactivity clock measures progress, not traffic.** Only prompt
    dispatch, a turn event, the prompt's terminal completion, or new user input
@@ -37,9 +41,11 @@ must correspond to no running process.
    through the execution-scoped stop, which does not write session state. A
    failed teardown is logged and leaves the execution registered for a later
    attempt; it never downgrades the recorded `FAILED` state.
-3. **The execution registry, not the persisted session state, is the authority
-   for what can be stopped.** The task-scoped stop resolves the union of
-   active-state sessions and sessions holding a registered execution. A session
+3. **The execution registry is the authority for a live execution that
+   persisted session state alone cannot vouch for.** Active-state sessions
+   remain a valid stop source in their own right; the registry is what the
+   task-scoped stop also consults so a session the database calls terminal is
+   not treated as unstoppable. It resolves the union of both. A session
    recovered only through the registry is stopped without a state transition, so
    its terminal state and error message survive.
 

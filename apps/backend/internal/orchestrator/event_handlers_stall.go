@@ -124,8 +124,13 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 			zap.Error(err))
 	}
 	if payload.NeverStarted {
-		s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, errAgentNeverStarted, session)
-		s.stopNeverStartedExecution(ctx, payload)
+		if s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, errAgentNeverStarted, session) {
+			s.stopNeverStartedExecution(ctx, payload)
+		} else {
+			s.logger.Warn("skipping never-started teardown: session was not durably recorded FAILED",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", payload.SessionID))
+		}
 	}
 }
 
