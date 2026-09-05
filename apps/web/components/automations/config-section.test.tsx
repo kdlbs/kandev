@@ -115,9 +115,11 @@ vi.mock("@/components/task-create-dialog-workspace-repo-chips", () => ({
   WorkspaceRepoChips: ({
     rows,
     onAdd,
+    showDiscoveryControls,
   }: {
     rows: Array<{ key: string; branch: string }>;
     onAdd: () => void;
+    showDiscoveryControls?: boolean;
   }) => (
     <div data-testid="shared-repository-chips">
       {rows.map((row) => (
@@ -126,12 +128,9 @@ vi.mock("@/components/task-create-dialog-workspace-repo-chips", () => ({
       <button type="button" onClick={onAdd}>
         Add repository
       </button>
+      {showDiscoveryControls ? <div data-testid="repository-discovery-selector-enabled" /> : null}
     </div>
   ),
-}));
-
-vi.mock("@/components/repository-discovery-controls", () => ({
-  RepositoryDiscoveryControls: () => <div data-testid="repository-discovery-controls" />,
 }));
 
 import { ConfigSection, getExecutorItemDisabledReason } from "./config-section";
@@ -188,7 +187,7 @@ describe("ConfigSection shared task selectors", () => {
     renderConfig();
 
     expect(screen.getByTestId("shared-repository-chips")).toBeTruthy();
-    expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
+    expect(screen.getByTestId("repository-discovery-selector-enabled")).toBeTruthy();
     expect(screen.queryByText("Use workspace default")).toBeNull();
     expect(
       screen.getByText("Run without repository files in a task-owned scratch workspace."),

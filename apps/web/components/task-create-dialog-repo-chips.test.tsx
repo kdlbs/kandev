@@ -33,7 +33,7 @@ vi.mock("./task-create-dialog-remote-repo-chip", () => ({
 }));
 
 vi.mock("@/components/repository-discovery-controls", () => ({
-  RepositoryDiscoveryControls: () => null,
+  RepositoryDiscoveryControls: () => <div data-testid="repository-discovery-controls" />,
 }));
 
 import { RepoChipsRow } from "./task-create-dialog-repo-chips";
@@ -104,6 +104,23 @@ const renderInProvider = (ui: Parameters<typeof render>[0]) =>
   render(<TooltipProvider>{ui}</TooltipProvider>);
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("RepoChipsRow", () => {
+  it("mounts discovery controls only inside the open repository selector", () => {
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })] })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+      />,
+    );
+
+    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+    expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
+  });
+
   it("keeps the compact Repo, Remote, and None source-mode controls and test IDs", () => {
     const onToggleRemote = vi.fn();
     const onToggleNoRepository = vi.fn();

@@ -118,7 +118,11 @@ export function ProjectRepositoryPicker({
         <TooltipContent>{t("office:pickAWorkspaceRepoADiscovered")}</TooltipContent>
       </Tooltip>
       <PopoverContent className="w-[420px] p-0" align="start" portal={false}>
-        <RepositoryDiscoveryControls workspaceId={workspaceId} enabled={open} />
+        <RepositoryDiscoveryControls
+          workspaceId={workspaceId}
+          enabled={open}
+          presentation="picker"
+        />
         <Command>
           <CommandInput
             placeholder={t("office:searchOrPasteAUrlOr")}

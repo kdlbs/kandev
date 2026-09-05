@@ -1,8 +1,46 @@
 import { expect, test } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { KanbanPage } from "../../pages/kanban-page";
 import fs from "node:fs";
 import path from "node:path";
 
+useRegularMode();
+
 test.describe("Desktop repository discovery consent", () => {
+  test("shows compact discovery actions only inside the repository selector", async ({
+    testPage,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await backend.restart({ KANDEV_DESKTOP_RUNTIME: "true" });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("discovery-root-controls")).toHaveCount(0);
+
+    await dialog.getByTestId("repo-chip-trigger").first().click();
+    const controls = testPage.getByTestId("discovery-root-controls");
+    const chooseFolders = controls.getByTestId("folder-picker-trigger");
+    const refreshRepositories = controls.getByRole("button", {
+      name: "Refresh repositories",
+    });
+    await expect(controls).toBeVisible();
+    await waitForFiniteAnimations(controls);
+
+    const [chooseBox, refreshBox] = await Promise.all([
+      chooseFolders.boundingBox(),
+      refreshRepositories.boundingBox(),
+    ]);
+    expect(chooseBox).not.toBeNull();
+    expect(refreshBox).not.toBeNull();
+    expect(refreshBox!.height).toBeCloseTo(chooseBox!.height, 1);
+    expect(refreshBox!.height).toBeLessThanOrEqual(32);
+  });
+
   test("uses the native picker and keeps the discovery root recoverable", async ({
     testPage,
     apiClient,

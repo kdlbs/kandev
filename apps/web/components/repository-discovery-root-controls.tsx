@@ -8,6 +8,7 @@ import type { DesktopDiscoveryRoot } from "@/lib/types/http";
 
 export type RepositoryDiscoveryRootControlsProps = {
   className?: string;
+  presentation?: "card" | "picker";
   isLoading: boolean;
   discoveryRoots: DesktopDiscoveryRoot[];
   homeConfirmationRequired: boolean;
@@ -19,6 +20,7 @@ export type RepositoryDiscoveryRootControlsProps = {
 
 export function RepositoryDiscoveryRootControls({
   className,
+  presentation = "card",
   isLoading,
   discoveryRoots,
   homeConfirmationRequired,
@@ -30,15 +32,25 @@ export function RepositoryDiscoveryRootControls({
   const { t } = useTranslation();
   return (
     <div
-      className={cn("space-y-2 rounded-md border border-border/60 p-3", className)}
+      className={cn(
+        presentation === "picker"
+          ? "space-y-2 border-b border-border/60 bg-muted/20 p-2"
+          : "space-y-2 rounded-md border border-border/60 p-3",
+        className,
+      )}
       data-testid="discovery-root-controls"
+      data-presentation={presentation}
     >
-      <div>
-        <p className="text-sm font-medium">{t("workspaces:chooseFoldersToDiscoverRepositories")}</p>
-        <p className="text-xs text-muted-foreground">
-          {t("workspaces:chooseFoldersToDiscoverRepositoriesDescription")}
-        </p>
-      </div>
+      {presentation === "card" && (
+        <div>
+          <p className="text-sm font-medium">
+            {t("workspaces:chooseFoldersToDiscoverRepositories")}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t("workspaces:chooseFoldersToDiscoverRepositoriesDescription")}
+          </p>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <FolderPicker
           value=""
@@ -48,7 +60,7 @@ export function RepositoryDiscoveryRootControls({
         <Button
           type="button"
           variant="outline"
-          className="min-h-11"
+          className="[@media(pointer:coarse)]:h-11"
           onClick={onRefreshDiscovery}
           disabled={isLoading}
         >
@@ -85,7 +97,7 @@ export function RepositoryDiscoveryRootControls({
           <Button
             type="button"
             variant="ghost"
-            className="min-h-11"
+            className="[@media(pointer:coarse)]:h-11"
             onClick={() => onRemoveDiscoveryRoot(root.path)}
           >
             {t("workspaces:removeDiscoveryRoot")}

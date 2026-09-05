@@ -1,7 +1,52 @@
 import { expect, test } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import fs from "node:fs";
 
+useRegularMode();
+
 test.describe("Mobile repository discovery consent", () => {
+  test("shows discovery actions only inside the repository selector with matched touch targets", async ({
+    testPage,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await backend.restart({ KANDEV_DESKTOP_RUNTIME: "true" });
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await mobile.mobileFab.tap();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("discovery-root-controls")).toHaveCount(0);
+
+    await dialog.getByTestId("repo-chip-trigger").first().tap();
+    const controls = testPage.getByTestId("discovery-root-controls");
+    const chooseFolders = controls.getByTestId("folder-picker-trigger");
+    const refreshRepositories = controls.getByRole("button", {
+      name: "Refresh repositories",
+    });
+    await expect(controls).toBeVisible();
+    await waitForFiniteAnimations(controls);
+
+    const [chooseBox, refreshBox] = await Promise.all([
+      chooseFolders.boundingBox(),
+      refreshRepositories.boundingBox(),
+    ]);
+    const [chooseCssHeight, refreshCssHeight] = await Promise.all([
+      chooseFolders.evaluate((element) => Number.parseFloat(getComputedStyle(element).height)),
+      refreshRepositories.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).height),
+      ),
+    ]);
+    expect(chooseBox).not.toBeNull();
+    expect(refreshBox).not.toBeNull();
+    expect(refreshBox!.height).toBeCloseTo(chooseBox!.height, 1);
+    expect(chooseCssHeight).toBe(44);
+    expect(refreshCssHeight).toBe(44);
+  });
+
   test("uses the HTTP picker on a mobile browser connected to a desktop backend", async ({
     testPage,
     apiClient,

@@ -168,7 +168,7 @@ export function DiscoverRepoDialog({
                 <Button
                   type="button"
                   variant="outline"
-                  className="min-h-11"
+                  className="[@media(pointer:coarse)]:h-11"
                   onClick={onRefreshDiscovery}
                 >
                   {t("workspaces:refreshRepositories")}

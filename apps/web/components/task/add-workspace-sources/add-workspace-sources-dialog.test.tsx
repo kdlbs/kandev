@@ -45,7 +45,7 @@ vi.mock("@/components/folder-picker", () => ({
 }));
 vi.mock("@/components/repository-discovery-controls", () => ({
   RepositoryDiscoveryControls: ({ enabled }: { enabled?: boolean }) =>
-    enabled ? <div data-testid="repository-discovery-controls" /> : null,
+    enabled !== false ? <div data-testid="repository-discovery-controls" /> : null,
 }));
 vi.mock("@/lib/api/domains/kanban-api", () => ({ attachTaskWorkspaceSources }));
 vi.mock("@/app/actions/workspaces", () => ({
@@ -145,7 +145,6 @@ describe("AddWorkspaceSourcesDialog consequences", () => {
 
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     const surface = await screen.findByTestId(surfaceTestId);
-    expect(surface.contains(screen.getByTestId("repository-discovery-controls"))).toBe(true);
     const consequences = screen.getByTestId("workspace-change-consequences");
 
     expect(surface.contains(consequences)).toBe(true);
@@ -181,6 +180,24 @@ describe("AddWorkspaceSourcesDialog consequences", () => {
 
     expect(consequences.textContent).toContain("This updates the live task workspace");
     expect(consequences.textContent).not.toContain("This restarts the task workspace");
+  });
+});
+
+describe("AddWorkspaceSourcesDialog repository discovery", () => {
+  it("mounts discovery controls only inside a saved repository selector", async () => {
+    render(
+      <TooltipProvider>
+        <Harness />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
+    openRepositoryMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace repository" }));
+    fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+
+    expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
   });
 });
 

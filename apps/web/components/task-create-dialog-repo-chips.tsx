@@ -14,7 +14,6 @@ import { CreateLocalRepositorySurface } from "@/components/create-local-reposito
 import { RepositorySetsControl } from "@/components/task-create-dialog-repository-sets-control";
 import { SaveRepositorySetDialog } from "@/components/task-create-dialog-repository-sets-save";
 import { SaveRepositorySetMenuAction } from "@/components/task-create-dialog-repository-sets-save-action";
-import { RepositoryDiscoveryControls } from "@/components/repository-discovery-controls";
 import type { DirectLocalExecutorSelection } from "@/components/task-create-dialog-handlers";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -153,7 +152,6 @@ export function RepoChipsRow({
       className="flex min-h-9 flex-wrap items-center gap-2"
       data-testid="repo-chips-row"
     >
-      <RepositoryDiscoverySurface workspaceId={workspaceId} />
       <ModeBody
         fs={fs}
         repositories={repositories}
@@ -204,16 +202,6 @@ export function RepoChipsRow({
         />
       ) : null}
     </div>
-  );
-}
-
-function RepositoryDiscoverySurface({ workspaceId }: { workspaceId: string | null }) {
-  return (
-    <RepositoryDiscoveryControls
-      workspaceId={workspaceId}
-      enabled={Boolean(workspaceId)}
-      className="basis-full"
-    />
   );
 }
 
@@ -299,15 +287,8 @@ function ModeBody({
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
 }) {
-  const { t } = useTranslation();
   if (fs.noRepository) {
-    return (
-      <FolderPicker
-        value={fs.workspacePath}
-        onChange={onWorkspacePathChange ?? (() => {})}
-        placeholder={t("task:pickAStartingFolderOptional")}
-      />
-    );
+    return <NoRepositoryMode fs={fs} onWorkspacePathChange={onWorkspacePathChange} />;
   }
   if (fs.useRemote) {
     return (
@@ -341,18 +322,35 @@ function ModeBody({
       onRowPolicyChange={onRowPolicyChange}
       onPolicySelected={onPolicySelected}
       showBranchPolicies
+      showDiscoveryControls
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
       onCreateRepository={onCreateRepository}
       onRefreshRepositories={onRefreshRepositories}
       repositoriesRefreshing={repositoriesRefreshing}
       freshBranchToggle={
-        // Multi-repo runs use worktrees, so the existing-vs-fork choice
-        // is irrelevant — only surface the toggle for single-repo flows.
+        // Multi-repo worktrees do not need the existing-vs-fork choice.
         freshBranchAvailable && onToggleFreshBranch && fs.repositories.length === 1 ? (
           <FreshBranchToggle enabled={!!freshBranchEnabled} onToggle={onToggleFreshBranch} />
         ) : null
       }
+    />
+  );
+}
+
+function NoRepositoryMode({
+  fs,
+  onWorkspacePathChange,
+}: {
+  fs: DialogFormState;
+  onWorkspacePathChange?: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <FolderPicker
+      value={fs.workspacePath}
+      onChange={onWorkspacePathChange ?? (() => {})}
+      placeholder={t("task:pickAStartingFolderOptional")}
     />
   );
 }
