@@ -429,8 +429,10 @@ slice shapes in a released plugin.
 
 Users configure a plugin's declared shortcuts on that installed plugin's detail
 page at **Settings > Plugins > `<plugin>`**. These overrides are personal to
-the signed-in user. The plugin's schema-driven configuration and lifecycle
-controls remain install-wide and administrator-only.
+the signed-in user. A plugin-owned plugin-settings card on that page is also
+available to signed-in users and should store personal display preferences with
+host.storage. The plugin's schema-driven configuration and lifecycle controls
+remain install-wide and administrator-only.
 
 If a bundle registers a component at its exact plugin detail route, Kandev
 keeps that component and renders the host-owned shortcut card alongside it.
@@ -893,6 +895,11 @@ declare `slotProps?: PluginComposerSlotProps` directly, without narrowing an
 `unknown` slot prop.
 
 ## Backend contract
+
+The generic plugin settings form and backend validator support the manifest
+config_schema subset of required fields, primitive types, enum membership, and
+inclusive numeric minimum/maximum bounds. Use minimum and maximum for numeric
+operator settings that must accept a continuous bounded range.
 
 ### Plugin lifecycle surface
 
@@ -3038,10 +3045,11 @@ registry.registerComponent("main-top-bar", makeAppBarStatus(host));
 ### Plugin settings page
 
 Register a `plugin-settings` component to render your own UI inline on your
-plugin's administration page (**Settings > Plugins > `<plugin>`**), at the top above
-the schema-driven settings form. Use it for package/runtime health or custom controls
-alongside that form. Service credentials, provider health, defaults, and saved watches
-belong in `registerIntegrationSettings(...)`. The host passes:
+plugin's settings page (**Settings > Plugins > `<plugin>`**), at the top above
+the schema-driven settings form. Signed-in users can see this owner-scoped card,
+so use it for personal display preferences or package/runtime health. Service
+credentials, provider health, defaults, and saved watches belong in
+`registerIntegrationSettings(...)`. The host passes:
 
 ```ts
 type PluginSettingsSlotProps = {
