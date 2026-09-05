@@ -1824,6 +1824,11 @@ func registerMCPAndDebugRoutes(
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
 		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
 	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Agents != nil {
+		mcpHandlers.SetTaskTransferCoordinatorAuthorizer(taskTransferCoordinatorAttestor{
+			tasks: p.taskSvc, sessions: p.taskRepo, agents: p.services.OfficeSvcs.Agents,
+		})
+	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

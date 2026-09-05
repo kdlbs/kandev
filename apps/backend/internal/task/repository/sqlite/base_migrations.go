@@ -63,6 +63,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureRepositoryBranchPoliciesSchema(); err != nil {
 		return err
 	}
+	r.migrate.Apply("workflow_steps.wip_limit", `ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflow_steps.pull_from_step_id", `ALTER TABLE workflow_steps ADD COLUMN pull_from_step_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("workflow_step_participants.provenance", `ALTER TABLE workflow_step_participants ADD COLUMN provenance TEXT NOT NULL DEFAULT 'manual'`)
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_sessions.route_generation", `ALTER TABLE task_sessions ADD COLUMN route_generation INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.route_state", `ALTER TABLE task_sessions ADD COLUMN route_state TEXT NOT NULL DEFAULT ''`)

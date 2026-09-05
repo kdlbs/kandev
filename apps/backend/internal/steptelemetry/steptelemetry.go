@@ -28,6 +28,7 @@ const (
 	TriggerTaskCreated      Trigger = "task_created"
 	TriggerManualMove       Trigger = "manual_move"
 	TriggerTaskUpdate       Trigger = "task_update"
+	TriggerTaskTransfer     Trigger = "task_transfer"
 	TriggerMCPMove          Trigger = "mcp_move"
 	TriggerMCPDeferredMove  Trigger = "mcp_deferred_move"
 	TriggerEngineTransition Trigger = "engine_transition"
