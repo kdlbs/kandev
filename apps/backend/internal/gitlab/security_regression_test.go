@@ -4,8 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,62 +24,79 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-func TestRegisterRoutesWithDispatcherDoesNotExposeLegacyGitLabActions(t *testing.T) {
-	dispatcher := ws.NewDispatcher()
-	router := gin.New()
-	RegisterRoutesWithDispatcher(
-		router,
-		dispatcher,
-		NewService(DefaultHost, NewNoopClient(DefaultHost), AuthMethodNone, nil, newTestLogger(t)),
-		newTestLogger(t),
-	)
-
-	legacyActions := []string{
-		ws.ActionGitLabStatus,
-		ws.ActionGitLabTaskMRsList,
-		ws.ActionGitLabTaskMRGet,
-		ws.ActionGitLabMRFeedbackGet,
-		ws.ActionGitLabReviewWatchesList,
-		ws.ActionGitLabReviewWatchCreate,
-		ws.ActionGitLabReviewWatchUpdate,
-		ws.ActionGitLabReviewWatchDelete,
-		ws.ActionGitLabReviewTrigger,
-		ws.ActionGitLabReviewTriggerAll,
-		ws.ActionGitLabMRWatchesList,
-		ws.ActionGitLabMRWatchDelete,
-		ws.ActionGitLabMRFilesGet,
-		ws.ActionGitLabMRCommitsGet,
-		ws.ActionGitLabTaskMRSync,
-		ws.ActionGitLabStats,
-		ws.ActionGitLabMRMerge,
-		ws.ActionGitLabMRApprove,
-		ws.ActionGitLabMRUnapprove,
-		ws.ActionGitLabMRSetLabels,
-		ws.ActionGitLabMRSetAssignees,
-		ws.ActionGitLabMRDiscussionNew,
-		ws.ActionGitLabMRDiscussionResolve,
-		ws.ActionGitLabProjectMergeMethodsGet,
-		ws.ActionGitLabIssueWatchesList,
-		ws.ActionGitLabIssueWatchCreate,
-		ws.ActionGitLabIssueWatchUpdate,
-		ws.ActionGitLabIssueWatchDelete,
-		ws.ActionGitLabIssueTrigger,
-		ws.ActionGitLabIssueTriggerAll,
-		ws.ActionGitLabActionPresetsList,
-		ws.ActionGitLabActionPresetsUpdate,
-		ws.ActionGitLabActionPresetsReset,
-		ws.ActionGitLabListUserProjects,
-		ws.ActionGitLabSearchProjects,
-		ws.ActionGitLabProjectBranches,
-		ws.ActionGitLabCleanupReviewTasks,
-		ws.ActionGitLabCleanupIssueTasks,
+func TestGitLabRequestSurfaceCannotImportWebSocketTransport(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate GitLab package")
 	}
-	for _, action := range legacyActions {
-		if dispatcher.HasHandler(action) {
-			t.Errorf("legacy GitLab WebSocket action %q is registered", action)
+	packageDir := filepath.Dir(sourceFile)
+	entries, err := os.ReadDir(packageDir)
+	if err != nil {
+		t.Fatalf("read GitLab package: %v", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		path := filepath.Join(packageDir, entry.Name())
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			t.Fatalf("parse %s: %v", entry.Name(), parseErr)
+		}
+		for _, importSpec := range file.Imports {
+			importPath, unquoteErr := strconv.Unquote(importSpec.Path.Value)
+			if unquoteErr != nil {
+				t.Fatalf("read import in %s: %v", entry.Name(), unquoteErr)
+			}
+			if importPath == "github.com/kandev/kandev/pkg/websocket" {
+				t.Errorf("%s imports the WebSocket request transport; GitLab requests must remain HTTP-only", entry.Name())
+			}
+		}
+	}
+}
+
+func TestWebSocketCatalogContainsOnlyAuthorizedGitLabActions(t *testing.T) {
+	authorized := map[string]bool{
+		"ActionGitLabCheckSessionMR":          true,
+		"ActionGitLabTaskMRUpdated":           true,
+		"ActionGitLabMRFeedbackNotify":        true,
+		"ActionGitLabNewReviewMRNotify":       true,
+		"ActionGitLabTaskMRAutomationUpdated": true,
+		"ActionGitLabNewIssueNotify":          true,
+	}
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate GitLab package")
+	}
+	actionsPath := filepath.Join(filepath.Dir(sourceFile), "..", "..", "pkg", "websocket", "actions.go")
+	file, err := parser.ParseFile(token.NewFileSet(), actionsPath, nil, 0)
+	if err != nil {
+		t.Fatalf("parse WebSocket action catalog: %v", err)
+	}
+
+	found := map[string]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		spec, isValueSpec := node.(*ast.ValueSpec)
+		if !isValueSpec {
+			return true
+		}
+		for _, name := range spec.Names {
+			if !strings.HasPrefix(name.Name, "ActionGitLab") {
+				continue
+			}
+			found[name.Name] = true
+			if !authorized[name.Name] {
+				t.Errorf("legacy GitLab WebSocket action constant %s is present", name.Name)
+			}
+		}
+		return true
+	})
+	for action := range authorized {
+		if !found[action] {
+			t.Errorf("authorized GitLab WebSocket action constant %s is missing", action)
 		}
 	}
 }
