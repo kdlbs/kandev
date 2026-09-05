@@ -347,17 +347,18 @@ function useSessionTabDialogState(sessionId: string | undefined) {
 
 function useSessionMenuDelete(
   triggerRef: RefObject<HTMLElement | null>,
+  menuContentRef: RefObject<HTMLDivElement | null>,
   openMenuDelete: () => void,
 ) {
   const handleMenuDelete = useCallback(
     (_event: Event) => {
       openMenuDelete();
     },
-    [openMenuDelete, triggerRef],
+    [openMenuDelete],
   );
   return {
     menuDeleteAnchorRef: triggerRef,
-    menuDeleteFocusBoundaryRef: triggerRef,
+    menuDeleteFocusBoundaryRef: menuContentRef,
     handleMenuDelete,
   };
 }
@@ -497,8 +498,9 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const showCloseAction = actions.visibleSessionCount > 1;
   const deleteState = useSessionTabDelete(dialogs.setConfirmDelete, actions.handleDelete);
   const triggerRef = useRef<HTMLElement>(null);
+  const menuContentRef = useRef<HTMLDivElement>(null);
   const { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete } =
-    useSessionMenuDelete(triggerRef, deleteState.handleMenuDelete);
+    useSessionMenuDelete(triggerRef, menuContentRef, deleteState.handleMenuDelete);
   const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
     sessionId,
     activeSessionId,
@@ -535,6 +537,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           />
         </ContextMenuTrigger>
         <SessionContextMenuItems
+          contentRef={menuContentRef}
           sessionState={sessionState}
           isPrimary={isPrimary}
           canShare={canShare}

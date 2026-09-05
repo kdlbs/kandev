@@ -314,15 +314,23 @@ describe("ActionConfirmPopover focus boundaries", () => {
 describe("ActionConfirmPopover stale menu events", () => {
   afterEach(cleanup);
 
-  function MenuEventHarness({ state }: { state: "open" | "closed" }) {
+  function MenuEventHarness({
+    state,
+    includeBoundary = false,
+  }: {
+    state: "open" | "closed";
+    includeBoundary?: boolean;
+  }) {
     const [open, setOpen] = useState(true);
     const anchorRef = useRef<HTMLButtonElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
     return (
       <>
         <button ref={anchorRef} type="button">
           Delete
         </button>
         <div
+          ref={menuRef}
           data-radix-menu-content=""
           data-state={state}
           data-testid="menu-content"
@@ -336,6 +344,7 @@ describe("ActionConfirmPopover stale menu events", () => {
           cancelLabel="Cancel"
           confirmLabel="Delete"
           onOpenChange={setOpen}
+          focusBoundaryRef={includeBoundary ? menuRef : undefined}
           onConfirm={vi.fn()}
         />
       </>
@@ -343,7 +352,7 @@ describe("ActionConfirmPopover stale menu events", () => {
   }
 
   it("keeps the popover open for the originating menu's closing portal", async () => {
-    render(<MenuEventHarness state="closed" />);
+    render(<MenuEventHarness state="closed" includeBoundary />);
     screen.getByTestId("menu-content").focus();
 
     await waitFor(() => expect(screen.getByRole("dialog", { name: deleteTitle })).toBeTruthy());

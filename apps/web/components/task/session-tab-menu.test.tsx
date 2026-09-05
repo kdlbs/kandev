@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useRef, useState } from "react";
+import { createRef, useRef, useState } from "react";
 
 import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
 
@@ -136,6 +136,43 @@ describe("SessionContextMenuItems", () => {
 
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(onDelete.mock.calls[0]?.[0].defaultPrevented).toBe(true);
+  });
+});
+
+describe("SessionContextMenuItems boundary", () => {
+  it("exposes the menu content boundary for anchored confirmations", () => {
+    const contentRef = createRef<HTMLDivElement>();
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button type="button">Session</button>
+        </ContextMenuTrigger>
+        <SessionContextMenuItems
+          contentRef={contentRef}
+          sessionState="COMPLETED"
+          isPrimary={false}
+          canShare={false}
+          taskId={null}
+          sessionId={undefined}
+          actions={{
+            handleSetPrimary: vi.fn(),
+            handleStop: vi.fn(),
+            handleResume: vi.fn(),
+          }}
+          onDelete={vi.fn()}
+          onShare={vi.fn()}
+          onHandoffProfile={vi.fn()}
+          onStartRename={vi.fn()}
+        />
+      </ContextMenu>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session" }), {
+      clientX: 100,
+      clientY: 100,
+    });
+
+    expect(contentRef.current).toBe(screen.getByRole("menu"));
   });
 });
 

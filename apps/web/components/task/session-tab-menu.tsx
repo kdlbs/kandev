@@ -125,6 +125,7 @@ export function DeleteSessionPopover({
 }
 
 export function SessionContextMenuItems({
+  contentRef,
   sessionState,
   isPrimary,
   canShare,
@@ -136,6 +137,7 @@ export function SessionContextMenuItems({
   onHandoffProfile,
   onStartRename,
 }: {
+  contentRef?: RefObject<HTMLDivElement | null>;
   sessionState: TaskSessionState | null;
   isPrimary: boolean;
   canShare: boolean;
@@ -150,7 +152,7 @@ export function SessionContextMenuItems({
 }) {
   const { t } = useTranslation();
   return (
-    <ContextMenuContent>
+    <ContextMenuContent ref={contentRef}>
       <ContextMenuItem className="cursor-pointer" onSelect={onStartRename}>
         {t("task:rename2")}
       </ContextMenuItem>
