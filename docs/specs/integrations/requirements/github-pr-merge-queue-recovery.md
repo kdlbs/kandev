@@ -76,6 +76,10 @@ task agent without sending the same removal more than once.
 - **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-002.8:** Kandev shall not
   treat the removal event's commit as a merge-group commit unless GitHub
   identifies it as such.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-002.9:** When Kandev first
+  observes an actionable removal after the active queue entry disappears, it
+  shall use the current-head removal baseline. A prior active-entry observation
+  or Kandev-created queue attempt shall not be required for auto-fix.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-RECOVERY-003: Safe automatic requeue
 

@@ -96,7 +96,7 @@ func TestCIAutomationMergeQueueRecoveryClassifiesReviewedReasons(t *testing.T) {
 	}
 }
 
-func TestCIAutomationMergeQueueRecoveryRequiresDurableAttemptEvidence(t *testing.T) {
+func TestCIAutomationMergeQueueRecoveryAcceptsRemovalOnlyBaseline(t *testing.T) {
 	pr := &github.TaskPR{HeadSHA: "head-a"}
 	tests := []struct {
 		name  string
@@ -105,9 +105,9 @@ func TestCIAutomationMergeQueueRecoveryRequiresDurableAttemptEvidence(t *testing
 	}{
 		{name: "no state", state: nil, want: false},
 		{
-			name:  "passive baseline has no attempt signature",
+			name:  "removal-only baseline",
 			state: &github.TaskCIPRAutomationState{LastQueueAttemptHeadSHA: "head-a"},
-			want:  false,
+			want:  true,
 		},
 		{
 			name:  "empty attempt head fails closed",
@@ -183,7 +183,7 @@ func TestCIAutomationMergeQueueRecoveryQueuesOneRepairPerRemoval(t *testing.T) {
 	}}
 	ghSvc.ciPRState = &github.TaskCIPRAutomationState{
 		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
-		LastQueueAttemptHeadSHA: "head-a", LastMergeSignature: "merge-a",
+		LastQueueAttemptHeadSHA: "head-a",
 	}
 	svc.SetGitHubService(ghSvc)
 	pr := &github.TaskPR{

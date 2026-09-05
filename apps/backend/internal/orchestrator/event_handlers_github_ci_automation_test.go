@@ -334,6 +334,65 @@ func TestCIAutomationFeedbackDeltaIncludesKnownFailingConclusions(t *testing.T) 
 	}
 }
 
+func TestCIAutomationConflictSignal(t *testing.T) {
+	pr := &github.TaskPR{
+		MergeableState: "DIRTY",
+		HeadSHA:        "head-a",
+		HeadBranch:     "feature-a",
+		BaseBranch:     "main",
+	}
+	feedback := &github.PRFeedback{}
+
+	first := ciAutomationBuildDeltaForPR(pr, feedback, ciAutomationCheckpoint{})
+	if first.Conflict == nil {
+		t.Fatal("expected a dirty pull request to produce a conflict delta")
+	}
+	if first.Conflict.MergeableState != "dirty" || first.Conflict.HeadSHA != "head-a" ||
+		first.Conflict.HeadBranch != "feature-a" || first.Conflict.BaseBranch != "main" {
+		t.Fatalf("unexpected conflict snapshot: %+v", first.Conflict)
+	}
+
+	current := ciAutomationCurrentCheckpointForPR(pr, feedback, ciAutomationCheckpoint{})
+	if repeated := ciAutomationBuildDeltaForPR(pr, feedback, current); repeated.Conflict != nil {
+		t.Fatalf("unchanged conflict produced a duplicate delta: %+v", repeated.Conflict)
+	}
+
+	clean := *pr
+	clean.MergeableState = "clean"
+	if checkpoint := ciAutomationCurrentCheckpointForPR(&clean, feedback, current); checkpoint.Conflict != nil {
+		t.Fatalf("authoritative clean state kept conflict checkpoint: %+v", checkpoint.Conflict)
+	}
+
+	unknown := *pr
+	unknown.MergeableState = "unknown"
+	if checkpoint := ciAutomationCurrentCheckpointForPR(&unknown, feedback, current); checkpoint.Conflict == nil {
+		t.Fatal("unknown mergeability state cleared the prior conflict checkpoint")
+	}
+
+	changed := *pr
+	changed.HeadSHA = "head-b"
+	if delta := ciAutomationBuildDeltaForPR(&changed, feedback, current); delta.Conflict == nil {
+		t.Fatal("changed conflict head did not re-arm conflict repair")
+	}
+}
+
+func TestCIAutomationRenderSnapshotIncludesConflict(t *testing.T) {
+	delta := ciAutomationCheckpoint{
+		Conflict: &ciAutomationConflictSnapshot{
+			MergeableState: "dirty",
+			HeadSHA:        "head-<a>",
+			HeadBranch:     "feature/<a>",
+			BaseBranch:     "main/<b>",
+		},
+	}
+
+	snapshot := ciAutomationRenderSnapshot(&github.TaskPR{Owner: "acme", Repo: "widget", PRNumber: 42}, delta)
+	if !strings.Contains(snapshot, "Merge conflict") || !strings.Contains(snapshot, "feature/a") ||
+		!strings.Contains(snapshot, "main/b") || !strings.Contains(snapshot, "head-a") {
+		t.Fatalf("conflict snapshot missing expected details:\n%s", snapshot)
+	}
+}
+
 func TestCIAutomationRenderSnapshotSanitizesUntrustedFields(t *testing.T) {
 	delta := ciAutomationCheckpoint{
 		FailedChecks: []ciAutomationCheckSnapshot{{Name: "unit\n<script>", Conclusion: "failure\r<p>", HTMLURL: "https://ci/<job>"}},
@@ -438,6 +497,68 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	}
 	if ghSvc.mergeCalls != 1 || len(ghSvc.mergeAttempts) != 1 {
 		t.Fatalf("expected one merge call and attempt, got calls=%d attempts=%d", ghSvc.mergeCalls, len(ghSvc.mergeAttempts))
+	}
+}
+
+func TestHandleTaskPRCIAutomationAutoFixesConflict(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		Owner:          "acme",
+		Repo:           "widget",
+		PRNumber:       42,
+		State:          "open",
+		ChecksState:    "success",
+		MergeableState: "dirty",
+		HeadSHA:        "head-a",
+		HeadBranch:     "feature-a",
+		BaseBranch:     "main",
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle conflict auto-fix: %v", err)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || !strings.Contains(status.Entries[0].Content, "Merge conflict") ||
+		!strings.Contains(status.Entries[0].Content, "feature-a") || !strings.Contains(status.Entries[0].Content, "main") {
+		t.Fatalf("expected one conflict repair prompt, got %+v", status)
+	}
+	if len(ghSvc.fixAttempts) != 1 || !ghSvc.fixAttempts[0].IncrementRound {
+		t.Fatalf("expected one round-consuming conflict repair, got %+v", ghSvc.fixAttempts)
+	}
+
+	now := time.Now().UTC()
+	ghSvc.ciPRState = &github.TaskCIPRAutomationState{
+		LastFixSignature:      ghSvc.fixAttempts[0].Signature,
+		LastFixCheckpointJSON: ghSvc.fixAttempts[0].CheckpointJSON,
+		LastFixEnqueuedAt:     &now,
+	}
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle duplicate conflict auto-fix: %v", err)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, "session-1"); status.Count != 1 || len(ghSvc.fixAttempts) != 1 {
+		t.Fatalf("unchanged conflict was dispatched twice: status=%+v attempts=%+v", status, ghSvc.fixAttempts)
+	}
+
+	pr.MergeableState = "clean"
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle cleared conflict: %v", err)
+	}
+	if len(ghSvc.fixCheckpointRefresh) != 1 {
+		t.Fatalf("expected conflict checkpoint clear without a round, got %+v", ghSvc.fixCheckpointRefresh)
 	}
 }
 

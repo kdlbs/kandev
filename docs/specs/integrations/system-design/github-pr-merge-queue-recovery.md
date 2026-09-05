@@ -134,6 +134,11 @@ actionable, belongs to the current head, and has not been checkpointed, the
 evaluator accepts one repair round. Enabling the option while the pull request
 is still queued only arms this behavior for a later removal.
 
+Current-head ownership can come from an observed active attempt or the durable
+removal-only baseline. Auto-fix does not require `last_merge_signature`. That
+signature proves a submitted or adopted merge attempt, but it is not evidence
+that the retained removal event is stale.
+
 ## Requeue flow
 
 The merge signature adds `TaskPR.HeadSHA`. This change makes a new commit a
@@ -155,7 +160,8 @@ reconciliation rule.
 
 When Kandev first observes a removal without an earlier active observation, it
 records a conservative baseline for the current head. This fallback prevents
-an immediate same-head requeue.
+an immediate same-head requeue. The same baseline lets auto-fix handle the
+actionable removal that produced it.
 
 The normal readiness gates remain unchanged. Auto-merge submits a new request
 only when the head SHA changes and all gates pass. The existing
