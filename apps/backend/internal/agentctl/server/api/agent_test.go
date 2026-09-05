@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -356,6 +358,173 @@ func TestHandleWSNewSessionStartsAndConfiguresMCPAttachmentAttempt(t *testing.T)
 	}
 }
 
+func TestHandleWSNewSessionForwardsServerOwnedAdditionalDirectories(t *testing.T) {
+	log := newTestLogger()
+	workspace := t.TempDir()
+	apiRoot := filepath.Join(workspace, "api")
+	if err := os.Mkdir(apiRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workspace, WorkspaceSourceRoots: []string{workspace, apiRoot}}
+	procMgr := process.NewManager(cfg, log)
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	capture := &additionalDirectoriesCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if response := s.handleWSNewSession(context.Background(), msg); response.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want response", response.Type)
+	}
+	// The exact-equality check below is itself the leak guard: any directory
+	// this server does not own (e.g. a materialization source checkout the
+	// lifecycle layer deliberately excludes from WorkspaceSourceRoots) would
+	// fail it, since it asserts the complete forwarded set rather than mere
+	// membership.
+	if !slices.Equal(capture.directories, []string{workspace, apiRoot}) {
+		t.Fatalf("additional directories = %v, want %v", capture.directories, []string{workspace, apiRoot})
+	}
+}
+
+func TestHandleWSNewSessionRejectsChangedAdditionalDirectoryBeforeProviderSession(t *testing.T) {
+	log := newTestLogger()
+	workspace := t.TempDir()
+	attached := filepath.Join(workspace, "attached")
+	if err := os.Mkdir(attached, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workspace, WorkspaceSourceRoots: []string{workspace, attached}}
+	procMgr := process.NewManager(cfg, log)
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	capture := &additionalDirectoriesCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+	if err := os.Remove(attached); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	response := s.handleWSNewSession(context.Background(), msg)
+	if response.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want error", response.Type)
+	}
+	var payload ws.ErrorPayload
+	if err := response.ParsePayload(&payload); err != nil {
+		t.Fatalf("ParsePayload: %v", err)
+	}
+	if !strings.Contains(payload.Message, "git_metadata_projection_unsupported") {
+		t.Fatalf("error message = %q, want unsupported projection", payload.Message)
+	}
+	if capture.directories != nil {
+		t.Fatalf("provider session started with changed roots: %v", capture.directories)
+	}
+}
+
+// TestHandleWSNewSessionPublishesMCPAttachmentErrorWhenRootsRevalidationFails
+// guards against a stranded MCP attachment attempt: a workspace-roots
+// revalidation failure previously returned before the shared
+// publishMCPAttachmentResult call, leaving any attachment attempt started for
+// this session/new request stuck reporting "configured" forever instead of
+// resolving to an explicit error.
+func TestHandleWSNewSessionPublishesMCPAttachmentErrorWhenRootsRevalidationFails(t *testing.T) {
+	log := newTestLogger()
+	workspace := t.TempDir()
+	attached := filepath.Join(workspace, "attached")
+	if err := os.Mkdir(attached, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.InstanceConfig{
+		Port:                 0,
+		WorkDir:              workspace,
+		WorkspaceSourceRoots: []string{workspace, attached},
+		InstanceID:           "execution-1",
+		TaskID:               "task-1",
+		SessionID:            "session-1",
+	}
+	procMgr := process.NewManager(cfg, log)
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	capture := &additionalDirectoriesCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+	if err := os.Remove(attached); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{McpServers: []types.McpServer{{
+		Name: "profile-server", Type: "http", URL: "https://mcp.example.test/path",
+	}}})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	response := s.handleWSNewSession(context.Background(), msg)
+	if response.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want error", response.Type)
+	}
+
+	readUpdate := func() adapter.AgentEvent {
+		select {
+		case event := <-s.procMgr.GetUpdates():
+			return event
+		default:
+			t.Fatal("expected MCP attachment update")
+			return adapter.AgentEvent{}
+		}
+	}
+	attempt := readUpdate()
+	if attempt.Type != streams.EventTypeMCPAttachment || attempt.MCPAttachmentAttempt == nil {
+		t.Fatalf("first event = %+v, want attachment attempt", attempt)
+	}
+	configured := readUpdate()
+	if configured.MCPAttachment == nil || configured.MCPAttachment.Kind != streams.MCPAttachmentEvidenceConfigured {
+		t.Fatalf("second event = %+v, want configured evidence", configured)
+	}
+	resolved := readUpdate()
+	if resolved.MCPAttachment == nil || resolved.MCPAttachment.Kind != streams.MCPAttachmentEvidenceExplicitError {
+		t.Fatalf("resolution event = %+v, want explicit_error evidence, not a stranded configured attempt", resolved)
+	}
+}
+
+// TestHandleWSNewSessionUsesPlainSessionPathWhenNoWorkspaceSourceRootsConfigured
+// guards a regular, non-worktree agentctl instance (one that never received
+// any WorkspaceSourceRoots because it does not need a Git metadata
+// projection) against being forced through the additionalDirectories
+// revalidation path. ValidatedWorkspaceSourceRoots fails closed whenever
+// there are zero configured roots — correct when roots were removed out from
+// under an established projection, but not when none were ever configured.
+// Every session/new call would otherwise fail before ever reaching the
+// provider, even for an adapter that implements AdditionalDirectoriesSessioner.
+func TestHandleWSNewSessionUsesPlainSessionPathWhenNoWorkspaceSourceRootsConfigured(t *testing.T) {
+	log := newTestLogger()
+	workspace := t.TempDir()
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workspace}
+	procMgr := process.NewManager(cfg, log)
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	capture := &additionalDirectoriesCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	response := s.handleWSNewSession(context.Background(), msg)
+	if response.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want response", response.Type)
+	}
+	if capture.directories != nil {
+		t.Fatalf("additionalDirectories session path used with no configured roots: %v", capture.directories)
+	}
+	var payload NewSessionResponse
+	if err := response.ParsePayload(&payload); err != nil {
+		t.Fatalf("ParsePayload: %v", err)
+	}
+	if payload.SessionID != "" {
+		t.Fatalf("session ID = %q, want the plain NewSession path's empty default", payload.SessionID)
+	}
+}
+
 func TestHandleWSLoadSession_NoAdapter(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()
@@ -547,6 +716,24 @@ type mcpCaptureAdapter struct {
 	promptErrorAdapter
 	newSessionServers  []types.McpServer
 	loadSessionServers []types.McpServer
+}
+
+type additionalDirectoriesCaptureAdapter struct {
+	promptErrorAdapter
+	directories []string
+}
+
+func (a *additionalDirectoriesCaptureAdapter) NewSessionWithAdditionalDirectories(_ context.Context, _ []types.McpServer, resolveRoots types.WorkspaceSourceRootsResolver) (string, error) {
+	var directories []string
+	if resolveRoots != nil {
+		var err error
+		directories, err = resolveRoots()
+		if err != nil {
+			return "", fmt.Errorf("git_metadata_projection_unsupported: workspace roots must be revalidated before starting a session: %w", err)
+		}
+	}
+	a.directories = append([]string(nil), directories...)
+	return "new-session", nil
 }
 
 type mcpResultCaptureAdapter struct{ mcpCaptureAdapter }

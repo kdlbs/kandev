@@ -71,8 +71,11 @@ manually moving files into the task workspace.
   root, and Kandev rehydrates the recorded conversation context with the next prompt.
 - Worktree and Local/Local PC rebinds stop terminal shells, the task editor server, dev servers, and
   other agentctl-managed workspace processes; users must reopen or restart them. Docker, SSH, and
-  Sprites attach repository siblings through the live workspace and rescan without restarting the
-  agent or those processes.
+  Sprites materialize repository siblings independently in every live executor workspace, quiesce the
+  child, revalidate every ordered task-owned clone, and atomically restart with the refreshed policy.
+  A failed refresh compensates every executor. An execution returns ready only after its former roots,
+  policy, and child session have been re-attested and restored; otherwise it stays stopped with recovery
+  guidance.
 - When **Add Repositories to workspace** is unavailable, the combined Files action remains
   reachable so **Open workspace folder** still works. The repository action is disabled and shows
   the reason in touch-visible text rather than relying on a tooltip.
@@ -91,6 +94,14 @@ manually moving files into the task workspace.
 Decisions: [ADR-2026-07-22-runtime-mutable-task-workspace-sources](../../../decisions/2026-07-22-runtime-mutable-task-workspace-sources.md)
 [ADR-2026-07-23-workspace-source-root-move-boundary](../../../decisions/2026-07-23-workspace-source-root-move-boundary.md),
 and [ADR-2026-07-27-legacy-add-branch-live-rescan](../../../decisions/2026-07-27-legacy-add-branch-live-rescan.md).
+Repository attachments also refresh the complete task-scoped Git metadata permission projection at
+the same idle rebind boundary; see [task Git metadata permissions](../../task-git-metadata-permissions/spec.md).
+When a mutable linked-worktree task is running in a runtime with immutable mounts or no atomic
+filesystem-policy refresh, this refresh fails before agentctl is stopped or rebound and instructs
+the user to start a new session. The attachment remains durable but is not reported usable in the
+existing child with stale Git grants.
+
+For ACP agents that advertise `sessionCapabilities.additionalDirectories`, every new session receives the ordered canonical source roots in `session/new.additionalDirectories`, excluding its `cwd` and duplicates. The roots are resolved in the executor's filesystem: host paths for Local and Worktree, and task-root-relative clone destinations for Docker, SSH, and Sprites. A provider that does not advertise the capability receives no extra directories; Kandev does not substitute a parent directory, a host path, or a broader sandbox grant. Materializing an additional remote repository therefore remains supported for file and Git services, while a new ACP session fails with clear recovery guidance only when the requested provider cannot represent the required source scope.
 
 ## Data model
 
@@ -255,8 +266,9 @@ persisted; every relaunch and resume of that task reuses the persisted name.
   agentctl-managed workspace processes restart or stop, recorded task context remains, and
   provider-private context that Kandev did not record may not carry over.
 - **GIVEN** an idle Docker, SSH, or Sprites task, **WHEN** the user opens **Add sources**, **THEN**
-  the consequence summary says repositories are attached and rescanned under the current remote
-  workspace without restarting the agent or changing its CWD.
+  the consequence summary says repositories clone independently in the live executor workspace and
+  the agent is paused, verified, and restored with the expanded workspace rather than left running
+  unchanged.
 - **GIVEN** configured source rows in either add-sources surface, **WHEN** the user chooses
   **Cancel** or closes the surface before submission, **THEN** no attachment request is sent and
   the task workspace remains unchanged.

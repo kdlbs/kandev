@@ -137,6 +137,14 @@ type Worktree struct {
 	// (e.g. missing patterns, traversal-rejected paths). Like CopiedFiles,
 	// this is in-memory only and read by the env preparer.
 	CopyFilesWarnings []string `json:"-"`
+
+	// Reused reports whether this call to Create returned an already-valid
+	// existing worktree unchanged, as opposed to creating or recreating the
+	// physical checkout. In-memory only (like CopiedFiles): callers that roll
+	// back a worktree on a later failure must never delete a worktree they
+	// did not create or modify, since it may still be a valid checkout owned
+	// by another session or execution.
+	Reused bool `json:"-"`
 }
 
 // CreateRequest contains the parameters for creating a new worktree.
@@ -251,6 +259,17 @@ type CreateRequest struct {
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
 	WorktreeID string
+
+	// WorktreePath is the last known-durable on-disk checkout path for this
+	// (SessionID, RepositoryID) pair, carried from the task environment's
+	// persisted repository record. It is consulted only when the primary
+	// session+repository+branch-slug lookup and the WorktreeID lookup both
+	// miss (for example, a legacy environment persisted before WorktreeID
+	// existed, combined with a changed branch-layout slug). The path is never
+	// trusted on its own: it is used solely to filter this session's own
+	// persisted worktree rows by exact canonical path, never to adopt an
+	// arbitrary directory as a worktree.
+	WorktreePath string
 
 	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
 	// When set together with RepoName, the worktree is placed at

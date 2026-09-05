@@ -6,21 +6,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type workspaceMaterializerClientStub struct {
-	requests        []agentctl.MaterializeRepositoryRequest
-	removals        []agentctl.RemoveMaterializedRepositoryRequest
-	removalContexts []context.Context
-	rescans         []string
-	reconciles      int
-	failAt          int
-	rescanErr       error
-	reconcileErr    error
+	requests                   []agentctl.MaterializeRepositoryRequest
+	removals                   []agentctl.RemoveMaterializedRepositoryRequest
+	removalContexts            []context.Context
+	rescans                    []string
+	rescanRoots                [][]string
+	reconciles                 int
+	failAt                     int
+	rescanErr                  error
+	reconcileErr               error
+	omitGitMetadataAttestation bool
 }
 
 func (s *workspaceMaterializerClientStub) MaterializeRepository(_ context.Context, request agentctl.MaterializeRepositoryRequest) (*agentctl.MaterializeRepositoryResponse, error) {
@@ -28,7 +35,7 @@ func (s *workspaceMaterializerClientStub) MaterializeRepository(_ context.Contex
 	if s.failAt > 0 && len(s.requests) == s.failAt {
 		return nil, context.Canceled
 	}
-	return &agentctl.MaterializeRepositoryResponse{Destination: request.Destination, Reused: request.Destination == "reused"}, nil
+	return &agentctl.MaterializeRepositoryResponse{Destination: request.Destination, Reused: request.Destination == "reused", GitMetadataAttested: !s.omitGitMetadataAttestation}, nil
 }
 
 func (s *workspaceMaterializerClientStub) RemoveMaterializedRepository(ctx context.Context, request agentctl.RemoveMaterializedRepositoryRequest) error {
@@ -37,8 +44,11 @@ func (s *workspaceMaterializerClientStub) RemoveMaterializedRepository(ctx conte
 	return nil
 }
 
-func (s *workspaceMaterializerClientStub) RescanWorkspace(_ context.Context, workdir string, _ ...[]string) error {
+func (s *workspaceMaterializerClientStub) RescanWorkspace(_ context.Context, workdir string, sourceRoots ...[]string) error {
 	s.rescans = append(s.rescans, workdir)
+	if len(sourceRoots) > 0 {
+		s.rescanRoots = append(s.rescanRoots, append([]string(nil), sourceRoots[0]...))
+	}
 	return s.rescanErr
 }
 
@@ -91,6 +101,17 @@ func TestRemoteWorkspaceProjectionFromLaunch_KeepsAdditionalBranchOfPrimaryRepos
 	}
 }
 
+func TestRemoteWorkspaceSourceRootsUseCanonicalExecutorPaths(t *testing.T) {
+	got := remoteWorkspaceSourceRoots("/workspace", []WorkspaceRepositoryMaterialization{
+		{Destination: "frontend-main"},
+		{Destination: "api-feature-next"},
+	})
+	want := []string{"/workspace", "/workspace/frontend-main", "/workspace/api-feature-next"}
+	if !equalStrings(got, want) {
+		t.Fatalf("roots = %v, want %v", got, want)
+	}
+}
+
 func TestMaterializeWorkspaceRepositories_ReconcilesAllBeforeRescan(t *testing.T) {
 	client := &workspaceMaterializerClientStub{}
 	err := materializeWorkspaceRepositories(context.Background(), client, []WorkspaceRepositoryMaterialization{
@@ -102,6 +123,29 @@ func TestMaterializeWorkspaceRepositories_ReconcilesAllBeforeRescan(t *testing.T
 	}
 	if len(client.requests) != 2 || len(client.rescans) != 1 || client.rescans[0] != "" {
 		t.Fatalf("requests=%+v rescans=%+v; want two requests followed by one rescan", client.requests, client.rescans)
+	}
+}
+
+func TestMaterializeWorkspaceRepositoriesForwardsCanonicalSourceRoots(t *testing.T) {
+	client := &workspaceMaterializerClientStub{}
+	roots := []string{"/workspace", "/workspace/frontend-main"}
+	if err := materializeWorkspaceRepositories(context.Background(), client, []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/acme/frontend.git", Destination: "frontend-main", BaseBranch: "main",
+	}}, roots); err != nil {
+		t.Fatalf("materializeWorkspaceRepositories: %v", err)
+	}
+	if len(client.rescanRoots) != 1 || !equalStrings(client.rescanRoots[0], roots) {
+		t.Fatalf("rescan roots = %v, want %v", client.rescanRoots, roots)
+	}
+}
+
+func TestMaterializeWorkspaceRepositoriesRejectsMissingGitMetadataAttestation(t *testing.T) {
+	client := &workspaceMaterializerClientStub{omitGitMetadataAttestation: true}
+	err := materializeWorkspaceRepositories(context.Background(), client, []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/acme/frontend.git", Destination: "frontend-main", BaseBranch: "main",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "attestation missing") {
+		t.Fatalf("materializeWorkspaceRepositories() error = %v, want missing attestation", err)
 	}
 }
 
@@ -139,7 +183,7 @@ func TestMaterializeRepositoriesForEnvironment_RescansEveryDistinctClient(t *tes
 		switch r.URL.Path {
 		case "/api/v1/workspace/materialize-repository":
 			materializations++
-			_, _ = w.Write([]byte(`{"destination":"added-main"}`))
+			_, _ = w.Write([]byte(`{"destination":"added-main","git_metadata_attested":true}`))
 		case "/api/v1/workspace/rescan":
 			rescans++
 			w.WriteHeader(http.StatusOK)
@@ -171,11 +215,374 @@ func TestMaterializeRepositoriesForEnvironment_RescansEveryDistinctClient(t *tes
 	if err != nil {
 		t.Fatalf("MaterializeRepositoriesForEnvironment: %v", err)
 	}
-	if materializations != 1 {
-		t.Fatalf("materializations = %d, want 1", materializations)
+	if materializations != 2 {
+		t.Fatalf("materializations = %d, want 2 for independent executor workspaces", materializations)
 	}
 	if rescans != 2 {
 		t.Fatalf("rescans = %d, want 2 for both live executions", rescans)
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentRefreshesMutableClonePolicyForEveryRemoteRuntime(t *testing.T) {
+	for _, runtimeName := range []executor.Name{executor.NameDocker, executor.NameRemoteDocker, executor.NameSSH, executor.NameSprites} {
+		t.Run(string(runtimeName), func(t *testing.T) {
+			server := newWorkspaceRebindAgentctlServer(t, false)
+			t.Cleanup(server.Close)
+			t.Cleanup(server.closeConnections)
+
+			manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+			manager.registry = registry.NewRegistry(newTestLogger())
+			manager.registry.LoadDefaults()
+			manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+			execution.TaskEnvironmentID = "environment-1"
+			execution.RuntimeName = runtimeName
+			execution.WorkspacePath = "/executor/workspace"
+			execution.Status = v1.AgentStatusReady
+			execution.ACPSessionID = "acp-existing"
+			execution.AgentID = "codex-acp"
+			execution.AgentProfileID = "profile-1"
+			execution.AgentCommand = "codex-acp"
+			execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+
+			_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
+				RepositoryURL: "https://github.com/acme/added.git",
+				Destination:   "added-main",
+				BaseBranch:    "main",
+			}})
+			if err != nil {
+				t.Fatalf("MaterializeRepositoriesForEnvironment: %v", err)
+			}
+			wantRoots := []string{"/executor/workspace", "/executor/workspace/added-main"}
+			if !sameStrings(execution.WorkspaceSourceRoots, wantRoots) {
+				t.Fatalf("workspace roots = %v, want %v", execution.WorkspaceSourceRoots, wantRoots)
+			}
+			if configs := server.configuredEnvs(); len(configs) != 1 || !strings.Contains(configs[0]["CODEX_CONFIG"], "/executor/workspace/added-main/.git") {
+				t.Fatalf("configured clone policies = %#v, want final attached GitDir", configs)
+			}
+			if server.attestationCalls() != 1 {
+				t.Fatalf("attestation calls = %d, want one final batch attestation", server.attestationCalls())
+			}
+			if loads := server.loads(); !sameStrings(loads, []string{"acp-existing"}) {
+				t.Fatalf("restored ACP sessions = %v, want [acp-existing]", loads)
+			}
+		})
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentMaterializesEveryDistinctCloneExecutor(t *testing.T) {
+	first := newWorkspaceRebindAgentctlServer(t, false)
+	second := newWorkspaceRebindAgentctlServer(t, false)
+	t.Cleanup(first.Close)
+	t.Cleanup(first.closeConnections)
+	t.Cleanup(second.Close)
+	t.Cleanup(second.closeConnections)
+
+	manager, firstExecution := workspaceSourceTestManager(t, first.URL, []string{"/executor/one"})
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+	configureCloneAttachmentExecution(firstExecution, "execution-1", "session-1", "environment-1", "/executor/one")
+	secondExecution := &AgentExecution{
+		ID:                   "execution-2",
+		SessionID:            "session-2",
+		TaskEnvironmentID:    "environment-1",
+		RuntimeName:          executor.NameSSH,
+		WorkspacePath:        "/executor/two",
+		WorkspaceSourceRoots: []string{"/executor/two"},
+		Status:               v1.AgentStatusReady,
+		ACPSessionID:         "acp-two",
+		AgentID:              "codex-acp",
+		AgentProfileID:       "profile-1",
+		AgentCommand:         "codex-acp",
+		agentctl:             workspaceMaterializationAgentctlClient(t, second.URL),
+	}
+	secondExecution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+	if err := manager.executionStore.Add(secondExecution); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/acme/added.git", Destination: "added-main", BaseBranch: "main",
+	}})
+	if err != nil {
+		t.Fatalf("MaterializeRepositoriesForEnvironment: %v", err)
+	}
+	for _, execution := range []*AgentExecution{firstExecution, secondExecution} {
+		want := filepath.Join(execution.WorkspacePath, "added-main", ".git")
+		if !strings.Contains(execution.RuntimeEnvironment()["CODEX_CONFIG"], want) {
+			t.Fatalf("execution %s policy lacks %q: %s", execution.ID, want, execution.RuntimeEnvironment()["CODEX_CONFIG"])
+		}
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentCompensatesFirstCloneExecutorWhenSecondMaterializationFails(t *testing.T) {
+	first := newWorkspaceRebindAgentctlServer(t, false)
+	second := newWorkspaceRebindAgentctlServer(t, false)
+	second.failMaterialize = true
+	t.Cleanup(first.Close)
+	t.Cleanup(first.closeConnections)
+	t.Cleanup(second.Close)
+	t.Cleanup(second.closeConnections)
+
+	manager, firstExecution := workspaceSourceTestManager(t, first.URL, []string{"/executor/one"})
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+	configureCloneAttachmentExecution(firstExecution, "execution-1", "session-1", "environment-1", "/executor/one")
+	secondExecution := &AgentExecution{ID: "execution-2", SessionID: "session-2", TaskEnvironmentID: "environment-1", RuntimeName: executor.NameSSH, WorkspacePath: "/executor/two", WorkspaceSourceRoots: []string{"/executor/two"}, Status: v1.AgentStatusReady, agentctl: workspaceMaterializationAgentctlClient(t, second.URL)}
+	secondExecution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+	if err := manager.executionStore.Add(secondExecution); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{RepositoryURL: "https://github.com/acme/added.git", Destination: "added-main", BaseBranch: "main"}})
+	if err == nil {
+		t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite second executor materialization failure")
+	}
+	if first.hasMaterialized("added-main") {
+		t.Fatal("first executor retained a repository after second executor materialization failed")
+	}
+	if !sameStrings(firstExecution.WorkspaceSourceRoots, []string{"/executor/one"}) || firstExecution.Status != v1.AgentStatusReady {
+		t.Fatalf("first execution after compensation = roots:%v status:%q, want untouched ready state", firstExecution.WorkspaceSourceRoots, firstExecution.Status)
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentFailsClosedWhenPartialCloneCleanupFails(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	server.failMaterializeAt = 2
+	server.failRemove = true
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+
+	manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+	configureCloneAttachmentExecution(execution, "execution", "session", "environment-1", "/executor/workspace")
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{
+		{RepositoryURL: "https://github.com/acme/one.git", Destination: "one-main", BaseBranch: "main"},
+		{RepositoryURL: "https://github.com/acme/two.git", Destination: "two-main", BaseBranch: "main"},
+	})
+	if err == nil {
+		t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite partial clone cleanup failure")
+	}
+	if execution.Status != v1.AgentStatusFailed || server.running() {
+		t.Fatalf("execution = status:%q running:%v, want failed stopped recovery state", execution.Status, server.running())
+	}
+	if !strings.Contains(execution.ErrorMessage, "recovery required") {
+		t.Fatalf("execution recovery guidance = %q", execution.ErrorMessage)
+	}
+	if !server.hasMaterialized("one-main") {
+		t.Fatal("fixture did not retain the unreverted first checkout")
+	}
+	if strings.Contains(execution.RuntimeEnvironment()["CODEX_CONFIG"], "one-main/.git") {
+		t.Fatalf("partial checkout widened live policy: %s", execution.RuntimeEnvironment()["CODEX_CONFIG"])
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentCompensatesRefreshedCloneExecutors(t *testing.T) {
+	for _, testCase := range []struct {
+		name              string
+		configureSecond   func(*workspaceRebindAgentctlServer)
+		wantSecondFailed  bool
+		wantSecondRemoved bool
+	}{
+		{name: "final attestation", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failAttestAt = 1 }, wantSecondRemoved: true},
+		{name: "configure", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failConfigureAt = 1 }, wantSecondRemoved: true},
+		{name: "start", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failStartAt = 1 }, wantSecondRemoved: true},
+		{name: "ACP restoration", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failLoadAt = 1 }, wantSecondRemoved: true},
+		{name: "permanent rollback configure", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failConfigure = true }, wantSecondFailed: true, wantSecondRemoved: true},
+		{name: "checkout cleanup", configureSecond: func(server *workspaceRebindAgentctlServer) { server.failStartAt = 1; server.failRemove = true }, wantSecondFailed: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			first := newWorkspaceRebindAgentctlServer(t, false)
+			second := newWorkspaceRebindAgentctlServer(t, false)
+			testCase.configureSecond(second)
+			t.Cleanup(first.Close)
+			t.Cleanup(first.closeConnections)
+			t.Cleanup(second.Close)
+			t.Cleanup(second.closeConnections)
+
+			manager, firstExecution := workspaceSourceTestManager(t, first.URL, []string{"/executor/one"})
+			manager.registry = registry.NewRegistry(newTestLogger())
+			manager.registry.LoadDefaults()
+			manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+			configureCloneAttachmentExecution(firstExecution, "execution-1", "session-1", "environment-1", "/executor/one")
+			secondExecution := &AgentExecution{ID: "execution-2", SessionID: "session-2", TaskEnvironmentID: "environment-1", RuntimeName: executor.NameSSH, WorkspacePath: "/executor/two", WorkspaceSourceRoots: []string{"/executor/two"}, Status: v1.AgentStatusReady, ACPSessionID: "acp-two", AgentID: "codex-acp", AgentProfileID: "profile-1", AgentCommand: "codex-acp", agentctl: workspaceMaterializationAgentctlClient(t, second.URL)}
+			secondExecution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+			if err := manager.executionStore.Add(secondExecution); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{RepositoryURL: "https://github.com/acme/added.git", Destination: "added-main", BaseBranch: "main"}})
+			if err == nil {
+				t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite second post-refresh failure")
+			}
+			assertRestoredCloneAttachmentExecution(t, first, firstExecution, "/executor/one", "acp-one", false)
+			assertRestoredCloneAttachmentExecution(t, second, secondExecution, "/executor/two", "acp-two", testCase.wantSecondFailed)
+			if first.hasMaterialized("added-main") {
+				t.Fatal("first executor retained the attached checkout after second executor refresh failure")
+			}
+			if got := second.hasMaterialized("added-main"); got != !testCase.wantSecondRemoved {
+				t.Fatalf("second materialization present = %v, want %v", got, !testCase.wantSecondRemoved)
+			}
+		})
+	}
+}
+
+func assertRestoredCloneAttachmentExecution(t *testing.T, server *workspaceRebindAgentctlServer, execution *AgentExecution, workspacePath, acpID string, wantFailed bool) {
+	t.Helper()
+	if !sameStrings(execution.WorkspaceSourceRoots, []string{workspacePath}) {
+		t.Fatalf("execution %s roots = %v, want prior root", execution.ID, execution.WorkspaceSourceRoots)
+	}
+	policy := execution.RuntimeEnvironment()["CODEX_CONFIG"]
+	if strings.Contains(policy, "added-main/.git") {
+		t.Fatalf("execution %s retained attached Git policy: %s", execution.ID, policy)
+	}
+	if wantFailed {
+		if execution.Status != v1.AgentStatusFailed || server.running() {
+			t.Fatalf("execution %s = status:%q running:%v, want failed stopped recovery state", execution.ID, execution.Status, server.running())
+		}
+		return
+	}
+	if execution.Status != v1.AgentStatusReady || !server.running() {
+		t.Fatalf("execution %s = status:%q running:%v, want restored ready child", execution.ID, execution.Status, server.running())
+	}
+	if !strings.Contains(policy, filepath.Join(workspacePath, ".git")) {
+		t.Fatalf("execution %s policy %q lacks restored GitDir", execution.ID, policy)
+	}
+	loads := server.loads()
+	if len(loads) == 0 || loads[len(loads)-1] != acpID {
+		t.Fatalf("execution %s ACP loads = %v, want restored prior session %q", execution.ID, loads, acpID)
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentAttestsOnlyAfterStoppingCloneChild(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	server.failAttestAt = 1
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+	manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+	configureCloneAttachmentExecution(execution, "execution", "session", "environment-1", "/executor/workspace")
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{RepositoryURL: "https://github.com/acme/added.git", Destination: "added-main", BaseBranch: "main"}})
+	if err == nil {
+		t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite final attestation barrier failure")
+	}
+	operations := server.operationLog()
+	if !sameStrings(operations, []string{"materialize", "stop", "rescan", "attest", "stop", "reconcile", "attest", "configure", "start", "remove"}) {
+		t.Fatalf("operations = %v, want final attestation after stop and before configure/start", operations)
+	}
+	for _, env := range server.configuredEnvs() {
+		if strings.Contains(env["CODEX_CONFIG"], "added-main/.git") {
+			t.Fatalf("configured widened policy after failed final attestation: %s", env["CODEX_CONFIG"])
+		}
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentFailsClosedWhenRollbackCannotReattestPriorRoots(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	server.attestationErr = true
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+	manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+	configureCloneAttachmentExecution(execution, "execution", "session", "environment-1", "/executor/workspace")
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{RepositoryURL: "https://github.com/acme/added.git", Destination: "added-main", BaseBranch: "main"}})
+	if err == nil {
+		t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite permanent attestation failure")
+	}
+	if execution.Status != v1.AgentStatusFailed {
+		t.Fatalf("execution status = %q, want failed when prior roots cannot be re-attested", execution.Status)
+	}
+	if !strings.Contains(execution.ErrorMessage, "recovery required") {
+		t.Fatalf("execution recovery guidance = %q", execution.ErrorMessage)
+	}
+	if server.startCount != 0 || len(server.configuredEnvs()) != 0 {
+		t.Fatalf("unsafe rollback attempted to restart/configure without prior-root proof: starts=%d configs=%#v", server.startCount, server.configuredEnvs())
+	}
+	if server.hasMaterialized("added-main") {
+		t.Fatal("materialized repository remained after failed closed refresh")
+	}
+}
+
+func configureCloneAttachmentExecution(execution *AgentExecution, id, sessionID, environmentID, workspacePath string) {
+	execution.ID = id
+	execution.SessionID = sessionID
+	execution.TaskEnvironmentID = environmentID
+	execution.RuntimeName = executor.NameDocker
+	execution.WorkspacePath = workspacePath
+	execution.WorkspaceSourceRoots = []string{workspacePath}
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-one"
+	execution.AgentID = "codex-acp"
+	execution.AgentProfileID = "profile-1"
+	execution.AgentCommand = "codex-acp"
+	execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+}
+
+func TestMaterializeRepositoriesForEnvironmentRollsBackClonePolicyOnAttestationOrRestartFailure(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		configure     func(*workspaceRebindAgentctlServer)
+		wantConfigs   int
+		wantStartCall int
+	}{
+		{name: "attestation", configure: func(server *workspaceRebindAgentctlServer) { server.failAttestAt = 1 }, wantConfigs: 1, wantStartCall: 1},
+		{name: "restart", configure: func(server *workspaceRebindAgentctlServer) { server.failStartAt = 1 }, wantConfigs: 2, wantStartCall: 2},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := newWorkspaceRebindAgentctlServer(t, false)
+			testCase.configure(server)
+			t.Cleanup(server.Close)
+			t.Cleanup(server.closeConnections)
+
+			manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+			manager.registry = registry.NewRegistry(newTestLogger())
+			manager.registry.LoadDefaults()
+			manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+			execution.TaskEnvironmentID = "environment-1"
+			execution.RuntimeName = executor.NameDocker
+			execution.WorkspacePath = "/executor/workspace"
+			execution.Status = v1.AgentStatusReady
+			execution.ACPSessionID = "acp-existing"
+			execution.AgentID = "codex-acp"
+			execution.AgentProfileID = "profile-1"
+			execution.AgentCommand = "codex-acp"
+			execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+
+			_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
+				RepositoryURL: "https://github.com/acme/added.git", Destination: "added-main", BaseBranch: "main",
+			}})
+			if err == nil {
+				t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite policy refresh failure")
+			}
+			if !sameStrings(execution.WorkspaceSourceRoots, []string{"/executor/workspace"}) {
+				t.Fatalf("workspace roots after failure = %v, want only prior task root", execution.WorkspaceSourceRoots)
+			}
+			if got := execution.RuntimeEnvironment()["CODEX_CONFIG"]; !strings.Contains(got, "/executor/workspace/.git") || strings.Contains(got, "added-main/.git") {
+				t.Fatalf("runtime policy after failure = %q, want re-attested original policy only", got)
+			}
+			if configs := server.configuredEnvs(); len(configs) != testCase.wantConfigs {
+				t.Fatalf("configure calls = %#v, want %d", configs, testCase.wantConfigs)
+			}
+			if testCase.wantConfigs > 0 {
+				rollbackPolicy := server.configuredEnvs()[testCase.wantConfigs-1]["CODEX_CONFIG"]
+				if !strings.Contains(rollbackPolicy, "/executor/workspace/.git") || strings.Contains(rollbackPolicy, "added-main/.git") {
+					t.Fatalf("rollback policy = %q, want re-attested original config", rollbackPolicy)
+				}
+			}
+			if testCase.wantStartCall > 0 && server.startCount != testCase.wantStartCall {
+				t.Fatalf("start calls = %d, want %d", server.startCount, testCase.wantStartCall)
+			}
+		})
 	}
 }
 
@@ -184,7 +591,7 @@ func TestMaterializeRepositoriesForEnvironment_DeduplicatesSharedAgentctlClient(
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/workspace/materialize-repository":
-			_, _ = w.Write([]byte(`{"destination":"added-main"}`))
+			_, _ = w.Write([]byte(`{"destination":"added-main","git_metadata_attested":true}`))
 		case "/api/v1/workspace/rescan":
 			rescans++
 			w.WriteHeader(http.StatusOK)
@@ -225,7 +632,7 @@ func TestMaterializeRepositoriesForEnvironment_RemovesCheckoutsBeforeReconciling
 		switch r.URL.Path {
 		case "/api/v1/workspace/materialize-repository":
 			events = append(events, "materialize")
-			_, _ = w.Write([]byte(`{"destination":"added-main"}`))
+			_, _ = w.Write([]byte(`{"destination":"added-main","git_metadata_attested":true}`))
 		case "/api/v1/workspace/rescan":
 			events = append(events, "rescan-first")
 			w.WriteHeader(http.StatusOK)
@@ -242,13 +649,20 @@ func TestMaterializeRepositoriesForEnvironment_RemovesCheckoutsBeforeReconciling
 	}))
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/workspace/rescan" {
+		switch r.URL.Path {
+		case "/api/v1/workspace/materialize-repository":
+			events = append(events, "materialize-second")
+			_, _ = w.Write([]byte(`{"destination":"added-main","git_metadata_attested":true}`))
+		case "/api/v1/workspace/rescan":
+			events = append(events, "rescan-second")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+		case "/api/v1/workspace/materialize-repository/remove":
+			events = append(events, "remove-second")
+			_, _ = w.Write([]byte(`{"removed":true}`))
+		default:
 			t.Errorf("unexpected request path %q", r.URL.Path)
 			w.WriteHeader(http.StatusInternalServerError)
-			return
 		}
-		events = append(events, "rescan-second")
-		w.WriteHeader(http.StatusUnprocessableEntity)
 	}))
 	defer second.Close()
 
@@ -270,8 +684,72 @@ func TestMaterializeRepositoriesForEnvironment_RemovesCheckoutsBeforeReconciling
 	if len(ids) != 0 {
 		t.Fatalf("adopted session ids = %v, want none after rollback", ids)
 	}
-	if !sameStrings(events, []string{"materialize", "rescan-first", "rescan-second", "remove", "reconcile-first"}) {
+	if !sameStrings(events, []string{"materialize", "materialize-second", "rescan-first", "rescan-second", "remove-second", "remove", "reconcile-first"}) {
 		t.Fatalf("events = %v, want checkout removal before exact rollback reconciliation", events)
+	}
+}
+
+// TestMaterializeRepositoriesForEnvironmentRollsBackNonCloneRescanWhenLaterCloneRefreshFails
+// covers the mixed-runtime case: a plain (non-clone) execution's rescan
+// succeeds first, then a later mutable-clone execution's post-materialization
+// policy refresh fails. The earlier successful rescan must be rolled back
+// (reconciled back to its prior roots) alongside the clone-side compensation,
+// not left pointing at the now-removed attached repository.
+func TestMaterializeRepositoriesForEnvironmentRollsBackNonCloneRescanWhenLaterCloneRefreshFails(t *testing.T) {
+	plain := newWorkspaceRebindAgentctlServer(t, false)
+	clone := newWorkspaceRebindAgentctlServer(t, false)
+	clone.failAttestAt = 1
+	t.Cleanup(plain.Close)
+	t.Cleanup(plain.closeConnections)
+	t.Cleanup(clone.Close)
+	t.Cleanup(clone.closeConnections)
+
+	store := NewExecutionStore()
+	plainExecution := &AgentExecution{
+		ID:                   "execution-1",
+		SessionID:            "session-1",
+		TaskEnvironmentID:    "environment-1",
+		WorkspacePath:        "/executor/plain",
+		WorkspaceSourceRoots: []string{"/executor/plain"},
+		Status:               v1.AgentStatusReady,
+		agentctl:             workspaceMaterializationAgentctlClient(t, plain.URL),
+	}
+	if err := store.Add(plainExecution); err != nil {
+		t.Fatal(err)
+	}
+	cloneExecution := &AgentExecution{ID: "execution-2", SessionID: "session-2", TaskEnvironmentID: "environment-1", agentctl: workspaceMaterializationAgentctlClient(t, clone.URL)}
+	configureCloneAttachmentExecution(cloneExecution, "execution-2", "session-2", "environment-1", "/executor/two")
+	if err := store.Add(cloneExecution); err != nil {
+		t.Fatal(err)
+	}
+
+	streamManager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	t.Cleanup(streamManager.Wait)
+	manager := &Manager{executionStore: store, logger: newTestLogger(), streamManager: streamManager}
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/acme/added.git",
+		Destination:   "added-main",
+		BaseBranch:    "main",
+	}})
+	if err == nil {
+		t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite clone refresh failure")
+	}
+	if !sameStrings(plainExecution.WorkspaceSourceRoots, []string{"/executor/plain"}) {
+		t.Fatalf("plain execution roots = %v, want untouched prior root", plainExecution.WorkspaceSourceRoots)
+	}
+	plainOps := plain.operationLog()
+	if !sameStrings(plainOps, []string{"materialize", "rescan", "remove", "reconcile"}) {
+		t.Fatalf("plain server operations = %v, want materialize, rescan, checkout removal, then reconcile rollback", plainOps)
+	}
+	if plain.hasMaterialized("added-main") {
+		t.Fatal("plain executor retained the attached checkout after clone executor refresh failed")
+	}
+	if clone.hasMaterialized("added-main") {
+		t.Fatal("clone executor retained the attached checkout after its own refresh failed")
 	}
 }
 

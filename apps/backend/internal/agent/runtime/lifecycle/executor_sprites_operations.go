@@ -454,12 +454,13 @@ func (r *SpritesExecutor) createAgentInstance(
 
 func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: spritesWorkspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     agentTypeFromReq(req),
+		ID:                   req.InstanceID,
+		WorkspacePath:        spritesWorkspacePath,
+		WorkspaceSourceRoots: []string{spritesWorkspacePath},
+		SessionID:            req.SessionID,
+		TaskID:               req.TaskID,
+		Protocol:             req.Protocol,
+		AgentType:            agentTypeFromReq(req),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

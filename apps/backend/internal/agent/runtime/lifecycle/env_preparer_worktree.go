@@ -87,15 +87,27 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	if err != nil {
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Error: err, Duration: time.Since(start)}, nil
 	}
+	projection, err := worktree.ResolveGitMetadataForRepository(wt.Path, req.RepositoryPath)
+	if err != nil {
+		// wt.Reused means Create returned an already-valid existing worktree
+		// unchanged; rolling it back here would delete a checkout this call
+		// never created (e.g. reused by session+repo lookup even though the
+		// caller passed no explicit req.WorktreeID).
+		if !wt.Reused {
+			p.rollbackWorktrees(ctx, []string{wt.ID})
+		}
+		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: "git metadata projection invalid", Error: err, Duration: time.Since(start)}, nil
+	}
 	if req.WorkspaceReuseRequired {
 		return &EnvPrepareResult{
-			Success:        true,
-			Steps:          steps,
-			WorkspacePath:  wt.Path,
-			Duration:       time.Since(start),
-			WorktreeID:     wt.ID,
-			WorktreeBranch: wt.Branch,
-			MainRepoGitDir: filepath.Join(req.RepositoryPath, ".git"),
+			Success:               true,
+			Steps:                 steps,
+			WorkspacePath:         wt.Path,
+			Duration:              time.Since(start),
+			WorktreeID:            wt.ID,
+			WorktreeBranch:        wt.Branch,
+			MainRepoGitDir:        filepath.Join(req.RepositoryPath, ".git"),
+			GitMetadataProjection: projection,
 		}, nil
 	}
 
@@ -154,6 +166,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		RequestedBaseBranch:       req.BaseBranch,
 		BaseBranch:                wt.BaseBranch,
 		BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
+		GitMetadataProjection:     projection,
 	}, nil
 }
 
@@ -306,6 +319,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
 		RemoteRefState:             req.RemoteRefState,
 		WorktreeID:                 req.WorktreeID,
+		WorktreePath:               req.WorktreePath,
 		ReuseRequired:              req.WorkspaceReuseRequired && !req.AllowBranchReplacement,
 		AllowBranchReplacement:     req.AllowBranchReplacement,
 		TaskDirName:                req.TaskDirName,
@@ -436,8 +450,24 @@ func (p *WorktreePreparer) prepareMultiRepo(
 				Duration:     time.Since(start),
 			}, nil
 		}
-		if spec.WorktreeID == "" || wt.ID != spec.WorktreeID {
+		// wt.Reused means prepareOneRepo's Create call returned an
+		// already-valid existing worktree unchanged; only track truly
+		// created/recreated worktrees for rollback, so a later repo's
+		// failure never deletes a checkout this call did not create (e.g.
+		// reused by session+repo lookup even with no explicit spec.WorktreeID).
+		if !wt.Reused {
 			createdIDs = append(createdIDs, wt.ID)
+		}
+		projection, projectionErr := worktree.ResolveGitMetadataForRepository(wt.Path, spec.RepositoryPath)
+		if projectionErr != nil {
+			p.rollbackWorktrees(ctx, createdIDs)
+			return &EnvPrepareResult{
+				Success:      false,
+				Steps:        steps,
+				ErrorMessage: "git metadata projection invalid",
+				Error:        projectionErr,
+				Duration:     time.Since(start),
+			}, nil
 		}
 		worktrees = append(worktrees, RepoWorktreeResult{
 			TaskRepositoryID:          spec.TaskRepositoryID,
@@ -450,6 +480,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 			RequestedBaseBranch:       spec.BaseBranch,
 			BaseBranch:                wt.BaseBranch,
 			BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
+			GitMetadataProjection:     projection,
 		})
 	}
 
@@ -476,6 +507,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		res.RequestedBaseBranch = worktrees[0].RequestedBaseBranch
 		res.BaseBranch = worktrees[0].BaseBranch
 		res.BaseBranchFallbackWarning = worktrees[0].BaseBranchFallbackWarning
+		res.GitMetadataProjection = worktrees[0].GitMetadataProjection
 	}
 	return res, nil
 }
@@ -532,6 +564,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.RemoteContribution = spec.RemoteContribution
 	subReq.ContributionDestination = spec.ContributionDestination
 	subReq.WorktreeID = spec.WorktreeID
+	subReq.WorktreePath = spec.WorktreePath
 	subReq.WorkspaceReuseRequired = req.WorkspaceReuseRequired || spec.WorkspaceReuseRequired
 	subReq.AllowBranchReplacement = req.AllowBranchReplacement || spec.AllowBranchReplacement
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix

@@ -488,6 +488,56 @@ func TestWorkspaceSourceMaterializer_WorktreeAddsLiveFolderAtTaskRoot(t *testing
 	}
 }
 
+func TestWorkspaceSourceMaterializer_WorktreeAttachmentRebindsCompleteGitMetadataProjection(t *testing.T) {
+	ctx := context.Background()
+	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)
+	repo := newMaterializerRepo(t)
+	seedMaterializerTask(t, ctx, repo, repoPath, taskRoot, primaryPath)
+	branch := &models.TaskRepository{
+		ID: "tr-branch-2", TaskID: "task-1", RepositoryID: "repo-1",
+		BaseBranch: "main", CheckoutBranch: "branch-2", Position: 1, Metadata: map[string]interface{}{},
+	}
+	if err := repo.CreateTaskRepository(ctx, branch); err != nil {
+		t.Fatal(err)
+	}
+	oldProjection, err := worktree.ResolveGitMetadata(primaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebinder := &gitMetadataRebindStub{active: map[string][]*worktree.GitMetadataProjection{
+		"session-1": {oldProjection},
+	}}
+	worktreeManager := newMaterializerWorktreeMgr(t, taskRoot)
+	materializer := &workspaceSourceMaterializer{
+		repo:        repo,
+		worktreeMgr: worktreeManager,
+		rescanner:   rebinder,
+		branches:    &branchMaterializer{repo: repo, worktreeMgr: worktreeManager, rescanner: &stubRescanner{}, logger: newTestLogger()},
+		logger:      newTestLogger(),
+	}
+
+	if _, err := materializer.MaterializeWorkspaceSources(ctx, "task-1", &models.WorkspaceSourceBatch{TaskID: "task-1", Sources: []models.WorkspaceSource{{Repository: branch}}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(rebinder.calls) != 1 {
+		t.Fatalf("typed rebind calls = %#v, want one attachment refresh", rebinder.calls)
+	}
+	projections := rebinder.calls[0].projections
+	if len(projections) != 2 {
+		t.Fatalf("projection count = %d, want primary plus attached checkout: %#v", len(projections), projections)
+	}
+	checkoutPaths := map[string]bool{}
+	for _, projection := range projections {
+		if err := projection.Revalidate(); err != nil {
+			t.Fatalf("projection %q did not validate: %v", projection.CheckoutPath, err)
+		}
+		checkoutPaths[projection.CheckoutPath] = true
+	}
+	if !checkoutPaths[primaryPath] || !checkoutPaths[filepath.Join(taskRoot, "kandev-branch-2")] {
+		t.Fatalf("projection checkouts = %#v, want primary and attached worktree", checkoutPaths)
+	}
+}
+
 func TestWorkspaceSourceMaterializer_RollsBackLinkAndPathWhenAdoptionFails(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
@@ -633,6 +683,89 @@ type orderedWorkspaceRebindStub struct {
 	calls      []stubRescanCall
 	roots      [][]string
 	failOnCall int
+}
+
+type gitMetadataRebindCall struct {
+	sessionID   string
+	workspace   string
+	projections []*worktree.GitMetadataProjection
+}
+
+type gitMetadataRebindStub struct {
+	active     map[string][]*worktree.GitMetadataProjection
+	calls      []gitMetadataRebindCall
+	failOnCall int
+}
+
+func (s *gitMetadataRebindStub) RebindWorkspaceForSession(context.Context, string, string, ...[]string) error {
+	return errors.New("legacy Git metadata rebind must not be used")
+}
+
+func (s *gitMetadataRebindStub) GitMetadataProjectionsForSession(sessionID string) ([]*worktree.GitMetadataProjection, bool) {
+	projections, ok := s.active[sessionID]
+	return append([]*worktree.GitMetadataProjection{}, projections...), ok
+}
+
+func (s *gitMetadataRebindStub) RebindWorkspaceWithGitMetadata(_ context.Context, sessionID, workspace string, projections []*worktree.GitMetadataProjection, _ ...[]string) error {
+	s.calls = append(s.calls, gitMetadataRebindCall{
+		sessionID:   sessionID,
+		workspace:   workspace,
+		projections: append([]*worktree.GitMetadataProjection(nil), projections...),
+	})
+	if len(s.calls) == s.failOnCall {
+		return errors.New("rebind failed")
+	}
+	s.active[sessionID] = append([]*worktree.GitMetadataProjection{}, projections...)
+	return nil
+}
+
+func TestWorkspaceSourceMaterializerUsesTypedGitMetadataRebindForAttachment(t *testing.T) {
+	oldProjection := &worktree.GitMetadataProjection{CheckoutPath: "/task/primary", Hash: "old"}
+	attachedProjection := &worktree.GitMetadataProjection{CheckoutPath: "/task/attached", Hash: "attached"}
+	rebinder := &gitMetadataRebindStub{active: map[string][]*worktree.GitMetadataProjection{
+		"session-1": {oldProjection},
+	}}
+	materializer := &workspaceSourceMaterializer{rescanner: rebinder}
+	sessions := []*models.TaskSession{{ID: "session-1"}}
+
+	_, adopted, err := materializer.adoptSessionWorkspaces(context.Background(), sessions, "/task", []string{"/task"}, []*worktree.GitMetadataProjection{oldProjection, attachedProjection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(adopted) != 1 || !reflect.DeepEqual(adopted[0].projections, []*worktree.GitMetadataProjection{oldProjection}) {
+		t.Fatalf("adopted snapshots = %#v, want prior projection", adopted)
+	}
+	if len(rebinder.calls) != 1 || !reflect.DeepEqual(rebinder.calls[0].projections, []*worktree.GitMetadataProjection{oldProjection, attachedProjection}) {
+		t.Fatalf("typed rebind calls = %#v, want complete replacement projection", rebinder.calls)
+	}
+}
+
+func TestWorkspaceSourceMaterializerRestoresPriorGitMetadataAfterAttachmentFailure(t *testing.T) {
+	firstOld := &worktree.GitMetadataProjection{CheckoutPath: "/task/primary", Hash: "first-old"}
+	secondOld := &worktree.GitMetadataProjection{CheckoutPath: "/task/secondary", Hash: "second-old"}
+	attached := &worktree.GitMetadataProjection{CheckoutPath: "/task/attached", Hash: "attached"}
+	rebinder := &gitMetadataRebindStub{
+		active: map[string][]*worktree.GitMetadataProjection{
+			"session-1": {firstOld},
+			"session-2": {secondOld},
+		},
+		failOnCall: 2,
+	}
+	materializer := &workspaceSourceMaterializer{rescanner: rebinder}
+	sessions := []*models.TaskSession{{ID: "session-1"}, {ID: "session-2"}}
+	_, adopted, err := materializer.adoptSessionWorkspaces(context.Background(), sessions, "/task", []string{"/task"}, []*worktree.GitMetadataProjection{firstOld, secondOld, attached})
+	if err == nil {
+		t.Fatal("adoptSessionWorkspaces succeeded despite second rebind failure")
+	}
+	if restoreErr := materializer.restoreSessionWorkspaces(context.Background(), adopted, "/old-task", []string{"/old-task"}); restoreErr != nil {
+		t.Fatal(restoreErr)
+	}
+	if len(rebinder.calls) != 3 {
+		t.Fatalf("typed rebind calls = %#v, want attach, failed attach, rollback", rebinder.calls)
+	}
+	if got := rebinder.calls[2].projections; !reflect.DeepEqual(got, []*worktree.GitMetadataProjection{firstOld}) {
+		t.Fatalf("rollback projection = %#v, want original authority", got)
+	}
 }
 
 func (s *orderedWorkspaceRebindStub) RebindWorkspaceForSession(_ context.Context, id, dir string, sourceRoots ...[]string) error {

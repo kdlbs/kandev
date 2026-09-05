@@ -229,6 +229,10 @@ An idle, non-archived repository-backed task can add sources from its **Files** 
 
 Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
 
+For clone-based Docker, SSH, and Sprites tasks, Kandev validates the executor's own checkout before configuring a mutable agent session. Git metadata access is limited to the attested task checkout and its materialized repository siblings; Kandev never uses a host checkout path to authorize a remote executor. When an idle task adds a repository, Kandev revalidates the complete checkout set and safely refreshes the running agent before the new repository is usable. A failed checkout, metadata validation, or refresh leaves the previous session and source set intact.
+
+When an ACP agent advertises support for additional workspace directories, Kandev passes only the canonical repository siblings already attached to that task. If an attached sibling requires that capability and the agent does not advertise it, session creation fails with an explicit recovery error; Kandev never silently widens or narrows the authorized scope.
+
 Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker remains unavailable because its runtime is not implemented.
 
 Source batches are atomic: if validation, cloning, or runtime adoption fails, Kandev removes the new records and Kandev-owned entries while preserving existing task contents. Persisted attachments are reapplied after reload, relaunch, or **Reset Environment**; a previously attached folder that later disappears is reported instead of silently skipped. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
@@ -260,7 +264,7 @@ At launch Kandev:
 3. bind-mounts a released Linux `agentctl` helper read-only at `/usr/local/bin/agentctl`;
 4. publishes control and agent ports to random ports on Docker-host loopback;
 5. runs the resolved prepare script, which normally clones attached repositories into `/workspace` and checks out the Kandev branch;
-6. starts `agentctl` even if prepare failed, then creates the agent instance.
+6. normally starts `agentctl` even if prepare fails, so the host can surface the failure. Clone-policy launches are stricter: a failed clone or checkout attestation stops before an agent can be configured.
 
 The repository workspace itself is not a normal host bind mount. For a local filesystem clone URL, Kandev temporarily mounts that local clone source read-only so the in-container `git clone` can read it. Images need the selected agent's dependencies; they do not need to contain `agentctl`.
 

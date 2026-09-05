@@ -12,8 +12,61 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+func TestTaskWorkspaceSourceRootsExcludesMaterializationSourceRepository(t *testing.T) {
+	sourceRepository := t.TempDir()
+	taskCheckout := canonicalTempDir(t)
+	projection := &worktree.GitMetadataProjection{CheckoutPath: taskCheckout}
+
+	roots := taskWorkspaceSourceRoots(taskCheckout, nil, []*worktree.GitMetadataProjection{projection}, "worktree", nil)
+
+	if !sameStrings(roots, []string{taskCheckout}) {
+		t.Fatalf("task workspace source roots = %v, want only task checkout", roots)
+	}
+	for _, root := range roots {
+		if root == sourceRepository {
+			t.Fatalf("source repository was exposed as a task workspace root: %v", roots)
+		}
+	}
+}
+
+func TestTaskWorkspaceSourceRootsIncludesLinkedLocalRepository(t *testing.T) {
+	workspacePath := canonicalTempDir(t)
+	secondaryRepository := canonicalTempDir(t)
+	repositories := []WorkspaceRepositorySpec{{RepoName: "secondary", RepositoryPath: secondaryRepository}}
+
+	roots := taskWorkspaceSourceRoots(workspacePath, nil, nil, string(models.ExecutorTypeLocal), repositories)
+
+	if !sameStrings(roots, []string{workspacePath, secondaryRepository}) {
+		t.Fatalf("task workspace source roots = %v, want workspace root and linked repository", roots)
+	}
+}
+
+func TestTaskWorkspaceSourceRootsOmitsLocalRepositoryForNonLocalExecutor(t *testing.T) {
+	workspacePath := canonicalTempDir(t)
+	secondaryRepository := canonicalTempDir(t)
+	repositories := []WorkspaceRepositorySpec{{RepoName: "secondary", RepositoryPath: secondaryRepository}}
+
+	roots := taskWorkspaceSourceRoots(workspacePath, nil, nil, "worktree", repositories)
+
+	if !sameStrings(roots, []string{workspacePath}) {
+		t.Fatalf("task workspace source roots = %v, want only workspace root for a non-local executor", roots)
+	}
+}
+
+func TestTaskWorkspaceSourceRootsSkipsSelfReferentialLocalRepository(t *testing.T) {
+	workspacePath := canonicalTempDir(t)
+	repositories := []WorkspaceRepositorySpec{{RepoName: "self", RepositoryPath: workspacePath}}
+
+	roots := taskWorkspaceSourceRoots(workspacePath, nil, nil, string(models.ExecutorTypeLocal), repositories)
+
+	if !sameStrings(roots, []string{workspacePath}) {
+		t.Fatalf("task workspace source roots = %v, want no duplicate self-referential root", roots)
+	}
+}
 
 func TestReconcileWorkspaceSources_RejectsMissingFolderTarget(t *testing.T) {
 	err := reconcileWorkspaceSources(context.Background(), t.TempDir(), []WorkspaceFolderSpec{{Name: "missing", LocalPath: "/definitely/not/a/kandev-folder"}}, testWorkspaceLinkOwner())

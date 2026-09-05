@@ -94,6 +94,58 @@ type ManagedNPMRuntimeAgent interface {
 	ManagedNPMRuntime() ManagedNPMRuntimeSpec
 }
 
+// FilesystemAccess is an agent-neutral access value for a server-authored
+// filesystem policy. Agents that do not implement FilesystemPolicyAgent keep
+// their existing runtime behavior; lifecycle uses this optional capability only
+// when an executor needs an agent-side sandbox policy.
+type FilesystemAccess string
+
+const (
+	FilesystemAccessRead  FilesystemAccess = "read"
+	FilesystemAccessWrite FilesystemAccess = "write"
+	FilesystemAccessDeny  FilesystemAccess = "deny"
+)
+
+// FilesystemPolicyRule grants one exact path a filesystem access value.
+// Paths are already canonicalized by lifecycle and are not interpreted by an
+// agent implementation as authority to widen a task's scope.
+type FilesystemPolicyRule struct {
+	Path   string
+	Access FilesystemAccess
+}
+
+// FilesystemPolicy is the neutral input to an agent filesystem-policy
+// renderer. It deliberately contains no lifecycle or worktree types so other
+// agents can opt in without importing runtime implementation details.
+type FilesystemPolicy struct {
+	Name  string
+	Rules []FilesystemPolicyRule
+	// SkipHostFilesystemValidation must be set when the target Codex process
+	// runs on a different host than this backend process (SSH, Sprites, and
+	// other remote executors). The legacy-sandbox disk check below can only
+	// ever inspect this backend's own filesystem, so for a remote target it
+	// validates the wrong host: it neither detects a real conflicting config.toml
+	// on the remote host, nor may it reject a launch over an unrelated file
+	// that merely happens to exist locally. The env-payload-based check (which
+	// inspects the CODEX_CONFIG value actually forwarded to the target host)
+	// remains authoritative and is never skipped.
+	SkipHostFilesystemValidation bool
+}
+
+// FilesystemPolicyAgent is an optional agent capability for runtimes that
+// require a narrow agent-side filesystem sandbox in addition to host or
+// container isolation. Each adapter owns its native configuration rendering
+// and validation; lifecycle supplies only the neutral server-authored policy.
+type FilesystemPolicyAgent interface {
+	ApplyFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error
+}
+
+// FilesystemPolicyEnvironmentAgent optionally identifies the generated
+// environment entries that must be forwarded to a remote executor.
+type FilesystemPolicyEnvironmentAgent interface {
+	FilesystemPolicyEnvironmentKeys() []string
+}
+
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
 type PassthroughAgent interface {
 	PassthroughConfig() PassthroughConfig

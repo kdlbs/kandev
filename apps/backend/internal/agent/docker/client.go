@@ -56,6 +56,7 @@ type MountConfig struct {
 	Source   string // Host path
 	Target   string // Container path
 	ReadOnly bool
+	Tmpfs    bool // Mask a host subtree with an empty in-container filesystem.
 }
 
 // ContainerInfo holds information about a running container.
@@ -264,8 +265,12 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 	// Build mounts
 	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
 	for _, m := range cfg.Mounts {
+		mountType := mount.TypeBind
+		if m.Tmpfs {
+			mountType = mount.TypeTmpfs
+		}
 		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
+			Type:     mountType,
 			Source:   m.Source,
 			Target:   m.Target,
 			ReadOnly: m.ReadOnly,
@@ -762,8 +767,12 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 	// Build mounts
 	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
 	for _, m := range cfg.Mounts {
+		mountType := mount.TypeBind
+		if m.Tmpfs {
+			mountType = mount.TypeTmpfs
+		}
 		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
+			Type:     mountType,
 			Source:   m.Source,
 			Target:   m.Target,
 			ReadOnly: m.ReadOnly,

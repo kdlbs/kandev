@@ -47,6 +47,7 @@ func TestRecreate_FetchesBranchFromOriginWhenLocalDeleted(t *testing.T) {
 		Path:           filepath.Join(t.TempDir(), "task-1", "repo-1"),
 		Branch:         "feature/pr-branch",
 		Status:         StatusDeleted,
+		Reused:         true,
 	}
 
 	wt, err := mgr.recreate(context.Background(), existing, CreateRequest{
@@ -60,6 +61,9 @@ func TestRecreate_FetchesBranchFromOriginWhenLocalDeleted(t *testing.T) {
 	}
 	if wt.Status != StatusActive {
 		t.Errorf("status = %q, want %q", wt.Status, StatusActive)
+	}
+	if wt.Reused {
+		t.Fatal("recreated worktree retained stale Reused state")
 	}
 	gotSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 	if gotSHA != branchSHA {

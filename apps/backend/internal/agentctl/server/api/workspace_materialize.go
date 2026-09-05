@@ -13,6 +13,8 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/common/codexconfig"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/models"
@@ -34,9 +36,84 @@ type MaterializeRepositoryRequest struct {
 // MaterializeRepositoryResponse deliberately contains no remote locator so a
 // credential accidentally supplied by an untrusted caller cannot be echoed.
 type MaterializeRepositoryResponse struct {
-	Destination string `json:"destination"`
-	Reused      bool   `json:"reused,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Destination         string `json:"destination"`
+	Reused              bool   `json:"reused,omitempty"`
+	GitMetadataAttested bool   `json:"git_metadata_attested,omitempty"`
+	Error               string `json:"error,omitempty"`
+}
+
+// GitMetadataAttestationResponse carries only agentctl-approved executor paths
+// over the authenticated lifecycle control channel. It is never surfaced in a
+// user-facing launch error.
+type GitMetadataAttestationResponse struct {
+	Attested  bool                     `json:"attested"`
+	Checkouts []GitMetadataAttestation `json:"checkouts,omitempty"`
+	Error     string                   `json:"error,omitempty"`
+}
+
+// GitMetadataAttestation is an executor-visible checkout/gitdir pair approved
+// by agentctl immediately before lifecycle renders a mutable clone policy.
+// It is returned only over the authenticated control channel, never copied to
+// a user-facing launch error.
+type GitMetadataAttestation struct {
+	CheckoutPath string `json:"checkout_path"`
+	GitDir       string `json:"git_dir"`
+}
+
+// handleWorkspaceGitMetadataAttestation batch-validates every task-owned
+// checkout that agentctl is currently authorized to expose. Clone executors
+// call this immediately before ConfigureAgent/Start, so lifecycle renders from
+// final executor-side proof rather than host paths or derived .git paths.
+func (s *Server) handleWorkspaceGitMetadataAttestation(c *gin.Context) {
+	if err := validateTargetFilesystemPolicyConfig(s.cfg); err != nil {
+		s.logger.Warn("workspace Git metadata policy configuration attestation failed",
+			zap.String("failure_code", "git_metadata_target_config_conflict"))
+		c.JSON(http.StatusUnprocessableEntity, GitMetadataAttestationResponse{Error: "workspace Git metadata validation failed"})
+		return
+	}
+	checkouts, err := attestWorkspaceGitMetadata(c.Request.Context(), s.procMgr.WorkspaceSourceRoots())
+	if err != nil {
+		s.logger.Warn("workspace Git metadata attestation failed", zap.Error(err))
+		c.JSON(http.StatusUnprocessableEntity, GitMetadataAttestationResponse{Error: "workspace Git metadata validation failed"})
+		return
+	}
+	c.JSON(http.StatusOK, GitMetadataAttestationResponse{Attested: true, Checkouts: checkouts})
+}
+
+func validateTargetFilesystemPolicyConfig(cfg *config.InstanceConfig) error {
+	if cfg == nil || (cfg.AgentType != "codex-acp" && cfg.AgentType != "codex") {
+		return nil
+	}
+	env := make(map[string]string, len(cfg.AgentEnv))
+	for _, entry := range cfg.AgentEnv {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	if err := codexconfig.ValidateJSON(env["CODEX_CONFIG"]); err != nil {
+		return err
+	}
+	codexHome := env["CODEX_HOME"]
+	if codexHome == "" {
+		home := env["HOME"]
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil || home == "" {
+				return errors.New("unable to validate Codex sandbox configuration")
+			}
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	contents, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("unable to validate Codex sandbox configuration")
+	}
+	return codexconfig.ValidateTOML(contents)
 }
 
 // RemoveMaterializedRepositoryRequest identifies a previously materialized,
@@ -101,11 +178,80 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 		c.JSON(http.StatusUnprocessableEntity, MaterializeRepositoryResponse{Error: "repository materialization failed"})
 		return
 	}
+	if err := attestMaterializedGitMetadata(c.Request.Context(), destination); err != nil {
+		s.logger.Warn("workspace repository Git metadata attestation failed", zap.String("destination", req.Destination), zap.Error(err))
+		// A fresh clone that fails attestation must not survive the failed
+		// response: the lifecycle rollback that runs after a successful batch
+		// only knows about repositories recorded on success, so an
+		// unattested fresh checkout left on disk here would never be cleaned
+		// up. A reused (pre-existing) checkout is left untouched — it
+		// predates this request and may still be owned by another in-flight
+		// operation or a prior successful attach.
+		if !reused {
+			if _, removeErr := removeMaterializedRepository(c.Request.Context(), s.procMgr.WorkDir(), destination, req.RepositoryURL); removeErr != nil {
+				s.logger.Warn("cleanup of unattested fresh checkout failed", zap.String("destination", req.Destination), zap.Error(removeErr))
+			}
+		}
+		c.JSON(http.StatusUnprocessableEntity, MaterializeRepositoryResponse{Error: "repository Git metadata validation failed"})
+		return
+	}
 	status := http.StatusCreated
 	if reused {
 		status = http.StatusOK
 	}
-	c.JSON(status, MaterializeRepositoryResponse{Destination: req.Destination, Reused: reused})
+	c.JSON(status, MaterializeRepositoryResponse{Destination: req.Destination, Reused: reused, GitMetadataAttested: true})
+}
+
+// attestMaterializedGitMetadata proves a materialized checkout remains a
+// regular repository under agentctl's canonical workspace before lifecycle can
+// grant its .git directory to a mutable Codex session. It returns no path to
+// the caller, keeping executor filesystem details out of API errors. It is a
+// package var, like the quarantine hooks below, so tests can substitute a
+// failing stub without tampering with a real checkout mid-request.
+var attestMaterializedGitMetadata = func(ctx context.Context, destination string) error {
+	_, err := attestRegularGitMetadata(ctx, destination)
+	return err
+}
+
+// attestWorkspaceGitMetadata revalidates every agentctl-authorized source
+// root as an exact regular checkout. It intentionally uses the process
+// manager's canonical allowlist, never caller-supplied paths.
+func attestWorkspaceGitMetadata(ctx context.Context, roots []string) ([]GitMetadataAttestation, error) {
+	if len(roots) == 0 {
+		return nil, errors.New("workspace source roots are unavailable")
+	}
+	checkouts := make([]GitMetadataAttestation, 0, len(roots))
+	for _, root := range roots {
+		attestation, err := attestRegularGitMetadata(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		checkouts = append(checkouts, attestation)
+	}
+	return checkouts, nil
+}
+
+func attestRegularGitMetadata(ctx context.Context, destination string) (GitMetadataAttestation, error) {
+	resolved, err := filepath.EvalSymlinks(destination)
+	if err != nil || resolved != destination {
+		return GitMetadataAttestation{}, errors.New("checkout path is not canonical")
+	}
+	gitDir := filepath.Join(destination, ".git")
+	for _, path := range []string{gitDir, filepath.Join(gitDir, "objects")} {
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return GitMetadataAttestation{}, errors.New("git directory is not a regular directory")
+		}
+	}
+	head, err := os.Lstat(filepath.Join(gitDir, "HEAD"))
+	if err != nil || !head.Mode().IsRegular() || head.Mode()&os.ModeSymlink != 0 {
+		return GitMetadataAttestation{}, errors.New("git HEAD is not a regular file")
+	}
+	actualGitDir, err := materializeGitOutput(ctx, "-C", destination, "rev-parse", "--absolute-git-dir")
+	if err != nil || filepath.Clean(strings.TrimSpace(actualGitDir)) != gitDir {
+		return GitMetadataAttestation{}, errors.New("git checkout does not own its metadata")
+	}
+	return GitMetadataAttestation{CheckoutPath: destination, GitDir: gitDir}, nil
 }
 
 func (s *Server) handleWorkspaceRemoveMaterializedRepository(c *gin.Context) {

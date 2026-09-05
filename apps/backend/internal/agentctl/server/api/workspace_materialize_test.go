@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -38,6 +39,133 @@ func TestMaterializeRepository_ClonesIntoWorkspaceDestination(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workDir, "second-repo", ".git")); err != nil {
 		t.Fatalf("cloned repository missing: %v", err)
+	}
+}
+
+func TestAttestMaterializedGitMetadataAcceptsRegularClone(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	destination := filepath.Join(t.TempDir(), "second-repo")
+	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
+		t.Fatalf("materialize repository: %v", err)
+	}
+	if err := attestMaterializedGitMetadata(context.Background(), destination); err != nil {
+		t.Fatalf("attest materialized Git metadata: %v", err)
+	}
+}
+
+func TestWorkspaceGitMetadataAttestationUsesAgentctlWorkdir(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	if _, err := materializeRepository(context.Background(), origin, workspace, "main", ""); err != nil {
+		t.Fatalf("materialize repository: %v", err)
+	}
+	s := newMaterializeTestServer(t, workspace)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/attest-git-metadata", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("attestation status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"attested":true`) {
+		t.Fatalf("attestation response = %s, want attested", w.Body.String())
+	}
+	var response GitMetadataAttestationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode attestation response: %v", err)
+	}
+	if len(response.Checkouts) != 1 || response.Checkouts[0].CheckoutPath != workspace || response.Checkouts[0].GitDir != filepath.Join(workspace, ".git") {
+		t.Fatalf("attestation checkouts = %#v, want canonical workdir metadata", response.Checkouts)
+	}
+}
+
+func TestWorkspaceGitMetadataAttestationFailsClosedForNonRepository(t *testing.T) {
+	s := newMaterializeTestServer(t, t.TempDir())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/attest-git-metadata", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("attestation status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "workspace") && strings.Contains(w.Body.String(), string(filepath.Separator)) {
+		t.Fatalf("attestation response disclosed a path: %s", w.Body.String())
+	}
+}
+
+func TestWorkspaceGitMetadataAttestationRejectsCheckoutSwapAfterChildStop(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink setup requires platform-specific privileges")
+	}
+	origin := createMaterializeOrigin(t)
+	workspace := filepath.Join(canonicalTempDir(t), "workspace")
+	if _, err := materializeRepository(context.Background(), origin, workspace, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	secondary := filepath.Join(workspace, "secondary")
+	if _, err := materializeRepository(context.Background(), origin, secondary, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	s := newMaterializeTestServerWithRoots(t, workspace, []string{workspace, secondary})
+
+	attest := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/attest-git-metadata", nil)
+		req.Header.Set("Authorization", "Bearer test-token")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		return w
+	}
+	if w := attest(); w.Code != http.StatusOK {
+		t.Fatalf("initial batch attestation status = %d, body = %s", w.Code, w.Body.String())
+	}
+	stop := httptest.NewRequest(http.MethodPost, "/api/v1/stop", nil)
+	stop.Header.Set("Authorization", "Bearer test-token")
+	stopResponse := httptest.NewRecorder()
+	s.router.ServeHTTP(stopResponse, stop)
+	if stopResponse.Code != http.StatusOK {
+		t.Fatalf("stop status = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
+	}
+
+	realGitDir := filepath.Join(secondary, ".git.real")
+	if err := os.Rename(filepath.Join(secondary, ".git"), realGitDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(workspace, ".git"), filepath.Join(secondary, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if w := attest(); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("post-stop swapped secondary attestation status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestWorkspaceGitMetadataAttestationRejectsSwappedPrimaryGitMetadata(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink setup requires platform-specific privileges")
+	}
+	origin := createMaterializeOrigin(t)
+	workspace := filepath.Join(canonicalTempDir(t), "workspace")
+	if _, err := materializeRepository(context.Background(), origin, workspace, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(workspace, ".git"), filepath.Join(workspace, ".git.real")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(workspace, ".git.real"), filepath.Join(workspace, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	s := newMaterializeTestServer(t, workspace)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/attest-git-metadata", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("swapped primary batch attestation status = %d, body = %s", w.Code, w.Body.String())
 	}
 }
 
@@ -167,7 +295,7 @@ func TestWorkspaceMaterializeRepository_RejectsEscapingDestination(t *testing.T)
 	origin := createMaterializeOrigin(t)
 	workDir := t.TempDir()
 	log := newTestLogger()
-	cfg := &config.InstanceConfig{Port: 0, WorkDir: workDir, AuthToken: "test-token"}
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workDir, WorkspaceSourceRoots: []string{workDir}, AuthToken: "test-token"}
 	s := NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)
 	body, err := json.Marshal(MaterializeRepositoryRequest{
 		RepositoryURL: origin,
@@ -349,6 +477,71 @@ func TestMaterializeRepository_RejectsSymlinkedGitMetadata(t *testing.T) {
 
 	if reused || !errors.Is(err, errMaterializeCollision) {
 		t.Fatalf("symlinked git metadata = reused:%t err:%v; want collision", reused, err)
+	}
+}
+
+func TestWorkspaceMaterializeRepository_CleansUpFreshCheckoutOnAttestationFailure(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	locator := materializeRewrittenLocator(t, origin)
+	workDir := t.TempDir()
+	s := newMaterializeTestServer(t, workDir)
+
+	original := attestMaterializedGitMetadata
+	attestMaterializedGitMetadata = func(ctx context.Context, destination string) error {
+		return errors.New("simulated attestation failure")
+	}
+	defer func() { attestMaterializedGitMetadata = original }()
+
+	body, err := json.Marshal(MaterializeRepositoryRequest{RepositoryURL: locator, Destination: "repo", BaseBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/materialize-repository", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+s.cfg.AuthToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+	destination := filepath.Join(workDir, "repo")
+	if _, statErr := os.Stat(destination); !os.IsNotExist(statErr) {
+		t.Fatalf("expected fresh checkout %q to be removed after attestation failure, stat err: %v", destination, statErr)
+	}
+}
+
+func TestWorkspaceMaterializeRepository_PreservesReusedCheckoutOnAttestationFailure(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	locator := materializeRewrittenLocator(t, origin)
+	workDir := t.TempDir()
+	s := newMaterializeTestServer(t, workDir)
+	destination := filepath.Join(workDir, "repo")
+	if _, err := materializeRepository(context.Background(), locator, destination, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	original := attestMaterializedGitMetadata
+	attestMaterializedGitMetadata = func(ctx context.Context, destination string) error {
+		return errors.New("simulated attestation failure")
+	}
+	defer func() { attestMaterializedGitMetadata = original }()
+
+	body, err := json.Marshal(MaterializeRepositoryRequest{RepositoryURL: locator, Destination: "repo", BaseBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/materialize-repository", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+s.cfg.AuthToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, statErr := os.Stat(destination); statErr != nil {
+		t.Fatalf("expected reused checkout %q to survive attestation failure, stat err: %v", destination, statErr)
 	}
 }
 
@@ -546,9 +739,13 @@ func canonicalTempDir(t *testing.T) string {
 }
 
 func newMaterializeTestServer(t *testing.T, workDir string) *Server {
+	return newMaterializeTestServerWithRoots(t, workDir, []string{workDir})
+}
+
+func newMaterializeTestServerWithRoots(t *testing.T, workDir string, roots []string) *Server {
 	t.Helper()
 	log := newTestLogger()
-	cfg := &config.InstanceConfig{Port: 0, WorkDir: workDir, AuthToken: "test-token"}
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workDir, WorkspaceSourceRoots: roots, AuthToken: "test-token"}
 	return NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)
 }
 
@@ -564,6 +761,22 @@ func removeMaterializedRepositoryRequest(t *testing.T, s *Server, removal Remove
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 	return w
+}
+
+// materializeRewrittenLocator returns an https:// locator that validateRepositoryLocator
+// accepts, rewritten via a scoped GIT_CONFIG_GLOBAL insteadOf rule to the given
+// local origin so tests can exercise the full HTTP validation path without a
+// real network remote.
+func materializeRewrittenLocator(t *testing.T, origin string) string {
+	t.Helper()
+	locator := "https://example.invalid/fixture/" + filepath.Base(t.TempDir()) + ".git"
+	configPath := filepath.Join(t.TempDir(), "gitconfig")
+	config := "[url \"file://" + filepath.ToSlash(origin) + "\"]\n\tinsteadOf = " + locator + "\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatalf("write git config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+	return locator
 }
 
 func createMaterializeOrigin(t *testing.T) string {

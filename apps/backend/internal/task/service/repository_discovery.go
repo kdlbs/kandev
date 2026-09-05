@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type RepositoryDiscoveryConfig struct {
@@ -262,51 +263,14 @@ func validateStandaloneGitMetadata(gitPath string) error {
 	return nil
 }
 
-func validateLinkedWorktreeMetadata(repoPath, gitPath string) error {
-	gitDir, err := resolveGitDir(repoPath)
-	if err != nil {
-		return err
-	}
-	canonicalGitDir, err := filepath.EvalSymlinks(gitDir)
-	if err != nil {
-		return err
-	}
-	canonicalGitFile, err := filepath.EvalSymlinks(gitPath)
-	if err != nil {
-		return err
-	}
-
-	backPointer, err := readMetadataPath(filepath.Join(canonicalGitDir, "gitdir"), canonicalGitDir)
-	if err != nil {
-		return errors.New(".git pointer is not a linked worktree")
-	}
-	if !sameCanonicalPath(backPointer, canonicalGitFile) {
-		return errors.New("linked-worktree metadata does not point back to the selected repository")
-	}
-
-	commonDir, err := readMetadataPath(filepath.Join(canonicalGitDir, "commondir"), canonicalGitDir)
-	if err != nil {
-		return errors.New("linked-worktree metadata has no valid common directory")
-	}
-	worktreesDir := filepath.Join(commonDir, "worktrees")
-	rel, err := filepath.Rel(worktreesDir, canonicalGitDir)
-	if err != nil || rel == "." || rel == ".." || filepath.Dir(rel) != "." {
-		return errors.New("linked-worktree metadata is outside its common directory")
-	}
-	return nil
-}
-
-func readMetadataPath(path, relativeTo string) (string, error) {
-	// codeql[go/path-injection] Linked-worktree metadata is canonicalized and verified by reciprocal pointers.
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	metadataPath := strings.TrimSpace(string(content))
-	if metadataPath == "" {
-		return "", errors.New("metadata path is empty")
-	}
-	return resolveMetadataPathValue(metadataPath, relativeTo)
+// validateLinkedWorktreeMetadata delegates to the shared worktree resolver so
+// admission and runtime authorization cannot drift. It intentionally rejects
+// submodule-shaped .git file pointers (no reciprocal gitdir/commondir pair);
+// validateGitFileMetadata falls through to validateSubmoduleMetadata for
+// those.
+func validateLinkedWorktreeMetadata(repoPath, _ string) error {
+	_, err := worktree.ResolveGitMetadata(repoPath)
+	return err
 }
 
 func resolveMetadataPathValue(value, relativeTo string) (string, error) {

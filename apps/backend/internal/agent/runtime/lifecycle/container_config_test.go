@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,7 +11,107 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/worktree"
 )
+
+func TestGitMetadataMountsRejectsHostProjectionWithoutExactMediation(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	runContainerGit(t, "", "init", "-b", "main", repo)
+	runContainerGit(t, repo, "config", "user.email", "test@example.com")
+	runContainerGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, repo, "add", "file")
+	runContainerGit(t, repo, "commit", "-m", "initial")
+	checkout := filepath.Join(t.TempDir(), "checkout")
+	runContainerGit(t, repo, "worktree", "add", "-b", "task", checkout)
+	projection, err := worktree.ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = gitMetadataMounts([]*worktree.GitMetadataProjection{projection})
+	if err == nil || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("gitMetadataMounts() error = %v, want fail-closed exact-mediation rejection", err)
+	}
+}
+
+// Regular host projections are rejected too: their ref/reflog parent mounts
+// would give agentctl-managed commands access to sibling refs.
+func TestGitMetadataMountsRejectsRegularHostProjectionWithoutExactMediation(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	runContainerGit(t, "", "init", "-b", "main", repo)
+	runContainerGit(t, repo, "config", "user.email", "test@example.com")
+	runContainerGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, repo, "add", "file")
+	runContainerGit(t, repo, "commit", "-m", "initial")
+	projection, err := worktree.ResolveGitMetadata(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.GitDir != projection.CommonDir {
+		t.Fatalf("test fixture must be a regular repository: GitDir=%q CommonDir=%q", projection.GitDir, projection.CommonDir)
+	}
+	if _, err := gitMetadataMounts([]*worktree.GitMetadataProjection{projection}); err == nil || !strings.Contains(err.Error(), "exact Git metadata mediation") {
+		t.Fatalf("gitMetadataMounts() error = %v, want fail-closed exact-mediation rejection", err)
+	}
+}
+
+func runContainerGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if dir != "" {
+		args = append([]string{"-C", dir}, args...)
+	}
+	if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, output)
+	}
+}
+
+// TestBuildContainerConfig_MutableCloneOmitsHostGitMetadataMounts guards the
+// clone-in-container invariant: a checkout created fresh at /workspace inside
+// the container has no host checkout to project, so even a caller that (by
+// bug) still attaches host GitMetadataProjections under
+// RequiresCloneGitMetadataPolicy must not have them bind-mounted into the
+// container.
+func TestBuildContainerConfig_MutableCloneOmitsHostGitMetadataMounts(t *testing.T) {
+	cm := newCMTest(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	runContainerGit(t, "", "init", "-b", "main", repo)
+	runContainerGit(t, repo, "config", "user.email", "test@example.com")
+	runContainerGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, repo, "add", "file")
+	runContainerGit(t, repo, "commit", "-m", "initial")
+	projection, err := worktree.ResolveGitMetadata(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := ContainerConfig{
+		AgentConfig:                    newConfigStubAgent(),
+		InstanceID:                     "0123456789abcdef",
+		TaskID:                         "task-1",
+		RequiresCloneGitMetadataPolicy: true,
+		// A leaked host projection here must never surface as a mount.
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+	}
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	for _, mount := range got.Mounts {
+		if mount.Source == repo || mount.Target == repo ||
+			mount.Source == projection.CommonDir || mount.Target == projection.CommonDir ||
+			mount.Source == projection.GitDir || mount.Target == projection.GitDir {
+			t.Fatalf("mutable-clone container must not mount host Git metadata: %#v", mount)
+		}
+	}
+}
 
 // configStubAgent wraps MockAgent and overrides Runtime() with a fixed
 // RuntimeConfig that mimics ACP agents (image+tag, {workspace} placeholder).
@@ -153,6 +255,50 @@ func TestBuildContainerConfigBoundsPrepareScriptBeforeAgentctl(t *testing.T) {
 	}
 	if strings.Index(script, want) >= strings.Index(script, "exec /usr/local/bin/agentctl") {
 		t.Fatalf("prepare timeout must run before agentctl: %s", script)
+	}
+}
+
+func TestBuildContainerConfigMutableCloneStartsAgentctlAfterPrepareFailure(t *testing.T) {
+	cm := newCMTest(t)
+	got, err := cm.buildContainerConfig(ContainerConfig{
+		AgentConfig:                    newConfigStubAgent(),
+		InstanceID:                     "0123456789abcdef",
+		TaskID:                         "task-1",
+		PrepareScript:                  "exit 42",
+		RequiresCloneGitMetadataPolicy: true,
+	})
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	for _, value := range got.Env {
+		if strings.HasPrefix(value, "KANDEV_REQUIRE_GIT_METADATA_ATTESTATION=") {
+			t.Fatalf("container environment must not make prepare failure bypass lifecycle attestation: %q", value)
+		}
+	}
+	bootstrap := got.Entrypoint[2]
+	if strings.Contains(bootstrap, `exit "$prep_rc"`) {
+		t.Fatalf("prepare failure exits before trusted agentctl can attest the checkout: %s", bootstrap)
+	}
+	if !strings.Contains(bootstrap, "exec /usr/local/bin/agentctl") {
+		t.Fatalf("bootstrap does not start trusted agentctl after prepare failure: %s", bootstrap)
+	}
+}
+
+func TestCloneGitMetadataPrepareScriptAttestsCanonicalWorkspace(t *testing.T) {
+	script := cloneGitMetadataPrepareScript("git clone https://example.test/repo /workspace")
+	if !strings.Contains(script, "git clone https://example.test/repo /workspace") {
+		t.Fatalf("prepare script lost clone command: %s", script)
+	}
+	if !strings.Contains(script, "git -C \"$workspace\" rev-parse --absolute-git-dir") {
+		t.Fatalf("prepare script does not attest canonical Git directory: %s", script)
+	}
+}
+
+func TestBuildContainerCreateInstanceRequestUsesContainerWorkspaceSourceRoot(t *testing.T) {
+	request := buildContainerCreateInstanceRequest(ContainerConfig{InstanceID: "instance-1"}, "codex", false, false, false, false, nil)
+	if !equalStrings(request.WorkspaceSourceRoots, []string{dockerWorkspacePath}) {
+		t.Fatalf("WorkspaceSourceRoots = %v, want the container workspace only", request.WorkspaceSourceRoots)
 	}
 }
 

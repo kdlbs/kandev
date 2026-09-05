@@ -1,6 +1,9 @@
 package agents
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -63,5 +66,126 @@ func TestCodexACPSessionDirTemplate(t *testing.T) {
 	}
 	if cfg.SessionDirTarget != "/root/.codex" {
 		t.Fatalf("SessionDirTarget = %q, want %q", cfg.SessionDirTarget, "/root/.codex")
+	}
+}
+
+func TestCodexACPRendersNarrowFilesystemPolicy(t *testing.T) {
+	env := map[string]string{"CODEX_CONFIG": `{"approval_policy":"never"}`}
+	err := NewCodexACP().ApplyFilesystemPolicy(env, FilesystemPolicy{
+		Name: "kandev_task_git_metadata",
+		Rules: []FilesystemPolicyRule{
+			{Path: ":minimal", Access: FilesystemAccessRead},
+			{Path: "/task", Access: FilesystemAccessWrite},
+			{Path: "/source/.git", Access: FilesystemAccessRead},
+			{Path: "/source/.git/worktrees", Access: FilesystemAccessDeny},
+			{Path: "/source/.git/worktrees/task", Access: FilesystemAccessWrite},
+			{Path: "/source/.git/objects", Access: FilesystemAccessWrite},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyFilesystemPolicy() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(env["CODEX_CONFIG"]), &decoded); err != nil {
+		t.Fatalf("unmarshal rendered policy: %v", err)
+	}
+	if got := decoded["default_permissions"]; got != "kandev_task_git_metadata" {
+		t.Fatalf("default_permissions = %#v, want task profile", got)
+	}
+	permissions := decoded["permissions"].(map[string]any)
+	profile := permissions["kandev_task_git_metadata"].(map[string]any)
+	if got := profile["extends"]; got != ":workspace" {
+		t.Fatalf("profile extends = %#v, want :workspace", got)
+	}
+	rules := profile["filesystem"].(map[string]any)
+	if got := rules["/source/.git"]; got != "read" {
+		t.Fatalf("common Git root = %#v, want read", got)
+	}
+	if got := rules["/source/.git/worktrees"]; got != "deny" {
+		t.Fatalf("worktrees parent = %#v, want deny", got)
+	}
+	if got := rules["/source/.git/worktrees/task"]; got != "write" {
+		t.Fatalf("owned worktree metadata = %#v, want write", got)
+	}
+}
+
+func TestCodexACPApplyFilesystemPolicyRejectsNullConfig(t *testing.T) {
+	env := map[string]string{"CODEX_CONFIG": "null"}
+	err := NewCodexACP().ApplyFilesystemPolicy(env, FilesystemPolicy{
+		Name:                         "kandev_task_git_metadata",
+		SkipHostFilesystemValidation: true,
+	})
+	if err == nil {
+		t.Fatal("ApplyFilesystemPolicy() error = nil, want rejection of a null CODEX_CONFIG payload")
+	}
+}
+
+func TestCodexACPApplyFilesystemPolicyRejectsLegacySandboxInProfile(t *testing.T) {
+	env := map[string]string{
+		"CODEX_CONFIG": `{"profile":"locked","profiles":{"locked":{"sandbox_mode":"danger-full-access"}}}`,
+	}
+	err := NewCodexACP().ApplyFilesystemPolicy(env, FilesystemPolicy{
+		Name:                         "kandev_task_git_metadata",
+		SkipHostFilesystemValidation: true,
+	})
+	if err == nil {
+		t.Fatal("ApplyFilesystemPolicy() error = nil, want selected profile sandbox rejection")
+	}
+	if strings.Contains(err.Error(), "danger-full-access") {
+		t.Fatalf("ApplyFilesystemPolicy() disclosed Codex config content: %v", err)
+	}
+}
+
+func TestCodexACPApplyFilesystemPolicySkipsHostDiskCheckForRemoteTargets(t *testing.T) {
+	home := t.TempDir()
+	writeLegacyCodexSandboxConfig(t, home)
+
+	env := map[string]string{
+		"HOME":         home,
+		"CODEX_CONFIG": `{"approval_policy":"never"}`,
+	}
+	err := NewCodexACP().ApplyFilesystemPolicy(env, FilesystemPolicy{
+		Name:                         "kandev_task_git_metadata",
+		SkipHostFilesystemValidation: true,
+	})
+	if err != nil {
+		t.Fatalf("ApplyFilesystemPolicy() error = %v, want remote target to skip the backend-host disk check", err)
+	}
+}
+
+func TestCodexACPApplyFilesystemPolicyFailsClosedOnLegacyHostSandbox(t *testing.T) {
+	home := t.TempDir()
+	writeLegacyCodexSandboxConfig(t, home)
+
+	env := map[string]string{
+		"HOME":         home,
+		"CODEX_CONFIG": `{"approval_policy":"never"}`,
+	}
+	err := NewCodexACP().ApplyFilesystemPolicy(env, FilesystemPolicy{Name: "kandev_task_git_metadata"})
+	if err == nil {
+		t.Fatal("ApplyFilesystemPolicy() error = nil, want rejection of a legacy on-disk Codex sandbox config")
+	}
+}
+
+func TestCodexACPApplyFilesystemPolicyFailsClosedWhenHomeIsUnresolvable(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	env := map[string]string{"CODEX_CONFIG": `{"approval_policy":"never"}`}
+	err := NewCodexACP().ApplyFilesystemPolicy(env, FilesystemPolicy{Name: "kandev_task_git_metadata"})
+	if err == nil {
+		t.Fatal("ApplyFilesystemPolicy() error = nil, want fail-closed when no host HOME can be resolved")
+	}
+}
+
+func writeLegacyCodexSandboxConfig(t *testing.T, home string) {
+	t.Helper()
+	codexDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", codexDir, err)
+	}
+	contents := "sandbox_mode = \"danger-full-access\"\n"
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(contents), 0o644); err != nil {
+		t.Fatalf("WriteFile config.toml error = %v", err)
 	}
 }

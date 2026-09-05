@@ -648,8 +648,14 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if err != nil {
 		return nil, err
 	}
+	if err := m.prepareExecutionGitMetadata(info, rt, preparation.request); err != nil {
+		return nil, err
+	}
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
 	defer launchCancel()
+	if err := preflightGitMetadataProjection(launchCtx, rt, preparation.request); err != nil {
+		return nil, err
+	}
 	if err := resumeRemoteInstancePreflight(launchCtx, rt, preparation.request); err != nil {
 		return nil, err
 	}
@@ -658,6 +664,21 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
+	if rt.RequiresCloneURL() {
+		remoteRepositories, projectionErr := remoteWorkspaceProjectionFromWorkspaceInfo(info, preparation.request)
+		if projectionErr == nil {
+			projectionErr = reconstructRemoteWorkspaceRepositories(launchCtx, rt, runtimeInstance, remoteRepositories)
+		}
+		if projectionErr != nil {
+			_ = rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, false)
+			return nil, fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr)
+		}
+	}
+	if err := installAttestedCloneGitMetadataPolicy(launchCtx, preparation.request, runtimeInstance); err != nil {
+		cleanupErr := rt.StopInstance(context.WithoutCancel(ctx), runtimeInstance, true)
+		return nil, errors.Join(fmt.Errorf("install clone Git metadata policy: %w", err), cleanupErr)
+	}
+	m.logGitMetadataPolicyInstalled(taskID, info.TaskEnvironmentID, info.ExecutorType, info.WorkspaceRepositories, preparation.request, rt)
 
 	execution := m.initializeCreatedExecution(ctx, taskID, info, executionID, rt, runtimeInstance, preparation)
 
@@ -711,6 +732,48 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	return execution, nil
 }
 
+func (m *Manager) prepareExecutionGitMetadata(info *WorkspaceInfo, rt ExecutorBackend, req *ExecutorCreateRequest) error {
+	if info == nil || req == nil || rt == nil {
+		return errors.New(gitMetadataProjectionInvalid)
+	}
+	if rt.RequiresCloneURL() {
+		req.GitMetadataRequirement = cloneGitMetadataRequirement(len(info.WorkspaceRepositories) > 0)
+		return nil
+	}
+	// Local and legacy local_pc executions operate directly in regular
+	// checkouts. Only Worktree executions need an explicit linked-worktree Git
+	// metadata projection; treating an in-place checkout as a linked worktree
+	// passes the same path as checkout and source, which must be rejected.
+	if info.ExecutorType != string(models.ExecutorTypeWorktree) {
+		return nil
+	}
+	if len(info.WorkspaceRepositories) == 0 {
+		return nil
+	}
+	projections := make([]*worktree.GitMetadataProjection, 0, len(info.WorkspaceRepositories))
+	for _, repository := range info.WorkspaceRepositories {
+		spec := RepoLaunchSpec{
+			RepositoryPath: repository.RepositoryPath,
+			RepoName:       repository.RepoName,
+			BranchSlug:     repository.BranchSlug,
+		}
+		checkoutPath, err := resumedWorktreeCheckoutPath(info.WorkspacePath, spec)
+		if err != nil {
+			return errors.New(gitMetadataProjectionInvalid)
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(checkoutPath, repository.RepositoryPath)
+		if err != nil {
+			return errors.New(gitMetadataProjectionInvalid)
+		}
+		projections = append(projections, projection)
+	}
+	if err := validateGitMetadataProjections(projections); err != nil {
+		return errors.New(gitMetadataProjectionInvalid)
+	}
+	req.GitMetadataProjections = projections
+	return nil
+}
+
 type executionCreatePreparation struct {
 	request     *ExecutorCreateRequest
 	profileInfo *AgentProfileInfo
@@ -727,7 +790,7 @@ func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string
 	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
 		return err
 	}
-	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
+	if isLocalExecutorType(info.ExecutorType) {
 		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return err
 		}
@@ -823,7 +886,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           info.AgentProfileID,
 			WorkspacePath:                  info.WorkspacePath,
-			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+			WorkspaceSourceRoots:           taskWorkspaceSourceRoots(info.WorkspacePath, info.WorkspaceFolders, nil, info.ExecutorType, info.WorkspaceRepositories),
 			Protocol:                       string(agentConfig.Runtime().Protocol),
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,

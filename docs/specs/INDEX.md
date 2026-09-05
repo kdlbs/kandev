@@ -39,5 +39,6 @@ The following specifications were added after this migration and remain in the l
 - [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 - [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
+- [Task Git Metadata Permissions](task-git-metadata-permissions/spec.md) (building)
 
 ## Authoring rule

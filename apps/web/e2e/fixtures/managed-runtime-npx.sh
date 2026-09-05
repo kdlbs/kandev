@@ -4,7 +4,7 @@ set -eu
 cache_root=${NPM_CONFIG_CACHE:-${npm_config_cache:-"$HOME/.npm"}}
 package_spec=${3:-}
 preference=${2:-}
-managed_package_spec=opencode-ai@1.18.18
+managed_package_spec=@agentclientprotocol/codex-acp@1.6.0
 real_npx=/usr/bin/npx
 
 # This image replaces npx only to make the selected managed runtime failure

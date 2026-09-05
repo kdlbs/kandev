@@ -3,10 +3,16 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/common/codexconfig"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -23,6 +29,7 @@ var (
 	_ PassthroughAgent       = (*CodexACP)(nil)
 	_ InferenceAgent         = (*CodexACP)(nil)
 	_ ManagedNPMRuntimeAgent = (*CodexACP)(nil)
+	_ FilesystemPolicyAgent  = (*CodexACP)(nil)
 )
 
 // CodexACP implements Agent for the Agent Client Protocol codex-acp package.
@@ -190,6 +197,152 @@ func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
+}
+
+// ApplyFilesystemPolicy renders and validates Codex's native session
+// configuration. Lifecycle remains unaware of CODEX_CONFIG and Codex sandbox
+// keys so other agents can render the same neutral policy differently.
+func (a *CodexACP) ApplyFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error {
+	return applyCodexFilesystemPolicy(env, policy)
+}
+
+func (a *CodexACP) FilesystemPolicyEnvironmentKeys() []string { return []string{"CODEX_CONFIG"} }
+
+func applyCodexFilesystemPolicy(env map[string]string, policy FilesystemPolicy) error {
+	if env == nil {
+		return errors.New("filesystem policy environment is unavailable")
+	}
+	if !policy.SkipHostFilesystemValidation {
+		if err := rejectLegacyCodexSandbox(env); err != nil {
+			return err
+		}
+	}
+	config, err := codexConfigFromEnvironment(env)
+	if err != nil {
+		return err
+	}
+	if hasLegacyCodexSandbox(config) {
+		return errors.New("legacy Codex sandbox configuration conflicts with task filesystem policy")
+	}
+	overlay, err := renderCodexFilesystemPolicy(policy)
+	if err != nil {
+		return err
+	}
+	mergeCodexConfig(config, overlay)
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("encode Codex filesystem policy: %w", err)
+	}
+	env["CODEX_CONFIG"] = string(encoded)
+	return nil
+}
+
+func renderCodexFilesystemPolicy(policy FilesystemPolicy) (map[string]any, error) {
+	if policy.Name == "" {
+		return nil, fmt.Errorf("filesystem policy name is required")
+	}
+	rules := make(map[string]string, len(policy.Rules))
+	for _, rule := range policy.Rules {
+		if rule.Path == "" {
+			return nil, fmt.Errorf("filesystem policy path is required")
+		}
+		switch rule.Access {
+		case FilesystemAccessRead, FilesystemAccessWrite, FilesystemAccessDeny:
+			rules[rule.Path] = string(rule.Access)
+		default:
+			return nil, fmt.Errorf("invalid filesystem access %q", rule.Access)
+		}
+	}
+	return map[string]any{
+		"default_permissions": policy.Name,
+		"permissions": map[string]any{
+			policy.Name: map[string]any{
+				"extends":    ":workspace",
+				"filesystem": rules,
+			},
+		},
+	}, nil
+}
+
+// resolveCodexHostHome finds the effective host home directory used to
+// locate a legacy on-disk Codex sandbox config, preferring the forwarded
+// environment's HOME, then the current process's HOME, then the OS user
+// home directory. It fails closed rather than resolving against an
+// unrelated working directory when none of these are available.
+func resolveCodexHostHome(env map[string]string) (string, error) {
+	if home := env["HOME"]; home != "" {
+		return home, nil
+	}
+	if home := os.Getenv("HOME"); home != "" {
+		return home, nil
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home, nil
+	}
+	return "", errors.New("unable to determine Codex home directory to validate sandbox configuration")
+}
+
+func rejectLegacyCodexSandbox(env map[string]string) error {
+	home := env["CODEX_HOME"]
+	if home == "" {
+		effectiveHome, err := resolveCodexHostHome(env)
+		if err != nil {
+			return err
+		}
+		home = filepath.Join(effectiveHome, ".codex")
+	}
+	contents, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("unable to validate Codex sandbox configuration")
+	}
+	return codexconfig.ValidateTOML(contents)
+}
+
+func codexConfigFromEnvironment(env map[string]string) (map[string]any, error) {
+	if env["CODEX_CONFIG"] == "" {
+		return make(map[string]any), nil
+	}
+	config := make(map[string]any)
+	if err := json.Unmarshal([]byte(env["CODEX_CONFIG"]), &config); err != nil {
+		return nil, errors.New("unable to validate Codex session configuration")
+	}
+	if config == nil {
+		// A JSON "null" payload unmarshals successfully but leaves config nil.
+		// Reject explicitly: a nil map reads as empty but panics on the first
+		// write in mergeCodexConfig, and "no config" must never be confused
+		// with "and here is a config with nothing in it" this deep into a
+		// path malformed or forged input could reach.
+		return nil, errors.New("unable to validate Codex session configuration")
+	}
+	return config, nil
+}
+
+func hasLegacyCodexSandbox(config map[string]any) bool {
+	return codexconfig.HasLegacySandbox(config)
+}
+
+func mergeCodexConfig(base, overlay map[string]any) {
+	for key, value := range overlay {
+		if key != "permissions" {
+			base[key] = value
+			continue
+		}
+		existing, _ := base[key].(map[string]any)
+		if existing == nil {
+			existing = make(map[string]any)
+			base[key] = existing
+		}
+		permissions, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		for name, profile := range permissions {
+			existing[name] = profile
+		}
+	}
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.

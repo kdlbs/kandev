@@ -300,6 +300,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		}
 		return nil, ErrReuseWorktreeUnavailable
 	}
+	wt.Reused = true
 	return wt, nil
 }
 
@@ -373,6 +374,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 					zap.String("repository_id", req.RepositoryID),
 					zap.String("task_id", req.TaskID),
 					zap.String("path", existing.Path))
+				existing.Reused = true
 				return existing, true, nil
 			}
 			m.logger.Warn("worktree directory invalid, recreating",
@@ -405,6 +407,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 					zap.String("session_id", req.SessionID),
 					zap.String("task_id", req.TaskID),
 					zap.String("path", existing.Path))
+				existing.Reused = true
 				return existing, true, nil
 			}
 			m.logger.Warn("worktree directory invalid, recreating",
@@ -421,6 +424,67 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 			zap.String("task_id", req.TaskID))
 	}
 
+	// Last resort: a durable resumed WorktreePath for this exact session and
+	// repository. This only matters when the environment was persisted before
+	// WorktreeID existed, or when a branch-layout slug changed between launch
+	// and resume so the session+repo+slug lookup above misses. The path is
+	// filtered to this session's own worktree rows before being trusted, so it
+	// can only ever adopt this session's existing checkout, never an
+	// arbitrary directory supplied by the request.
+	if req.WorktreePath != "" && req.SessionID != "" {
+		if wt, found, err := m.tryReuseByPersistedPath(ctx, req); found {
+			return wt, true, err
+		}
+	}
+
+	return nil, false, nil
+}
+
+// tryReuseByPersistedPath is the last-resort reuse tier: it locates this
+// session's own worktree rows for the requested repository and accepts one
+// only if its persisted Path is byte-identical to req.WorktreePath. It never
+// trusts req.WorktreePath as authority to open an arbitrary directory —
+// GetAllBySessionID already scopes the candidate set to rows this session
+// owns, and the exact-path match rejects any row whose canonical path was
+// reassigned since the caller's environment record was last read.
+func (m *Manager) tryReuseByPersistedPath(ctx context.Context, req CreateRequest) (*Worktree, bool, error) {
+	candidates, err := m.GetAllBySessionID(ctx, req.SessionID)
+	if err != nil || len(candidates) == 0 {
+		return nil, false, nil
+	}
+	for _, existing := range candidates {
+		if existing == nil || existing.RepositoryID != req.RepositoryID || existing.Path != req.WorktreePath {
+			continue
+		}
+		handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+		if err != nil {
+			return nil, true, err
+		}
+		if handle != nil {
+			defer func() { _ = handle.Close() }()
+		}
+		if !valid {
+			m.logger.Warn("resumed worktree path invalid, recreating",
+				zap.String("worktree_id", existing.ID),
+				zap.String("session_id", req.SessionID),
+				zap.String("repository_id", req.RepositoryID),
+				zap.String("task_id", req.TaskID),
+				zap.String("path", existing.Path))
+			wt, err := m.recreate(ctx, existing, req)
+			return wt, true, err
+		}
+		if err := m.validateReusableContribution(ctx, req, existing); err != nil {
+			return nil, true, err
+		}
+		m.logger.Info("reusing existing worktree by resumed path",
+			zap.String("worktree_id", existing.ID),
+			zap.String("session_id", req.SessionID),
+			zap.String("repository_id", req.RepositoryID),
+			zap.String("task_id", req.TaskID),
+			zap.String("path", existing.Path))
+		existing.Reused = true
+		return existing, true, nil
+	}
 	return nil, false, nil
 }
 
@@ -2045,6 +2109,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	now := time.Now()
 	existing.Path = worktreePath
 	existing.Status = StatusActive
+	// Reused describes only the Create call that returned this in-memory
+	// record. Recreation created a fresh checkout, so stale reuse state must
+	// never suppress rollback or cleanup on a later multi-repository failure.
+	existing.Reused = false
 	existing.DeletedAt = nil
 	existing.UpdatedAt = now
 	existing.BaseBranchFallbackWarning = fallbackWarning

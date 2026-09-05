@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 const (
@@ -52,7 +53,9 @@ type ContainerConfig struct {
 	AutoApprovePermissionsOverride *bool
 	ProfileInfo                    *AgentProfileInfo
 	InstanceID                     string
-	MainRepoGitDir                 string // Path to main repo's .git directory (for worktrees)
+	GitMetadataProjections         []*worktree.GitMetadataProjection
+	RequiresCloneGitMetadataPolicy bool
+	WorkspaceSourceRoots           []string // Canonical roots as visible inside the container.
 	McpServers                     []McpServerConfig
 	McpMode                        string
 	McpProviders                   []string
@@ -101,12 +104,17 @@ func buildContainerCreateInstanceRequest(
 	disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill bool,
 	stripEnv []string,
 ) *agentctl.CreateInstanceRequest {
+	workspaceSourceRoots := config.WorkspaceSourceRoots
+	if len(workspaceSourceRoots) == 0 {
+		workspaceSourceRoots = []string{dockerWorkspacePath}
+	}
 	return &agentctl.CreateInstanceRequest{
-		ID:            config.InstanceID,
-		WorkspacePath: "/workspace",
-		AgentCommand:  "",
-		AgentType:     agentType,
-		Env:           config.Credentials,
+		ID:                   config.InstanceID,
+		WorkspacePath:        "/workspace",
+		WorkspaceSourceRoots: append([]string(nil), workspaceSourceRoots...),
+		AgentCommand:         "",
+		AgentType:            agentType,
+		Env:                  config.Credentials,
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,
@@ -443,15 +451,19 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// sources resolve to a real on-disk location.
 	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag, config.InstanceID)
 
-	// Add main repo .git directory mount for worktrees
-	if config.MainRepoGitDir != "" {
-		mounts = append(mounts, docker.MountConfig{
-			Source:   config.MainRepoGitDir,
-			Target:   config.MainRepoGitDir, // Same path inside container
-			ReadOnly: false,
-		})
-		cm.logger.Debug("added main repo .git directory mount for worktree",
-			zap.String("path", config.MainRepoGitDir))
+	// A mutable-clone checkout is created fresh inside the container; it has
+	// no host checkout to bind-mount, and host Git metadata projections must
+	// never be attached to a container whose checkout the host cannot see.
+	// This is a defense-in-depth guard: callers should already omit
+	// projections under this policy, but a leaked host path here would
+	// otherwise silently bind-mount unrelated host Git administration into
+	// the container.
+	if !config.RequiresCloneGitMetadataPolicy {
+		gitMounts, err := gitMetadataMounts(config.GitMetadataProjections)
+		if err != nil {
+			return docker.ContainerConfig{}, err
+		}
+		mounts = append(mounts, gitMounts...)
 	}
 
 	if config.LocalClonePath != "" {
@@ -522,9 +534,9 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// agentctl receives the agent command later via the CreateInstance API.
 	//
 	// Prepare runs in a subshell so its `set -e` (most prepare scripts opt in)
-	// can't kill the bootstrap before exec'ing agentctl. If prepare fails, we
-	// still bring agentctl up so the host can connect, surface the failure, and
-	// the user can debug from the Executor Settings popover.
+	// can't kill the bootstrap before exec'ing agentctl. Agentctl is the trusted
+	// control plane lifecycle uses to attest the prepared checkout; the agent
+	// child is started only after that attestation and policy installation pass.
 	//
 	prepareTimeout := formatCoreutilsTimeout(constants.SetupScriptTimeout)
 	//nolint:dupword // shell branches contain repeated `fi` tokens.

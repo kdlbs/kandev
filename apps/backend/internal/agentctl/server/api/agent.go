@@ -391,13 +391,13 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
 
-	if err := adapter.Initialize(ctx); err != nil {
+	if err := agentAdapter.Initialize(ctx); err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		return resp
@@ -405,7 +405,7 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	// Get agent info after successful initialization
 	var agentInfoResp *AgentInfoResponse
-	if info := adapter.GetAgentInfo(); info != nil {
+	if info := agentAdapter.GetAgentInfo(); info != nil {
 		agentInfoResp = &AgentInfoResponse{
 			Name:    info.Name,
 			Version: info.Version,
@@ -534,8 +534,8 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	ctx, cancel := context.WithTimeout(ctx, constants.SessionNewTimeout)
 	defer cancel()
 
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
@@ -555,7 +555,18 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
-	sessionID, err := adapter.NewSession(ctx, mcpServers)
+	var sessionID string
+	var err error
+	if sessioner, ok := agentAdapter.(adapter.AdditionalDirectoriesSessioner); ok && len(s.procMgr.WorkspaceSourceRoots()) > 0 {
+		// Pass the revalidating accessor itself, not a pre-fetched snapshot,
+		// so the adapter re-reads the canonical roots immediately before
+		// consuming them instead of racing a concurrent root change that
+		// happens after this point but before the provider actually receives
+		// additionalDirectories.
+		sessionID, err = sessioner.NewSessionWithAdditionalDirectories(ctx, mcpServers, s.procMgr.ValidatedWorkspaceSourceRoots)
+	} else {
+		sessionID, err = agentAdapter.NewSession(ctx, mcpServers)
+	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
 		s.logger.Error("new session failed", zap.Error(err))
@@ -566,7 +577,7 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
 		Success:    true,
 		SessionID:  sessionID,
-		ModelState: sessionModelState(adapter),
+		ModelState: sessionModelState(agentAdapter),
 	})
 	return resp
 }
@@ -854,7 +865,13 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
-	sessionID, err := sr.ResetSession(ctx, mcpServers)
+	var sessionID string
+	var err error
+	if rooted, ok := agentAdapter.(adapter.AdditionalDirectoriesSessionResetter); ok {
+		sessionID, err = rooted.ResetSessionWithAdditionalDirectories(ctx, mcpServers, s.procMgr.ValidatedWorkspaceSourceRoots)
+	} else {
+		sessionID, err = sr.ResetSession(ctx, mcpServers)
+	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
 		s.logger.Error("session reset failed", zap.Error(err))
