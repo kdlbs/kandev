@@ -404,6 +404,39 @@ func TestHandleAskUserQuestion_RetryAfterDetachedDeliveryDoesNotReplayToolRespon
 	require.EqualValues(t, 1, resumer.calls.Load(), "retry must not dispatch or return the detached answer twice")
 }
 
+func TestHandleAskUserQuestion_RetryReturnsFinalizedDetachedRejection(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	taskID, sessionID, pendingID := seedRetrySession(t, ctx, svc, repo, "retry-after-detached-rejection")
+	seedRetryMessage(t, ctx, repo, taskID, sessionID, pendingID, "pending", nil)
+
+	store := clarification.NewStore(time.Minute)
+	resumer := &countingDetachedResumer{}
+	resolver := clarification.NewResolver(
+		store,
+		repo,
+		&svcMessageUpdater{Service: svc},
+		svc,
+		resumer,
+		resumer,
+		nil,
+		testLogger(t),
+	)
+	_, claimed, err := resolver.ResolveBundle(ctx, pendingID, clarification.Outcome{Rejected: true})
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.Zero(t, resumer.calls.Load(), "a detached rejection is finalized without resuming the agent")
+
+	h := NewHandlers(svc, nil, store, nil, &countingMessageCreator{}, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, retryAskPayload(sessionID, taskID)))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var body clarification.Response
+	require.NoError(t, json.Unmarshal(resp.Payload, &body))
+	assert.True(t, body.Rejected)
+	assert.Empty(t, store.ListPending())
+}
+
 func TestHandleAskUserQuestion_RetryReturnsRecordedAnswerWithoutWaiting(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()

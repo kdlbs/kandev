@@ -420,6 +420,77 @@ func TestCreateRequest_PresetID_NeverReplacesLiveEntry(t *testing.T) {
 	}
 }
 
+func TestRespondWithDeliveryConfirmation_CancelsRetryRegisteredAfterOriginalCancellation(t *testing.T) {
+	s := NewStore(time.Minute)
+	request := &Request{
+		PendingID: "retry-cancel-race",
+		SessionID: "session-1",
+		Questions: []Question{{
+			Prompt:  "Continue?",
+			Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
+		}},
+	}
+	pendingID, created := s.CreateRequest(request)
+	if !created {
+		t.Fatal("original request was not created")
+	}
+
+	respondLoaded := make(chan struct{})
+	releaseRespond := make(chan struct{})
+	s.SetOnRespondLoaded(func(string) {
+		close(respondLoaded)
+		<-releaseRespond
+	})
+	respondDone := make(chan error, 1)
+	go func() {
+		respondDone <- s.RespondWithDeliveryConfirmation(
+			context.Background(), pendingID, &Response{}, func() error { return nil },
+		)
+	}()
+	<-respondLoaded
+
+	if !s.CancelRequest(pendingID) {
+		t.Fatal("original request was not cancelled")
+	}
+	_, retryCreated, deliveryMissed := s.CreateRetryRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "session-1",
+		Questions: request.Questions,
+	})
+	if !retryCreated || deliveryMissed {
+		t.Fatalf("retry registration = created %v, delivery missed %v; want true, false before responder observes cancellation", retryCreated, deliveryMissed)
+	}
+
+	waitEntered := make(chan struct{}, 1)
+	s.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
+	waitDone := make(chan error, 1)
+	go func() {
+		_, err := s.WaitForResponse(context.Background(), pendingID)
+		waitDone <- err
+	}()
+	<-waitEntered
+	close(releaseRespond)
+
+	if err := <-respondDone; !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RespondWithDeliveryConfirmation error = %v, want %v", err, ErrNotFound)
+	}
+	select {
+	case err := <-waitDone:
+		if err == nil {
+			t.Fatal("replacement retry waiter returned without cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replacement retry waiter was stranded after detached delivery won")
+	}
+	if _, created, missed := s.CreateRetryRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "session-1",
+		Questions: request.Questions,
+	}); created || !missed {
+		t.Fatalf("retry after detached delivery = created %v, delivery missed %v; want false, true", created, missed)
+	}
+}
+
 // TestWaitForResponse_Broadcast_MultipleWaiters verifies that close(done) in
 // Respond unblocks every parked waiter. The onWaitEntered hook lets the test
 // observe each goroutine after it has captured a *PendingClarification pointer

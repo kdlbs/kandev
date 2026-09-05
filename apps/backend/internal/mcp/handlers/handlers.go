@@ -3975,14 +3975,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to reconcile clarification retry", nil)
 	}
-	if deliveryMissed {
-		h.logger.Info("clarification retry joined an answer already committed to detached delivery",
-			zap.String("pending_id", retryPendingID),
-			zap.String("session_id", req.SessionID))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"Clarification response is already being delivered after the interrupted wait", nil)
-	}
-	if durable.response != nil && !durable.deliveryPending {
+	if durable.response != nil && !durable.deliveryPending && (!deliveryMissed || durable.response.Rejected) {
 		if isNew {
 			h.clarificationSvc.CancelRequest(pendingID)
 		}
@@ -3992,6 +3985,13 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 			zap.String("session_id", req.SessionID),
 			zap.Bool("rejected", durable.response.Rejected))
 		return ws.NewResponse(msg.ID, msg.Action, durable.response)
+	}
+	if deliveryMissed {
+		h.logger.Info("clarification retry joined an answer already committed to detached delivery",
+			zap.String("pending_id", retryPendingID),
+			zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"Clarification response is already being delivered after the interrupted wait", nil)
 	}
 	if durable.closed != "" {
 		h.clarificationSvc.CancelRequest(pendingID)

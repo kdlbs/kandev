@@ -339,6 +339,7 @@ func (s *Store) respond(
 
 	if pending.cancelled {
 		pending.mu.Unlock()
+		s.recordDeliveryMissAfterCancellation(pendingID, pending, confirm != nil)
 		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
 	}
 	if pending.resolved {
@@ -360,6 +361,7 @@ func (s *Store) respond(
 	select {
 	case <-pending.CancelCh:
 		pending.mu.Unlock()
+		s.recordDeliveryMissAfterCancellation(pendingID, pending, confirm != nil)
 		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
 	default:
 	}
@@ -399,6 +401,29 @@ func (s *Store) respond(
 		pending.mu.Unlock()
 		s.deletePendingIfCurrent(pendingID, pending)
 		return fmt.Errorf("wait for clarification delivery confirmation: %w", waitCtx.Err())
+	}
+}
+
+// recordDeliveryMissAfterCancellation closes a replacement retry that raced
+// between cancellation of the waiter we loaded and observing that cancellation.
+// Detached delivery has already won for this durable identity, so leaving the
+// replacement live would strand it: the responder still holds the old entry
+// and will never signal the replacement's done channel.
+func (s *Store) recordDeliveryMissAfterCancellation(
+	pendingID string,
+	loaded *PendingClarification,
+	record bool,
+) {
+	if !record {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.pruneDeliveryMissesLocked(now)
+	s.deliveryMisses[pendingID] = now
+	if replacement := s.pending[pendingID]; replacement != nil && replacement != loaded {
+		s.cancelPendingLocked(pendingID, replacement)
 	}
 }
 
