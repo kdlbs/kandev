@@ -145,6 +145,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
   "plugin-panel": PortalSlot,
+  canvas: PortalSlot,
   // Backwards compat aliases for saved layouts
   "diff-files": PortalSlot,
   "all-files": PortalSlot,

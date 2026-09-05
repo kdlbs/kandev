@@ -744,6 +744,50 @@
       ]
     },
     {
+      "id": "agent-authored-canvases",
+      "audiences": ["user", "operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["canvases"],
+      "sources": [
+        "apps/backend/internal/canvas/service.go",
+        "apps/backend/internal/canvas/repository.go",
+        "apps/backend/internal/mcp/handlers/canvas.go",
+        "apps/backend/internal/mcp/server/canvas_tools.go",
+        "apps/backend/internal/plugins/instances/store.go",
+        "apps/backend/internal/plugins/manifest/manifest.go",
+        "apps/backend/internal/plugins/manifest/validate.go",
+        "apps/backend/internal/plugins/webapp/package.go",
+        "apps/backend/internal/plugins/webapp/policy.go",
+        "apps/backend/internal/plugins/webapp/runtime.go",
+        "apps/backend/internal/runtimeflags/registry.go",
+        "apps/web/components/plugins/canvas-page.tsx",
+        "apps/web/components/plugins/web-app-frame.tsx",
+        "apps/web/lib/api/domains/canvas-api.ts"
+      ],
+      "tests": [
+        "apps/backend/internal/canvas/canvas_test.go",
+        "apps/backend/internal/mcp/handlers/canvas_test.go",
+        "apps/backend/internal/mcp/server/canvas_tools_test.go",
+        "apps/backend/internal/plugins/instances/store_test.go",
+        "apps/backend/internal/plugins/manifest/manifest_test.go",
+        "apps/backend/internal/plugins/webapp/package_test.go",
+        "apps/backend/internal/plugins/webapp/policy_test.go",
+        "apps/backend/internal/plugins/webapp/runtime_test.go",
+        "apps/web/components/plugins/canvas-page.test.tsx",
+        "apps/web/components/plugins/web-app-frame.test.tsx",
+        "apps/web/lib/api/domains/canvas-api.test.ts"
+      ],
+      "mcpTools": [
+        "list_canvases_kandev",
+        "read_canvas_authoring_skill_kandev",
+        "create_canvas_kandev",
+        "get_canvas_kandev",
+        "publish_canvas_kandev",
+        "get_canvas_state_kandev",
+        "set_canvas_state_kandev"
+      ]
+    },
+    {
       "id": "plugin-marketplace",
       "audiences": [
         "operator",

@@ -1,4 +1,4 @@
-import { type Locator, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { assertLocatorWithinViewportX } from "../../helpers/layout-assertions";
 import { closeQuickTerminalTab } from "./terminal-test-helpers";
@@ -33,10 +33,6 @@ async function runCommandAndWaitForOutput(page: Page, command: string, expected:
       message: `Waiting for terminal output ${expected}`,
     })
     .toContain(expected);
-}
-
-function terminalTab(dialog: Locator, sequence: number) {
-  return dialog.locator(`[data-testid="quick-terminal-tab"][data-terminal-sequence="${sequence}"]`);
 }
 
 async function closeSurvivingQuickTerminals(page: Page, launcherTestId: string) {
@@ -134,11 +130,21 @@ test.describe("quick terminal tabs", () => {
         "QUICK_TERMINAL_TWO",
       );
 
-      const firstTab = terminalTab(dialog, 1);
-      const secondTab = terminalTab(dialog, 2);
-      await firstTab.getByRole("button", { name: "Terminal 1", exact: true }).click();
+      const terminalTabs = dialog.locator('[data-testid="quick-terminal-tab"]');
+      await expect(terminalTabs).toHaveCount(2);
+      const firstTab = terminalTabs.first();
+      const secondTab = terminalTabs.last();
+      const firstSequence = await firstTab.getAttribute("data-terminal-sequence");
+      const secondSequence = await secondTab.getAttribute("data-terminal-sequence");
+      if (!firstSequence || !secondSequence) throw new Error("quick terminal sequence missing");
+      expect(secondSequence).not.toBe(firstSequence);
+      await firstTab
+        .getByRole("button", { name: `Terminal ${firstSequence}`, exact: true })
+        .click();
       await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_ONE", "QUICK_TERMINAL_ONE");
-      await secondTab.getByRole("button", { name: "Terminal 2", exact: true }).click();
+      await secondTab
+        .getByRole("button", { name: `Terminal ${secondSequence}`, exact: true })
+        .click();
       await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_TWO", "QUICK_TERMINAL_TWO");
 
       // Closing one tab stops/removes only that tab and falls back to its sibling.
@@ -152,7 +158,9 @@ test.describe("quick terminal tabs", () => {
       await quickChatButton.click();
       await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
       await expect(firstTab).toBeVisible();
-      await firstTab.getByRole("button", { name: "Terminal 1", exact: true }).click();
+      await firstTab
+        .getByRole("button", { name: `Terminal ${firstSequence}`, exact: true })
+        .click();
       await expect(dialog.getByTestId("quick-terminal-tab-panel")).toBeVisible();
 
       const dialogBox = await dialog.boundingBox();

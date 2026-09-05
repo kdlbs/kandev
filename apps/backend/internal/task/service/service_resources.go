@@ -274,6 +274,14 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	if err != nil {
 		return err
 	}
+	// Record canvas artifact cleanup before the workspace cascade removes its
+	// task and workspace rows. This keeps the release ownership boundary
+	// durable across a process stop between the two operations.
+	if s.canvasCleanup != nil {
+		if err := s.canvasCleanup.CleanupWorkspaceCanvases(ctx, workspace.ID); err != nil {
+			return fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err)
+		}
+	}
 
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow

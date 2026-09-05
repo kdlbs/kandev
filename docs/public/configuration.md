@@ -483,6 +483,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.auth` | `KANDEV_FEATURES_AUTH` | off | Experimental authentication, users, per-user workspaces, and team access. |
 | `features.multiTenancy` | `KANDEV_FEATURES_MULTI_TENANCY` | off | Experimental organizations above authenticated users. Requires `features.auth`; startup is refused otherwise. |
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
+| `features.canvases` | `KANDEV_FEATURES_CANVASES` | off | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk. |
 | `features.officeSessionIdentity` | `KANDEV_FEATURES_OFFICE_SESSION_IDENTITY` | off | Experimental Office participant sessions. Enable only after the `(task_id, agent_profile_id)` unique index is available. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
@@ -492,6 +493,14 @@ database-backed toggle controls in this section. Use **Settings → System →
 Feature Toggles** for persistent product changes.
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
+
+`features.canvases` is off in the `prod`, `dev`, and `e2e` profiles. Restart Kandev
+after enabling or disabling it. The restart is required because Kandev registers
+canvas MCP tools and composes the canvas backend at startup. With the flag off,
+Kandev exposes no canvas tools, routes, events, background work, or navigation.
+The database can contain canvas migrations, but Kandev does not read or change
+canvas data while the flag is off. See [Agent-authored Canvases](canvases.md)
+for the experimental user workflow.
 
 For a risky release feature, keep the flag off in the shipped profiles, enable it
 only on a selected install through an admin override or explicit environment,
