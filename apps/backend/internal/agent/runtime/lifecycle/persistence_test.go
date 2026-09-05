@@ -14,13 +14,19 @@ import (
 type captureExecutorRunningWriter struct {
 	prior       *models.ExecutorRunning
 	running     *models.ExecutorRunning
+	getErr      error
 	upsertErr   error
+	statusErr   error
+	status      string
 	deleteCalls int
 }
 
 func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
 	context.Context, string,
 ) (*models.ExecutorRunning, error) {
+	if w.getErr != nil {
+		return nil, w.getErr
+	}
 	if w.prior == nil {
 		return nil, models.ErrExecutorRunningNotFound
 	}
@@ -30,6 +36,11 @@ func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
 func (w *captureExecutorRunningWriter) UpsertExecutorRunning(_ context.Context, running *models.ExecutorRunning) error {
 	w.running = running
 	return w.upsertErr
+}
+
+func (w *captureExecutorRunningWriter) UpdateExecutorRunningStatus(_ context.Context, _ string, status string) error {
+	w.status = status
+	return w.statusErr
 }
 
 func (w *captureExecutorRunningWriter) DeleteExecutorRunningBySessionID(_ context.Context, _ string) error {
@@ -149,6 +160,20 @@ func TestPersistExecutorRunningReturnsUpsertFailure(t *testing.T) {
 	})
 	if err == nil || !errors.Is(err, writer.upsertErr) {
 		t.Fatalf("persistExecutorRunning error = %v, want %v", err, writer.upsertErr)
+	}
+}
+
+func TestPersistStoppedExecutorRunningUsesNarrowStatusUpdate(t *testing.T) {
+	writer := &captureExecutorRunningWriter{}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+
+	err := mgr.persistStoppedExecutorRunning(context.Background(), &AgentExecution{ID: "exec-stop", SessionID: "session-stop"})
+	if err != nil {
+		t.Fatalf("persistStoppedExecutorRunning: %v", err)
+	}
+	if writer.status != models.ExecutorRunningStatusStopped || writer.running != nil {
+		t.Fatalf("status=%q full-row=%#v, want narrow stopped update", writer.status, writer.running)
 	}
 }
 

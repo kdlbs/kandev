@@ -644,14 +644,26 @@ func (s *Server) Close(ctx context.Context) error {
 
 // wrapHandler wraps a tool handler with debug logging for tracing MCP calls.
 func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
-	return s.wrapHandlerWithArgumentLogging(toolName, handler, true)
+	return s.wrapHandlerWithOptions(toolName, handler, true, true)
 }
 
 func (s *Server) wrapSensitiveHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
-	return s.wrapHandlerWithArgumentLogging(toolName, handler, false)
+	return s.wrapHandlerWithOptions(toolName, handler, false, true)
 }
 
-func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.ToolHandlerFunc, logArguments bool) server.ToolHandlerFunc {
+// wrapAuditedSensitiveHandler forwards even schema-invalid arguments so the
+// backend can persist the required denial audit, while keeping their values
+// out of MCP logs. The backend handler remains the validation authority.
+func (s *Server) wrapAuditedSensitiveHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return s.wrapHandlerWithOptions(toolName, handler, false, false)
+}
+
+func (s *Server) wrapHandlerWithOptions(
+	toolName string,
+	handler server.ToolHandlerFunc,
+	logArguments bool,
+	validateArguments bool,
+) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
 
@@ -666,13 +678,17 @@ func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.
 			s.mcpLogger.Debug("MCP tool call", mcpFields...)
 		}
 
-		validatedReq, validationErr := s.validateToolArguments(toolName, req)
 		var result *mcp.CallToolResult
 		var err error
-		if validationErr != nil {
-			result = mcp.NewToolResultError(validationErr.Error())
+		if validateArguments {
+			validatedReq, validationErr := s.validateToolArguments(toolName, req)
+			if validationErr != nil {
+				result = mcp.NewToolResultError(validationErr.Error())
+			} else {
+				result, err = handler(ctx, validatedReq)
+			}
 		} else {
-			result, err = handler(ctx, validatedReq)
+			result, err = handler(ctx, req)
 		}
 		duration := time.Since(start)
 
@@ -1160,6 +1176,8 @@ func (s *Server) registerAutomationTools() {
 	s.registerAgentPermissionTools()
 	s.registerConfigWorkflowTools()
 	s.registerConfigExecutorTools()
+	s.registerPendingMoveCancellationTool()
+	s.registerPendingMoveReadTool()
 	s.mcpServer.DeleteTools(
 		"delete_task_kandev",
 		"update_task_state_kandev",

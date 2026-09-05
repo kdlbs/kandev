@@ -134,6 +134,26 @@
       ]
     },
     {
+      "id": "exact-pending-move-cancellation",
+      "audiences": ["operator", "contributor"],
+      "stability": "beta",
+      "docs": ["automation-and-mcp"],
+      "sources": [
+        "apps/backend/internal/orchestrator/messagequeue/pending_move_exact_cancel.go",
+        "apps/backend/internal/orchestrator/messagequeue/pending_move_exact_read.go",
+        "apps/backend/internal/mcp/handlers/pending_move_cancellation.go",
+        "apps/backend/internal/mcp/handlers/pending_move_read.go",
+        "apps/backend/internal/mcp/server/pending_move_handlers.go"
+      ],
+      "tests": [
+        "apps/backend/internal/orchestrator/messagequeue/pending_move_exact_cancel_test.go",
+        "apps/backend/internal/orchestrator/messagequeue/pending_move_exact_read_test.go",
+        "apps/backend/internal/mcp/handlers/pending_move_cancellation_test.go",
+        "apps/backend/internal/mcp/handlers/pending_move_read_test.go"
+      ],
+      "mcpTools": ["cancel_pending_move_kandev", "read_pending_move_kandev"]
+    },
+    {
       "id": "task-lifecycle",
       "audiences": [
         "user"

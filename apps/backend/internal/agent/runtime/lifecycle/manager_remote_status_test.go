@@ -549,7 +549,16 @@ func TestStopAgentSerializesWithActiveKubernetesRefresh(t *testing.T) {
 	<-refreshDone
 	require.NoError(t, <-stopDone)
 
-	require.Nil(t, writer.snapshot(), "terminal stop must remain the final persistence owner")
+	// Terminal stop must remain the final persistence owner: whatever the
+	// committed refresh published, the row must not still look live once Stop
+	// returns. The lifecycle manager now always re-persists a terminal status
+	// after tearing down the runtime (so privileged MCP attestation reads never
+	// see a stale "running" row), so the final snapshot may be nil (cleared by
+	// the runtime's own stop) or an explicit terminal row -- never "running".
+	if final := writer.snapshot(); final != nil {
+		require.Equal(t, models.ExecutorRunningStatusStopped, final.Status,
+			"a surviving row must be terminal, not a live-looking attestation from the raced refresh")
+	}
 	_, exists := mgr.executionStore.Get(execution.ID)
 	require.False(t, exists)
 	store.mu.RLock()
