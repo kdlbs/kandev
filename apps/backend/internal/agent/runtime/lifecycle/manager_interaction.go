@@ -1928,6 +1928,18 @@ func (m *Manager) markCompletedWithTurnID(
 	errorMessage, turnID string,
 	failureEvidence *PromptAttemptEvidence,
 ) error {
+	return m.markCompletedWithTurnIDAndPromptGeneration(
+		executionID, exitCode, errorMessage, turnID, failureEvidence, 0,
+	)
+}
+
+func (m *Manager) markCompletedWithTurnIDAndPromptGeneration(
+	executionID string,
+	exitCode int,
+	errorMessage, turnID string,
+	failureEvidence *PromptAttemptEvidence,
+	promptGeneration uint64,
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -1984,7 +1996,11 @@ func (m *Manager) markCompletedWithTurnID(
 	// row kept claiming a `running`/`starting` process after it had exited
 	// (#1597). Re-stamping here leaves the row truthful (terminal
 	// status + fresh last_seen_at) the moment the process is gone.
-	m.persistExecutorRunning(context.Background(), execution)
+	if promptGeneration > 0 {
+		m.persistExecutorRunningWithPromptGeneration(context.Background(), execution, promptGeneration)
+	} else {
+		m.persistExecutorRunning(context.Background(), execution)
+	}
 	m.releaseActivity(executionActivityKey(executionID))
 
 	m.logger.Info("execution completed",
@@ -2033,6 +2049,18 @@ func isTerminalStatus(status v1.AgentStatus) bool {
 func (m *Manager) markStoppedDuringShutdown(
 	execution *AgentExecution, exitCode int, errorMessage string, turnIDs ...string,
 ) error {
+	return m.markStoppedDuringShutdownWithPromptGeneration(
+		execution, exitCode, errorMessage, 0, turnIDs...,
+	)
+}
+
+func (m *Manager) markStoppedDuringShutdownWithPromptGeneration(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage string,
+	promptGeneration uint64,
+	turnIDs ...string,
+) error {
 	applied := false
 	err := m.executionStore.WithLock(execution.ID, func(exec *AgentExecution) {
 		if isTerminalStatus(exec.Status) {
@@ -2060,7 +2088,11 @@ func (m *Manager) markStoppedDuringShutdown(
 		zap.String("error", errorMessage))
 
 	execution.EndSessionSpan()
-	m.persistExecutorRunning(context.Background(), execution)
+	if promptGeneration > 0 {
+		m.persistExecutorRunningWithPromptGeneration(context.Background(), execution, promptGeneration)
+	} else {
+		m.persistExecutorRunning(context.Background(), execution)
+	}
 	m.releaseActivity(executionActivityKey(execution.ID))
 
 	turnID := ""

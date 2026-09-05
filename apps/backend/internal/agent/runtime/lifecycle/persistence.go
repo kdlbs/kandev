@@ -63,6 +63,15 @@ func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 // pre-existing row (a previous run's resume state) so the lifecycle write
 // doesn't clobber data the orchestrator's narrow CAS update wrote earlier.
 func buildRunningFromExecution(execution *AgentExecution, prior *models.ExecutorRunning) *models.ExecutorRunning {
+	generation := execution.promptGenerationSnapshot()
+	return buildRunningFromExecutionWithPromptGeneration(execution, prior, generation)
+}
+
+func buildRunningFromExecutionWithPromptGeneration(
+	execution *AgentExecution,
+	prior *models.ExecutorRunning,
+	promptGeneration uint64,
+) *models.ExecutorRunning {
 	agentctlURL := execution.AgentctlURL()
 	agentctlPort := agentctlPortFromExecution(execution, agentctlURL)
 	pid := agentctlPIDFromExecution(execution)
@@ -74,11 +83,11 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 
 	metadata := execution.MetadataSnapshot()
 	persistentMetadata := FilterPersistentMetadata(metadata)
-	if generation := execution.promptGenerationSnapshot(); generation > 0 {
+	if promptGeneration > 0 {
 		if persistentMetadata == nil {
 			persistentMetadata = make(map[string]interface{})
 		}
-		persistentMetadata[MetadataKeyPromptGeneration] = generation
+		persistentMetadata[MetadataKeyPromptGeneration] = promptGeneration
 	}
 	running := &models.ExecutorRunning{
 		ID:                 execution.SessionID,
@@ -251,6 +260,22 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 }
 
 func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *AgentExecution) error {
+	return m.persistExecutorRunningResultWithPromptGeneration(ctx, execution, nil)
+}
+
+func (m *Manager) persistExecutorRunningWithPromptGeneration(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration uint64,
+) {
+	_ = m.persistExecutorRunningResultWithPromptGeneration(ctx, execution, &promptGeneration)
+}
+
+func (m *Manager) persistExecutorRunningResultWithPromptGeneration(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration *uint64,
+) error {
 	if m.runningWriter == nil {
 		// Permitted in tests that don't exercise persistence; logged so a
 		// missed wire-up in production stands out.
@@ -292,7 +317,11 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 		execution.AgentProfileID = prior.ExecutionProfileID
 	}
 
-	running := buildRunningFromExecution(execution, prior)
+	if promptGeneration == nil {
+		generation := execution.promptGenerationSnapshot()
+		promptGeneration = &generation
+	}
+	running := buildRunningFromExecutionWithPromptGeneration(execution, prior, *promptGeneration)
 	// Attach the host-local liveness handle for local/standalone rows. Kept out
 	// of buildRunningFromExecution (a pure mapper) because the PID lives on the
 	// manager, wired from the agentctl launcher at DI. resolveLocalPID returns 0
