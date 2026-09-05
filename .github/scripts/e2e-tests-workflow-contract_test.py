@@ -32,6 +32,7 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
         *,
         manifest: bytes,
         failures_before_success: int,
+        stalls_before_success: int = 0,
         invalid_manifest: bytes = b"",
         invalid_responses_before_success: int = 0,
     ) -> tuple[subprocess.CompletedProcess[str], int]:
@@ -59,7 +60,12 @@ if (( count <= FAKE_DOCKER_FAILURES )); then
   echo "transient registry failure" >&2
   exit 1
 fi
-if (( count <= FAKE_DOCKER_FAILURES + FAKE_DOCKER_INVALID_RESPONSES )); then
+if (( count <= FAKE_DOCKER_FAILURES + FAKE_DOCKER_STALLS )); then
+  echo "stalled registry lookup" >&2
+  /bin/sleep 1
+  exit 1
+fi
+if (( count <= FAKE_DOCKER_FAILURES + FAKE_DOCKER_STALLS + FAKE_DOCKER_INVALID_RESPONSES )); then
   cat "${FAKE_DOCKER_INVALID_MANIFEST}"
   exit 0
 fi
@@ -79,11 +85,13 @@ cat "${FAKE_DOCKER_MANIFEST}"
                     "PATH": f"{bin_dir}:{env['PATH']}",
                     "FAKE_DOCKER_COUNT": str(count_file),
                     "FAKE_DOCKER_FAILURES": str(failures_before_success),
+                    "FAKE_DOCKER_STALLS": str(stalls_before_success),
                     "FAKE_DOCKER_INVALID_MANIFEST": str(invalid_manifest_file),
                     "FAKE_DOCKER_INVALID_RESPONSES": str(
                         invalid_responses_before_success
                     ),
                     "FAKE_DOCKER_MANIFEST": str(manifest_file),
+                    "IMAGE_RESOLVE_ATTEMPT_TIMEOUT": "0.1s",
                 }
             )
             result = subprocess.run(
@@ -275,7 +283,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
         resolver = IMAGE_DIGEST_RESOLVER.read_text(encoding="utf-8")
         self.assertIn('imagetools inspect --raw "$image"', resolver)
-        manifest = b'{"schemaVersion":2,"manifests":[]}'
+        manifest = b'{"schemaVersion":2,"config":{},"layers":[]}'
 
         result, attempts = self.run_image_digest_resolver(
             manifest=manifest, failures_before_success=0
@@ -300,6 +308,19 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("attempt 1/5", result.stderr)
         self.assertIn("transient registry failure", result.stderr)
 
+    def test_image_digest_resolver_times_out_stalled_registry_lookup(self) -> None:
+        manifest = b'{"schemaVersion":2,"manifests":[]}'
+
+        result, attempts = self.run_image_digest_resolver(
+            manifest=manifest,
+            failures_before_success=0,
+            stalls_before_success=1,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(attempts, 2)
+        self.assertIn("timed out after 0.1s", result.stderr)
+
     def test_image_digest_resolver_retries_invalid_manifest_then_succeeds(self) -> None:
         self.assertTrue(IMAGE_DIGEST_RESOLVER.exists())
         manifest = b'{"schemaVersion":2,"manifests":[]}'
@@ -323,6 +344,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
             ("empty", b""),
             ("malformed", b"not-json"),
             ("wrong-schema", b'{"schemaVersion":1}'),
+            ("schema-only", b'{"schemaVersion":2}'),
         ):
             with self.subTest(name=name):
                 result, attempts = self.run_image_digest_resolver(
