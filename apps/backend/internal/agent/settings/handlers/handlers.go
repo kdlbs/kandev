@@ -628,7 +628,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create profile"})
 		return
 	}
-	h.broadcastProfileEvent(ws.ActionAgentProfileCreated, resp)
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileCreated, resp)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -711,7 +711,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile"})
 		return
 	}
-	h.broadcastProfileEvent(ws.ActionAgentProfileUpdated, resp)
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileUpdated, resp)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -741,7 +741,7 @@ func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to duplicate profile"})
 		return
 	}
-	h.broadcastProfileEvent(ws.ActionAgentProfileCreated, resp)
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileCreated, resp)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -753,12 +753,24 @@ func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
 // filterGlobalProfiles, and the WS path must not contradict that. When the
 // hub does not support workspace routing (test fakes), the office event is
 // dropped fail-closed.
-func (h *Handlers) broadcastProfileEvent(action string, profile *dto.AgentProfileDTO) {
+func (h *Handlers) broadcastProfileEvent(ctx context.Context, action string, profile *dto.AgentProfileDTO) {
 	if h.hub == nil {
 		return
 	}
+	// Profile events can arrive before settings-agent hydration. Include the
+	// capability needed by sessionless pickers so they need not guess.
+	inferenceCapable := false
+	if action != ws.ActionAgentProfileDeleted {
+		agent, err := h.controller.GetAgent(ctx, profile.AgentID)
+		if err != nil {
+			h.logger.Warn("failed to load agent capability for profile event", zap.Error(err))
+		} else {
+			inferenceCapable = agent.InferenceCapable
+		}
+	}
 	notification, _ := ws.NewNotification(action, gin.H{
-		"profile": profile,
+		"profile":           profile,
+		"inference_capable": inferenceCapable,
 	})
 	if profile.WorkspaceID != "" {
 		if workspaceHub, ok := h.hub.(interface {
@@ -796,7 +808,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete profile"})
 		return
 	}
-	h.broadcastProfileEvent(ws.ActionAgentProfileDeleted, profile)
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileDeleted, profile)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 

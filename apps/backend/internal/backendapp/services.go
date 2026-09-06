@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
@@ -1184,12 +1185,22 @@ func initPluginsService(
 	return svc
 }
 
+type pluginHostUtilityManager interface {
+	ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (*hostutility.PromptResult, error)
+}
+
 type pluginsHostUtilityAdapter struct {
-	mgr *hostutility.Manager
+	mgr pluginHostUtilityManager
 }
 
 func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (string, error) {
 	res, err := a.mgr.ExecuteProfilePrompt(ctx, profileID, prompt)
+	if errors.Is(err, profilebinding.ErrProfileNotFound) {
+		return "", plugins.ErrAgentProfileNotFound
+	}
+	if errors.Is(err, profilebinding.ErrProfileIneligible) {
+		return "", plugins.ErrAgentProfileIneligible
+	}
 	if err != nil {
 		return "", err
 	}
@@ -1199,6 +1210,39 @@ func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, pro
 type pluginsUtilityAgentAdapter struct {
 	svc     *utilityservice.Service
 	userSvc *userservice.Service
+}
+
+type pluginAgentProfileResolver interface {
+	Resolve(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)
+}
+
+// pluginsAgentProfileAdapter keeps agent-settings storage errors at the
+// backend boundary. The plugins package only receives the narrow execution
+// eligibility record and its typed missing-profile sentinel.
+type pluginsAgentProfileAdapter struct {
+	resolver pluginAgentProfileResolver
+}
+
+func (a pluginsAgentProfileAdapter) GetProfileByID(ctx context.Context, id string) (*plugins.AgentProfile, error) {
+	profile, err := a.resolver.Resolve(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, profilebinding.ErrProfileNotFound) {
+		return nil, plugins.ErrAgentProfileNotFound
+	}
+	if errors.Is(err, profilebinding.ErrProfileIneligible) {
+		return nil, plugins.ErrAgentProfileIneligible
+	}
+	if err != nil {
+		return nil, err
+	}
+	if profile == nil {
+		return nil, plugins.ErrAgentProfileNotFound
+	}
+	return &plugins.AgentProfile{
+		Enabled:          profile.Enabled,
+		CLIPassthrough:   profile.CLIPassthrough,
+		WorkspaceID:      profile.WorkspaceID,
+		InferenceCapable: true,
+	}, nil
 }
 
 func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {

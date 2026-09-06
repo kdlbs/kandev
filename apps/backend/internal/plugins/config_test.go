@@ -143,6 +143,30 @@ func TestMergeMaskedSecretsDropsMaskWithNoStoredValue(t *testing.T) {
 	}
 }
 
+func TestUpdateConfigPreservesLegacyUtilityAgentForDirectProfileSchema(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+	merged := mergeMaskedSecrets(map[string]any{agentProfileConfigKey: "profile-1"}, map[string]any{
+		utilityAgentConfigKey: "utility-agent-1",
+	}, schema)
+	if _, submitted := merged[utilityAgentConfigKey]; submitted {
+		t.Fatal("precondition: legacy selector should be absent from the replacement payload")
+	}
+
+	if agentID, ok := merged[utilityAgentConfigKey].(string); ok && agentID != "" {
+		t.Fatalf("legacy selector unexpectedly present before preservation: %q", agentID)
+	}
+	merged = preserveLegacyUtilityAgentConfig(merged, map[string]any{
+		utilityAgentConfigKey: "utility-agent-1",
+	}, schema)
+	if merged[utilityAgentConfigKey] != "utility-agent-1" {
+		t.Fatalf("legacy selector = %v, want utility-agent-1", merged[utilityAgentConfigKey])
+	}
+}
+
 func TestValidateConfigSchema(t *testing.T) {
 	schema := testConfigSchema()
 	cases := []struct {
