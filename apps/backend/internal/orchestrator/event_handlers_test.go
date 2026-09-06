@@ -2363,6 +2363,26 @@ func TestHandleAgentRunning_DoesNotWakeWaitingAcpSession(t *testing.T) {
 	})
 }
 
+func TestHandleAgentRunning_PassthroughStartsDurableTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	svc := createTestServiceWithAgent(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		&mockAgentManager{isPassthrough: true},
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+
+	svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+	turn, err := svc.turnService.GetActiveTurn(ctx, "s1")
+	require.NoError(t, err)
+	require.NotNil(t, turn, "passthrough turn start must create a durable turn")
+}
+
 func TestDeliverPassthroughPrompt(t *testing.T) {
 	ctx := context.Background()
 

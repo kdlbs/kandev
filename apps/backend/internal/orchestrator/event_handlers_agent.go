@@ -94,6 +94,12 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 			zap.String("session_state", string(session.State)))
 		return
 	}
+	// Passthrough prompts are written directly to the PTY, so they do not pass
+	// through PromptTask's durable-turn admission. Start or adopt the turn here
+	// while the running event still represents the prompt that caused it. This
+	// gives the matching ready event a unique completion identity for workflow
+	// idempotency and keeps successive PTY prompts from sharing one operation ID.
+	s.startTurnForSession(ctx, data.SessionID)
 	s.processOnTurnStartViaEngine(ctx, data.TaskID, session)
 
 	// Move session to running and task to in progress.

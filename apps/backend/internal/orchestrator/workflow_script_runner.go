@@ -422,7 +422,7 @@ func workflowScriptResult(process *agentruntime.WorkspaceProcessInfo) (taskmodel
 			return taskmodels.WorkflowScriptRunSucceeded, ""
 		}
 		return taskmodels.WorkflowScriptRunFailed, "workflow script exited with a non-zero status"
-	case "timed_out":
+	case string(taskmodels.WorkflowScriptRunTimedOut):
 		return taskmodels.WorkflowScriptRunTimedOut, "workflow script timed out"
 	case agentEventFailed, "stopped":
 		return taskmodels.WorkflowScriptRunFailed, "workflow script process failed"
@@ -606,7 +606,7 @@ func workflowScriptRunStatus(status agentruntime.WorkspaceProcessStatus) taskmod
 
 func isTerminalWorkspaceProcess(status agentruntime.WorkspaceProcessStatus) bool {
 	switch string(status) {
-	case "exited", agentEventFailed, "stopped", "timed_out":
+	case "exited", agentEventFailed, "stopped", string(taskmodels.WorkflowScriptRunTimedOut):
 		return true
 	default:
 		return false
