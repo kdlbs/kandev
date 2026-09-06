@@ -1762,18 +1762,25 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	defer cancel()
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
+	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
 	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
 	// when wired so descendant runs are cancelled, group memberships are
 	// released with reason=deleted, and the cleanup state machine fires.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID, cascade); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(
+			deleteCtx, taskID, cascade, service.DeleteTaskOptions{
+				DiscardWorktreeChanges: discardWorktreeChanges,
+			},
+		); err != nil {
 			handleNotFound(c, h.logger, err, "task not deleted")
 			return
 		}
 		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 		return
 	}
-	if err := h.service.DeleteTask(deleteCtx, taskID); err != nil {
+	if err := h.service.DeleteTaskWithOptions(deleteCtx, taskID, service.DeleteTaskOptions{
+		DiscardWorktreeChanges: discardWorktreeChanges,
+	}); err != nil {
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
@@ -1808,6 +1815,10 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 // unless the client explicitly opts in via ?cascade=true.
 func cascadeQueryParam(c *gin.Context) bool {
 	return strings.EqualFold(c.Query("cascade"), "true")
+}
+
+func discardWorktreeChangesQueryParam(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("discard_worktree_changes"), "true")
 }
 
 // httpTaskSubtaskCount returns the count of direct, non-archived,
