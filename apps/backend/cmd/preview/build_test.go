@@ -1,6 +1,35 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestUntrustedBuildEnvRemovesCredentials(t *testing.T) {
+	t.Parallel()
+
+	buildEnv := untrustedBuildEnv([]string{
+		"PATH=/usr/bin",
+		"HOME=/tmp/kandev",
+		"SPRITES_API_TOKEN=sprites-secret",
+		"GH_TOKEN=github-secret",
+		"GITHUB_TOKEN=github-actions-secret",
+		"ACTIONS_ID_TOKEN_REQUEST_TOKEN=oidc-secret",
+		"ACTIONS_RUNTIME_TOKEN=runtime-secret",
+	})
+
+	got := strings.Join(buildEnv, "\n")
+	for _, credential := range []string{
+		"SPRITES_API_TOKEN=", "GH_TOKEN=", "GITHUB_TOKEN=", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=", "ACTIONS_RUNTIME_TOKEN=",
+	} {
+		if strings.Contains(got, credential) {
+			t.Fatalf("untrustedBuildEnv() retained %q", credential)
+		}
+	}
+	if got != "PATH=/usr/bin\nHOME=/tmp/kandev" {
+		t.Fatalf("untrustedBuildEnv() = %q, want preserved non-credential environment", got)
+	}
+}
 
 func TestViteIndexHasEntrypoint(t *testing.T) {
 	t.Parallel()

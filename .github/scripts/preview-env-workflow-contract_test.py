@@ -8,6 +8,7 @@ import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "preview-env.yml"
+PREVIEW_BUILD = REPO_ROOT / "apps" / "backend" / "cmd" / "preview" / "build.go"
 
 
 def workflow_job(workflow: str, name: str) -> str:
@@ -93,6 +94,20 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             deploy_job,
         )
         self.assertNotIn("go run ./cmd/preview deploy", deploy_job)
+
+    def test_fork_build_subprocesses_cannot_inherit_deployment_credentials(self) -> None:
+        build_source = PREVIEW_BUILD.read_text(encoding="utf-8")
+
+        self.assertIn("func untrustedBuildEnv", build_source)
+        for credential in (
+            "SPRITES_API_TOKEN",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+            "ACTIONS_RUNTIME_TOKEN",
+        ):
+            self.assertIn(credential, build_source)
+        self.assertEqual(build_source.count("untrustedBuildEnv(os.Environ())"), 3)
 
 
 if __name__ == "__main__":
