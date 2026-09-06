@@ -438,6 +438,9 @@ export type Task = ActiveSubagentCountFields & {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start (see internal/task/models WorkspaceOrphaned). */
+  workspace_orphaned?: boolean;
   /**
    * Task-level MOST-ACTIVE-WINS activity across sessions. "generating" wins,
    * then "background"; null/absent means none is known. The count is the

@@ -12,7 +12,7 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { renderSubagentCountChip, renderTaskStatusIcon } from "./kanban-card-content";
-import { AutoStartFailedTaskIcon } from "@/lib/ui/state-icons";
+import { AutoStartFailedTaskIcon, WorkspaceOrphanedTaskIcon } from "@/lib/ui/state-icons";
 import type { Task } from "./kanban-card";
 
 const BACKGROUND_ICON_TEST_ID = "task-state-background-running";
@@ -214,6 +214,44 @@ describe("renderTaskStatusIcon — auto-start failed", () => {
       false,
     );
     expect(iconType(node)).toBe(IconCheck);
+  });
+
+  it("renders nothing for a resting task with the marker absent", () => {
+    expect(renderTaskStatusIcon(task({ state: "IN_PROGRESS" }), false, false, false)).toBeNull();
+  });
+});
+
+describe("renderTaskStatusIcon — workspace orphaned", () => {
+  it("shows the workspace-orphaned marker for a resting task with no other activity", () => {
+    // The population REQ-002 exists to surface: a live CREATED/TODO subtask,
+    // no session, no activity, no pending prompt — every other gate is false.
+    const node = renderTaskStatusIcon(
+      task({ state: "TODO", workspaceOrphaned: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(WorkspaceOrphanedTaskIcon);
+  });
+
+  it("keeps the terminal done check over a lingering workspace-orphaned marker", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "COMPLETED", workspaceOrphaned: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(IconCheck);
+  });
+
+  it("prefers auto-start-failed over workspace-orphaned when both are set", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", autoStartFailed: true, workspaceOrphaned: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(AutoStartFailedTaskIcon);
   });
 
   it("renders nothing for a resting task with the marker absent", () => {

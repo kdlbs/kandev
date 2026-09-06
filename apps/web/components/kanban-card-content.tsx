@@ -265,32 +265,34 @@ export function renderTaskStatusIcon(
   const showInterrupted = !!task.interrupted;
   const showAutoStartFailed = !!task.autoStartFailed;
   const parkedOnBackgroundWork = !!task.parkedOnBackgroundWork;
+  const showWorkspaceOrphaned = !!task.workspaceOrphaned;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (
+  const hasNoStatusAffordance =
     !showRunningSpinner &&
     !needsMe &&
     !hasActivity &&
     !showInterrupted &&
     !showAutoStartFailed &&
-    !parkedOnBackgroundWork
-  ) {
-    return null;
-  }
+    !parkedOnBackgroundWork &&
+    !showWorkspaceOrphaned;
+  if (hasNoStatusAffordance) return null;
   // A "needs me" prompt (pending clarification / permission) must not be masked
   // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
   // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon. A failed auto-start must not be masked either: startTask
-  // sets the task to SCHEDULING before the launch, so a launch failure before
-  // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
-  // reads as showRunningSpinner=true — the exact shape the failure marker exists
-  // to surface. The parked affordance (AC-58) is likewise never masked by the
-  // generic spinner — it renders through getTaskStateIcon below.
+  // getTaskStateIcon. A failed auto-start or an orphaned workspace must not be
+  // masked either: startTask sets the task to SCHEDULING before the launch, so
+  // a session-less SCHEDULING/IN_PROGRESS task (whether from a launch failure
+  // or a vanished parent workspace) reads as showRunningSpinner=true, the exact
+  // shape both markers exist to surface. The parked affordance (AC-58) is
+  // likewise never masked by the generic spinner — it renders through
+  // getTaskStateIcon below.
   const foregroundActivity =
     showRunningSpinner &&
     !needsMe &&
     !showAutoStartFailed &&
     !parkedOnBackgroundWork &&
+    !showWorkspaceOrphaned &&
     task.foregroundActivity !== "background"
       ? "generating"
       : task.foregroundActivity;
@@ -301,6 +303,7 @@ export function renderTaskStatusIcon(
     interrupted: showInterrupted,
     autoStartFailed: showAutoStartFailed,
     parkedOnBackgroundWork,
+    workspaceOrphaned: showWorkspaceOrphaned,
   });
 }
 
