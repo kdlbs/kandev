@@ -191,6 +191,55 @@ func TestStoreMigratesCIRunSemanticConstraintWithoutLosingAudit(t *testing.T) {
 	}
 }
 
+func TestStoreMigratesScopedCIRunSemanticConstraintToIncludeWorkflowStep(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for _, statement := range []string{
+		`DROP TABLE github_ci_run_audit_events`,
+		`DROP TABLE github_ci_run_requests`,
+	} {
+		if _, err := store.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	noStepConstraint := "UNIQUE (\n\t\t\tworkspace_id, target_task_id, workflow_id, repository_id," +
+		"\n\t\t\tpr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind\n\t\t)"
+	stepConstraint := "UNIQUE (\n\t\t\tworkspace_id, target_task_id, workflow_id, workflow_step_id, repository_id," +
+		"\n\t\t\tpr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind\n\t\t)"
+	noStepSchema := strings.Replace(ciRunTablesSQL, stepConstraint, noStepConstraint, 1)
+	if noStepSchema == ciRunTablesSQL {
+		t.Fatal("test did not restore the preceding scoped semantic constraint")
+	}
+	if _, err := store.db.Exec(noStepSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	grant := testCIRunGrant(now)
+	if err := store.UpsertCIRunGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	original, created, err := store.ClaimCIRunRequest(ctx, testCIRunRequest(grant, now))
+	if err != nil || !created {
+		t.Fatalf("claim before migration = %+v, created %v, error %v", original, created, err)
+	}
+
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("migrate scoped semantic constraint: %v", err)
+	}
+	differentStep := testCIRunRequest(grant, now)
+	differentStep.ID = "request-different-step"
+	differentStep.WorkflowStepID = "ci-fixup-2"
+	differentStep.IdempotencyHash = strings.Repeat("c", 64)
+	claimed, created, err := store.ClaimCIRunRequest(ctx, differentStep)
+	if err != nil {
+		t.Fatalf("claim after migration: %v", err)
+	}
+	if !created || claimed.ID != differentStep.ID {
+		t.Fatalf("claim = %+v, created %v; want distinct workflow-step request", claimed, created)
+	}
+}
+
 func TestStoreCIRunExecutionLeaseExpiresBeforeProviderStart(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -533,6 +582,9 @@ func TestStoreClaimCIRunRequestDoesNotCoalesceDifferentSemanticScope(t *testing.
 		}},
 		{name: "workflow", edit: func(request *CIRunRequest) {
 			request.WorkflowID = "workflow-2"
+		}},
+		{name: "workflow step", edit: func(request *CIRunRequest) {
+			request.WorkflowStepID = "ci-fixup-2"
 		}},
 	}
 	for index, tt := range tests {

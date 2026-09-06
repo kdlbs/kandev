@@ -268,9 +268,9 @@ func (s *Store) ClaimCIRunRequestWithAudit(ctx context.Context, request *CIRunRe
 	if errors.Is(err, sql.ErrNoRows) {
 		var semantic CIRunRequest
 		semanticErr := tx.GetContext(ctx, &semantic, tx.Rebind(`SELECT `+ciRunRequestColumns+` FROM github_ci_run_requests
-			WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND repository_id = ?
+			WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND workflow_step_id = ? AND repository_id = ?
 			AND pr_number = ? AND expected_head_sha = ? AND source_run_id = ? AND expected_source_attempt = ? AND evidence_kind = ?`),
-			request.WorkspaceID, request.TargetTaskID, request.WorkflowID, request.RepositoryID, request.PRNumber,
+			request.WorkspaceID, request.TargetTaskID, request.WorkflowID, request.WorkflowStepID, request.RepositoryID, request.PRNumber,
 			request.ExpectedHeadSHA, request.SourceRunID, request.ExpectedSourceAttempt, request.EvidenceKind)
 		if semanticErr == nil {
 			return &semantic, false, ErrCIRunSemanticConflict
@@ -289,9 +289,9 @@ func (s *Store) ClaimCIRunRequestWithAudit(ctx context.Context, request *CIRunRe
 	if !created {
 		var semantic CIRunRequest
 		if err := tx.GetContext(ctx, &semantic, tx.Rebind(`SELECT `+ciRunRequestColumns+` FROM github_ci_run_requests
-			WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND repository_id = ?
+			WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND workflow_step_id = ? AND repository_id = ?
 			AND pr_number = ? AND expected_head_sha = ? AND source_run_id = ? AND expected_source_attempt = ? AND evidence_kind = ?`),
-			request.WorkspaceID, request.TargetTaskID, request.WorkflowID, request.RepositoryID, request.PRNumber,
+			request.WorkspaceID, request.TargetTaskID, request.WorkflowID, request.WorkflowStepID, request.RepositoryID, request.PRNumber,
 			request.ExpectedHeadSHA, request.SourceRunID, request.ExpectedSourceAttempt, request.EvidenceKind); err == nil && semantic.ID != loaded.ID {
 			return &semantic, false, ErrCIRunSemanticConflict
 		}
@@ -416,10 +416,10 @@ func (s *Store) getCIRunRequestBySemanticKey(ctx context.Context, r *CIRunReques
 	var loaded CIRunRequest
 	err := s.ro.GetContext(ctx, &loaded, s.ro.Rebind(`SELECT `+ciRunRequestColumns+`
 		FROM github_ci_run_requests
-		WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ?
+		WHERE workspace_id = ? AND target_task_id = ? AND workflow_id = ? AND workflow_step_id = ?
 			AND repository_id = ? AND pr_number = ? AND expected_head_sha = ?
 			AND source_run_id = ? AND expected_source_attempt = ? AND evidence_kind = ?`),
-		r.WorkspaceID, r.TargetTaskID, r.WorkflowID,
+		r.WorkspaceID, r.TargetTaskID, r.WorkflowID, r.WorkflowStepID,
 		r.RepositoryID, r.PRNumber, r.ExpectedHeadSHA, r.SourceRunID,
 		r.ExpectedSourceAttempt, r.EvidenceKind)
 	return &loaded, err
