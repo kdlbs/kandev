@@ -35,6 +35,7 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
 
   const sourceCard = kanban.taskCard(task.id);
   const feederColumn = kanban.columnByStepId(feederStep.id);
+  await sourceCard.waitFor({ state: "visible" });
   const sourceBox = await sourceCard.boundingBox();
   expect(sourceBox).not.toBeNull();
 
@@ -44,6 +45,11 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   await testPage.mouse.down();
   await testPage.mouse.move(sourceX + 20, sourceY, { steps: 4 });
   await expect(sourceCard).toHaveClass(/opacity-50/, { timeout: 5_000 });
+  await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(1);
+  await testPage.evaluate(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
 
   // Dragging can temporarily move destinations before the anchored source
   // column, so scroll them back into the viewport before dropping.
@@ -61,11 +67,12 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
     feederBox = await feederColumn.boundingBox();
   }
   expect(feederBox).not.toBeNull();
-  await testPage.mouse.move(
-    feederBox!.x + feederBox!.width / 2,
-    feederBox!.y + feederBox!.height / 2,
-    { steps: 12 },
-  );
+  const feederPoint = {
+    x: feederBox!.x + feederBox!.width / 2,
+    y: feederBox!.y + Math.min(160, feederBox!.height / 2),
+  };
+  await testPage.mouse.move(feederPoint.x, feederPoint.y);
+  await expect(feederColumn).toHaveClass(/bg-primary\/5/);
   await testPage.mouse.up();
 
   await expect(pullColumn).toContainText("1/1");

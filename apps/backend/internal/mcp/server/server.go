@@ -1367,6 +1367,20 @@ func (s *Server) registerPRAutomationTools() {
 		),
 		s.wrapHandler("update_task_pr_automation_kandev", s.updateTaskPRAutomationHandler()),
 	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("report_pr_auto_fix_outcome_kandev",
+			mcp.WithDescription(
+				"Report the one explicit outcome for the current GitHub PR auto-fix turn. "+
+					"Use action_taken when a concrete provider-visible change was made, "+
+					"non_actionable when the feedback identifies no change this task can make, "+
+					"or blocked when an external condition prevents the needed change. "+
+					"The task, session, turn, and PR are bound by Kandev and are not tool arguments.",
+			),
+			mcp.WithString("outcome", mcp.Required(), mcp.Enum("action_taken", "non_actionable", "blocked"), mcp.Description("The disposition of this auto-fix turn.")),
+			mcp.WithString("summary", mcp.Required(), mcp.Description("A short plain-text explanation of the outcome.")),
+		),
+		s.wrapHandler("report_pr_auto_fix_outcome_kandev", s.reportTaskPRAutoFixOutcomeHandler()),
+	)
 }
 
 func (s *Server) registerMRAutomationTools() {

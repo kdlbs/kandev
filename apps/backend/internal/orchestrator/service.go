@@ -2640,6 +2640,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
 	// Recover routes orphaned at "starting" by a launch failure that never
 	// reached a terminal route status. Must run before
 	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former
@@ -2650,6 +2651,10 @@ func (s *Service) Start(ctx context.Context) error {
 	// snapshot of "starting" routes.
 	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
+	// Executor reconciliation abandons turns left open by a pre-crash active
+	// session. Run the CI attempt sweep again after that transition so a
+	// running auto-fix reservation can become retryable on the same startup.
+	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
