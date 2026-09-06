@@ -284,7 +284,7 @@ func handleE2EReset(
 			deletedTaskIDSet[taskID] = struct{}{}
 		}
 		for _, t := range tasks {
-			if err := taskSvc.DeleteTask(ctx, t.ID); err != nil {
+			if err := deleteTaskForE2EReset(ctx, taskSvc, t.ID); err != nil {
 				// Abort: leaving an undeleted task with its workflow gone
 				// would create orphan rows visible to subsequent tests.
 				log.Error("e2e reset: failed to delete task",
@@ -327,6 +327,22 @@ func handleE2EReset(
 			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
 	}
+}
+
+type e2eResetTaskDeleter interface {
+	DeleteTaskWithOptions(context.Context, string, taskservice.DeleteTaskOptions) error
+}
+
+func deleteTaskForE2EReset(
+	ctx context.Context,
+	taskDeleter e2eResetTaskDeleter,
+	taskID string,
+) error {
+	return taskDeleter.DeleteTaskWithOptions(ctx, taskID, taskservice.DeleteTaskOptions{
+		// E2E reset is an explicit test cleanup boundary. It must remove
+		// disposable local changes left by the test that created the task.
+		DiscardWorktreeChanges: true,
+	})
 }
 
 func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []string) error {

@@ -12,6 +12,10 @@ import {
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
+
 const requestMock = vi.fn().mockResolvedValue({});
 const getWebSocketClientMock = vi.fn<() => { request: typeof requestMock } | null>(() => ({
   request: requestMock,

@@ -197,6 +197,108 @@ test.describe("Task creation", () => {
     }
   });
 
+  test("shows the selected workflow launch prompt preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Launch Preview Workflow",
+    );
+    const configuredStart = await apiClient.createWorkflowStep(workflow.id, "Backlog", 0, {
+      is_start_step: true,
+    });
+    const autoStart = await apiClient.createWorkflowStep(workflow.id, "In Progress", 1);
+
+    await apiClient.updateWorkflowStep(configuredStart.id, { events: {} });
+    await apiClient.updateWorkflowStep(autoStart.id, {
+      prompt: "Launch instructions: {{task_prompt}} | {{task_prompt}} | {task_id} | @saved",
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      task_create_last_used: {
+        repository_id: seedData.repositoryId,
+        branch: "main",
+        agent_profile_id: seedData.agentProfileId,
+        workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
+      },
+    });
+
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
+      await expect(workflowSelector).toContainText("E2E Workflow");
+      await workflowSelector.click();
+      await testPage
+        .getByRole("button", { name: /^Launch Preview Workflow/ })
+        .last()
+        .click();
+
+      await expect(workflowSelector).toContainText("Launch Preview Workflow");
+      await dialog.getByTestId("task-description-input").fill("");
+      const launchStep = dialog.getByTestId("task-create-launch-step");
+      await expect(launchStep).toHaveText("Start step: Backlog");
+      await expect(workflowSelector).not.toContainText("Start step:");
+      const selectorBox = await workflowSelector.boundingBox();
+      const launchStepBox = await launchStep.boundingBox();
+      const launchStepInfo = dialog.getByTestId("task-create-launch-step-info");
+      await expect(launchStepInfo).toHaveAttribute("aria-label", "Learn about the task start step");
+      const launchStepInfoBox = await launchStepInfo.boundingBox();
+      if (!selectorBox || !launchStepInfoBox || !launchStepBox) {
+        throw new Error("launch step controls have no layout box");
+      }
+      expect(launchStepInfoBox.x).toBeGreaterThanOrEqual(selectorBox.x + selectorBox.width - 1);
+      expect(launchStepBox.x).toBeGreaterThanOrEqual(
+        launchStepInfoBox.x + launchStepInfoBox.width - 1,
+      );
+      await launchStepInfo.hover();
+      await expect(
+        testPage.getByRole("tooltip", {
+          name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
+        }),
+      ).toBeVisible();
+
+      await dialog.getByTestId("task-title-input").fill("Preview the launch prompt");
+      const description = "Review the launch preview";
+      await dialog.getByTestId("task-description-input").fill(description);
+      await expect(launchStep).toHaveText("Start step: In Progress");
+      const toggle = dialog.getByTestId("task-create-launch-preview-toggle");
+      await expect(toggle).toHaveAttribute(
+        "aria-label",
+        "Preview launch prompt with workflow step prompt: In Progress",
+      );
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await toggle.hover();
+      await expect(
+        testPage.getByRole("tooltip", {
+          name: "Preview launch prompt with workflow step prompt: In Progress",
+        }),
+      ).toBeVisible();
+      await toggle.click();
+
+      await expect(dialog.getByTestId("task-create-launch-preview-content")).toContainText(
+        `Launch instructions: ${description} | {{task_prompt}} | {task_id} | @saved`,
+      );
+      await expect(dialog.getByTestId("task-description-input")).toHaveCount(0);
+
+      await toggle.click();
+      await expect(dialog.getByTestId("task-description-input")).toHaveValue(description);
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+    } finally {
+      await apiClient.deleteWorkflow(workflow.id).catch(() => {});
+    }
+  });
+
   test("keeps remembered workflows isolated by workspace after reload", async ({
     testPage,
     apiClient,

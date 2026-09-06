@@ -234,6 +234,12 @@ test.describe("Kanban card delete — cascade subtasks toggle", () => {
     await expect(dialog).toContainText("Also delete 1 subtask");
     await expect(cascade).not.toBeChecked();
 
+    const discard = testPage.getByTestId("delete-discard-worktree-checkbox");
+    await expect(discard).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Delete" })).toBeDisabled();
+    await discard.click();
+    await expect(dialog.getByRole("button", { name: "Delete" })).toBeEnabled();
+
     await dialog.getByRole("button", { name: "Delete" }).click();
 
     // Parent is gone, child survives (now reparented to root with no
@@ -273,6 +279,10 @@ test.describe("Kanban card delete — cascade subtasks toggle", () => {
     const dialog = testPage.getByRole("alertdialog");
     const cascade = testPage.getByTestId("delete-cascade-checkbox");
     await expect(cascade).toBeVisible();
+    const discard = testPage.getByTestId("delete-discard-worktree-checkbox");
+    await expect(discard).toBeVisible();
+    await discard.click();
+    await expect(discard).toBeChecked();
     await cascade.click();
     await expect(cascade).toBeChecked();
 

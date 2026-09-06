@@ -25,7 +25,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         generate = step_block(workflow, "Generate test report")
         publish = step_block(workflow, "Publish bounded test report summary")
 
-        temporary_summary = "$RUNNER_TEMP/backend-test-summary-${{ matrix.shard }}.md"
+        temporary_summary = "$RUNNER_TEMP/backend-test-summary-${BACKEND_TEST_SHARD}.md"
         self.assertIn(
             "uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
             checkout,
@@ -37,12 +37,13 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("path: .github/vendor/go-test-action", checkout)
         self.assertIn(f'report_summary="{temporary_summary}"', generate)
+        self.assertIn("BACKEND_TEST_SHARD: ${{ matrix.shard }}", generate)
         self.assertNotIn("${{ runner.temp }}", generate)
         self.assertIn(': > "$report_summary"', generate)
         self.assertIn('GITHUB_STEP_SUMMARY="$report_summary"', generate)
         self.assertIn(
             'INPUT_FROMJSONFILE="$GITHUB_WORKSPACE/apps/backend/'
-            'test-results-${{ matrix.shard }}.json"',
+            'test-results-${BACKEND_TEST_SHARD}.json"',
             generate,
         )
         self.assertIn(
@@ -60,8 +61,8 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn(f'--input "{temporary_summary}"', publish)
         self.assertIn('--output "$GITHUB_STEP_SUMMARY"', publish)
         self.assertIn("--diagnostics-label", publish)
-        self.assertIn("backend-test-results-${{ matrix.shard }}", publish)
-        self.assertIn("${{ github.run_id }}#artifacts", publish)
+        self.assertIn("backend-test-results-${BACKEND_TEST_SHARD}", publish)
+        self.assertIn("$GITHUB_RUN_ID#artifacts", publish)
 
     def test_full_json_diagnostics_remain_in_the_named_artifact(self) -> None:
         workflow = BACKEND_WORKFLOW.read_text(encoding="utf-8")
