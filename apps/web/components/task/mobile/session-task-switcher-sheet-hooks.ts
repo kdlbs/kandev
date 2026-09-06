@@ -5,7 +5,11 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { replaceTaskUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
-import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import {
+  useTaskActions,
+  useArchiveAndSwitchTask,
+  type TaskActionOptions,
+} from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
@@ -367,7 +371,7 @@ function useSheetDeleteActions(
   );
 
   const handleDeleteConfirm = useCallback(
-    async (opts?: { cascade?: boolean }) => {
+    async (opts?: TaskActionOptions) => {
       if (!deletingTask || isDeleting) return;
       const taskId = deletingTask.id;
       setIsDeleting(true);
@@ -422,7 +426,7 @@ export function useSheetArchiveActions(
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
 
   const runArchive = useCallback(
-    async (taskId: string, opts?: { cascade?: boolean }) => {
+    async (taskId: string, opts?: TaskActionOptions) => {
       setIsArchiving(true);
       setArchivingTaskId(taskId);
       try {
@@ -439,7 +443,7 @@ export function useSheetArchiveActions(
   );
 
   const handleArchiveTask = useCallback(
-    (taskId: string, opts?: { cascade?: boolean }) => {
+    (taskId: string, opts?: TaskActionOptions) => {
       if (opts) {
         void runArchive(taskId, opts);
         return;
@@ -455,7 +459,7 @@ export function useSheetArchiveActions(
   );
 
   const handleArchiveConfirm = useCallback(
-    async (opts?: { cascade?: boolean }) => {
+    async (opts?: TaskActionOptions) => {
       if (!archivingTask) return;
       await runArchive(archivingTask.id, opts);
     },
