@@ -47,6 +47,7 @@ const (
 	reqKey               = "required"
 	typeKey              = "type"
 	stringType           = "string"
+	severityArg          = "severity"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -1249,6 +1250,55 @@ func (s *Server) publishReviewFindingsHandler() server.ToolHandlerFunc {
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(fmt.Sprintf("Review findings published:\n%s", string(data))), nil
+	}
+}
+
+// listReviewFindingsHandler renders a bare JSON document (no prose prefix)
+// so the whole text result parses as JSON, per AC-TWS-003.13.
+func (s *Server) listReviewFindingsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+
+		payload := map[string]interface{}{
+			"task_id":   taskID,
+			"status":    req.GetString("status", ""),
+			severityArg: req.GetString(severityArg, ""),
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListReviewFindings, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// resolveReviewFindingHandler renders a bare JSON document (no prose prefix)
+// so the whole text result parses as JSON, per AC-TWS-003.13.
+func (s *Server) resolveReviewFindingHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		findingID, err := req.RequireString("finding_id")
+		if err != nil {
+			return mcp.NewToolResultError("finding_id is required"), nil
+		}
+		status, err := req.RequireString("status")
+		if err != nil {
+			return mcp.NewToolResultError("status must be one of open, resolved, dismissed"), nil
+		}
+
+		payload := map[string]interface{}{
+			"finding_id": findingID,
+			"status":     status,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPResolveReviewFinding, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 

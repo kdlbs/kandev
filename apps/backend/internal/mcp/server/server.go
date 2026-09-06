@@ -1924,10 +1924,10 @@ func (s *Server) registerWalkthroughTools() {
 	)
 }
 
-// registerReviewTools registers the native code-review publishing tool. An
-// agent uses it to turn its own reading of the diff into anchored findings that
-// render as inline comments in the user's Changes/Review panel, in the same
-// place the built-in review pass writes to.
+// registerReviewTools registers the native code-review tools: publishing
+// findings as anchored comments in the user's Changes/Review panel (the same
+// place the built-in review pass writes to), plus listing and resolving those
+// findings so a later step can read back and close out what was published.
 func (s *Server) registerReviewTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("publish_review_findings_kandev",
@@ -1940,6 +1940,29 @@ func (s *Server) registerReviewTools() {
 			),
 		),
 		s.wrapHandler("publish_review_findings_kandev", s.publishReviewFindingsHandler()),
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_review_findings_kandev",
+			mcp.WithDescription("List the current task's published review findings. task_id defaults to your current task; pass another task's ID (within your reach — same workspace / task tree) to target it directly. Filter by status (default open) and optionally severity."),
+			mcp.WithString("task_id", mcp.Description("The task ID to list findings for. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
+			mcp.WithString("status", mcp.Description("Filter by disposition: open, resolved, dismissed, or all. Defaults to open.")),
+			mcp.WithString(severityArg, mcp.Description("Optional filter: blocker, major, minor, or nit. Omitted, results are not restricted by severity.")),
+		),
+		s.wrapHandler("list_review_findings_kandev", s.listReviewFindingsHandler()),
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("resolve_review_finding_kandev",
+			mcp.WithDescription("Resolve, dismiss, or reopen one review finding by id. Authorized against the finding's own task, not any task_id you supply."),
+			mcp.WithString("finding_id", mcp.Required(), mcp.Description("The finding to update.")),
+			mcp.WithString("status",
+				mcp.Required(),
+				mcp.Enum("open", "resolved", "dismissed"),
+				mcp.Description("The new disposition, required. One of open, resolved, dismissed. Use open to reopen a finding closed in error."),
+			),
+		),
+		s.wrapHandler("resolve_review_finding_kandev", s.resolveReviewFindingHandler()),
 	)
 }
 
@@ -1962,7 +1985,7 @@ func buildReviewFindingSchemaItem() map[string]any {
 			"line_end": num(
 				"Optional 1-based end line. Use it only when the finding genuinely spans a range.",
 			),
-			"severity": map[string]any{
+			severityArg: map[string]any{
 				typeKey:        "string",
 				"enum":         []string{"blocker", "major", "minor", "nit"},
 				descriptionArg: "blocker breaks correctness or security; nit is genuinely optional.",
@@ -1976,7 +1999,7 @@ func buildReviewFindingSchemaItem() map[string]any {
 				"Optional replacement code. Shown to the user but never applied automatically.",
 			),
 		},
-		"required": []string{"file", "line", "severity", "category", titleArg, "body"},
+		"required": []string{"file", "line", severityArg, "category", titleArg, "body"},
 	}
 }
 
