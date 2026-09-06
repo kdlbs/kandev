@@ -25,6 +25,7 @@ type Store struct {
 	ro                         *sqlx.DB // reader
 	freshInstall               bool
 	deploymentAppPersistenceMu sync.Mutex
+	ciRunGrantMutationMu       sync.Mutex
 	appLifecycleLocksMu        sync.Mutex
 	appLifecycleLocks          map[string]*appRegistrationLifecycleLock
 }
@@ -445,6 +446,93 @@ const createTablesSQL = `
 	);
 `
 
+const ciRunTablesSQL = `
+	CREATE TABLE IF NOT EXISTS github_ci_run_grants (
+		id TEXT PRIMARY KEY,
+		generation BIGINT NOT NULL DEFAULT 1 CHECK (generation > 0),
+		workspace_id TEXT NOT NULL,
+		actor_task_id TEXT NOT NULL,
+		target_task_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		created_by_user_id TEXT NOT NULL,
+		revoked_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_github_ci_run_grants_scope
+		ON github_ci_run_grants (
+			workspace_id, actor_task_id, target_task_id, workflow_id, workflow_step_id, repository_id
+		) WHERE revoked_at IS NULL;
+
+	CREATE TABLE IF NOT EXISTS github_ci_run_requests (
+		id TEXT PRIMARY KEY,
+		grant_id TEXT NOT NULL,
+		grant_generation BIGINT NOT NULL DEFAULT 1 CHECK (grant_generation > 0),
+		workspace_id TEXT NOT NULL,
+		actor_task_id TEXT NOT NULL,
+		actor_session_id TEXT NOT NULL,
+		target_task_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		canonical_repository TEXT NOT NULL DEFAULT '',
+		pr_number INTEGER NOT NULL,
+		expected_head_sha TEXT NOT NULL,
+		source_run_id BIGINT NOT NULL,
+		expected_source_attempt INTEGER NOT NULL,
+		evidence_kind TEXT NOT NULL CHECK (evidence_kind IN ('pr_head', 'current_merge')),
+		idempotency_hash TEXT NOT NULL,
+		status TEXT NOT NULL CHECK (status IN ('pending', 'reconciling', 'succeeded', 'failed')),
+		execution_owner TEXT NOT NULL DEFAULT '',
+		execution_lease_expires_at DATETIME,
+		provider_retry_after DATETIME,
+		operation TEXT NOT NULL DEFAULT '',
+		provider_call_started_at DATETIME,
+		provider_call_revision BIGINT NOT NULL DEFAULT 0,
+		provider_run_watermark BIGINT NOT NULL DEFAULT 0,
+		provider_run_id BIGINT NOT NULL DEFAULT 0,
+		provider_workflow_id BIGINT NOT NULL DEFAULT 0,
+		provider_workflow_name TEXT NOT NULL DEFAULT '',
+		provider_workflow_path TEXT NOT NULL DEFAULT '',
+		provider_attempt INTEGER NOT NULL DEFAULT 0,
+		provider_head_repo TEXT NOT NULL DEFAULT '',
+		provider_head_ref TEXT NOT NULL DEFAULT '',
+		provider_head_sha TEXT NOT NULL DEFAULT '',
+		observed_pr_head_sha TEXT NOT NULL DEFAULT '',
+		provider_event TEXT NOT NULL DEFAULT '',
+		provider_principal_json TEXT NOT NULL DEFAULT '',
+		provider_request_id TEXT NOT NULL DEFAULT '',
+		provider_url TEXT NOT NULL DEFAULT '',
+		failure_class TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE (actor_task_id, idempotency_hash),
+		UNIQUE (
+			workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id,
+			pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind
+		)
+	);
+
+	CREATE TABLE IF NOT EXISTS github_ci_run_audit_events (
+		id TEXT PRIMARY KEY,
+		request_id TEXT NOT NULL,
+		event_type TEXT NOT NULL,
+		failure_class TEXT NOT NULL DEFAULT '',
+		details_json TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (request_id) REFERENCES github_ci_run_requests(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_github_ci_run_audit_request
+		ON github_ci_run_audit_events(request_id, created_at);
+`
+
+func (s *Store) initCIRunSchema() error {
+	_, err := s.db.Exec(schemaSQLForDriver(ciRunTablesSQL, s.db.DriverName()))
+	return err
+}
+
 const appRegistrationTablesSQL = `
 	CREATE TABLE IF NOT EXISTS github_app_registrations (
 		id TEXT PRIMARY KEY CHECK (id <> ''),
@@ -551,6 +639,9 @@ func (s *Store) initSchemaFoundations() error {
 	if err := s.initCoreSchema(); err != nil {
 		return err
 	}
+	if err := s.initCIRunSchema(); err != nil {
+		return err
+	}
 	if err := s.addWorkspaceOwnershipColumns(); err != nil {
 		return err
 	}
@@ -587,6 +678,15 @@ func (s *Store) applyIdempotentSchemaColumns() {
 }
 
 func (s *Store) initSchemaUpgrades() error {
+	if err := s.addCIRunGrantColumns(); err != nil {
+		return err
+	}
+	if err := s.addCIRunRecoveryColumns(); err != nil {
+		return err
+	}
+	if err := s.migrateCIRunSemanticConstraint(); err != nil {
+		return err
+	}
 	if err := s.addTaskGitCredentialsMode(); err != nil {
 		return err
 	}
@@ -627,6 +727,128 @@ func (s *Store) initSchemaUpgrades() error {
 		return err
 	}
 	return nil
+}
+
+// addCIRunGrantColumns upgrades databases created before grant generations
+// were persisted.  Requests retain the generation that authorized admission,
+// so silently relying on the grant's current generation after a restart would
+// make old requests ambiguous and could invalidate recovery decisions.
+func (s *Store) addCIRunGrantColumns() error {
+	columns, err := s.tableColumns("github_ci_run_grants")
+	if err != nil {
+		return fmt.Errorf("read github_ci_run_grants columns: %w", err)
+	}
+	if _, ok := columns["generation"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE github_ci_run_grants ADD COLUMN generation BIGINT NOT NULL DEFAULT 1`); err != nil && !dbutil.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add github_ci_run_grants.generation: %w", err)
+	}
+	return nil
+}
+
+var ciRunRecoveryColumnDDL = []struct {
+	name string
+	ddl  string
+}{
+	{"grant_generation", "BIGINT NOT NULL DEFAULT 1"},
+	{"execution_owner", "TEXT NOT NULL DEFAULT ''"},
+	{"execution_lease_expires_at", "DATETIME"},
+	{"provider_retry_after", "DATETIME"},
+	{"provider_call_revision", "BIGINT NOT NULL DEFAULT 0"},
+	{"provider_run_watermark", "BIGINT NOT NULL DEFAULT 0"},
+	{"canonical_repository", "TEXT NOT NULL DEFAULT ''"},
+	{"observed_pr_head_sha", "TEXT NOT NULL DEFAULT ''"},
+	{"provider_event", "TEXT NOT NULL DEFAULT ''"},
+	{"provider_principal_json", "TEXT NOT NULL DEFAULT ''"},
+	{"provider_request_id", "TEXT NOT NULL DEFAULT ''"},
+	{"provider_url", "TEXT NOT NULL DEFAULT ''"},
+}
+
+func (s *Store) addCIRunRecoveryColumns() error {
+	columns, err := s.tableColumns("github_ci_run_requests")
+	if err != nil {
+		return fmt.Errorf("read github_ci_run_requests columns: %w", err)
+	}
+	for _, column := range ciRunRecoveryColumnDDL {
+		if _, ok := columns[column.name]; ok {
+			continue
+		}
+		stmt := "ALTER TABLE github_ci_run_requests ADD COLUMN " + column.name + " " + column.ddl
+		if _, err := s.db.Exec(stmt); err != nil && !dbutil.IsDuplicateColumnError(err) {
+			return fmt.Errorf("add github_ci_run_requests.%s: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+const legacyCIRunSemanticConstraint = "UNIQUE (target_task_id, repository_id, pr_number, source_run_id, expected_source_attempt, evidence_kind)"
+const legacyCIRunCallerConstraint = "UNIQUE (grant_id, actor_task_id, idempotency_hash)"
+const scopedCIRunCallerConstraint = "UNIQUE (actor_task_id, idempotency_hash)"
+
+const legacyScopedCIRunSemanticConstraint = "UNIQUE (\n\t\t\tworkspace_id, target_task_id, workflow_id, repository_id,\n\t\t\tpr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind\n\t\t)"
+const scopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)"
+
+func (s *Store) migrateCIRunSemanticConstraint() error {
+	// The constraint-rebuild migration is SQLite-specific. PostgreSQL applies
+	// the current constraint through CREATE TABLE and does not expose
+	// sqlite_master, so there is nothing to rebuild on that driver.
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
+	var existingSQL string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master
+		WHERE type = 'table' AND name = 'github_ci_run_requests'`).Scan(&existingSQL); err != nil {
+		return fmt.Errorf("read github_ci_run_requests schema: %w", err)
+	}
+	if !strings.Contains(existingSQL, legacyCIRunSemanticConstraint) &&
+		!strings.Contains(existingSQL, legacyScopedCIRunSemanticConstraint) &&
+		!strings.Contains(existingSQL, legacyCIRunCallerConstraint) {
+		return nil
+	}
+	requestSchema := strings.Replace(existingSQL,
+		"github_ci_run_requests", "github_ci_run_requests_new", 1)
+	requestSchema = strings.Replace(requestSchema,
+		legacyScopedCIRunSemanticConstraint, scopedCIRunSemanticConstraint, 1)
+	requestSchema = strings.Replace(requestSchema,
+		legacyCIRunSemanticConstraint, scopedCIRunSemanticConstraint, 1)
+	requestSchema = strings.Replace(requestSchema,
+		legacyCIRunCallerConstraint, scopedCIRunCallerConstraint, 1)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	statements := []string{
+		requestSchema,
+		`INSERT INTO github_ci_run_requests_new (` + ciRunRequestColumns + `)
+			SELECT ` + ciRunRequestColumns + ` FROM github_ci_run_requests`,
+		`CREATE TABLE github_ci_run_audit_events_new (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			failure_class TEXT NOT NULL DEFAULT '',
+			details_json TEXT NOT NULL DEFAULT '{}',
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (request_id) REFERENCES github_ci_run_requests_new(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO github_ci_run_audit_events_new
+			(id, request_id, event_type, failure_class, details_json, created_at)
+			SELECT id, request_id, event_type, failure_class, details_json, created_at
+			FROM github_ci_run_audit_events`,
+		`DROP TABLE github_ci_run_audit_events`,
+		`DROP TABLE github_ci_run_requests`,
+		`ALTER TABLE github_ci_run_requests_new RENAME TO github_ci_run_requests`,
+		`ALTER TABLE github_ci_run_audit_events_new RENAME TO github_ci_run_audit_events`,
+		`CREATE INDEX idx_github_ci_run_audit_request
+			ON github_ci_run_audit_events(request_id, created_at)`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return fmt.Errorf("migrate github_ci_run_requests semantic constraint: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 var taskPRMergeQueueColumnDDL = []struct {
@@ -1463,10 +1685,7 @@ func (s *Store) addPRScopeMigrationColumn() error {
 	return nil
 }
 
-// tableColumns returns the set of column names declared on `table`. Cheap
-// SQLite PRAGMA lookup; used by addWatchSelfHealColumns to skip ALTERs on a
-// fresh install whose createTablesSQL already includes the columns. Mirrors
-// the helper in jira/store.go.
+// tableColumns returns the set of column names declared on `table`.
 func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 	columns, err := dbutil.TableColumns(s.db, table)
 	if err != nil {
@@ -4320,9 +4539,24 @@ func (s *Store) DeleteWorkspaceSettings(ctx context.Context, workspaceID string)
 	if workspaceID == "" {
 		return fmt.Errorf("workspace_id is required")
 	}
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(
-		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`), workspaceID)
-	return err
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, statement := range []string{
+		`DELETE FROM github_ci_run_audit_events WHERE request_id IN (
+			SELECT id FROM github_ci_run_requests WHERE workspace_id = ?
+		)`,
+		`DELETE FROM github_ci_run_requests WHERE workspace_id = ?`,
+		`DELETE FROM github_ci_run_grants WHERE workspace_id = ?`,
+		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(statement), workspaceID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) listWorkspaceIDs(ctx context.Context) ([]string, error) {

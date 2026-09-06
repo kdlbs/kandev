@@ -95,6 +95,61 @@ func TestE2EResetDeletesWorkspaceGitHubAuthentication(t *testing.T) {
 	}
 }
 
+func TestE2EResetDeletesWorkspaceCIRunStateInDependencyOrder(t *testing.T) {
+	raw, err := db.OpenSQLite(filepath.Join(t.TempDir(), "e2e-reset-ci-runs.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	database := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.Exec(`
+		PRAGMA foreign_keys = ON;
+		CREATE TABLE github_ci_run_grants (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL
+		);
+		CREATE TABLE github_ci_run_requests (
+			id TEXT PRIMARY KEY,
+			grant_id TEXT NOT NULL REFERENCES github_ci_run_grants(id),
+			workspace_id TEXT NOT NULL
+		);
+		CREATE TABLE github_ci_run_audit_events (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL REFERENCES github_ci_run_requests(id)
+		);
+		INSERT INTO github_ci_run_grants VALUES ('grant-1', 'ws-1'), ('grant-2', 'ws-2');
+		INSERT INTO github_ci_run_requests VALUES
+			('request-1', 'grant-1', 'ws-1'),
+			('request-2', 'grant-2', 'ws-2');
+		INSERT INTO github_ci_run_audit_events VALUES
+			('audit-1', 'request-1'),
+			('audit-2', 'request-2');
+	`); err != nil {
+		t.Fatalf("seed database: %v", err)
+	}
+
+	if err := deleteGitHubCIRunStateForReset(context.Background(), database.DB, "ws-1"); err != nil {
+		t.Fatalf("delete CI run state: %v", err)
+	}
+	assertWorkspaceRows(t, database, "github_ci_run_grants", "ws-1", 0)
+	assertWorkspaceRows(t, database, "github_ci_run_grants", "ws-2", 1)
+	assertWorkspaceRows(t, database, "github_ci_run_requests", "ws-1", 0)
+	assertWorkspaceRows(t, database, "github_ci_run_requests", "ws-2", 1)
+	for _, tc := range []struct {
+		id   string
+		want int
+	}{{id: "audit-1", want: 0}, {id: "audit-2", want: 1}} {
+		var got int
+		if err := database.Get(&got,
+			`SELECT COUNT(*) FROM github_ci_run_audit_events WHERE id = ?`, tc.id); err != nil {
+			t.Fatalf("count %s: %v", tc.id, err)
+		}
+		if got != tc.want {
+			t.Fatalf("%s rows = %d, want %d", tc.id, got, tc.want)
+		}
+	}
+}
+
 func TestWaitForE2ETaskCleanupWithReader(t *testing.T) {
 	t.Run("waits for a running job to finish", func(t *testing.T) {
 		firstRead := make(chan struct{})

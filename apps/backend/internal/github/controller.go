@@ -69,6 +69,9 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/credentials/resolve", c.httpCredentialBrokerReady)
 	api.POST("/credentials/resolve", c.httpResolveCredentialLease)
 	api.POST("/credentials/reissue", c.httpReissueCredentialLease)
+	api.POST("/ci-run-grants", c.httpCreateCIRunGrant)
+	api.GET("/ci-run-grants", c.httpListCIRunGrants)
+	api.DELETE("/ci-run-grants/:grantId", c.httpRevokeCIRunGrant)
 
 	// Git credential broker routes are provider-neutral. Keep the GitHub paths
 	// above as compatibility aliases for existing executors and integrations.

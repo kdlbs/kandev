@@ -196,6 +196,29 @@ func TestCredentialResolverNeverFallsBackForDisconnectedWorkspace(t *testing.T) 
 	}
 }
 
+func TestCredentialResolverScopedActionsWriteRejectsHumanAndLegacyCredentials(t *testing.T) {
+	for _, source := range []ConnectionSource{
+		ConnectionSourcePAT, ConnectionSourceGHCLI, ConnectionSourceLegacyShared,
+	} {
+		t.Run(string(source), func(t *testing.T) {
+			resolver := NewCredentialResolver(&fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
+				"work": {WorkspaceID: "work", Source: source, Status: ConnectionStatusActive},
+			}}, fakeAuthSecrets{})
+			resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+				t.Fatal("legacy credential factory must not be called")
+				return nil, "", nil
+			})
+			_, err := resolver.Resolve(context.Background(), ResolveCredentialRequest{
+				WorkspaceID: "work", Purpose: CredentialPurposeScopedActionsWrite,
+				RepoOwner: "kdlbs", RepoName: "kandev",
+			})
+			if !errors.Is(err, ErrGitHubCapabilityDenied) {
+				t.Fatalf("error = %v, want ErrGitHubCapabilityDenied", err)
+			}
+		})
+	}
+}
+
 func TestAuthResolverKeysAppCredentialsByRegistration(t *testing.T) {
 	installationID := int64(42)
 	connection := &WorkspaceConnection{

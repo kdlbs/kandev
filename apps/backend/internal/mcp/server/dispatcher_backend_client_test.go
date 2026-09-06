@@ -80,6 +80,18 @@ func TestDispatcherBackendClient_ErrorResponse(t *testing.T) {
 	assert.Contains(t, err.Error(), "boom")
 }
 
+func TestDispatcherBackendClient_ErrorResponsePreservesDetails(t *testing.T) {
+	errPayload, err := json.Marshal(ws.ErrorPayload{
+		Code: "RATE_LIMITED", Message: "retry later", Details: map[string]interface{}{"request_id": "request-1"},
+	})
+	require.NoError(t, err)
+	d := &fakeDispatcher{resp: &ws.Message{ID: "x", Action: "test.action", Type: ws.MessageTypeError, Payload: errPayload}}
+	err = NewDispatcherBackendClient(d, newTestLogger(t)).RequestPayload(context.Background(), "test.action", nil, nil)
+	var backendErr *BackendError
+	require.ErrorAs(t, err, &backendErr)
+	assert.Equal(t, "request-1", backendErr.Details["request_id"])
+}
+
 func TestDispatcherBackendClient_DispatchError(t *testing.T) {
 	log := newTestLogger(t)
 

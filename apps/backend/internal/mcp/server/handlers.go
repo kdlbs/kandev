@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -485,6 +486,44 @@ func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) requestFreshCIRunHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		repositoryID, err := req.RequireString("repository_id")
+		if err != nil {
+			return mcp.NewToolResultError("repository_id is required"), nil
+		}
+		prNumber, _ := req.RequireInt("pr_number")
+		sourceRunID, _ := req.RequireInt("source_run_id")
+		sourceAttempt, _ := req.RequireInt("expected_source_attempt")
+		payload := map[string]any{
+			"actor_task_id": s.taskID, "actor_session_id": s.sessionID,
+			"task_id": taskID, "repository_id": repositoryID, "pr_number": prNumber,
+			"expected_head_sha":         req.GetString("expected_head_sha", ""),
+			"expected_workflow_step_id": req.GetString("expected_workflow_step_id", ""),
+			"source_run_id":             int64(sourceRunID), "expected_source_attempt": sourceAttempt,
+			"evidence_kind":   req.GetString("evidence_kind", ""),
+			"idempotency_key": req.GetString("idempotency_key", ""),
+		}
+		var result map[string]any
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPRequestFreshCIRun, payload, &result); err != nil {
+			var backendErr *BackendError
+			if errors.As(err, &backendErr) && len(backendErr.Details) > 0 {
+				data, _ := json.MarshalIndent(backendErr.Details, "", "  ")
+				out := mcp.NewToolResultStructured(backendErr.Details, string(data))
+				out.IsError = true
+				return out, nil
+			}
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultStructured(result, string(data)), nil
 	}
 }
 

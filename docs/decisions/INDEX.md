@@ -229,6 +229,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-30-bound-untracked-dependency-enumeration | [Bound Untracked Dependency Enumeration](2026-08-30-bound-untracked-dependency-enumeration.md) | accepted | backend | 2026-08-30 |
 | 2026-08-30-dual-era-mcp-protocol | [Use One Dual-Era MCP Endpoint](2026-08-30-dual-era-mcp-protocol.md) | accepted | backend, agentctl, protocol, security | 2026-08-30 |
 | 2026-08-30-e2e-browser-cache | [Cache host-runner E2E browser provisioning](2026-08-30-e2e-browser-cache.md) | accepted | infra, workflow | 2026-08-30 |
+| 2026-08-30-server-owned-scoped-ci-runs | [Server-Owned Scoped CI Runs](2026-08-30-server-owned-scoped-ci-runs.md) | accepted | backend, protocol, security, GitHub, workflow | 2026-08-30 |
 | 2026-08-31-generic-plugin-host-boundary | [Generic plugin Host boundary](2026-08-31-generic-plugin-host-boundary.md) | proposed | backend, frontend, protocol, security, workflow | 2026-08-31 |
 | 2026-08-30-environment-owned-git-status | [Persist Current Git Status with the Task Environment](2026-08-30-environment-owned-git-status.md) | accepted | backend, frontend, protocol | 2026-08-31 |
 | 2026-08-31-explicit-new-branch-session-recovery | [Require Explicit User Action Before Continuing a Session on a Replacement Branch](2026-08-31-explicit-new-branch-session-recovery.md) | accepted | backend, frontend, protocol | 2026-08-31 |
