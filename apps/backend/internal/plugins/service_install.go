@@ -135,7 +135,7 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 			s.log.Warn("plugins: failed to delete plugin record after approval review error",
 				zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
 		}
-		_ = os.RemoveAll(result.InstallPath)
+		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, err
 	}
 	s.registry.Add(rec)

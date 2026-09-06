@@ -46,6 +46,26 @@ func TestServiceApprovalRevokeBumpsRevisionAndDenies(t *testing.T) {
 	}
 }
 
+func TestServiceApprovalRevokeRetryReplaysOriginalResult(t *testing.T) {
+	dir := t.TempDir()
+	svc := &Service{}
+	svc.SetPluginsDir(dir)
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	first, err := svc.approvalRevoke("inst-1", "ws-1", "human", "revoke", "revoke-1")
+	if err != nil {
+		t.Fatalf("first revoke: %v", err)
+	}
+	replayed, err := svc.approvalRevoke("inst-1", "ws-1", "human", "revoke", "revoke-1")
+	if err != nil {
+		t.Fatalf("retry revoke: %v", err)
+	}
+	if replayed.Revision != first.Revision || !replayed.UpdatedAt.Equal(first.UpdatedAt) {
+		t.Fatalf("retry changed the original result: first=%#v replayed=%#v", first, replayed)
+	}
+}
+
 func TestServiceApprovalTombstoneRetainsStateOnReinstall(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}

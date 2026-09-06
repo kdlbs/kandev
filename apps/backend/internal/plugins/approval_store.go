@@ -273,7 +273,12 @@ func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, ex
 		idempotencyKey := approvalIdempotencyKey(CapabilityApprovalEventRevoke, auditID, installationID, workspaceID)
 		if replayed, ok := file.Idempotency[idempotencyKey]; ok {
 			input, inputOK := file.IdempotencyInputs[idempotencyKey]
-			if inputOK && input.Revision == expectedRevision && input.Actor == actor && input.Reason == reason {
+			// Current-revision callers intentionally pass allowCurrent=true and
+			// do not retain the pre-mutation revision. Once the first revoke
+			// advances the row, the audit identity is the only stable lookup for
+			// an exact retry. Explicit-revision callers remain bound to the
+			// persisted pre-revoke revision.
+			if inputOK && (allowCurrent || input.Revision == expectedRevision) && input.Actor == actor && input.Reason == reason {
 				return replayed, nil
 			}
 			return CapabilityApproval{}, ErrApprovalIdempotencyConflict

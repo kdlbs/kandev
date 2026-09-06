@@ -39,7 +39,7 @@ func (s *Service) approvalRevoke(installationID, workspaceID, actor, reason, aud
 		}
 		return CapabilityApproval{}, fmt.Errorf("plugins: approval not found")
 	}
-	return ledger.revokeIfRevision(installationID, workspaceID, current.Revision, actor, reason, auditID, time.Now().UTC(), false)
+	return ledger.revokeIfRevision(installationID, workspaceID, current.Revision, actor, reason, auditID, time.Now().UTC(), true)
 }
 
 func (s *Service) approvalTombstoneInstallation(installationID string) error {

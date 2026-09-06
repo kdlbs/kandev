@@ -173,6 +173,38 @@ func TestServiceInstallUpgradeReviewsExistingCapabilityApprovals(t *testing.T) {
 	}
 }
 
+func TestServiceInstallUpgradeReviewFailureRestartsPreviousRuntime(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	rec1, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.0.0", "tasks"))
+	if err != nil {
+		t.Fatalf("install initial plugin: %v", err)
+	}
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec1.Manifest), []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("grant approval: %v", err)
+	}
+
+	// An empty manifest resource is accepted by package extraction but is
+	// rejected while deriving the exact approval capability set. This fails
+	// after the old runtime has been stopped and the new record persisted.
+	_, err = svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.1.0", "*"))
+	if err == nil {
+		t.Fatal("upgrade with invalid capability expected an approval review error")
+	}
+	if !rt.Running("kandev-plugin-slack") {
+		t.Fatal("previous runtime was not restarted after approval review failure")
+	}
+	if got := rt.startCallCount("kandev-plugin-slack"); got != 2 {
+		t.Fatalf("runtime Start called %d times, want initial start plus rollback restart", got)
+	}
+	onDisk, err := svc.Get("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("get restored plugin: %v", err)
+	}
+	if onDisk.Version != "1.0.0" {
+		t.Fatalf("restored plugin version = %q, want 1.0.0", onDisk.Version)
+	}
+}
+
 // failingSaveStore wraps a real store.Store, letting a test arm exactly one
 // Save call to fail with a simulated error — used to exercise Install's
 // cleanup-on-persist-failure path without a real disk-full/permission

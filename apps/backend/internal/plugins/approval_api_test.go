@@ -1,6 +1,9 @@
 package plugins
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestApprovalAPIExportsCurrentRowsAndDecision(t *testing.T) {
 	dir := t.TempDir()
@@ -29,5 +32,27 @@ func TestApprovalAPIExportsCurrentRowsAndDecision(t *testing.T) {
 	decision := svc.AuthorizeCapability("inst-1", "ws-1", "api_read:tasks", 1, "req", "method")
 	if !decision.Allowed {
 		t.Fatalf("decision = %#v", decision)
+	}
+}
+
+func TestApprovalAPIRevokeRetryReplaysOriginalResult(t *testing.T) {
+	svc := &Service{}
+	svc.SetPluginsDir(t.TempDir())
+	if _, err := svc.GrantCapabilityApproval("inst-1", "ws-1", 1, "digest-a", []string{"api_read:tasks"}, "human", "grant", "grant-1"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	first, err := svc.RevokeCapabilityApproval("inst-1", "ws-1", 1, "human", "revoke", "revoke-1")
+	if err != nil {
+		t.Fatalf("first revoke: %v", err)
+	}
+	replayed, err := svc.RevokeCapabilityApproval("inst-1", "ws-1", 1, "human", "revoke", "revoke-1")
+	if err != nil {
+		t.Fatalf("exact retry: %v", err)
+	}
+	if replayed.Revision != first.Revision || replayed.UpdatedAt != first.UpdatedAt {
+		t.Fatalf("retry changed original result: first=%#v replayed=%#v", first, replayed)
+	}
+	if _, err := svc.RevokeCapabilityApproval("inst-1", "ws-1", 2, "human", "revoke", "revoke-1"); !errors.Is(err, ErrApprovalIdempotencyConflict) {
+		t.Fatalf("changed expected revision error = %v, want idempotency conflict", err)
 	}
 }
