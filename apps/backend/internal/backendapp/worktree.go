@@ -121,8 +121,14 @@ func (a *environmentDestroyerAdapter) DestroySandbox(ctx context.Context, sandbo
 }
 
 func (a *environmentDestroyerAdapter) DestroyWorktree(ctx context.Context, worktreeID string) error {
-	// removeBranch=false: preserve the branch so unpushed work isn't lost.
-	return a.worktrees.RemoveByID(ctx, worktreeID, false)
+	receipt, err := a.worktrees.RemoveByIDWithReceipt(ctx, worktreeID)
+	if err != nil {
+		return err
+	}
+	if receipt.RetainedReasons[worktree.RetainedActiveReference] > 0 {
+		return fmt.Errorf("worktree %s is still referenced by another task", worktreeID)
+	}
+	return nil
 }
 
 func (a *environmentDestroyerAdapter) GetContainerLiveStatus(ctx context.Context, containerID string) (*taskservice.ContainerLiveStatus, error) {

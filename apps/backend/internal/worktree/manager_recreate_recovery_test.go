@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// archiveDeletesLocalBranch simulates what task archive does to a worktree's
-// branch: the local ref is deleted (`git branch -D`), while origin and the
-// remote-tracking ref are left alone.
+// archiveDeletesLocalBranch simulates a compacted archived worktree branch: the
+// local ref is absent while origin and the remote-tracking ref are left alone.
 func archiveDeletesLocalBranch(t *testing.T, repoPath, branch string) {
 	t.Helper()
 	runGit(t, repoPath, "branch", "-D", branch)
@@ -515,6 +515,92 @@ func TestRecreate_ManagedRefreshUsesRemoteWhenLocalCheckoutBranchIsBehind(t *tes
 	}
 }
 
+func TestRecreate_RecoveryHeadWinsOverRefreshedRemoteWhenSyncHandled(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	recoverySHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/pr-branch"))
+	refreshedSHA := advanceRemoteBranch(t, repoPath, "feature/pr-branch")
+	if refreshedSHA == recoverySHA {
+		t.Fatal("remote refresh did not advance the branch")
+	}
+	archiveDeletesLocalBranch(t, repoPath, "feature/pr-branch")
+	worktreePath := filepath.Join(t.TempDir(), "task-recovery-precedence", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+
+	mgr := newRecreateTestManager(t)
+	wt, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-recovery-precedence", SessionID: "session-recovery-precedence",
+		TaskID: "task-recovery-precedence", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/pr-branch", BranchOwner: BranchOwnerManaged,
+		RecoveryHeadSHA: recoverySHA, Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-recovery-precedence", TaskID: "task-recovery-precedence", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, CheckoutBranch: "feature/pr-branch", RemoteSyncHandled: true,
+	})
+	if err != nil {
+		t.Fatalf("recreate(): %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD")); got != recoverySHA {
+		t.Fatalf("restored HEAD = %q, want persisted recovery SHA %q (refreshed remote was %q)", got, recoverySHA, refreshedSHA)
+	}
+}
+
+// TestRecreate_CompactedBranchWithUnavailableRecoveryRefRefusesFallback pins
+// the fail-closed boundary: an archived compaction marker cannot fall back to
+// an advanced base or remote branch when its exact recovery object is gone.
+func TestRecreate_CompactedBranchWithUnavailableRecoveryRefRefusesFallback(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	advanceRemoteBranch(t, repoPath, "main")
+	advanceRemoteBranch(t, repoPath, "feature/pr-branch")
+	archiveDeletesLocalBranch(t, repoPath, "feature/pr-branch")
+
+	worktreePath := filepath.Join(t.TempDir(), "task-compacted-missing-recovery", "repo-1")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("create worktree placeholder: %v", err)
+	}
+	compactedAt := time.Now().UTC()
+	mgr := newRecreateTestManager(t)
+	_, err := mgr.recreate(context.Background(), &Worktree{
+		ID: "wt-compacted-missing-recovery", SessionID: "session-compacted-missing-recovery",
+		TaskID: "task-compacted-missing-recovery", RepositoryID: "repo-1", RepositoryPath: repoPath,
+		Path: worktreePath, Branch: "feature/pr-branch", BranchOwner: BranchOwnerManaged,
+		RecoveryHeadSHA: strings.Repeat("f", 40), BranchCompactedAt: &compactedAt, Status: StatusDeleted,
+	}, CreateRequest{
+		SessionID: "session-compacted-missing-recovery", TaskID: "task-compacted-missing-recovery",
+		RepositoryID: "repo-1", RepositoryPath: repoPath, BaseBranch: "main",
+		FallbackBaseBranch: "main", CheckoutBranch: "feature/pr-branch", PullBeforeWorktree: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "restore compacted worktree branch") {
+		t.Fatalf("recreate() error = %v, want fail-closed recovery error", err)
+	}
+	if _, statErr := os.Stat(worktreePath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("fallback recreated worktree path = %q (%v), want no fallback", worktreePath, statErr)
+	}
+	if got := mgr.BranchRecoveryStatus(context.Background(), repoPath, "feature/pr-branch"); got != BranchStatusRemote {
+		t.Fatalf("recovery status = %q, want remote-only branch after refusal", got)
+	}
+}
+
+func TestRestoreManagedBranchFromRecoveryHead_RefusesConcurrentCreator(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	recoverySHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "feature/pr-branch"))
+	creatorSHA := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main"))
+	runGit(t, repoPath, "branch", "feature/recovery-cas", creatorSHA)
+
+	mgr := newRecreateTestManager(t)
+	err := mgr.restoreManagedBranchFromRecoveryHeadLocked(context.Background(), &Worktree{
+		RepositoryPath: repoPath, Branch: "feature/recovery-cas", BranchOwner: BranchOwnerManaged,
+		RecoveryHeadSHA: recoverySHA,
+	})
+	if err == nil {
+		t.Fatal("restore succeeded despite an existing branch ref")
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "refs/heads/feature/recovery-cas")); got != creatorSHA {
+		t.Fatalf("concurrent creator branch changed to %q, want %q", got, creatorSHA)
+	}
+}
+
 func TestRecreate_ManagedRefreshUsesRemotePRHeadWhenLocalCheckoutBranchIsBehind(t *testing.T) {
 	repoPath, wantSHA := initManagedPRCheckoutBranch(t, 977, "feature/managed-fork-pr-behind")
 	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
@@ -570,13 +656,14 @@ func TestCreate_RestoresReleasedWorktreeAfterArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
-	// Work the user never pushed. It only survives because archive keeps the
-	// branch (DestroyWorktree passes removeBranch=false).
+	// Work the user never pushed. It survives because ancestry validation
+	// retains every branch with commits outside the integration ref.
 	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "unpushed work")
 	workSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 
-	// Archive: remove the directory, release the reference, keep the branch.
-	if err := mgr.RemoveByID(ctx, wt.ID, false); err != nil {
+	// Archive: remove the directory and release the reference; the unique
+	// commit makes the branch ineligible for compaction.
+	if err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt}); err != nil {
 		t.Fatalf("archive worktree: %v", err)
 	}
 	if _, statErr := os.Stat(wt.Path); !os.IsNotExist(statErr) {
@@ -613,4 +700,51 @@ func TestCreate_RestoresReleasedWorktreeAfterArchive(t *testing.T) {
 		t.Fatalf("session lookup returned worktree %q, want the restored %q", found.ID, wt.ID)
 	}
 	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
+}
+
+func TestCreate_RestoresSafelyCompactedBranchFromExactHead(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-integrated", "session-integrated", models.TaskSessionStateCompleted)
+	req := CreateRequest{
+		TaskID:         "task-integrated",
+		SessionID:      "session-integrated",
+		TaskTitle:      "Integrated work",
+		RepositoryID:   "repository",
+		RepositoryPath: initGitRepoWithRemote(t),
+		BaseBranch:     "main",
+		IntegrationRef: "main",
+		TaskDirName:    "task-integrated",
+		RepoName:       "repository",
+	}
+	wt, err := mgr.Create(ctx, req)
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	wantSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+
+	if err := mgr.CleanupWorktreesPreservingBranches(ctx, []*Worktree{wt}); err != nil {
+		t.Fatalf("archive worktree: %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "branch", "--list", wt.Branch)); got != "" {
+		t.Fatalf("fully integrated branch was not compacted: %q", got)
+	}
+	archived, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load compacted worktree metadata: %v", err)
+	}
+	if archived.BranchOwner != BranchOwnerManaged || archived.RecoveryHeadSHA != wantSHA {
+		t.Fatalf("compacted recovery metadata = owner %q head %q, want %q at %q",
+			archived.BranchOwner, archived.RecoveryHeadSHA, BranchOwnerManaged, wantSHA)
+	}
+
+	resumeReq := req
+	resumeReq.WorktreeID = wt.ID
+	restored, err := mgr.Create(ctx, resumeReq)
+	if err != nil {
+		t.Fatalf("recreate compacted worktree: %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, restored.Path, "rev-parse", "HEAD")); got != wantSHA {
+		t.Fatalf("restored HEAD = %q, want exact compacted head %q", got, wantSHA)
+	}
 }

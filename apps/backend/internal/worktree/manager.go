@@ -26,6 +26,9 @@ const (
 	gitNoTags                = "--no-tags"
 )
 
+// ArchivedBranchMaintenanceBatchLimit bounds one storage-maintenance revisit.
+const ArchivedBranchMaintenanceBatchLimit = 100
+
 // repoLockEntry tracks a repository lock and its reference count.
 type repoLockEntry struct {
 	mu       *sync.Mutex
@@ -117,6 +120,29 @@ type MultiRepoStore interface {
 	// branchSlug scopes the lookup for multi-branch tasks; empty matches the
 	// legacy single-branch persistence shape.
 	GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID, branchSlug string) (*Worktree, error)
+}
+
+// BranchMetadataStore is the fail-closed persistence capability required for
+// managed-branch compaction. Stores without it retain every branch.
+type BranchMetadataStore interface {
+	CountWorktreeBranchOwners(ctx context.Context, repositoryPath, branch string) (int, error)
+	PersistBranchRecoveryHead(ctx context.Context, worktreeID, expected, recoveryHead string) (bool, error)
+	PersistBranchCompactionComplete(ctx context.Context, worktreeID, expectedRecoveryHead string) (bool, error)
+}
+
+// ArchivedBranchMaintenanceStore supplies only durable archived worktree
+// candidates. The Manager remains responsible for every Git safety check and
+// mutation after selection.
+type ArchivedBranchMaintenanceStore interface {
+	ListArchivedBranchCandidates(ctx context.Context, limit int) ([]*Worktree, error)
+	IsArchivedBranchCandidate(ctx context.Context, worktreeID string) (bool, error)
+	PersistArchivedBranchRecoveryHead(
+		ctx context.Context, worktreeID, expected, recoveryHead string,
+	) (bool, error)
+	PersistArchivedBranchCompactionComplete(
+		ctx context.Context, worktreeID, expectedRecoveryHead string,
+	) (bool, error)
+	TouchArchivedBranchCandidate(ctx context.Context, worktreeID string) error
 }
 
 // NewManager creates a new worktree manager.

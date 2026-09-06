@@ -187,6 +187,13 @@ permanent deletion. Each entry shows its `delete_after` retention deadline: **De
 time, not an exact promise, the first successful scheduled or full manual maintenance run after the
 deadline performs the purge, subject to the idle gate and any preemption.
 
+Each full maintenance run also revisits at most 100 Kandev-managed local branches retained when a
+task was archived before its work was integrated. Kandev considers only durable rows that still
+belong to archived tasks with inactive worktrees; it does not scan branch-name patterns or fetch
+remote state. The branch is removed only after the same ownership, liveness, and local integration
+checks used during archive cleanup. Remote refs and branches with unpublished or ambiguous work
+remain untouched.
+
 ![Settings > System > Storage showing the maintenance policy, schedule, workspace cleanup, and folder allowlist.](../screenshots/system-maintenance-policy.png)
 
 Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected

@@ -27,6 +27,7 @@ func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, work
 		Path:              worktreePath,
 		Branch:            branchName,
 		BaseBranch:        req.BaseBranch,
+		IntegrationRef:    req.IntegrationRef,
 		Status:            StatusActive,
 		CreatedAt:         now,
 		UpdatedAt:         now,

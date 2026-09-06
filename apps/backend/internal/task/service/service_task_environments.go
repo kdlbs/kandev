@@ -381,11 +381,21 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 // On any non-idempotent error, the caller should preserve the row so the user
 // can retry.
 func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.TaskEnvironment) error {
+	return s.teardownEnvironmentResourcesWithWorktrees(ctx, env, true)
+}
+
+func (s *Service) teardownEnvironmentRuntimeResources(ctx context.Context, env *models.TaskEnvironment) error {
+	return s.teardownEnvironmentResourcesWithWorktrees(ctx, env, false)
+}
+
+func (s *Service) teardownEnvironmentResourcesWithWorktrees(
+	ctx context.Context, env *models.TaskEnvironment, includeWorktrees bool,
+) error {
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
 	}
 	worktreeIDs := environmentWorktreeIDs(env)
-	if env.ContainerID == "" && env.SandboxID == "" && len(worktreeIDs) == 0 {
+	if !environmentHasResources(env, includeWorktrees, worktreeIDs) {
 		return nil
 	}
 	if s.envDestroyer == nil {
@@ -415,20 +425,36 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 			errs = append(errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
 		}
 	}
-	for _, worktreeID := range worktreeIDs {
-		if err := contextError(); err != nil {
-			return err
-		}
-		if err := s.envDestroyer.DestroyWorktree(ctx, worktreeID); err != nil {
-			if !errors.Is(err, worktree.ErrWorktreeNotFound) {
-				errs = append(errs, fmt.Errorf("destroy worktree %s: %w", worktreeID, err))
-			}
+	if includeWorktrees {
+		var stopErr error
+		errs, stopErr = s.destroyEnvironmentWorktrees(ctx, worktreeIDs, errs)
+		if stopErr != nil {
+			return errors.Join(errors.Join(errs...), stopErr)
 		}
 	}
 	if err := contextError(); err != nil {
 		return err
 	}
 	return errors.Join(errs...)
+}
+
+func environmentHasResources(env *models.TaskEnvironment, includeWorktrees bool, worktreeIDs []string) bool {
+	return env.ContainerID != "" || env.SandboxID != "" || (includeWorktrees && len(worktreeIDs) > 0)
+}
+
+func (s *Service) destroyEnvironmentWorktrees(
+	ctx context.Context, worktreeIDs []string, errs []error,
+) ([]error, error) {
+	for _, worktreeID := range worktreeIDs {
+		if cause := context.Cause(ctx); cause != nil {
+			return errs, cause
+		}
+		if err := s.envDestroyer.DestroyWorktree(ctx, worktreeID); err != nil &&
+			!errors.Is(err, worktree.ErrWorktreeNotFound) {
+			errs = append(errs, fmt.Errorf("destroy worktree %s: %w", worktreeID, err))
+		}
+	}
+	return errs, nil
 }
 
 // environmentWorktreeIDs returns the physical worktree identities recorded on

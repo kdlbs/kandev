@@ -271,8 +271,10 @@ Read-only Git actions used by the Changes panel include `session.commit_diff`, `
 Worktree cleanup audits the Git worktree and checkout before it runs the repository cleanup script. It then removes the Git worktree directory and may remove the local branch:
 
 - Normal task deletion audits each owned worktree before mutation. Tracked or untracked changes keep the checkout in place and make durable cleanup retry. A clean branch is removed only when its current commit is already contained by the recorded base or repository default; a clean branch with unique commits is preserved after its checkout is reclaimed. Remote branches are never deleted.
-- **Reset Environment** is allowed only when no task session is `STARTING` or `RUNNING`. It can optionally push first; a failed requested push aborts the reset. Teardown removes the worktree but deliberately preserves the local branch, then the next launch materializes a fresh environment.
-- Office handoff cleanup also preserves the branch when it releases a worktree.
+- **Reset Environment** is allowed only when no task session is `STARTING` or `RUNNING`. It can optionally push first; a failed requested push aborts the reset. Teardown removes the worktree, preserves unpublished or ambiguous local work, and removes a Kandev-owned local branch only when its exact head is already contained in the recorded integration ref. The next launch materializes a fresh environment.
+- Office handoff cleanup uses the same fail-closed local-branch policy when it releases a worktree.
+
+Archive cleanup uses that policy too. If a task is archived before integration, the branch remains. A later full storage-maintenance run can revisit a bounded set of those archived rows and remove the exact local ref after integration is proven. Ref deletion includes the expected head SHA, so an external branch update causes retention instead of deleting the changed ref. Kandev never removes a remote ref through this cleanup.
 
 Before deleting a task or performing a hard reset, commit and push anything you need. Kandev does not run a cleanup script when the audit finds uncommitted or untracked work. Cleanup scripts should perform transient teardown only; files they create are removed with the audited checkout. If an audited cleanup script fails, Kandev logs the failure and continues with the same recorded worktree. An audited directory is removed through its pinned no-follow handle, and un-audited fallback cleanup can remove a managed directory without following replacement links. Git metadata is then pruned. Registration pruning and local-branch deletion are verified before the durable cleanup job succeeds; a partial failure remains retryable.
 
@@ -288,6 +290,6 @@ Before deleting a task or performing a hard reset, commit and push anything you 
 - **Change-request creation failed after push:** the branch may already be remote. Fix `gh`, `glab`, GitLab workspace-token, or `az` authentication as applicable, then retry without assuming the push was rolled back. GitLab retries reuse an existing open MR with the same source and target.
 - **Operation timed out:** inspect status before retrying. A client timeout or lost WebSocket response does not prove the underlying command did nothing.
 - **Multi-repository operation failed at workspace root:** choose the repository in the toolbar or include its exact `repo` subpath in the request.
-- **Missing work after cleanup:** inspect the preserved local branch for Reset Environment/handoff, or the remote branch if it was pushed. Task deletion may already have force-deleted the local branch.
+- **Missing work after cleanup:** inspect a retained local branch or the remote branch if it was pushed. On unarchive, Kandev recreates a safely compacted managed branch from its recorded exact head before trying remote recovery. Task deletion may already have force-deleted the local branch.
 
 Related guides: [Configuration](configuration.md), [Executors](executors.md), [Operations](operations.md), and [WebSocket API](websocket-api.md).
