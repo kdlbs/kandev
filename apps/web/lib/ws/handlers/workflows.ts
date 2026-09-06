@@ -1,11 +1,14 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { WorkflowPayload } from "@/lib/types/backend";
 import {
   normalizeWorkflowProfileSessionStartPolicy,
   normalizeWorkflowProfileSessionEndPolicy,
 } from "@/lib/types/http";
+
+type KanbanStep = KanbanState["steps"][number];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function stepFromPayload(step: any) {
@@ -29,6 +32,36 @@ function stepFromPayload(step: any) {
     wip_limit: step.wip_limit,
     pull_from_step_id: step.pull_from_step_id ?? null,
     stage_type: step.stage_type,
+  };
+}
+
+function applyWorkflowStepChange(
+  state: AppState,
+  workflowId: string,
+  update: (steps: KanbanStep[]) => KanbanStep[],
+): AppState {
+  const nextKanbanSteps =
+    state.kanban.workflowId === workflowId ? update(state.kanban.steps) : state.kanban.steps;
+  const snapshot = state.kanbanMulti.snapshots[workflowId];
+  const nextSnapshotSteps = snapshot ? update(snapshot.steps) : undefined;
+  const kanbanChanged = nextKanbanSteps !== state.kanban.steps;
+  const snapshotChanged = snapshot !== undefined && nextSnapshotSteps !== snapshot.steps;
+
+  if (!kanbanChanged && !snapshotChanged) return state;
+
+  return {
+    ...state,
+    kanban: kanbanChanged ? { ...state.kanban, steps: nextKanbanSteps } : state.kanban,
+    kanbanMulti:
+      snapshotChanged && snapshot && nextSnapshotSteps
+        ? {
+            ...state.kanbanMulti,
+            snapshots: {
+              ...state.kanbanMulti.snapshots,
+              [workflowId]: { ...snapshot, steps: nextSnapshotSteps },
+            },
+          }
+        : state.kanbanMulti,
   };
 }
 
@@ -117,31 +150,34 @@ export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers
     },
     "workflow.step.created": (message) => {
       const step = message.payload.step;
+      const mappedStep = stepFromPayload(step);
       store.setState((state) => {
-        if (state.kanban.workflowId !== step.workflow_id) return state;
-        if (state.kanban.steps.some((s) => s.id === step.id)) return state;
-        const steps = [...state.kanban.steps, stepFromPayload(step)].sort(
-          (a, b) => a.position - b.position,
-        );
-        return { ...state, kanban: { ...state.kanban, steps } };
+        return applyWorkflowStepChange(state, step.workflow_id, (steps) => {
+          if (steps.some((s) => s.id === step.id)) return steps;
+          return [...steps, mappedStep].sort((a, b) => a.position - b.position);
+        });
       });
     },
     "workflow.step.updated": (message) => {
       const step = message.payload.step;
+      const mappedStep = stepFromPayload(step);
       store.setState((state) => {
-        if (state.kanban.workflowId !== step.workflow_id) return state;
-        const steps = state.kanban.steps
-          .map((s) => (s.id === step.id ? stepFromPayload(step) : s))
-          .sort((a, b) => a.position - b.position);
-        return { ...state, kanban: { ...state.kanban, steps } };
+        return applyWorkflowStepChange(state, step.workflow_id, (steps) => {
+          const index = steps.findIndex((s) => s.id === step.id);
+          if (index < 0) return steps;
+          const nextSteps = [...steps];
+          nextSteps[index] = mappedStep;
+          return nextSteps.sort((a, b) => a.position - b.position);
+        });
       });
     },
     "workflow.step.deleted": (message) => {
       const step = message.payload.step;
       store.setState((state) => {
-        if (state.kanban.workflowId !== step.workflow_id) return state;
-        const steps = state.kanban.steps.filter((s) => s.id !== step.id);
-        return { ...state, kanban: { ...state.kanban, steps } };
+        return applyWorkflowStepChange(state, step.workflow_id, (steps) => {
+          if (!steps.some((s) => s.id === step.id)) return steps;
+          return steps.filter((s) => s.id !== step.id);
+        });
       });
     },
   };
