@@ -8,11 +8,12 @@ import (
 const defaultStreamCoalesceWindow = 100 * time.Millisecond
 
 type coalescedStreamChunk struct {
-	eventType  string
-	messageID  string
-	content    string
-	isAppend   bool
-	diagnostic bool
+	eventType        string
+	messageID        string
+	content          string
+	isAppend         bool
+	diagnostic       bool
+	promptGeneration uint64
 }
 
 // streamCoalescer combines adjacent append chunks for one execution. The

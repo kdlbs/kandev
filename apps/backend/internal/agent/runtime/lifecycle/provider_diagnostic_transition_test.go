@@ -29,7 +29,7 @@ func TestHandleMessageChunkEvent_LegacyBufferSplitsOnDiagnosticChange(t *testing
 		Text:                        "and now some ordinary assistant text",
 		ProviderDiagnosticCandidate: false,
 	})
-	mgr.flushMessageBuffer(execution)
+	mgr.flushMessageBuffer(execution, 0)
 	mgr.flushStreamCoalescer(execution)
 
 	streamEvents := eventBus.getStreamEvents()
