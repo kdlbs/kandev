@@ -234,8 +234,22 @@ them is destructive if it does.
   fragment committed as the entire plan, with a success response — precisely what
   `AC-TASKS-PLAN-APPEND-001.3` rejects on the sibling tool. The fix is a validation
   error at `createTaskPlanHandler` naming `update_task_plan_kandev`, before any payload
-  is sent. Do **not** add the parameter to the tool's schema: the error exists for a
-  mistyped call, not to advertise an option that does not exist there.
+  is sent.
+
+  **The schema must declare `mode` after all, narrowly.** The server's generic MCP
+  argument-schema validator (`internal/mcp/server/tool_argument_validation.go`) compiles
+  every tool's schema with `additionalProperties:false`, derived from the exact same
+  `Tool.InputSchema` object `ListTools()` exposes to clients, and runs it **before** any
+  handler body executes. If `create_task_plan_kandev`'s schema does not declare `mode`,
+  a call supplying `mode: "append"` never reaches `createTaskPlanHandler`'s own
+  rejection at all: the generic validator intercepts it first with a schema-keyword
+  error that names neither the tool nor `update_task_plan_kandev`, which fails
+  `AC-TASKS-PLAN-APPEND-005.2`'s literal requirement. There is no code-only way to let
+  an undeclared top-level key reach a handler under this validator. The resolution
+  (`AC-TASKS-PLAN-APPEND-006.9`) is to declare `mode` in the schema with a description
+  stating only that the value is rejected — advisory to a well-behaved client, not an
+  advertised capability — so `createTaskPlanHandler`'s own, correctly-worded rejection
+  is what the caller actually sees.
 - **The browser path ignores it.** `wsUpdateTaskPlan` unmarshals into a struct with no
   `Mode` field, and `json.Unmarshal` ignores unknown fields — the path's existing
   behavior for *every* unknown field, so leaving it is what keeps

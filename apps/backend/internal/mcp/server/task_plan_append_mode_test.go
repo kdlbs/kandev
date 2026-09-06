@@ -39,6 +39,51 @@ func TestUpdateTaskPlanKandev_ToolSchema_ModeHasDefaultAndDocumentsBothValues(t 
 	assert.Contains(t, description, string(service.PlanWriteModeAppend))
 }
 
+// TestUpdateTaskPlanKandev_ToolDescription_CoversAC006 pins
+// AC-TASKS-PLAN-APPEND-006.1 through 006.5 directly against
+// update_task_plan_kandev's own tool description (not its mode parameter,
+// covered separately above): both modes and the default are named, the
+// destructive replace-mode warning survives scoped to replace, and append's
+// blank-line separator, non-idempotence, and no-read-first properties are
+// each stated. Each sub-test asserts a substantive clause rather than the
+// whole string, so a wording change that keeps the fact does not fail it.
+func TestUpdateTaskPlanKandev_ToolDescription_CoversAC006(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	toolsMap := s.mcpServer.ListTools()
+	st, ok := toolsMap["update_task_plan_kandev"]
+	require.True(t, ok, "update_task_plan_kandev not registered")
+	desc := st.Tool.Description
+
+	t.Run("006.1 names both modes, the default, and what each submits", func(t *testing.T) {
+		assert.Contains(t, desc, `mode="replace"`)
+		assert.Contains(t, desc, `mode="append"`)
+		assert.Contains(t, desc, "default")
+		assert.Contains(t, desc, "whole document")
+		assert.Contains(t, desc, "only an addition")
+	})
+
+	t.Run("006.2 retains the destructive warning scoped to replace", func(t *testing.T) {
+		assert.Contains(t, desc, "replace mode")
+		assert.Contains(t, desc, "silently delete everything else")
+	})
+
+	t.Run("006.3 states the blank-line separator", func(t *testing.T) {
+		assert.Contains(t, desc, "append mode")
+		assert.Contains(t, desc, "blank line")
+	})
+
+	t.Run("006.4 states append is not idempotent", func(t *testing.T) {
+		assert.Contains(t, desc, "not idempotent")
+		assert.Contains(t, desc, "again")
+	})
+
+	t.Run("006.5 states append does not require reading the plan first", func(t *testing.T) {
+		assert.Contains(t, desc, "do not need to read the plan first")
+	})
+}
+
 // TestCreateTaskPlanKandev_ToolSchema_ModeParamIsDocumentedAsRejected pins
 // that create_task_plan_kandev's schema deliberately DOES declare a "mode"
 // property (unlike a literal reading of REQ-TASKS-PLAN-APPEND-005 might
@@ -60,15 +105,32 @@ func TestCreateTaskPlanKandev_ToolSchema_ModeParamIsDocumentedAsRejected(t *test
 	assert.Contains(t, description, "update_task_plan_kandev")
 }
 
+// planWriteDenialPhrases are the literal claims AC-TASKS-PLAN-APPEND-006.9
+// forbids: that no partial update or append mode exists anywhere. Both
+// phrasings have shipped in production text before this capability existed
+// (the truncation warning's "there is no partial update or append mode",
+// and create_task_plan_kandev's former "has no append mode"), so both are
+// checked rather than one. AC-TASKS-PLAN-APPEND-006.9 carves out exactly one
+// exception: create_task_plan_kandev may say it, scoped to itself, as long
+// as the same text also redirects to update_task_plan_kandev's append mode -
+// checked separately below, not by exempting the tool from this scan.
+var planWriteDenialPhrases = []string{"no partial update", "no append mode"}
+
+// planWriteResendPhrases are the read-then-resend prescriptions
+// AC-TASKS-PLAN-APPEND-006.9 forbids directing at a caller who wants to add
+// a section, unless the same text also names update_task_plan_kandev's
+// append mode as the alternative (replace-mode guidance keeps this phrasing
+// legitimately, since append is mentioned right alongside it).
+var planWriteResendPhrases = []string{"read the plan and resubmit", "read the whole plan and send it back"}
+
 // TestPlanToolDescriptions_MentionAppendModeConsistently is the AC-006.9
 // class-rule test: every plan tool's description and every string-typed
-// parameter description is scanned by iteration (not enumerated per string)
-// so a new plan tool or parameter is covered the day it is added. Any
-// surface naming "append" must also name update_task_plan_kandev, the only
-// tool that accepts it - except update_task_plan_kandev's own text, which
-// has no reason to name itself. This both pins create's "I don't have
-// append, go there instead" pointer and would catch a future description
-// that dangles the word "append" without saying where to use it.
+// parameter description, plus the two rendered truncation-warning branches,
+// is scanned by iteration (not enumerated per string) so a new plan tool or
+// parameter is covered the day it is added. update_task_plan_kandev's own
+// text is walked too - it is the tool whose description most recently
+// carried the banned claim, so a special case here is exactly what would
+// stop checking it again.
 func TestPlanToolDescriptions_MentionAppendModeConsistently(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "task-current")
@@ -78,29 +140,52 @@ func TestPlanToolDescriptions_MentionAppendModeConsistently(t *testing.T) {
 		"update_task_plan_kandev", "delete_task_plan_kandev",
 	}
 	toolsMap := s.mcpServer.ListTools()
+	toolTexts := map[string][]string{}
 	for _, name := range planTools {
+		st, ok := toolsMap[name]
+		require.True(t, ok, "tool %q not registered", name)
+
+		texts := []string{st.Tool.Description}
+		schema, err := json.Marshal(st.Tool.InputSchema)
+		require.NoError(t, err)
+		var parsed struct {
+			Properties map[string]struct {
+				Description string `json:"description"`
+			} `json:"properties"`
+		}
+		require.NoError(t, json.Unmarshal(schema, &parsed))
+		for _, prop := range parsed.Properties {
+			texts = append(texts, prop.Description)
+		}
+		toolTexts[name] = texts
+	}
+
+	for name, texts := range toolTexts {
 		t.Run(name, func(t *testing.T) {
-			st, ok := toolsMap[name]
-			require.True(t, ok, "tool %q not registered", name)
-
-			texts := []string{st.Tool.Description}
-			schema, err := json.Marshal(st.Tool.InputSchema)
-			require.NoError(t, err)
-			var parsed struct {
-				Properties map[string]struct {
-					Description string `json:"description"`
-				} `json:"properties"`
-			}
-			require.NoError(t, json.Unmarshal(schema, &parsed))
-			for _, prop := range parsed.Properties {
-				texts = append(texts, prop.Description)
-			}
-
-			if name == "update_task_plan_kandev" {
-				return // the append tool itself has no reason to name itself
-			}
 			for _, text := range texts {
-				if strings.Contains(text, "append") && !strings.Contains(text, "update_task_plan_kandev") {
+				mentionsAppend := strings.Contains(text, "append")
+				redirectsToUpdateAppend := mentionsAppend && strings.Contains(text, "update_task_plan_kandev")
+				for _, denial := range planWriteDenialPhrases {
+					if !strings.Contains(text, denial) {
+						continue
+					}
+					// The one sanctioned exception: create_task_plan_kandev
+					// scoping the denial to itself while redirecting to
+					// update_task_plan_kandev's append mode in the same text.
+					if name == "create_task_plan_kandev" && redirectsToUpdateAppend {
+						continue
+					}
+					t.Errorf("text states or implies no append mode exists (%q): %q", denial, text)
+				}
+				for _, resend := range planWriteResendPhrases {
+					if strings.Contains(text, resend) && !mentionsAppend {
+						t.Errorf("text prescribes read-then-resend without naming append: %q", text)
+					}
+				}
+				// Every other tool's mention of "append" must point the
+				// caller at the one tool that accepts it. update_task_plan_
+				// kandev's own text has no reason to name itself.
+				if name != "update_task_plan_kandev" && mentionsAppend && !strings.Contains(text, "update_task_plan_kandev") {
 					t.Errorf("text mentions append without naming update_task_plan_kandev: %q", text)
 				}
 			}

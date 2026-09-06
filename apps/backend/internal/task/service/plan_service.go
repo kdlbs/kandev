@@ -203,15 +203,15 @@ const (
 	planHeadUnknown
 )
 
-func (s *PlanService) readPlanHead(ctx context.Context, taskID string) (*models.TaskPlan, planHeadState) {
+func (s *PlanService) readPlanHead(ctx context.Context, taskID string) (*models.TaskPlan, planHeadState, error) {
 	plan, err := s.repo.GetTaskPlan(ctx, taskID)
 	if err != nil {
-		return nil, planHeadUnknown
+		return nil, planHeadUnknown, err
 	}
 	if plan == nil {
-		return nil, planHeadAbsent
+		return nil, planHeadAbsent, nil
 	}
-	return plan, planHeadFound
+	return plan, planHeadFound, nil
 }
 
 // planRevisionState is the revision-history analog of planHeadState.
@@ -323,7 +323,7 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	// caller's write still fails - just at the transaction, not at an earlier read.
 	readCtx := context.WithoutCancel(ctx)
 
-	headPlan, headState := s.readPlanHead(readCtx, req.TaskID)
+	headPlan, headState, headErr := s.readPlanHead(readCtx, req.TaskID)
 	if requireExistingHead && headState == planHeadAbsent {
 		return planWriteOutcome{}, ErrTaskPlanNotFound
 	}
@@ -334,6 +334,8 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 	// CreatePlan, so this never runs there even if a caller set Mode anyway.
 	if requireExistingHead && req.Mode == PlanWriteModeAppend {
 		if headState == planHeadUnknown {
+			s.logger.Error("read plan head for append",
+				zap.String("task_id", req.TaskID), zap.Error(headErr))
 			return planWriteOutcome{}, ErrPlanContentReadFailed
 		}
 		req.Content = composePlanAppend(headPlan.Content, req.Content)
@@ -813,7 +815,7 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 		authorName = defaultUserAuthorFallback
 	}
 
-	headPlan, headState := s.readPlanHead(readCtx, req.TaskID)
+	headPlan, headState, _ := s.readPlanHead(readCtx, req.TaskID)
 	plan := &models.TaskPlan{
 		TaskID:    req.TaskID,
 		Title:     target.Title,

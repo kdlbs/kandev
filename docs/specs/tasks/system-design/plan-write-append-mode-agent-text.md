@@ -67,9 +67,12 @@ Both `create_task_plan_kandev` strings deny the mode exists and prescribe the
 read-then-resend pattern this capability removes, on the same tool
 `AC-TASKS-PLAN-APPEND-005.2` makes *reject* a mode by naming
 `update_task_plan_kandev`'s append. `AC-TASKS-PLAN-APPEND-006.9` fixes the replacement.
-The boundary Build must hold: do not declare a `mode` parameter there, because
-[the two sibling surfaces](plan-write-append-mode.md#the-two-sibling-surfaces-which-behave-differently-on-purpose)
-keeps it off this tool's schema deliberately.
+The boundary Build must hold: the `mode` property, if declared, states only that its
+value is rejected, per
+[the two sibling surfaces](plan-write-append-mode.md#the-two-sibling-surfaces-which-behave-differently-on-purpose),
+which explains why this tool's schema declares it at all — the platform's generic
+argument-schema validator would otherwise shadow `createTaskPlanHandler`'s own,
+correctly-worded rejection with a generic error naming neither tool.
 
 ### The truncation warning is the most urgent of them
 
@@ -117,8 +120,12 @@ contributor to context growth in plan-heavy sessions.
 every registered plan-tool description and parameter description plus both rendered
 warning branches, and assert none carries the no-append claim or the read-then-resend
 prescription (`AC-TASKS-PLAN-APPEND-006.9`). A per-string test would have passed against
-a spec that missed one, which is what happened twice. Also assert the warning names
-`append` while still stating where the prior content lives and that the caller must not
-rewrite from memory (`006.7`, `006.8`), and that `create_task_plan_kandev`'s texts point
-at `update_task_plan_kandev` while declaring no `mode` parameter. Assert on substantive
-clauses, not whole strings, so they do not become punctuation change-detectors.
+a spec that missed one, which is what happened twice. This must not exempt
+`update_task_plan_kandev`'s own strings from the walk — the tool whose description most
+recently carried the banned claim is exactly the one a special-cased test would stop
+checking. Also assert the warning names `append` while still stating where the prior
+content lives and that the caller must not rewrite from memory (`006.7`, `006.8`), and
+that `create_task_plan_kandev`'s texts point at `update_task_plan_kandev`, and that its
+`mode` property (whether or not the schema declares one) states only that the value is
+rejected, never a functioning capability. Assert on substantive clauses, not whole
+strings, so they do not become punctuation change-detectors.

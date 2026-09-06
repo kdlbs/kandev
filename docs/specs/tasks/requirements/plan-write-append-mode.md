@@ -249,12 +249,11 @@ that append exists
 Several texts today assert there is no append mode, spread across both plan tools'
 descriptions and `content` parameters and the truncation warning shown after a write
 destroyed content. Left alone they argue against the mode; the warning does so at the
-worst moment, when a
-caller has just lost content and is steered from the remedy, and the create tool while
-prescribing the read-then-resend pattern this capability removes. Softened too far, they
-drop the warning that
-keeps the replace path safe. Enumerating these texts has twice missed one, so
-AC-TASKS-PLAN-APPEND-006.9 binds the class instead of a list.
+worst moment, steering a caller who just lost content away from the remedy, and the
+create tool while prescribing the read-then-resend pattern this capability removes.
+Softened too far, they drop the warning that keeps the replace path safe. Enumerating
+these texts has twice missed one, so AC-TASKS-PLAN-APPEND-006.9 binds the class instead
+of a list.
 
 #### Acceptance criteria
 
@@ -285,8 +284,8 @@ AC-TASKS-PLAN-APPEND-006.9 binds the class instead of a list.
   parameter description on the agent write path, not only those above. On
   `create_task_plan_kandev` each shall still state that **this** tool replaces the whole
   plan and name `update_task_plan_kandev` in `append` mode as the way to add a section,
-  and none shall declare a `mode` parameter there, whose only mode behavior is the
-  rejection in AC-TASKS-PLAN-APPEND-005.2.
+  and its schema MAY declare a `mode` parameter that only rejects, keeping
+  AC-TASKS-PLAN-APPEND-005.2's message reaching the caller.
 
 ### REQ-TASKS-PLAN-APPEND-007: An append is measured against the document it will store
 

@@ -5,6 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 )
 
 func TestParsePlanWriteMode(t *testing.T) {
@@ -319,6 +325,51 @@ func TestUpdatePlanAppend_ReadFailureIsDistinctFromNotFound(t *testing.T) {
 	}
 	if len(revs) != 1 {
 		t.Fatalf("expected no new revision, got %d", len(revs))
+	}
+}
+
+// TestUpdatePlanAppend_ReadFailureLogsError pins COR-001: a HEAD read
+// failure on the append path (planHeadUnknown) is visible in the logs, not
+// silently swallowed. readPlanHead's caller previously discarded the
+// underlying repository error entirely; mirroring logPlanWriteError's
+// pattern, it must reach an Error-level log line naming the task.
+func TestUpdatePlanAppend_ReadFailureLogsError(t *testing.T) {
+	svc, eventBus, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-append-readfail-log")
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-append-readfail-log", Content: "base"}); err != nil {
+		t.Fatalf("seed CreatePlan: %v", err)
+	}
+
+	flaky := newFlakyPlanService(t, repo, eventBus, 1) // every GetTaskPlan call fails
+	core, logs := observer.New(zapcore.WarnLevel)
+	logWithObserver, err := commonlogger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create logger: %v", err)
+	}
+	flaky.logger = logWithObserver
+
+	_, err = flaky.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-append-readfail-log", Content: "fragment", Mode: PlanWriteModeAppend,
+	})
+	if !errors.Is(err, ErrPlanContentReadFailed) {
+		t.Fatalf("err = %v, want ErrPlanContentReadFailed", err)
+	}
+
+	entries := logs.All()
+	found := false
+	for _, entry := range entries {
+		if entry.Level < zapcore.ErrorLevel {
+			continue
+		}
+		ctxMap := entry.ContextMap()
+		if ctxMap["task_id"] == "task-append-readfail-log" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected an Error-level log naming task_id=task-append-readfail-log, got: %+v", entries)
 	}
 }
 
