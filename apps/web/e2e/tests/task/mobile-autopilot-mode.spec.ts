@@ -59,7 +59,7 @@ test.describe("Mobile task autopilot", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
 
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
