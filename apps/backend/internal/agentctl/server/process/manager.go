@@ -1031,7 +1031,8 @@ func (m *Manager) GitOperator() *GitOperator {
 
 	if m.gitOperator == nil {
 		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
-		m.gitOperator.setEnvironmentProvider(m.gitEnvironment)
+		m.gitOperator.setEnvironmentProvider(m.agentEnvSnapshot)
+		m.gitOperator.setManagedPushEnvironmentProvider(m.gitEnvironment)
 		if binding, ok := m.cfg.RemoteContributions[""]; ok {
 			m.gitOperator.setRemoteContribution(&binding)
 		}
@@ -1071,7 +1072,8 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 		tracker = m.GetWorkspaceTracker()
 	}
 	op := NewGitOperatorForRepo(full, cleaned, m.logger, tracker)
-	op.setEnvironmentProvider(m.gitEnvironment)
+	op.setEnvironmentProvider(m.agentEnvSnapshot)
+	op.setManagedPushEnvironmentProvider(m.gitEnvironment)
 	if binding, ok := m.cfg.RemoteContributions[cleaned]; ok {
 		op.setRemoteContribution(&binding)
 	}
@@ -1085,7 +1087,14 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 func (m *Manager) gitEnvironment() []string {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
-	return append([]string(nil), m.cfg.AgentEnv...)
+	env := append([]string(nil), m.cfg.AgentEnv...)
+	for _, assignment := range m.cfg.ManagedGitPushEnv {
+		key, value, ok := strings.Cut(assignment, "=")
+		if ok {
+			env = upsertEnvValue(env, key, value)
+		}
+	}
+	return env
 }
 
 func (m *Manager) trackerGitEnvironment() []string {

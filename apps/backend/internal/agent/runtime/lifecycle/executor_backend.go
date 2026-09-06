@@ -574,6 +574,7 @@ type ExecutorCreateRequest struct {
 	WorkspaceSourceRoots   []string
 	Protocol               string
 	Env                    map[string]string
+	ManagedGitPushEnv      map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
