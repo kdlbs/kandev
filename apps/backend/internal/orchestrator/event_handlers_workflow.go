@@ -69,6 +69,10 @@ type taskMetadataKeyRemover interface {
 	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
 }
 
+type manualMoveLifecycleMarkerCleaner interface {
+	ClearManualMoveLifecycleMarkersIfCompleted(context.Context, string, time.Time) (bool, error)
+}
+
 type taskMetadataKeySetter interface {
 	SetTaskMetadataKey(context.Context, string, string, interface{}) error
 }
@@ -1062,11 +1066,10 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	}()
 
 	// dispatchCtx is a locally cancellable child of ctx so the deadline branch
-	// below can stop the dispatcher and any not-yet-started work without
-	// waiting on ctx itself (owned by the caller, not this function) to be
-	// cancelled. It does not cut short an already in-flight resume — that
-	// runs under context.WithoutCancel (task_operations.go) — only the
-	// dispatch loop and any work that has not reached that point yet.
+	// below can stop the dispatcher without waiting on ctx itself (owned by the
+	// caller, not this function) to be cancelled. Accepted workers keep using
+	// ctx: the deadline is an admission/reporting bound, not a cancellation of
+	// work that already started.
 	dispatchCtx, dispatchCancel := context.WithCancel(ctx)
 	defer dispatchCancel()
 
@@ -1082,7 +1085,7 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 			defer wg.Done()
 			for taskID := range jobIDs {
 				inFlight.start(taskID)
-				s.recoverTaskLifecycleToken(dispatchCtx, taskID)
+				s.recoverTaskLifecycleToken(ctx, taskID)
 				inFlight.finish(taskID)
 				processed.Add(1)
 			}
@@ -1122,6 +1125,7 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 			zap.Int64("processed", processed.Load()),
 			zap.Duration("elapsed", time.Since(start)))
 	case <-ctx.Done():
+		dispatchCancel()
 		close(sweepDone)
 		<-warnDone
 		s.logger.Warn("startup lifecycle sweep cancelled; abandoning wait, in-flight tasks continue recovering in the background",
@@ -1130,6 +1134,7 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 			zap.Strings("in_flight_task_ids", inFlight.snapshot()),
 			zap.Duration("elapsed", time.Since(start)))
 	case <-time.After(lifecycleSweepOverallDeadline):
+		dispatchCancel()
 		close(sweepDone)
 		<-warnDone
 		s.logger.Warn("startup lifecycle sweep exceeded its deadline; abandoning wait, in-flight tasks continue recovering in the background",
@@ -1200,25 +1205,18 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 		}
 	}
 	if manualMoveLifecycleCompleted(task) {
-		s.continueManualMoveLifecycle(ctx, taskID)
-		// persistManualMoveLifecycleCompletion sets completed and clears
-		// pending in two separate writes, so a crash or a failed remove
-		// between them can leave both keys set. manualMoveLifecyclePending
-		// is defined as pending && !completed, so it is always false here
-		// and cannot detect that case — check the raw key on a fresh read
-		// instead. The move already ran (that is what "completed" means),
-		// so a coexisting pending token here is stale, not a signal to
-		// replay the move: clear it directly rather than through
-		// recoverManualMoveLifecycle, which would resurrect it and replay
-		// this move's side effects a second time. Leaving either key
-		// uncleared would make the sweep re-list and re-run this
-		// continuation on every future startup.
-		postCompletion, err := s.repo.GetTask(ctx, taskID)
-		if err == nil && postCompletion != nil {
-			if _, stillPending := postCompletion.Metadata[models.MetaKeyManualMoveLifecyclePending]; stillPending {
-				s.clearManualMoveLifecyclePending(ctx, taskID)
-			}
-			s.clearManualMoveLifecycleCompleted(ctx, taskID)
+		completedAt := task.UpdatedAt
+		if err := s.continueManualMoveLifecycle(ctx, taskID); err != nil {
+			return true
+		}
+		// Clear both markers in one compare-and-clear operation. A new manual
+		// move removes the old completed marker and writes its own pending
+		// marker in one task update, so an unconditional pending-key remove here
+		// could erase live recovery work. The update-generation predicate also
+		// prevents an already-completed newer move from being cleared before its
+		// feeder continuation runs.
+		if _, err := s.clearManualMoveLifecycleMarkersIfCompleted(ctx, taskID, completedAt); err != nil {
+			return true
 		}
 	}
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
@@ -1232,7 +1230,8 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 		return false
 	}
 	return queuedMoveExitPending(latest) || manualMoveLifecyclePending(latest) ||
-		hasQueuePromotionPending(latest) || autoStartOnCreateActionable(latest)
+		manualMoveLifecycleCompleted(latest) || hasQueuePromotionPending(latest) ||
+		autoStartOnCreateActionable(latest)
 }
 
 func (s *Service) recoverQueuedMoveExit(ctx context.Context, task *models.Task) bool {
@@ -2102,23 +2101,6 @@ func (s *Service) clearManualMoveLifecyclePending(ctx context.Context, taskID st
 	}
 }
 
-// clearManualMoveLifecycleCompleted removes the completion marker once its
-// continuation (continueManualMoveLifecycle) has run and no pending token
-// remains. Both readers of MetaKeyManualMoveLifecycleCompleted treat its
-// presence only as a negative signal for "pending", so leaving it set past
-// that point serves no purpose and only causes the startup sweep to re-list
-// and re-replay this task's continuation forever.
-func (s *Service) clearManualMoveLifecycleCompleted(ctx context.Context, taskID string) {
-	remover, ok := s.repo.(taskMetadataKeyRemover)
-	if !ok {
-		return
-	}
-	if _, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyManualMoveLifecycleCompleted); err != nil {
-		s.logger.Warn("failed to clear manual move lifecycle completion token",
-			zap.String("task_id", taskID), zap.Error(err))
-	}
-}
-
 func (s *Service) persistManualMoveLifecycleCompletion(ctx context.Context, taskID string) bool {
 	setter, ok := s.repo.(taskMetadataKeySetter)
 	if !ok {
@@ -2135,20 +2117,47 @@ func (s *Service) persistManualMoveLifecycleCompletion(ctx context.Context, task
 	return true
 }
 
-func (s *Service) continueManualMoveLifecycle(ctx context.Context, taskID string) {
+func (s *Service) continueManualMoveLifecycle(ctx context.Context, taskID string) error {
 	latest, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || latest == nil {
-		return
+		if err != nil {
+			return err
+		}
+		return errors.New("manual move lifecycle task not found")
 	}
 	if !manualMoveLifecycleCompleted(latest) {
-		return
+		return nil
 	}
 	if s.feederPulls == nil {
 		s.logger.Warn("manual move lifecycle has no feeder reconciler",
 			zap.String("task_id", taskID))
-		return
+		return errors.New("manual move lifecycle feeder reconciler is unavailable")
 	}
-	s.feederPulls.ReconcileFeederPulls(ctx, latest.WorkflowID, latest.WorkflowStepID)
+	if err := s.feederPulls.ReconcileFeederPulls(ctx, latest.WorkflowID, latest.WorkflowStepID); err != nil {
+		s.logger.Warn("manual move lifecycle feeder reconciliation failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (s *Service) clearManualMoveLifecycleMarkersIfCompleted(ctx context.Context, taskID string, completedAt time.Time) (bool, error) {
+	cleaner, ok := s.repo.(manualMoveLifecycleMarkerCleaner)
+	if !ok {
+		return false, errors.New("repository cannot atomically clear manual move lifecycle markers")
+	}
+	cleared, err := cleaner.ClearManualMoveLifecycleMarkersIfCompleted(ctx, taskID, completedAt)
+	if err != nil {
+		s.logger.Warn("failed to clear manual move lifecycle markers",
+			zap.String("task_id", taskID), zap.Error(err))
+		return false, err
+	}
+	if cleared {
+		if task, loadErr := s.repo.GetTask(ctx, taskID); loadErr == nil && task != nil {
+			s.publishTaskUpdated(ctx, task)
+		}
+	}
+	return cleared, nil
 }
 
 // processManualMoveLifecycleWithFeederBarrier runs the original move lifecycle

@@ -74,10 +74,16 @@ func TestStartDoesNotBlockOnLifecycleSweep(t *testing.T) {
 // sweep replayed a continuation.
 type countingFeederPullReconciler struct {
 	calls atomic.Int32
+	done  chan struct{}
+	once  sync.Once
 }
 
-func (r *countingFeederPullReconciler) ReconcileFeederPulls(context.Context, string, string) {
+func (r *countingFeederPullReconciler) ReconcileFeederPulls(context.Context, string, string) error {
 	r.calls.Add(1)
+	if r.done != nil {
+		r.once.Do(func() { close(r.done) })
+	}
+	return nil
 }
 
 // TestRecoverTaskLifecycleTokenClearsInertCompletedToken is the regression
@@ -100,6 +106,8 @@ func TestRecoverTaskLifecycleTokenClearsInertCompletedToken(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	recorder := &countingFeederPullReconciler{}
 	svc.SetFeederPullReconciler(recorder)
+	publisher := &recordingTaskUpdatedPublisher{}
+	svc.SetTaskEventPublisher(publisher)
 
 	svc.recoverTaskLifecycleToken(ctx, "completed-only-task")
 
@@ -112,6 +120,9 @@ func TestRecoverTaskLifecycleTokenClearsInertCompletedToken(t *testing.T) {
 	}
 	if _, completed := stored.Metadata[models.MetaKeyManualMoveLifecycleCompleted]; completed {
 		t.Fatal("inert manual move lifecycle completion token was not cleared")
+	}
+	if len(publisher.updatedTaskIDs) != 1 || publisher.updatedTaskIDs[0] != "completed-only-task" {
+		t.Fatalf("task.updated publishes = %v, want one update for completed-only-task", publisher.updatedTaskIDs)
 	}
 }
 
@@ -302,8 +313,9 @@ func TestLifecycleSweepConcurrentWithLiveTaskMovedRunsManualMoveSideEffectsOnce(
 	}
 	svc := createTestService(repo, steps, newMockTaskRepo())
 	var starts atomic.Int32
+	feederDone := make(chan struct{})
 	svc.onManualMoveLifecycleStart = func() { starts.Add(1) }
-	svc.SetFeederPullReconciler(&countingFeederPullReconciler{})
+	svc.SetFeederPullReconciler(&countingFeederPullReconciler{done: feederDone})
 
 	var wg sync.WaitGroup
 	ready := make(chan struct{})
@@ -324,26 +336,17 @@ func TestLifecycleSweepConcurrentWithLiveTaskMovedRunsManualMoveSideEffectsOnce(
 	close(ready)
 	wg.Wait()
 
-	// handleTaskMoved's manual-move barrier dispatches to a detached goroutine
-	// (fromStepAndTargetForTaskMoved), and the sweep's own inert-token GC
-	// (recoverTaskLifecycleAttempt) may race to clear the completed marker
-	// before this check runs, so the only durable convergence signal is the
-	// pending token's absence — poll for that instead of assuming either
-	// goroutine finished when it returns, and instead of requiring the
-	// completed marker to still be present.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		stored, err := repo.GetTask(ctx, "concurrent-manual-move-task")
-		if err != nil {
-			t.Fatalf("reload task: %v", err)
-		}
-		if _, pending := stored.Metadata[models.MetaKeyManualMoveLifecyclePending]; !pending {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("manual move lifecycle pending token never cleared")
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-feederDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual move feeder continuation never completed")
+	}
+	stored, err := repo.GetTask(ctx, "concurrent-manual-move-task")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if _, pending := stored.Metadata[models.MetaKeyManualMoveLifecyclePending]; pending {
+		t.Fatal("manual move lifecycle pending token never cleared")
 	}
 
 	if got := starts.Load(); got != 1 {

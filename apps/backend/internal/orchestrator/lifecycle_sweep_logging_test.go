@@ -46,6 +46,7 @@ type dispatchTrackingLifecycleRepo struct {
 	release <-chan struct{}
 	mu      sync.Mutex
 	seen    map[string]int
+	done    chan struct{}
 }
 
 func (r *dispatchTrackingLifecycleRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
@@ -56,7 +57,14 @@ func (r *dispatchTrackingLifecycleRepo) GetTask(ctx context.Context, id string) 
 	r.seen[id]++
 	r.mu.Unlock()
 	<-r.release
-	return r.sessionExecutorStore.GetTask(ctx, id)
+	task, err := r.sessionExecutorStore.GetTask(ctx, id)
+	if r.done != nil {
+		select {
+		case r.done <- struct{}{}:
+		default:
+		}
+	}
+	return task, err
 }
 
 func (r *dispatchTrackingLifecycleRepo) ListTasksWithMetadataKey(ctx context.Context, key string) ([]*models.Task, error) {
@@ -386,7 +394,8 @@ func TestReconcileTaskLifecycleTokensDeadlineStopsUndispatchedWork(t *testing.T)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
 	release := make(chan struct{})
-	tracking := &dispatchTrackingLifecycleRepo{sessionExecutorStore: repo, release: release}
+	workerDone := make(chan struct{}, 4)
+	tracking := &dispatchTrackingLifecycleRepo{sessionExecutorStore: repo, release: release, done: workerDone}
 	svc.repo = tracking
 
 	done := make(chan struct{})
@@ -419,14 +428,20 @@ func TestReconcileTaskLifecycleTokensDeadlineStopsUndispatchedWork(t *testing.T)
 		t.Fatalf("want exactly 4 of 5 jobs dispatched before the deadline and 1 left over, got %d dispatched, undispatched=%q", dispatchedBeforeDeadline, undispatched)
 	}
 
-	// Releasing the four parked workers now and giving them a moment to loop
-	// back to a closed jobIDs channel proves the leftover job was never
-	// handed out, rather than merely not yet handed out. There is no
-	// production completion signal for this detached worker pool to
-	// synchronize on instead (see stopLifecycleSweepAsync's own comment on
-	// this being an intentionally un-joined background sweep).
+	// Releasing the four parked workers and waiting for each admitted call to
+	// return proves the leftover job was never handed out, rather than merely
+	// not yet handed out. There is no production completion signal for this
+	// detached worker pool to synchronize on instead (see
+	// stopLifecycleSweepAsync's own comment on this being an intentionally
+	// un-joined background sweep).
 	close(release)
-	time.Sleep(100 * time.Millisecond)
+	for i := 0; i < 4; i++ {
+		select {
+		case <-workerDone:
+		case <-time.After(time.Second):
+			t.Fatal("parked lifecycle worker did not finish after release")
+		}
+	}
 
 	if got := tracking.callCount(undispatched); got != 0 {
 		t.Fatalf("job %q was dispatched to a worker after the sweep's overall deadline had already fired: called %d times", undispatched, got)

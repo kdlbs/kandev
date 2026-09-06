@@ -189,7 +189,7 @@ type TaskEventPublisher interface {
 // lifecycle has completed. The task service remains the owner of candidate
 // selection and promotion rules.
 type FeederPullReconciler interface {
-	ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string)
+	ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) error
 }
 
 type taskQueuePromotionPublisher interface {
@@ -2538,6 +2538,12 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return ErrServiceAlreadyRunning
 	}
+	// Publish the next-run state before advertising the service as running. A
+	// concurrent Stop can then never clear lifecycleSweepStopped and have a
+	// racing Start reset it after Stop has already returned. Keep this after
+	// the already-running check so a rejected duplicate Start cannot reopen a
+	// sweep while the service is active.
+	s.resetLifecycleSweepWorkers()
 	s.running = true
 	s.startedAt = time.Now()
 	s.mu.Unlock()
@@ -2547,7 +2553,6 @@ func (s *Service) Start(ctx context.Context) error {
 	s.resetSendNowWorkers()
 	s.resetCIAutomationWorkers()
 	s.resetDynamicSuccessorWorkers()
-	s.resetLifecycleSweepWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
