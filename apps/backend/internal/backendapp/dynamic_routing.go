@@ -270,7 +270,8 @@ func routeActionError(
 	session *models.TaskSession,
 	err error,
 ) error {
-	if !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
+	if !errors.Is(err, dynamicruntime.ErrStaleGeneration) &&
+		!errors.Is(err, dynamicruntime.ErrRecoveryPending) {
 		return err
 	}
 	return routeActionConflict(ctx, repo, session, err)
