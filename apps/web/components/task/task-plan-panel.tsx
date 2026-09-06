@@ -7,6 +7,8 @@ import dynamic from "@/lib/routing/client-dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
+import { usePlanDraft } from "@/hooks/domains/session/use-plan-draft";
+import { TaskPlanSaveErrorBanner } from "./task-plan-save-error-banner";
 import { useAppStore } from "@/components/state-provider";
 import { PlanSelectionPopover } from "./plan-selection-popover";
 import { usePlanComments } from "@/hooks/domains/comments/use-plan-comments";
@@ -37,9 +39,6 @@ const PlanEditor = dynamic(
   },
 );
 
-/** Debounce delay for auto-saving plan content (ms) */
-const AUTO_SAVE_DELAY = 1500;
-
 type TaskPlanPanelProps = {
   taskId: string | null;
   visible?: boolean;
@@ -52,6 +51,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     plan,
     isLoading,
     isSaving,
+    saveError,
     savePlan,
     revisions,
     isLoadingRevisions,
@@ -81,7 +81,8 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isEditorFocused,
     handleEmptyStateClick,
     hasUnsavedChanges,
-  } = usePlanDraft(plan, isSaving, savePlan, editorWrapperRef);
+    attemptSave,
+  } = usePlanDraft({ plan, isSaving, savePlan, editorWrapperRef, taskId, saveError });
   const commentState = usePlanComments(activeSessionId);
   const selectionState = usePlanSelection(activeSessionId, commentState);
 
@@ -116,6 +117,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     plan,
     isLoading,
     isSaving,
+    saveError,
     savePlan,
     activeSessionId,
     draftContent,
@@ -124,6 +126,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isEditorFocused,
     handleEmptyStateClick,
     hasUnsavedChanges,
+    attemptSave,
     commentState,
     selectionState,
     handleEditorReady,
@@ -155,13 +158,13 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   const { t } = useTranslation();
   const state = useTaskPlanPanelState(taskId, visible);
   // Ctrl+S to save immediately
-  useSaveShortcut(
-    state.hasUnsavedChanges,
-    state.isSaving,
-    state.savePlan,
-    state.draftContent,
-    state.plan?.title,
-  );
+  useSaveShortcut({
+    hasUnsavedChanges: state.hasUnsavedChanges,
+    isSaving: state.isSaving,
+    attemptSave: state.attemptSave,
+    draftContent: state.draftContent,
+    title: state.plan?.title,
+  });
 
   if (state.isLoading) {
     return (
@@ -209,7 +212,7 @@ function PlanPanelContent({
         isLoadingRevisions={state.isLoadingRevisions}
         isSaving={state.isSaving}
         isAgentBusy={state.isAgentBusy}
-        savePlan={state.savePlan}
+        attemptSave={state.attemptSave}
         onOpenRevisions={state.loadRevisions}
         onRevert={state.revertTo}
         loadRevisionContent={state.loadRevisionContent}
@@ -219,6 +222,7 @@ function PlanPanelContent({
         toggleCompareSelection={state.toggleCompareSelection}
         clearComparePair={state.clearComparePair}
       />
+      {state.saveError && <TaskPlanSaveErrorBanner saveError={state.saveError} />}
       <PanelBody
         padding={false}
         scroll={false}
@@ -373,111 +377,37 @@ function PlanSelectionPopoverWrapper({
   );
 }
 
-/** Draft content, editor key, focus tracking, and auto-save */
-function usePlanDraft(
-  plan: { content?: string; title?: string } | null | undefined,
-  isSaving: boolean,
-  savePlan: (content: string, title?: string) => Promise<unknown>,
-  editorWrapperRef: React.RefObject<HTMLDivElement | null>,
-) {
-  const [draftContent, setDraftContent] = useState(plan?.content ?? "");
-  const draftContentRef = useRef(draftContent);
-  const [editorKey, setEditorKey] = useState(0);
-  const lastPlanContentRef = useRef<string | undefined>(undefined);
-  const isExternalUpdateRef = useRef(false);
-  const [isEditorFocused, setIsEditorFocused] = useState(false);
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleEmptyStateClick = useCallback(() => {
-    const el = editorWrapperRef.current?.querySelector(".ProseMirror");
-    if (el) (el as HTMLElement).focus();
-  }, [editorWrapperRef]);
-
-  // Track focus state
-  useEffect(() => {
-    const checkFocus = () => {
-      const wrapper = editorWrapperRef.current;
-      if (!wrapper) return;
-      setIsEditorFocused(wrapper.contains(document.activeElement));
-    };
-    document.addEventListener("focusin", checkFocus);
-    document.addEventListener("focusout", checkFocus);
-    checkFocus();
-    return () => {
-      document.removeEventListener("focusin", checkFocus);
-      document.removeEventListener("focusout", checkFocus);
-    };
-  }, [editorWrapperRef]);
-
-  useEffect(() => {
-    draftContentRef.current = draftContent;
-  }, [draftContent]);
-
-  // Sync from external plan updates
-  useEffect(() => {
-    const prevContent = lastPlanContentRef.current;
-    const newContent = plan?.content;
-    lastPlanContentRef.current = newContent;
-    if (newContent !== prevContent) {
-      const resolved = newContent ?? "";
-      if (resolved === draftContentRef.current) return;
-      isExternalUpdateRef.current = true;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing external plan data to local editor state
-      setDraftContent(resolved);
-      setEditorKey((k) => k + 1);
-    }
-  }, [plan?.content]);
-
-  // Auto-save with debounce
-  useEffect(() => {
-    if (isExternalUpdateRef.current) {
-      isExternalUpdateRef.current = false;
-      return;
-    }
-    const hasChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
-    if (!hasChanges || isSaving) return;
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(() => {
-      autoSaveTimerRef.current = null;
-      savePlan(draftContent, plan?.title);
-    }, AUTO_SAVE_DELAY);
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-        autoSaveTimerRef.current = null;
-      }
-    };
-  }, [draftContent, plan, isSaving, savePlan]);
-
-  const hasUnsavedChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
-  return {
-    draftContent,
-    setDraftContent,
-    editorKey,
-    isEditorFocused,
-    handleEmptyStateClick,
-    hasUnsavedChanges,
-  };
-}
+type SaveShortcutOptions = {
+  hasUnsavedChanges: boolean;
+  isSaving: boolean;
+  attemptSave: (content: string, title?: string) => Promise<unknown>;
+  draftContent: string;
+  title: string | undefined;
+};
 
 /** Ctrl+S save shortcut */
-function useSaveShortcut(
-  hasUnsavedChanges: boolean,
-  isSaving: boolean,
-  savePlan: (content: string, title?: string) => Promise<unknown>,
-  draftContent: string,
-  title?: string,
-) {
+function useSaveShortcut({
+  hasUnsavedChanges,
+  isSaving,
+  attemptSave,
+  draftContent,
+  title,
+}: SaveShortcutOptions) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        if (hasUnsavedChanges && !isSaving) savePlan(draftContent, title);
+        if (hasUnsavedChanges && !isSaving) {
+          // An explicit save is the user's escape hatch from a suppressed
+          // autosave: it proceeds unconditionally, even resubmitting
+          // unchanged content.
+          attemptSave(draftContent, title);
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [hasUnsavedChanges, isSaving, savePlan, draftContent, title]);
+  }, [hasUnsavedChanges, isSaving, attemptSave, draftContent, title]);
 }
 
 /** Rich empty state - shows when no content and editor not focused */

@@ -35,7 +35,7 @@ test.describe("Mobile storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     const trigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
     await trigger.tap();
     const cleanButton = testPage.getByTestId("storage-temporary-artifacts-clean");
@@ -86,7 +86,7 @@ test.describe("Mobile storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     await testPage.getByTestId("storage-run-now").tap();
     await expect(testPage.getByTestId("storage-busy")).toContainText("A test command is running");
     await expect(testPage.getByTestId("storage-run-anyway")).toBeVisible();
@@ -119,7 +119,7 @@ test.describe("Mobile storage maintenance", () => {
     await mobile.mobileMenuButton.click();
     await testPage.getByRole("link", { name: "Settings" }).click();
     const index = testPage.getByTestId("settings-index");
-    await index.locator('a[href="/settings/system/data-storage"]').click();
+    await index.locator('a[href="/settings/system/storage"]').click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
@@ -215,7 +215,7 @@ test.describe("Mobile storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/data-storage");
+      await testPage.goto("/settings/system/storage");
       await overviewObserved;
 
       const spinner = testPage.getByTestId("storage-overview-spinner");
@@ -280,7 +280,7 @@ test.describe("Mobile storage maintenance", () => {
         body: JSON.stringify({ job_id: "mobile-force-purge" }),
       });
     });
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     await expect(testPage.getByTestId("storage-quarantine-force-clear")).toBeVisible();
     await testPage.getByTestId("storage-quarantine-card").scrollIntoViewIfNeeded();
     await prCapture.screenshot("quarantine-actions", {

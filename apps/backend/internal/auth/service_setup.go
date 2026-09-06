@@ -42,6 +42,14 @@ func (s *Service) Setup(ctx context.Context, email, password, displayName, userA
 	if err != nil {
 		return nil, "", err
 	}
+	// Tenant placement must complete before the identity commit point below.
+	// If it fails, setup remains retryable instead of returning an org-less,
+	// non-operator session that cannot repair itself.
+	if s.adminCreated != nil {
+		if err := s.adminCreated(ctx, adminID); err != nil {
+			return nil, "", err
+		}
+	}
 	identity := &store.LoginIdentity{
 		UserID:       adminID,
 		Provider:     store.ProviderLocal,

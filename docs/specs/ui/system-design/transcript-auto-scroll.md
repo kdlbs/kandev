@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-TRANSCRIPT-AUTO-SCROLL-001
 created: 2026-08-27
-updated: 2026-09-02
+updated: 2026-09-04
 owners:
   - kandev
 ---
@@ -15,15 +15,16 @@ owners:
 
 This design keeps an enabled transcript pinned during streamed updates and
 restores that bottom-follow intent when a persistent desktop session panel
-becomes visible. It does not force browser layout during each React commit. It
-preserves disabled-state freezing, reader-owned positions, explicit navigation,
-prepend restoration, and catch-up after the user enables auto-scroll again.
+becomes visible or a task switch rebuilds Dockview for another environment. It
+does not force browser layout during each React commit. It preserves
+disabled-state freezing, reader-owned positions, explicit navigation, prepend
+restoration, and catch-up after the user enables auto-scroll again.
 
 ## Requirement mapping
 
-| Requirement                         | Design section                                                                                                                        |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `REQ-UI-TRANSCRIPT-AUTO-SCROLL-001` | [Bottom placement](#bottom-placement), [Persistent-panel visibility lifecycle](#persistent-panel-visibility-lifecycle), [Interaction boundaries](#interaction-boundaries), [Responsive behavior](#responsive-behavior) |
+| Requirement                         | Design section                                                                                                                                                                                                                                                                                        |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-UI-TRANSCRIPT-AUTO-SCROLL-001` | [Bottom placement](#bottom-placement), [Persistent-panel visibility lifecycle](#persistent-panel-visibility-lifecycle), [Environment-change rebuild lifecycle](#environment-change-rebuild-lifecycle), [Interaction boundaries](#interaction-boundaries), [Responsive behavior](#responsive-behavior) |
 
 ## Bottom placement
 
@@ -91,6 +92,59 @@ place.
 The visibility lifecycle uses component refs only. It does not add persisted
 scroll state or change the existing per-session disabled-position storage.
 
+## Environment-change rebuild lifecycle
+
+`buildEnvSwitchAction` distinguishes an environment-changing task switch from
+same-environment session activation before it mutates Dockview. A cross-
+environment switch arms a tokened initial-placement request for the incoming
+session. The request is independent of `pendingChatScrollTop`: the latter keeps
+owning same-transcript layout rebuilds, while the environment-switch request
+must never capture or replay the outgoing session's absolute offset.
+
+The incoming native transcript treats a matching request as a reactivation even
+when its panel remains logically visible through the rebuild. The request owns
+two bounded placement phases whenever cached rows are already available and no
+unread-divider target owns entry:
+
+1. After Dockview restoration makes the panel measurable, provisional
+   placement resolves against the incoming session's cached rows. Enabled
+   auto-scroll selects the newest cached message; disabled auto-scroll selects
+   the incoming session's saved offset. This phase does not clear the request.
+2. After the latest-window refresh settles, final placement resolves against
+   the reconciled rows and clears the request conditionally.
+
+Both phases use `scheduleAfterPanelRestore` and re-check the live session,
+visibility, and competing owners before writing. This prevents cached content
+from appearing at the browser's default `scrollTop = 0` while preserving a
+final correction when the refresh changes the current window. A transcript
+without cached rows keeps the existing loading presentation and performs only
+the final phase. An active unread-divider target keeps its existing
+visit-scoped placement and does not receive the provisional bottom or saved-
+offset write.
+
+Each placement resolves ownership in this order:
+
+1. A pending explicit navigation target or same-transcript layout restore keeps
+   priority.
+2. Disabled auto-scroll restores
+   `transcriptAutoScroll.scrollTopBySessionId[sessionId]`, with
+   `getStoredAutoScrollTop(sessionId)` as its storage fallback.
+3. Enabled auto-scroll places the transcript at its current native maximum.
+
+Final completion conditionally clears the same token so a superseded switch
+cannot consume a newer request. While a matching request remains pending, the
+older-history intersection sentinel is blocked. Releasing that block is an
+eligibility transition, not proof that the sentinel remains at the top. Before
+replaying an intersection observed while blocked, `useLazyLoadSentinel` invokes
+the consumer's current-geometry predicate. The transcript starts pagination
+only if the current sentinel and scroll root remain inside the preload region.
+The same current-geometry rule applies when a stale request hands an observed
+intersection to a replacement view.
+
+Same-environment session switches return before arming this lifecycle.
+Maximize, un-maximize, preset, and custom-layout rebuilds retain the existing
+`pendingChatScrollTop` path and do not request session initialization.
+
 ## Interaction boundaries
 
 The optimization does not replace geometry reads that answer a user-action
@@ -108,6 +162,8 @@ placement:
 - The reader is near the bottom.
 - No user programmatic scroll lock is active.
 - No layout restoration is pending.
+- No environment-switch initial placement is pending for the session, except
+  when that matching request is executing its own provisional or final write.
 
 Disabled auto-scroll continues to restore the captured `scrollTop`. New
 content cannot move that frozen position through application code or browser
@@ -122,14 +178,18 @@ control, copy, layout, or touch target changes.
 The inactive persistent-portal state exists only in the desktop Dockview
 workbench. Mobile renders one selected `TaskChatPanel` and replaces its session
 input instead of keeping inactive session panels mounted. Mobile therefore
-keeps `isVisible` true and retains its current initial, enabled, and disabled
-scroll behavior through the shared coordinator.
+keeps `isVisible` true and retains its initial, enabled, and disabled scroll
+behavior through the shared coordinator. A mobile task switch with cached rows
+must also place the incoming transcript before a background refresh can expose
+the browser-default top, but it does not consume Dockview's environment-switch
+placement request.
 
-The nearest mobile exemplar is the current task Chat tab in
-`apps/web/components/task/task-layout.tsx`. Existing desktop and mobile
-auto-scroll Playwright scenarios remain the browser contract. Both viewports
-must prove enabled bottom pinning and disabled position freezing after the
-change.
+The nearest mobile exemplar is the current full-height task Chat tab selected
+by `TaskLayout` in `apps/web/components/task/task-layout.tsx`. The transcript is
+the only vertical scroll region; the task header and composer retain their
+existing safe-area handling. Desktop and mobile Playwright scenarios must prove
+immediate cached placement, final refresh reconciliation, enabled bottom
+pinning, and disabled position restoration.
 
 ## Failure modes
 
@@ -144,6 +204,21 @@ change.
   transcript to the top.
 - If a layout restore or explicit navigation owns the scroll, the existing
   guards suppress bottom placement until that owner releases control.
+- If a newer environment switch supersedes a pending placement, the older
+  token cannot clear or position the newer session.
+- If the latest-window refresh is slow, cached rows remain at their provisional
+  position and automatic older-history pagination stays blocked.
+- If the incoming history refresh fails, the request resolves against the
+  session history that remains available; it does not fall back to the outgoing
+  session's offset.
+
+## Observability
+
+Debug logging records provisional placement, final placement, and request
+completion with the session identifier, placement token, selected owner, and
+scroll geometry. Pagination start logging retains its trigger and geometry so
+diagnostics can distinguish a real top reach from a rejected stale
+intersection. Message content and saved offsets are not logged.
 
 ## Related decisions
 

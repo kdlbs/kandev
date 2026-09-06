@@ -69,9 +69,9 @@ const state = {
     savedLayouts: [] as Array<{ id: string }>,
   },
   auth: {
-    mode: "disabled" as const,
+    mode: "disabled" as string,
     authenticated: true,
-    user: null,
+    user: null as { role: string } | null,
   },
   settingsMenu: {
     mode: "flat" as SettingsMenuMode,
@@ -87,8 +87,12 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
 }));
 
+// Per-test feature flags, so a row that only exists behind one can be driven
+// both ways rather than being permanently invisible to this suite.
+const featuresOn = new Set<string>();
+
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => false,
+  useFeature: (name: string) => featuresOn.has(name),
 }));
 
 vi.mock("@/hooks/domains/settings/use-secrets", () => ({
@@ -146,7 +150,12 @@ describe("SettingsTree static menu", () => {
     setMenuMode("flat");
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    featuresOn.clear();
+    state.auth.mode = "disabled";
+    state.auth.user = null;
+  });
 
   it("renders section headers as static text, not links or buttons", () => {
     render(<SettingsTree pathname="/settings" />);
@@ -193,6 +202,35 @@ describe("SettingsTree static menu", () => {
     expect(screen.queryByText("Access Control")).toBeNull();
     expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
     expect(screen.queryByRole("link", { name: "API Tokens" })).toBeNull();
+  });
+
+  // An organization is a boundary above users, so it belongs with the other
+  // who-can-reach-what settings. It used to sit under System, which is for
+  // operating the instance.
+  it("puts Organizations in Access Control, not System", () => {
+    featuresOn.add("auth");
+    featuresOn.add("multiTenancy");
+    state.auth.mode = "enabled";
+    state.auth.user = { role: "admin" };
+
+    render(<SettingsTree pathname="/settings" />);
+
+    const access = screen.getByTestId("settings-section-access");
+    expect(within(access).getByRole("link", { name: "Organizations" })).toBeTruthy();
+    const system = screen.queryByTestId("settings-section-system");
+    if (system) {
+      expect(within(system).queryByRole("link", { name: "Organizations" })).toBeNull();
+    }
+  });
+
+  it("hides Organizations when the feature is off, rather than linking a page that refuses", () => {
+    featuresOn.add("auth");
+    state.auth.mode = "enabled";
+    state.auth.user = { role: "admin" };
+
+    render(<SettingsTree pathname="/settings" />);
+
+    expect(screen.queryByRole("link", { name: "Organizations" })).toBeNull();
   });
 
   it("keeps a section inside Task Behavior instead of rendering it as a page row", () => {

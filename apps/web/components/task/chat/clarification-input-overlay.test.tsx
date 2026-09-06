@@ -91,7 +91,7 @@ function renderOverlay(
 beforeEach(() => {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
-  fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+  fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 });
 
@@ -366,7 +366,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     expect(onResolved).not.toHaveBeenCalled();
     expect(screen.getByTestId(TESTID_OPTION).getAttribute("data-selected")).toBe("true");
 
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
     fireEvent.click(screen.getByTestId("clarification-retry"));
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

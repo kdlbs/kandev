@@ -88,17 +88,24 @@ test.describe("mobile quick terminal tabs", () => {
       await waitForTerminalReady(testPage);
       await sendCommand(testPage, "echo", "MOBILE_TERMINAL_ONE");
 
-      const firstTab = dialog.locator(
-        '[data-testid="quick-terminal-tab"][data-terminal-sequence="1"]',
-      );
-      const firstActions = firstTab.getByRole("button", { name: "Actions for Terminal 1" });
+      const terminalTabs = dialog.locator('[data-testid="quick-terminal-tab"]');
+      await expect(terminalTabs).toHaveCount(1);
+      const firstTab = terminalTabs.first();
+      const firstSequence = await firstTab.getAttribute("data-terminal-sequence");
+      if (!firstSequence) throw new Error("first Quick Chat terminal is missing its sequence");
+      const firstActions = firstTab.getByRole("button", {
+        name: `Actions for Terminal ${firstSequence}`,
+      });
       const firstActionsBox = await firstActions.boundingBox();
       expect(firstActionsBox).not.toBeNull();
       expect(firstActionsBox!.width).toBeGreaterThanOrEqual(44);
       expect(firstActionsBox!.height).toBeGreaterThanOrEqual(44);
       await firstActions.tap();
       await expect(
-        testPage.getByRole("menuitem", { name: "Close Terminal 1", exact: true }),
+        testPage.getByRole("menuitem", {
+          name: `Close Terminal ${firstSequence}`,
+          exact: true,
+        }),
       ).toBeVisible();
       await testPage.keyboard.press("Escape");
 
@@ -108,7 +115,7 @@ test.describe("mobile quick terminal tabs", () => {
       await expect(terminalButton).toBeVisible();
       await terminalButton.tap();
       await expect(dialog).toBeVisible();
-      await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+      await expect(terminalTabs).toHaveCount(1);
       await expect
         .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
         .toContain(normalizeTerminalText("MOBILE_TERMINAL_ONE"));
@@ -145,7 +152,9 @@ test.describe("mobile quick terminal tabs", () => {
       await expect(testPage.getByText("Agents", { exact: true })).toBeVisible();
       const menu = testPage.locator('[data-slot="dropdown-menu-content"]');
       await expect(menu).toBeVisible();
-      await expect(menu.getByRole("menuitem", { name: "Terminal 1", exact: true })).toHaveCount(0);
+      await expect(
+        menu.getByRole("menuitem", { name: `Terminal ${firstSequence}`, exact: true }),
+      ).toHaveCount(0);
       const menuBox = await menu.boundingBox();
       expect(menuBox).not.toBeNull();
       expect(menuBox!.y).toBeGreaterThan(viewport!.height / 2);
@@ -158,7 +167,11 @@ test.describe("mobile quick terminal tabs", () => {
         .toBeGreaterThanOrEqual(44);
       await newTerminal.tap();
 
-      await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(2);
+      await expect(terminalTabs).toHaveCount(2);
+      const secondTab = terminalTabs.last();
+      const secondSequence = await secondTab.getAttribute("data-terminal-sequence");
+      if (!secondSequence) throw new Error("second Quick Chat terminal is missing its sequence");
+      expect(secondSequence).not.toBe(firstSequence);
       await waitForTerminalReady(testPage);
       await sendCommand(testPage, "echo", "MOBILE_TERMINAL_TWO");
       await sendCommand(testPage, "seq 1 160; echo", "MOBILE_SCROLL_MARKER");
@@ -173,11 +186,8 @@ test.describe("mobile quick terminal tabs", () => {
       await assertNoDocumentHorizontalOverflow(testPage, "mobile shared terminal tabs");
 
       // Explicit close stops one sibling and returns to the first tab.
-      await closeQuickTerminalTab(
-        testPage,
-        dialog.locator('[data-testid="quick-terminal-tab"][data-terminal-sequence="2"]'),
-      );
-      await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+      await closeQuickTerminalTab(testPage, secondTab);
+      await expect(terminalTabs).toHaveCount(1);
       await expect
         .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
         .toContain(normalizeTerminalText("MOBILE_TERMINAL_ONE"));
@@ -189,7 +199,7 @@ test.describe("mobile quick terminal tabs", () => {
       // Reopening through the mobile launcher selects the same terminal tab.
       await terminalButton.tap();
       await expect(dialog).toBeVisible();
-      await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+      await expect(terminalTabs).toHaveCount(1);
       await expect
         .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
         .toContain(normalizeTerminalText("MOBILE_TERMINAL_ONE"));

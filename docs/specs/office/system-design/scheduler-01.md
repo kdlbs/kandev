@@ -253,7 +253,7 @@ A 30-second buffer is added to any parsed time. If no pattern matches or the par
 
 Log fields gain `source: "rate_limit_parsed"` vs `source: "backoff"`, plus `parsed_reset_at` (UTC).
 
-**Default backoff for non-rate-limit retries**: 4 attempts at `[2m, 10m, 30m, 2h]` with 25% jitter. After `MaxRetryCount` (4) failures, `escalateFailure` is called - the wakeup is marked `failed`, an `agent.error` inbox item is created, and the coordinator receives an `agent_error` wakeup.
+**Default backoff for non-rate-limit retries**: 4 attempts at `[2m, 10m, 30m, 2h]` with 25% jitter. After `MaxRetryCount` (4) failures, `escalateFailure` is called - the wakeup is marked `failed`, an `agent.error` inbox item is created, and the coordinator receives an `agent_error` wakeup. When the failing run's agent IS the coordinator itself, the `agent_error` wakeup is not escalated to it (no self-targeted run is queued) - the `agent.error` inbox item is still created.
 
 ### Recovery sweep (unstarted Office tasks)
 

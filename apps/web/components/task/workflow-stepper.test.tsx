@@ -112,6 +112,8 @@ const MOVE_A_TEST_ID = "workflow-step-disclosure-move-a";
 const MOVE_C_TEST_ID = "workflow-step-disclosure-move-c";
 const MOVE_D_TEST_ID = "workflow-step-disclosure-move-d";
 const TRIGGER_LABEL = "Step 2 of 4: Work";
+const SPEC_TEST_ID = "workflow-step-Spec";
+const ARIA_CURRENT = "aria-current";
 
 describe("WorkflowStepper", () => {
   it("renders every step when there is room (not collapsed)", () => {
@@ -121,9 +123,23 @@ describe("WorkflowStepper", () => {
     expect(screen.getByTestId("workflow-stepper")).toBeTruthy();
     expect(screen.queryByTestId("workflow-stepper-minimal")).toBeNull();
     // All steps render under the persistent outer container.
-    expect(screen.getByTestId("workflow-step-Spec")).toBeTruthy();
+    expect(screen.getByTestId(SPEC_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId("workflow-step-Work")).toBeTruthy();
     expect(screen.getByTestId("workflow-step-Review")).toBeTruthy();
+  });
+
+  it("orders steps sharing a position by ascending id, not insertion order", () => {
+    collapsedMock.mockReturnValue(false);
+    const TIEBREAK_STEPS: WorkflowStepperStep[] = [
+      { id: "z", name: "ZStep", color: "#111", position: 0 },
+      { id: "a", name: "AStep", color: "#222", position: 0 },
+    ];
+    const { container } = render(<WorkflowStepper steps={TIEBREAK_STEPS} currentStepId={null} />);
+
+    const aIndex = container.innerHTML.indexOf("AStep");
+    const zIndex = container.innerHTML.indexOf("ZStep");
+    expect(aIndex).toBeGreaterThan(-1);
+    expect(aIndex).toBeLessThan(zIndex);
   });
 
   it("collapses to only the current step when space runs out", () => {
@@ -136,8 +152,8 @@ describe("WorkflowStepper", () => {
 
     // Current step keeps its test id + aria-current in either variant.
     const current = screen.getByTestId("workflow-step-Work");
-    expect(current.getAttribute("aria-current")).toBe("step");
-    expect(screen.queryByTestId("workflow-step-Spec")).toBeNull();
+    expect(current.getAttribute(ARIA_CURRENT)).toBe("step");
+    expect(screen.queryByTestId(SPEC_TEST_ID)).toBeNull();
     expect(screen.queryByTestId("workflow-step-Review")).toBeNull();
 
     // Position indicator reflects the current step out of the total.
@@ -164,7 +180,7 @@ describe("WorkflowStepper compact disclosure", () => {
 
     expect(screen.getByTestId(DISCLOSURE_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId("workflow-step-disclosure-row-a")).toBeTruthy();
-    expect(screen.getByTestId("workflow-step-disclosure-row-b").getAttribute("aria-current")).toBe(
+    expect(screen.getByTestId("workflow-step-disclosure-row-b").getAttribute(ARIA_CURRENT)).toBe(
       "step",
     );
     expect(screen.getByTestId("workflow-step-disclosure-row-c")).toBeTruthy();
@@ -248,8 +264,25 @@ describe("WorkflowStepper fallback states", () => {
     render(<WorkflowStepper steps={STEPS} currentStepId={null} />);
 
     // Fallback step isn't the real current step, so it must not claim aria-current.
-    expect(screen.getByTestId("workflow-step-Spec").getAttribute("aria-current")).toBeNull();
+    const fallbackStep = screen.getByTestId(SPEC_TEST_ID);
+    expect(fallbackStep.getAttribute(ARIA_CURRENT)).toBeNull();
+    // aria-current alone is a false negative here: it was already conditioned
+    // correctly before the fix. The marker itself must also not read "current".
+    expect(
+      fallbackStep.querySelector("[data-marker-state]")?.getAttribute("data-marker-state"),
+    ).toBe("upcoming");
     expect(screen.getByText("1/3")).toBeTruthy();
+  });
+
+  it("marks the marker current when collapsed on a resolved current step", () => {
+    collapsedMock.mockReturnValue(true);
+    render(<WorkflowStepper steps={STEPS} currentStepId="a" />);
+
+    const currentStep = screen.getByTestId(SPEC_TEST_ID);
+    expect(currentStep.getAttribute(ARIA_CURRENT)).toBe("step");
+    expect(
+      currentStep.querySelector("[data-marker-state]")?.getAttribute("data-marker-state"),
+    ).toBe("current");
   });
 
   it("shows the archived badge instead of a step when collapsed and archived", () => {

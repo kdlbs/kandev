@@ -11,7 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const pendingIDLookupIndexName = "idx_messages_metadata_pending_id_lookup"
+const pendingIDLookupIndexName = "idx_messages_metadata_pending_id_lookup_ordered"
 
 // TestPendingIDLookupIndexFreshReplayAndExistingUpgrade covers the additive
 // startup path: fresh initialization creates the lookup index, replay keeps it

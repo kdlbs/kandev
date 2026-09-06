@@ -8,7 +8,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | --- | --- | --- | --- |
 | Agents | [README](agents/README.md) | complete | 27 requirements, 17 designs |
 | Auth | [README](auth/README.md) | complete | 7 requirements, 2 designs |
-| CLI | [README](cli/README.md) | complete | 2 requirements, 0 designs |
+| CLI | [README](cli/README.md) | complete | 3 requirements, 1 designs |
 | Costs | [README](costs/README.md) | complete | 2 requirements, 0 designs |
 | Desktop | [README](desktop/README.md) | complete | 1 requirements, 1 designs |
 | Executors | [README](executors/README.md) | complete | 3 requirements, 6 designs |
@@ -35,6 +35,7 @@ The former legacy size exceptions for migrated sources were removed. All canonic
 The following specifications were added after this migration and remain in the legacy layout until they move into an owning system:
 
 - [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
+- [Multi-tenancy](multi-tenancy/spec.md) (draft)
 - [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
 - [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 - [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)

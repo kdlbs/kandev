@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,7 +41,11 @@ func (m *Manager) ResolveSessionRuntime(ctx context.Context, sessionID string) (
 	if sessionID == "" {
 		return "", fmt.Errorf("session_id is required")
 	}
-	if check := m.sessionAccessCheck; check != nil {
+	// Execution surfaces require session.exec, not mere reach. This is the
+	// chokepoint every workspace-oriented handler (shell, files, ports, VS
+	// Code, LSP) goes through, so gating it here covers them all rather than
+	// relying on each handler to remember.
+	if check := m.execAccessCheck(); check != nil {
 		if err := check(ctx, sessionID); err != nil {
 			return "", err
 		}
@@ -80,7 +85,11 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	// Per-user workspace scoping (opt-in auth): user-facing session surfaces
 	// funnel through here; internal callers pass a ctx without an identity
 	// and are unaffected.
-	if check := m.sessionAccessCheck; check != nil {
+	// Execution surfaces require session.exec, not mere reach. This is the
+	// chokepoint every workspace-oriented handler (shell, files, ports, VS
+	// Code, LSP) goes through, so gating it here covers them all rather than
+	// relying on each handler to remember.
+	if check := m.execAccessCheck(); check != nil {
 		if err := check(ctx, sessionID); err != nil {
 			return nil, err
 		}
@@ -147,6 +156,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	}
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
+	}
+	if err := validateWorkspaceInfoForExecution(ctx, info); err != nil {
+		return nil, fmt.Errorf("%w: repository workspace failed validation", ErrSessionWorkspaceNotReady)
 	}
 	if info.SessionID == "" {
 		return nil, fmt.Errorf("task environment %s has no task session", taskEnvironmentID)
@@ -298,6 +310,9 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
 	}
+	if err := validateWorkspaceInfoForExecution(ctx, info); err != nil {
+		return nil, fmt.Errorf("%w: repository workspace failed validation", ErrSessionWorkspaceNotReady)
+	}
 
 	m.logger.Info("creating execution for task session",
 		zap.String("task_id", taskID),
@@ -344,6 +359,50 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	}()
 
 	return execution, nil
+}
+
+// validateWorkspaceInfoForExecution is the cold-start defense behind the
+// orchestrator's launch admission. A persisted non-empty path is not enough to
+// create agentctl for a repo-backed host execution: it must still resolve to
+// the selected Git checkout. Remote executors validate inside their backend
+// and are intentionally excluded from host filesystem inspection.
+func validateWorkspaceInfoForExecution(ctx context.Context, info *WorkspaceInfo) error {
+	if info == nil || len(info.WorkspaceRepositories) == 0 || models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
+		return nil
+	}
+	if info.TaskEnvironmentID != "" &&
+		(info.ValidatedTaskEnvironmentID == "" || info.ValidatedTaskEnvironmentID != info.TaskEnvironmentID ||
+			info.ValidatedExecutorType == "" || info.ValidatedExecutorType != info.ExecutorType) {
+		return fmt.Errorf("%w: workspace environment ownership was not validated for this launch", models.ErrWorkspaceReuseUnsafe)
+	}
+	if info.WorkspacePath == "" {
+		return ErrSessionWorkspaceNotReady
+	}
+	for index, repository := range info.WorkspaceRepositories {
+		candidate := info.WorkspacePath
+		if index > 0 {
+			candidate = filepath.Join(info.WorkspacePath, repository.RepoName)
+		} else if len(info.WorkspaceRepositories) > 1 {
+			// Multi-repository worktree layouts use a task root. Local layouts
+			// may use the primary repository itself as the root, so prefer the
+			// root when it validates and otherwise try its named child.
+			expected := localWorkspaceExpectedRepository(info, repository)
+			if validateLocalRepositoryWorkspace(ctx, candidate, expected) != nil {
+				candidate = filepath.Join(info.WorkspacePath, repository.RepoName)
+			}
+		}
+		if err := validateLocalRepositoryWorkspace(ctx, candidate, localWorkspaceExpectedRepository(info, repository)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func localWorkspaceExpectedRepository(info *WorkspaceInfo, repository WorkspaceRepositorySpec) string {
+	if info != nil && (info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == legacyExecutorTypeLocalPC || info.ExecutorType == string(models.ExecutorTypeWorktree)) {
+		return repository.RepositoryPath
+	}
+	return ""
 }
 
 // GetExecutionIDForSession returns the execution ID for a session from the in-memory
@@ -395,7 +454,11 @@ func (m *Manager) IsAgentCommandConfigured(executionID string) bool {
 func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	// Per-user scoping (opt-in auth) — before the cache short-circuit so a
 	// cached execution cannot be reached by a non-owner.
-	if check := m.sessionAccessCheck; check != nil {
+	// Execution surfaces require session.exec, not mere reach. This is the
+	// chokepoint every workspace-oriented handler (shell, files, ports, VS
+	// Code, LSP) goes through, so gating it here covers them all rather than
+	// relying on each handler to remember.
+	if check := m.execAccessCheck(); check != nil {
 		if err := check(ctx, sessionID); err != nil {
 			return nil, err
 		}

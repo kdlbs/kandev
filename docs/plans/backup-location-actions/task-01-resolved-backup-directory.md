@@ -63,7 +63,7 @@ Run the final two commands from the repository root.
 - `apps/backend/internal/system/database/stats.go`
 - `apps/backend/internal/system/database/stats_test.go`
 - `apps/web/lib/types/system.ts`
-- `apps/web/components/settings/system/data-storage-settings.tsx`
+- `apps/web/components/settings/system/data-logs-settings.tsx`
 - `apps/web/components/settings/system/system-route-shell.tsx`
 - `apps/web/components/settings/system/system-route-copy.test.ts`
 - `apps/web/components/settings/system/system-invisible-copy.test.tsx`

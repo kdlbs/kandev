@@ -40,7 +40,7 @@ const fetchMock = vi.fn();
 function setupFetchMock() {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
-  fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+  fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 }
 

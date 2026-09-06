@@ -176,6 +176,7 @@ func dropMessageMetadataIndex(t *testing.T, db *sqlx.DB) {
 		"idx_messages_metadata_tool_call_id",
 		"idx_messages_metadata_pending_id",
 		"idx_messages_metadata_pending_id_lookup",
+		"idx_messages_metadata_pending_id_lookup_ordered",
 	} {
 		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + index); err != nil {
 			t.Fatalf("drop %s: %v", index, err)

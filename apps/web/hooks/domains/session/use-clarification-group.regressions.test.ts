@@ -44,7 +44,7 @@ const fetchMock = vi.fn();
 
 function setupFetchMock() {
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+  fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 }
 
@@ -71,7 +71,7 @@ describe("useClarificationGroup — live retry answers", () => {
 
   it("retry uses answers edited after the failed submit", async () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
     const msgs = [
       clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 2 }),
       clarMessage({ id: "m2", pendingId: "p1", questionId: "q2", index: 1, total: 2 }),
@@ -152,7 +152,7 @@ describe("useClarificationGroup — request generation guard", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      resolveSecond?.(new Response(null, { status: 200 }));
+      resolveSecond?.(new Response("{}", { status: 200 }));
       await secondSubmit;
     });
     expect(result.current.submitState).toBe("ok");

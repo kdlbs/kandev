@@ -47,8 +47,9 @@ clarification hook owns the client deadline and desktop/phone recovery state.
 
 ### Index shape
 
-Add `idx_messages_metadata_pending_id_lookup` without removing
-`idx_messages_metadata_pending_id`.
+Add `idx_messages_metadata_pending_id_lookup_ordered` without removing
+`idx_messages_metadata_pending_id` or the existing bare pending-ID lookup
+index `idx_messages_metadata_pending_id_lookup`.
 
 The new B-tree index has these keys, in order:
 
@@ -59,7 +60,10 @@ The new B-tree index has these keys, in order:
 The index includes only rows whose extracted pending ID is non-null. Equality
 on the leading expression isolates one small interaction bundle. The remaining
 keys serve deterministic bundle ordering. The existing session-ID-leading
-index remains available for session-scoped access paths.
+index remains available for session-scoped access paths. The existing bare
+pending-ID lookup index remains available for compatibility with installations
+that already created it; the ordered partial index uses a distinct name so
+startup can add it without attempting to alter an existing index definition.
 
 SQLite uses `json_extract(metadata, '$.pending_id')`. PostgreSQL uses
 `metadata::jsonb->>'pending_id'`. The lookup, claim, malformed-bundle guard,

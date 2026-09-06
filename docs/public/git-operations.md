@@ -16,6 +16,14 @@ Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset
 3. Run required checks before pushing or opening a change request.
 4. Treat discard, reset, amend, force-push, and cleanup as irreversible or history-changing operations.
 
+![Git lifecycle from a working copy through inspected changes, commit, pushed branch, change request, and cleanup.](../screenshots/git-operations.svg)
+
+[Open full-size SVG diagram][git-operations-diagram]
+
+[git-operations-diagram]: ../../docs/screenshots/git-operations.svg
+
+The state transitions are separate operations. Inspect the diff before staging, verify checks before pushing, and decide whether cleanup may remove a worktree or other local data.
+
 ## Prerequisites and trust boundary
 
 The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials in the executor where the command runs before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not. The workspace's provider automation identity does not replace the task's Git credential policy or executor-local SSH setup; see [Executors](executors.md#workspace-automation-identity-and-task-git-transport).
@@ -54,7 +62,7 @@ When a provider retargets the pull request, Kandev refreshes the stored target a
 comparison. Selecting a task base branch or removing the owning pull-request association clears the
 explicit target. A PR with incomplete fork identity is not guessed or applied to another repository.
 
-These UI operations enter through Kandev's `/ws` endpoint, which currently has no backend authentication. Anyone who can reach an unprotected backend can invoke destructive Git actions with the executor's permissions. Keep Kandev on loopback or behind an authenticated, origin-protected reverse proxy; see [WebSocket API](websocket-api.md).
+These UI operations enter through Kandev's `/ws` endpoint. With authentication disabled, anyone who can reach an unprotected backend receives the synthetic administrator identity and can invoke destructive Git actions with the executor's permissions. Experimental authentication adds user and workspace authorization, but it does not restrict the executor's filesystem or credentials. Keep Kandev on loopback or behind an authenticated, origin-protected TLS proxy; see [WebSocket API](websocket-api.md).
 
 Credentials are resolved where `agentctl` runs. A host SSH agent, credential helper, `gh` login, or `az` login is not automatically available inside every Docker, SSH, or remote executor. Give the executor only the repository access it needs and test with a disposable branch. See [Executors](executors.md) for executor-specific credential handling.
 

@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- submit lifecycle regressions share one fixture. */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { createRef } from "react";
@@ -140,6 +142,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     isSessionMode: false,
     isEditMode: false,
     autopilot: false,
+    priority: "medium",
     isPassthroughProfile: false,
     taskName: "My CLI task",
     workspaceId: "ws-1",
@@ -375,6 +378,90 @@ describe("useTaskSubmitHandlers — started task edits", () => {
     expect(updateTaskMock).toHaveBeenCalledWith(TASK_ID, { title: RENAMED_TITLE });
     expect(launchSessionMock).not.toHaveBeenCalled();
     expect(onSuccess).toHaveBeenCalledWith({ id: TASK_ID, title: RENAMED_TITLE }, "edit");
+  });
+
+  it("replaces edited dependencies after task fields and closes on success", async () => {
+    const save = vi.fn(async () => undefined);
+    const onOpenChange = vi.fn();
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      editingTask: {
+        id: TASK_ID,
+        title: ORIGINAL_TITLE,
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: TODO_STATE,
+      },
+      descriptionInputRef: makeRef(UPDATED_PROMPT),
+      onOpenChange,
+      editDependencies: { isDirty: true, ready: true, save },
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(updateTaskMock).toHaveBeenCalledWith(TASK_ID, {
+      title: RENAMED_TITLE,
+      description: UPDATED_PROMPT,
+    });
+    expect(save).toHaveBeenCalledOnce();
+    expect(save.mock.invocationCallOrder[0]).toBeGreaterThan(
+      updateTaskMock.mock.invocationCallOrder[0]!,
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps the edit dialog open and restores task fields when dependencies fail", async () => {
+    const setValue = vi.fn();
+    const setTaskName = vi.fn();
+    const setHasDescription = vi.fn();
+    const onOpenChange = vi.fn();
+    const cycleError = new ApiError("would create a dependency cycle", 409, {
+      cycle: [TASK_ID, "task-2", TASK_ID],
+    });
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      editingTask: {
+        id: TASK_ID,
+        title: ORIGINAL_TITLE,
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: TODO_STATE,
+      },
+      descriptionInputRef: {
+        current: { ...makeRef(UPDATED_PROMPT).current!, setValue },
+      },
+      onOpenChange,
+      setTaskName,
+      setHasDescription,
+      editDependencies: {
+        isDirty: true,
+        ready: true,
+        save: vi.fn().mockRejectedValue({ dependencyUpdate: true, cause: cycleError }),
+      },
+    });
+    updateTaskMock.mockResolvedValueOnce({
+      id: TASK_ID,
+      title: RENAMED_TITLE,
+      description: "Server description",
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(setTaskName).toHaveBeenCalledWith(RENAMED_TITLE);
+    expect(setValue).toHaveBeenCalledWith("Server description");
+    expect(setHasDescription).toHaveBeenCalledWith(true);
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Dependency cycle: task-1 -> task-2 -> task-1" }),
+    );
   });
 });
 

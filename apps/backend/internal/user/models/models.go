@@ -66,6 +66,9 @@ const (
 	RoleAdmin = "admin"
 	// RoleMember is a regular authenticated user.
 	RoleMember = "member"
+	// RoleGuest reaches only workspaces it is an explicit member of. It is
+	// never assigned by migration; an admin grants it deliberately.
+	RoleGuest = "guest"
 
 	// StatusActive marks a user that may log in.
 	StatusActive = "active"
@@ -74,14 +77,35 @@ const (
 	StatusDisabled = "disabled"
 )
 
+// NormalizeRole returns the canonical org role. Admin and guest are accepted
+// as-is; anything else (including empty and unknown values) becomes member,
+// which is the role every pre-guest account already had.
+func NormalizeRole(value string) string {
+	switch value {
+	case RoleAdmin:
+		return RoleAdmin
+	case RoleGuest:
+		return RoleGuest
+	default:
+		return RoleMember
+	}
+}
+
 type User struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	Status      string `json:"status"`
+	// OrgID is the user's tenant. Empty means the account predates
+	// organizations or the tenancy migration has not run.
+	OrgID string `json:"org_id,omitempty"`
+	// IsOperator marks the instance operator tier: managing organizations,
+	// feature toggles and instance configuration. It grants NO access inside
+	// any organization, including the operator's own.
+	IsOperator bool      `json:"is_operator,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type UserSettings struct {
@@ -121,6 +145,9 @@ type UserSettings struct {
 	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
 	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
+	ThreadViews                       []ThreadView                      `json:"thread_views"`
+	ThreadActiveViewID                string                            `json:"thread_active_view_id"`
+	ThreadViewDraft                   *ThreadViewDraft                  `json:"thread_view_draft"`
 	SidebarTaskPrefs                  SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
@@ -140,6 +167,7 @@ type UserSettings struct {
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
 	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`

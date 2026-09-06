@@ -217,16 +217,18 @@ func TestPostgresSubagentContextBackfillJSONHelpers(t *testing.T) {
 	seedPostgresForMsgTest(t, db, "task-pg-malformed", "session-pg-malformed", "turn-pg-malformed")
 	ts := time.Date(2026, 8, 5, 14, 0, 0, 0, time.UTC)
 
-	// idx_messages_metadata_tool_call_id / idx_messages_metadata_pending_id
-	// are expression indexes over metadata::jsonb; Postgres evaluates them on
-	// every insert, so a literal empty-string metadata row (simulating
-	// historical corruption that predates the index) can only be seeded with
-	// the index dropped first — matching subagent_context_migration_test.go's
-	// SQLite technique.
+	// idx_messages_metadata_tool_call_id / idx_messages_metadata_pending_id /
+	// idx_messages_metadata_pending_id_lookup /
+	// idx_messages_metadata_pending_id_lookup_ordered are expression indexes
+	// over metadata::jsonb; Postgres evaluates them on every insert, so a
+	// literal empty-string metadata row (simulating historical corruption that
+	// predates the index) can only be seeded with the indexes dropped first —
+	// matching subagent_context_migration_test.go's SQLite technique.
 	for _, index := range []string{
 		"idx_messages_metadata_tool_call_id",
 		"idx_messages_metadata_pending_id",
 		"idx_messages_metadata_pending_id_lookup",
+		"idx_messages_metadata_pending_id_lookup_ordered",
 	} {
 		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + index); err != nil {
 			t.Fatalf("drop %s: %v", index, err)

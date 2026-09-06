@@ -41,9 +41,10 @@ to multiple backend replicas.
 
 ### Persistence access path
 
-- Add `idx_messages_metadata_pending_id_lookup` with extracted pending ID
-  first, followed by `created_at` and `id`, and restrict it to non-null pending
-  IDs.
+- Add `idx_messages_metadata_pending_id_lookup_ordered` with extracted pending
+  ID first, followed by `created_at` and `id`, and restrict it to non-null
+  pending IDs. Retain the existing bare pending-ID lookup index for compatible
+  upgrades from the current main branch.
 - Generate the expression and DDL through `internal/db/dialect`. Query and
   index expressions must remain textually aligned for both database drivers.
 - Retain the existing session-first index for session-scoped consumers.

@@ -150,6 +150,10 @@ type WorkspaceTracker struct {
 	// updateMu prevents concurrent updateGitStatus calls from the two polling loops.
 	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
 	updateMu sync.Mutex
+	// mutationMu serializes final upload target selection and placement. Upload
+	// bytes are staged before this lock, so slow readers do not block other
+	// workspace mutations while the target invariant remains atomic.
+	mutationMu sync.Mutex
 
 	// gitStatusObserver is the expensive live repository observation. Keeping it
 	// as a dependency makes the concurrency contract deterministic to test while

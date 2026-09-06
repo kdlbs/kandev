@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -477,15 +478,13 @@ func (c *Client) readUpdatesStream(
 
 			// This is an MCP request - dispatch it
 			if wsMsg.Type == ws.MessageTypeRequest {
-				if mcpHandler != nil {
-					sessionID, pendingID := extractMCPRequestCorrelation(wsMsg.Payload)
-					c.logger.Debug("received MCP request from agent stream",
-						zap.String("request_id", wsMsg.ID),
-						zap.String("action", wsMsg.Action),
-						zap.String("session_id", sessionID),
-						zap.String("pending_id", pendingID))
-					go c.dispatchMCPRequest(ctx, wsMsg, mcpHandler, writeMessage)
-				}
+				sessionID, pendingID := extractMCPRequestCorrelation(wsMsg.Payload)
+				c.logger.Info("received MCP request from agent stream",
+					zap.String("request_id", wsMsg.ID),
+					zap.String("action", wsMsg.Action),
+					zap.String("session_id", sessionID),
+					zap.String("pending_id", pendingID))
+				go c.dispatchMCPRequest(ctx, wsMsg, mcpHandler, writeMessage)
 				continue
 			}
 		}
@@ -603,7 +602,13 @@ func (c *Client) dispatchMCPRequest(ctx context.Context, msg ws.Message, mcpHand
 		zap.String("session_id", sessionID),
 		zap.String("pending_id", pendingID))
 
-	resp, err := mcpHandler.Dispatch(ctx, &msg)
+	var resp *ws.Message
+	var err error
+	if mcpHandler == nil {
+		err = errors.New("MCP handler is not configured")
+	} else {
+		resp, err = mcpHandler.Dispatch(ctx, &msg)
+	}
 	if err != nil {
 		c.logger.Error("MCP dispatch error",
 			zap.String("request_id", msg.ID),
@@ -612,6 +617,16 @@ func (c *Client) dispatchMCPRequest(ctx context.Context, msg ws.Message, mcpHand
 			zap.String("pending_id", pendingID),
 			zap.Duration("duration", time.Since(start)),
 			zap.Error(err))
+		tracing.TraceMCPResponse(span, err)
+		resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	} else if resp == nil {
+		err = errors.New("MCP handler returned no response")
+		c.logger.Error("MCP dispatch returned no response",
+			zap.String("request_id", msg.ID),
+			zap.String("action", msg.Action),
+			zap.String("session_id", sessionID),
+			zap.String("pending_id", pendingID),
+			zap.Duration("duration", time.Since(start)))
 		tracing.TraceMCPResponse(span, err)
 		resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	} else {

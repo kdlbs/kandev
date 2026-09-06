@@ -295,6 +295,38 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+describe("cached session entry history readiness", () => {
+  // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.11
+  it("keeps cached-entry history placement pending until its background refresh settles", async () => {
+    const readiness = deferred<void>();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+    mockState.messages.bySession["sess-1"] = [makeMessage({ id: "cached" })];
+
+    const { result, unmount } = renderHook(() => useSessionMessages("sess-1"));
+
+    expect(result.current.historyRefreshPending).toBe(true);
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+    expect(result.current.historyRefreshPending).toBe(true);
+
+    await act(async () => {
+      response.resolve({ messages: [], has_more: false });
+      await response.promise;
+    });
+    expect(result.current.historyRefreshPending).toBe(false);
+    unmount();
+  });
+});
+
 describe("session subscription hydration ordering", () => {
   // @covers AC-UI-TASK-PROMPT-TRANSCRIPT-VISIBILITY-001.10
   it("replaces a disjoint stale cache while preserving rows received during the fetch", async () => {

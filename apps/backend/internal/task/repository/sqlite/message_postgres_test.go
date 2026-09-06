@@ -44,6 +44,7 @@ func TestPostgresPermissionClaimIgnoresEmptyMetadataRows(t *testing.T) {
 		"idx_messages_metadata_tool_call_id",
 		"idx_messages_metadata_pending_id",
 		"idx_messages_metadata_pending_id_lookup",
+		"idx_messages_metadata_pending_id_lookup_ordered",
 	} {
 		if _, err := repo.db.Exec("DROP INDEX " + index); err != nil {
 			t.Fatalf("drop metadata index %s: %v", index, err)

@@ -298,9 +298,10 @@ type Handlers struct {
 	// Native code review (optional, set via SetReviewService /
 	// SetReviewRunner). Without them the review actions are simply not
 	// registered — see registerReviewHandlers.
-	reviewService *service.ReviewService
-	reviewRunner  ReviewRunner
-	pluginSvc     *plugins.Service
+	reviewService      *service.ReviewService
+	reviewRunner       ReviewRunner
+	pluginSvc          *plugins.Service
+	canvasAuthoringSvc CanvasAuthoringService
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
@@ -319,6 +320,16 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+}
+
+func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
+	if h.handoffSvc == nil || taskID == "" {
+		return
+	}
+	if err := h.handoffSvc.ReleaseWorkspacePolicy(context.WithoutCancel(ctx), taskID, "create_rollback"); err != nil {
+		h.logger.Warn("rollback workspace membership cleanup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
 }
 
 // NewHandlers creates new MCP handlers.
@@ -420,6 +431,13 @@ func (h *Handlers) SetPluginService(svc *plugins.Service) {
 	h.pluginSvc = svc
 }
 
+// SetCanvasAuthoringService wires the feature-gated, task-scoped canvas
+// authoring boundary. Leave it unset when canvas support is disabled so raw WS
+// canvas actions are not registered either.
+func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
+	h.canvasAuthoringSvc = svc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(dispatcher *ws.Dispatcher) {
 	d := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
@@ -437,6 +455,7 @@ func (h *Handlers) registerTaskModeHandlers(d *guardedMCPDispatcher) {
 	h.registerTaskPlanHandlers(d)
 	h.registerTaskQuestionHandlers(d)
 	h.registerReviewHandlers(d)
+	h.registerCanvasHandlers(d)
 }
 
 func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
@@ -889,6 +908,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		DeferredLaunch:         deferredLaunch,
 		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
+		WorkspacePolicy:        &workspacePolicy,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -927,6 +947,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				h.logger.Error("rollback delete failed after missing task repository",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
+			h.releaseWorkspacePolicyAfterCreateRollback(ctx, task.ID)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
 		}
 		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].RepositoryID, resolution); err != nil {
@@ -936,19 +957,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				h.logger.Error("rollback delete failed after contribution association error",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
+			h.releaseWorkspacePolicyAfterCreateRollback(ctx, task.ID)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: "+err.Error(), nil)
-		}
-	}
-
-	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
-		if attachErr := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, workspacePolicy); attachErr != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(attachErr))
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach workspace policy: "+attachErr.Error(), nil)
 		}
 	}
 
@@ -3779,7 +3789,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		zap.String("task_id", taskID))
 
 	// Block until user responds or context is cancelled (agent MCP timeout).
-	// With MCP_TIMEOUT set to 2h for Claude Code, this will wait long enough.
+	// With MCP_TOOL_TIMEOUT set to 2h for Claude Code, this will wait long enough.
 	// If the agent times out, the entry is cleaned up and the event-based
 	// fallback in the orchestrator handles resuming with a new turn.
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)

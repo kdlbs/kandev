@@ -18,6 +18,15 @@ func TestIsPostgres(t *testing.T) {
 	}
 }
 
+func TestTimestampType(t *testing.T) {
+	if got := TimestampType(SQLite3); got != "DATETIME" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := TimestampType(PGX); got != "TIMESTAMPTZ" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestBoolToInt(t *testing.T) {
 	if BoolToInt(true) != 1 {
 		t.Error("expected 1 for true")

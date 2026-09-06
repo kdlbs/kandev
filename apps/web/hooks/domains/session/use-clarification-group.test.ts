@@ -46,7 +46,7 @@ const fetchMock = vi.fn();
 function setupFetchMock() {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
-  fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+  fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 }
 
@@ -284,7 +284,7 @@ describe("useClarificationGroup — retry", () => {
 
   it("retry() re-POSTs the same batch after a failed submit", async () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
     const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
     const { result } = renderHook(() => useClarificationGroup(msgs));
 
@@ -310,7 +310,7 @@ describe("useClarificationGroup — retry", () => {
 
   it("retry() re-POSTs the original skip reason after a failed skip", async () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
     const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
     const { result } = renderHook(() => useClarificationGroup(msgs));
 
@@ -500,7 +500,7 @@ describe("useClarificationGroup — optimistic store update edge cases", () => {
         "q-old": { question_id: "q-old", selected_options: ["o1"] },
       });
       rerender({ msgs: next });
-      resolveFetch?.(new Response(null, { status: 200 }));
+      resolveFetch?.(new Response("{}", { status: 200 }));
       await pending;
     });
 
@@ -666,7 +666,7 @@ describe("useClarificationGroup — losing a race, other call sites & fallback",
   });
 
   it("submitCollected keeps applying its own answers when claimed is absent (older backend)", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
     const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
     const { result } = renderHook(() => useClarificationGroup(msgs));
 
@@ -712,7 +712,7 @@ describe("useClarificationGroup — bundle swap while a request is in flight", (
     expect(result.current.submitState).toBe("idle");
 
     // B must be submittable right away, not blocked by A's stale request.
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
     await act(async () => {
       await result.current.submitCollected({ qB: { question_id: "qB", selected_options: ["o2"] } });
     });
@@ -753,7 +753,7 @@ describe("useClarificationGroup — inflight guard", () => {
     await act(async () => {
       const first = result.current.submitCollected();
       const second = result.current.submitCollected();
-      resolveFetch?.(new Response(null, { status: 200 }));
+      resolveFetch?.(new Response("{}", { status: 200 }));
       await Promise.all([first, second]);
     });
 

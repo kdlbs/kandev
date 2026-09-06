@@ -18,11 +18,12 @@ on fresh and existing SQLite and PostgreSQL databases.
 ## In scope
 
 - Add a dialect-owned DDL helper for
-  `idx_messages_metadata_pending_id_lookup` with pending ID first, followed by
-  `created_at` and `id`, and a non-null predicate.
+  `idx_messages_metadata_pending_id_lookup_ordered` with pending ID first,
+  followed by `created_at` and `id`, and a non-null predicate.
 - Create the index in the ordered, startup-critical message-index step with a
   new replay-safe name.
-- Keep the existing session-first pending-ID index.
+- Keep the existing session-first pending-ID index and the bare pending-ID
+  lookup index already present on the current main branch.
 - Add SQLite fresh-schema, replay, existing-schema, and query-plan coverage.
 - Add environment-gated real PostgreSQL index-definition, replay, and planner
   eligibility coverage.

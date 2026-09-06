@@ -31,6 +31,11 @@ export type {
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
+  ThreadTaskScopeApi,
+  ThreadViewClauseApi,
+  ThreadViewSortApi,
+  ThreadViewApi,
+  ThreadViewDraftApi,
   LspStatusLocation,
   LastSeenDisplay,
   MCPTaskAgentProfileDefault,
@@ -269,6 +274,14 @@ export type Workspace = {
   name: string;
   description?: string | null;
   owner_id: string;
+  /** "private" (owner + explicit members) or "org" (every non-guest user). */
+  /** The organization unit this workspace sits in; reach follows the tree. */
+  unit_id?: string;
+  /** The requesting user's role here; drives owner-only controls. */
+  viewer_role?: string;
+  /** Scopes the requesting user holds here. The server is authoritative. */
+  scopes?: string[];
+  member_count?: number;
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: AgentProfileId | null;
@@ -426,14 +439,22 @@ export type Task = ActiveSubagentCountFields & {
   primary_executor_type?: ExecutorType | null;
   primary_executor_name?: string | null;
   primary_agent_name?: string | null;
+  primary_agent_profile_id?: string | null;
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   is_ephemeral?: boolean;
+  /**
+   * The human assignee's user id, independent of the agent assignee. Advisory:
+   * it records who owns the task and gates nothing.
+   */
+  assignee_user_id?: string;
   parent_id?: TaskId;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;
+  /** JSON-encoded normalized task labels from the backend. */
+  labels?: string;
   // Office extensions (mirror TaskDTO Go fields). Empty/undefined for kanban-origin tasks.
   origin?: TaskOrigin;
   project_id?: string;

@@ -43,6 +43,10 @@ export {
 
 type GitFileStatus = FileInfo["status"] | undefined;
 
+export function shouldShowFileTreeTouchActions(isMobile: boolean, isFinePointer: boolean) {
+  return isMobile || !isFinePointer;
+}
+
 type TreeNodeRowProps = {
   row: FileBrowserRow;
   activeFolderPath: string;
@@ -55,6 +59,7 @@ type TreeNodeRowProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
@@ -185,7 +190,7 @@ export function FileTreeNodeTouchActions({
           data-testid="file-tree-node-actions"
           data-path={node.path}
           aria-label={t("chat:fileTreeActions")}
-          className="ml-auto flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+          className="absolute top-1/2 right-0 z-10 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
           onPointerDown={stopRowInteraction}
           onMouseDown={stopRowInteraction}
           onClick={stopRowInteraction}
@@ -236,6 +241,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
     onDeleteFile,
     onRenameFile,
     onDownloadFile,
+    onUploadFilesHere,
     setTree,
     showTouchActions,
     onAddToChatContext,
@@ -272,7 +278,8 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       role="treeitem"
       className={cn(
         getTreeNodeRowClass(isActive, isActiveFolder, isSelected, props.isDragging, isDropTarget),
-        props.showTouchActions && "flex-wrap",
+        showTouchActions &&
+          "relative min-h-11 pr-11 has-[[data-testid=file-delete-inline-confirmation]]:flex-wrap has-[[data-testid=file-delete-inline-confirmation]]:pr-2",
       )}
       style={{ paddingLeft: treeNodePaddingLeft(row.depth, node.is_dir) }}
       onClick={handleClick}
@@ -313,6 +320,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       onDeleteFile={onDeleteFile}
       onRenameFile={onRenameFile}
       onDownloadFile={onDownloadFile}
+      onUploadFilesHere={onUploadFilesHere}
       onStartRename={rename.handleStartRename}
       onAddToChatContext={onAddToChatContext}
       selectedCount={props.selectedCount}
@@ -371,6 +379,7 @@ export function SearchResultsList({
             className={cn(
               "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
               "hover:bg-muted",
+              showTouchActions && "relative min-h-11 pr-11",
             )}
             onClick={() => onOpenFile(path)}
           >
@@ -382,7 +391,7 @@ export function SearchResultsList({
             />
             <span
               className={cn(
-                "truncate group-hover:text-foreground",
+                "min-w-0 flex-1 truncate group-hover:text-foreground",
                 getGitStatusTextClass(gitStatus) || "text-muted-foreground",
               )}
             >
@@ -436,6 +445,7 @@ type FileBrowserContentAreaProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   onRetry: () => void;
@@ -468,6 +478,7 @@ function rowToItemProps(props: FileBrowserContentAreaProps, row: FileBrowserRow)
     onDeleteFile: props.onDeleteFile,
     onRenameFile: props.onRenameFile,
     onDownloadFile: props.onDownloadFile,
+    onUploadFilesHere: props.onUploadFilesHere,
     setTree: props.setTree,
     isSelectedFn: props.isSelectedFn,
     onSelect: props.onSelect,

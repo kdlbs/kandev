@@ -3,6 +3,7 @@ import type { DialogFormState } from "./task-create-dialog-types";
 import {
   computeHasAllBranches,
   localRepositoryCreationEnabled,
+  resolveWorkflowName,
 } from "./task-create-dialog-prop-builders";
 
 function formState(overrides: Partial<DialogFormState>): DialogFormState {
@@ -83,5 +84,21 @@ describe("localRepositoryCreationEnabled", () => {
     expect(localRepositoryCreationEnabled(true, false)).toBe(true);
     expect(localRepositoryCreationEnabled(false, false)).toBe(false);
     expect(localRepositoryCreationEnabled(true, true)).toBe(false);
+  });
+});
+
+describe("resolveWorkflowName", () => {
+  const workflows = [
+    { id: "wf-dev", name: "Development" },
+    { id: "wf-ops", name: "Operations" },
+  ];
+
+  it("returns the name of the effective workflow", () => {
+    expect(resolveWorkflowName(workflows, "wf-dev")).toBe("Development");
+  });
+
+  it("returns null when no workflow is effective or the id is unknown", () => {
+    expect(resolveWorkflowName(workflows, null)).toBeNull();
+    expect(resolveWorkflowName(workflows, "wf-missing")).toBeNull();
   });
 });
