@@ -119,6 +119,45 @@ func TestLauncherStopIsANoOpWhenSurvivalEnabled(t *testing.T) {
 	}
 }
 
+// TestLauncherStopTerminatesTheServerWhenSurvivalDisabled is the closed side
+// of the same kill path. With the capability off, the control server is the
+// backend's to own for the length of the backend's life, so the registered
+// cleanup's Stop() must actually terminate it rather than leave an orphan
+// running with no backend attached to it.
+func TestLauncherStopTerminatesTheServerWhenSurvivalDisabled(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start long-lived test process: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
+
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+
+	l := &Launcher{
+		cmd:           cmd,
+		exited:        exited,
+		logger:        newLauncherTestLogger(t),
+		startupConfig: commonconfig.AgentctlStartupConfig{Configured: true, AgentSurvivalEnabled: false},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := l.Stop(ctx); err != nil {
+		t.Fatalf("Stop() = %v, want nil", err)
+	}
+
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("process is still running after Stop() with the capability disabled")
+	}
+}
+
 func newSurvivalKillPathTestLauncher(t *testing.T, survivalEnabled bool) *Launcher {
 	t.Helper()
 	binary, err := exec.LookPath("true")

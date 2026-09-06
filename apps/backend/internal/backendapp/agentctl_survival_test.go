@@ -190,6 +190,7 @@ func TestAdoptSurvivingAgentctlAdoptsAndUpdatesConfig(t *testing.T) {
 	endpoint := server.Listener.Addr().String()
 	store := &fakeControlServerStore{record: &models.ControlServerRecord{
 		Endpoint:           endpoint,
+		ServerIdentity:     "survivor-identity",
 		CredentialSecretID: seedSecret.ID,
 	}}
 	cfg := &config.Config{}

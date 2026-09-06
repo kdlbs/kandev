@@ -561,12 +561,13 @@ func TestAttemptAdoptControlServerServerIdentityMismatchRefusesWithoutStop(t *te
 	}
 }
 
-// TestAttemptAdoptControlServerEmptyRecordedServerIdentitySkipsCheck pins
-// backward compatibility with a record written before this field existed (or
-// a first-ever record with no verified identity yet): an empty recorded
-// ServerIdentity does not gate adoption, since there is nothing yet to
-// compare the live server's identity against.
-func TestAttemptAdoptControlServerEmptyRecordedServerIdentitySkipsCheck(t *testing.T) {
+// TestAttemptAdoptControlServerEmptyRecordedServerIdentityRefuses pins the
+// fail-closed side of the identity proof end to end: a record that carries no
+// server identity cannot prove which process it describes, and the home
+// directory it shares with every control server on the installation is not a
+// substitute. The server is left unadopted rather than claimed on an
+// unprovable match.
+func TestAttemptAdoptControlServerEmptyRecordedServerIdentityRefuses(t *testing.T) {
 	secretStore := newInMemorySecretStore()
 	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "current-token")
 	if err != nil {
@@ -586,8 +587,11 @@ func TestAttemptAdoptControlServerEmptyRecordedServerIdentitySkipsCheck(t *testi
 	outcome := AttemptAdoptControlServer(context.Background(), store, secretStore, factory,
 		testHomeDir, RequiredSurvivalCapabilities, 0, -1, newAdoptionTestLogger(t))
 
-	if !outcome.Adopted {
-		t.Fatalf("outcome = %+v, want Adopted despite an unset recorded ServerIdentity", outcome)
+	if outcome.Adopted || outcome.Reason != AdoptionReasonIdentityMismatch {
+		t.Fatalf("outcome = %+v, want unadopted identity_mismatch for an unset recorded ServerIdentity", outcome)
+	}
+	if client.shutdownCalled {
+		t.Fatal("ShutdownControlServer was called for a server whose identity could not be proven")
 	}
 }
 

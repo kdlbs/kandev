@@ -482,19 +482,17 @@ func stopIncompatibleControlServer(
 }
 
 // identityMatchesRecordedServer reports whether a live server's identity
-// proves it is the exact process a control-server record describes: the
-// home directory matches (installation identity), and -- when the record
-// carries a previously-recorded ServerIdentity -- the live per-launch
-// identity nonce matches it too (AC-CONTROL-OWNERSHIP-001.2). The home
-// directory alone only proves the live server shares an installation with
-// the recorded one, not that it IS that recorded process. record.ServerIdentity
-// is empty only for a record written before this field existed (or never yet
-// verified), which skips that second check rather than refusing on it.
+// proves it is the exact process a control-server record describes: the home
+// directory matches (installation identity) and the live per-launch identity
+// nonce matches the one the record carries. The home directory alone only
+// proves the live server shares an installation with the recorded one, not
+// that it IS that recorded process, so an identity neither side can produce
+// leaves the match unprovable and is refused rather than assumed.
 func identityMatchesRecordedServer(identity *agentctl.IdentityInfo, record *models.ControlServerRecord, homeDir string) bool {
 	if identity.HomeDir == "" || identity.HomeDir != homeDir {
 		return false
 	}
-	if record.ServerIdentity != "" && identity.ServerIdentity != record.ServerIdentity {
+	if record.ServerIdentity == "" || identity.ServerIdentity != record.ServerIdentity {
 		return false
 	}
 	return true

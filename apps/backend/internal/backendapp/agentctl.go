@@ -47,21 +47,33 @@ func provideAgentctlLauncher(
 	store lifecycle.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
 ) (*agentctlLauncherResult, error) {
-	if cfg.Features.AgentSurvival {
-		if result := adoptSurvivingAgentctl(ctx, cfg, log, store, secretStore); result != nil {
-			availability.MarkAvailable()
-			return result, nil
-		}
-	} else {
-		// AC-EXECUTORS-SURVIVAL-005.5: the capability just turned off (or was
-		// never on for this launch) -- reclaim a detached control server an
-		// earlier survival-enabled launch may have left running, rather than
-		// leaving it running unowned until its own unowned-shutdown timer
-		// elapses.
-		lifecycle.ReclaimUnneededControlServer(ctx, store, secretStore, controlClientFactory(log), cfg.ResolvedHomeDir(),
-			cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
+	if result := resolveSurvivingAgentctl(ctx, cfg, log, store, secretStore); result != nil {
+		availability.MarkAvailable()
+		return result, nil
 	}
 	return spawnFreshAgentctl(ctx, cfg, log, availability, store, secretStore)
+}
+
+// resolveSurvivingAgentctl applies the agent-survival capability gate to a
+// control server a prior launch left running, and returns non-nil only when
+// this launch took that server over. With the capability disabled nothing is
+// ever adopted, but a server an earlier survival-enabled launch detached is
+// still running with no backend attached to it, so it is stopped here rather
+// than left to its own unowned-shutdown timer. Either way a nil return means
+// the caller spawns fresh.
+func resolveSurvivingAgentctl(
+	ctx context.Context,
+	cfg *config.Config,
+	log *logger.Logger,
+	store lifecycle.AdoptionRecordStore,
+	secretStore secrets.SecretStore,
+) *agentctlLauncherResult {
+	if !cfg.Features.AgentSurvival {
+		lifecycle.ReclaimUnneededControlServer(ctx, store, secretStore, controlClientFactory(log), cfg.ResolvedHomeDir(),
+			cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
+		return nil
+	}
+	return adoptSurvivingAgentctl(ctx, cfg, log, store, secretStore)
 }
 
 // adoptSurvivingAgentctl attempts to adopt a control server recorded by a
