@@ -11,16 +11,7 @@ import (
 	sprites "github.com/superfly/sprites-go"
 )
 
-type deployOptions struct {
-	pr              int
-	sha             string
-	repo            string
-	port            int
-	skipWebInstall  bool
-	skipDescription bool
-}
-
-func parseDeployOptions(args []string) (deployOptions, error) {
+func runDeploy(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	pr := fs.Int("pr", 0, "PR number (required)")
 	sha := fs.String("sha", "", "commit SHA to display in the comment")
@@ -30,30 +21,14 @@ func parseDeployOptions(args []string) (deployOptions, error) {
 	skipDescription := fs.Bool("skip-description", false, "skip the PR description update")
 
 	if err := fs.Parse(args); err != nil {
-		return deployOptions{}, err
-	}
-
-	return deployOptions{
-		pr:              *pr,
-		sha:             *sha,
-		repo:            *repo,
-		port:            *port,
-		skipWebInstall:  *skipWebInstall,
-		skipDescription: *skipDescription,
-	}, nil
-}
-
-func runDeploy(ctx context.Context, args []string) int {
-	opts, err := parseDeployOptions(args)
-	if err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
 		return 2
 	}
-	if opts.pr == 0 {
+	if *pr == 0 {
 		fmt.Fprintln(os.Stderr, "preview deploy: --pr is required")
 		return 2
 	}
-	if opts.repo == "" {
+	if *repo == "" {
 		fmt.Fprintln(os.Stderr, "preview deploy: --repo or GITHUB_REPOSITORY is required")
 		return 2
 	}
@@ -64,12 +39,12 @@ func runDeploy(ctx context.Context, args []string) int {
 		return 2
 	}
 	ghToken := os.Getenv("GH_TOKEN")
-	if ghToken == "" && !opts.skipDescription {
+	if ghToken == "" && !*skipDescription {
 		fmt.Fprintln(os.Stderr, "preview deploy: GH_TOKEN is required")
 		return 2
 	}
 
-	spriteName := fmt.Sprintf("kandev-pr-%d", opts.pr)
+	spriteName := fmt.Sprintf("kandev-pr-%d", *pr)
 
 	tmpDir, err := os.MkdirTemp("", "kandev-preview-*")
 	if err != nil {
@@ -81,19 +56,19 @@ func runDeploy(ctx context.Context, args []string) int {
 	binDir := filepath.Join(tmpDir, "bin")
 	tarPath := filepath.Join(tmpDir, "kandev-preview.tar.gz")
 
-	previewURL, err := deployArtifacts(ctx, binDir, tarPath, spritesToken, spriteName, opts.port, opts.skipWebInstall)
+	previewURL, err := deployArtifacts(ctx, binDir, tarPath, spritesToken, spriteName, *port, *skipWebInstall)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
 		return 1
 	}
 
 	fmt.Printf("preview URL: %s\n", previewURL)
-	if opts.skipDescription {
+	if *skipDescription {
 		return 0
 	}
 
-	section := buildDeploySection(previewURL, opts.sha)
-	if err := upsertDescriptionSection(ctx, ghToken, opts.repo, opts.pr, section); err != nil {
+	section := buildDeploySection(previewURL, *sha)
+	if err := upsertDescriptionSection(ctx, ghToken, *repo, *pr, section); err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: update PR description: %v\n", err)
 		return 1
 	}

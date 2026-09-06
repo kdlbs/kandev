@@ -15,6 +15,7 @@ type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
 // A 409 this client does not recognize is treated as an error rather than
 // risked as a silent success.
 const CLARIFICATION_CONFLICT_NOT_ACTIVE = "not_active";
+const CLARIFICATION_RESPONSE_TIMEOUT_MS = 40_000;
 
 // The bundle status the backend can report on a resolved response (R10).
 // Upstream's claim cannot produce a cancelled winner, so a loss only ever
@@ -28,13 +29,84 @@ type ResolvedStatus = "answered" | "rejected";
 type ClarificationRespondResult = {
   state: SubmitState;
   // Present only when the server returned a parseable 200 body. Absent on a
-  // 409 (legacy backend, no body) or a network/non-2xx failure — callers
-  // treat an absent `claimed` the same as an older backend that never sent
-  // one (W3: keep applying this client's own answers).
+  // 409 (legacy backend, no body), malformed 200 body, or a network/non-2xx
+  // failure — callers treat an absent `claimed` the same as an older backend
+  // that never sent one (W3: keep applying this client's own answers).
   claimed?: boolean;
   status?: ResolvedStatus;
   answers?: ClarificationAnswer[];
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isResolvedStatus(value: unknown): value is ResolvedStatus {
+  return value === "answered" || value === "rejected";
+}
+
+function isClarificationAnswer(value: unknown): value is ClarificationAnswer {
+  if (!isRecord(value) || typeof value.question_id !== "string") return false;
+  const selectedOptions = value.selected_options;
+  if (
+    selectedOptions !== undefined &&
+    (!Array.isArray(selectedOptions) ||
+      !selectedOptions.every((option) => typeof option === "string"))
+  ) {
+    return false;
+  }
+  const customText = value.custom_text;
+  return customText === undefined || typeof customText === "string";
+}
+
+function parseClarificationAnswers(value: unknown): ClarificationAnswer[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(isClarificationAnswer)) return null;
+  return value;
+}
+
+function parseOptionalClaimed(value: unknown): boolean | null | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "boolean" ? value : null;
+}
+
+function parseOptionalStatus(value: unknown): ResolvedStatus | null | undefined {
+  if (value === undefined) return undefined;
+  return isResolvedStatus(value) ? value : null;
+}
+
+type ParsedResponseFields = {
+  response?: Record<string, unknown>;
+  answers?: ClarificationAnswer[];
+};
+
+function parseResponseFields(value: unknown): ParsedResponseFields | null {
+  if (value === undefined || value === null) return {};
+  if (!isRecord(value)) return null;
+  const answers = parseClarificationAnswers(value.answers);
+  if (answers === null) return null;
+  return { response: value, answers };
+}
+
+// A 200 is authoritative only when it has the response envelope introduced by
+// the clarification resolver. Older backends may omit claimed, but they must
+// still identify a successful response explicitly.
+function parseClarificationResponseBody(value: unknown): ClarificationRespondResult | null {
+  if (!isRecord(value) || value.success !== true) return null;
+  const claimed = parseOptionalClaimed(value.claimed);
+  const status = parseOptionalStatus(value.status);
+  const responseFields = parseResponseFields(value.response);
+  if (claimed === null || status === null || responseFields === null) return null;
+  if (
+    claimed === false &&
+    (status === undefined ||
+      responseFields.response === undefined ||
+      responseFields.answers === undefined)
+  ) {
+    return null;
+  }
+  return { state: "ok", claimed, status, ...responseFields };
+}
 
 export type ClarificationGroupApi = {
   pendingId: string | null;
@@ -109,38 +181,37 @@ async function postClarification(
   body: Record<string, unknown>,
 ): Promise<ClarificationRespondResult> {
   const { apiBaseUrl } = getBackendConfig();
-  let res: Response;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CLARIFICATION_RESPONSE_TIMEOUT_MS);
   try {
-    res = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
+    const res = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
+    if (res.status === 409) return await classifyConflictResult(res);
+    if (!res.ok) {
+      console.error("Clarification request failed:", res.status, res.statusText);
+      return { state: "error" };
+    }
+    try {
+      const parsed = parseClarificationResponseBody(await res.json());
+      if (!parsed) {
+        console.error("Clarification response body failed envelope validation");
+        return { state: "error" };
+      }
+      return parsed;
+    } catch (err) {
+      console.error("Clarification response body parse failed:", err);
+      return { state: "error" };
+    }
   } catch (err) {
     console.error("Clarification request failed:", err);
     return { state: "error" };
-  }
-  if (res.status === 409) return await classifyConflictResult(res);
-  if (!res.ok) {
-    console.error("Clarification request failed:", res.status, res.statusText);
-    return { state: "error" };
-  }
-  try {
-    const parsed = (await res.json()) as {
-      claimed?: boolean;
-      status?: ResolvedStatus;
-      response?: { answers?: ClarificationAnswer[] } | null;
-    };
-    return {
-      state: "ok",
-      claimed: parsed.claimed,
-      status: parsed.status,
-      answers: parsed.response?.answers,
-    };
-  } catch (err) {
-    console.error("Clarification response body parse failed:", err);
-    return { state: "ok" };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

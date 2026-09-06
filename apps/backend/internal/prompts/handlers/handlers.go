@@ -18,6 +18,10 @@ type Handlers struct {
 	logger     *logger.Logger
 }
 
+// Prompt fields are validated independently by the service. Leave enough
+// room for JSON syntax and escaping around the one-megabyte content field.
+const maxPromptRequestBodyBytes = 8 << 20
+
 func NewHandlers(ctrl *controller.Controller, log *logger.Logger) *Handlers {
 	return &Handlers{
 		controller: ctrl,
@@ -45,6 +49,7 @@ func (h *Handlers) httpListPrompts(c *gin.Context) {
 }
 
 func (h *Handlers) httpCreatePrompt(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPromptRequestBodyBytes)
 	var req dto.CreatePromptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -58,6 +63,8 @@ func (h *Handlers) httpCreatePrompt(c *gin.Context) {
 			status, message = http.StatusBadRequest, err.Error()
 		case errors.Is(err, service.ErrPromptAlreadyExists):
 			status, message = http.StatusConflict, err.Error()
+		case errors.Is(err, service.ErrPromptListLimit):
+			status, message = http.StatusUnprocessableEntity, err.Error()
 		}
 		logRejection(h.logger, "create prompt rejected", "failed to create prompt", err, status)
 		c.JSON(status, gin.H{"error": message})
@@ -67,6 +74,7 @@ func (h *Handlers) httpCreatePrompt(c *gin.Context) {
 }
 
 func (h *Handlers) httpUpdatePrompt(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPromptRequestBodyBytes)
 	var req dto.UpdatePromptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})

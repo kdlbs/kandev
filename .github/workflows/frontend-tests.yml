@@ -29,12 +29,42 @@ permissions:
   packages: read
 
 jobs:
+  runner_plan:
+    name: Plan external runner allocation
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan runner allocation
+        id: plan
+        uses: ./.github/actions/plan-external-runners
+        with:
+          workflow: frontend
+          run-id: ${{ github.run_id }}
+          families: >-
+            [
+              {"name":"changes","tier":"light"},
+              {"name":"frontend","tier":"standard"},
+              {"name":"frontend_gate","tier":"light"}
+            ]
+          burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
+
   # The former trigger-level `paths:` list, applied one level down so a skip
   # still produces a conclusion. `.github/scripts/changed-paths.py` implements
   # the same last-match-wins semantics GitHub applies to `paths:`.
   changes:
     name: Detect relevant changes
-    runs-on: ubuntu-latest
+    needs: runner_plan
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}
     timeout-minutes: 10
     outputs:
       run: ${{ steps.detect.outputs.run }}
@@ -103,9 +133,9 @@ jobs:
 
   frontend:
     name: Run Frontend Lint, Tests, and Build
-    needs: changes
+    needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}
     # Pre-baked image bundles Node 24, pnpm 9.15.9, Go, and go-licenses —
     # see .github/docker/ci-base/Dockerfile.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
@@ -121,6 +151,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Mark workspace safe for git
         shell: bash
@@ -353,22 +384,28 @@ jobs:
   # conclusion to read instead of a check that stays pending forever.
   frontend-gate:
     name: Frontend Tests Passed
-    runs-on: ubuntu-latest
-    needs: [changes, frontend]
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_gate_runner }}
+    needs: [changes, frontend, runner_plan]
     if: always()
 
     steps:
       - name: Require the frontend job to have passed or been skipped
         env:
+          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
         run: |
           set -euo pipefail
 
+          echo "Runner plan: ${RUNNER_PLAN_RESULT}"
           # `skipped` is a pass: the change-detection job decided nothing this
           # workflow covers was touched. `cancelled` is not — a cancelled job
           # never reached a verdict, and treating that as a pass would let an
           # untested merge group through.
+          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
+            echo "Runner planning finished with result: ${RUNNER_PLAN_RESULT}" >&2
+            exit 1
+          fi
           if [[ "${CHANGES_RESULT}" != "success" ]]; then
             echo "Change detection finished with result: ${CHANGES_RESULT}" >&2
             exit 1

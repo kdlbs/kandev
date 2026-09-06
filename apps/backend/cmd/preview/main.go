@@ -2,8 +2,10 @@
 //
 // Usage:
 //
-//	preview deploy  --pr N --sha S [--repo owner/repo] [--port 38429] [--skip-description]
-//	preview cleanup --pr N [--repo owner/repo] [--skip-description]
+//	preview deploy             --pr N --sha S [--repo owner/repo] [--port 38429] [--skip-description]
+//	preview update-description --pr N --sha S --url URL [--repo owner/repo]
+//	preview cleanup            --pr N [--repo owner/repo] [--skip-description]
+//	preview remove-description --pr N [--repo owner/repo]
 //
 // Required environment variables:
 //
@@ -34,8 +36,12 @@ func run() int {
 	switch os.Args[1] {
 	case "deploy":
 		return runDeploy(ctx, os.Args[2:])
+	case "update-description":
+		return runUpdateDescription(ctx, os.Args[2:])
 	case "cleanup":
 		return runCleanup(ctx, os.Args[2:])
+	case "remove-description":
+		return runRemoveDescription(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return 0
@@ -50,12 +56,14 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `preview — deploy and manage PR preview environments on Sprites.dev
 
 Usage:
-  preview deploy  --pr N --sha S [--repo owner/repo] [--port 38429] [--skip-description]
-  preview cleanup --pr N [--repo owner/repo] [--skip-description]
+  preview deploy             --pr N --sha S [--repo owner/repo] [--port 38429] [--skip-description]
+  preview update-description --pr N --sha S --url URL [--repo owner/repo]
+  preview cleanup            --pr N [--repo owner/repo] [--skip-description]
+  preview remove-description --pr N [--repo owner/repo]
 
 Environment variables:
   SPRITES_API_TOKEN  Sprites.dev API token (required)
-  GH_TOKEN           GitHub token for posting PR comments (required)
+  GH_TOKEN           GitHub token for PR description updates (required by description commands)
   GITHUB_REPOSITORY  GitHub repository in owner/repo format (required)
 
 Local usage:

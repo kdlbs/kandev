@@ -220,7 +220,7 @@
   "oauthTokenExpires": "權杖過期時間：{{date}}",
   "oauthPasteInstructions": "在新標籤頁中完成授權",
   "oauthPasteHelp": "在 Atlassian 上批准後，你將被重定向到一個無法載入的 localhost 網址。請從瀏覽器位址列複製完整網址並貼上到下方。",
-  "oauthPopupBlocked": "瀏覽器已封鎖授權視窗。請允許彈出式視窗，然後再試。",
+  "oauthPopupBlocked": "瀏覽器已阻止授權視窗。請允許彈出視窗，然後重試。",
   "oauthComplete": "完成",
   "oauthCancel": "取消",
   "oauthPasteInvalid": "網址無效。請確保複製了包含 code 和 state 引數的完整重定向網址。"
