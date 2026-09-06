@@ -38,8 +38,19 @@ test.describe("Workspace repository sets settings", () => {
     // Create a set holding both repositories.
     const setName = `Settings set ${Date.now()}`;
     await testPage.getByTestId("repository-set-create").click();
+    const membersHint = testPage.getByText(
+      "Add at least one. The order here is the order they are added to a task. Choose a saved base branch or use the task default for each repository.",
+    );
+    const addRepository = testPage.getByTestId("repository-set-add-repository");
+    const [membersHintBox, addRepositoryBox] = await Promise.all([
+      membersHint.boundingBox(),
+      addRepository.boundingBox(),
+    ]);
+    expect(membersHintBox).not.toBeNull();
+    expect(addRepositoryBox).not.toBeNull();
+    expect(membersHintBox!.width).toBeGreaterThan(addRepositoryBox!.width);
     await testPage.getByTestId(EDITOR_NAME).fill(setName);
-    await testPage.getByTestId("repository-set-add-repository").click();
+    await addRepository.click();
     await testPage.getByRole("option", { name: /E2E Repo/ }).click();
     await testPage.getByTestId("repository-set-add-repository").click();
     await testPage.getByRole("option", { name: SECOND_REPO_NAME }).click();

@@ -26,6 +26,18 @@ test.describe("Mobile workspace repository sets", () => {
     await expect(testPage.getByTestId("repository-set-editor-form")).toHaveClass(
       /min-h-0.*overflow-y-auto/,
     );
+    const membersHint = testPage.getByText(
+      "Add at least one. The order here is the order they are added to a task. Choose a saved base branch or use the task default for each repository.",
+    );
+    const addRepository = testPage.getByTestId("repository-set-add-repository");
+    const [membersHintBox, addRepositoryBox] = await Promise.all([
+      membersHint.boundingBox(),
+      addRepository.boundingBox(),
+    ]);
+    expect(membersHintBox).not.toBeNull();
+    expect(addRepositoryBox).not.toBeNull();
+    expect(addRepositoryBox!.y).toBeGreaterThan(membersHintBox!.y + membersHintBox!.height);
+    expect(addRepositoryBox!.width).toBeCloseTo(membersHintBox!.width, 0);
     await prCapture.screenshot("mobile-repository-set-editor", {
       caption:
         "The mobile repository set editor uses a full-height drawer with a fixed action bar.",
