@@ -86,8 +86,16 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         deploy_job = workflow_job(workflow, "deploy-fork")
 
-        self.assertIn("path: .preview-cli", deploy_job)
-        self.assertIn("ref: ${{ github.workflow_sha }}", deploy_job)
+        self.assertRegex(
+            deploy_job,
+            re.compile(
+                r"repository: \$\{\{ github\.repository \}\}\n"
+                r"\s+ref: \$\{\{ github\.workflow_sha \}\}\n"
+                r"\s+path: \.preview-cli\n"
+                r"\s+persist-credentials: false"
+            ),
+        )
+        self.assertIn('GOWORK: "off"', deploy_job)
         self.assertIn("go build -o \"$RUNNER_TEMP/kandev-preview-deploy\" ./cmd/preview", deploy_job)
         self.assertIn(
             'deploy_output="$(\"$RUNNER_TEMP/kandev-preview-deploy\" deploy',

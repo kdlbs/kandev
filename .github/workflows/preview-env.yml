@@ -143,6 +143,8 @@ jobs:
 
       - name: Build trusted preview command
         working-directory: .preview-cli/apps/backend
+        env:
+          GOWORK: "off"
         run: go build -o "$RUNNER_TEMP/kandev-preview-deploy" ./cmd/preview
 
       - name: Deploy preview environment
