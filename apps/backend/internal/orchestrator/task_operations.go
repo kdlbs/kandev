@@ -4196,6 +4196,17 @@ type promptTaskOptions struct {
 	promptDispatchRecovery    *models.PromptDispatchRecovery
 	expectedCurrentTurnID     string
 	requireNonterminalSession bool
+	// promptAlreadyComposed and fallbackRetryPrompt mirror the composed-prompt
+	// seam autoStartStepPrompt's own ErrExecutionNotFound branch uses (see
+	// fallbackFreshLaunchOnMissingExecution). When promptAlreadyComposed is
+	// true, handlePromptDispatchFailure's own internal ErrExecutionNotFound
+	// recovery relaunches via startCreatedSessionWithComposedPrompt
+	// (fallbackRetryPrompt as its dispatch value) instead of the public
+	// StartCreatedSession, so a caller that already composed the prompt itself
+	// (e.g. appending a claimed step handoff) is not silently recomposed from
+	// the destination step's own template.
+	promptAlreadyComposed bool
+	fallbackRetryPrompt   string
 }
 
 type promptDispatchOutcome struct {
@@ -4479,6 +4490,7 @@ func (s *Service) finishPromptDispatchFailure(
 	failureResult, failureErr := s.handlePromptDispatchFailure(
 		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
 		attachments, rollback, options.lifecyclePrompt, dispatchAccepted, promptErr,
+		options.promptAlreadyComposed, options.fallbackRetryPrompt,
 	)
 	return failureResult, wrapAcceptedPromptDispatchFailure(
 		dispatchAccepted,
@@ -4939,6 +4951,11 @@ func (s *Service) restoreLifecycleTaskState(
 // it falls back to a fresh launch instead of surfacing the error to the
 // caller. Otherwise — or if that fallback launch itself fails — it
 // delegates to handlePromptError for the caller-facing result.
+// promptAlreadyComposed/fallbackRetryPrompt are the caller's promptTaskOptions
+// values, forwarded to fallbackFreshLaunchOnMissingExecution so a caller that
+// already composed the dispatch prompt (e.g. autoStartStepPrompt, which
+// appends a claimed step handoff) is not silently recomposed from the
+// destination step's own template by this internal recovery.
 func (s *Service) handlePromptDispatchFailure(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
@@ -4948,6 +4965,8 @@ func (s *Service) handlePromptDispatchFailure(
 	lifecyclePrompt bool,
 	dispatchAccepted bool,
 	promptErr error,
+	promptAlreadyComposed bool,
+	fallbackRetryPrompt string,
 ) (*PromptResult, error) {
 	if resumedForPrompt && !dispatchAccepted && !rollback.reservedTurnAccepted && rollback.reservedTurn == nil &&
 		errors.Is(promptErr, executor.ErrExecutionNotFound) {
@@ -4955,7 +4974,7 @@ func (s *Service) handlePromptDispatchFailure(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
 		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
-			ctx, taskID, sessionID, prompt, false, "", planMode, nil, attachments, nil,
+			ctx, taskID, sessionID, prompt, promptAlreadyComposed, fallbackRetryPrompt, planMode, nil, attachments, nil,
 		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {

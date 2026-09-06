@@ -4107,6 +4107,14 @@ func (s *Service) autoStartStepPrompt(
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, promptTaskOptions{
 			requireNonterminalSession: true,
+			// dispatchPrompt is already fully composed for this step entry
+			// (handoff included, see the ErrExecutionNotFound branch below):
+			// if promptTask's own internal ErrExecutionNotFound recovery fires
+			// first (ordinary lazy-resume race), it must use the same
+			// composed-prompt seam rather than recomposing from the
+			// destination step's own template and discarding the handoff.
+			promptAlreadyComposed: true,
+			fallbackRetryPrompt:   dispatchPrompt,
 		})
 		if err == nil {
 			return nil
