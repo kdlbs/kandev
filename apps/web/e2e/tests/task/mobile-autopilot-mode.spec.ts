@@ -2,6 +2,7 @@ import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { waitForSessionDone } from "../../helpers/session";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -78,6 +79,14 @@ test.describe("Mobile task autopilot", () => {
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
       },
+    );
+    if (!parent.session_id) throw new Error("mobile autopilot parent did not return a session ID");
+    await waitForSessionDone(
+      apiClient,
+      parent.id,
+      parent.session_id,
+      "mobile autopilot parent should finish its initial turn before the child asks a question",
+      60_000,
     );
     const child = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

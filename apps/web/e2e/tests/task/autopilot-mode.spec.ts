@@ -1,7 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { useRegularMode } from "../../helpers/regular-mode";
-import { waitForSessionState } from "../../helpers/session";
+import { waitForSessionDone, waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -80,6 +80,14 @@ test.describe("Task autopilot", () => {
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
       },
+    );
+    if (!parent.session_id) throw new Error("autopilot parent did not return a session ID");
+    await waitForSessionDone(
+      apiClient,
+      parent.id,
+      parent.session_id,
+      "autopilot parent should finish its initial turn before the child asks a question",
+      60_000,
     );
     const child = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
