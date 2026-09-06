@@ -88,7 +88,17 @@ const (
 	ActionTaskPlanRevisionsList = "task.plan.revisions.list"
 	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
 	ActionTaskPlanRevert        = "task.plan.revert"
-	ActionTaskPlanImplement     = "task.plan.implementation_started"
+
+	// Plugin-backed canvas lifecycle notifications. These are owner-scoped
+	// workspace/task events and contain no application content or capabilities.
+	ActionCanvasCreated                   = "canvas.created"
+	ActionCanvasReleaseActivated          = "canvas.release.activated"
+	ActionCanvasReleasePermissionRequired = "canvas.release.permission_required"
+	ActionCanvasPromoted                  = "canvas.promoted"
+	ActionCanvasArchived                  = "canvas.archived"
+	ActionCanvasRestored                  = "canvas.restored"
+	ActionCanvasRemoved                   = "canvas.removed"
+	ActionTaskPlanImplement               = "task.plan.implementation_started"
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
@@ -445,12 +455,19 @@ const (
 	ActionMCPGetDiagnosticBundle        = "mcp.get_diagnostic_bundle"
 
 	// Office task handoffs (cross-task context).
-	ActionMCPListRelatedTasks  = "mcp.list_related_tasks"
-	ActionMCPListTaskDocuments = "mcp.list_task_documents"
-	ActionMCPGetTaskDocument   = "mcp.get_task_document"
-	ActionMCPWriteTaskDocument = "mcp.write_task_document"
-	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
-	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
+	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
+	ActionMCPListTaskDocuments        = "mcp.list_task_documents"
+	ActionMCPGetTaskDocument          = "mcp.get_task_document"
+	ActionMCPWriteTaskDocument        = "mcp.write_task_document"
+	ActionMCPListPluginTools          = "mcp.list_plugin_tools"
+	ActionMCPInvokePluginTool         = "mcp.invoke_plugin_tool"
+	ActionMCPListCanvases             = "mcp.list_canvases"
+	ActionMCPReadCanvasAuthoringSkill = "mcp.read_canvas_authoring_skill"
+	ActionMCPCreateCanvas             = "mcp.create_canvas"
+	ActionMCPGetCanvas                = "mcp.get_canvas"
+	ActionMCPPublishCanvas            = "mcp.publish_canvas"
+	ActionMCPGetCanvasState           = "mcp.get_canvas_state"
+	ActionMCPSetCanvasState           = "mcp.set_canvas_state"
 
 	// Office quorum decision recording.
 	ActionMCPRecordStepDecision = "mcp.record_step_decision"

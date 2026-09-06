@@ -16,6 +16,7 @@ const THEME_TOGGLE_TEST_ID = "mobile-theme-toggle-button";
 const ARIA_LABEL = "aria-label";
 
 const state = {
+  features: { canvases: false },
   workspaces: { activeId: "ws-1" as string | null },
 };
 

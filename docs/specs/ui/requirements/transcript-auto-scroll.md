@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-07-30
-updated: 2026-09-03
+updated: 2026-09-04
 owners:
   - cfl
 ---
@@ -14,6 +14,8 @@ owners:
 Users expect an enabled transcript to follow the newest message, including when
 they activate a long-running session tab that was mounted outside the visible
 Dockview layout or return to a task whose environment rebuilds that layout.
+When cached history is already available, task entry must not expose the
+browser's default top position while a latest-window refresh is pending.
 Users who turn off transcript auto-scroll expect the visible conversation to
 stay fixed while new content arrives and to reopen at that session's own saved
 position. Chrome can still adjust the view through its native overflow
@@ -61,9 +63,15 @@ hand-off it is designed to protect.
   user switches to that task, **THEN** the transcript restores that session's
   saved position and does not apply the outgoing session's position.
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.13:** **GIVEN** a task switch that rebuilds
-  the Dockview layout, **WHEN** the incoming transcript has not completed its
-  initial placement, **THEN** automatic older-history pagination does not start
-  from the transient pre-placement geometry.
+  the Dockview layout, **WHEN** the incoming transcript is placed and
+  pagination becomes eligible, **THEN** automatic older-history pagination
+  does not start from transient or stale pre-placement geometry.
+- **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.14:** **GIVEN** an incoming transcript with
+  cached messages and no active unread-divider target, **WHEN** a task switch
+  starts a latest-window refresh, **THEN** an enabled transcript shows its
+  newest cached message and a disabled transcript shows its saved reader
+  position as soon as the panel is measurable, without first exposing the
+  browser's default top position.
 
 ## Migrated source detail
 
@@ -86,10 +94,11 @@ the asynchronous hand-off it is designed to protect.
   message after the panel becomes measurable.
 - Activating a reader-owned transcript position preserves that position.
 - Returning to a task in another environment repeats initial placement after
-  that session's current message history is ready without replaying the
-  outgoing transcript's absolute offset.
+  its cached history becomes measurable and reconciles placement after the
+  latest-window refresh without replaying the outgoing transcript's absolute
+  offset.
 - Automatic older-history pagination waits until environment-switch placement
-  has completed.
+  has completed and validates current sentinel geometry before retrying.
 - The clarification-recovery concurrency regression waits for its asynchronous
   completion signal within a bounded interval instead of treating scheduler
   timing as a product failure.
@@ -116,13 +125,15 @@ the asynchronous hand-off it is designed to protect.
   **THEN** the prior reading position remains visible.
 - **GIVEN** two tasks in different environments with overflowing transcripts,
   **WHEN** the user switches between them and returns, **THEN** the incoming
-  enabled transcript opens at the newest message after its history refresh.
+  enabled transcript shows the newest cached message immediately and remains
+  at the newest message after its history refresh.
 - **GIVEN** the incoming transcript has auto-scroll disabled, **WHEN** that
   environment-switch placement runs, **THEN** it restores the incoming
   session's saved position rather than the outgoing transcript's position.
 - **GIVEN** incoming history and layout are still settling, **WHEN** the
-  older-history sentinel is temporarily at the viewport top, **THEN** the
-  sentinel does not start an automatic pagination cascade.
+  older-history sentinel was temporarily at the viewport top, **THEN** the
+  sentinel does not start an automatic pagination cascade unless its current
+  geometry remains inside the preload region.
 
 ## Out of scope
 

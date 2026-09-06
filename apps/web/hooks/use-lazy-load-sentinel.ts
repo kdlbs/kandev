@@ -149,7 +149,8 @@ function useSentinelObserver(opts: {
           !entry.isIntersecting ||
           !hasMore ||
           blocked ||
-          (isLoadingMore && !joinInFlightWhileLoading)
+          (isLoadingMore && !joinInFlightWhileLoading) ||
+          !isCurrentSentinelGeometryEligible(opts.refs)
         ) {
           return;
         }
@@ -339,6 +340,21 @@ function useScrollPinnedToBottom(scrollRef: React.RefObject<HTMLDivElement | nul
 }
 
 /** Retries an eligible, still-visible sentinel after a firing guard clears. */
+function isCurrentSentinelGeometryEligible(refs: SentinelMutableRefs): boolean {
+  return refs.optionsRef.current.isCurrentGeometryEligible?.() ?? true;
+}
+
+function sentinelBecameEligible(
+  previous: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
+  current: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
+): boolean {
+  return (
+    (!previous.hasMore && current.hasMore) ||
+    (previous.blocked && !current.blocked) ||
+    (previous.isLoadingMore && !current.isLoadingMore)
+  );
+}
+
 function shouldRetrySentinel(
   previous: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
   current: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
@@ -347,12 +363,10 @@ function shouldRetrySentinel(
   const { optionsRef, intersectingRef, disarmedRef } = refs;
   if (!optionsRef.current.rearmWhileIntersecting) return false;
   if (!intersectingRef.current || disarmedRef.current) return false;
-  const becameEligible =
-    (!previous.hasMore && current.hasMore) ||
-    (previous.blocked && !current.blocked) ||
-    (previous.isLoadingMore && !current.isLoadingMore);
-  if (!becameEligible || !current.hasMore || current.blocked) return false;
+  if (!sentinelBecameEligible(previous, current) || !current.hasMore || current.blocked)
+    return false;
   if (current.isLoadingMore && !optionsRef.current.joinInFlightWhileLoading) return false;
+  if (!isCurrentSentinelGeometryEligible(refs)) return false;
   return !refs.loadInFlightRef.current && !refs.continuationScheduledRef.current;
 }
 
@@ -401,7 +415,8 @@ function shouldReplayCurrentIntersection(
     !refs.continuationScheduledRef.current &&
     hasMore &&
     !blocked &&
-    (!isLoadingMore || joinInFlightWhileLoading),
+    (!isLoadingMore || joinInFlightWhileLoading) &&
+    isCurrentSentinelGeometryEligible(refs),
   );
 }
 

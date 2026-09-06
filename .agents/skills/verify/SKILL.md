@@ -35,6 +35,14 @@ verification report.
   delivery are waiting on mandatory verification; do not imply that Codex or GitHub cannot
   create PRs or ask whether to proceed unverified.
 
+## Resource-safe frontend verification
+
+Before a broad web test or E2E run, read
+[the E2E resource-safety reference](../e2e/references/resource-safety.md).
+The local Vitest configuration clamps unsafe worker overrides, and the E2E
+wrappers cap local shards and workers. Do not bypass those limits or overlap
+full suites unless the task is a deliberate, monitored resource experiment.
+
 ## Verification Procedure
 
 Resolve the PR base and verification scope base, then collect
