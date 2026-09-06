@@ -108,15 +108,21 @@ func (s *PlanService) authorize(ctx context.Context, taskID string) error {
 	return s.authorizeTask(ctx, taskID)
 }
 
-// validatePlanWrite applies the shared admission checks for a plan write.
-// Authorization runs first so a caller cannot learn the size constraint for a
-// task it cannot access. For an oversized write, the task lookup preserves the
-// existing not_found contract before the size error is returned. The plan
-// storage read and per-task write lock remain after this admission step.
+// validatePlanWrite applies CreatePlan's shared admission checks. Authorization
+// runs first so a caller cannot learn the size constraint for a task it cannot
+// access. The plan storage read and per-task write lock remain after this
+// admission step.
 func (s *PlanService) validatePlanWrite(ctx context.Context, taskID, content string) error {
 	if err := s.authorize(ctx, taskID); err != nil {
 		return err
 	}
+	return s.checkContentSize(ctx, taskID, content)
+}
+
+// checkContentSize applies the size ceiling once authorization has already
+// run. For an oversized write, the task lookup preserves the existing
+// not_found contract before the size error is returned.
+func (s *PlanService) checkContentSize(ctx context.Context, taskID, content string) error {
 	if len(content) <= MaxPlanContentBytes {
 		return nil
 	}
@@ -269,25 +275,37 @@ type UpdatePlanRequest struct {
 
 // UpdatePlan updates an existing plan (errors if missing).
 //
-// Append mode's admission checks deliberately do not call validatePlanWrite:
-// AC-TASKS-PLAN-APPEND-001.7 orders task-reach authorization before content
-// validity, and the size limit for an append is measured against the
-// composed content inside upsertPlan's lock, not the submitted fragment
-// (AC-TASKS-PLAN-APPEND-007.1) — validatePlanWrite's pre-lock size check
-// would measure the wrong thing and run at the wrong point in that order.
+// Authorization runs once, before either mode's content check, satisfying
+// AC-TASKS-PLAN-APPEND-001.7's order for both: append's content validity is
+// validateAppendFragment; an explicit replace's is the empty-content check
+// below. A request with no mode at all (the browser write path, which never
+// sets this field) keeps its pre-existing behavior of accepting empty
+// content — that check is scoped to an explicit PlanWriteModeReplace, which
+// only the agent write path ever sends, so this does not extend
+// AC-TASKS-PLAN-APPEND-001.4's "agent plan update" requirement onto a
+// surface it was never meant to reach.
+//
+// The size limit for an append is measured against the composed content
+// inside upsertPlan's lock, not the submitted fragment (AC-TASKS-PLAN-APPEND-
+// 007.1), so it is not part of this admission step for that mode.
 func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (PlanWriteResult, error) {
 	if req.TaskID == "" {
 		return PlanWriteResult{}, ErrTaskIDRequired
 	}
+	if err := s.authorize(ctx, req.TaskID); err != nil {
+		return PlanWriteResult{}, err
+	}
 	if req.Mode == PlanWriteModeAppend {
-		if err := s.authorize(ctx, req.TaskID); err != nil {
-			return PlanWriteResult{}, err
-		}
 		if err := validateAppendFragment(req.Content); err != nil {
 			return PlanWriteResult{}, err
 		}
-	} else if err := s.validatePlanWrite(ctx, req.TaskID, req.Content); err != nil {
-		return PlanWriteResult{}, err
+	} else {
+		if req.Mode == PlanWriteModeReplace && req.Content == "" {
+			return PlanWriteResult{}, ErrContentRequired
+		}
+		if err := s.checkContentSize(ctx, req.TaskID, req.Content); err != nil {
+			return PlanWriteResult{}, err
+		}
 	}
 	release := s.locks.acquire(req.TaskID)
 	defer release()

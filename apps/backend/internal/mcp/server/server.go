@@ -1855,13 +1855,14 @@ func (s *Server) registerPlanTools() {
 			mcp.WithDescription(`Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own). Set mode="replace" (the default) to submit the whole document, or mode="append" to submit only an addition. In replace mode this call OVERWRITES THE ENTIRE PLAN: sending only a new section instead of the whole document will silently delete everything else, so call get_task_plan_kandev first and send the full document (prior content plus your changes), never just the new section. In append mode you do not need to read the plan first: the server reads the stored plan and stores it, then one blank line, then your content. append is not idempotent — resubmitting the same call adds your content again.`),
 			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			// Deliberately not mcp.Required(): AC-TASKS-PLAN-APPEND-001.7
-			// orders mode validity ahead of content validity, but the
-			// server's generic MCP argument-schema validator rejects a
-			// schema-required property's absence itself, before
-			// updateTaskPlanHandler's own mode check ever runs - which
-			// would report the wrong failure for a call invalid on both
-			// axes. content-required is instead enforced by this handler's
-			// own RequireString call, positioned after the mode check.
+			// orders mode validity, then task-reach authorization, ahead of
+			// content validity. A schema-required property's absence is
+			// rejected by the server's generic MCP argument-schema
+			// validator itself, before updateTaskPlanHandler's own mode
+			// check ever runs, and before any authorization check could
+			// run either - both would report the wrong failure for a call
+			// invalid on more than one axis. content-required is instead
+			// enforced by PlanService.UpdatePlan, after authorization.
 			mcp.WithString("content", mcp.Description(`In mode="replace" (default): the full plan content in markdown format that REPLACES the entire existing plan. Sending only a new section instead of the whole document will silently delete everything else. Read the current plan with get_task_plan_kandev first and include its content here plus your additions. In mode="append": only the fragment to add — do not include the existing plan; the server composes it onto the stored content for you. Capped at 262,144 bytes (256 KiB) of UTF-8 content measured after composition; a write over that limit is rejected and stores nothing.`)),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 			// Deliberately no mcp.Enum here: the server's generic MCP

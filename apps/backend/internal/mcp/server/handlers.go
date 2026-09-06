@@ -1127,11 +1127,11 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		// already rejects a non-string value before this handler runs, so
 		// this is defense-in-depth against a future schema change, not the
 		// primary guard. content is deliberately NOT schema-required (see
-		// its registration in registerPlanTools): a schema-level rejection
-		// for missing content would fire before this mode check, which
-		// would violate this exact precedence for a request invalid on both
-		// axes. RequireString below is what actually enforces "content is
-		// required," positioned after the mode check.
+		// its registration in registerPlanTools) and read permissively
+		// here rather than with RequireString: "content is required" is
+		// PlanService.UpdatePlan's call to make, after authorization, so
+		// that a denied caller never learns content validity for a task it
+		// cannot reach (AC-TASKS-PLAN-APPEND-001.7).
 		mode, _, wrongType := planModeArg(req)
 		if wrongType {
 			return mcp.NewToolResultError(fmt.Sprintf("mode must be a string; accepted values are %q and %q", service.PlanWriteModeReplace, service.PlanWriteModeAppend)), nil
@@ -1142,10 +1142,7 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 			}
 		}
 
-		content, err := req.RequireString("content")
-		if err != nil {
-			return mcp.NewToolResultError("content is required"), nil
-		}
+		content := req.GetString("content", "")
 		title := req.GetString("title", "")
 
 		payload := map[string]interface{}{

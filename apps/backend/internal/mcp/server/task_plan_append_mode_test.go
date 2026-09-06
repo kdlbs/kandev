@@ -120,8 +120,13 @@ var planWriteDenialPhrases = []string{"no partial update", "no append mode"}
 // AC-TASKS-PLAN-APPEND-006.9 forbids directing at a caller who wants to add
 // a section, unless the same text also names update_task_plan_kandev's
 // append mode as the alternative (replace-mode guidance keeps this phrasing
-// legitimately, since append is mentioned right alongside it).
-var planWriteResendPhrases = []string{"read the plan and resubmit", "read the whole plan and send it back"}
+// legitimately, since append is mentioned right alongside it). These are the
+// literal phrasings that ship in create_task_plan_kandev's own description
+// and content parameter today ("read it first with get_task_plan_kandev",
+// "call get_task_plan_kandev first and include its content") — checking the
+// real production text rather than a hypothetical wording that has never
+// shipped.
+var planWriteResendPhrases = []string{"read it first with get_task_plan_kandev", "call get_task_plan_kandev first and include its content"}
 
 // TestPlanToolDescriptions_MentionAppendModeConsistently is the AC-006.9
 // class-rule test: every plan tool's description and every string-typed
@@ -296,12 +301,11 @@ func TestUpdateTaskPlanKandev_RejectsWronglyTypedMode(t *testing.T) {
 
 // TestUpdateTaskPlanKandev_RejectsUnknownModeValueBeforeContentCheck pins
 // AC-TASKS-PLAN-APPEND-001.7's ordering at the MCP tool layer: mode validity
-// is resolved entirely from the request and checked before
-// RequireString("content"), so a call missing content too still reports the
-// mode rejection, naming both accepted values, and never reaches the
-// backend. content is deliberately not schema-required (see server.go) so
-// this ordering is actually observable rather than shadowed by a generic
-// "content is required" schema error.
+// is resolved entirely from the request before content is even read, so a
+// call missing content too still reports the mode rejection, naming both
+// accepted values, and never reaches the backend. content is deliberately
+// not schema-required (see server.go) so this ordering is actually
+// observable rather than shadowed by a generic schema error.
 func TestUpdateTaskPlanKandev_RejectsUnknownModeValueBeforeContentCheck(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "task-current")

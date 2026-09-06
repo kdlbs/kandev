@@ -187,6 +187,18 @@ func TestUpdatePlanAppend_ComposesAndPreservesTitle(t *testing.T) {
 		t.Errorf("title = %q, want stored title preserved (no title supplied)", result.Plan.Title)
 	}
 
+	// AC-TASKS-PLAN-APPEND-005.5: the stored revision's content must be the
+	// composed document, not the raw fragment that was submitted — a reader
+	// of the revision history must be able to see the whole document at that
+	// point in time, the same as a replace-mode revision.
+	rev, err := svc.GetLatestRevision(ctx, "task-append-1")
+	if err != nil {
+		t.Fatalf("GetLatestRevision: %v", err)
+	}
+	if rev.Content != want {
+		t.Errorf("revision content = %q, want the composed content %q, not the raw fragment", rev.Content, want)
+	}
+
 	result, err = svc.UpdatePlan(ctx, UpdatePlanRequest{
 		TaskID: "task-append-1", Title: "New Title", Content: "## Step three", Mode: PlanWriteModeAppend,
 	})
@@ -195,6 +207,81 @@ func TestUpdatePlanAppend_ComposesAndPreservesTitle(t *testing.T) {
 	}
 	if result.Plan.Title != "New Title" {
 		t.Errorf("title = %q, want the supplied title applied", result.Plan.Title)
+	}
+}
+
+// TestUpdatePlanAppend_IsNotIdempotent pins AC-TASKS-PLAN-APPEND-003.6:
+// appending the identical fragment twice produces two occurrences in the
+// composed content, not one — an append composes onto whatever is currently
+// stored; it does not deduplicate against a prior append of the same text.
+func TestUpdatePlanAppend_IsNotIdempotent(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-append-repeat")
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-append-repeat", Content: "base"}); err != nil {
+		t.Fatalf("seed CreatePlan: %v", err)
+	}
+
+	fragment := "## Repeated section"
+	if _, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-append-repeat", Content: fragment, Mode: PlanWriteModeAppend,
+	}); err != nil {
+		t.Fatalf("first append: %v", err)
+	}
+	result, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-append-repeat", Content: fragment, Mode: PlanWriteModeAppend,
+	})
+	if err != nil {
+		t.Fatalf("second append: %v", err)
+	}
+
+	if got := strings.Count(result.Plan.Content, fragment); got != 2 {
+		t.Fatalf("expected the identical fragment to appear twice after two appends, got %d occurrence(s) in %q", got, result.Plan.Content)
+	}
+}
+
+// TestUpdatePlanAppend_EventParityWithReplace pins that an append publishes
+// the same event types, in the same order, as a replace that produces the
+// same final content: append is a composition detail of UpdatePlan, not a
+// distinct write path from the event bus's perspective, so subscribers (WS
+// broadcast, etc.) need not special-case it.
+func TestUpdatePlanAppend_EventParityWithReplace(t *testing.T) {
+	ctx := context.Background()
+
+	appendSvc, appendBus, appendRepo := createTestPlanService(t)
+	seedTask(t, ctx, appendRepo, "task-append-parity")
+	if _, err := appendSvc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-append-parity", Content: "base"}); err != nil {
+		t.Fatalf("seed CreatePlan (append side): %v", err)
+	}
+	appendBus.ClearEvents()
+	if _, err := appendSvc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-append-parity", Content: "## New section", Mode: PlanWriteModeAppend,
+	}); err != nil {
+		t.Fatalf("UpdatePlan append: %v", err)
+	}
+	appendEvents := appendBus.GetPublishedEvents()
+
+	replaceSvc, replaceBus, replaceRepo := createTestPlanService(t)
+	seedTask(t, ctx, replaceRepo, "task-replace-parity")
+	if _, err := replaceSvc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-replace-parity", Content: "base"}); err != nil {
+		t.Fatalf("seed CreatePlan (replace side): %v", err)
+	}
+	replaceBus.ClearEvents()
+	if _, err := replaceSvc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-replace-parity", Content: "base\n\n## New section", Mode: PlanWriteModeReplace,
+	}); err != nil {
+		t.Fatalf("UpdatePlan replace: %v", err)
+	}
+	replaceEvents := replaceBus.GetPublishedEvents()
+
+	if len(appendEvents) != len(replaceEvents) {
+		t.Fatalf("event count mismatch: append published %d event(s) %v, replace published %d event(s) %v",
+			len(appendEvents), eventTypes(appendEvents), len(replaceEvents), eventTypes(replaceEvents))
+	}
+	for i := range appendEvents {
+		if appendEvents[i].Type != replaceEvents[i].Type {
+			t.Errorf("event[%d] type mismatch: append=%q replace=%q", i, appendEvents[i].Type, replaceEvents[i].Type)
+		}
 	}
 }
 
@@ -286,6 +373,35 @@ func TestUpdatePlanAppend_AuthorizationRunsBeforeContentValidity(t *testing.T) {
 	})
 	if !errors.Is(err, denied) {
 		t.Fatalf("err = %v, want the authorization failure (not the empty-content error)", err)
+	}
+}
+
+// TestUpdatePlanReplace_AuthorizationRunsBeforeContentValidity pins
+// AC-TASKS-PLAN-APPEND-001.7's order for an explicit replace, mirroring
+// TestUpdatePlanAppend_AuthorizationRunsBeforeContentValidity: a request
+// invalid on both task-reach authorization and content validity (empty
+// content) reports the authorization failure, not ErrContentRequired. This is
+// the regression pin for the ordering bug this fix corrects — before it,
+// UpdatePlan checked req.Content == "" ahead of authorization.
+func TestUpdatePlanReplace_AuthorizationRunsBeforeContentValidity(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-replace-denied")
+	if _, err := svc.CreatePlan(ctx, CreatePlanRequest{TaskID: "task-replace-denied", Content: "base"}); err != nil {
+		t.Fatalf("seed CreatePlan: %v", err)
+	}
+
+	denied := errors.New("not visible to this caller")
+	svc.SetTaskAuthorizer(func(context.Context, string) error { return denied })
+
+	_, err := svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: "task-replace-denied", Content: "", Mode: PlanWriteModeReplace,
+	})
+	if !errors.Is(err, denied) {
+		t.Fatalf("err = %v, want the authorization failure (not ErrContentRequired)", err)
+	}
+	if errors.Is(err, ErrContentRequired) {
+		t.Fatalf("err must not also match ErrContentRequired: %v", err)
 	}
 }
 
