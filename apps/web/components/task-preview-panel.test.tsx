@@ -286,9 +286,15 @@ describe("TaskPreviewPanel actions menu — closes on Archive/Delete success (AC
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
     const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByTestId("delete-discard-worktree-checkbox"));
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    await waitFor(() => expect(deleteTaskMock).toHaveBeenCalledWith("task-1", { cascade: false }));
+    await waitFor(() =>
+      expect(deleteTaskMock).toHaveBeenCalledWith("task-1", {
+        cascade: false,
+        discardWorktreeChanges: true,
+      }),
+    );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
