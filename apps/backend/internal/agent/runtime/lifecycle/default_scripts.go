@@ -87,7 +87,7 @@ repository_branch={{repository.branch}}
     fi
     if git rev-parse --verify "$worktree_branch" >/dev/null 2>&1; then
       git checkout "$worktree_branch"
-    elif git fetch --no-tags origin "+refs/heads/$worktree_branch:refs/remotes/origin/$worktree_branch" 2>/dev/null; then
+    elif git fetch --no-tags origin "+refs/heads/${worktree_branch}:refs/remotes/origin/${worktree_branch}" 2>/dev/null; then
       git checkout -b "$worktree_branch" "origin/$worktree_branch"
     else
       git checkout -b "$worktree_branch"
@@ -312,7 +312,7 @@ if [ -n "$repository_url" ]; then
   git -C "$workspace" config remote.origin.partialclonefilter blob:none
   echo "Fetching $repository_branch..."
   if ! git -C "$workspace" fetch --filter=blob:none --no-tags origin \
-      "+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch"; then
+      "+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}"; then
     echo 'kandev: target base branch is unavailable' >&2
     exit 1
   fi
@@ -387,7 +387,7 @@ if [ -n "$repository_url" ]; then
     echo 'kandev: target repository has no base branch' >&2
     exit 1
   fi
-  if ! git -C "$workspace" fetch --no-tags origin "+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch" >/dev/null 2>&1; then
+  if ! git -C "$workspace" fetch --no-tags origin "+refs/heads/${repository_branch}:refs/remotes/origin/${repository_branch}" >/dev/null 2>&1; then
     echo 'kandev: target base branch is unavailable' >&2
     exit 1
   fi

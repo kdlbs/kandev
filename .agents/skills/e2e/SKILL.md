@@ -71,7 +71,7 @@ command. Shared `.git` metadata does not include `apps/node_modules`.
 
 ### Preferred: `pnpm e2e:run` (managed runner — builds, runs, tears down)
 
-`e2e/scripts/run-e2e.sh` handles the build, the run, and cleanup in one command. Use it instead of stitching the steps together. It auto-selects docker vs host, runs N shards concurrently, enforces strict WS accounting by default (matching CI), and never leaves root-owned artifacts behind.
+`e2e/scripts/run-e2e.sh` handles the build, the run, and cleanup in one command. Use it instead of stitching the steps together. It auto-selects docker vs host, runs a resource-bounded number of shards concurrently, enforces one Playwright worker per shard and strict WS accounting by default (matching CI), and never leaves root-owned artifacts behind.
 
 ```bash
 cd apps/web
@@ -96,10 +96,11 @@ pnpm e2e:run --project routing tests/office-routing-<name>.spec.ts
 pnpm e2e:run --project containers tests/docker/<name>.spec.ts
 ```
 
-Use `mobile-chrome` only for `mobile-*.spec.ts` files. Confirm Playwright
-discovers the intended test count before treating a focused command as evidence.
+Use `mobile-chrome` only for `mobile-*.spec.ts` files. Confirm Playwright discovers the intended test count before treating a focused command as evidence.
 
 `e2e:run` accepts one `--project`; repeating it selects only the last value, so run desktop and mobile separately when both are required and confirm discovery for each.
+
+See [resource-safety.md](references/resource-safety.md) before any full local test run.
 
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
@@ -136,7 +137,7 @@ Start by matching CI as closely as possible, then add pressure deliberately:
      -e NODE_OPTIONS=--dns-result-order=ipv4first \
      -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
      ghcr.io/kdlbs/kandev-ci:runtime-latest \
-     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --shard=<failed-shard>/14 --reporter=list'
+     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; bash e2e/scripts/run-raw-e2e.sh --project=chromium --project=mobile-chrome --shard=<failed-shard>/14 -- --reporter=list --retries=0'
    ```
 2. If the exact shard passes, constrain container resources and repeat the
    failing spec/test. GitHub-hosted runners can expose timing bugs that a roomy
@@ -148,7 +149,7 @@ Start by matching CI as closely as possible, then add pressure deliberately:
      -e NODE_OPTIONS=--dns-result-order=ipv4first \
      -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
      ghcr.io/kdlbs/kandev-ci:runtime-latest \
-     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=mobile-chrome e2e/tests/terminal/mobile-terminal-keybar.spec.ts --grep "user presses an OS-keyboard letter while no modifier is active" --repeat-each=30 --reporter=list'
+     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; bash e2e/scripts/run-raw-e2e.sh --project=mobile-chrome e2e/tests/terminal/mobile-terminal-keybar.spec.ts --grep "user presses an OS-keyboard letter while no modifier is active" --repeat-each=30 --reporter=list --retries=0'
    ```
 3. Preserve nearby test ordering when a single-test repeat stays green; run the full spec or shard with the same resource limits before declaring a flake non-reproducible.
 
@@ -439,11 +440,11 @@ CI splits host tests across 14 shards (plus 6 container shards); reproduce a spe
 
 ```bash
 # List which tests are in a shard
-npx playwright test --config e2e/playwright.config.ts --shard=2/14 --list
+pnpm e2e:raw -- --shard=2/14 --list
 
 # Run that shard locally (requires production build)
 make build-backend build-web
-cd apps/web && npx playwright test --config e2e/playwright.config.ts --shard=2/14
+cd apps/web && pnpm e2e:raw -- --shard=2/14
 ```
 
 ```bash
@@ -473,7 +474,7 @@ A test that flakes under parallel/sharded load is one of two things — decide w
 1. **Re-run it in a fresh, isolated container** (or at minimum a single fresh worker), `--retries=0`, a few reps:
    ```bash
    pnpm e2e:docker --no-build -- --repeat-each=4 --workers=1 --retries=0 tests/path.spec.ts:LINE
-   # or raw: pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium --repeat-each=4 --workers=1 --retries=0 tests/path.spec.ts:LINE
+   # or raw: pnpm e2e:raw -- --project=chromium --repeat-each=4 --retries=0 tests/path.spec.ts:LINE
    ```
    (On Apple Silicon, `pnpm e2e:docker` needs Colima + Rosetta — `colima start --vz-rosetta`; default QEMU segfaults the amd64 Go build. See `apps/web/e2e/README.md`.)
    - **Flakes alone (fails some reps, fast):** intrinsic race — fix it (condition-correct wait, fix the actual race; not a timeout bump). E.g. a `waitForRequest` that times out the full window means the request *never fired* (a click swallowed during hydration) — retry the action with `await expect(async () => { ... }).toPass()`, don't extend the timeout.

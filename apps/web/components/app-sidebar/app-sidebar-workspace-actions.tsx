@@ -2,11 +2,17 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { IconLayoutGrid, IconListDetails } from "@tabler/icons-react";
+import Link from "@/components/routing/app-link";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { usePathname } from "@/lib/routing/client-router";
 import type { SidebarWorkspaceActionsSlotProps } from "@/lib/plugins/types";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import { cn } from "@/lib/utils";
+import { canvasHref, workspaceCanvasSettingsHref } from "@/lib/api/domains/canvas-api";
+import { isActiveWorkspaceCanvas, useWorkspaceCanvases } from "./sections/canvases-section";
 
 /**
  * Props forwarded to every plugin component registered for the
@@ -61,10 +67,15 @@ export function MobileWorkspaceActionsSection({
 }) {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((state) => state.workspaces?.activeId ?? null);
+  const canvasesEnabled = useFeature("canvases");
   const registry = usePluginRegistry();
+  const pathname = usePathname();
   const workspaceId = providedWorkspaceId ?? activeWorkspaceId;
+  const canvases = useWorkspaceCanvases(canvasesEnabled ? workspaceId : null);
+  const activeCanvases = canvases.filter(isActiveWorkspaceCanvas);
+  const hasPluginActions = registry.getSlotRegistrations("sidebar-workspace-actions").length > 0;
 
-  if (!workspaceId || registry.getSlotRegistrations("sidebar-workspace-actions").length === 0) {
+  if (!workspaceId || (!hasPluginActions && !canvasesEnabled)) {
     return null;
   }
 
@@ -75,7 +86,43 @@ export function MobileWorkspaceActionsSection({
       role="group"
       aria-label={t("common:workspace")}
     >
-      <AppSidebarWorkspaceActions workspaceId={workspaceId} presentation="mobile" />
+      {canvasesEnabled && (
+        <div className="flex flex-col gap-1" data-testid="mobile-workspace-canvases">
+          <div className="flex items-center gap-2 px-1 text-xs font-semibold text-muted-foreground">
+            <IconLayoutGrid className="h-4 w-4" aria-hidden="true" />
+            <span>{t("canvases:canvases")}</span>
+          </div>
+          {activeCanvases.length > 0 ? (
+            activeCanvases.map((canvas) => (
+              <Link
+                key={canvas.id}
+                href={canvasHref(canvas.id)}
+                aria-current={pathname === canvasHref(canvas.id) ? "page" : undefined}
+                className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm cursor-pointer hover:bg-muted/60"
+                data-testid={`mobile-workspace-canvas-${canvas.id}`}
+              >
+                <IconLayoutGrid
+                  className="h-4 w-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1 truncate">{canvas.title}</span>
+              </Link>
+            ))
+          ) : (
+            <Link
+              href={workspaceCanvasSettingsHref(workspaceId)}
+              className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground cursor-pointer hover:bg-muted/60"
+              data-testid="mobile-workspace-canvases-settings"
+            >
+              <IconListDetails className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{t("canvases:openWorkspaceSettings")}</span>
+            </Link>
+          )}
+        </div>
+      )}
+      {hasPluginActions && (
+        <AppSidebarWorkspaceActions workspaceId={workspaceId} presentation="mobile" />
+      )}
     </div>
   );
 }

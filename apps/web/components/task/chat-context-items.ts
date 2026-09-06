@@ -98,9 +98,6 @@ function buildPromptContextItem(
     onRemove: makeRemoveHandler(helpers.sid, f.path, helpers.removeContextFile),
     onUnpin: makeUnpinHandler(f.pinned, helpers.sid, f.path, helpers.unpinFile),
     promptContent: prompt?.content,
-    onClick: () => {
-      /* navigate to settings/prompts if desired */
-    },
   };
 }
 

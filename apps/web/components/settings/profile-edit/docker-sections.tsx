@@ -1,12 +1,20 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { IconPlayerPlay, IconLoader2, IconCheck, IconX, IconTrash } from "@tabler/icons-react";
+import {
+  IconPlayerPlay,
+  IconLoader2,
+  IconCheck,
+  IconX,
+  IconTrash,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Switch } from "@kandev/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
 import {
@@ -411,6 +419,51 @@ function ContainerRow({
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+export function UserNamespacesCard({
+  enabled,
+  baselineEnabled = false,
+  onChange,
+}: {
+  enabled: boolean;
+  baselineEnabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const isDirty = enabled !== baselineEnabled;
+  return (
+    <SettingsCard isDirty={isDirty}>
+      <SettingsCardHeader
+        title={t("executors:allowUserNamespacesTitle")}
+        description={t("executors:allowUserNamespacesDescription")}
+        actions={
+          <label
+            htmlFor="allow-user-namespaces"
+            className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center md:min-h-0 md:min-w-0"
+          >
+            <Switch
+              id="allow-user-namespaces"
+              aria-label={t("executors:allowUserNamespacesTitle")}
+              checked={enabled}
+              onCheckedChange={onChange}
+              data-settings-dirty={isDirty}
+            />
+          </label>
+        }
+      />
+      <CardContent>
+        <p className="text-sm text-muted-foreground flex items-start gap-2">
+          <IconInfoCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {t("executors:allowUserNamespacesNote")}
+        </p>
+        <p className="mt-2 flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400">
+          <IconInfoCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {t("executors:allowUserNamespacesWarning")}
+        </p>
+      </CardContent>
+    </SettingsCard>
   );
 }
 

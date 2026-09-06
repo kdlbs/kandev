@@ -105,6 +105,7 @@ import (
 const (
 	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
 	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
+	desktopRuntimeEnv        = "KANDEV_DESKTOP_RUNTIME"
 	agentShutdownTimeout     = 20 * time.Second
 	httpShutdownTimeout      = 10 * time.Second
 	tracingShutdownTimeout   = 5 * time.Second
@@ -1042,9 +1043,11 @@ func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
-		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
-		Locale:        i18n.FromRequest(req),
-		TitlePrefix:   strings.TrimSpace(titlePrefix),
+		NonProduction:               profiles.DetectEnvironment() != profiles.EnvProd,
+		Locale:                      i18n.FromRequest(req),
+		TitlePrefix:                 strings.TrimSpace(titlePrefix),
+		NativeFolderPickerAvailable: strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
+		DesktopRuntime:              strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
 	}
 }
 
@@ -1429,9 +1432,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
 		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
+		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
 	if p.services.AzureDevOps != nil {
@@ -1476,6 +1479,10 @@ func registerSecondaryRoutes(
 			p.services.Plugins.SetAuthLoginBridge(pluginSSOBridge{auth: p.authSvc})
 		}
 		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log)
+		if p.features.Canvases {
+			plugins.RegisterWebAppRuntimeRoutes(p.router, p.services.Plugins.WebRuntime())
+			registerCanvasRoutes(p)
+		}
 		p.log.Debug("Registered Plugins handlers (HTTP)")
 	}
 
@@ -1815,6 +1822,12 @@ func registerMCPAndDebugRoutes(
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	mcpHandlers.SetPluginService(p.services.Plugins)
+	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
+		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(
+			p.services.Canvas, p.services.Plugins, p.taskSvc,
+			lifecycleCanvasExecutionResolver{manager: p.lifecycleMgr}, p.homeDir, p.log,
+		))
+	}
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)

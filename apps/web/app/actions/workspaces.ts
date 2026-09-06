@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- Workspace and workflow actions share one server-action boundary. */
+
 "use server";
 
 import { getBackendConfig } from "@/lib/config";
@@ -232,6 +234,15 @@ export async function discoverRepositoriesAction(
     `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/discover${params}`,
   );
 }
+
+export {
+  getRepositoryDiscoveryAction,
+  refreshRepositoryDiscoveryAction,
+  listDesktopDiscoveryRootsAction,
+  addDesktopDiscoveryRootAction,
+  reconnectDesktopDiscoveryRootAction,
+  removeDesktopDiscoveryRootAction,
+} from "./repository-discovery";
 
 export async function validateRepositoryPathAction(
   workspaceId: string,
