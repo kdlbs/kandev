@@ -95,11 +95,10 @@ func (s *Service) sendCIRunDispatch(
 		return nil, err
 	}
 	request.ProviderCallStartedAt = &dispatchStartedAt
-	// GitHub workflow dispatch accepts a branch or tag ref, not a commit SHA.
-	// Reconciliation rejects any resulting run that does not prove this request's
-	// validated head.
+	// A commit SHA is immutable, so a branch move after the final admission read
+	// cannot change the workflow or revision GitHub dispatches.
 	metadata, err := dispatchCIRunWorkflow(ctx, client, binding.Owner, binding.Repo,
-		verified.Workflow.ID, verified.PR.HeadBranch, inputs)
+		verified.Workflow.ID, request.ExpectedHeadSHA, inputs)
 	applyCIRunProviderMetadata(request, metadata, err)
 	if err != nil {
 		return s.handleCIRunMutationError(ctx, request, err)

@@ -33,6 +33,7 @@ type fakeCIRunActionsClient struct {
 	preDispatchRuns  []GitHubActionsRun
 	rerunErr         error
 	dispatchErr      error
+	dispatchHook     func()
 	reruns           int
 	dispatches       int
 	dispatchRef      string
@@ -108,6 +109,9 @@ func (f *fakeCIRunActionsClient) DispatchActionsWorkflow(
 ) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.dispatchHook != nil {
+		f.dispatchHook()
+	}
 	f.dispatches++
 	f.dispatchRef = ref
 	f.dispatchInputs = inputs
@@ -118,6 +122,9 @@ func (f *fakeCIRunActionsClient) DispatchActionsWorkflowWithMetadata(
 ) (GitHubRequestMetadata, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.dispatchHook != nil {
+		f.dispatchHook()
+	}
 	f.dispatches++
 	f.dispatchRef = ref
 	f.dispatchInputs = inputs
@@ -322,7 +329,7 @@ func TestRequestFreshCIRunDispatchesOnlyReviewedSameRepoWorkflow(t *testing.T) {
 	if receipt.Operation != CIRunOperationWorkflowDispatch || receipt.RunID != 101 {
 		t.Fatalf("receipt = %+v", receipt)
 	}
-	if client.dispatchRef != "feature/x" || client.dispatchInputs["fail_on_flaky"] != "false" {
+	if client.dispatchRef != input.ExpectedHeadSHA || client.dispatchInputs["fail_on_flaky"] != "false" {
 		t.Fatalf("dispatch ref/inputs = %q %#v", client.dispatchRef, client.dispatchInputs)
 	}
 	if len(client.workflowRefs) != 2 || client.workflowRefs[0] != "main" ||
@@ -630,6 +637,36 @@ func TestRequestFreshCIRunRechecksHeadImmediatelyBeforeDispatch(t *testing.T) {
 	}
 	if client.dispatches != 0 {
 		t.Fatal("workflow was dispatched after the PR head changed")
+	}
+}
+
+func TestRequestFreshCIRunDoesNotDispatchMutableBranchAfterValidation(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.rerunErr = &CIRunProviderError{Class: CIRunFailureRerunIneligible, StatusCode: 422}
+	client.workflowSource = []byte("on:\n  workflow_dispatch:\n")
+	client.runs = []GitHubActionsRun{{
+		ID: 101, Attempt: 1, WorkflowID: 77, WorkflowName: "E2E",
+		WorkflowPath: reviewedDispatchWorkflow, HeadSHA: input.ExpectedHeadSHA,
+		HeadBranch: "feature/x", Event: "workflow_dispatch",
+		Repository: "kdlbs/kandev", HeadRepository: "kdlbs/kandev",
+		CreatedAt: service.ciRunClock()().UTC(),
+	}}
+	client.dispatchHook = func() {
+		client.pr.HeadSHA = strings.Repeat("b", 40)
+	}
+
+	_, err := service.RequestFreshCIRun(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.dispatches != 1 {
+		t.Fatalf("provider dispatches = %d, want one immutable dispatch", client.dispatches)
+	}
+	if client.dispatchRef != input.ExpectedHeadSHA {
+		t.Fatalf("dispatch ref = %q, want validated immutable SHA %q", client.dispatchRef, input.ExpectedHeadSHA)
+	}
+	if client.pr.HeadSHA != strings.Repeat("b", 40) {
+		t.Fatalf("dispatch hook did not move mutable branch head: %q", client.pr.HeadSHA)
 	}
 }
 
