@@ -27,7 +27,7 @@
 # Exit codes:
 #   0  terminal and clean      - no failed checks, no unresolved threads
 #   1  terminal with findings  - failures and/or review threads to act on
-#   2  deadline reached        - checks still pending; names reported
+#   2  deadline reached        - checks still pending or terminal rollup not confirmed
 #   3  blocked                 - merged/closed, approval required, or access lost
 #
 # Requires: gh (authenticated), jq, and scripts/pr-state alongside this script.
@@ -155,6 +155,55 @@ PR=$((10#$PR))
 
 progress() {
   [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$*" >&2
+}
+
+# A current-head check rollup can briefly contain only the first materialized
+# workflows while reporting no failed or pending checks. Require two identical
+# terminal snapshots so a later workflow registration is observed before the
+# caller receives a clean verdict.
+TERMINAL_ROLLUP_FINGERPRINT=''
+TERMINAL_ROLLUP_STREAK=0
+TERMINAL_ROLLUP_PROVISIONAL=0
+
+terminal_rollup_fingerprint() {
+  jq -c '
+    def stable_checks:
+      sort_by([
+        (.workflow // ""),
+        (.name // ""),
+        (.status // ""),
+        (.conclusion // ""),
+        ((.run_id // "") | tostring),
+        ((.job_id // "") | tostring)
+      ]);
+    {
+      check_count: (.check_count // 0),
+      passed_check_count: (.passed_check_count // 0),
+      successful_checks: ((.successful_checks // []) | stable_checks),
+      terminal_checks: ((.terminal_checks // []) | stable_checks),
+      failed_checks: ((.failed_checks // []) | stable_checks),
+      pending_checks: ((.pending_checks // []) | stable_checks)
+    }' <<<"$1"
+}
+
+augment_required_status_checks() {
+  # pr-state performs this augmentation in production. Keep this defensive
+  # fallback for raw snapshots supplied by tests or another snapshot producer.
+  jq -c '
+    if (.required_status_checks_known // false) != true then
+      .
+    else
+      ([.successful_checks[]?, .terminal_checks[]?, .failed_checks[]?, .pending_checks[]? | .name] | unique) as $reported
+      | ([.required_status_checks[]?
+          | . as $required
+          | select(($reported | index($required)) == null)
+          | {name: $required, workflow: null, status: "missing", run_id: null,
+             job_id: null, details_url: null, target_url: null}
+        ]) as $missing
+      | .pending_checks = ((.pending_checks // []) + $missing)
+      | .check_count = ((.check_count // 0) + ($missing | length))
+    end
+  '
 }
 
 # Mergeability is deliberately absent from `pr-state --summary`, so it is
@@ -370,6 +419,7 @@ MERGE_ERRORS=0
 MERGE_TIMED_OUT=0
 EVIDENCE_ERRORS=0
 MERGE_UNKNOWN=0
+REQUIRED_STATUS_UNKNOWN=0
 HEAD_CHANGES=0
 FIRST_HEAD=''
 SUMMARY_JSON=''
@@ -425,6 +475,7 @@ while :; do
     fi
     continue
   fi
+  summary_body="$(augment_required_status_checks <<<"$summary_body")"
   SUMMARY_JSON="$summary_body"
   CONSECUTIVE_ERRORS=0
 
@@ -447,7 +498,7 @@ while :; do
 
   read_rc=0
   run_bounded_capture "$budget" "$READ_TMP" \
-    "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,headRefOid || read_rc=$?
+    "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,reviewDecision,headRefOid || read_rc=$?
   if [[ "$read_rc" -eq 124 ]]; then
     progress "poll ${POLLS}: gh pr view exceeded its ${budget}s bound"
     OUTCOME='blocked-merge-state'
@@ -492,6 +543,9 @@ while :; do
     # deadline reached before the next read print those checks under the new
     # SHA; with no snapshot the run reports blocked, which is the truth.
     SUMMARY_JSON=''
+    TERMINAL_ROLLUP_FINGERPRINT=''
+    TERMINAL_ROLLUP_STREAK=0
+    TERMINAL_ROLLUP_PROVISIONAL=0
     if ! sleep_or_stop; then
       OUTCOME='deadline'
       break
@@ -529,6 +583,22 @@ while :; do
     continue
   fi
 
+  required_status_known="$(jq -r 'if .required_status_checks_known == true then "yes" else "no" end' <<<"$SUMMARY_JSON")"
+  if [[ "$required_status_known" != 'yes' ]]; then
+    REQUIRED_STATUS_UNKNOWN=$((REQUIRED_STATUS_UNKNOWN + 1))
+    progress "poll ${POLLS}: required status policy is unavailable (${REQUIRED_STATUS_UNKNOWN} in a row)"
+    if [[ "$REQUIRED_STATUS_UNKNOWN" -ge 3 ]]; then
+      OUTCOME='blocked-required-statuses'
+      break
+    fi
+    if ! sleep_or_stop; then
+      OUTCOME='blocked-required-statuses'
+      break
+    fi
+    continue
+  fi
+  REQUIRED_STATUS_UNKNOWN=0
+
   if [[ "$(jq -r '.approval_required_runs | length' <<<"$SUMMARY_JSON")" -gt 0 ]]; then
     # action_required reads as green-or-skipped in a naive check count. It is
     # blocked verification: waiting for it to finish would never terminate.
@@ -540,12 +610,21 @@ while :; do
   # empty rollup satisfies "nothing pending" without any evidence behind it;
   # in this repository the required jobs always run, so zero means not yet.
   if [[ "$check_count" -eq 0 ]]; then
+    TERMINAL_ROLLUP_FINGERPRINT=''
+    TERMINAL_ROLLUP_STREAK=0
+    TERMINAL_ROLLUP_PROVISIONAL=0
     progress "poll ${POLLS}: no checks registered at this head yet; waiting"
     if ! sleep_or_stop; then
       OUTCOME='deadline'
       break
     fi
     continue
+  fi
+
+  if [[ "$pending" -gt 0 || "$complete" != 'true' ]]; then
+    TERMINAL_ROLLUP_FINGERPRINT=''
+    TERMINAL_ROLLUP_STREAK=0
+    TERMINAL_ROLLUP_PROVISIONAL=0
   fi
 
   # A failed job can be visible while its parent workflow is still running, so
@@ -578,6 +657,9 @@ while :; do
     snapshot_errors="$(jq -r '.errors // [] | length' <<<"$SUMMARY_JSON")"
     threads_known="$(jq -r 'if .unresolved_review_thread_count == null then "no" else "yes" end' <<<"$SUMMARY_JSON")"
     if [[ "$snapshot_errors" -gt 0 || "$threads_known" == 'no' ]]; then
+      TERMINAL_ROLLUP_FINGERPRINT=''
+      TERMINAL_ROLLUP_STREAK=0
+      TERMINAL_ROLLUP_PROVISIONAL=0
       EVIDENCE_ERRORS=$((EVIDENCE_ERRORS + 1))
       progress "poll ${POLLS}: checks terminal but evidence incomplete (${EVIDENCE_ERRORS} in a row)"
       if [[ "$EVIDENCE_ERRORS" -ge 3 ]]; then
@@ -595,6 +677,9 @@ while :; do
     # GitHub reports UNKNOWN while it is still computing mergeability. Deciding
     # on it would call a PR clean before the answer exists.
     if [[ "$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")" == 'UNKNOWN' ]]; then
+      TERMINAL_ROLLUP_FINGERPRINT=''
+      TERMINAL_ROLLUP_STREAK=0
+      TERMINAL_ROLLUP_PROVISIONAL=0
       MERGE_UNKNOWN=$((MERGE_UNKNOWN + 1))
       progress "poll ${POLLS}: mergeability still UNKNOWN (${MERGE_UNKNOWN} in a row)"
       if [[ "$MERGE_UNKNOWN" -ge 3 ]]; then
@@ -608,6 +693,24 @@ while :; do
       continue
     fi
     MERGE_UNKNOWN=0
+
+    terminal_fingerprint="$(terminal_rollup_fingerprint "$SUMMARY_JSON")"
+    if [[ "$terminal_fingerprint" == "$TERMINAL_ROLLUP_FINGERPRINT" ]]; then
+      TERMINAL_ROLLUP_STREAK=$((TERMINAL_ROLLUP_STREAK + 1))
+    else
+      TERMINAL_ROLLUP_FINGERPRINT="$terminal_fingerprint"
+      TERMINAL_ROLLUP_STREAK=1
+    fi
+    if [[ "$TERMINAL_ROLLUP_STREAK" -lt 2 ]]; then
+      TERMINAL_ROLLUP_PROVISIONAL=1
+      progress "poll ${POLLS}: terminal check rollup is provisional; waiting for a matching snapshot"
+      if ! sleep_or_stop; then
+        OUTCOME='deadline'
+        break
+      fi
+      continue
+    fi
+    TERMINAL_ROLLUP_PROVISIONAL=0
 
     OUTCOME='terminal'
     break
@@ -665,6 +768,7 @@ threads_known_final="$(jq -r 'if .unresolved_review_thread_count == null then "n
 base_advanced="$(jq -r 'if .pr.base_advanced_since_head == true then 1 else 0 end' <<<"$SUMMARY_JSON")"
 mergeable="$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")"
 merge_status="$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$MERGE_JSON")"
+review_decision="$(jq -r '.reviewDecision // "UNKNOWN"' <<<"$MERGE_JSON")"
 
 conflicted=0
 [[ "$mergeable" == 'CONFLICTING' || "$merge_status" == 'DIRTY' ]] && conflicted=1
@@ -675,7 +779,7 @@ conflicted=0
 findings=$((failed_n + threads_total_n + comments_n + conflicted + changes_req_n + blocked_rev_n + base_advanced))
 
 case "$OUTCOME" in
-  blocked-pr-state | blocked-approval | blocked-evidence | blocked-merge-unknown) code=3 ;;
+  blocked-pr-state | blocked-approval | blocked-evidence | blocked-merge-unknown | blocked-required-statuses) code=3 ;;
   deadline) code=2 ;;
   *) [[ "$findings" -gt 0 ]] && code=1 || code=0 ;;
 esac
@@ -712,7 +816,7 @@ printf 'gate: %s | outcome: %s | waited %dm%02ds over %d poll(s)\n' \
   "$MODE" "$OUTCOME" "$((WAITED / 60))" "$((WAITED % 60))" "$POLLS"
 [[ "$HEAD_CHANGES" -gt 0 ]] && printf 'note: head moved %d time(s) during the wait\n' "$HEAD_CHANGES"
 printf 'checks: %s passed, %s failed, %s pending\n' "$passed_n" "$failed_n" "$pending_n"
-printf 'merge: %s / %s\n' "$mergeable" "$merge_status"
+printf 'merge: %s / %s | review: %s\n' "$mergeable" "$merge_status" "$review_decision"
 printf 'toolchain: %s\n' "$TOOLCHAIN"
 
 if [[ "$failed_n" -gt 0 ]]; then
@@ -761,8 +865,12 @@ case "$OUTCOME" in
       "${error_sources:-null unresolved thread count}" ;;
   blocked-merge-unknown)
     printf 'GitHub still reports mergeability as UNKNOWN. Re-run before treating this head as clean.\n' ;;
+  blocked-required-statuses)
+    printf 'required status check policy is unavailable. Treat the check rollup as unknown, not clean.\n' ;;
   deadline)
-    if [[ "$(jq -r '.check_count // 0' <<<"$SUMMARY_JSON")" -eq 0 ]]; then
+    if [[ "$TERMINAL_ROLLUP_PROVISIONAL" -eq 1 ]]; then
+      printf 'deadline hit while confirming the terminal check rollup. Re-run or raise --deadline-min.\n'
+    elif [[ "$(jq -r '.check_count // 0' <<<"$SUMMARY_JSON")" -eq 0 ]]; then
       printf 'deadline hit with no checks registered yet at this head. Re-run or raise --deadline-min.\n'
     else
       printf 'deadline hit with %s check(s) pending. Re-run or raise --deadline-min.\n' "$pending_n"
@@ -771,6 +879,8 @@ case "$OUTCOME" in
   *)
     if [[ "$conflicted" -eq 1 ]]; then
       printf 'resolve the merge conflict before triaging checks or threads.\n'
+    elif [[ "$findings" -eq 0 && "$review_decision" == 'REVIEW_REQUIRED' && "$merge_status" == 'BLOCKED' ]]; then
+      printf 'checks and reviews are clean, but human approval is required before merge.\n'
     elif [[ "$findings" -eq 0 ]]; then
       printf 'clean at this head.\n'
     elif [[ "$failed_n" -eq 0 && "$threads_total_n" -eq 0 ]]; then

@@ -19,7 +19,7 @@ import { Dialog } from "@kandev/ui/dialog";
 
 **Do NOT** import from `@/components/ui/*` - always use `@kandev/ui` package.
 
-- Always prefer native shadcn components over custom implementations.
+- Always prefer native shadcn components over custom implementations. For async-status UI, do not rely on a changing button label as a live announcement: use one translated `role="status"` region, keep the button's accessible name stable, and override `@kandev/ui/spinner`'s default English `aria-label` with `t(...)` when it is announced (or use `aria-hidden` when another live status covers it).
 - Check `apps/packages/ui/src/` for available components (pagination, table, dialog, etc.).
 - For data tables, use `@kandev/ui/table` with TanStack Table; use shadcn Pagination components.
 - Only create custom components when shadcn doesn't provide what's needed.
@@ -28,6 +28,7 @@ import { Dialog } from "@kandev/ui/dialog";
 
 - Use `hooks/use-responsive-breakpoint.ts` for application layout decisions. Its mobile boundary matches the sidebar's 768px `md` boundary, and it also models tablet, compact desktop, full desktop, and pointer precision; do not substitute the UI package's generic `useIsMobile` hook. Tablet is a coarse-pointer fallback between `md` and `lg`, so no fine-pointer width reports it — a spec that needs the tablet layout has to emulate touch.
 - When a Tailwind visibility class gates the same surface the hook picks, both must use the same boundary. A `sm:` class paired with a hook-driven mobile branch leaves 640-767px in a state neither side renders.
+- CSS visibility classes can leave the other viewport tree mounted. Gate live effects such as polling, subscriptions, timers, and measurements with the same responsive or pointer condition, and test both initialization orders when readiness can precede or follow hydration.
 - Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable. Apply the 44px minimum to coarse-pointer hit areas, touch rows, and mobile controls only; keep fine-pointer desktop controls at the surrounding design-system density and do not reuse a touch-sized `h-11` class as the shared visual button size.
 - Existing Radix DropdownMenu and ContextMenu surfaces receive inset, safe-area-aware bottom-sheet treatment below 640px in `app/globals.css`. Reuse those primitives for contextual actions and add focused coverage for long or nested menus instead of creating a parallel mobile menu.
 - Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements.
@@ -72,7 +73,7 @@ lib/api/domains/                    # API clients
 
 **Key State Paths:**
 
-- `messages.bySession[sessionId]`, `shell.outputs[sessionId]`, `gitStatus.bySessionId[sessionId]`
+- `messages.bySession[sessionId]`, `shell.outputs[taskEnvironmentId]`, `gitStatus.byEnvironmentId[taskEnvironmentId]`, `gitStatus.byEnvironmentRepo[taskEnvironmentId][repositoryName]`, and `sessionCommits.byEnvironmentId[taskEnvironmentId]`; code/tests starting from a session ID must resolve `environmentIdBySessionId[sessionId]` before direct environment-scoped reads/writes, and `setGitStatus` takes the environment ID.
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
@@ -89,13 +90,13 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow [`
 **Format:** `{id, type, action, payload, timestamp}`.
 
 Use subscription hooks only; the WS client auto-deduplicates.
-
 **Task overview vs. session detail:** Shared task rows read `Task.statusSummary` and `task.status_summary.updated`; rich streams stay session-detail-only. Extend the bounded projection per the [spec](../../docs/specs/platform/requirements/bounded-task-status-delivery.md) and [ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md).
 **Branch-scoped task state:** For live worktree/session state plus `task_prs`, key by `(repository, checked-out branch)`, not task/repository alone. `branch_switched` invalidates prior status/commits; reject late results with a generation/identity guard and preserve siblings. Historical PRs affect Changes only when `repository_id` and normalized `head_branch` match; Review/PR history may still show them. Test single/multi-repo cases and desktop/mobile Changes behavior.
-**HTTP/WS cache races:** When HTTP hydrates a cache also updated by WebSockets, guard responses with per-scope revision and request/workspace generation; discard or refresh stale responses and cover deferred responses. `useEnsureTaskSession` re-fires `session.ensure` when an open task page sees zero sessions after a prior ensure, so deleting the last session from that page spawns a replacement; test zero-session states through the backend/API instead.
+**HTTP/WS cache races:** When HTTP hydrates a cache also updated by WebSockets, resolve every freshness-sensitive displayed field from one accepted live/HTTP projection, not a mixture of sources; this includes workflow placement and step badge name/color as well as activity/status. Guard responses with per-scope revision and request/workspace generation; discard or refresh stale responses and cover a newer live move plus stale-live rejection. For React StrictMode or multiple hydration effects, keep the mocked response deferred, assert request count while it is pending, then resolve it for cleanup. Action-level pending markers spanning status refreshes clear from the initiating request's settle path, not unrelated status changes; scope them by repository/path for concurrent operations. `useEnsureTaskSession` re-fires `session.ensure` when an open task page sees zero sessions after a prior ensure, so deleting the last session from that page spawns a replacement; test zero-session states through the backend/API instead.
 
-When changing task lifecycle WS handlers (`task.updated`, `task.deleted`,
-`task.state_changed`), check both kanban and Office surfaces. Archive/delete
+- **Wire timestamps:** Use the shared `parseTurnTimestamp` parser before formatting or comparing untrusted RFC3339 values; `Date.parse` accepts or normalizes values such as `"0"` and February 30. Test syntactically malformed and Date-normalized malformed inputs, then follow the consumer's omit-or-reject contract.
+
+When changing task lifecycle WS handlers (`task.updated`, `task.deleted`, `task.state_changed`), check both kanban and Office surfaces. Archive/delete
 events may need to update kanban caches, `tasks.activeTaskId` / session pin
 state, recent/sidebar prefs, Office refetch triggers such as
 `setOfficeRefetchTrigger("tasks")`, and route redirects for `/t/:id`,
@@ -192,18 +193,17 @@ surface.
   loss removes canonical panels, while restoration/maximized and offered/dismissed
   markers suppress insertion; existing panels sync identity without moving.
 - **Dockview environment switching:** reconcile ephemeral panels before restoring views;
-  correlate ID-less groups by stable ID or position. Treat `chat`/`session:*` as semantic only with a non-null `activeSessionId`.
+  correlate ID-less groups by stable ID or position. Setup can precede asynchronous layout restoration. Reconcile dependent state after restoration settles. Dispose added subscriptions. Test late restoration and mixed valid or stale candidates before ambiguity checks. Treat `chat`/`session:*` as semantic only with a non-null `activeSessionId`.
 - **GitHub PR status UI:** use the shared `pr-task-icon.tsx` display helpers and
   `isPRReadyToMerge`; aggregate counts are display-only and cannot enable merges.
   Update `pr-task-icon.test.ts` and `pr-status-chip.test.tsx` with behavior changes.
 - **GitHub PR associations:** retain terminal/merged siblings for tabs/unlink;
-  derive `openPRs` only for aggregate status/automation and test desktop/mobile
-  terminal unlink plus two-to-one collapse/focus.
-- **Task repository labels:** user-facing task/card repo chips should display a
-  stable repo slug or name (`owner/repo` when known, otherwise the repo name),
-  not a local filesystem path. Local clone paths or folder paths belong in
-  hover/title/tooltip metadata. Tasks with no repository, or only a non-repo
-  local folder, should not render a repo chip.
+  derive `openPRs` only for aggregate status/automation and test desktop/mobile terminal unlink plus two-to-one collapse/focus.
+- **Task repository labels and projections:** user-facing task/card repo chips
+  should display a stable repo slug or name (`owner/repo` when known, otherwise the repo name),
+  not a local filesystem path; local paths belong in metadata. Tasks with no repository should not render a repo chip.
+  When a UI projection adds normalized collection data for grouping, preserve scalar filter fields such as
+  `repositoryPath` and test both grouping and filtered views.
 
 ## Internationalization (i18n)
 
@@ -260,7 +260,7 @@ README markup and for stripping executable HTML and unsafe URLs.
 
 Enforced by `apps/web/eslint.config.mjs` (warnings, will become errors):
 
-- Files: ≤600 lines · Functions: ≤100 lines
+- Files: ≤600 lines · Functions: ≤100 lines · Absolute-positioned virtualizer rows do not collapse CSS margins; do not layer row padding/gaps over an item's existing margin. Preserve the old rendered gap with a focused bounding-box regression.
 - Cyclomatic complexity: ≤15 · Cognitive complexity: ≤20
 - Nesting depth: ≤4 · Parameters: ≤5
 - No duplicated strings (≥4 occurrences) · No identical functions · No unused imports

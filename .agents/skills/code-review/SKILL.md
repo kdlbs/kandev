@@ -27,6 +27,7 @@ change and a small diff because this limits risk and maintainer burden.
 ## Available skills
 
 - **`/tdd`** — Recommend when flagging untested logic. The author can use this to add tests.
+- **`/mobile-parity`** — Required when a review touches frontend or user-facing UI, including scrolling, visibility, or activation behavior, even when the change is not described as responsive.
 
 ## Steps
 
@@ -42,6 +43,14 @@ head if needed, and use that immutable SHA in the diff. If the current PR head
 cannot be fetched, say so rather than reporting a stale checkout as a review of
 the current PR.
 
+A Kandev task worktree may hold none of the work: a clean checkout can be an old
+base while the reviewable code lives on the PR's branch, and prior-session claims
+that local changes exist may be stale. Before reporting “no changes”, confirm
+that `git log "$(git merge-base <base-remote>/<base-ref> HEAD)"..HEAD` is
+non-empty. If it is empty, resolve the PR branch with
+`gh pr view <N> --json headRefName,headRefOid`, fetch that ref, and review its
+immutable head, stating why it is not the local branch.
+
 Record the base and head SHA for each review round. A new contributor push starts
 a new round: reassess prior findings and the verdict against the new head, and
 verify checks or workflow results for that head rather than relying on a PR
@@ -49,9 +58,15 @@ number or author summary. From `scripts/pr-state --summary`, also record
 `pr.base_ref_name`, `pr.base_head_oid`, `pr.merge_base_oid`, and
 `pr.base_advanced_since_head` when available.
 
-For a follow-up round, inspect `<previous-reviewed-head>..<current-head>` first
-to isolate the author's response, then re-evaluate `<base>...<current-head>` for
-complete PR coverage. Record both immutable heads.
+For a follow-up round, inspect `<previous-reviewed-head>..<current-head>` first,
+then re-evaluate `<base>...<current-head>` for complete PR coverage. Record both
+immutable heads. The first range does not isolate the author's response when the
+branch merged or rebased onto an advanced base: it also carries every upstream
+commit that arrived with it. Use `rtk proxy git log --oneline --first-parent
+<previous-reviewed-head>..<current-head>` to list the branch's own commits, then
+`rtk proxy git show --stat <sha>` per commit to size the response. When history
+shape decides review scope, use `rtk proxy git log` because the normal RTK
+wrapper can omit merge commits and truncate subjects.
 
 When `pr.base_advanced_since_head` is `true`, validate the actual merge result
 before declaring the PR ready. Record the latest base and immutable head SHAs,
@@ -74,10 +89,21 @@ reports hidden unresolved threads, use `pr-resolve list` to inspect them rather
 than assuming the filtered list is complete.
 
 Compare the PR description, checklist, and claimed manual validation with that
-exact head, especially after a major refactor. Report stale claims separately;
-they are not verification evidence for the current diff.
+exact head, especially after a major refactor. Treat unchecked static template
+boxes preserved by `/pr` as intentional; flag only prose or checklist claims
+factually contradicted by the exact-head diff or evidence. Report stale claims
+separately; they are not verification evidence for the current diff.
 
 Read each changed file in full — understand surrounding code, not just the diff. Navigate callers, interfaces, and tests to understand changes end-to-end.
+
+To read files at an immutable head that is not checked out, create a detached
+worktree so file and line anchors remain accurate:
+
+```bash
+git worktree add --detach /tmp/review-<pr> <head-sha>
+# inspect the files in /tmp/review-<pr>
+git worktree remove --force /tmp/review-<pr>
+```
 
 For each file, identify which requirement or intent it serves. Flag any changes that don't map to the task — scope creep is a blocker.
 
@@ -88,6 +114,8 @@ Before reviewing implementation details:
 - Check whether tests assert behavior, not implementation details.
 - Check whether the selected test level is appropriate: unit for pure logic, integration for boundaries, E2E for critical browser flows.
 - Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.
+- When a contract spans dispatchers, explicit service/API launches, approval/UI flows, or background handlers, enumerate every user-reachable entry point, trace each to the operation, and require path-specific regression coverage before declaring review clean.
+- When a PR changes the semantics of a field, flag, enum, event, or API contract, grep all producers and consumers for comments, logs, names, and tests that describe the old meaning. Those unchanged descriptions are in scope because the PR makes them false; anchor the finding to the changed contract use and list affected downstream sites.
 - For concurrent or event-driven changes, require a deterministic schedule that checks ownership or generation identity, stale-event handling, cancellation, and lock scope. Channel/barrier coordination is preferable to timing sleeps.
 - For stale-event races, cover both event-before-successor and delayed-old-event-after-successor orderings. Prefer integration coverage for cross-package event or callback paths when practical.
 - When an HTTP mutation returns a full entity while WebSocket/event updates can
@@ -102,7 +130,10 @@ Before reviewing implementation details:
   coverage.
 - For terminal event streams, block an earlier publication, enqueue a terminal event (for example delete or cancellation), then enqueue a stale update. Assert no later mutation reaches an upserting consumer; queues must tombstone the entity or discard pending work at the terminal boundary.
 - When completion events lack a stable workload identity, test N outstanding registrations with N completion signals and duplicate delivery. A single-registration test cannot prove that uncorrelated completions retire work correctly. Compare this behavior with the accepted spec or ADR; a passing test that contradicts the contract is still a blocker.
+- For durable one-shot metadata, inventory every producer, claim, restore, retry/redelivery, and startup-sweep path. If a token carries a structured descriptor, restore that exact claimed value rather than replacing it with a boolean marker; test a real producer and a claim-to-restore-to-reclaim round trip.
+- Components can remain mounted while hidden or zero-sized. For visibility/activation behavior, ensure deadlines begin or reset at visible activation; mount the hidden state, advance fake timers or deliver content/layout changes, activate it, and assert final ownership with controlled observers or animation frames.
 - Treat missing tests for new or changed non-UI logic as a blocker unless the change is explicitly untestable and says why.
+- For forms that catch typed validation or provider errors, review feedback and cleanup as separate paths. Require focused coverage for every typed error family (or a table-driven equivalent) that asserts localized feedback is shown and the dialog/input remains open, plus a success assertion that it still closes; a `finally` block must not close a recoverable form unconditionally.
 
 ### 3. Review for issues
 
@@ -147,12 +178,17 @@ Check every changed file for the following layers. Skip layers that don't apply 
 **Logic & correctness:**
 - Edge cases handled (empty input, nil/null, zero, max values)
 - Error paths covered and not silently swallowed
+- For marker-delimited full-document mutations, define missing, orphaned,
+  duplicate, and malformed-marker behavior before writing. Cleanup must no-op or
+  fail closed when the body is not owned, and tests must cover each ownership
+  boundary without retrying an unowned document.
 - Race conditions or concurrency issues in concurrent code
 - Async events carry an immutable identity when they can outlive the operation that created them; stale events cannot mutate a replacement operation
 - Locks protect only the atomic ownership boundary and are not held across unbounded I/O or a full asynchronous operation
 - Synchronous callbacks cannot re-enter a lock they already need; moving publication asynchronous also requires an immutable value snapshot, clear shutdown ownership, and protection against a delayed event changing successor state
 - When a generation, token, or lease authorizes a side effect, validate and mutate within one critical section. Check every terminal path separately: success, raw error, cancellation, timeout, and disconnect.
 - Detached goroutines have immutable snapshots and a real happens-before relationship before reading state that can otherwise transition underneath them
+- When a system design requires telemetry for an external or provider operation, audit every early return and require exactly one completion outcome per invocation. Outcomes should use allowlisted stable IDs, duration, response shape, and typed failure category, while excluding URLs, request/response bodies, credentials, and raw upstream errors; add observer/logger assertions for success and representative timeout and invalid-descriptor failures.
 
 **Performance:**
 - No N+1 queries (loop with individual DB calls)
@@ -196,6 +232,7 @@ Check every changed file for the following layers. Skip layers that don't apply 
 **Testing (blocker if missing):**
 - Backend (Go): new or changed functions/methods must have corresponding `*_test.go` tests
 - Frontend: new utilities, hooks, API clients, and store slices must have focused tests. Pure React markup may skip a unit test, but behavior-bearing components (conditional status, accessibility, store-derived state, or responsive/mobile variants) need focused `*.test.tsx` coverage and/or E2E. Route responsive user-facing changes through `/mobile-parity`.
+- For conditional UI driven by store-derived data, trace branch predicates through real callers and use production-shaped props. Include required identity props and seed the empty store/data state; do not simulate "no data" by omitting props that callers always pass.
 - Async UI lifecycle: loading/busy state must clear through `finally` or equivalent terminal cleanup for success, error, cancellation, and early/no-op returns; require focused tests for those terminal paths.
 - Exceptions: config files, generated code, and pure React component markup
 - Missing tests for new or changed logic is a **blocker** — suggest what tests to add and recommend `/tdd`
@@ -216,12 +253,14 @@ review; preserve all pre-existing user changes.
 Report findings with a concrete suggested fix. Do not edit the checkout during
 a review-only request; otherwise remediate in the same primary conversation.
 
-Before drafting or posting a copyable PR comment, map each proposed point against
+Before drafting or sending an author-facing review finding through any channel,
+including a PR comment or `message_task_kandev`, map each point against
 exact-current-head review bodies, top-level discussion comments, and all
 unresolved or hidden threads. If a point is already raised, omit it from the
-author-facing comment but retain it in the private review summary; repeat it
+author-facing delivery but retain it in the private review summary; repeat it
 only when the user explicitly asks for reinforcement. Re-fetch immediately
-before posting and start a new review round if `headRefOid` changed.
+before delivery and start a new review round if `headRefOid` changed. Name the
+exact reviewed SHA in the outgoing finding.
 
 ### 5. Output
 

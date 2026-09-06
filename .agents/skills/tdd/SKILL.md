@@ -50,11 +50,27 @@ Choose the right level:
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
 
+When one behavior has separate wheel, keyboard, touch, or pointer handlers,
+inventory and test every handler with distinct branching. For input at a hard
+boundary where the underlying position cannot change, dispatch the input event
+or gesture directly. Cover the eligible direction at the boundary, the wrong
+direction or off-boundary no-op, one physical gesture firing at most once, and
+listener cleanup when the change adds subscriptions. An E2E case for one input
+modality does not cover the other handler paths.
+
 When a work order names an `AC-*` acceptance criterion, keep the mapping visible
 in the test name or a nearby `@covers AC-...` comment. Do not copy the complete
 requirement into the test.
 
 For failure-path tests, inject the error at the boundary the production code claims to handle and exercise the real downstream call chain; do not short-circuit by mocking the handler under test.
+When production code has a defensive nil/fallback branch or sanitizes an internal error into a public error, inject that alternate return at the interface boundary and assert the public result plus absence of internal details or sensitive content.
+
+For parser, canonicalization, or sanitization tests, build fixtures from the
+producer's exact serialized shape. Include boundary cases such as optional
+whitespace, adjacent records, terminators without a newline, and malformed or
+unclosed input; assert that untrusted content is removed or fails closed while
+independent following content is preserved. A test-only normalized fixture can
+pass while the real wire framing still fails.
 
 ### Cross-layer contracts
 
@@ -64,6 +80,13 @@ merge, reconnect/readiness handler, and consumer before editing. Add focused
 coverage at the affected boundaries, including refresh/reconnect and an update
 that omits the field, so a partial payload cannot silently discard an existing
 value.
+For MCP/API tool registration or mode-gated catalogs, add positive tests for
+intended modes and negative tests asserting tool absence in every excluded mode.
+
+When content passes through multiple canonicalizers or a delayed/created-session
+path, test each handoff with distinct sentinels and assert exact equality at
+persistence and dispatch. Carry the exact value produced at acceptance through
+later stages instead of re-deriving it from mutable source data at launch.
 
 ### Concurrent and event-driven behavior
 
@@ -75,13 +98,44 @@ competing operation, then release. Exercise the real delivery path where
 practical, and prove the old interleaving fails before the fix. Assert both the
 winner state and the untouched replacement state, including relevant buffers,
 signals, or queue ownership. Cover stale events acting after a replacement
-operation begins, cancellation/retry ownership, and at-most-once delivery when
-they apply. Run affected Go packages with `-race`.
+operation begins, stale-owner handoffs plus same-owner invalidation/no-replay,
+cancellation/retry ownership, and at-most-once delivery when they apply. Run
+affected Go packages with `-race`.
+
+When a source can deliver either a complete snapshot or a partial event, define
+the omission semantics and test both forms. Capture a request-start revision or
+epoch before every asynchronous request, inventory all callers, and use
+deferred response/event tests to prove ordering. React loading state does not
+serialize same-tick callbacks; use an immediate ref or shared in-flight promise
+when request identity must be single-flight.
+
+During cancellation or recovery, do not broadly suppress stream frames. Suppress
+only allowlisted cancellation acknowledgements with immutable operation identity;
+same-identity message, thinking, and tool frames remain authoritative activity.
+Add a negative regression for each activity class and a transport-boundary test
+when ordering depends on subscriber processing.
 
 When delayed state has a lifecycle owner, pair the boundary tests: disposal
 before the threshold must cancel timers and emit nothing later; disposal or
 replacement after publication must immediately clear externally observable
 state; and stale callbacks must not mutate the replacement.
+
+When setup can finish before hydration or restoration, test both readiness
+states. Cover state that is ready at setup and state that becomes ready after
+listener registration. Drive the readiness transition explicitly and dispose
+each added subscription.
+
+When logic rejects ambiguous candidates, filter invalid candidates before the
+cardinality check. Cover zero valid candidates, one valid candidate mixed with
+invalid candidates, and multiple valid candidates.
+
+For behavior described as remaining reactive, updating, or responding after
+initialization, test both the initial state and a deterministic post-initialization
+transition. An initial snapshot test cannot prove that a subscription, watcher,
+or reconciliation path remains active; trigger a state, event, or input change
+and assert the updated outcome. If no public API exposes publication or render
+counts, a controlled boundary fake may instrument those events, but retain an
+observable state assertion as the proof of behavior.
 
 ## Steps
 
@@ -132,6 +186,9 @@ a later patch.
 **Don't test implementation details:**
 - Assert behavior, state, API response, DB row, emitted event, or UI outcome. Avoid assertions that only prove a helper was called or an internal query string happened to be built a certain way.
 - Custom hooks and async controller helpers are behavior-bearing logic, not pure React markup: add focused tests for success, failure, cancellation/no-op, and busy/loading-state cleanup.
+- When a change adds a bulk or action entry point, test that entry point directly,
+  including its empty, partial, and success paths; coverage of a shared helper or
+  neighboring single-item flow does not prove the new dispatch path works.
 
 **Don't test mock behavior:**
 - If your assertion checks a mock element (`*-mock` test ID, mock return value), you're testing the mock, not the code. Test real behavior or don't mock it.

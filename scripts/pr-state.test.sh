@@ -75,8 +75,38 @@ if [[ "${GH_FAIL_APPROVAL_RUNS:-0}" == "1" && "$*" == *"repos/kdlbs/kandev/actio
 fi
 
 if [[ "$1" == "repo" && "$2" == "view" ]]; then
-  printf '{"owner":{"login":"kdlbs"},"name":"kandev"}\n'
+  printf '{"owner":{"login":"kdlbs"},"name":"kandev","defaultBranchRef":{"name":"main"}}\n'
   exit 0
+fi
+
+if [[ "$*" == *"repos/kdlbs/kandev/rulesets?per_page=100"* ]]; then
+  if [[ "${GH_REQUIRED_RULESET:-0}" == "1" ]]; then
+    printf '%s\n' '[{"id":7,"target":"branch","enforcement":"active"}]'
+  else
+    printf '%s\n' '[]'
+  fi
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/rulesets/7" ]]; then
+  if [[ "${GH_RULESET_PATTERN:-0}" == "1" ]]; then
+    printf '%s\n' '{"id":7,"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["release/*"]}},"rules":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Pattern required check"}]}}]}'
+  elif [[ "${GH_RULESET_INTEGRATION:-0}" == "1" ]]; then
+    printf '%s\n' '{"id":7,"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~ALL"]}},"rules":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"App required check","integration_id":42}]}}]}'
+  elif [[ "${GH_RULESET_EXCLUDES_MAIN:-0}" == "1" ]]; then
+    printf '%s\n' '{"id":7,"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~ALL"],"exclude":["main"]}},"rules":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Excluded required check"}]}}]}'
+  else
+    printf '%s\n' '{"id":7,"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"]}},"rules":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"E2E Tests Passed"},{"context":"Run Backend Tests"}]}}]}'
+  fi
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/branches/main/protection/required_status_checks" ]]; then
+  if [[ "${GH_LEGACY_REQUIRED:-0}" == "1" ]]; then
+    printf '%s\n' '{"contexts":["Legacy required check"],"checks":[{"context":"Legacy checked required"}]}'
+    exit 0
+  fi
+  exit 1
 fi
 
 if [[ "$1" == "api" && "$2" == repos/kdlbs/kandev/compare/* ]]; then
@@ -175,6 +205,34 @@ JSON
   exit 0
 fi
 
+if [[ "${GH_TERMINAL_CHECKS:-0}" == "1" && "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
+  cat <<'JSON'
+{
+  "number": 123,
+  "baseRefName": "main",
+  "headRefName": "feat/pr-state",
+  "headRefOid": "abc123",
+  "headRepositoryOwner": { "login": "kdlbs" },
+  "headRepository": { "name": "kandev" },
+  "maintainerCanModify": true,
+  "isCrossRepository": false,
+  "url": "https://github.com/kdlbs/kandev/pull/123",
+  "comments": [],
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "skipped required check",
+      "workflowName": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000010/job/55150000010"
+    }
+  ]
+}
+JSON
+  exit 0
+fi
+
 if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
   if [[ "${GH_NO_PR_URL:-0}" == "1" ]]; then
     pr_url='null'
@@ -234,6 +292,11 @@ if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
       "author": { "login": "github-actions" },
       "body": "<!-- opencode-review:fallback-findings --> finding",
       "createdAt": "2026-06-01T13:06:00Z"
+    },
+    {
+      "author": { "login": "github-actions" },
+      "body": "<!-- kandev-docs-cloudflare-preview -->\\n## Cloudflare Pages docs preview\\n\\n[Open the docs preview](https://preview.example/docs)\\n\\nBuilt from docs commit `abc1234`.",
+      "createdAt": "2026-06-01T13:07:00Z"
     }
   ],
   "statusCheckRollup": [
@@ -553,7 +616,7 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
       "data": {
         "repository": {
           "pullRequest": {
-            "baseRefName": "main",
+            "baseRefName": "'"${GH_BASE_REF_NAME:-main}"'",
             "baseRefOid": "'"$base_head"'"
           }
         }
@@ -755,9 +818,10 @@ test_snapshot_happy_path() {
   assert_jq "thread comment timestamp" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_created_at == "2026-06-01T13:00:00Z"' "$json"
   assert_jq "reviews count" '.reviews | length == 1' "$json"
   assert_jq "review author" '.reviews[] | select(.author == "cubic-dev-ai[bot]") | .author == "cubic-dev-ai[bot]"' "$json"
-  assert_jq "issue comments count" '.issue_comments | length == 7' "$json"
+  assert_jq "issue comments count" '.issue_comments | length == 8' "$json"
   assert_jq "issue comment author" 'any(.issue_comments[]; .author == "github-actions" and (.body | contains("Verdict")))' "$json"
-  assert_jq "only GitHub Actions noncanonical output is actionable" '([.issue_comments[] | select(.actionable == false)] | length) == 2 and .actionable_issue_comment_count == 5' "$json"
+  assert_jq "only GitHub Actions noncanonical output is actionable" '([.issue_comments[] | select(.actionable == false)] | length) == 3 and .actionable_issue_comment_count == 5' "$json"
+  assert_jq "Cloudflare preview marker is informational" 'any(.issue_comments[]; (.body | contains("<!-- kandev-docs-cloudflare-preview -->")) and .actionable == false)' "$json"
   assert_jq "non-GitHub-Actions canonical marker is nonactionable while workflow diagnostic and fallback remain actionable" 'any(.issue_comments[]; .author == "other-bot[bot]" and .actionable == false) and all(.issue_comments[] | select(.body | test("Blocker: real|diagnostic|fallback"; "i")); .actionable == true)' "$json"
   assert_jq "no errors" '.errors == []' "$json"
   assert_jq "raw review evidence is complete" '.review_evidence.complete == true and .review_evidence.current_head_sha == "abc123"' "$json"
@@ -1129,7 +1193,7 @@ test_partial_failure_records_error_but_keeps_other_data() {
 
   assert_jq "reviews empty on failure" '.reviews == []' "$json"
   assert_jq "checks still present" '.checks | length < 9' "$json"
-  assert_jq "new issue comments still present" '.issue_comments | length == 7' "$json"
+  assert_jq "new issue comments still present" '.issue_comments | length == 8' "$json"
   assert_jq "partial failure recorded" '.errors | length == 1' "$json"
   assert_jq "partial failure source" '.errors[0].source == "reviews"' "$json"
   pass "partial failure records error but keeps other data"
@@ -1186,7 +1250,7 @@ test_graphql_failure_records_error_but_keeps_other_data() {
   assert_jq "graphql failure records review_threads error" '.errors[] | select(.source == "review_threads") | .message == "gh api graphql reviewThreads failed"' "$json"
   assert_jq "graphql failure records closing head error" '.errors[] | select(.source == "closing_head") | .message == "gh api graphql closing head commit failed"' "$json"
   assert_jq "graphql failure records closing base error" '.errors[] | select(.source == "closing_base") | .message == "gh api graphql base ref lookup failed after evidence collection"' "$json"
-  assert_jq "since fallback includes all historical comments" '.issue_comments | length == 8' "$json"
+  assert_jq "since fallback includes all historical comments" '.issue_comments | length == 9' "$json"
   pass "graphql failure records error but keeps other data"
 }
 
@@ -1218,7 +1282,7 @@ test_all_flag_includes_historical_comments_and_reviews() {
   json="$(<"$tmp/out.json")"
 
   assert_jq "since omitted in all mode" '.since == null' "$json"
-  assert_jq "all issue comments present" '.issue_comments | length == 8' "$json"
+  assert_jq "all issue comments present" '.issue_comments | length == 9' "$json"
   assert_jq "all reviews present" '.reviews | length == 2' "$json"
   assert_jq "all review threads present" '.review_threads | length == 2' "$json"
   assert_jq "all mode keeps historical thread comment" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
@@ -1259,6 +1323,90 @@ test_summary_mode_returns_compact_fixup_state() {
   assert_jq "summary omits raw arrays" 'has("checks") | not' "$json"
   assert_jq "summary no errors" '.errors == []' "$json"
   pass "--summary returns compact fixup state"
+}
+
+test_summary_reports_required_status_contexts_from_rulesets() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "required status policy is known" '.required_status_checks_known == true' "$json"
+  assert_jq "required status contexts are listed" '.required_status_checks == ["E2E Tests Passed", "Run Backend Tests"]' "$json"
+  assert_jq "missing required contexts remain pending" '.pending_checks | map(.name) | index("E2E Tests Passed") != null' "$json"
+  pass "summary reports required status contexts from the active ruleset"
+}
+
+test_summary_unions_legacy_and_ruleset_required_status_contexts() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 GH_LEGACY_REQUIRED=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "legacy and ruleset policies are both known" '.required_status_checks_known == true' "$json"
+  assert_jq "legacy and ruleset contexts are unioned" '.required_status_checks == ["E2E Tests Passed", "Legacy checked required", "Legacy required check", "Run Backend Tests"]' "$json"
+  pass "summary unions legacy and ruleset required status contexts"
+}
+
+test_summary_ignores_excluded_ruleset_branch() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 GH_RULESET_EXCLUDES_MAIN=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "excluded ruleset policy is known" '.required_status_checks_known == true' "$json"
+  assert_jq "excluded ruleset contributes no required context" '.required_status_checks == []' "$json"
+  pass "summary honors ruleset branch exclusions"
+}
+
+test_summary_marks_unsupported_ruleset_patterns_unknown() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 GH_RULESET_PATTERN=1 GH_BASE_REF_NAME=release/1.2 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "unsupported ruleset patterns make policy unknown" '.required_status_checks_known == false' "$json"
+  assert_jq "unsupported ruleset pattern is reported" '.errors[] | select(.source == "required_status_checks") | .message == "required status check policy lookup failed"' "$json"
+  pass "summary does not guess at unsupported ruleset patterns"
+}
+
+test_summary_marks_integration_scoped_rules_unknown() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 GH_RULESET_INTEGRATION=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "integration-scoped rules make policy unknown" '.required_status_checks_known == false' "$json"
+  assert_jq "integration-scoped policy failure is reported" '.errors[] | select(.source == "required_status_checks") | .message == "required status check policy lookup failed"' "$json"
+  pass "summary does not accept an unverified required-check integration"
+}
+
+test_summary_preserves_terminal_skipped_contexts() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_TERMINAL_CHECKS=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "skipped check remains terminal evidence" '.terminal_checks | length == 1 and .[0].name == "skipped required check" and .[0].conclusion == "skipped"' "$json"
+  pass "summary preserves skipped and neutral terminal checks"
 }
 
 test_summary_reports_current_head_fork_approval_runs() {
@@ -1594,6 +1742,12 @@ test_graphql_failure_records_error_but_keeps_other_data
 test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
+test_summary_reports_required_status_contexts_from_rulesets
+test_summary_unions_legacy_and_ruleset_required_status_contexts
+test_summary_ignores_excluded_ruleset_branch
+test_summary_marks_unsupported_ruleset_patterns_unknown
+test_summary_marks_integration_scoped_rules_unknown
+test_summary_preserves_terminal_skipped_contexts
 test_summary_reports_current_head_fork_approval_runs
 test_summary_reports_base_not_advanced_when_head_matches_merge_base
 test_summary_revalidates_base_at_closing_head

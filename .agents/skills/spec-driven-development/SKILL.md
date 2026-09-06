@@ -52,6 +52,11 @@ Keep a visible task list:
 6. Execute work orders with TDD after an explicit implementation request.
 7. Open the PR, address valid findings, record changes, and report.
 
+When task-plan MCP tools are available, use the Kandev task plan for live phase
+progress and update it after each completed design phase. Keep
+`docs/plans/<initiative>/plan.md` and its work orders as the durable
+implementation package; neither plan replaces the other.
+
 ## Phases 1 to 4: Design
 
 Use `/interview-me` only when the request needs clarification.
@@ -122,7 +127,15 @@ For each work order, in dependency order:
 2. Change only that work order to `in_progress`.
 3. Implement with `/tdd`. Use `/e2e` and `/mobile-parity` when applicable.
 4. Run the exact targeted verification commands.
-5. Change the work order to `done` and synchronize `plan.md`.
+5. After implementation and targeted checks pass, change only the current work
+   order to `done`.
+6. After every linked work order passes, verify the implementation still matches
+   each paired draft system design. If it does, promote that design from `draft`
+   to `current`, synchronize affected spec frontmatter and matching
+   `docs/specs/INDEX.md` entries from `building` to `shipped`, then change the
+   plan to `implemented`. If implementation diverged or an open design issue
+   remains, leave the design draft and report the mismatch instead of completing
+   the package.
 
 If the user authorizes subagents, launch only parallel-safe work orders in the
 requested wave. Use native delegation with no full-history fork. Give each
