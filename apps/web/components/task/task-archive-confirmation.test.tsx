@@ -21,6 +21,10 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 import { TaskArchiveConfirmation } from "./task-archive-confirmation";
 
 afterEach(cleanup);
+beforeEach(() => {
+  pointerState.isFinePointer = false;
+  getSubtaskCountMock.mockReset();
+});
 
 function ConfirmationHarness({
   onConfirm,
@@ -36,6 +40,9 @@ function ConfirmationHarness({
     <>
       <button ref={anchorRef} type="button" data-testid="archive-anchor">
         Archive source
+      </button>
+      <button type="button" data-testid="outside-action">
+        Outside action
       </button>
       <TaskArchiveConfirmation
         open
@@ -72,12 +79,38 @@ function deferredSubtaskCount() {
   return { promise, resolve };
 }
 
-describe("TaskArchiveConfirmation classification", () => {
-  beforeEach(() => {
-    pointerState.isFinePointer = false;
-    getSubtaskCountMock.mockReset();
+describe("TaskArchiveConfirmation pending dismissal", () => {
+  it("dismisses the hidden desktop request on Escape and restores trigger focus", async () => {
+    pointerState.isFinePointer = true;
+    getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
+    const onOpenChange = vi.fn();
+
+    renderConfirmation(vi.fn(), onOpenChange);
+    await waitFor(() => expect(getSubtaskCountMock).toHaveBeenCalledWith("task-1"));
+
+    const outsideAction = screen.getByTestId("outside-action");
+    outsideAction.focus();
+    fireEvent.keyDown(outsideAction, { key: "Escape" });
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(document.activeElement).toBe(screen.getByTestId("archive-anchor"));
   });
 
+  it("dismisses the hidden desktop request on outside pointer intent", async () => {
+    pointerState.isFinePointer = true;
+    getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
+    const onOpenChange = vi.fn();
+
+    renderConfirmation(vi.fn(), onOpenChange);
+    await waitFor(() => expect(getSubtaskCountMock).toHaveBeenCalledWith("task-1"));
+
+    fireEvent.pointerDown(screen.getByTestId("outside-action"));
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("TaskArchiveConfirmation classification", () => {
   it("does not expose an archive action while descendant classification is pending", () => {
     getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
 

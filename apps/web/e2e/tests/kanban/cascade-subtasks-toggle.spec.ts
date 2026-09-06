@@ -10,7 +10,7 @@ const VISIBLE_TIMEOUT = 10_000;
 // propagate the choice to the backend.
 test.describe("Kanban card archive — cascade subtasks toggle", () => {
   // @covers AC-TASKS-CONFIRMATION-SURFACE-002.4
-  test("waits for classification before showing only the cascade dialog", async ({
+  test("keeps pending classification hidden and dismissible before the cascade dialog", async ({
     testPage,
     apiClient,
     seedData,
@@ -62,13 +62,23 @@ test.describe("Kanban card archive — cascade subtasks toggle", () => {
       await requestObserved;
 
       const popover = testPage.getByTestId("task-archive-confirm-popover");
+      const dialog = testPage.getByRole("alertdialog", { name: "Archive task" });
       await expect(popover).toHaveCount(0);
-      await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+      await expect(dialog).toHaveCount(0);
+
+      await testPage.keyboard.press("Escape");
+      await expect(kanban.taskCard(parent.id).getByLabel("More options")).toBeFocused();
 
       releaseResponse();
       await handlerSettled;
+      await testPage.unroute(routePattern, holdSubtaskCount);
 
-      const dialog = testPage.getByRole("alertdialog", { name: "Archive task" });
+      await expect(dialog).toHaveCount(0);
+      await expect(popover).toHaveCount(0);
+
+      await kanban.openTaskActionsMenu(parent.id);
+      await testPage.getByRole("menuitem", { name: "Archive" }).click();
+
       await expect(dialog).toBeVisible();
       await expect(dialog.getByTestId("archive-cascade-checkbox")).toBeVisible();
       await expect(popover).toHaveCount(0);

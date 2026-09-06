@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-24
-updated: 2026-09-06
+updated: 2026-09-07
 owners:
   - kandev
 ---
@@ -82,7 +82,10 @@ pointer inline confirmation behavior.
   classification is pending. After classification, exactly one final surface
   shall appear: the anchored popover for zero descendants, or the full dialog
   for one or more descendants. An unavailable classification shall fail safe to
-  the full dialog without first showing the popover.
+  the full dialog without first showing the popover. While no surface is
+  visible, Escape or a new pointer interaction shall dismiss the pending
+  request; keyboard dismissal shall restore trigger focus, and a late
+  classification result shall not mount a confirmation after dismissal.
 
 ### REQ-UI-TASK-CLEANUP-CONFIRMATION-001: Scannable task cleanup confirmation
 

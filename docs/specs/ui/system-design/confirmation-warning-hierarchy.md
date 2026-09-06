@@ -5,7 +5,7 @@ requirements:
   - REQ-TASKS-CONFIRMATION-WARNING-001
   - REQ-TASKS-CONFIRMATION-SURFACE-002
   - REQ-UI-TASK-CLEANUP-CONFIRMATION-001
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # Task Confirmation Surface System Design
@@ -23,7 +23,7 @@ the task runtime contract.
 | Requirement                            | Design section                                                                                                                                                                                                                                                                                                    |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-TASKS-CONFIRMATION-WARNING-001`   | [Components and responsibilities](#components-and-responsibilities) and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                                                                                                                         |
-| `REQ-TASKS-CONFIRMATION-SURFACE-002`   | [Classification-gated surface selection](#classification-gated-surface-selection), [Popover width contract](#popover-width-contract), [Fine-pointer mounting](#fine-pointer-mounting), and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                 |
+| `REQ-TASKS-CONFIRMATION-SURFACE-002`   | [Classification-gated surface selection](#classification-gated-surface-selection), [Popover width contract](#popover-width-contract), [Fine-pointer mounting](#fine-pointer-mounting), and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                      |
 | `REQ-UI-TASK-CLEANUP-CONFIRMATION-001` | [Task cleanup content model](#task-cleanup-content-model), [Full-dialog composition](#full-dialog-composition), [Compact archive surfaces](#compact-archive-surfaces), [Source-specific archive routing](#source-specific-archive-routing), and [Mobile and desktop containment](#mobile-and-desktop-containment) |
 
 ## Components and responsibilities
@@ -136,6 +136,14 @@ focus and assistive-technology context from a temporary popover into a dialog.
 It also preserves the existing final surfaces and their callbacks instead of
 adding cascade controls to the compact popover.
 
+A non-rendering pending-dismissal controller retains the lifecycle previously
+owned by the provisional popover. Escape closes the controlled request and
+returns focus to the configured trigger; a new pointer interaction closes it
+without preventing the new target's interaction. Closing disables the
+classification hook, whose cleanup ignores any late response, so a dismissed
+request cannot surface later. The controller mounts no role, action, or visual
+confirmation shell.
+
 Callers whose final presentation is already known keep their current behavior.
 Forced mobile Kanban and bulk operations may mount the full dialog immediately
 with its action disabled until classification settles. Explicit inline and
@@ -242,10 +250,13 @@ disabled actions, single and bulk callback values, cascade behavior, and typed
 conflict feedback. Dialog and compact-surface tests assert equivalent structured
 content, semantic action variants, unchanged callbacks, and that a deferred
 positive descendant result does not expose a provisional fine-pointer popover.
+Pending-dismissal component cases cover Escape, trigger focus restoration, and
+outside pointer intent.
 Rendered desktop and phone checks cover viewport bounds, scroll ownership,
 action reach, and document overflow. The desktop cascade E2E holds the
-descendant-count response, proves no temporary confirmation is visible, then
-releases it and observes only the cascade dialog.
+descendant-count response, dismisses the invisible request, proves a late
+result cannot mount a confirmation, then reopens Archive and observes only the
+cascade dialog.
 
 ## Mobile and desktop containment
 

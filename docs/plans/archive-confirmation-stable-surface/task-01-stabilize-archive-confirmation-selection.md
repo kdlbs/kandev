@@ -31,6 +31,8 @@ final confirmation route and the contained phone dialog.
 
 - Remove the provisional fine-pointer loading popover from
   `TaskArchiveConfirmation` without changing its controlled request state.
+- Preserve Escape and outside-pointer dismissal while the pending request has
+  no rendered confirmation shell.
 - Add a RED component regression that holds descendant classification pending,
   then resolves it to a positive count and observes only the cascade dialog.
 - Add a RED desktop Kanban E2E regression that deterministically holds the
@@ -50,6 +52,9 @@ final confirmation route and the contained phone dialog.
 - While a standard fine-pointer descendant classification is unresolved, no
   archive confirmation shell or actionable archive control is rendered; a
   positive result mounts only the existing full cascade dialog.
+- Escape restores focus to the configured trigger, outside pointer intent
+  dismisses without being blocked, and a late result cannot mount a surface
+  after either dismissal.
 - Resolved zero counts still mount the anchored popover, classification errors
   still fail safe to the full dialog, and callbacks/focus/preference behavior
   remain unchanged.
@@ -108,8 +113,11 @@ None.
   the implementation, both failed because the fine-pointer loading popover was
   visible while classification remained pending.
 - Removed the provisional fine-pointer loading popover and its loader import.
-  The controlled archive request now waits without mounting a confirmation
-  shell, then renders the existing resolved-zero popover or safe dialog.
-- Component suite: 10 passed. Touched-file ESLint and web typecheck passed.
+  A non-rendering controller preserves Escape, trigger-focus, and outside
+  pointer dismissal while the request waits, then renders the existing
+  resolved-zero popover or safe dialog only if it remains open.
+- Review-remediation RED cases exposed the missing hidden-state dismissal at
+  both component and Chromium boundaries before the controller was added.
+- Component suite: 12 passed. Touched-file ESLint and web typecheck passed.
 - Existing Mobile Chrome confirmation spec: 2 passed. Chromium cascade spec:
   6 passed, with a fresh desktop capture of the final cascade dialog.

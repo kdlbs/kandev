@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useEffect, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
@@ -156,6 +156,38 @@ function ArchiveConfirmPopover({
   );
 }
 
+function PendingArchiveDismissal({
+  anchorRef,
+  focusReturnRef,
+  onOpenChange,
+}: {
+  anchorRef: RefObject<HTMLElement | null>;
+  focusReturnRef?: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
+}) {
+  useEffect(() => {
+    const dismiss = () => onOpenChange(false);
+    const handlePointerDown = () => dismiss();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const focusTarget = focusReturnRef?.current ?? anchorRef.current;
+      dismiss();
+      if (focusTarget?.isConnected) focusTarget.focus();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [anchorRef, focusReturnRef, onOpenChange]);
+
+  return null;
+}
+
 type ArchiveDialogProps = Pick<
   TaskArchiveConfirmationProps,
   | "onOpenChange"
@@ -228,7 +260,14 @@ function ArchiveConfirmationContent({
         </span>
       );
     }
-    return null;
+    if (!isFinePointer) return null;
+    return (
+      <PendingArchiveDismissal
+        anchorRef={anchorRef}
+        focusReturnRef={focusReturnRef}
+        onOpenChange={dialogProps.onOpenChange}
+      />
+    );
   }
 
   const confirm = () => dialogProps.onConfirm({ cascade: false });
