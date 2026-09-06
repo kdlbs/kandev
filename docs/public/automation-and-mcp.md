@@ -560,6 +560,50 @@ Use `stop_task_kandev` only when the direct child should halt without a replacem
 
 After an accepted stop, Kandev attempts to move an unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states are preserved. Worktrees, task environments, commits, task records, descendants, and queued messages remain available, and the task can be started again later.
 
+### Inspect and dispose of exact queued messages
+
+Task-mode and automation Coordinator sessions can inspect their own current
+session queue with `get_message_queue_census_kandev`. The response is FIFO and
+content-free. Each entry includes an immutable ID, opaque claim, safe sender
+provenance, content hash and size, queued time, and optional routine identity.
+It never returns the message body.
+
+Use this sequence when stale pending work must be removed:
+
+1. Call `get_message_queue_census_kandev`.
+2. Choose only the exact entries to remove from their safe metadata.
+3. Call `dispose_message_queue_entries_kandev` with each selected `id` and
+   `claim` unchanged.
+4. Record the response's `before_count`, `after_count`, and per-entry outcome.
+
+An outcome of `removed` means this call removed the unchanged row. `changed`
+means the row was edited, replaced, reordered, or reserved after the census;
+inspect again before deciding. `not_found` means another consumer or normal
+delivery already removed it. Retrying is safe, and a new or changed row is
+never selected by an old claim.
+
+The tools have no task, session, workspace, body, force, sender-filter, or
+clear-all argument. The local MCP server binds them to the calling task and
+session, and the backend verifies that binding against the task workspace. If
+the tools are unavailable, preserve the queue and wait for normal FIFO delivery
+or use the authenticated queue UI. Do not use database edits as a fallback.
+
+Trusted scheduled automation messages use the same durable queue with an
+additional guard. The Host derives routine identity from the authenticated
+workspace, routine type/name, policy generation, and semantic scope
+generation, not from the carrier task, session, message, automation, or
+trigger. Identical expanded payloads retain one pending FIFO entry. A claimed
+wake stays persisted until prompt acceptance, and arrivals during execution
+form at most one post-run successor even when the queue is at capacity.
+
+The `message_task_kandev` response includes a body-free `routine_wake` receipt
+when a wake is queued. It identifies the canonical entry, absorbed source IDs
+and timestamps, leader fencing token, dirty generation, and post-run requeue
+state. A routine carrier is rejected when its workspace differs from the
+target or it explicitly names a non-primary target session. Different policy
+or scope generations, different payloads, and messages from peers, users,
+webhooks, or provider events remain separate.
+
 `add_workspace_sources_kandev` adds one or more sources to an idle task and defaults `task_id` to the current task. A task may also target its same-workspace direct child; Kandev verifies the calling task and session on the backend, so agents cannot provide or override that provenance. Its `sources` input accepts the same atomic mixed batch as the Files panel: `repository` sources use exactly one saved repository ID, local Git path, or remote repository locator plus branch fields; `folder` sources use a local path and optional display name. Repository sources work on Worktree, Local/Local PC, Local Docker, SSH, and Sprites; folders work only on Worktree and Local/Local PC. The target must be repository-backed and have no active turn or tool call. Exact normalized retries are idempotent; contradictory duplicates, unsupported, or failed sources roll back the batch.
 
 `add_branch_to_task_kandev` is the Worktree-only compatibility path for adding one repository/branch during an active agent turn. It creates the worktree as a sibling under the task directory, promotes the persisted Files root to that parent, and rescans it without restarting the agent, terminals, or workspace processes. The response returns `worktree_path` (the exact new repository location), `task_workspace_path` (the Files root), and `agent_cwd_changed: false`; deferred pre-launch materialization omits both paths. The original repository stays a separate Git worktree, so the sibling is not reported as an embedded repository or untracked files by its Git status. Use `add_workspace_sources_kandev` for mixed batch attachments to an idle task. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.

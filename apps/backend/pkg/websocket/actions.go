@@ -512,6 +512,8 @@ const (
 	ActionMCPSpawnSession                = "mcp.spawn_session"
 	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
+	ActionMCPGetMessageQueueCensus       = "mcp.get_message_queue_census"
+	ActionMCPDisposeMessageQueueEntries  = "mcp.dispose_message_queue_entries"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
 )

@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -377,6 +378,7 @@ func (s *Service) insertQueueMessageWithCoalesceKey(ctx context.Context, session
 	metadataCopy := copyMessageMetadata(metadata, 1)
 	metadataCopy[MetadataCoalesceKey] = coalesceKey
 	msg := &QueuedMessage{
+		ID:          uuid.NewString(),
 		SessionID:   sessionID,
 		TaskID:      taskID,
 		Content:     content,
@@ -384,8 +386,10 @@ func (s *Service) insertQueueMessageWithCoalesceKey(ctx context.Context, session
 		PlanMode:    planMode,
 		Attachments: attachments,
 		Metadata:    metadataCopy,
+		QueuedAt:    time.Now().UTC(),
 		QueuedBy:    userID,
 	}
+	prepareRoutineWakeSource(msg)
 	queued, replaced, err := s.repo.InsertOrReplaceByCoalesceKey(ctx, msg, coalesceKey, maxPerSession, allowInsert)
 	if err != nil {
 		if errors.Is(err, ErrQueueFull) {
@@ -394,6 +398,9 @@ func (s *Service) insertQueueMessageWithCoalesceKey(ctx context.Context, session
 				zap.Int("max", maxPerSession))
 		}
 		return nil, false, err
+	}
+	if replaced && queued.IsRoutineWake() {
+		recordRoutineWakeSuppressed()
 	}
 	s.logger.Info("message queued with coalesce key",
 		zap.String("session_id", sessionID),

@@ -1307,6 +1307,41 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
+	censusTool := mcp.NewToolWithRawSchema(
+		"get_message_queue_census_kandev",
+		"Inspect the calling session's pending FIFO queue without reading message bodies. Returns ordered immutable entry IDs, opaque claims, safe provenance, content hashes and sizes, capacity, and the before count. Use the returned id and claim unchanged with dispose_message_queue_entries_kandev.",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	censusTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
+	censusTool.Annotations.DestructiveHint = mcp.ToBoolPtr(false)
+	censusTool.Annotations.IdempotentHint = mcp.ToBoolPtr(true)
+	censusTool.Annotations.OpenWorldHint = mcp.ToBoolPtr(false)
+	s.mcpServer.AddTool(
+		censusTool,
+		s.wrapHandler("get_message_queue_census_kandev", s.getMessageQueueCensusHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("dispose_message_queue_entries_kandev",
+			mcp.WithDescription("Remove exact unchanged entries from the calling session's FIFO queue. First call get_message_queue_census_kandev, select entries, and pass each returned id and opaque claim unchanged. Results are per entry: removed, changed, or not_found, with atomic before/after counts. There is no clear-all, body, force, task, or session control."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithArray("entries", mcp.Required(), mcp.MinItems(1),
+				mcp.Description("Exact census claims to dispose"),
+				mcp.Items(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":    map[string]any{"type": "string", "minLength": 1},
+						"claim": map[string]any{"type": "string", "minLength": 1},
+					},
+					"required":             []string{"id", "claim"},
+					"additionalProperties": false,
+				}),
+			),
+		),
+		s.wrapHandler("dispose_message_queue_entries_kandev", s.disposeMessageQueueEntriesHandler()),
+	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
 			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),

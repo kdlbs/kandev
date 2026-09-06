@@ -221,7 +221,7 @@ func (s *Service) requeueLifecycleMessage(ctx context.Context, queuedMsg *messag
 		return false
 	}
 	if !accepted {
-		s.acknowledgeLifecycleQueueEntry(ctx, queuedMsg.SessionID, queuedMsg)
+		s.acknowledgeDurableQueueEntry(ctx, queuedMsg.SessionID, queuedMsg)
 		s.logger.Info("discarding lifecycle retry for inactive task",
 			zap.String("session_id", queuedMsg.SessionID),
 			zap.String("task_id", queuedMsg.TaskID),
@@ -721,7 +721,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		// only acknowledges the reservation after Executor.Prompt accepts it.
 		// Executor.Prompt itself is passthrough-aware and writes to PTY stdin.
 		// Ordinary entries retain the historical direct PTY behavior below.
-		if queuedMsg.IsDurableLifecycle() {
+		if queuedMsg.IsDurableQueueDelivery() {
 			// Reserve the durable row's dispatch token while this ready handler
 			// still owns the same guard used by all drains. Deferring this mark
 			// until after guard release lets a competing manual drain reserve the
@@ -939,7 +939,7 @@ func (s *Service) finishQueuedMessageExecution(
 		return
 	}
 	if errors.Is(err, errLifecyclePromptInactive) {
-		s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
+		s.acknowledgeDurableQueueEntry(ctx, reservedSessionID, queuedMsg)
 		return
 	}
 	var reselected *lifecyclePromptReselectedError
@@ -948,7 +948,7 @@ func (s *Service) finishQueuedMessageExecution(
 		if s.requeueLifecycleMessage(
 			ctx, queuedMsg, queuedMsg.QueuedBy, messageCoalesceKey(queuedMsg),
 		) {
-			s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
+			s.acknowledgeDurableQueueEntry(ctx, reservedSessionID, queuedMsg)
 		}
 		return
 	}
@@ -972,8 +972,8 @@ func (s *Service) finishQueuedMessageExecution(
 		)
 		return
 	}
-	if lifecyclePrompt {
-		s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
+	if lifecyclePrompt || queuedMsg.IsRoutineWake() {
+		s.acknowledgeDurableQueueEntry(ctx, reservedSessionID, queuedMsg)
 	}
 }
 
@@ -991,7 +991,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
-	if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||
+	if lifecyclePrompt || queuedMsg.IsRoutineWake() || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) {
@@ -1093,16 +1093,16 @@ func (s *Service) lifecycleQueuedDispatchIsCurrent(
 		(s.messageQueue != nil && s.messageQueue.IsCurrentLifecycleReservation(ctx, queuedMsg))
 }
 
-func (s *Service) acknowledgeLifecycleQueueEntry(
+func (s *Service) acknowledgeDurableQueueEntry(
 	ctx context.Context,
 	sessionID string,
 	queuedMsg *messagequeue.QueuedMessage,
 ) {
-	if s.messageQueue == nil || queuedMsg == nil || !queuedMsg.IsDurableLifecycle() {
+	if s.messageQueue == nil || queuedMsg == nil || !queuedMsg.IsDurableQueueDelivery() {
 		return
 	}
 	if err := s.messageQueue.AcknowledgeQueued(ctx, sessionID, queuedMsg.ID); err != nil {
-		s.logger.Error("failed to acknowledge accepted lifecycle message",
+		s.logger.Error("failed to acknowledge accepted durable queue message",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID),

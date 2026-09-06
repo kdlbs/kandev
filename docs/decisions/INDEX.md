@@ -237,6 +237,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |
 | 2026-08-31-surface-owned-saved-task-views | [Keep Saved Task Views Surface Owned](2026-08-31-surface-owned-saved-task-views.md) | proposed | backend, frontend | 2026-08-31 |
 | 2026-08-31-agent-aware-mcp-tool-names | [Preserve Canonical MCP Tool Names Through Agent Namespacing](2026-08-31-agent-aware-mcp-tool-names.md) | accepted | backend, agentctl, protocol | 2026-08-31 |
+| 2026-09-01-guard-agent-queue-disposition | [Guard Agent Queue Disposition With Exact Snapshot Claims](2026-09-01-guard-agent-queue-disposition.md) | accepted | backend, protocol, security, workflow | 2026-09-01 |
 | 2026-08-31-workflow-profile-session-switch-policy | [Make Workflow Profile-Session Switching Explicit](2026-08-31-workflow-profile-session-switch-policy.md) | accepted | workflow | 2026-08-31 |
 | 2026-09-01-server-owned-saved-prompt-expansion | [Keep Saved-Prompt Expansion Server-Owned](2026-09-01-server-owned-saved-prompt-expansion.md) | accepted | backend, frontend, protocol, security | 2026-09-01 |
 | 2026-09-01-passthrough-initial-prompt-turn-boundary | [Keep Passthrough Initial Prompt State in Lifecycle](2026-09-01-passthrough-initial-prompt-turn-boundary.md) | accepted | backend, workflow | 2026-09-01 |

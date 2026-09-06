@@ -899,6 +899,58 @@ func TestStopTask_BackendErrorReturnsToolError(t *testing.T) {
 	assert.Contains(t, text.Text, "stop refused")
 }
 
+func TestMessageQueueCensusToolsBindCurrentTaskAndSession(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{
+		"task_id": "task-current", "session_id": "test-session",
+		"entries": []interface{}{}, "before_count": 0.0,
+	}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "get_message_queue_census_kandev", map[string]interface{}{})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPGetMessageQueueCensus, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, map[string]interface{}{"task_id": "task-current", "session_id": "test-session"}, payload)
+
+	entries := []interface{}{map[string]interface{}{"id": "entry-1", "claim": "claim-1"}}
+	result = callTool(t, s, "dispose_message_queue_entries_kandev", map[string]interface{}{"entries": entries})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPDisposeMessageQueueEntries, backend.lastAction)
+	payload, ok = backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, "test-session", payload["session_id"])
+	assert.Equal(t, entries, payload["entries"])
+}
+
+func TestMessageQueueCensusToolSchemasExposeNoScopeOrMessageBodyControls(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task-current")
+	tools := s.mcpServer.ListTools()
+	census, ok := tools["get_message_queue_census_kandev"]
+	require.True(t, ok)
+	censusSchema, err := json.Marshal(census.Tool.InputSchema)
+	require.NoError(t, err)
+	assert.NotContains(t, string(censusSchema), "task_id")
+	assert.NotContains(t, string(censusSchema), "session_id")
+	assert.NotContains(t, string(censusSchema), "content")
+
+	dispose, ok := tools["dispose_message_queue_entries_kandev"]
+	require.True(t, ok)
+	disposeSchema, err := json.Marshal(dispose.Tool.InputSchema)
+	require.NoError(t, err)
+	assert.Contains(t, string(disposeSchema), "entries")
+	assert.Contains(t, string(disposeSchema), "claim")
+	for _, forbidden := range []string{"task_id", "session_id", "content", "all", "force"} {
+		assert.NotContains(t, string(disposeSchema), forbidden)
+	}
+	annotations := dispose.Tool.Annotations
+	require.NotNil(t, annotations.DestructiveHint)
+	require.NotNil(t, annotations.IdempotentHint)
+	assert.True(t, *annotations.DestructiveHint)
+	assert.True(t, *annotations.IdempotentHint)
+}
+
 func TestTaskPRAutomationToolsBindCurrentTask(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
 	s := newTaskModeServer(t, backend, "task-current")
