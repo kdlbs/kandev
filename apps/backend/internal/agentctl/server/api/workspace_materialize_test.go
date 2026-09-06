@@ -53,6 +53,21 @@ func TestAttestMaterializedGitMetadataAcceptsRegularClone(t *testing.T) {
 	}
 }
 
+func TestAttestMaterializedGitMetadataAcceptsRegularPackedRefs(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	destination := filepath.Join(t.TempDir(), "second-repo")
+	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
+		t.Fatalf("materialize repository: %v", err)
+	}
+	materializeGitOutputForTest(t, destination, "pack-refs", "--all", "--prune")
+	if info, err := os.Lstat(filepath.Join(destination, ".git", "packed-refs")); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("packed refs = info:%v err:%v, want regular file", info, err)
+	}
+	if err := attestMaterializedGitMetadata(context.Background(), destination); err != nil {
+		t.Fatalf("attest materialized Git metadata with packed refs: %v", err)
+	}
+}
+
 func TestAttestRegularGitMetadataRejectsUnsafeGitReferenceMetadata(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink setup requires platform-specific privileges")
