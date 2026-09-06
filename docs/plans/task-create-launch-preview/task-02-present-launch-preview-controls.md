@@ -24,13 +24,19 @@ system_design:
 
 ## Summary
 
-Show the launch destination beside, but outside, the workflow selector. Add the inline prompt
-preview toggle, localization, component coverage, and public task guidance.
+Show the launch destination beside, but outside, the workflow selector. Keep
+the selector trigger at its intrinsic width and add an inline information
+button for launch-step guidance. Add the prompt preview toggle, localization,
+component coverage, and public task guidance.
 
 ## In scope
 
 - Render the muted **Start step: {{step}}** label outside the selected workflow
   trigger and aligned to its right.
+- Keep the workflow selector trigger independent from the adjacent launch-step
+  label and information button.
+- Add localized launch-step help to the information button with a coarse-pointer
+  hit area of at least 44 CSS pixels.
 - Add the preview icon after **Enhance prompt with AI**.
 - Toggle between the unchanged editor and a read-only composed preview.
 - Add accessible names, pressed state, and coarse-pointer sizing.
@@ -47,7 +53,9 @@ preview toggle, localization, component coverage, and public task guidance.
   adding a second routing rule.
 - Toggling the preview preserves the exact task prompt. Losing the preview model
   returns the editor to edit mode.
-- Localized, accessible controls work at desktop and coarse-pointer sizes.
+- Localized, accessible controls work at desktop and coarse-pointer sizes. The
+  selector trigger remains independently clickable, and the adjacent help
+  button explains the action-sensitive launch destination.
 
 ## Verification
 

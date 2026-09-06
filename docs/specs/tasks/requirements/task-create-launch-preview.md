@@ -46,7 +46,9 @@ that the workflow destination is not hidden.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.1:** When the workflow selector
   shows a selected workflow, the system shall show the immediate launch
   destination outside the selector, aligned to its right in muted text, with
-  the label **Start step: {{step}}**.
+  the label **Start step: {{step}}**. An adjacent localized information control
+  shall provide help that explains the displayed destination and its
+  action-sensitive precedence.
 - **AC-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001.2:** When the description is empty,
   the displayed launch destination shall be the first positional step because
   **Start Plan Mode** uses the plan-mode launch path. When the description is

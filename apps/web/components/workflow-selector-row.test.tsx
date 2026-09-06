@@ -39,8 +39,13 @@ describe("WorkflowSelectorRow launch destination", () => {
     expect(trigger.contains(launchStep)).toBe(false);
     expect(row.contains(trigger)).toBe(true);
     expect(row.contains(launchStep)).toBe(true);
+    expect(trigger.className).not.toContain("flex-1");
     expect(launchStep.textContent).toBe("Start step: In Progress");
     expect(launchStep.className).toContain("ml-auto");
+
+    const launchStepInfo = screen.getByTestId("task-create-launch-step-info");
+    expect(trigger.contains(launchStepInfo)).toBe(false);
+    expect(launchStepInfo.getAttribute("aria-label")).toBe("Learn about the task start step");
   });
 
   it("does not show a destination when the selected workflow has no preview", () => {

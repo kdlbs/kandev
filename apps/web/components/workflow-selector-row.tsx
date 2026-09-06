@@ -2,7 +2,7 @@
 
 import { Fragment, memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconCheck, IconChevronDown, IconLogicBuffer } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconInfoCircle, IconLogicBuffer } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
@@ -107,7 +107,7 @@ function WorkflowSelectorTrigger({
       <Button
         type="button"
         variant="ghost"
-        className="min-h-11 w-auto min-w-0 max-w-full flex-1 justify-between cursor-pointer md:min-h-7"
+        className="min-h-11 w-auto min-w-0 max-w-full justify-between cursor-pointer md:min-h-7"
         data-testid="workflow-selector-trigger"
       >
         <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -117,6 +117,41 @@ function WorkflowSelectorTrigger({
         <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
       </Button>
     </PopoverTrigger>
+  );
+}
+
+function LaunchDestinationInfo() {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          aria-label={t("task:launchDestinationHelpLabel")}
+          data-testid="task-create-launch-step-info"
+        >
+          <IconInfoCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[320px] text-xs leading-relaxed">
+        {t("task:launchDestinationHelp")}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function LaunchDestinationLabel({ stepName }: { stepName: string }) {
+  const { t } = useTranslation();
+  return (
+    <span
+      className="ml-auto min-w-0 max-w-[45vw] shrink truncate text-right text-xs text-muted-foreground"
+      data-testid="task-create-launch-step"
+    >
+      {t("task:launchDestination", { step: stepName })}
+    </span>
   );
 }
 
@@ -143,12 +178,10 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
       <div className="flex min-w-0 items-center gap-2" data-testid="workflow-selector-row">
         <WorkflowSelectorTrigger selectedWorkflow={selectedWorkflow} placeholder={placeholder} />
         {launchPreview && (
-          <span
-            className="ml-auto min-w-0 max-w-[45vw] shrink truncate text-right text-xs text-muted-foreground"
-            data-testid="task-create-launch-step"
-          >
-            {t("task:launchDestination", { step: launchPreview.stepName })}
-          </span>
+          <>
+            <LaunchDestinationLabel stepName={launchPreview.stepName} />
+            <LaunchDestinationInfo />
+          </>
         )}
       </div>
       <PopoverContent className="w-auto min-w-[300px] max-w-none p-1" align="start">

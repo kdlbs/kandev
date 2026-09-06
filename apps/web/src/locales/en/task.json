@@ -1994,6 +1994,8 @@
   "worktreeExecutorRequiresRepository": "Worktree executor requires a repository.",
   "worktreeNumbered": "Worktree {{index}}",
   "launchDestination": "Start step: {{step}}",
+  "launchDestinationHelpLabel": "Learn about the task start step",
+  "launchDestinationHelp": "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
   "launchErrorBaseBranchMissing": "The task could not start because its base branch is unavailable.",
   "launchErrorDefaultBranchUnresolved": "The task could not resolve the repository default branch.",
   "launchErrorPrAlreadyClosed": "The task is linked to a closed pull request.",

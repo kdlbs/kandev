@@ -251,6 +251,14 @@ test.describe("Task creation", () => {
       const launchStepBox = await launchStep.boundingBox();
       if (!selectorBox || !launchStepBox) throw new Error("launch step has no layout box");
       expect(launchStepBox.x).toBeGreaterThanOrEqual(selectorBox.x + selectorBox.width - 1);
+      const launchStepInfo = dialog.getByTestId("task-create-launch-step-info");
+      await expect(launchStepInfo).toHaveAttribute("aria-label", "Learn about the task start step");
+      await launchStepInfo.hover();
+      await expect(
+        testPage.getByRole("tooltip", {
+          name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
+        }),
+      ).toBeVisible();
 
       await dialog.getByTestId("task-title-input").fill("Preview the launch prompt");
       const description = "Review the launch preview";
