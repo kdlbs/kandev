@@ -332,6 +332,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 			SessionID:        sessionID,
 			AgentExecutionID: executionID,
 			AgentID:          payload.AgentID,
+			AgentProfileID:   payload.AgentProfileID,
 			PromptGeneration: payload.Data.PromptGeneration,
 			ErrorMessage:     payload.Data.Error,
 			ProviderError:    payload.Data.ProviderError,
