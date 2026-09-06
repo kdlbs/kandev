@@ -200,10 +200,9 @@ func TestResolveParticipantRole_StepPreferredTransitionFires(t *testing.T) {
 // no-guard-at-step fallback: a caller holding both seats, with neither
 // seat's StepID matching the step being queried and that step naming no
 // wait_for_quorum guard (quorumEngine's step has a nil Guard), still
-// resolves under approver-wins — the step-preference added for the Review
-// re-entry bug only kicks in when the approver seat itself sits at the
-// queried step, and the guard-role tiebreak only kicks in when the queried
-// step names exactly one guard role.
+// resolves under approver-wins — the step-preference early return only
+// kicks in when neither seat sits at the queried step, and the guard-role
+// tiebreak only kicks in when the queried step names exactly one guard role.
 func TestResolveParticipantRole_NeitherSeatAtStep_ApproverWins(t *testing.T) {
 	participants := scopedParticipants{perTask: []ParticipantInfo{
 		{ID: "seat-reviewer", TaskID: "task-1", StepID: "review-1", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
@@ -258,5 +257,45 @@ func TestResolveParticipantRole_BothSeatsAtSameNonCurrentStep_GuardRoleWins(t *t
 	}
 	if result.FromStepID != "review" || result.ToStepID != "approval" {
 		t.Fatalf("unexpected transition endpoints: %#v", result)
+	}
+}
+
+// TestResolveParticipantRole_BothSeatsAtSameNonCurrentStep_StepNamesBothRoles_ApproverWins
+// covers AC-4's third fallback branch: the queried step names *two* guard
+// roles (reviewer and approver each gated separately), so the single-role
+// tiebreak in ResolveParticipantRole cannot apply and resolution must fall
+// through to the final approver-wins line — distinct from the sibling test
+// above, where the step names no guard role at all.
+func TestResolveParticipantRole_BothSeatsAtSameNonCurrentStep_StepNamesBothRoles_ApproverWins(t *testing.T) {
+	store := &stepStoreForQuorum{
+		state: MachineState{TaskID: "task-1", SessionID: "sess-1", WorkflowID: "wf", CurrentStepID: "review"},
+		step: StepSpec{
+			ID: "review", WorkflowID: "wf", Position: 1,
+			Events: map[Trigger][]Action{
+				TriggerOnTurnComplete: {
+					{Kind: ActionMoveToNext, Guard: &TransitionGuard{
+						WaitForQuorum: &WaitForQuorumGuard{Role: "reviewer", Threshold: QuorumAllApprove},
+					}},
+					{Kind: ActionMoveToNext, Guard: &TransitionGuard{
+						WaitForQuorum: &WaitForQuorumGuard{Role: "approver", Threshold: QuorumAllApprove},
+					}},
+				},
+			},
+		},
+		next:    StepSpec{ID: "approval", Position: 2},
+		applied: map[string]bool{},
+	}
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-reviewer", TaskID: "task-1", StepID: "backlog", Role: "reviewer", AgentProfileID: "agent-a", DecisionRequired: true},
+		{ID: "seat-approver", TaskID: "task-1", StepID: "backlog", Role: "approver", AgentProfileID: "agent-a", DecisionRequired: true},
+	}}
+	eng := New(store, MapRegistry{}, WithParticipantStore(participants))
+
+	role, participantID, err := eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if err != nil {
+		t.Fatalf("ResolveParticipantRole: %v", err)
+	}
+	if role != "approver" || participantID != "seat-approver" {
+		t.Errorf("role/participantID = %q/%q, want approver/seat-approver", role, participantID)
 	}
 }
