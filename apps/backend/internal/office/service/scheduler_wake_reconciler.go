@@ -93,6 +93,11 @@ func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
 func (h *ParentWakeReconciler) reconcileOne(
 	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate,
 ) {
+	// No dispatcher wired means there is nothing to admit: bail out before
+	// any of the work below.
+	if svc.engineDispatcher == nil {
+		return
+	}
 	if err := svc.guardAgentStatus(ctx, c.AssigneeAgentProfileID); err != nil {
 		svc.recordWakeAssigneeUnresolved(c.ParentTaskID, err.Error())
 		return
@@ -121,7 +126,7 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey)
+	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey, c.NewestChildUpdatedAt)
 	accepted, err := svc.dispatchEngineTriggerForRecovery(
 		ctx,
 		c.ParentTaskID,
@@ -206,9 +211,21 @@ func (h *ParentWakeReconciler) recordReceipt(
 		return
 	}
 
+	// c.NewestChildUpdatedAt is the sweep-time MAX(tasks.updated_at) across
+	// this parent's children (ListStuckParents), not just the ones that
+	// completed — any later edit to a terminal child (title, description,
+	// labels, metadata) with no state change bumps that same column, so the
+	// next tick sees newest_child_updated_at != child_generation again and
+	// re-admits the parent for one extra wake even though nothing completed.
+	// This is bounded and self-correcting (recordReceipt persists the same
+	// value that triggered the re-admit, so the tick after that sees them
+	// equal and stops), and follows the same duplicate-over-missed bias
+	// already accepted for wakeOperationID below. A real fix needs a
+	// completion-specific generation distinct from generic updated_at — see
+	// follow-up task fc871ca9-bcb2-4db5-915d-52c92c7bd1ad.
 	deliveredAt := time.Now().UTC()
 	if err := svc.repo.UpsertWakeReceiptTx(
-		ctx, tx, c.ParentTaskID, c.ChildSetKey, "", operationID, deliveredAt,
+		ctx, tx, c.ParentTaskID, c.ChildSetKey, "", operationID, c.NewestChildUpdatedAt, deliveredAt,
 	); err != nil {
 		if ctx.Err() != nil {
 			return
@@ -230,12 +247,20 @@ func (h *ParentWakeReconciler) recordReceipt(
 	svc.recordWakeEmitted(c.ParentTaskID, operationID)
 }
 
-func wakeOperationID(parentTaskID, childSetKey string) string {
-	// A completion wave is identified by the child IDs, not by the terminal
-	// state each child reached. A terminal-to-terminal edit (for example,
-	// CANCELLED to COMPLETED) must not create a new parent wake. The receipt
-	// keeps the full state-aware key for recovery, so strip only the state
-	// suffix when deriving the operation identity.
+// wakeOperationID identifies one task_children_completed dispatch. Two
+// independent producers can race for the same completion wave — the
+// edge-triggered path (queueChildrenCompletedRun, event_subscribers.go) and
+// this reconciler's own sweep — so both must derive the same id from the
+// same observed state for idx_run_idempotency to actually collapse the
+// race; a per-caller counter could never do that. A completion wave is
+// identified by the child IDs, not by the terminal state each child
+// reached: a terminal-to-terminal edit (for example, CANCELLED to
+// COMPLETED) must not mint a new wake, so only the state suffix is
+// stripped, not the id. generation (child_generation /
+// NewestChildUpdatedAt, both dialect.SecondPrecisionText-rendered so every
+// caller sees the same text) distinguishes a reopen-and-recomplete that
+// lands on the same terminal child set from the delivery it invalidates.
+func wakeOperationID(parentTaskID, childSetKey, generation string) string {
 	childIDs := make([]string, 0)
 	for _, child := range strings.Split(childSetKey, ",") {
 		if child == "" {
@@ -247,6 +272,6 @@ func wakeOperationID(parentTaskID, childSetKey string) string {
 		childIDs = append(childIDs, child)
 	}
 	canonicalChildSet := strings.Join(childIDs, ",")
-	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + canonicalChildSet))
+	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + canonicalChildSet + "\x00" + generation))
 	return fmt.Sprintf("task_children_completed:%s:%s", parentTaskID, hex.EncodeToString(sum[:]))
 }

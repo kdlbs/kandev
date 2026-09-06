@@ -723,7 +723,8 @@ func (r *Repository) createParentChildWakeReceiptsTable() error {
 		child_set_key         TEXT NOT NULL,
 		delivered_run_id      TEXT NOT NULL DEFAULT '',
 		delivery_operation_id TEXT NOT NULL DEFAULT '',
-		delivered_at          TIMESTAMP NOT NULL
+		delivered_at          TIMESTAMP NOT NULL,
+		child_generation      TEXT NOT NULL DEFAULT ''
 	);
 	`)
 	return err

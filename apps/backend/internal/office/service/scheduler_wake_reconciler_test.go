@@ -118,6 +118,179 @@ func TestParentWakeReconciler_EmitsRunForStuckParent(t *testing.T) {
 	}
 }
 
+// TestParentWakeReconciler_RedeliversAfterChildReopenedAndRecompleted is the
+// reopened-child regression test end-to-end: a child that completes, is
+// reopened, and completes again with the same terminal state produces a
+// byte-identical child_set_key, but the mutation happened after the first
+// wake's receipt was recorded. The reconciler must sweep it again on the
+// next tick, and the second dispatch's operation id must differ from the
+// first so the engine's permanent operation ledger does not swallow it as
+// already-applied.
+func TestParentWakeReconciler_RedeliversAfterChildReopenedAndRecompleted(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	calls := dispatcher.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("want exactly one engine dispatch after tick 1, got %d: %#v", len(calls), calls)
+	}
+	firstOpID := calls[0].opID
+
+	// One of the terminal children is reopened and re-completed after the
+	// receipt from tick 1 was recorded — a supported board action.
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = '2099-01-01 00:00:00' WHERE id = ?`, "parent-1-child-0")
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'COMPLETED', updated_at = '2099-01-01 00:00:01' WHERE id = ?`, "parent-1-child-0")
+
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	callsAfter := dispatcher.Calls()
+	if len(callsAfter) != 2 {
+		t.Fatalf("LOST WAKE NOT RECOVERABLE: want 2 engine dispatches after re-completion, got %d: %#v", len(callsAfter), callsAfter)
+	}
+	secondOpID := callsAfter[1].opID
+	if secondOpID == firstOpID {
+		t.Fatalf("second delivery reused the first operation id %q; the engine's permanent operation ledger would swallow it as already-applied", secondOpID)
+	}
+}
+
+// TestParentWakeReconciler_RedeliversAfterPersistedReceiptInvalidatedByReopen
+// is R4-F2's regression test. Unlike
+// TestParentWakeReconciler_RedeliversAfterChildReopenedAndRecompleted, the
+// reopen here lands in a later generation whose text still differs from the
+// first receipt's, so the redelivery on tick 2 is driven purely by
+// ListStuckParents' third OR arm (newest_child_updated_at != child_generation)
+// — the other two arms both stay false because the reopen leaves
+// child_set_key and the stored delivery_operation_id untouched.
+func TestParentWakeReconciler_RedeliversAfterPersistedReceiptInvalidatedByReopen(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+	const childID = "parent-1-child-0"
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	receipt, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt after tick 1: %v", err)
+	}
+	if receipt == nil || receipt.DeliveryOperationID == "" {
+		t.Fatalf("tick 1 did not persist a receipt: %#v", receipt)
+	}
+	firstGeneration := receipt.ChildGeneration
+
+	// Reopen and re-complete the child in a later, distinct generation, so
+	// child_set_key stays byte-identical to what the persisted receipt
+	// already matches but child_generation changes.
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = '2099-01-01 00:00:00' WHERE id = ?`, childID)
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'COMPLETED', updated_at = '2099-01-01 00:00:01' WHERE id = ?`, childID)
+
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if got := len(dispatcher.Calls()); got != 2 {
+		t.Fatalf("LOST WAKE: reopen after a persisted receipt for the prior generation was not redelivered, got %d dispatches: %#v", got, dispatcher.Calls())
+	}
+	receiptAfter, err := svc.GetWakeReceiptForTest(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("get wake receipt after tick 2: %v", err)
+	}
+	if receiptAfter == nil || receiptAfter.ChildGeneration == firstGeneration {
+		t.Fatalf("receipt still reflects the stale generation after redelivery: %#v", receiptAfter)
+	}
+}
+
+// seedTerminalChildrenCompletedRun inserts a finished
+// task_children_completed run for parentTaskID at requestedAt.
+func seedTerminalChildrenCompletedRun(t *testing.T, svc *service.Service, runID, agentID, parentTaskID, requestedAt string) {
+	t.Helper()
+	svc.ExecSQL(t, `
+		INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at)
+		VALUES (?, ?, 'task_children_completed', ?, 'finished', ?)
+	`, runID, agentID, `{"task_id":"`+parentTaskID+`"}`, requestedAt)
+}
+
+// TestParentWakeReconciler_SameSecondReopenSuppressedByEdgePathRun and
+// TestParentWakeReconciler_LaterSecondReopenRedeliveredAfterEdgePathRun pin
+// the accepted residual: ListStuckParents' NOT EXISTS runs arm
+// (wake_receipts.go) drops a candidate whose newest child generation is not
+// strictly newer than a terminal task_children_completed run's
+// requested_at, in the same wall-clock second as that run. In production the
+// edge path (cascadeChildrenCompleted) always writes exactly this kind of
+// run for the parent's first completion, so a reopen+recomplete landing in
+// that same second is not recovered by this reconciler — only a later
+// second is. Both tests below seed a real runs row rather than using
+// fakeDispatcher's no-run defaults, closing the coverage gap that hid this
+// behind R6-F1/R6-F2: every other reconciler test leaves the runs table
+// empty, so the NOT EXISTS arm was never exercised.
+func TestParentWakeReconciler_SameSecondReopenSuppressedByEdgePathRun(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+	const childID = "parent-1-child-0"
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	// The edge path's run for the parent's first completion, requested in
+	// the same second the reopen+recomplete below will also land in.
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = '2050-06-01 12:00:00' WHERE id = ?`, childID)
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'COMPLETED', updated_at = '2050-06-01 12:00:00' WHERE id = ?`, childID)
+	seedTerminalChildrenCompletedRun(t, svc, "edge-run-1", "worker-1", "parent-1", "2050-06-01 12:00:00")
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := len(dispatcher.Calls()); got != 0 {
+		t.Fatalf("ACCEPTED RESIDUAL regressed: a same-second reopen must stay suppressed by the edge path's run, got %d dispatches: %#v", got, dispatcher.Calls())
+	}
+}
+
+func TestParentWakeReconciler_LaterSecondReopenRedeliveredAfterEdgePathRun(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	dispatcher := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(dispatcher)
+	const childID = "parent-1-child-0"
+
+	adoptOffice(t, svc, "ws-1")
+	seedStuckParent(t, svc, "ws-1", "parent-1", "worker-1")
+
+	// The edge path's run for the parent's first completion.
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = '2050-06-01 12:00:00' WHERE id = ?`, childID)
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'COMPLETED', updated_at = '2050-06-01 12:00:00' WHERE id = ?`, childID)
+	seedTerminalChildrenCompletedRun(t, svc, "edge-run-1", "worker-1", "parent-1", "2050-06-01 12:00:00")
+
+	// Reopen+recomplete in a strictly later second than the edge run.
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'IN_PROGRESS', updated_at = '2050-06-01 12:00:01' WHERE id = ?`, childID)
+	svc.ExecSQL(t, `UPDATE tasks SET state = 'COMPLETED', updated_at = '2050-06-01 12:00:01' WHERE id = ?`, childID)
+
+	handler := service.NewParentWakeReconciler(service.NewSchedulerIntegration(svc, 0))
+	if err := handler.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := len(dispatcher.Calls()); got != 1 {
+		t.Fatalf("want exactly one dispatch for a later-second reopen, got %d: %#v", got, dispatcher.Calls())
+	}
+}
+
 func TestParentWakeReconciler_SkipsWithoutEngineDispatcher(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

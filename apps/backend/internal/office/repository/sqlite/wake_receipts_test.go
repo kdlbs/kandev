@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
@@ -505,6 +506,132 @@ func TestListStuckParents_RecoversAfterChildSetChangesPastFinishedRun(t *testing
 	}
 	if len(after) != 1 || after[0].ParentTaskID != parentID {
 		t.Fatalf("LOST WAKE NOT RECOVERABLE: after the child set changed, ListStuckParents returned %#v; want exactly [%s]", after, parentID)
+	}
+}
+
+// waitForNextWholeSecond blocks until the wall clock crosses into a new
+// second, so a CURRENT_TIMESTAMP write taken after it is guaranteed to
+// produce different text than one taken before it. Used to reproduce R1-F1:
+// the original bug was a same-wall-clock-second collision between a bound
+// time.Time (microsecond precision) and a CURRENT_TIMESTAMP write (second
+// precision) — a real gap is needed on one side of the comparison for the
+// collision on the other side to be observable at all.
+//
+// testing/synctest cannot be used here because the gap is needed in
+// SQLite's own CURRENT_TIMESTAMP writer — fake-time advancement only
+// applies to Go's time package, not to the database's clock.
+func waitForNextWholeSecond(t *testing.T) {
+	t.Helper()
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(1100 * time.Millisecond)))
+}
+
+// TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted is the
+// reopened-child regression test: a child that completes, is moved back to a
+// non-terminal state, and completes again (a supported board action)
+// produces a byte-identical child_set_key (it encodes "id:state" only), so
+// neither the receipt-mismatch arm nor the missing-delivery-evidence arm
+// admits the parent. Only a receipt whose child_generation no longer matches
+// the child's fresh updated_at can tell the two completions apart.
+//
+// Both sides of that comparison are driven through their real production
+// writers — UpsertWakeReceiptTx for the receipt, UpdateTaskState's
+// CURRENT_TIMESTAMP write for the child — with the reopen landing in the
+// same wall-clock second as the receipt's delivered_at, reproducing R1-F1:
+// a receipt whose delivered_at (a bound time.Time, microsecond precision)
+// falls in the same second as a reopen's tasks.updated_at (CURRENT_TIMESTAMP,
+// second precision) previously made `newest_child_updated_at > delivered_at`
+// false — the shorter string sorts lower than the longer one for an equal
+// second — even though the reopen was chronologically later and represents a
+// genuinely new generation. Hand-written literals in one format cannot
+// surface this: the bug is specifically about two producers disagreeing on
+// text format, not about elapsed wall-clock time.
+func TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	const (
+		parentID = "parent-1"
+		wsID     = "ws-1"
+	)
+
+	insertTask(t, repo, ctx, parentID, wsID, "Parent", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, parentID,
+	); err != nil {
+		t.Fatalf("mark parent as Office task: %v", err)
+	}
+	childID := parentID + "-child-0"
+	insertTask(t, repo, ctx, childID, wsID, "Child", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET parent_id = ? WHERE id = ?`, parentID, childID,
+	); err != nil {
+		t.Fatalf("attach child to parent: %v", err)
+	}
+	seedWakeAgentProfile(t, repo, ctx, parentID+"-agent", "idle")
+	seedRunner(t, repo, ctx, parentID)
+
+	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
+		t.Fatalf("complete child: %v", err)
+	}
+
+	preDelivery, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (pre-delivery): %v", err)
+	}
+	if len(preDelivery) != 1 || preDelivery[0].ParentTaskID != parentID {
+		t.Fatalf("ListStuckParents (pre-delivery) = %#v, want exactly [%s]", preDelivery, parentID)
+	}
+
+	// A real gap between the original completion and delivery: without it,
+	// the reopen below (which lands in the same second as delivery) would
+	// also land in the same second as the original completion, making the
+	// two generations indistinguishable by construction rather than by bug.
+	waitForNextWholeSecond(t)
+
+	// Record the delivery receipt the way recordReceipt does: through
+	// UpsertWakeReceiptTx, carrying the generation the sweep observed
+	// (never re-read at commit time).
+	tx, err := repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := repo.UpsertWakeReceiptTx(
+		ctx, tx, parentID, preDelivery[0].ChildSetKey, "", "op-1",
+		preDelivery[0].NewestChildUpdatedAt, time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("upsert wake receipt: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit receipt tx: %v", err)
+	}
+
+	// Control: no child mutation since the receipt was delivered, so the
+	// parent must still be excluded.
+	afterDelivery, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (after delivery): %v", err)
+	}
+	if len(afterDelivery) != 0 {
+		t.Fatalf("after delivery: candidates = %#v, want none (receipt already covers this child set)", afterDelivery)
+	}
+
+	// The child is reopened and re-completed through the same production
+	// writer used above, immediately after delivery — landing in the same
+	// wall-clock second as delivered_at. The resulting child_set_key is
+	// byte-identical to before (same "id:state").
+	if err := repo.UpdateTaskState(ctx, childID, "IN_PROGRESS"); err != nil {
+		t.Fatalf("reopen child: %v", err)
+	}
+	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
+		t.Fatalf("recomplete child: %v", err)
+	}
+
+	after, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (after reopen): %v", err)
+	}
+	if len(after) != 1 || after[0].ParentTaskID != parentID {
+		t.Fatalf("LOST WAKE NOT RECOVERABLE: after reopen+recomplete, ListStuckParents returned %#v; want exactly [%s]", after, parentID)
 	}
 }
 

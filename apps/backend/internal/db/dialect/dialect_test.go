@@ -173,6 +173,17 @@ func TestNaiveUTCTimestampOf(t *testing.T) {
 	}
 }
 
+func TestSecondPrecisionText(t *testing.T) {
+	got := SecondPrecisionText(SQLite3, "MAX(c.updated_at)")
+	if got != "strftime('%Y-%m-%d %H:%M:%S', MAX(c.updated_at))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = SecondPrecisionText(PGX, "MAX(c.updated_at)")
+	if got != "to_char(MAX(c.updated_at), 'YYYY-MM-DD HH24:MI:SS')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestNow(t *testing.T) {
 	if Now(SQLite3) != "datetime('now')" {
 		t.Errorf("sqlite: got %q", Now(SQLite3))
