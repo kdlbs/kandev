@@ -144,8 +144,9 @@ to send every eligible job with a non-empty tier label to external capacity.
 Malformed or out-of-range values fail closed to GitHub-hosted runners and emit
 a planner warning.
 
-The planner runs on `ubuntu-latest` and gives each eligible job either the
-`external` or `github` assignment. The workflow maps that assignment to a
+The reusable `.github/actions/plan-external-runners` composite action runs on
+the planner job's `ubuntu-latest` checkout and gives each eligible job either
+the `external` or `github` assignment. Each workflow maps that assignment to a
 configured label:
 
 ```yaml

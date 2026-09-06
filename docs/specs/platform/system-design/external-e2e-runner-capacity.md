@@ -119,6 +119,12 @@ read-only planner job. Eligible jobs depend on the planner only for their
 runner assignment; their existing test dependencies, matrices, artifacts,
 timeouts, permissions, and required conclusions remain unchanged.
 
+The planner steps use the reusable composite action at
+`.github/actions/plan-external-runners/action.yml`. The action owns the
+validated environment wiring and `runner-plan.py` invocation, while each
+workflow keeps only its job-specific output mapping. This keeps the job
+contract explicit without copying planner logic between workflows.
+
 The planner output is limited to the enum values `github` and `external`. The
 workflow maps `external` to one of the configured tier variables. Protected
 jobs keep explicit `runs-on: ubuntu-latest` and do not consume planner output.

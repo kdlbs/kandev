@@ -25,10 +25,13 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         workflow = (WORKFLOW_ROOT / workflow_name).read_text(encoding="utf-8")
         planner = job_block(workflow, "runner_plan", "changes" if "changes:" in workflow else "lint")
         self.assertIn("runs-on: ubuntu-latest", planner)
-        self.assertIn("python3 .github/scripts/runner-plan.py", planner)
-        self.assertIn(f"--workflow {workflow_key}", planner)
-        self.assertIn("KANDEV_CI_EXTERNAL_ENABLED", planner)
-        self.assertIn("KANDEV_CI_EXTERNAL_PERCENT", planner)
+        self.assertIn("uses: ./.github/actions/plan-external-runners", planner)
+        self.assertIn(f"workflow: {workflow_key}", planner)
+        self.assertIn("run-id: ${{ github.run_id }}", planner)
+        self.assertIn("burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}", planner)
+        self.assertIn("percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}", planner)
+        self.assertIn("light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}", planner)
+        self.assertIn("standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}", planner)
         for output in outputs:
             self.assertIn(f"{output}: ${{{{ steps.plan.outputs.{output} }}}}", planner)
         return workflow
@@ -124,6 +127,11 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
     def test_plan_script_is_checked_by_required_action_pinning_workflow(self) -> None:
         workflow = (WORKFLOW_ROOT / "lint-action-pinning.yml").read_text(encoding="utf-8")
         self.assertTrue(PLAN_SCRIPT.is_file())
+        action = (WORKFLOW_ROOT / ".." / "actions" / "plan-external-runners" / "action.yml").resolve()
+        self.assertTrue(action.is_file())
+        action_text = action.read_text(encoding="utf-8")
+        self.assertIn("using: composite", action_text)
+        self.assertIn("runner-plan.py", action_text)
         self.assertIn("python3 .github/scripts/runner-plan_test.py", workflow)
         self.assertIn("python3 .github/scripts/external-runner-workflow-contract_test.py", workflow)
 

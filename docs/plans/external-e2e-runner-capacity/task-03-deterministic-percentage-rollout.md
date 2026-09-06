@@ -105,6 +105,8 @@ contract before planner outputs are introduced.
 
 - Added `.github/scripts/runner-plan.py` with deterministic matrix and
   singleton allocation.
+- Added `.github/actions/plan-external-runners/action.yml` so all workflow
+  planner jobs share one environment and script invocation.
 - Added planner tests for unset, 0, 50, 100, empty-label, rerun, and invalid
   percentage behavior.
 - Added planner jobs and enum-safe outputs to all eligible workflows.

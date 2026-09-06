@@ -36,20 +36,14 @@ jobs:
 
       - name: Plan runner allocation
         id: plan
-        env:
-          KANDEV_CI_EXTERNAL_ENABLED: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
-          KANDEV_CI_EXTERNAL_PERCENT: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
-          KANDEV_CI_RUNNER_LIGHT: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
-          KANDEV_CI_RUNNER_STANDARD: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
-        run: |
-          python3 .github/scripts/runner-plan.py \
-            --workflow architecture \
-            --run-id "$GITHUB_RUN_ID" \
-            --burst "$KANDEV_CI_EXTERNAL_ENABLED" \
-            --percent "$KANDEV_CI_EXTERNAL_PERCENT" \
-            --light-label "$KANDEV_CI_RUNNER_LIGHT" \
-            --standard-label "$KANDEV_CI_RUNNER_STANDARD" \
-            --output "$GITHUB_OUTPUT"
+        uses: ./.github/actions/plan-external-runners
+        with:
+          workflow: architecture
+          run-id: ${{ github.run_id }}
+          burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
 
   lint:
     name: Architecture boundaries do not regress
