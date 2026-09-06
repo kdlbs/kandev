@@ -9,14 +9,25 @@ type WorkflowEditorActionType =
   | "auto_start_agent"
   | "move_to_next"
   | "move_to_previous"
+  | "move_to_step"
   | "run_script";
 
 const WORKFLOW_EDITOR_ACTION_LABELS: Record<WorkflowEditorActionType, string> = {
   auto_start_agent: "Auto-start agent",
   move_to_next: "Move to next step",
   move_to_previous: "Move to previous step",
+  move_to_step: "Move to specific step",
   run_script: "Run script",
 };
+
+function transitionActionType(
+  optionName: string,
+): "move_to_next" | "move_to_previous" | "move_to_step" {
+  const normalized = optionName.toLowerCase();
+  if (normalized.includes("previous")) return "move_to_previous";
+  if (normalized.includes("specific")) return "move_to_step";
+  return "move_to_next";
+}
 
 export class WorkflowSettingsPage {
   readonly page: Page;
@@ -26,6 +37,7 @@ export class WorkflowSettingsPage {
   readonly confirmCreateButton: Locator;
   readonly floatingSave: Locator;
   readonly cycleGuardDialog: Locator;
+  private activeWorkflowCard: Locator | null = null;
 
   constructor(page: Page) {
     this.page = page;
@@ -49,34 +61,32 @@ export class WorkflowSettingsPage {
     return this.page.getByTestId(`workflow-card-${workflowId}`);
   }
 
-  /** The focused-editor link rendered for a persisted workflow. */
-  workflowEditorLink(workflowId: string): Locator {
-    return this.page.getByTestId(`edit-workflow-${workflowId}`);
-  }
-
-  /** The route-level focused workflow editor. */
+  /** The inline workflow-card editing surface. */
   get editor(): Locator {
-    return this.page.getByTestId("workflow-editor");
+    return this.activeWorkflowCard ?? this.page.getByTestId("workflow-order-list");
   }
 
-  /** A focused editor step node by persisted or draft identity. */
-  editorStep(stepId: string, mobile = false): Locator {
-    return this.page.getByTestId(
-      `${mobile ? "workflow-editor-mobile-step" : "workflow-editor-step"}-${stepId}`,
-    );
+  /** An inline workflow-card step node by persisted or draft identity. */
+  editorStep(stepId: string, _mobile = false): Locator {
+    return this.page.getByTestId(`workflow-step-node-${stepId}`);
   }
 
-  /** A focused-editor step node by its rendered name. */
-  editorStepByName(name: string, mobile = false): Locator {
-    return this.page
-      .locator(
-        `[data-testid^="${mobile ? "workflow-editor-mobile-step" : "workflow-editor-step"}-"]`,
-      )
+  /** An inline workflow-card step node by its rendered name. */
+  editorStepByName(name: string, _mobile = false): Locator {
+    return (this.activeWorkflowCard ?? this.page.getByTestId("workflow-order-list"))
+      .locator('[data-testid^="workflow-step-node-"]')
       .filter({ hasText: name });
   }
 
   /** A lifecycle action list within the focused editor. */
-  editorActionList(trigger: "on_enter" | "on_turn_start" | "on_turn_complete" | "on_exit") {
+  editorActionList(
+    trigger:
+      | "on_enter"
+      | "on_turn_start"
+      | "on_turn_complete"
+      | "on_exit"
+      | "on_children_completed",
+  ) {
     return this.page.getByTestId(`workflow-action-list-${trigger}`);
   }
 
@@ -87,20 +97,31 @@ export class WorkflowSettingsPage {
 
   /** The focused action editor within a lifecycle action list. */
   editorAction(
-    trigger: "on_enter" | "on_turn_start" | "on_turn_complete" | "on_exit",
+    trigger:
+      | "on_enter"
+      | "on_turn_start"
+      | "on_turn_complete"
+      | "on_exit"
+      | "on_children_completed",
     index: number,
   ): Locator {
     return this.page.getByTestId(`workflow-action-editor-${trigger}-${index}`);
   }
 
-  /** Select a step in the focused editor's pipeline. */
+  /** Select a step in the active inline workflow card. */
   async selectEditorStep(name: string, touch = false): Promise<void> {
-    await this.activate(this.editorStepByName(name, touch), touch);
+    const card = this.activeWorkflowCard ?? this.page.getByTestId("workflow-order-list");
+    await this.selectStep(card, name, touch);
   }
 
   /** Add one action to a focused editor lifecycle recipe. */
   async addEditorAction(
-    trigger: "on_enter" | "on_turn_start" | "on_turn_complete" | "on_exit",
+    trigger:
+      | "on_enter"
+      | "on_turn_start"
+      | "on_turn_complete"
+      | "on_exit"
+      | "on_children_completed",
     type: WorkflowEditorActionType,
     touch = false,
   ): Promise<void> {
@@ -116,24 +137,17 @@ export class WorkflowSettingsPage {
     } else {
       await list.locator("select").selectOption(type);
     }
-    await expect(
-      this.page.locator(
-        '[data-testid="workflow-focused-action-editor"], [data-testid="workflow-editor-mobile-action-screen"]',
-      ),
-    ).toBeVisible();
+    await expect(this.page.locator('[data-testid="workflow-focused-action-editor"]')).toBeVisible();
   }
 
-  /** Return from the focused action editor to its recipe or step screen. */
+  /** Return from the focused action editor to its inline recipe. */
   async backFromEditorAction(touch = false): Promise<void> {
-    await this.activate(
-      this.page.getByRole("button", { name: touch ? "Back to step" : "Back to automation" }),
-      touch,
-    );
+    await this.activate(this.page.getByRole("button", { name: "Back to automation" }), touch);
   }
 
-  /** Return from the mobile step screen to the vertical workflow journey. */
+  /** Inline editing keeps the workflow journey mounted, so there is no back navigation. */
   async backToEditorJourney(): Promise<void> {
-    await this.page.getByRole("button", { name: "Back to workflow journey" }).tap();
+    await Promise.resolve();
   }
 
   /** Find a workflow card by the name shown in its input field using its current value. */
@@ -210,20 +224,28 @@ export class WorkflowSettingsPage {
       await this.activate(this.stepNodeByName(card, stepName), touch);
     }
     await expect(currentName).toHaveValue(stepName);
-    return currentName.locator(
-      "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' rounded-lg ')][1]",
-    );
+    return card.locator('[data-testid^="workflow-step-panel-"]').first();
   }
 
   /** Toggle auto-start for a step through the visible configuration panel. */
   async setAutoStart(card: Locator, stepName: string, enabled: boolean, touch = false) {
     const panel = await this.selectStep(card, stepName, touch);
-    const checkbox = panel.getByRole("checkbox", { name: "Auto-start agent" });
-    if ((await checkbox.isChecked()) !== enabled) {
-      await this.activate(checkbox, touch);
+    await this.activate(panel.getByTestId("workflow-editor-tab-automation"), touch);
+    const list = panel.getByTestId("workflow-action-list-on_enter");
+    const action = list.locator("button").filter({ hasText: "Auto-start agent" }).first();
+    const hasAction = (await action.count()) > 0;
+    if (hasAction !== enabled) {
+      if (enabled) {
+        await this.addEditorAction("on_enter", "auto_start_agent", touch);
+        await this.backFromEditorAction(touch);
+      } else {
+        await this.activate(action, touch);
+        await this.activate(this.page.getByRole("button", { name: "Remove action" }), touch);
+      }
     }
-    if (enabled) await expect(checkbox).toBeChecked();
-    else await expect(checkbox).not.toBeChecked();
+    const updated = list.locator("button").filter({ hasText: "Auto-start agent" });
+    if (enabled) await expect(updated).toHaveCount(1);
+    else await expect(updated).toHaveCount(0);
   }
 
   /** Set the On Turn Complete transition in a step's configuration panel. */
@@ -233,12 +255,10 @@ export class WorkflowSettingsPage {
     optionName: string,
     touch = false,
   ) {
-    const panel = await this.selectStep(card, stepName, touch);
-    const transitionSection = panel
-      .getByText("On Turn Complete", { exact: true })
-      .locator("xpath=../..");
-    await this.activate(transitionSection.getByRole("combobox"), touch);
-    await this.activate(this.page.getByRole("option", { name: optionName }), touch);
+    await this.selectStep(card, stepName, touch);
+    const type = transitionActionType(optionName);
+    await this.addEditorAction("on_turn_complete", type, touch);
+    await this.backFromEditorAction(touch);
   }
 
   /** Toggle the cancellation policy beneath a configured turn-complete transition. */
@@ -249,6 +269,7 @@ export class WorkflowSettingsPage {
     touch = false,
   ) {
     const panel = await this.selectStep(card, stepName, touch);
+    await this.activate(panel.getByTestId("workflow-editor-tab-policies"), touch);
     const checkbox = panel.getByRole("checkbox", {
       name: "Run completion actions when a turn is cancelled",
     });
@@ -321,7 +342,7 @@ export class WorkflowSettingsPage {
     return this.page.getByTestId(`workflow-drag-handle-${workflowId}`);
   }
 
-  /** Open the "Add Workflow" dialog and enter the client-only focused editor. */
+  /** Open the "Add Workflow" dialog and create a draft inline workflow card. */
   async createWorkflow(name: string, templateName?: string, touch = false) {
     await this.activate(this.addWorkflowButton, touch);
     await expect(this.createDialog).toBeVisible();
@@ -342,10 +363,8 @@ export class WorkflowSettingsPage {
 
     await this.activate(this.confirmCreateButton, touch);
     await expect(this.createDialog).not.toBeVisible();
-    await expect(this.page).toHaveURL(/\/workflows\/new(?:\?|$)/);
-    await expect(
-      this.page.locator('[data-testid="workflow-editor"], [data-testid="workflow-editor-mobile"]'),
-    ).toBeVisible();
+    this.activeWorkflowCard = await this.findWorkflowCard(name, { waitForName: true });
+    await expect(this.activeWorkflowCard).toBeVisible();
   }
 
   /** The workflow-level agent profile select trigger within a workflow card. */

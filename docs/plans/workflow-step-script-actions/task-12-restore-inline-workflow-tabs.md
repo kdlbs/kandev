@@ -1,7 +1,7 @@
 ---
 id: 12-restore-inline-workflow-tabs
 title: Restore inline workflow editing with compact tabs
-status: pending
+status: done
 wave: 9
 depends_on:
   - 05-build-workflow-editor-view-model
@@ -98,4 +98,9 @@ git diff --check
 
 ## Results
 
-Pending implementation.
+Removed the dedicated workflow-editor routes and integrated compact Agent,
+Automation, and Policies tabs into the existing inline selected-step panel.
+Preserved workflow-level defaults, step metadata, lifecycle policies, manual
+save, read-only behavior, import/export, sync, and inherited transition
+semantics. Desktop and mobile editor tests, typecheck, lint, and i18n checks
+pass.

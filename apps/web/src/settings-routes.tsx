@@ -108,7 +108,6 @@ import type { LicenseEntry } from "@/lib/types/system";
 import { renderIntegrationSettingsRoute } from "./integration-settings-route";
 import {
   WorkspaceRepositoriesRoute,
-  WorkspaceWorkflowEditorRoute,
   WorkspaceWorkflowsRoute,
 } from "./settings-routes.workspace-data";
 
@@ -445,19 +444,6 @@ function renderWorkspaceSettingsRoute(pathname: string): ReactNode {
   );
   if (workspaceIntegration?.[1]) {
     return renderWorkspaceIntegrationRoute(workspaceIntegration);
-  }
-
-  const workspaceWorkflowEditor = matchDouble(
-    pathname,
-    /^\/settings\/workspaces\/([^/]+)\/workflows\/([^/]+)$/,
-  );
-  if (workspaceWorkflowEditor) {
-    const [workspaceId, workflowId] = workspaceWorkflowEditor;
-    return (
-      <WorkspaceSettingsShell workspaceId={workspaceId} activeTab="workflows">
-        <WorkspaceWorkflowEditorRoute workspaceId={workspaceId} workflowId={workflowId} />
-      </WorkspaceSettingsShell>
-    );
   }
 
   const workspaceAutomation = matchDouble(

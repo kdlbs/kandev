@@ -47,6 +47,7 @@ describe("workflow editor view model", () => {
             { type: "run_script", config: { command: "echo ready" } },
           ],
           on_turn_complete: [{ type: "move_to_next" }],
+          on_children_completed: [{ type: "move_to_step", config: { step_id: "one" } }],
         },
       }),
     ];
@@ -56,7 +57,7 @@ describe("workflow editor view model", () => {
     expect(model.stepSummaries[1]).toMatchObject({
       stepId: "two",
       effectiveProfileId: "profile-review",
-      actionCount: 3,
+      actionCount: 4,
       primaryDestinationId: undefined,
       isDirty: true,
     });

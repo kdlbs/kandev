@@ -13,7 +13,8 @@ export type WorkflowLifecycleTrigger =
   | "on_enter"
   | "on_turn_start"
   | "on_turn_complete"
-  | "on_exit";
+  | "on_exit"
+  | "on_children_completed";
 
 export type WorkflowActionRecord = {
   type: string;
@@ -31,6 +32,7 @@ const ENTRY_TRIGGERS = ["on_enter"] as const;
 const TURN_START_TRIGGERS = ["on_turn_start"] as const;
 const TURN_COMPLETE_TRIGGERS = ["on_turn_complete"] as const;
 const EXIT_TRIGGERS = ["on_exit"] as const;
+const CHILDREN_COMPLETED_TRIGGERS = ["on_children_completed"] as const;
 
 export const WORKFLOW_ACTION_CATALOG: readonly WorkflowActionDescriptor[] = [
   { type: "enable_plan_mode", labelKey: "workflows:planMode", compatibleTriggers: ENTRY_TRIGGERS },
@@ -82,17 +84,29 @@ export const WORKFLOW_ACTION_CATALOG: readonly WorkflowActionDescriptor[] = [
   {
     type: "move_to_next",
     labelKey: "workflows:moveToNextStep",
-    compatibleTriggers: [...TURN_START_TRIGGERS, ...TURN_COMPLETE_TRIGGERS],
+    compatibleTriggers: [
+      ...TURN_START_TRIGGERS,
+      ...TURN_COMPLETE_TRIGGERS,
+      ...CHILDREN_COMPLETED_TRIGGERS,
+    ],
   },
   {
     type: "move_to_previous",
     labelKey: "workflows:moveToPreviousStep",
-    compatibleTriggers: [...TURN_START_TRIGGERS, ...TURN_COMPLETE_TRIGGERS],
+    compatibleTriggers: [
+      ...TURN_START_TRIGGERS,
+      ...TURN_COMPLETE_TRIGGERS,
+      ...CHILDREN_COMPLETED_TRIGGERS,
+    ],
   },
   {
     type: "move_to_step",
     labelKey: "workflows:moveToSpecificStep",
-    compatibleTriggers: [...TURN_START_TRIGGERS, ...TURN_COMPLETE_TRIGGERS],
+    compatibleTriggers: [
+      ...TURN_START_TRIGGERS,
+      ...TURN_COMPLETE_TRIGGERS,
+      ...CHILDREN_COMPLETED_TRIGGERS,
+    ],
   },
   {
     type: "disable_plan_mode",

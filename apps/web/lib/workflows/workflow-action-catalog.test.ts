@@ -33,6 +33,11 @@ describe("workflow action catalog", () => {
       "disable_plan_mode",
       "run_script",
     ]);
+    expect(getWorkflowActionCatalog("on_children_completed").map((item) => item.type)).toEqual([
+      "move_to_next",
+      "move_to_previous",
+      "move_to_step",
+    ]);
   });
 
   it("creates a portable script action with documented defaults", () => {

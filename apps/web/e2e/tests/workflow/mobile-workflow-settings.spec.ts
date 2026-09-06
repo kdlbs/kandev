@@ -153,13 +153,15 @@ test.describe("Workflow settings on mobile", () => {
     const card = await page.findWorkflowCard("Mobile Child Completion Settings");
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Waiting").click();
+    const panel = card.getByTestId(`workflow-step-panel-${waitStep.id}`);
+    await panel.getByTestId("workflow-editor-tab-automation").tap();
 
-    const childCompletionSelect = card.getByTestId(
-      `${waitStep.id}-children-completed-transition-select`,
-    );
-    await expect(childCompletionSelect).toBeVisible();
-    await childCompletionSelect.click();
-    await testPage.getByRole("option", { name: "Move to next step" }).click();
+    await page.addEditorAction("on_children_completed", "move_to_next", true);
+    await page.backFromEditorAction(true);
+    const childCompletionAction = panel
+      .getByTestId("workflow-action-list-on_children_completed")
+      .getByRole("button", { name: /select action 1/i });
+    await expect(childCompletionAction).toBeVisible();
 
     const beforeSave = await apiClient.listWorkflowSteps(workflow.id);
     expect(
@@ -181,8 +183,8 @@ test.describe("Workflow settings on mobile", () => {
     const viewportWidth = await testPage.evaluate(() => window.innerWidth);
     const editorControls = [
       card.getByPlaceholder("Step name"),
-      childCompletionSelect,
-      card.getByRole("button", { name: "Delete", exact: true }),
+      childCompletionAction,
+      panel.getByTestId("workflow-editor-tab-automation"),
     ];
     for (const control of editorControls) {
       const box = await control.boundingBox();
@@ -293,7 +295,8 @@ test.describe("Workflow settings on mobile", () => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
     const card = await page.findWorkflowCard("Mobile WIP Guidance");
-    await page.selectStep(card, "Review", true);
+    const panel = await page.selectStep(card, "Review", true);
+    await panel.getByTestId("workflow-editor-tab-policies").tap();
 
     const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
     await expect(guidanceHelp).toBeVisible();

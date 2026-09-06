@@ -59,6 +59,7 @@ test.describe("Workflow settings", () => {
     await page.goto(seedData.workspaceId);
     const card = await page.findWorkflowCard("Turn Complete Layout");
     const panel = await page.selectStep(card, "Working");
+    await panel.getByTestId("workflow-editor-tab-policies").click();
     const signalRow = panel.getByTestId(`${working.id}-require-signal-row`);
     const cancelRow = panel.getByTestId(`${working.id}-cancel-completion-row`);
     const label = panel.getByTestId(`${working.id}-cancel-completion-label`);
@@ -207,7 +208,7 @@ test.describe("Workflow settings", () => {
     // Select a known template so the step-level assertions do not depend on template ordering.
     await page.createWorkflow("Template Test Workflow", "Kanban");
 
-    // New workflows stay in the client-only focused editor until Save.
+    // New workflows stay in the client-only inline card until Save.
     await expect(page.editorStepByName("Backlog")).toBeVisible();
 
     const beforeSave = await apiClient.listWorkflows(seedData.workspaceId);
@@ -249,10 +250,10 @@ test.describe("Workflow settings", () => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    // Create the workflow in the focused editor, then add a local step before Save.
+    // Create the workflow in the inline card, then add a local step before Save.
     await page.createWorkflow("Step Add Test");
 
-    await page.editor.getByTestId("workflow-editor-add-step").click();
+    await page.addStepButton(page.editor).click();
     await expect(page.editorStepByName("New Step")).toBeVisible();
     const beforeSave = await apiClient.listWorkflows(seedData.workspaceId);
     expect(beforeSave.workflows.some((item) => item.name === "Step Add Test")).toBe(false);
@@ -286,17 +287,24 @@ test.describe("Workflow settings", () => {
     const card = await page.findWorkflowCard("Child Completion Settings");
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Waiting for Children").click();
+    const panel = card.getByTestId(`workflow-step-panel-${waitStep.id}`);
+    await panel.getByTestId("workflow-editor-tab-automation").click();
+    const childActions = panel.getByTestId("workflow-action-list-on_children_completed");
 
-    await card.getByTestId(`${waitStep.id}-children-completed-help`).hover();
+    await childActions
+      .getByText("When every active direct child task is COMPLETED, FAILED, or CANCELLED")
+      .hover();
     await expect(
       testPage.getByText("When every active direct child task is COMPLETED, FAILED, or CANCELLED"),
     ).toBeVisible();
 
-    await card.getByTestId(`${waitStep.id}-children-completed-transition-select`).click();
-    await testPage.getByRole("option", { name: "Move to specific step" }).click();
-    await expect(card.getByTestId(`${waitStep.id}-children-completed-step-select`)).toContainText(
-      "All Children Done",
-    );
+    await childActions.locator("select").selectOption("move_to_step");
+    await expect(panel.getByTestId("workflow-focused-action-editor")).toBeVisible();
+    await panel
+      .getByTestId("workflow-action-editor-on_children_completed-0")
+      .getByRole("combobox")
+      .click();
+    await testPage.getByRole("option", { name: "All Children Done" }).click();
 
     const beforeSave = await apiClient.listWorkflowSteps(workflow.id);
     expect(
@@ -321,6 +329,8 @@ test.describe("Workflow settings", () => {
     const card = await page.findWorkflowCard("WIP Settings");
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Review").click();
+    const panel = card.getByTestId(`workflow-step-panel-${reviewStep.id}`);
+    await panel.getByTestId("workflow-editor-tab-policies").click();
 
     const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
     await expect(guidanceHelp).toBeVisible();
