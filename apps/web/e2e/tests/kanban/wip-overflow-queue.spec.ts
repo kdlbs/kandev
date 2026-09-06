@@ -36,25 +36,35 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   const sourceCard = kanban.taskCard(task.id);
   const feederColumn = kanban.columnByStepId(feederStep.id);
   const sourceBox = await sourceCard.boundingBox();
-  const feederBox = await feederColumn.boundingBox();
   expect(sourceBox).not.toBeNull();
-  expect(feederBox).not.toBeNull();
 
-  await testPage.mouse.move(
-    sourceBox!.x + sourceBox!.width / 2,
-    sourceBox!.y + sourceBox!.height / 2,
-  );
+  const sourceX = sourceBox!.x + sourceBox!.width / 2;
+  const sourceY = sourceBox!.y + sourceBox!.height / 2;
+  await testPage.mouse.move(sourceX, sourceY);
   await testPage.mouse.down();
-  await testPage.mouse.move(
-    sourceBox!.x + sourceBox!.width / 2 + 20,
-    sourceBox!.y + sourceBox!.height / 2,
-  );
+  await testPage.mouse.move(sourceX + 20, sourceY);
+  await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(1);
+
+  // Dragging can temporarily move destinations before the anchored source
+  // column, so scroll them back into the viewport before dropping.
+  let feederBox = await feederColumn.boundingBox();
+  const scrollWindowBox = await testPage.getByTestId("desktop-kanban-scroll-window").boundingBox();
+  expect(scrollWindowBox).not.toBeNull();
+  if (feederBox && feederBox.x + feederBox.width <= 0) {
+    await testPage.mouse.move(scrollWindowBox!.x + 2, sourceY, { steps: 12 });
+    await expect
+      .poll(async () => {
+        const box = await feederColumn.boundingBox();
+        return box ? box.x + box.width / 2 : -1;
+      })
+      .toBeGreaterThan(0);
+    feederBox = await feederColumn.boundingBox();
+  }
+  expect(feederBox).not.toBeNull();
   await testPage.mouse.move(
     feederBox!.x + feederBox!.width / 2,
     feederBox!.y + feederBox!.height / 2,
-    {
-      steps: 12,
-    },
+    { steps: 12 },
   );
   await testPage.mouse.up();
 

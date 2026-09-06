@@ -2707,6 +2707,16 @@ export class ApiClient {
     return this.wsRequest("message.queue.get", { session_id: sessionId });
   }
 
+  async setQueueAutoRun(
+    sessionId: string,
+    enabled: boolean,
+  ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
+    return this.wsRequest("message.queue.auto_run.set", {
+      session_id: sessionId,
+      enabled,
+    });
+  }
+
   // --- Integration config seeding (real API, not mock) ---
 
   async setJiraConfig(payload: {
