@@ -121,6 +121,52 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("SPRITES_API_TOKEN", deploy_job)
 
+    def test_trusted_preview_cli_is_built_outside_the_fork_job(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        trusted_build = workflow_job(workflow, "build-trusted-preview-cli")
+        fork_build = workflow_job(workflow, "build-fork-preview")
+
+        self.assertIn("permissions: {}", trusted_build)
+        self.assertRegex(
+            trusted_build,
+            re.compile(
+                r"ref: \$\{\{ github\.workflow_sha \}\}\n"
+                r"\s+fetch-depth: 1\n"
+                r"\s+token: \"\"\n"
+                r"\s+persist-credentials: false"
+            ),
+        )
+        self.assertIn(
+            'go build -o "$RUNNER_TEMP/kandev-preview-deploy" ./cmd/preview',
+            trusted_build,
+        )
+        self.assertIn("trusted-preview-cli-${{ github.run_id }}", trusted_build)
+        self.assertNotIn("github.event.pull_request.head.repo.full_name", trusted_build)
+
+        self.assertIn("needs: build-trusted-preview-cli", fork_build)
+        self.assertIn("actions/download-artifact", fork_build)
+        self.assertIn("trusted-preview-cli-${{ github.run_id }}", fork_build)
+        self.assertNotIn(".preview-cli", fork_build)
+        self.assertLess(
+            fork_build.index("Record trusted tool paths"),
+            fork_build.index("repository: ${{ github.event.pull_request.head.repo.full_name }}"),
+        )
+        self.assertLess(
+            fork_build.index("repository: ${{ github.event.pull_request.head.repo.full_name }}"),
+            fork_build.index("pnpm -C apps install --frozen-lockfile"),
+        )
+        self.assertLess(
+            fork_build.index("pnpm -C apps install --frozen-lockfile"),
+            fork_build.index("actions/download-artifact"),
+        )
+        self.assertLess(
+            fork_build.index("actions/download-artifact"),
+            fork_build.index("Package fork preview artifact"),
+        )
+        self.assertIn('BASH_ENV: ""', fork_build)
+        self.assertIn('env -i PATH="$TRUSTED_PATH"', fork_build)
+        self.assertIn('"$RUNNER_TEMP/kandev-preview-deploy" package', fork_build)
+
     def test_fork_build_subprocesses_cannot_inherit_deployment_credentials(self) -> None:
         build_source = PREVIEW_BUILD.read_text(encoding="utf-8")
 
