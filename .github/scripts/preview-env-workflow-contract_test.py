@@ -136,6 +136,8 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         self.assertRegex(
             trusted_build,
             re.compile(
+                r"repository: \$\{\{ github\.repository \}\}\n"
+                r"\s+"
                 r"ref: \$\{\{ github\.workflow_sha \}\}\n"
                 r"\s+fetch-depth: 1\n"
                 r"\s+token: \"\"\n"
@@ -146,6 +148,7 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             'go build -o "$RUNNER_TEMP/kandev-preview-deploy" ./cmd/preview',
             trusted_build,
         )
+        self.assertIn('GOWORK: "off"', trusted_build)
         self.assertIn("trusted-preview-cli-${{ github.run_id }}", trusted_build)
         self.assertNotIn("github.event.pull_request.head.repo.full_name", trusted_build)
 
