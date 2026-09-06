@@ -4,6 +4,7 @@ system: ui
 requirements:
   - REQ-UI-CI-PR-AUTOMATION-001
 created: 2026-06-18
+updated: 2026-09-06
 owners:
   - tbd
 ---
@@ -51,7 +52,33 @@ This design preserves the technical source detail for `REQ-UI-CI-PR-AUTOMATION-0
   `dirty`, **THEN** Kandev sends or queues one conflict repair prompt under the
   [GitHub integration contract](../../integrations/requirements/github-pr-auto-fix-conflicts.md).
 - **GIVEN** auto-fix is enabled and a PR still has queued, pending, or in-progress checks, **WHEN** automation evaluates the PR, **THEN** Kandev does not send or queue an `@ci-auto-fix` prompt and does not count a round, even if some checks have already failed or comments are present.
-- **GIVEN** auto-fix already prompted for a failure snapshot, **WHEN** the same failure is observed again on a later poll, **THEN** no duplicate prompt is sent.
+- **GIVEN** auto-fix already queued or started a turn for a failure snapshot,
+  **WHEN** the same failure is observed while that attempt remains unresolved,
+  **THEN** no concurrent duplicate prompt is sent.
+- **GIVEN** an auto-fix turn ends normally without calling
+  `report_pr_auto_fix_outcome_kandev`, **WHEN** a later settled PR evaluation
+  observes the same failure snapshot, **THEN** Kandev starts another round for
+  that snapshot if the 10-round budget remains.
+- **GIVEN** an auto-fix turn ends in a recoverable agent failure without a
+  recorded outcome, **WHEN** the session and PR remain eligible, **THEN** the
+  same snapshot is retryable rather than permanently acknowledged.
+- **GIVEN** the agent reports `action_taken`, **WHEN** two complete PR watch
+  intervals pass without a changed PR head, check execution timestamp, review
+  thread, conflict, or queue-removal state, **THEN** the same snapshot becomes
+  retryable.
+- **GIVEN** a failed check is rerun and fails again with the same name, URL,
+  conclusion, and output, **WHEN** its provider execution timestamp changes,
+  **THEN** Kandev treats it as a new feedback generation and can start another
+  round.
+- **GIVEN** the agent reports `non_actionable`, **WHEN** later polls observe the
+  unchanged snapshot, **THEN** Kandev does not send another prompt until the
+  provider feedback changes.
+- **GIVEN** the agent reports `blocked` with a reason, **WHEN** the outcome is
+  accepted, **THEN** Kandev suppresses the unchanged snapshot and displays the
+  reason in the selected PR's existing automation error surface.
+- **GIVEN** an agent calls the outcome tool from another task, session, turn,
+  or stale retry, **WHEN** Kandev validates the call, **THEN** it rejects the
+  disposition and leaves the current attempt unchanged.
 - **GIVEN** auto-fix already prompted for a failure snapshot, **WHEN** a new failed check or new unresolved review comment appears, **THEN** Kandev sends or queues a new prompt containing the new or materially changed feedback.
 - **GIVEN** auto-fix is enabled and a PR has only pending checks plus a bot-authored PR conversation/status comment, **WHEN** automation evaluates the PR, **THEN** Kandev does not send or queue an `@ci-auto-fix` prompt and does not count a round.
 - **GIVEN** auto-fix is enabled and the task session is running, **WHEN** changed CI feedback appears multiple times for the same PR before the queue drains, **THEN** Kandev keeps one queued `@ci-auto-fix` entry for that PR and updates it with the latest feedback.
@@ -73,6 +100,13 @@ This design preserves the technical source detail for `REQ-UI-CI-PR-AUTOMATION-0
 - **GIVEN** auto-fix has already used 10 rounds for a PR and no pending auto-fix queue entry exists, **WHEN** new actionable feedback appears, **THEN** Kandev does not send or queue another prompt and records the PR as paused at `Auto-fix 10/10`.
 - **GIVEN** auto-fix has already used 10 rounds for a PR and the 10th round is still queued, **WHEN** new actionable feedback appears, **THEN** Kandev replaces that pending queued prompt without incrementing the round count.
 - **GIVEN** auto-fix sends a prompt for feedback that the backend considered prompt-worthy but the agent determines is already addressed or otherwise non-actionable, **WHEN** the agent reviews that prompt, **THEN** the agent does not modify files, commit, or push and only reports that there is nothing actionable to address.
+- **GIVEN** an installation still stores an exact untouched legacy
+  `ci-auto-fix` built-in prompt, **WHEN** the upgraded backend starts, **THEN**
+  it replaces that row with the current embedded default while preserving any
+  prompt whose content or update timestamp proves a user edit.
+- **GIVEN** a task uses a custom auto-fix prompt, **WHEN** Kandev dispatches an
+  auto-fix turn, **THEN** the immutable outcome instruction is still delivered
+  and the custom prompt cannot redefine the current task/session/turn binding.
 - **GIVEN** auto-fix is enabled and the task session is running, **WHEN** new actionable PR feedback appears, **THEN** the prompt is queued and delivered after the current turn rather than interrupting the running session, and the chat history shows the `@ci-auto-fix` user message with visible PR snapshot details before the agent output for the queued turn.
 - **GIVEN** a linked draft PR has passing checks and GitHub reports clean mergeability, **WHEN** Kandev refreshes its status, **THEN** PR status surfaces identify it as a draft and do not present it as ready to merge.
 - **GIVEN** auto-merge is enabled and the PR has passing checks, required reviews, no unresolved threads, and clean mergeability, **WHEN** the PR watch poll observes the ready state, **THEN** Kandev merges the PR with the existing backend merge-method selection.

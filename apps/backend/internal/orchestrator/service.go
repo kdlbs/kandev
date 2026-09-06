@@ -2553,6 +2553,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
 	// Recover routes orphaned at "starting" by a launch failure that never
 	// reached a terminal route status. Must run before
 	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former

@@ -244,6 +244,29 @@ func UserRefreshTokenSecretKey(workspaceID, userID string) string {
 // TaskCIAutoFixMaxRounds is the server-enforced CI auto-fix loop guard.
 const TaskCIAutoFixMaxRounds = 10
 
+// TaskCIAutoFixAttemptState is the durable lifecycle of one GitHub PR
+// auto-fix prompt. Legacy rows use acknowledged so an upgrade cannot invent
+// an in-flight attempt for feedback that was already deduplicated.
+type TaskCIAutoFixAttemptState string
+
+const (
+	TaskCIAutoFixAttemptQueued                   TaskCIAutoFixAttemptState = "queued"
+	TaskCIAutoFixAttemptRunning                  TaskCIAutoFixAttemptState = "running"
+	TaskCIAutoFixAttemptAwaitingProviderProgress TaskCIAutoFixAttemptState = "awaiting_provider_progress"
+	TaskCIAutoFixAttemptAcknowledged             TaskCIAutoFixAttemptState = "acknowledged"
+	TaskCIAutoFixAttemptRetryable                TaskCIAutoFixAttemptState = "retryable"
+)
+
+// TaskCIAutoFixOutcome is the explicit disposition reported by the bound
+// auto-fix turn.
+type TaskCIAutoFixOutcome string
+
+const (
+	TaskCIAutoFixOutcomeActionTaken   TaskCIAutoFixOutcome = "action_taken"
+	TaskCIAutoFixOutcomeNonActionable TaskCIAutoFixOutcome = "non_actionable"
+	TaskCIAutoFixOutcomeBlocked       TaskCIAutoFixOutcome = "blocked"
+)
+
 // PR represents a GitHub Pull Request.
 type PR struct {
 	ID                  int64  `json:"id"`
@@ -736,32 +759,43 @@ func (r *TaskCIOptionsResponse) GetWorkspaceID() string {
 
 // TaskCIPRAutomationState stores per-PR dedupe and error state for CI automation.
 type TaskCIPRAutomationState struct {
-	TaskID                   string     `json:"task_id" db:"task_id"`
-	RepositoryID             string     `json:"repository_id" db:"repository_id"`
-	PRNumber                 int        `json:"pr_number" db:"pr_number"`
-	LastFixSignature         string     `json:"last_fix_signature" db:"last_fix_signature"`
-	LastFixCheckpointJSON    string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
-	LastFixEnqueuedAt        *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
-	LastFixSessionID         *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
-	AutoFixRoundCount        int        `json:"auto_fix_round_count" db:"auto_fix_round_count"`
-	AutoFixExhaustedAt       *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
-	LastMergeSignature       string     `json:"last_merge_signature" db:"last_merge_signature"`
-	LastMergeAttemptAt       *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
-	LastMergeResult          string     `json:"last_merge_result" db:"last_merge_result"`
-	MergeRetryPending        bool       `json:"-" db:"merge_retry_pending"`
-	LastQueueAttemptHeadSHA  string     `json:"last_queue_attempt_head_sha" db:"last_queue_attempt_head_sha"`
-	LastQueueFixEventID      string     `json:"last_queue_fix_event_id" db:"last_queue_fix_event_id"`
-	LastQueueRemovalCause    string     `json:"last_queue_removal_cause" db:"last_queue_removal_cause"`
-	ReviewRequestInitialized bool       `json:"review_request_initialized" db:"review_request_initialized"`
-	LastReviewRequested      bool       `json:"last_review_requested" db:"last_review_requested"`
-	LastObservedPRState      string     `json:"last_observed_pr_state" db:"last_observed_pr_state"`
-	LastLifecycleEvent       string     `json:"last_lifecycle_event" db:"last_lifecycle_event"`
-	LastLifecyclePromptAt    *time.Time `json:"last_lifecycle_prompt_at,omitempty" db:"last_lifecycle_prompt_at"`
-	LastLifecycleSessionID   *string    `json:"last_lifecycle_session_id,omitempty" db:"last_lifecycle_session_id"`
-	LastError                *string    `json:"last_error,omitempty" db:"last_error"`
-	LastErrorKind            string     `json:"last_error_kind" db:"last_error_kind"`
-	CreatedAt                time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt                time.Time  `json:"updated_at" db:"updated_at"`
+	TaskID                           string                    `json:"task_id" db:"task_id"`
+	RepositoryID                     string                    `json:"repository_id" db:"repository_id"`
+	PRNumber                         int                       `json:"pr_number" db:"pr_number"`
+	LastFixSignature                 string                    `json:"last_fix_signature" db:"last_fix_signature"`
+	LastFixCheckpointJSON            string                    `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
+	LastFixEnqueuedAt                *time.Time                `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
+	LastFixSessionID                 *string                   `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
+	AutoFixRoundCount                int                       `json:"auto_fix_round_count" db:"auto_fix_round_count"`
+	AutoFixExhaustedAt               *time.Time                `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
+	LastMergeSignature               string                    `json:"last_merge_signature" db:"last_merge_signature"`
+	LastMergeAttemptAt               *time.Time                `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
+	LastMergeResult                  string                    `json:"last_merge_result" db:"last_merge_result"`
+	MergeRetryPending                bool                      `json:"-" db:"merge_retry_pending"`
+	LastQueueAttemptHeadSHA          string                    `json:"last_queue_attempt_head_sha" db:"last_queue_attempt_head_sha"`
+	LastQueueFixEventID              string                    `json:"last_queue_fix_event_id" db:"last_queue_fix_event_id"`
+	LastQueueRemovalCause            string                    `json:"last_queue_removal_cause" db:"last_queue_removal_cause"`
+	ReviewRequestInitialized         bool                      `json:"review_request_initialized" db:"review_request_initialized"`
+	LastReviewRequested              bool                      `json:"last_review_requested" db:"last_review_requested"`
+	LastObservedPRState              string                    `json:"last_observed_pr_state" db:"last_observed_pr_state"`
+	LastLifecycleEvent               string                    `json:"last_lifecycle_event" db:"last_lifecycle_event"`
+	LastLifecyclePromptAt            *time.Time                `json:"last_lifecycle_prompt_at,omitempty" db:"last_lifecycle_prompt_at"`
+	LastLifecycleSessionID           *string                   `json:"last_lifecycle_session_id,omitempty" db:"last_lifecycle_session_id"`
+	LastError                        *string                   `json:"last_error,omitempty" db:"last_error"`
+	LastErrorKind                    string                    `json:"last_error_kind" db:"last_error_kind"`
+	AutoFixAttemptState              TaskCIAutoFixAttemptState `json:"auto_fix_attempt_state" db:"auto_fix_attempt_state"`
+	AutoFixAttemptQueueEntryID       string                    `json:"auto_fix_attempt_queue_entry_id,omitempty" db:"auto_fix_attempt_queue_entry_id"`
+	AutoFixAttemptSessionID          string                    `json:"auto_fix_attempt_session_id,omitempty" db:"auto_fix_attempt_session_id"`
+	AutoFixAttemptTurnID             string                    `json:"auto_fix_attempt_turn_id,omitempty" db:"auto_fix_attempt_turn_id"`
+	AutoFixAttemptSignature          string                    `json:"auto_fix_attempt_signature,omitempty" db:"auto_fix_attempt_signature"`
+	AutoFixAttemptProviderGeneration string                    `json:"auto_fix_attempt_provider_generation,omitempty" db:"auto_fix_attempt_provider_generation"`
+	AutoFixAttemptOutcome            TaskCIAutoFixOutcome      `json:"auto_fix_attempt_outcome,omitempty" db:"auto_fix_attempt_outcome"`
+	AutoFixAttemptSummary            string                    `json:"auto_fix_attempt_summary,omitempty" db:"auto_fix_attempt_summary"`
+	AutoFixAttemptStartedAt          *time.Time                `json:"auto_fix_attempt_started_at,omitempty" db:"auto_fix_attempt_started_at"`
+	AutoFixAttemptOutcomeAt          *time.Time                `json:"auto_fix_attempt_outcome_at,omitempty" db:"auto_fix_attempt_outcome_at"`
+	AutoFixAttemptProgressDeadline   *time.Time                `json:"auto_fix_attempt_progress_deadline,omitempty" db:"auto_fix_attempt_progress_deadline"`
+	CreatedAt                        time.Time                 `json:"created_at" db:"created_at"`
+	UpdatedAt                        time.Time                 `json:"updated_at" db:"updated_at"`
 }
 
 const (
@@ -784,6 +818,44 @@ type TaskCIFixAttempt struct {
 	IncrementRound      bool
 	QueueRemovalEventID string
 	QueueRemovalCause   string
+	QueueEntryID        string
+	TurnID              string
+	State               TaskCIAutoFixAttemptState
+	ProviderGeneration  string
+}
+
+// TaskCIAutoFixAttemptBinding identifies the exact queued prompt and turn
+// that may transition an attempt from queued to running.
+type TaskCIAutoFixAttemptBinding struct {
+	TaskID       string
+	RepositoryID string
+	PRNumber     int
+	SessionID    string
+	QueueEntryID string
+	Signature    string
+	TurnID       string
+}
+
+// TaskCIAutoFixOutcomeReport is intentionally scoped to task/session/turn.
+// The MCP caller cannot select a repository or PR; the server resolves the
+// matching durable attempt from this identity.
+type TaskCIAutoFixOutcomeReport struct {
+	TaskID    string
+	SessionID string
+	TurnID    string
+	Outcome   TaskCIAutoFixOutcome
+	Summary   string
+}
+
+// TaskCIAutoFixProviderProgress is the provider generation observed by a
+// settled PR watch after an action_taken outcome.
+type TaskCIAutoFixProviderProgress struct {
+	TaskID             string
+	RepositoryID       string
+	PRNumber           int
+	Signature          string
+	ProviderGeneration string
+	ObservedAt         time.Time
 }
 
 // TaskCIMergeAttempt records an auto-merge attempt for a task PR.

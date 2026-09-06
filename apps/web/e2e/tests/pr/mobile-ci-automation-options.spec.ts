@@ -267,6 +267,11 @@ test.describe("mobile PR CI automation options", () => {
     await expect(session.prStatusChip().getByTestId("pr-status-auto-fix-chip")).toContainText(
       "Auto-fix 1/10",
     );
+    await drawer.getByTestId("ci-auto-fix-round-help").tap();
+    await expect(drawer.getByTestId("ci-auto-fix-round-explanation")).toContainText(
+      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
+    );
+    await testPage.keyboard.press("Escape");
     await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
     const [firstMessage] = await listAutoFixMessages(apiClient, sessionId);
     expect(firstMessage).toBeDefined();

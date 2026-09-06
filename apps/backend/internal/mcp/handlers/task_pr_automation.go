@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -20,8 +21,19 @@ type TaskPRAutomationService interface {
 	UpdateTaskCIOptions(ctx context.Context, taskID string, patch github.TaskCIOptionsPatch) (*github.TaskCIOptionsResponse, error)
 }
 
+// TaskPRAutoFixOutcomeService accepts the server-resolved disposition of the
+// current GitHub PR auto-fix turn. The MCP server supplies task and session
+// identity from its bound execution, not from tool arguments.
+type TaskPRAutoFixOutcomeService interface {
+	ReportTaskPRAutoFixOutcome(ctx context.Context, taskID, sessionID, outcome, summary string) error
+}
+
 func (h *Handlers) SetTaskPRAutomationService(automation TaskPRAutomationService) {
 	h.taskPRAutomation = automation
+}
+
+func (h *Handlers) SetTaskPRAutoFixOutcomeService(outcomes TaskPRAutoFixOutcomeService) {
+	h.taskPRAutoFixOutcome = outcomes
 }
 
 func (h *Handlers) handleGetTaskPRAutomation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -99,6 +111,51 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 		}
 	}
 	return ws.NewResponse(msg.ID, msg.Action, options)
+}
+
+func (h *Handlers) handleReportTaskPRAutoFixOutcome(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Outcome   string `json:"outcome"`
+		Summary   string `json:"summary"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	req.TaskID = strings.TrimSpace(req.TaskID)
+	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.Outcome = strings.TrimSpace(req.Outcome)
+	req.Summary = strings.TrimSpace(req.Summary)
+	if req.TaskID == "" || req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and session_id are required", nil)
+	}
+	if req.Outcome != string(github.TaskCIAutoFixOutcomeActionTaken) &&
+		req.Outcome != string(github.TaskCIAutoFixOutcomeNonActionable) &&
+		req.Outcome != string(github.TaskCIAutoFixOutcomeBlocked) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "outcome must be action_taken, non_actionable, or blocked", nil)
+	}
+	if req.Summary == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "summary is required", nil)
+	}
+	if h.taskPRAutoFixOutcome == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "GitHub PR auto-fix outcome reporting is not available", nil)
+	}
+	if err := h.taskPRAutoFixOutcome.ReportTaskPRAutoFixOutcome(
+		ctx, req.TaskID, req.SessionID, req.Outcome, req.Summary,
+	); err != nil {
+		switch {
+		case errors.Is(err, github.ErrTaskCIAutoFixAttemptNotFound),
+			errors.Is(err, github.ErrTaskCIAutoFixOutcomeInvalid):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		default:
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to record PR auto-fix outcome: "+err.Error(), nil)
+		}
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]string{
+		"status":  "recorded",
+		"outcome": req.Outcome,
+	})
 }
 
 func hasLifecyclePromptOverride(fields map[string]json.RawMessage) bool {

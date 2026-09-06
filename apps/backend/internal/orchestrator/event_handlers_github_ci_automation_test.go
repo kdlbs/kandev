@@ -224,6 +224,48 @@ func TestCIAutomationPromptOmitsSnapshotWithoutPlaceholder(t *testing.T) {
 	}
 }
 
+func TestCIAutomationProviderGenerationIncludesHeadAndCheckExecution(t *testing.T) {
+	started := time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC)
+	completed := started.Add(4 * time.Minute)
+	pr := &github.TaskPR{HeadSHA: "head-a", ReviewState: "approved", MergeableState: "clean"}
+	feedback := &github.PRFeedback{Checks: []github.CheckRun{{
+		Name: "unit", Status: "completed", Conclusion: "failure", StartedAt: &started, CompletedAt: &completed,
+	}}}
+
+	initial := ciAutomationProviderGeneration(pr, feedback)
+	if initial == "" {
+		t.Fatal("provider generation is empty")
+	}
+
+	rerun := completed
+	rerun = rerun.Add(time.Minute)
+	feedback.Checks[0].CompletedAt = &rerun
+	if got := ciAutomationProviderGeneration(pr, feedback); got == initial {
+		t.Fatal("check execution timestamp did not change provider generation")
+	}
+
+	feedback.Checks[0].CompletedAt = &completed
+	pr.HeadSHA = "head-b"
+	if got := ciAutomationProviderGeneration(pr, feedback); got == initial {
+		t.Fatal("pull-request head did not change provider generation")
+	}
+}
+
+func TestCIAutomationOutcomeProtocolVisibility(t *testing.T) {
+	structured := ciAutomationAppendOutcomeProtocol("repair the PR", false)
+	if !strings.Contains(structured, "report_pr_auto_fix_outcome_kandev") {
+		t.Fatal("structured prompt omitted the outcome tool instructions")
+	}
+	if visible := sysprompt.StripSystemContent(structured); strings.Contains(visible, "report_pr_auto_fix_outcome_kandev") {
+		t.Fatalf("structured outcome instructions leaked into visible chat: %s", visible)
+	}
+
+	passthrough := ciAutomationAppendOutcomeProtocol("repair the PR", true)
+	if !strings.Contains(passthrough, "report_pr_auto_fix_outcome_kandev") {
+		t.Fatal("passthrough prompt omitted the outcome tool instructions")
+	}
+}
+
 func TestCIAutomationCheckpointPrunesResolvedFailures(t *testing.T) {
 	failed := &github.PRFeedback{
 		Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/stable"}},

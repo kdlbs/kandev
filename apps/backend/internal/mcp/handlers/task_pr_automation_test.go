@@ -11,8 +11,13 @@ import (
 )
 
 type recordingTaskPRAutomationService struct {
-	patch github.TaskCIOptionsPatch
-	calls int
+	patch            github.TaskCIOptionsPatch
+	calls            int
+	outcomeTaskID    string
+	outcomeSessionID string
+	outcome          string
+	outcomeSummary   string
+	outcomeErr       error
 }
 
 func (s *recordingTaskPRAutomationService) GetTaskCIOptionsResponse(context.Context, string) (*github.TaskCIOptionsResponse, error) {
@@ -25,6 +30,16 @@ func (s *recordingTaskPRAutomationService) UpdateTaskCIOptions(
 	s.calls++
 	s.patch = patch
 	return &github.TaskCIOptionsResponse{}, nil
+}
+
+func (s *recordingTaskPRAutomationService) ReportTaskPRAutoFixOutcome(
+	_ context.Context, taskID, sessionID, outcome, summary string,
+) error {
+	s.outcomeTaskID = taskID
+	s.outcomeSessionID = sessionID
+	s.outcome = outcome
+	s.outcomeSummary = summary
+	return s.outcomeErr
 }
 
 // recordingTaskPRAutomationServiceWithErr optionally returns a fixed error
@@ -132,4 +147,53 @@ func TestHandleUpdateTaskPRAutomationRejectsLifecyclePromptOverrides(t *testing.
 	assert.Equal(t, ws.MessageTypeError, response.Type)
 	assert.Contains(t, string(response.Payload), "lifecycle prompt overrides are not supported")
 	assert.Zero(t, automation.calls, "rejected overrides must never reach persistence")
+}
+
+func TestHandleReportTaskPRAutoFixOutcomeForwardsBoundIdentity(t *testing.T) {
+	automation := &recordingTaskPRAutomationService{}
+	h := &Handlers{taskPRAutoFixOutcome: automation, logger: testLogger(t).WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, map[string]any{
+		"task_id":    "task-current",
+		"session_id": "session-current",
+		"outcome":    "action_taken",
+		"summary":    "committed the failing test fix",
+	})
+	response, err := h.handleReportTaskPRAutoFixOutcome(context.Background(), msg)
+
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, response.Type)
+	assert.Equal(t, "task-current", automation.outcomeTaskID)
+	assert.Equal(t, "session-current", automation.outcomeSessionID)
+	assert.Equal(t, "action_taken", automation.outcome)
+	assert.Equal(t, "committed the failing test fix", automation.outcomeSummary)
+}
+
+func TestHandleReportTaskPRAutoFixOutcomeRejectsInvalidAndStaleReports(t *testing.T) {
+	for name, payload := range map[string]map[string]any{
+		"invalid outcome": {
+			"task_id": "task-current", "session_id": "session-current", "outcome": "unknown", "summary": "reason",
+		},
+		"missing summary": {
+			"task_id": "task-current", "session_id": "session-current", "outcome": "blocked",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			automation := &recordingTaskPRAutomationService{}
+			h := &Handlers{taskPRAutoFixOutcome: automation, logger: testLogger(t).WithFields()}
+			response, err := h.handleReportTaskPRAutoFixOutcome(context.Background(), makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, payload))
+			require.NoError(t, err)
+			assert.Equal(t, ws.MessageTypeError, response.Type)
+			assert.Empty(t, automation.outcome)
+		})
+	}
+
+	automation := &recordingTaskPRAutomationService{outcomeErr: github.ErrTaskCIAutoFixAttemptNotFound}
+	h := &Handlers{taskPRAutoFixOutcome: automation, logger: testLogger(t).WithFields()}
+	response, err := h.handleReportTaskPRAutoFixOutcome(context.Background(), makeWSMessage(t, ws.ActionMCPReportPRAutoFixOutcome, map[string]any{
+		"task_id": "task-current", "session_id": "session-current", "outcome": "blocked", "summary": "provider is unavailable",
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeError, response.Type)
+	assert.Contains(t, string(response.Payload), "not found")
 }

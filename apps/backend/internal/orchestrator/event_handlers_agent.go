@@ -666,6 +666,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	s.markReadyTurn(data.SessionID, data.AgentExecutionID, data.PromptGeneration, turnAtEventFire)
 
 	// Complete the current turn
+	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
 	s.completeTurnForSession(ctx, data.SessionID)
 
 	// A move_task_kandev call during this turn deferred the actual move to
@@ -770,7 +771,7 @@ const githubPRAutomationOrigin = "github_pr_automation"
 // recognizes the set of origins entitled to that treatment, so adding a
 // future provider only needs a change here.
 func isLifecycleAutomationOrigin(origin interface{}) bool {
-	return origin == githubPRAutomationOrigin || origin == mrAutomationOrigin
+	return origin == githubPRAutomationOrigin || origin == mrAutomationOrigin || origin == ciAutomationOrigin
 }
 
 func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, attachments []v1.MessageAttachment) error {
@@ -900,7 +901,13 @@ func (s *Service) executeQueuedMessageWithReservation(
 			claimEntryID:    claimEntryID,
 			lifecyclePrompt: lifecyclePrompt,
 			afterClaim:      afterClaim,
+			onAccepted: func(turnID string) {
+				s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
+			},
 		})
+	if err != nil {
+		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
+	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg,
 		lifecyclePrompt, userMessageRecorded, err,
@@ -1294,6 +1301,7 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	// session. `session` was read above, so the guard costs nothing.
 	s.clearRecoveredAgentError(context.WithoutCancel(ctx), data.TaskID, session)
 
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
@@ -1791,6 +1799,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 		zap.String("error", data.ErrorMessage))
 
 	// Complete the current turn.
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.persistLastAgentError(ctx, data)
 
@@ -2395,9 +2404,6 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 		}
 	}
 
-	// Complete the current turn if there is one
-	s.completeTurnForSession(ctx, data.SessionID)
-
 	// Don't override WAITING_FOR_INPUT or IDLE — these are "stopped on
 	// purpose" states the caller already set. WAITING_FOR_INPUT comes from
 	// the recovery path so the user can choose to resume; IDLE comes from
@@ -2415,6 +2421,11 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 			zap.String("state", string(session.State)))
 		return
 	}
+
+	// Complete the current turn if there is one. Deliberate stops return above,
+	// so an explicit user cancellation cannot re-arm the auto-fix watcher.
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	s.completeTurnForSession(ctx, data.SessionID)
 
 	// Update session state to cancelled (already done by executor, but ensure consistency)
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateCancelled, "", false)

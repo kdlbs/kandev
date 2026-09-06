@@ -334,6 +334,31 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) reportTaskPRAutoFixOutcomeHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		outcome := strings.TrimSpace(req.GetString("outcome", ""))
+		summary := strings.TrimSpace(req.GetString("summary", ""))
+		if outcome != "action_taken" && outcome != "non_actionable" && outcome != "blocked" {
+			return mcp.NewToolResultError("outcome must be action_taken, non_actionable, or blocked"), nil
+		}
+		if summary == "" {
+			return mcp.NewToolResultError("summary is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":    s.taskID,
+			"session_id": s.sessionID,
+			"outcome":    outcome,
+			"summary":    summary,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPReportPRAutoFixOutcome, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func hasLifecyclePromptOverrideArgument(args map[string]interface{}) bool {
 	for _, field := range []string{"review_prompt_override", "merged_prompt_override", "closed_prompt_override"} {
 		if _, ok := args[field]; ok {

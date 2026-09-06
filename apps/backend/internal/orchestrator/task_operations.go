@@ -4189,12 +4189,18 @@ type promptTaskOptions struct {
 	promptDispatchRecovery    *models.PromptDispatchRecovery
 	expectedCurrentTurnID     string
 	requireNonterminalSession bool
+	// onAccepted runs at the agentctl acceptance boundary, before PromptTask
+	// waits for the turn to finish. Automation callers use it to bind durable
+	// attempt identity to the exact turn.
+	onAccepted func(turnID string)
 }
 
 type promptDispatchOutcome struct {
 	mu             sync.Mutex
 	accepted       bool
 	publicationErr error
+	turnID         string
+	onAccepted     func(turnID string)
 }
 
 func (o *promptDispatchOutcome) recordAccepted(publicationErr error) {
@@ -4422,6 +4428,8 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		s.isDynamicPromptSession(session),
 	)
 	dispatchOutcome := &promptDispatchOutcome{}
+	dispatchOutcome.turnID = rollback.turnID
+	dispatchOutcome.onAccepted = options.onAccepted
 	onDispatched := s.promptDispatchCallback(
 		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
 	)
@@ -4634,6 +4642,15 @@ func (s *Service) promptDispatchCallback(
 				s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
 			}
 			s.resolveReservedPromptTurn(sessionID, reservedTurn.ID, true)
+		}
+		if outcome != nil && outcome.onAccepted != nil {
+			acceptedTurnID := outcome.turnID
+			if reservedTurn != nil && reservedTurn.ID != "" {
+				acceptedTurnID = reservedTurn.ID
+			}
+			if acceptedTurnID != "" {
+				outcome.onAccepted(acceptedTurnID)
+			}
 		}
 		outcome.recordAccepted(publicationErr)
 		if s.acceptForegroundDispatch(dispatch) {

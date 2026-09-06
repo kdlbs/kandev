@@ -174,6 +174,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 
 	// Emit the yellow status (against the failed turn) before completing it.
 	s.createTransientRetryStatusMessage(ctx, data, classified, attempt, delay, retryAt)
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	s.completeTurnForSession(ctx, data.SessionID)
 
 	// Park the session in WAITING_FOR_INPUT (a calm, banner-less state that

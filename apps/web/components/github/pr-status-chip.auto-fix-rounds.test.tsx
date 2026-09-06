@@ -232,6 +232,15 @@ describe("PRStatusChip auto-fix round display", () => {
     expect(explanation.textContent).toContain(
       "pauses auto-fix for this PR so it cannot loop forever",
     );
+    expect(explanation.textContent).toContain(
+      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
+    );
+    expect(explanation.textContent).toContain(
+      "After an action-taken outcome, Kandev waits for provider progress before retrying",
+    );
+    expect(explanation.textContent).toContain(
+      "A non-actionable or blocked outcome acknowledges unchanged feedback and does not retry it",
+    );
   });
 
   it("opens the auto-fix round explanation from the mobile drawer help icon", async () => {
@@ -250,6 +259,9 @@ describe("PRStatusChip auto-fix round display", () => {
     expect(explanation.textContent).toContain("Auto-fix has used 2 of 10 rounds");
     expect(explanation.textContent).toContain(
       "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+    );
+    expect(explanation.textContent).toContain(
+      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
     );
   });
 });

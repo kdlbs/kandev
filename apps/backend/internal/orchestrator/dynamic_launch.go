@@ -1058,6 +1058,7 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	if err := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateCreated, ""); err != nil {
 		return false
 	}
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.retireExecutionActivityAndPublish(ctx, data.TaskID, data.SessionID, data.AgentExecutionID)
 	isOfficeTask, officeErr := s.lookupOfficeTask(ctx, data.TaskID)
