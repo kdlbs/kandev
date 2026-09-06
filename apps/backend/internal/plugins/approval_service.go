@@ -24,7 +24,37 @@ func (s *Service) approvalGrant(installationID, workspaceID string, revision uin
 	if err != nil {
 		return CapabilityApproval{}, err
 	}
+	if err := s.validateApprovalManifest(installationID, manifestDigest, canonical); err != nil {
+		return CapabilityApproval{}, err
+	}
 	return ledger.grant(installationID, workspaceID, revision, manifestDigest, canonical, actor, reason, auditID, time.Now().UTC())
+}
+
+func (s *Service) validateApprovalManifest(installationID, manifestDigest string, capabilityIDs []string) error {
+	if s.registry == nil {
+		return nil
+	}
+	installed := s.installedRecordByInstallationID(installationID)
+	if installed == nil {
+		return fmt.Errorf("plugins: approval installation not found")
+	}
+	if manifestDigest != ManifestCapabilityDigest(installed.Manifest) {
+		return fmt.Errorf("plugins: approval manifest digest does not match installed manifest")
+	}
+	declared, err := ManifestCapabilityIDs(installed.Manifest)
+	if err != nil {
+		return err
+	}
+	declaredSet := make(map[string]struct{}, len(declared))
+	for _, capability := range declared {
+		declaredSet[capability] = struct{}{}
+	}
+	for _, capability := range capabilityIDs {
+		if _, ok := declaredSet[capability]; !ok {
+			return fmt.Errorf("plugins: capability %q is not declared by installed manifest", capability)
+		}
+	}
+	return nil
 }
 
 func (s *Service) approvalRevoke(installationID, workspaceID, actor, reason, auditID string) (CapabilityApproval, error) {
@@ -80,6 +110,7 @@ func (s *Service) authorizePluginCapability(installationID, workspaceID, capabil
 			ObservedAt:     time.Now().UTC(),
 		},
 	}
+	decision.AuditID = decision.Receipt.AuditID
 	if reason, ok := malformedAuthorizationRequestReason(installationID, workspaceID, capabilityID, requestDigest, methodDigest); !ok {
 		decision.Reason = reason
 		return decision

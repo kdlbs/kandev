@@ -453,11 +453,18 @@ func TestAuthorizePluginCapabilityRequiresCurrentInstalledManifest(t *testing.T)
 		Manifest:       manifest.Manifest{ID: "plugin-a", Capabilities: manifest.Capabilities{APIRead: []string{"tasks"}}},
 		InstallationID: "inst-1",
 	})
-	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, ManifestCapabilityDigest(svc.registry.List()[0].Manifest), []string{"api_read:tasks", "api_write:tasks"}, "human", "grant", "audit-1"); err != nil {
+	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, ManifestCapabilityDigest(svc.registry.List()[0].Manifest), []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	decision := svc.authorizePluginCapability("inst-1", "ws-1", "api_write:tasks", 1, "req", "method")
 	if decision.Allowed || decision.Reason != ApprovalDenyUndeclaredCapability {
 		t.Fatalf("decision = %#v, want manifest intersection denial", decision)
+	}
+}
+
+func TestApprovalLedgerRejectsNULIdentifiers(t *testing.T) {
+	ledger := newApprovalLedger(t.TempDir())
+	if _, err := ledger.grant("inst\x00-1", "ws-1", 1, "digest", []string{"api_read:tasks"}, "human", "grant", "audit-1", time.Now().UTC()); !errors.Is(err, ErrApprovalInvalidIdentifier) {
+		t.Fatalf("grant error = %v, want invalid identifier", err)
 	}
 }

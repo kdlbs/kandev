@@ -130,10 +130,14 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
 				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
 					zap.String("plugin_id", rec.ID), zap.Error(restoreErr))
+				s.registry.Add(rec)
+				return nil, errors.Join(err, fmt.Errorf("plugins: restore previous plugin record: %w", restoreErr))
 			}
 		} else if deleteErr := s.store.Delete(rec.ID); deleteErr != nil {
 			s.log.Warn("plugins: failed to delete plugin record after approval review error",
 				zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
+			s.registry.Add(rec)
+			return nil, errors.Join(err, fmt.Errorf("plugins: remove failed plugin record: %w", deleteErr))
 		}
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, err
@@ -170,7 +174,7 @@ func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
 	if err != nil {
 		return err
 	}
-	return ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC())
+	return ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC(), true)
 }
 
 // extractPackage runs pkgtar.Install and registers the extracted version
@@ -388,6 +392,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	}
 	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
 	if err := s.approvalTombstoneInstallation(rec.InstallationID); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: tombstone approval history: %w", err)
 	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {

@@ -693,8 +693,11 @@ func TestServiceUninstallDeletesPluginUserStateForEveryUser(t *testing.T) {
 func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	svc, fsStore, rt := newTestService(t)
 	svc.SetUserState(newTestUserStateStore(t))
-	rec := installTestPlugin(t, svc, "kandev-plugin-notes")
 	ctx := context.Background()
+	rec, err := svc.Install(ctx, testPackageWithAPIRead(t, "kandev-plugin-notes", "1.0.0", "tasks"))
+	if err != nil {
+		t.Fatalf("install plugin: %v", err)
+	}
 	if _, err := svc.UserState().Set(ctx, rec.ID, "user_1", "task", "task_1", "note", json.RawMessage(`"a"`), nil); err != nil {
 		t.Fatalf("seed user state: %v", err)
 	}
@@ -711,7 +714,7 @@ func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	deliverer := &fakeDeliverer{}
 	svc.SetDeliverer(deliverer)
 
-	err := svc.Uninstall(ctx, rec.ID)
+	err = svc.Uninstall(ctx, rec.ID)
 	if err == nil || !strings.Contains(err.Error(), cleanupErr.Error()) {
 		t.Fatalf("Uninstall() error = %v, want user-state cleanup failure", err)
 	}
@@ -772,6 +775,38 @@ func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	}
 	if len(ledger.Events) != 2 {
 		t.Fatalf("approval event count after uninstall retry = %d, want grant plus single revoke", len(ledger.Events))
+	}
+}
+
+func TestServiceUninstallReconcilesRuntimeStateWhenApprovalTombstoneFails(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	rec, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.0.0", "tasks"))
+	if err != nil {
+		t.Fatalf("install plugin: %v", err)
+	}
+	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("seed approval: %v", err)
+	}
+	if err := os.Remove(svc.approvalLedger().path()); err != nil {
+		t.Fatalf("remove approval ledger: %v", err)
+	}
+	if err := os.Mkdir(svc.approvalLedger().path(), 0o755); err != nil {
+		t.Fatalf("replace approval ledger with directory: %v", err)
+	}
+
+	err = svc.Uninstall(context.Background(), rec.ID)
+	if err == nil {
+		t.Fatal("Uninstall() expected tombstone failure")
+	}
+	if !rt.stopped(rec.ID) {
+		t.Fatal("Uninstall() did not stop the runtime before tombstone failure")
+	}
+	current, getErr := svc.Get(rec.ID)
+	if getErr != nil {
+		t.Fatalf("Get() after failed uninstall: %v", getErr)
+	}
+	if current.Status != StatusError {
+		t.Fatalf("status after failed tombstone = %q, want %q", current.Status, StatusError)
 	}
 }
 

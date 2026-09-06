@@ -30,6 +30,8 @@ type ApprovalDecision struct {
 // generic plugin approval layer.
 type ApprovalDenyReason string
 
+var ErrApprovalInvalidIdentifier = errors.New("plugins: approval identifier contains NUL")
+
 // A foreign workspace (an installation with no approval in the requested
 // workspace) intentionally reuses ApprovalDenyMissingApproval rather than a
 // distinct reason: returning a different, more specific reason for "wrong

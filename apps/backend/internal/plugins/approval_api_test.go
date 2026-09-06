@@ -3,6 +3,9 @@ package plugins
 import (
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/store"
 )
 
 func TestApprovalAPIExportsCurrentRowsAndDecision(t *testing.T) {
@@ -54,5 +57,20 @@ func TestApprovalAPIRevokeRetryReplaysOriginalResult(t *testing.T) {
 	}
 	if _, err := svc.RevokeCapabilityApproval("inst-1", "ws-1", 2, "human", "revoke", "revoke-1"); !errors.Is(err, ErrApprovalIdempotencyConflict) {
 		t.Fatalf("changed expected revision error = %v, want idempotency conflict", err)
+	}
+}
+
+func TestGrantCapabilityApprovalRequiresInstalledManifestBinding(t *testing.T) {
+	svc := &Service{registry: NewRegistry()}
+	svc.SetPluginsDir(t.TempDir())
+	installed := &store.Record{
+		Manifest:       manifest.Manifest{ID: "plugin-a", Capabilities: manifest.Capabilities{APIRead: []string{"tasks"}}},
+		InstallationID: "inst-1",
+	}
+	svc.registry.Add(installed)
+
+	_, err := svc.GrantCapabilityApproval("inst-1", "ws-1", 1, ManifestCapabilityDigest(installed.Manifest), []string{"api_read:messages"}, "human", "grant", "audit-1")
+	if err == nil {
+		t.Fatal("GrantCapabilityApproval accepted a capability outside the installed manifest")
 	}
 }

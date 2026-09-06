@@ -55,3 +55,12 @@ func TestApprovalReceiptCarriesSafeMetadata(t *testing.T) {
 		t.Fatalf("ObservedAt = %v, want %v", receipt.ObservedAt, when)
 	}
 }
+
+func TestAuthorizePluginCapabilityCopiesAuditIDToDeniedDecision(t *testing.T) {
+	svc := &Service{}
+	svc.SetPluginsDir(t.TempDir())
+	decision := svc.authorizePluginCapability("inst-1", "ws-1", "api_read:tasks", 1, "req", "method")
+	if decision.AuditID == "" || decision.AuditID != decision.Receipt.AuditID {
+		t.Fatalf("denied decision audit id = %q, receipt audit id = %q", decision.AuditID, decision.Receipt.AuditID)
+	}
+}

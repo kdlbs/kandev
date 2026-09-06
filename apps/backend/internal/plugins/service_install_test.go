@@ -141,8 +141,8 @@ func TestServiceInstallUpgradeReviewsExistingCapabilityApprovals(t *testing.T) {
 	if got, want := row.CapabilityIDs, []string{"api_read:tasks"}; !equalStrings(got, want) {
 		t.Fatalf("capabilities after narrowing upgrade = %#v, want %#v", got, want)
 	}
-	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 3, row.ManifestDigest, []string{"api_read:tasks", "api_read:messages"}, "human", "widen", "audit-2"); err != nil {
-		t.Fatalf("grant widened approval: %v", err)
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 3, row.ManifestDigest, []string{"api_read:tasks"}, "human", "renew", "audit-2"); err != nil {
+		t.Fatalf("renew approval: %v", err)
 	}
 	rec3, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.2.0", "tasks", "messages"))
 	if err != nil {
@@ -158,7 +158,7 @@ func TestServiceInstallUpgradeReviewsExistingCapabilityApprovals(t *testing.T) {
 	if row.Revision != 4 {
 		t.Fatalf("revision after rollback-equivalent replacement = %d, want 4", row.Revision)
 	}
-	if got, want := row.CapabilityIDs, []string{"api_read:messages", "api_read:tasks"}; !equalStrings(got, want) {
+	if got, want := row.CapabilityIDs, []string{"api_read:tasks"}; !equalStrings(got, want) {
 		t.Fatalf("capabilities after rollback-equivalent replacement = %#v, want %#v", got, want)
 	}
 	file, err := svc.approvalLedger().load()
@@ -205,6 +205,70 @@ func TestServiceInstallUpgradeReviewFailureRestartsPreviousRuntime(t *testing.T)
 	}
 }
 
+func TestServiceInstallUpgradeReviewRollbackFailureKeepsNewRecordCoherent(t *testing.T) {
+	dir := t.TempDir()
+	fsStore := store.NewFSStore(dir)
+	failing := &failMatchingSaveStore{
+		Store:   fsStore,
+		match:   func(rec *store.Record) bool { return rec.Version == "1.0.0" },
+		failErr: errors.New("simulated compensating save failure"),
+	}
+	svc := NewService(failing, NewRegistry(), nil, testLogger(t))
+	svc.SetPluginsDir(dir)
+	svc.SetRuntime(newFakeRuntime())
+	if _, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.0.0", "tasks")); err != nil {
+		t.Fatalf("install initial plugin: %v", err)
+	}
+	failing.arm()
+	_, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.1.0", "*"))
+	if err == nil || !strings.Contains(err.Error(), "compensating save failure") {
+		t.Fatalf("upgrade error = %v, want compensating save failure", err)
+	}
+	onDisk, getErr := fsStore.Get("kandev-plugin-slack")
+	if getErr != nil {
+		t.Fatalf("store.Get(): %v", getErr)
+	}
+	if onDisk.Version != "1.1.0" {
+		t.Fatalf("persisted version = %q, want retained new version 1.1.0", onDisk.Version)
+	}
+	if _, statErr := os.Stat(onDisk.InstallPath); statErr != nil {
+		t.Fatalf("retained new install path missing: %v", statErr)
+	}
+	current, getErr := svc.Get("kandev-plugin-slack")
+	if getErr != nil || current.Version != "1.1.0" {
+		t.Fatalf("registry record = %#v, err=%v; want coherent new record", current, getErr)
+	}
+}
+
+func TestServiceInstallEquivalentUpgradeBumpsApprovalRevision(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	rec1, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.0.0", "tasks"))
+	if err != nil {
+		t.Fatalf("install initial plugin: %v", err)
+	}
+	digest := ManifestCapabilityDigest(rec1.Manifest)
+	if _, err := svc.approvalGrant(rec1.InstallationID, "ws-1", 1, digest, []string{"api_read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if _, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.1.0", "tasks")); err != nil {
+		t.Fatalf("equivalent upgrade: %v", err)
+	}
+	row, ok, err := svc.approvalCurrent(rec1.InstallationID, "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("approvalCurrent: ok=%v err=%v", ok, err)
+	}
+	if row.Revision != 2 {
+		t.Fatalf("revision = %d, want 2", row.Revision)
+	}
+	file, err := svc.approvalLedger().load()
+	if err != nil {
+		t.Fatalf("load approvals: %v", err)
+	}
+	if len(file.Events) != 2 || file.Events[1].Type != CapabilityApprovalEventUpgradeReview {
+		t.Fatalf("events = %#v, want grant and upgrade review", file.Events)
+	}
+}
+
 // failingSaveStore wraps a real store.Store, letting a test arm exactly one
 // Save call to fail with a simulated error — used to exercise Install's
 // cleanup-on-persist-failure path without a real disk-full/permission
@@ -213,6 +277,33 @@ type failingSaveStore struct {
 	store.Store
 	mu       sync.Mutex
 	failNext bool
+}
+
+type failMatchingSaveStore struct {
+	store.Store
+	mu      sync.Mutex
+	armed   bool
+	match   func(*store.Record) bool
+	failErr error
+}
+
+func (s *failMatchingSaveStore) Save(rec *store.Record) error {
+	s.mu.Lock()
+	fail := s.armed && s.match(rec)
+	if fail {
+		s.armed = false
+	}
+	s.mu.Unlock()
+	if fail {
+		return s.failErr
+	}
+	return s.Store.Save(rec)
+}
+
+func (s *failMatchingSaveStore) arm() {
+	s.mu.Lock()
+	s.armed = true
+	s.mu.Unlock()
 }
 
 func (s *failingSaveStore) Save(rec *store.Record) error {

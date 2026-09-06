@@ -157,7 +157,15 @@ func (l *approvalLedger) save(file *approvalLedgerFile) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, l.path())
+	if err := os.Rename(tmpPath, l.path()); err != nil {
+		return err
+	}
+	dir, err := os.Open(l.dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	return dir.Sync()
 }
 
 func approvalKey(installationID, workspaceID string) string {
@@ -169,6 +177,9 @@ func approvalIdempotencyKey(eventType CapabilityApprovalEventType, auditID, inst
 }
 
 func (l *approvalLedger) grant(installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string, at time.Time) (CapabilityApproval, error) {
+	if err := validateApprovalIdentifiers(installationID, workspaceID); err != nil {
+		return CapabilityApproval{}, err
+	}
 	if revision == 0 {
 		return CapabilityApproval{}, ErrApprovalRevisionConflict
 	}
@@ -251,6 +262,9 @@ func (l *approvalLedger) revoke(installationID, workspaceID string, actor, reaso
 }
 
 func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, expectedRevision uint64, actor, reason, auditID string, at time.Time, allowCurrent bool) (CapabilityApproval, error) {
+	if err := validateApprovalIdentifiers(installationID, workspaceID); err != nil {
+		return CapabilityApproval{}, err
+	}
 	if strings.TrimSpace(auditID) == "" {
 		return CapabilityApproval{}, errors.New("plugins: approval audit id is required")
 	}
@@ -309,6 +323,9 @@ func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, ex
 }
 
 func (l *approvalLedger) tombstoneInstallation(installationID string, at time.Time) error {
+	if err := validateApprovalIdentifiers(installationID, ""); err != nil {
+		return err
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	file, err := l.load()
@@ -342,7 +359,10 @@ func (l *approvalLedger) tombstoneInstallation(installationID string, at time.Ti
 	return l.save(file)
 }
 
-func (l *approvalLedger) reviewManifestChange(installationID, manifestDigest string, manifestCapabilities []string, at time.Time) error {
+func (l *approvalLedger) reviewManifestChange(installationID, manifestDigest string, manifestCapabilities []string, at time.Time, force bool) error {
+	if err := validateApprovalIdentifiers(installationID, ""); err != nil {
+		return err
+	}
 	canonical, err := CanonicalCapabilityList(manifestCapabilities)
 	if err != nil {
 		return err
@@ -354,7 +374,7 @@ func (l *approvalLedger) reviewManifestChange(installationID, manifestDigest str
 		return err
 	}
 	for key, approval := range file.Approvals {
-		if approval.InstallationID != installationID || approval.ManifestDigest == manifestDigest || approval.TombstonedAt != nil {
+		if approval.InstallationID != installationID || (!force && approval.ManifestDigest == manifestDigest) || approval.TombstonedAt != nil {
 			continue
 		}
 		current := approval
@@ -404,6 +424,9 @@ func intersectStrings(a, b []string) []string {
 }
 
 func (l *approvalLedger) get(installationID, workspaceID string) (CapabilityApproval, bool, error) {
+	if err := validateApprovalIdentifiers(installationID, workspaceID); err != nil {
+		return CapabilityApproval{}, false, err
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	file, err := l.load()
@@ -415,6 +438,9 @@ func (l *approvalLedger) get(installationID, workspaceID string) (CapabilityAppr
 }
 
 func (l *approvalLedger) listByInstallation(installationID string) ([]CapabilityApproval, error) {
+	if err := validateApprovalIdentifiers(installationID, ""); err != nil {
+		return nil, err
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	file, err := l.load()
@@ -434,4 +460,11 @@ func (l *approvalLedger) listByInstallation(installationID string) ([]Capability
 		return out[i].WorkspaceID < out[j].WorkspaceID
 	})
 	return out, nil
+}
+
+func validateApprovalIdentifiers(installationID, workspaceID string) error {
+	if strings.ContainsRune(installationID, '\x00') || strings.ContainsRune(workspaceID, '\x00') {
+		return ErrApprovalInvalidIdentifier
+	}
+	return nil
 }
