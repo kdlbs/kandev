@@ -57,7 +57,7 @@ type Multi = ReturnType<typeof useSidebarMultiSelect>;
  * The selection-lifecycle effects (Escape-to-clear, prune-hidden) and the
  * memoized range/move/pin callbacks threaded into `TaskSwitcher`.
  */
-function useSelectionHandlers(args: {
+export function useSelectionHandlers(args: {
   multiSelect: Multi;
   pinTasks: (ids: string[]) => void;
   unpinTasks: (ids: string[]) => void;
@@ -67,7 +67,7 @@ function useSelectionHandlers(args: {
 }) {
   const { multiSelect, pinTasks, unpinTasks, pinnedTaskIds, visibleTaskIds, movableSelectedIds } =
     args;
-  const { isSelecting, clearSelection, selectRange, pruneToVisible } = multiSelect;
+  const { isSelecting, clearSelection, selectRange, pruneToVisible, bulkMove } = multiSelect;
 
   // Escape clears an active selection.
   useEffect(() => {
@@ -95,7 +95,7 @@ function useSelectionHandlers(args: {
   // the destination; drop workflow-less rows that can't be moved.
   const onBulkMove = useCallback(
     (ids: string[], targetWorkflowId: string, targetStepId: string) =>
-      multiSelect.bulkMove(
+      bulkMove(
         sortIdsByVisibleOrder(
           ids.filter((id) => movableSelectedIds.has(id)),
           visibleTaskIds,
@@ -103,7 +103,7 @@ function useSelectionHandlers(args: {
         targetWorkflowId,
         targetStepId,
       ),
-    [multiSelect, visibleTaskIds, movableSelectedIds],
+    [bulkMove, visibleTaskIds, movableSelectedIds],
   );
 
   const onBulkPin = useCallback(
