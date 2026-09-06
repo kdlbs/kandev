@@ -136,6 +136,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 ### Design
+- [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Dialog containment](system-design/dialog-content-containment.md)
 - [Descriptive select options](system-design/descriptive-select-options.md)
