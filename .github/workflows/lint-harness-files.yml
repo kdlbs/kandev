@@ -31,11 +31,51 @@ permissions:
   contents: read
 
 jobs:
-  lint:
-    name: Harness files pass lint
+  runner_plan:
+    name: Plan external runner allocation
     runs-on: ubuntu-latest
+    outputs:
+      lint_runner: ${{ steps.plan.outputs.lint_runner }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan runner allocation
+        id: plan
+        env:
+          KANDEV_CI_EXTERNAL_ENABLED: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          KANDEV_CI_EXTERNAL_PERCENT: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          KANDEV_CI_RUNNER_LIGHT: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          KANDEV_CI_RUNNER_STANDARD: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
+        run: |
+          python3 .github/scripts/runner-plan.py \
+            --workflow harness-lint \
+            --run-id "$GITHUB_RUN_ID" \
+            --burst "$KANDEV_CI_EXTERNAL_ENABLED" \
+            --percent "$KANDEV_CI_EXTERNAL_PERCENT" \
+            --light-label "$KANDEV_CI_RUNNER_LIGHT" \
+            --standard-label "$KANDEV_CI_RUNNER_STANDARD" \
+            --output "$GITHUB_OUTPUT"
+
+  lint:
+    name: Harness files pass lint
+    needs: runner_plan
+    if: always()
+    runs-on: ${{ needs.runner_plan.outputs.lint_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+
+    steps:
+      - name: Require runner plan
+        env:
+          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
+        run: |
+          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
+            echo "Runner planning finished with result: ${RUNNER_PLAN_RESULT}" >&2
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:

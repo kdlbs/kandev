@@ -33,12 +33,46 @@ permissions:
   packages: read
 
 jobs:
+  runner_plan:
+    name: Plan external runner allocation
+    runs-on: ubuntu-latest
+    outputs:
+      changes_runner: ${{ steps.plan.outputs.changes_runner }}
+      static_checks_runner: ${{ steps.plan.outputs.static_checks_runner }}
+      backend_test_matrix: ${{ steps.plan.outputs.backend_test_matrix }}
+      test_ambient_env_runner: ${{ steps.plan.outputs.test_ambient_env_runner }}
+      test_runner: ${{ steps.plan.outputs.test_runner }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan runner allocation
+        id: plan
+        env:
+          KANDEV_CI_EXTERNAL_ENABLED: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          KANDEV_CI_EXTERNAL_PERCENT: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          KANDEV_CI_RUNNER_LIGHT: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          KANDEV_CI_RUNNER_STANDARD: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
+        run: |
+          python3 .github/scripts/runner-plan.py \
+            --workflow backend \
+            --run-id "$GITHUB_RUN_ID" \
+            --burst "$KANDEV_CI_EXTERNAL_ENABLED" \
+            --percent "$KANDEV_CI_EXTERNAL_PERCENT" \
+            --light-label "$KANDEV_CI_RUNNER_LIGHT" \
+            --standard-label "$KANDEV_CI_RUNNER_STANDARD" \
+            --output "$GITHUB_OUTPUT"
+
   # The former trigger-level `paths:` list, applied one level down so a skip
   # still produces a conclusion. `.github/scripts/changed-paths.py` implements
   # the same last-match-wins semantics GitHub applies to `paths:`.
   changes:
     name: Detect relevant changes
-    runs-on: ubuntu-latest
+    needs: runner_plan
+    runs-on: ${{ needs.runner_plan.outputs.changes_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
     timeout-minutes: 10
     outputs:
       run: ${{ steps.detect.outputs.run }}
@@ -103,9 +137,9 @@ jobs:
 
   static_checks:
     name: Backend Static Checks
-    needs: changes
+    needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner_plan.outputs.static_checks_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
@@ -223,17 +257,12 @@ jobs:
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
-    needs: changes
+    needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - shard: 1
-            index: 0
-          - shard: 2
-            index: 1
+      matrix: ${{ fromJSON(needs.runner_plan.outputs.backend_test_matrix) }}
     # Pre-baked image bundles Go and jq, so test shards can start immediately
     # without repeating tool installation.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
@@ -336,9 +365,9 @@ jobs:
 
   test_ambient_env:
     name: Backend (ambient integration env)
-    needs: changes
+    needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner_plan.outputs.test_ambient_env_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
     # test_shards runs in the same clean container and never sets these vars,
     # so it cannot catch a package that starts reading them again — the class
     # of bug that shipped alongside internal/gitlab's host-trust tests (they
@@ -400,9 +429,10 @@ jobs:
   # `test-windows` were outside it before this workflow became a gate.
   test:
     name: Run Backend Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner_plan.outputs.test_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
     needs:
       - changes
+      - runner_plan
       - static_checks
       - test_shards
       - test_ambient_env
@@ -412,6 +442,7 @@ jobs:
     steps:
       - name: Require backend checks to pass
         env:
+          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
@@ -421,12 +452,20 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Runner plan: ${RUNNER_PLAN_RESULT}"
           echo "Change detection: ${CHANGES_RESULT}"
           echo "Static checks: ${STATIC_CHECKS_RESULT}"
           echo "Test shards: ${TEST_SHARDS_RESULT}"
           echo "Ambient env tests: ${TEST_AMBIENT_ENV_RESULT}"
           echo "Postgres boot: ${POSTGRES_BOOT_RESULT}"
           echo "Windows tests: ${TEST_WINDOWS_RESULT}"
+
+          # Runner planning must succeed because its outputs select the runner
+          # fleet. A planner error cannot silently become a hosted fallback.
+          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
+            echo "Runner planning did not succeed; refusing to report a pass." >&2
+            exit 1
+          fi
 
           # Change detection itself must succeed: if it errored we do not know
           # whether the skips below were deliberate.

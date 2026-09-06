@@ -39,12 +39,46 @@ permissions:
   packages: read
 
 jobs:
+  runner_plan:
+    name: Plan external runner allocation
+    runs-on: ubuntu-latest
+    outputs:
+      changes_runner: ${{ steps.plan.outputs.changes_runner }}
+      build_runner: ${{ steps.plan.outputs.build_runner }}
+      e2e_matrix: ${{ steps.plan.outputs.e2e_matrix }}
+      e2e_report_runner: ${{ steps.plan.outputs.e2e_report_runner }}
+      e2e_gate_runner: ${{ steps.plan.outputs.e2e_gate_runner }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan runner allocation
+        id: plan
+        env:
+          KANDEV_CI_EXTERNAL_ENABLED: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          KANDEV_CI_EXTERNAL_PERCENT: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          KANDEV_CI_RUNNER_LIGHT: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          KANDEV_CI_RUNNER_STANDARD: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
+        run: |
+          python3 .github/scripts/runner-plan.py \
+            --workflow e2e \
+            --run-id "$GITHUB_RUN_ID" \
+            --burst "$KANDEV_CI_EXTERNAL_ENABLED" \
+            --percent "$KANDEV_CI_EXTERNAL_PERCENT" \
+            --light-label "$KANDEV_CI_RUNNER_LIGHT" \
+            --standard-label "$KANDEV_CI_RUNNER_STANDARD" \
+            --output "$GITHUB_OUTPUT"
+
   # The former trigger-level `paths:` list, applied one level down so a skip
   # still produces a conclusion. `.github/scripts/changed-paths.py` implements
   # the same last-match-wins semantics GitHub applies to `paths:`.
   changes:
     name: Detect relevant changes
-    runs-on: ubuntu-latest
+    needs: runner_plan
+    runs-on: ${{ needs.runner_plan.outputs.changes_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
     timeout-minutes: 10
     outputs:
       run: ${{ steps.detect.outputs.run }}
@@ -111,9 +145,9 @@ jobs:
 
   build:
     name: Build
-    needs: changes
+    needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner_plan.outputs.build_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
     # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
     # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
     # because this job compiles the backend.
@@ -367,9 +401,9 @@ jobs:
 
   e2e:
     name: E2E Shard ${{ matrix.shard }}/14
-    needs: [changes, build]
+    needs: [changes, build, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright browser
     # binaries (Chromium etc.) — see .github/docker/ci-base/Dockerfile. This is
     # the biggest speedup since `npx playwright install chromium --with-deps`
@@ -398,8 +432,7 @@ jobs:
       NODE_OPTIONS: --dns-result-order=ipv4first
     strategy:
       fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+      matrix: ${{ fromJSON(needs.runner_plan.outputs.e2e_matrix) }}
 
     steps:
       - name: Checkout code
@@ -467,9 +500,10 @@ jobs:
         working-directory: apps/web
         env:
           E2E_SHARD: ${{ matrix.shard }}
+          E2E_MANIFEST_SHARD: ${{ matrix.shard }}
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-        run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${{ matrix.shard }}.json"
+        run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"
 
       - name: Upload blob report
         if: always()
@@ -1098,13 +1132,13 @@ jobs:
 
   e2e-report:
     name: Merge E2E Reports
-    needs: [changes, e2e, e2e-containers, desktop-e2e]
+    needs: [changes, e2e, e2e-containers, desktop-e2e, runner_plan]
     # `always()` so a failed shard still gets its report merged, but not when
     # change detection skipped the shards outright: there would be no blob
     # reports to download, and the artifact step would fail on an empty run.
     # `e2e-gate` below, not this job, is what the merge queue waits on.
     if: always() && needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner_plan.outputs.e2e_report_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
     # `runtime` tag — no Go needed for merging blob reports.
     container: ghcr.io/kdlbs/kandev-ci:runtime-latest
@@ -1473,10 +1507,11 @@ jobs:
   # count changes.
   e2e-gate:
     name: E2E Tests Passed
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner_plan.outputs.e2e_gate_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
     needs:
       [
         changes,
+        runner_plan,
         build,
         playwright_image,
         e2e,
@@ -1490,6 +1525,7 @@ jobs:
     steps:
       - name: Require the E2E jobs to have passed or been skipped
         env:
+          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           PLAYWRIGHT_IMAGE_RESULT: ${{ needs.playwright_image.result }}
@@ -1502,6 +1538,7 @@ jobs:
           set -euo pipefail
 
           echo "Change detection: ${CHANGES_RESULT}"
+          echo "Runner plan: ${RUNNER_PLAN_RESULT}"
           echo "Build: ${BUILD_RESULT}"
           echo "Playwright image: ${PLAYWRIGHT_IMAGE_RESULT}"
           echo "E2E shards: ${E2E_RESULT}"
@@ -1509,6 +1546,13 @@ jobs:
           echo "Kubernetes compatibility: ${E2E_KUBERNETES_COMPATIBILITY_RESULT}"
           echo "Desktop smoke: ${DESKTOP_E2E_RESULT}"
           echo "Report merge: ${E2E_REPORT_RESULT}"
+
+          # Runner planning must succeed because its outputs select the runner
+          # fleet. A planner error cannot silently become a hosted fallback.
+          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
+            echo "Runner planning did not succeed; refusing to report a pass." >&2
+            exit 1
+          fi
 
           # Change detection itself must succeed: if it errored we do not know
           # whether the skips below were deliberate.

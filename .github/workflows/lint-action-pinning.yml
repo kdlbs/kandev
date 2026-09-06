@@ -32,11 +32,51 @@ permissions:
   contents: read
 
 jobs:
-  lint:
-    name: All action refs are SHA-pinned
+  runner_plan:
+    name: Plan external runner allocation
     runs-on: ubuntu-latest
+    outputs:
+      lint_runner: ${{ steps.plan.outputs.lint_runner }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan runner allocation
+        id: plan
+        env:
+          KANDEV_CI_EXTERNAL_ENABLED: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
+          KANDEV_CI_EXTERNAL_PERCENT: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
+          KANDEV_CI_RUNNER_LIGHT: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
+          KANDEV_CI_RUNNER_STANDARD: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
+        run: |
+          python3 .github/scripts/runner-plan.py \
+            --workflow action-pinning \
+            --run-id "$GITHUB_RUN_ID" \
+            --burst "$KANDEV_CI_EXTERNAL_ENABLED" \
+            --percent "$KANDEV_CI_EXTERNAL_PERCENT" \
+            --light-label "$KANDEV_CI_RUNNER_LIGHT" \
+            --standard-label "$KANDEV_CI_RUNNER_STANDARD" \
+            --output "$GITHUB_OUTPUT"
+
+  lint:
+    name: All action refs are SHA-pinned
+    needs: runner_plan
+    if: always()
+    runs-on: ${{ needs.runner_plan.outputs.lint_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+
+    steps:
+      - name: Require runner plan
+        env:
+          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
+        run: |
+          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
+            echo "Runner planning finished with result: ${RUNNER_PLAN_RESULT}" >&2
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -72,6 +112,12 @@ jobs:
 
       - name: Test E2E workflow contract
         run: python3 .github/scripts/e2e-tests-workflow-contract_test.py
+
+      - name: Test external runner workflow contract
+        run: python3 .github/scripts/external-runner-workflow-contract_test.py
+
+      - name: Test external runner planner
+        run: python3 .github/scripts/runner-plan_test.py
 
       - name: Test stale merge approval revocation workflow contract
         run: python3 .github/scripts/revoke-ready-to-merge-workflow-contract_test.py

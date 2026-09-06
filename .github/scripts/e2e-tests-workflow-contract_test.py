@@ -193,6 +193,65 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("timeout-minutes: 35", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.2
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.3
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.4
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.5
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.6
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-002.1
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-002.2
+    def test_external_runner_tiers_are_toggleable_for_eligible_jobs(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+
+        light_jobs = {
+            "changes": ("build", "KANDEV_CI_RUNNER_LIGHT", "changes_runner"),
+            "e2e-gate": (None, "KANDEV_CI_RUNNER_LIGHT", "e2e_gate_runner"),
+        }
+        standard_jobs = {
+            "build": ("e2e", "KANDEV_CI_RUNNER_STANDARD", "build_runner"),
+            "e2e": ("playwright_image", "KANDEV_CI_RUNNER_STANDARD", "e2e_matrix"),
+            "e2e-report": ("e2e-gate", "KANDEV_CI_RUNNER_STANDARD", "e2e_report_runner"),
+        }
+
+        for job, (next_job, tier_variable, output_name) in (
+            *light_jobs.items(),
+            *standard_jobs.items(),
+        ):
+            if next_job is None:
+                job_text = workflow.partition("  e2e-gate:\n")[2]
+            else:
+                job_text = job_block(workflow, job, next_job)
+            if job == "e2e":
+                expected = "runs-on: ${{ matrix.runner == 'external'"
+            else:
+                expected = (
+                    f"runs-on: ${{{{ needs.runner_plan.outputs.{output_name} == 'external' && "
+                    f"vars.{tier_variable} || 'ubuntu-latest' }}}}"
+                )
+            self.assertIn(
+                expected,
+                job_text,
+                f"{job} must select its configured tier",
+            )
+        e2e_job = job_block(workflow, "e2e", "playwright_image")
+        self.assertIn(
+            "matrix: ${{ fromJSON(needs.runner_plan.outputs.e2e_matrix) }}",
+            e2e_job,
+        )
+
+        protected_jobs = {
+            "playwright_image": "e2e-containers",
+            "e2e-containers": "e2e-kubernetes-compatibility",
+            "e2e-kubernetes-compatibility": "desktop-e2e",
+            "desktop-e2e": "e2e-report",
+        }
+        for job, next_job in protected_jobs.items():
+            protected_text = job_block(workflow, job, next_job)
+            self.assertIn("runs-on: ubuntu-latest", protected_text)
+            self.assertNotIn("KANDEV_CI_EXTERNAL_ENABLED", protected_text)
+            self.assertNotIn("KANDEV_CI_RUNNER_", protected_text)
+
     def test_contract_runs_in_the_unfiltered_required_workflow(self) -> None:
         workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
 
