@@ -51,8 +51,14 @@ export type Graph2TaskPipelineProps = {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask?: (task: Task) => void;
-  onDeleteTask: (task: Task, opts?: { cascade?: boolean }) => void;
-  onArchiveTask?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDeleteTask: (
+    task: Task,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => void;
+  onArchiveTask?: (
+    task: Task,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => void;
   isMoving?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
@@ -541,8 +547,14 @@ function PipelineDialogs({
   menu: KanbanCardMenuState;
   isDeleting?: boolean;
   isArchiving?: boolean;
-  onDeleteTask: (task: Task, opts?: { cascade?: boolean }) => void;
-  onArchiveTask?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDeleteTask: (
+    task: Task,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => void;
+  onArchiveTask?: (
+    task: Task,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => void;
 }) {
   return (
     <>

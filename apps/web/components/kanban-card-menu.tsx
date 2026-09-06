@@ -38,7 +38,7 @@ export interface TaskCardMenuParams {
   isSelected?: boolean;
   selectedIds?: Set<string>;
   onEdit?: (task: Task) => void;
-  onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDelete?: (task: Task, opts?: { cascade?: boolean; discardWorktreeChanges?: boolean }) => void;
   onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
   onMove?: (task: Task, targetStepId: string) => void;
 }
@@ -294,7 +294,7 @@ export function KanbanCardDialogs({
         taskId={task.id}
         executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
+        onConfirm={(opts) => onDelete?.(task, opts)}
       />
       <TaskGitHubPRDialog
         workspaceId={workspaceId}

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
-import { useTaskActions } from "@/hooks/use-task-actions";
+import { useTaskActions, type TaskActionOptions } from "@/hooks/use-task-actions";
 import type { Task } from "@/components/kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 
@@ -31,7 +31,7 @@ export function useTaskCRUD() {
   }, []);
 
   const handleDelete = useCallback(
-    async (task: Task, opts?: { cascade?: boolean }) => {
+    async (task: Task, opts?: TaskActionOptions) => {
       setDeletingTaskId(task.id);
       try {
         await deleteTaskById(task.id, opts);
@@ -53,7 +53,7 @@ export function useTaskCRUD() {
   );
 
   const handleArchive = useCallback(
-    async (task: Task, opts?: { cascade?: boolean }) => {
+    async (task: Task, opts?: TaskActionOptions) => {
       setArchivingTaskId(task.id);
       try {
         await archiveTaskById(task.id, opts);

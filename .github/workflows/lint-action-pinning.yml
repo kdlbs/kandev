@@ -34,6 +34,8 @@ permissions:
 jobs:
   lint:
     name: All action refs are SHA-pinned
+    # Checkout receives the short-lived job token. Keep this credential-bearing
+    # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
 
     steps:
@@ -72,6 +74,12 @@ jobs:
 
       - name: Test E2E workflow contract
         run: python3 .github/scripts/e2e-tests-workflow-contract_test.py
+
+      - name: Test external runner workflow contract
+        run: python3 .github/scripts/external-runner-workflow-contract_test.py
+
+      - name: Test external runner planner
+        run: python3 .github/scripts/runner-plan_test.py
 
       - name: Test bounded step summary
         run: python3 .github/scripts/bounded-step-summary_test.py

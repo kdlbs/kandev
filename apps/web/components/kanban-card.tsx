@@ -16,6 +16,7 @@ import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirma
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
+import type { TaskActionOptions } from "@/hooks/use-task-actions";
 import {
   type ForegroundActivity,
   type TaskPendingAction,
@@ -122,8 +123,8 @@ interface KanbanCardProps {
   repositoryChips?: RepositoryChip[];
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
-  onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
-  onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDelete?: (task: Task, opts?: TaskActionOptions) => void;
+  onArchive?: (task: Task, opts?: TaskActionOptions) => void;
   onOpenFullPage?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];

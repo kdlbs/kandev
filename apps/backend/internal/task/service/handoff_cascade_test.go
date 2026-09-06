@@ -135,6 +135,33 @@ type recordingCleanupCoordinator struct {
 	cleaned               []string
 }
 
+type deleteAdmissionCall struct {
+	taskIDs []string
+	discard bool
+}
+
+type recordingDeleteAdmissionCleaner struct {
+	mu       sync.Mutex
+	calls    []deleteAdmissionCall
+	dirtyErr error
+}
+
+func (c *recordingDeleteAdmissionCleaner) CleanupTaskResources(context.Context, string, bool) {}
+
+func (c *recordingDeleteAdmissionCleaner) ValidateTaskDeleteWorktrees(
+	_ context.Context, taskIDs []string, discardWorktreeChanges bool,
+) error {
+	c.mu.Lock()
+	c.calls = append(c.calls, deleteAdmissionCall{
+		taskIDs: append([]string(nil), taskIDs...), discard: discardWorktreeChanges,
+	})
+	c.mu.Unlock()
+	if !discardWorktreeChanges {
+		return c.dirtyErr
+	}
+	return nil
+}
+
 func (c *recordingCleanupCoordinator) CleanupTaskResources(_ context.Context, taskID string, _ bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -169,6 +196,57 @@ func TestDeleteTaskTreePreparedCleanupDeletesEnvironmentRow(t *testing.T) {
 	defer coordinator.mu.Unlock()
 	if len(coordinator.deleteEnvironmentRows) != 1 || !coordinator.deleteEnvironmentRows[0] {
 		t.Fatalf("deleteEnvironmentRows = %v, want [true]", coordinator.deleteEnvironmentRows)
+	}
+}
+
+func TestDeleteTaskTreeWithOptionsPreflightsWholeTreeAndPropagatesDiscardConsent(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.addTask("grandchild", "child", "ws-1")
+	cleaner := &recordingDeleteAdmissionCleaner{dirtyErr: errors.New("dirty worktree")}
+	svc := NewHandoffService(
+		&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil,
+	)
+	svc.SetTaskResourceCleaner(cleaner)
+
+	if _, err := svc.DeleteTaskTreeWithOptions(context.Background(), "root", true, DeleteTaskOptions{}); !errors.Is(err, cleaner.dirtyErr) {
+		t.Fatalf("unconsented cascade error = %v, want dirty admission error", err)
+	}
+	for _, taskID := range []string{"root", "child", "grandchild"} {
+		if task, err := tasks.GetTask(context.Background(), taskID); err != nil || task == nil {
+			t.Fatalf("unconsented cascade mutated %s: task=%#v err=%v", taskID, task, err)
+		}
+	}
+
+	cleaner.mu.Lock()
+	if len(cleaner.calls) != 1 {
+		t.Fatalf("admission calls after refusal = %d, want 1", len(cleaner.calls))
+	}
+	if cleaner.calls[0].discard {
+		t.Fatal("unconsented cascade passed discard consent")
+	}
+	if len(cleaner.calls[0].taskIDs) != 3 {
+		t.Fatalf("admission task IDs = %v, want complete tree", cleaner.calls[0].taskIDs)
+	}
+	cleaner.mu.Unlock()
+
+	if _, err := svc.DeleteTaskTreeWithOptions(context.Background(), "root", true, DeleteTaskOptions{
+		DiscardWorktreeChanges: true,
+	}); err != nil {
+		t.Fatalf("consented cascade: %v", err)
+	}
+	for _, taskID := range []string{"root", "child", "grandchild"} {
+		if task, err := tasks.GetTask(context.Background(), taskID); err != nil {
+			t.Fatalf("get deleted task %s: %v", taskID, err)
+		} else if task != nil {
+			t.Fatalf("consented cascade retained %s: %#v", taskID, task)
+		}
+	}
+	cleaner.mu.Lock()
+	defer cleaner.mu.Unlock()
+	if len(cleaner.calls) != 2 || !cleaner.calls[1].discard {
+		t.Fatalf("admission calls after consent = %+v, want second call with discard=true", cleaner.calls)
 	}
 }
 
