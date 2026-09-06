@@ -53,6 +53,95 @@ func TestAttestMaterializedGitMetadataAcceptsRegularClone(t *testing.T) {
 	}
 }
 
+func TestAttestRegularGitMetadataRejectsUnsafeGitReferenceMetadata(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink setup requires platform-specific privileges")
+	}
+
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, checkout string)
+	}{
+		{
+			name: "symlinked refs on detached HEAD",
+			prepare: func(t *testing.T, checkout string) {
+				t.Helper()
+				materializeGitOutputForTest(t, checkout, "checkout", "--detach", "HEAD")
+				refs := filepath.Join(checkout, ".git", "refs")
+				if err := os.RemoveAll(refs); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), refs); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "symlinked logs",
+			prepare: func(t *testing.T, checkout string) {
+				t.Helper()
+				logs := filepath.Join(checkout, ".git", "logs")
+				if err := os.RemoveAll(logs); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), logs); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "invalid symbolic HEAD ref",
+			prepare: func(t *testing.T, checkout string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(checkout, ".git", "HEAD"), []byte("ref: refs/tags/release\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "symlinked active ref component",
+			prepare: func(t *testing.T, checkout string) {
+				t.Helper()
+				heads := filepath.Join(checkout, ".git", "refs", "heads")
+				if err := os.RemoveAll(heads); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), heads); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "symlinked active reflog component",
+			prepare: func(t *testing.T, checkout string) {
+				t.Helper()
+				heads := filepath.Join(checkout, ".git", "logs", "refs", "heads")
+				if err := os.RemoveAll(heads); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), heads); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			origin := createMaterializeOrigin(t)
+			checkout := filepath.Join(t.TempDir(), "checkout")
+			if _, err := materializeRepository(context.Background(), origin, checkout, "main", ""); err != nil {
+				t.Fatal(err)
+			}
+			test.prepare(t, checkout)
+
+			if _, err := attestRegularGitMetadata(context.Background(), checkout); err == nil {
+				t.Fatal("attestation accepted unsafe Git reference metadata")
+			}
+		})
+	}
+}
+
 func TestWorkspaceGitMetadataAttestationUsesAgentctlWorkdir(t *testing.T) {
 	origin := createMaterializeOrigin(t)
 	workspace := filepath.Join(t.TempDir(), "workspace")

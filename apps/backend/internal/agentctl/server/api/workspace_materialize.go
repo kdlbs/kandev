@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	"go.uber.org/zap"
 )
 
@@ -247,11 +248,86 @@ func attestRegularGitMetadata(ctx context.Context, destination string) (GitMetad
 	if err != nil || !head.Mode().IsRegular() || head.Mode()&os.ModeSymlink != 0 {
 		return GitMetadataAttestation{}, errors.New("git HEAD is not a regular file")
 	}
+	if err := attestRegularGitReferenceMetadata(gitDir); err != nil {
+		return GitMetadataAttestation{}, err
+	}
 	actualGitDir, err := materializeGitOutput(ctx, "-C", destination, "rev-parse", "--absolute-git-dir")
 	if err != nil || filepath.Clean(strings.TrimSpace(actualGitDir)) != gitDir {
 		return GitMetadataAttestation{}, errors.New("git checkout does not own its metadata")
 	}
 	return GitMetadataAttestation{CheckoutPath: destination, GitDir: gitDir}, nil
+}
+
+func attestRegularGitReferenceMetadata(gitDir string) error {
+	for _, path := range []string{filepath.Join(gitDir, "refs"), filepath.Join(gitDir, "logs")} {
+		if err := rejectGitMetadataSymlink(path); err != nil {
+			return errors.New("git reference metadata is unsafe")
+		}
+	}
+	ref, err := regularGitHeadRef(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return errors.New("git HEAD ref is invalid")
+	}
+	if ref == "" {
+		return nil
+	}
+	for _, path := range []string{filepath.Join(gitDir, ref), filepath.Join(gitDir, "logs", ref)} {
+		if err := rejectGitMetadataSymlinkComponents(gitDir, path); err != nil {
+			return errors.New("git reference metadata is unsafe")
+		}
+	}
+	return nil
+}
+
+func regularGitHeadRef(headPath string) (string, error) {
+	content, err := os.ReadFile(headPath)
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(string(content))
+	if !strings.HasPrefix(value, "ref: ") {
+		return "", nil
+	}
+	ref := strings.TrimSpace(strings.TrimPrefix(value, "ref: "))
+	if !worktree.ValidBranchRef(ref) {
+		return "", errors.New("invalid HEAD ref")
+	}
+	return ref, nil
+}
+
+func rejectGitMetadataSymlink(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("symbolic link in metadata path")
+	}
+	return nil
+}
+
+func rejectGitMetadataSymlinkComponents(root, path string) error {
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return errors.New("metadata path escapes git directory")
+	}
+	current := root
+	for _, component := range strings.Split(relative, string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("symbolic link in metadata path")
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleWorkspaceRemoveMaterializedRepository(c *gin.Context) {
