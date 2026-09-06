@@ -41,5 +41,6 @@ The following specifications were added after this migration and remain in the l
 - [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
 - [Task Git Metadata Permissions](task-git-metadata-permissions/spec.md) (building)
+- [Workflow Engine Operation Ledger Lifetime](workflow-engine-operation-ledger-lifetime/spec.md) (draft)
 
 ## Authoring rule
