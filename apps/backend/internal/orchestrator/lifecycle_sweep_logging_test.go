@@ -14,6 +14,8 @@ import (
 
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // blockingLifecycleRepo blocks GetTask until release is closed, letting a
@@ -33,6 +35,75 @@ func (r *blockingLifecycleRepo) ListTasksWithMetadataKey(ctx context.Context, ke
 	return r.sessionExecutorStore.(interface {
 		ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
 	}).ListTasksWithMetadataKey(ctx, key)
+}
+
+// dispatchTrackingLifecycleRepo behaves like blockingLifecycleRepo but also
+// records which task IDs GetTask was called for, so a test can assert a job
+// was never dispatched to a worker in the first place (as opposed to merely
+// still being in flight).
+type dispatchTrackingLifecycleRepo struct {
+	sessionExecutorStore
+	release <-chan struct{}
+	mu      sync.Mutex
+	seen    map[string]int
+}
+
+func (r *dispatchTrackingLifecycleRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	r.mu.Lock()
+	if r.seen == nil {
+		r.seen = make(map[string]int)
+	}
+	r.seen[id]++
+	r.mu.Unlock()
+	<-r.release
+	return r.sessionExecutorStore.GetTask(ctx, id)
+}
+
+func (r *dispatchTrackingLifecycleRepo) ListTasksWithMetadataKey(ctx context.Context, key string) ([]*models.Task, error) {
+	return r.sessionExecutorStore.(interface {
+		ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
+	}).ListTasksWithMetadataKey(ctx, key)
+}
+
+func (r *dispatchTrackingLifecycleRepo) callCount(id string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.seen[id]
+}
+
+// seedTaskAndSessionInWorkspace creates a task and session against an
+// already-seeded workspace/workflow (e.g. from seedSession), for tests that
+// need several tasks in the same sweep without recreating those rows.
+func seedTaskAndSessionInWorkspace(t *testing.T, repo *sqliterepo.Repository, workspaceID, workflowID, taskID, sessionID, workflowStepID string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	task := &models.Task{
+		ID:             taskID,
+		WorkspaceID:    workspaceID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: workflowStepID,
+		Title:          "Test Task",
+		Description:    "Test",
+		State:          v1.TaskStateInProgress,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("failed to create task %s: %v", taskID, err)
+	}
+
+	session := &models.TaskSession{
+		ID:        sessionID,
+		TaskID:    taskID,
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to create task session for %s: %v", taskID, err)
+	}
 }
 
 func observedTestLogger(t *testing.T) (*commonlogger.Logger, *observer.ObservedLogs) {
@@ -274,6 +345,91 @@ func TestReconcileTaskLifecycleTokensDeadlineIncludesInFlightTaskIDs(t *testing.
 	ids, ok := entries[0].ContextMap()["in_flight_task_ids"].([]interface{})
 	if !ok || len(ids) != 1 || ids[0] != "deadline-task" {
 		t.Fatalf("in_flight_task_ids = %#v, want [\"deadline-task\"]", entries[0].ContextMap()["in_flight_task_ids"])
+	}
+}
+
+// TestReconcileTaskLifecycleTokensDeadlineStopsUndispatchedWork is the
+// regression test for the sweep's dispatch loop outliving its own overall
+// deadline: only ctx.Done() stopped the dispatcher, so once every worker was
+// parked on a per-task resume and the deadline fired, the function returned
+// but the dispatcher kept the job channel open — any worker that later freed
+// up (e.g. once its parked resume unblocked) would immediately pick up the
+// next undispatched job, admitting new recovery work well past the advertised
+// deadline instead of stopping at it.
+//
+// Five jobs with a worker pool of four guarantees one job is still sitting
+// undispatched in the dispatcher's loop when the (short) deadline fires.
+// jobs is a map, so which of the five ends up as that leftover job is
+// randomized by Go's map iteration order — the test finds it by call count
+// rather than assuming a fixed name.
+//
+// Expected pre-fix failure: after the parked workers are released, one of
+// them picks up the previously-undispatched job and calls GetTask for it, so
+// its call count goes from 0 to nonzero.
+func TestReconcileTaskLifecycleTokensDeadlineStopsUndispatchedWork(t *testing.T) {
+	prevDeadline := lifecycleSweepOverallDeadline
+	lifecycleSweepOverallDeadline = 20 * time.Millisecond
+	t.Cleanup(func() { lifecycleSweepOverallDeadline = prevDeadline })
+
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskIDs := []string{"deadline-fan-1", "deadline-fan-2", "deadline-fan-3", "deadline-fan-4", "deadline-fan-5"}
+	seedSession(t, repo, taskIDs[0], taskIDs[0]+"-session", "step1")
+	for _, id := range taskIDs[1:] {
+		seedTaskAndSessionInWorkspace(t, repo, "ws1", "wf1", id, id+"-session", "step1")
+	}
+	for _, id := range taskIDs {
+		if err := repo.SetTaskMetadataKey(ctx, id, models.MetaKeyQueuePromotionPending, true); err != nil {
+			t.Fatalf("seed promotion token for %s: %v", id, err)
+		}
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	release := make(chan struct{})
+	tracking := &dispatchTrackingLifecycleRepo{sessionExecutorStore: repo, release: release}
+	svc.repo = tracking
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.reconcileTaskLifecycleTokens(ctx)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("sweep did not return by its overall deadline while workers were parked")
+	}
+
+	// reconcileTaskLifecycleTokens has already returned, so exactly
+	// workerCount (4) of the 5 jobs should have reached a worker and be
+	// blocked in GetTask; find the one that was never dispatched before
+	// releasing the rest.
+	var undispatched string
+	var dispatchedBeforeDeadline int
+	for _, id := range taskIDs {
+		if tracking.callCount(id) == 0 {
+			undispatched = id
+		} else {
+			dispatchedBeforeDeadline++
+		}
+	}
+	if undispatched == "" || dispatchedBeforeDeadline != 4 {
+		t.Fatalf("want exactly 4 of 5 jobs dispatched before the deadline and 1 left over, got %d dispatched, undispatched=%q", dispatchedBeforeDeadline, undispatched)
+	}
+
+	// Releasing the four parked workers now and giving them a moment to loop
+	// back to a closed jobIDs channel proves the leftover job was never
+	// handed out, rather than merely not yet handed out. There is no
+	// production completion signal for this detached worker pool to
+	// synchronize on instead (see stopLifecycleSweepAsync's own comment on
+	// this being an intentionally un-joined background sweep).
+	close(release)
+	time.Sleep(100 * time.Millisecond)
+
+	if got := tracking.callCount(undispatched); got != 0 {
+		t.Fatalf("job %q was dispatched to a worker after the sweep's overall deadline had already fired: called %d times", undispatched, got)
 	}
 }
 

@@ -131,6 +131,14 @@ func TestRecoverTaskLifecycleTokenClearsInertCompletedToken(t *testing.T) {
 // pending token as a live move and a second attempt calls
 // recoverManualMoveLifecycle, replaying the step exit/enter side effects for a
 // lifecycle that already finished.
+//
+// It also covers the follow-on defect the raw-key fix introduced by itself:
+// once the guard correctly detects the coexisting pending token, it must not
+// simply leave both keys in place — that just swaps "replays forever" for
+// "never converges," re-listing this task and re-running its continuation on
+// every future startup. The stale pending token has to be cleared directly
+// (not through recoverManualMoveLifecycle, which would replay the move), and
+// the completed token cleared alongside it, so both converge in one pass.
 func TestRecoverTaskLifecycleTokenDoesNotReplayCoexistingPendingAndCompletedTokens(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -168,6 +176,16 @@ func TestRecoverTaskLifecycleTokenDoesNotReplayCoexistingPendingAndCompletedToke
 
 	if got := replays.Load(); got != 0 {
 		t.Fatalf("manual move lifecycle side effects replayed %d times, want 0 (move already completed)", got)
+	}
+	stored, err := repo.GetTask(ctx, "coexist-task")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if _, pending := stored.Metadata[models.MetaKeyManualMoveLifecyclePending]; pending {
+		t.Fatal("stale manual move lifecycle pending token was not cleared; sweep will never converge")
+	}
+	if _, completed := stored.Metadata[models.MetaKeyManualMoveLifecycleCompleted]; completed {
+		t.Fatal("manual move lifecycle completion token was not cleared; sweep will never converge")
 	}
 }
 

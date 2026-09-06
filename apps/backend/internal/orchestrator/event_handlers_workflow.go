@@ -1061,6 +1061,15 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		s.warnIfLifecycleSweepStuck(taskCount, &processed, start, inFlight, sweepDone)
 	}()
 
+	// dispatchCtx is a locally cancellable child of ctx so the deadline branch
+	// below can stop the dispatcher and any not-yet-started work without
+	// waiting on ctx itself (owned by the caller, not this function) to be
+	// cancelled. It does not cut short an already in-flight resume — that
+	// runs under context.WithoutCancel (task_operations.go) — only the
+	// dispatch loop and any work that has not reached that point yet.
+	dispatchCtx, dispatchCancel := context.WithCancel(ctx)
+	defer dispatchCancel()
+
 	jobIDs := make(chan string)
 	workerCount := 4
 	if len(jobs) < workerCount {
@@ -1073,7 +1082,7 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 			defer wg.Done()
 			for taskID := range jobIDs {
 				inFlight.start(taskID)
-				s.recoverTaskLifecycleToken(ctx, taskID)
+				s.recoverTaskLifecycleToken(dispatchCtx, taskID)
 				inFlight.finish(taskID)
 				processed.Add(1)
 			}
@@ -1082,17 +1091,17 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 	// Dispatch in its own goroutine: if every worker is parked on one task's
 	// interactive resume budget, sending the remaining job IDs would block
 	// this function on the same wait workersDone below is trying to bound.
-	// The ctx.Done branch matters independently of that: without it, once the
-	// deadline/cancel select case below fires and this function returns, an
-	// undispatched send blocks forever on the unbuffered channel — the
-	// dispatcher (and, transitively, the workers and the wg.Wait goroutine)
-	// outlives both the sweep's own deadline and Stop().
+	// The dispatchCtx.Done branch matters independently of that: without it,
+	// once the deadline/cancel select case below fires and this function
+	// returns, an undispatched send blocks forever on the unbuffered channel
+	// — the dispatcher (and, transitively, the workers and the wg.Wait
+	// goroutine) outlives both the sweep's own deadline and Stop().
 	go func() {
 		defer close(jobIDs)
 		for taskID := range jobs {
 			select {
 			case jobIDs <- taskID:
-			case <-ctx.Done():
+			case <-dispatchCtx.Done():
 				return
 			}
 		}
@@ -1197,15 +1206,19 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 		// between them can leave both keys set. manualMoveLifecyclePending
 		// is defined as pending && !completed, so it is always false here
 		// and cannot detect that case — check the raw key on a fresh read
-		// instead, so the sweep never resurrects a coexisting pending token
-		// and replays this move's side effects a second time. Left
-		// uncleared otherwise, the completed marker would make the sweep
-		// re-list and re-run this continuation on every future startup.
+		// instead. The move already ran (that is what "completed" means),
+		// so a coexisting pending token here is stale, not a signal to
+		// replay the move: clear it directly rather than through
+		// recoverManualMoveLifecycle, which would resurrect it and replay
+		// this move's side effects a second time. Leaving either key
+		// uncleared would make the sweep re-list and re-run this
+		// continuation on every future startup.
 		postCompletion, err := s.repo.GetTask(ctx, taskID)
 		if err == nil && postCompletion != nil {
-			if _, stillPending := postCompletion.Metadata[models.MetaKeyManualMoveLifecyclePending]; !stillPending {
-				s.clearManualMoveLifecycleCompleted(ctx, taskID)
+			if _, stillPending := postCompletion.Metadata[models.MetaKeyManualMoveLifecyclePending]; stillPending {
+				s.clearManualMoveLifecyclePending(ctx, taskID)
 			}
+			s.clearManualMoveLifecycleCompleted(ctx, taskID)
 		}
 	}
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
