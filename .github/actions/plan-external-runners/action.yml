@@ -8,6 +8,9 @@ inputs:
   run-id:
     description: Stable workflow run identifier used for allocation
     required: true
+  families:
+    description: JSON job-family definitions owned by the calling workflow
+    required: true
   burst:
     description: Exact true value enables external allocation
     required: false
@@ -26,42 +29,9 @@ inputs:
     default: ""
 
 outputs:
-  changes_runner:
-    description: Change-detection runner assignment
-    value: ${{ steps.plan.outputs.changes_runner }}
-  build_runner:
-    description: Build runner assignment
-    value: ${{ steps.plan.outputs.build_runner }}
-  e2e_matrix:
-    description: E2E shard matrix with runner assignments
-    value: ${{ steps.plan.outputs.e2e_matrix }}
-  e2e_report_runner:
-    description: E2E report runner assignment
-    value: ${{ steps.plan.outputs.e2e_report_runner }}
-  e2e_gate_runner:
-    description: E2E gate runner assignment
-    value: ${{ steps.plan.outputs.e2e_gate_runner }}
-  static_checks_runner:
-    description: Backend static-check runner assignment
-    value: ${{ steps.plan.outputs.static_checks_runner }}
-  backend_test_matrix:
-    description: Backend test matrix with runner assignments
-    value: ${{ steps.plan.outputs.backend_test_matrix }}
-  test_ambient_env_runner:
-    description: Backend ambient-environment runner assignment
-    value: ${{ steps.plan.outputs.test_ambient_env_runner }}
-  test_runner:
-    description: Backend aggregate-test runner assignment
-    value: ${{ steps.plan.outputs.test_runner }}
-  frontend_runner:
-    description: Frontend test runner assignment
-    value: ${{ steps.plan.outputs.frontend_runner }}
-  frontend_gate_runner:
-    description: Frontend gate runner assignment
-    value: ${{ steps.plan.outputs.frontend_gate_runner }}
-  lint_runner:
-    description: Lint runner assignment
-    value: ${{ steps.plan.outputs.lint_runner }}
+  plan:
+    description: JSON object containing runner and matrix outputs
+    value: ${{ steps.plan.outputs.plan }}
 
 runs:
   using: composite
@@ -70,14 +40,18 @@ runs:
       id: plan
       shell: bash
       env:
+        RUNNER_PLAN_WORKFLOW: ${{ inputs.workflow }}
+        RUNNER_PLAN_RUN_ID: ${{ inputs.run-id }}
+        RUNNER_PLAN_FAMILIES: ${{ inputs.families }}
         KANDEV_CI_EXTERNAL_ENABLED: ${{ inputs.burst }}
         KANDEV_CI_EXTERNAL_PERCENT: ${{ inputs.percent }}
         KANDEV_CI_RUNNER_LIGHT: ${{ inputs.light-label }}
         KANDEV_CI_RUNNER_STANDARD: ${{ inputs.standard-label }}
       run: |
         python3 "$GITHUB_WORKSPACE/.github/scripts/runner-plan.py" \
-          --workflow "${{ inputs.workflow }}" \
-          --run-id "${{ inputs.run-id }}" \
+          --workflow "$RUNNER_PLAN_WORKFLOW" \
+          --run-id "$RUNNER_PLAN_RUN_ID" \
+          --families "$RUNNER_PLAN_FAMILIES" \
           --burst "$KANDEV_CI_EXTERNAL_ENABLED" \
           --percent "$KANDEV_CI_EXTERNAL_PERCENT" \
           --light-label "$KANDEV_CI_RUNNER_LIGHT" \

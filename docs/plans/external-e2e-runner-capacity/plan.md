@@ -24,10 +24,10 @@ measurement procedure.
 
 ### In scope
 
-- Route E2E, backend, frontend, architecture-lint, action-pinning, and
-  harness-lint control jobs through the light runner tier.
-- Route E2E build/shard/report jobs and backend/frontend Linux test jobs through
-  the standard runner tier.
+- Route eligible E2E and frontend jobs, plus the backend aggregate gate,
+  through the light or standard runner tier.
+- Keep token-bearing E2E build/report, backend checkout/test, architecture,
+  action-pinning, and harness jobs on GitHub-hosted runners.
 - Use `KANDEV_CI_EXTERNAL_ENABLED` as the single activation switch for both tiers.
 - Use `KANDEV_CI_EXTERNAL_PERCENT` to allocate 0 to 100 percent of eligible
   job instances when burst mode is active.
@@ -58,23 +58,24 @@ measurement procedure.
 
 ### Workflow placement
 
-For tier-only jobs, use the light expression in the existing E2E workflow:
+Eligible singleton jobs read a resolved runner label from the planner's JSON
+output:
 
 ```yaml
-runs-on: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED == 'true' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}
 ```
 
-Use the same expression with `KANDEV_CI_RUNNER_STANDARD` for standard jobs.
-Apply the same contract to the backend, frontend, architecture-lint,
-action-pinning, and harness-lint workflows. Each tier variable is the full
-runner label.
+Matrix jobs read their matrix from that plan and use its `runner` field.
+Protected jobs keep an explicit `ubuntu-latest` value and do not depend on the
+planner.
 
 For percentage rollout, add a read-only `runner-plan.py` planner job on
 `ubuntu-latest`. It validates the percentage and emits runner assignments for
 each eligible job family. Matrix families receive exactly
 `floor(N * percentage / 100)` external assignments. Singleton families use a
-stable hash bucket. Downstream jobs consume only `github` or `external` from
-planner outputs, then map `external` to the configured tier label.
+stable hash bucket. Workflows declare their family data through a reusable
+composite action. Downstream jobs consume one JSON plan containing resolved
+runner labels and matrices.
 
 If burst mode is inactive, eligible jobs use GitHub-hosted capacity. If burst
 mode is active, each job uses its configured tier. An empty tier uses
@@ -83,9 +84,9 @@ mode is active, each job uses its configured tier. An empty tier uses
 ### Contract tests
 
 Extend the E2E, backend, and frontend workflow contract tests with focused
-assertions for every affected job block. Add equivalent assertions for the
-architecture-lint, action-pinning, and harness-lint workflows where their
-placement is source-visible.
+assertions for every affected job block. Add equivalent assertions that the
+architecture-lint, action-pinning, and harness-lint workflows stay hosted and
+do not create planner jobs.
 
 Assert `runs-on: ubuntu-latest` in every protected block. Also assert that
 protected jobs do not reference the burst, percentage, or tier variables. Keep

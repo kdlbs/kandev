@@ -47,25 +47,25 @@ The repository stores these Actions variables:
 | `KANDEV_CI_EXTERNAL_ENABLED` | Activates configured external tiers only when its value is `true`. | Unset or `false` |
 | `KANDEV_CI_EXTERNAL_PERCENT` | Selects the percentage of eligible job instances assigned to external capacity when burst mode is active. | Unset or `0` |
 | `KANDEV_CI_RUNNER_LIGHT` | Selects capacity for change detection and required gates. | `ubicloud-standard-2-ubuntu-2404` |
-| `KANDEV_CI_RUNNER_STANDARD` | Selects capacity for builds, reports, browser tests, and Linux test jobs. | `ubicloud-standard-4-ubuntu-2404` |
+| `KANDEV_CI_RUNNER_STANDARD` | Selects capacity for eligible browser and frontend test jobs. | `ubicloud-standard-4-ubuntu-2404` |
 
-The workflow maps a light planner assignment with this `runs-on` expression:
+The workflow consumes the planner's resolved light-tier value with this
+`runs-on` expression:
 
 ```yaml
-runs-on: ${{ needs.runner_plan.outputs.changes_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}
 ```
 
-Standard jobs use the same expression with `KANDEV_CI_RUNNER_STANDARD`. Matrix
-jobs use `matrix.runner` instead of a singleton output. GitHub evaluates the
-expression before it dispatches the job. If external capacity is not selected,
-the expression selects `ubuntu-latest`.
+The planner returns the configured external label or `ubuntu-latest`, never an
+expression fragment. Matrix jobs read their matrix from the same JSON plan and
+use `runs-on: ${{ matrix.runner }}`. GitHub evaluates the value before it
+dispatches the job.
 
 Percentage rollout cannot be implemented safely with a direct `runs-on`
 expression. GitHub expressions provide comparisons and boolean operators but no
 random or modulo operator. A planner job therefore computes assignments before
-eligible jobs start and exposes only validated runner values through job
-outputs. Downstream jobs consume those outputs with `needs` and, for matrices,
-`fromJSON`.
+eligible jobs start and exposes one JSON plan through a job output. Downstream
+jobs consume that plan with `needs` and `fromJSON`.
 
 If burst mode is active, the expression selects the complete label for that
 tier. An empty tier label uses `ubuntu-latest`. A non-empty invalid label stays
@@ -81,10 +81,11 @@ the duration-aware timing profile useful across normal shards.
 
 ## Percentage allocation
 
-`.github/scripts/runner-plan.py` is a read-only planner that runs on
-`ubuntu-latest`. It receives the workflow identifier, run identifier, job
-family descriptors, burst switch, percentage, and tier labels. It validates
-the percentage and emits JSON assignments plus a visible warning when the
+`.github/scripts/runner-plan.py` is a generic read-only planner that runs on
+`ubuntu-latest`. It receives the workflow identifier, run identifier,
+workflow-owned JSON family descriptors, burst switch, percentage, and tier
+labels. It contains no workflow or job-family catalog. It validates the
+percentage and emits one JSON assignment plan plus a visible warning when the
 percentage is invalid.
 
 The planner applies these rules:
@@ -112,23 +113,23 @@ total compute across workflows with different family sizes.
 
 ## Workflow integration
 
-Each workflow with eligible jobs adds a small planner job on
-`ubuntu-latest`. Existing change-detection jobs can own this planning step when
-they already run for the workflow. Always-run workflows use a dedicated
-read-only planner job. Eligible jobs depend on the planner only for their
-runner assignment; their existing test dependencies, matrices, artifacts,
-timeouts, permissions, and required conclusions remain unchanged.
+Each workflow with eligible jobs adds a small planner job on `ubuntu-latest`.
+Eligible jobs depend on the planner only for their runner assignment; their
+existing test dependencies, matrices, artifacts, timeouts, permissions, and
+required conclusions remain unchanged. A workflow with no eligible jobs does
+not run the planner.
 
 The planner steps use the reusable composite action at
 `.github/actions/plan-external-runners/action.yml`. The action owns the
 validated environment wiring and `runner-plan.py` invocation, while each
-workflow keeps only its job-specific output mapping. This keeps the job
-contract explicit without copying planner logic between workflows.
+workflow owns the family JSON and exposes one `plan` job output. This keeps the
+job contract explicit without copying planner logic or teaching Python about
+workflow-specific families.
 
-The planner output is limited to the enum values `github` and `external`. The
-workflow maps `external` to one of the configured tier variables. Protected
-jobs keep explicit `runs-on: ubuntu-latest` and do not consume planner output.
-Contract tests assert the output wiring and the protected-job boundary.
+The JSON plan contains only resolved runner labels and matrix data declared by
+the workflow. Protected jobs keep explicit `runs-on: ubuntu-latest` and do not
+consume planner output. Contract tests assert the output wiring and the
+protected-job boundary.
 
 ## Job placement
 
@@ -155,11 +156,10 @@ image, the environment, the timeout, or artifacts. The gate keeps
 ## Workflow contract coverage
 
 The E2E, backend, and frontend workflow contract tests own the executable
-placement contract. Dedicated checks cover the architecture-lint,
-action-pinning, and harness-lint workflows. They verify the exact
-variable-backed `runs-on` expression for both eligible classes. They also
-verify that every protected CI job uses `runs-on: ubuntu-latest` without the
-burst, percentage, or tier variables.
+placement contract. Dedicated checks verify that architecture-lint,
+action-pinning, and harness-lint do not create planner jobs. They also verify
+that every protected CI job uses `runs-on: ubuntu-latest` without the burst,
+percentage, or tier variables.
 
 The contract test also protects the provider-neutral behavior: it asserts the
 variable names and GitHub fallback, not the Ubicloud labels. Provider

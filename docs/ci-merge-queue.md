@@ -126,7 +126,7 @@ so the workflows use GitHub-hosted runners.
 | `KANDEV_CI_EXTERNAL_ENABLED` | unset | Set to `true` to allow external assignments |
 | `KANDEV_CI_EXTERNAL_PERCENT` | unset or `0` | Assign 0 to 100 percent of eligible jobs |
 | `KANDEV_CI_RUNNER_LIGHT` | `ubicloud-standard-2-ubuntu-2404` | Control and aggregate jobs |
-| `KANDEV_CI_RUNNER_STANDARD` | `ubicloud-standard-4-ubuntu-2404` | Builds and Linux test jobs |
+| `KANDEV_CI_RUNNER_STANDARD` | `ubicloud-standard-4-ubuntu-2404` | Eligible browser and frontend test jobs |
 
 Set `KANDEV_CI_EXTERNAL_ENABLED` to the exact value `true` when the Actions queue
 needs extra capacity. Set it to `false`, or remove it, after the queue returns
@@ -145,13 +145,13 @@ Malformed or out-of-range values fail closed to GitHub-hosted runners and emit
 a planner warning.
 
 The reusable `.github/actions/plan-external-runners` composite action runs on
-the planner job's `ubuntu-latest` checkout and gives each eligible job either
-the `external` or `github` assignment. Each workflow maps that assignment to a
-configured label:
+the planner job's `ubuntu-latest` checkout. Each workflow declares its eligible
+families as JSON, and the action returns one JSON plan with resolved runner
+labels:
 
 ```yaml
-runs-on: ${{ needs.runner_plan.outputs.frontend_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
-runs-on: ${{ matrix.runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
+runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}
+runs-on: ${{ matrix.runner }}
 ```
 
 If a tier variable is empty, that tier uses `ubuntu-latest`. If a non-empty
@@ -166,10 +166,11 @@ stay on GitHub-hosted runners. Release, publishing, signing, deployment, and
 credential-bearing jobs stay on their existing runners. The workflows do not
 add permissions, secrets, or persistent state.
 
-The same switch and tier labels apply to E2E, backend, frontend,
-architecture-lint, action-pinning, and harness-lint workflows. The planner
-does not change job names, test selection, matrices, artifacts, dependencies,
-timeouts, permissions, or required conclusions.
+The same switch and tier labels apply to eligible E2E, backend-gate, and
+frontend jobs. Architecture-lint, action-pinning, and harness-lint stay hosted
+and do not create planner jobs. The planner does not change job names, test
+selection, matrix values, artifacts, dependencies, timeouts, permissions, or
+required conclusions.
 
 Pilot procedure:
 

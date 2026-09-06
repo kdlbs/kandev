@@ -68,8 +68,8 @@ runner fleet, so that I can reduce merge-queue wait across Linux CI.
   label cannot accept a job, that job shall remain visibly queued or fail. The
   workflow shall not silently select an unapproved fleet.
 - **AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.7:** The same burst switch and
-  tier labels shall apply consistently to the eligible E2E, backend, frontend,
-  architecture-lint, action-pinning, and harness-lint jobs.
+  tier labels shall apply consistently to eligible E2E, backend-gate, and
+  frontend jobs. Protected lint workflows shall remain GitHub-hosted.
 
 ### REQ-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-002: Initial runner trust boundary
 

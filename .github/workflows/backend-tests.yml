@@ -37,11 +37,7 @@ jobs:
     name: Plan external runner allocation
     runs-on: ubuntu-latest
     outputs:
-      changes_runner: ${{ steps.plan.outputs.changes_runner }}
-      static_checks_runner: ${{ steps.plan.outputs.static_checks_runner }}
-      backend_test_matrix: ${{ steps.plan.outputs.backend_test_matrix }}
-      test_ambient_env_runner: ${{ steps.plan.outputs.test_ambient_env_runner }}
-      test_runner: ${{ steps.plan.outputs.test_runner }}
+      plan: ${{ steps.plan.outputs.plan }}
 
     steps:
       - name: Checkout code
@@ -55,6 +51,8 @@ jobs:
         with:
           workflow: backend
           run-id: ${{ github.run_id }}
+          families: >-
+            [{"name":"test","tier":"light"}]
           burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
           percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
           light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
@@ -65,7 +63,6 @@ jobs:
   # the same last-match-wins semantics GitHub applies to `paths:`.
   changes:
     name: Detect relevant changes
-    needs: runner_plan
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
@@ -134,7 +131,7 @@ jobs:
 
   static_checks:
     name: Backend Static Checks
-    needs: [changes, runner_plan]
+    needs: changes
     if: needs.changes.outputs.run == 'true'
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
@@ -256,14 +253,19 @@ jobs:
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
-    needs: [changes, runner_plan]
+    needs: changes
     if: needs.changes.outputs.run == 'true'
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.runner_plan.outputs.backend_test_matrix) }}
+      matrix:
+        include:
+          - shard: 1
+            index: 0
+          - shard: 2
+            index: 1
     # Pre-baked image bundles Go and jq, so test shards can start immediately
     # without repeating tool installation.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
@@ -399,7 +401,7 @@ jobs:
 
   test_ambient_env:
     name: Backend (ambient integration env)
-    needs: [changes, runner_plan]
+    needs: changes
     if: needs.changes.outputs.run == 'true'
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
@@ -465,7 +467,7 @@ jobs:
   # `test-windows` were outside it before this workflow became a gate.
   test:
     name: Run Backend Tests
-    runs-on: ${{ needs.runner_plan.outputs.test_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).test_runner }}
     needs:
       - changes
       - runner_plan

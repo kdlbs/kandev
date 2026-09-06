@@ -106,10 +106,11 @@ contract before planner outputs are introduced.
 - Added `.github/scripts/runner-plan.py` with deterministic matrix and
   singleton allocation.
 - Added `.github/actions/plan-external-runners/action.yml` so all workflow
-  planner jobs share one environment and script invocation.
+  planner jobs share one environment and script invocation. Workflows own the
+  family JSON; Python contains no workflow catalog.
 - Added planner tests for unset, 0, 50, 100, empty-label, rerun, and invalid
   percentage behavior.
-- Added planner jobs and enum-safe outputs to all eligible workflows.
+- Added planner jobs with one resolved JSON plan output to eligible workflows.
 - Updated the merge-queue runbook with percentage operation and rollback.
 - Planner, workflow contract, action-pinning, actionlint, specification, and
   diff checks passed.

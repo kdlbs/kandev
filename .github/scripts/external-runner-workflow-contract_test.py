@@ -21,44 +21,51 @@ def job_block(workflow: str, job: str, next_job: str | None) -> str:
 
 
 class ExternalRunnerWorkflowContractTest(unittest.TestCase):
-    def assert_planner(self, workflow_name: str, workflow_key: str, outputs: tuple[str, ...]) -> str:
+    def assert_planner(
+        self, workflow_name: str, workflow_key: str, families: tuple[str, ...]
+    ) -> str:
         workflow = (WORKFLOW_ROOT / workflow_name).read_text(encoding="utf-8")
-        planner = job_block(workflow, "runner_plan", "changes" if "changes:" in workflow else "lint")
+        planner = job_block(workflow, "runner_plan", "changes")
         self.assertIn("runs-on: ubuntu-latest", planner)
+        self.assertIn("plan: ${{ steps.plan.outputs.plan }}", planner)
         self.assertIn("uses: ./.github/actions/plan-external-runners", planner)
         self.assertIn(f"workflow: {workflow_key}", planner)
+        self.assertIn("families: >-", planner)
         self.assertIn("run-id: ${{ github.run_id }}", planner)
         self.assertIn("burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}", planner)
         self.assertIn("percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}", planner)
         self.assertIn("light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}", planner)
         self.assertIn("standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}", planner)
-        for output in outputs:
-            self.assertIn(f"{output}: ${{{{ steps.plan.outputs.{output} }}}}", planner)
+        for family in families:
+            self.assertIn(f'"name":"{family}"', planner)
         return workflow
 
     def test_e2e_uses_planner_for_eligible_jobs_and_keeps_protected_jobs_hosted(self) -> None:
         workflow = self.assert_planner(
             "e2e-tests.yml",
             "e2e",
-            (
-                "changes_runner",
-                "build_runner",
-                "e2e_matrix",
-                "e2e_report_runner",
-                "e2e_gate_runner",
-            ),
+            ("changes", "e2e", "e2e_gate"),
         )
-        self.assertIn("runs-on: ${{ needs.runner_plan.outputs.changes_runner == 'external'", job_block(workflow, "changes", "build"))
+        self.assertIn(
+            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}",
+            job_block(workflow, "changes", "build"),
+        )
         build = job_block(workflow, "build", "e2e")
         self.assertIn("runs-on: ubuntu-latest", build)
-        self.assertNotIn("needs.runner_plan.outputs.build_runner", build)
+        self.assertNotIn("runner_plan", build)
         e2e = job_block(workflow, "e2e", "playwright_image")
-        self.assertIn("matrix: ${{ fromJSON(needs.runner_plan.outputs.e2e_matrix) }}", e2e)
-        self.assertIn("runs-on: ${{ matrix.runner == 'external'", e2e)
+        self.assertIn(
+            "matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}",
+            e2e,
+        )
+        self.assertIn("runs-on: ${{ matrix.runner }}", e2e)
         report = job_block(workflow, "e2e-report", "e2e-gate")
         self.assertIn("runs-on: ubuntu-latest", report)
-        self.assertNotIn("needs.runner_plan.outputs.e2e_report_runner", report)
-        self.assertIn("runs-on: ${{ needs.runner_plan.outputs.e2e_gate_runner == 'external'", job_block(workflow, "e2e-gate", None))
+        self.assertNotIn("runner_plan", report)
+        self.assertIn(
+            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_gate_runner }}",
+            job_block(workflow, "e2e-gate", None),
+        )
         for job, next_job in (
             ("playwright_image", "e2e-containers"),
             ("e2e-containers", "e2e-kubernetes-compatibility"),
@@ -74,13 +81,7 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         workflow = self.assert_planner(
             "backend-tests.yml",
             "backend",
-            (
-                "changes_runner",
-                "static_checks_runner",
-                "backend_test_matrix",
-                "test_ambient_env_runner",
-                "test_runner",
-            ),
+            ("test",),
         )
         for job, next_job in (
             ("changes", "static_checks"),
@@ -89,13 +90,18 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         ):
             protected = job_block(workflow, job, next_job)
             self.assertIn("runs-on: ubuntu-latest", protected)
-            self.assertNotIn("needs.runner_plan.outputs", protected)
+            self.assertNotIn("runner_plan", protected)
         shards = job_block(workflow, "test_shards", "test_ambient_env")
-        self.assertIn("matrix: ${{ fromJSON(needs.runner_plan.outputs.backend_test_matrix) }}", shards)
+        self.assertIn("- shard: 1", shards)
+        self.assertIn("- shard: 2", shards)
         self.assertIn("runs-on: ubuntu-latest", shards)
+        self.assertNotIn("runner_plan", shards)
         self.assertNotIn("matrix.runner", shards)
         test_gate = job_block(workflow, "test", "postgres-boot")
-        self.assertIn("runs-on: ${{ needs.runner_plan.outputs.test_runner == 'external'", test_gate)
+        self.assertIn(
+            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).test_runner }}",
+            test_gate,
+        )
         for job, next_job in (("postgres-boot", "test-windows"), ("test-windows", None)):
             protected = job_block(workflow, job, next_job)
             self.assertIn("runs-on: ubuntu-latest" if job == "postgres-boot" else "runs-on: windows-latest", protected)
@@ -105,24 +111,32 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         workflow = self.assert_planner(
             "frontend-tests.yml",
             "frontend",
-            ("changes_runner", "frontend_runner", "frontend_gate_runner"),
+            ("changes", "frontend", "frontend_gate"),
         )
-        self.assertIn("runs-on: ${{ needs.runner_plan.outputs.changes_runner == 'external'", job_block(workflow, "changes", "frontend"))
-        self.assertIn("runs-on: ${{ needs.runner_plan.outputs.frontend_runner == 'external'", job_block(workflow, "frontend", "frontend-gate"))
-        self.assertIn("runs-on: ${{ needs.runner_plan.outputs.frontend_gate_runner == 'external'", job_block(workflow, "frontend-gate", None))
+        self.assertIn(
+            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}",
+            job_block(workflow, "changes", "frontend"),
+        )
+        self.assertIn(
+            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}",
+            job_block(workflow, "frontend", "frontend-gate"),
+        )
+        self.assertIn(
+            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_gate_runner }}",
+            job_block(workflow, "frontend-gate", None),
+        )
 
-    def test_short_lint_workflows_use_light_planner_output(self) -> None:
-        for workflow_name, workflow_key in (
-            ("architecture-lint.yml", "architecture"),
-            ("lint-action-pinning.yml", "action-pinning"),
-            ("lint-harness-files.yml", "harness-lint"),
+    def test_protected_lint_workflows_do_not_run_the_planner(self) -> None:
+        for workflow_name in (
+            "architecture-lint.yml",
+            "lint-action-pinning.yml",
+            "lint-harness-files.yml",
         ):
-            workflow = self.assert_planner(workflow_name, workflow_key, ("lint_runner",))
+            workflow = (WORKFLOW_ROOT / workflow_name).read_text(encoding="utf-8")
             lint = job_block(workflow, "lint", None)
-            self.assertIn("if: always()", lint)
-            self.assertIn("name: Require runner plan", lint)
+            self.assertNotIn("runner_plan:", workflow)
+            self.assertNotIn("name: Require runner plan", lint)
             self.assertIn("runs-on: ubuntu-latest", lint)
-            self.assertNotIn("needs.runner_plan.outputs.lint_runner", lint)
 
     def test_plan_script_is_checked_by_required_action_pinning_workflow(self) -> None:
         workflow = (WORKFLOW_ROOT / "lint-action-pinning.yml").read_text(encoding="utf-8")
@@ -131,7 +145,10 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         self.assertTrue(action.is_file())
         action_text = action.read_text(encoding="utf-8")
         self.assertIn("using: composite", action_text)
+        self.assertIn("families:", action_text)
+        self.assertIn("plan:", action_text)
         self.assertIn("runner-plan.py", action_text)
+        self.assertNotIn("changes_runner:", action_text)
         self.assertIn("python3 .github/scripts/runner-plan_test.py", workflow)
         self.assertIn("python3 .github/scripts/external-runner-workflow-contract_test.py", workflow)
 

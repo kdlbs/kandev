@@ -22,47 +22,13 @@ permissions:
   contents: read
 
 jobs:
-  runner_plan:
-    name: Plan external runner allocation
-    runs-on: ubuntu-latest
-    outputs:
-      lint_runner: ${{ steps.plan.outputs.lint_runner }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          persist-credentials: false
-
-      - name: Plan runner allocation
-        id: plan
-        uses: ./.github/actions/plan-external-runners
-        with:
-          workflow: architecture
-          run-id: ${{ github.run_id }}
-          burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
-          percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
-          light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
-          standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
-
   lint:
     name: Architecture boundaries do not regress
-    needs: runner_plan
-    if: always()
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
 
     steps:
-      - name: Require runner plan
-        env:
-          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
-        run: |
-          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
-            echo "Runner planning finished with result: ${RUNNER_PLAN_RESULT}" >&2
-            exit 1
-          fi
-
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:

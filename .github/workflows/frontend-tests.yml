@@ -33,9 +33,7 @@ jobs:
     name: Plan external runner allocation
     runs-on: ubuntu-latest
     outputs:
-      changes_runner: ${{ steps.plan.outputs.changes_runner }}
-      frontend_runner: ${{ steps.plan.outputs.frontend_runner }}
-      frontend_gate_runner: ${{ steps.plan.outputs.frontend_gate_runner }}
+      plan: ${{ steps.plan.outputs.plan }}
 
     steps:
       - name: Checkout code
@@ -49,6 +47,12 @@ jobs:
         with:
           workflow: frontend
           run-id: ${{ github.run_id }}
+          families: >-
+            [
+              {"name":"changes","tier":"light"},
+              {"name":"frontend","tier":"standard"},
+              {"name":"frontend_gate","tier":"light"}
+            ]
           burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
           percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
           light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
@@ -60,7 +64,7 @@ jobs:
   changes:
     name: Detect relevant changes
     needs: runner_plan
-    runs-on: ${{ needs.runner_plan.outputs.changes_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}
     timeout-minutes: 10
     outputs:
       run: ${{ steps.detect.outputs.run }}
@@ -131,7 +135,7 @@ jobs:
     name: Run Frontend Lint, Tests, and Build
     needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ${{ needs.runner_plan.outputs.frontend_runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}
     # Pre-baked image bundles Node 24, pnpm 9.15.9, Go, and go-licenses —
     # see .github/docker/ci-base/Dockerfile.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
@@ -380,7 +384,7 @@ jobs:
   # conclusion to read instead of a check that stays pending forever.
   frontend-gate:
     name: Frontend Tests Passed
-    runs-on: ${{ needs.runner_plan.outputs.frontend_gate_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_gate_runner }}
     needs: [changes, frontend, runner_plan]
     if: always()
 

@@ -205,36 +205,28 @@ cat "${FAKE_DOCKER_MANIFEST}"
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
 
         light_jobs = {
-            "changes": ("build", "KANDEV_CI_RUNNER_LIGHT", "changes_runner"),
-            "e2e-gate": (None, "KANDEV_CI_RUNNER_LIGHT", "e2e_gate_runner"),
-        }
-        standard_jobs = {
-            "e2e": ("playwright_image", "KANDEV_CI_RUNNER_STANDARD", "e2e_matrix"),
+            "changes": ("build", "changes_runner"),
+            "e2e-gate": (None, "e2e_gate_runner"),
         }
 
-        for job, (next_job, tier_variable, output_name) in (
-            *light_jobs.items(),
-            *standard_jobs.items(),
-        ):
+        for job, (next_job, output_name) in light_jobs.items():
             if next_job is None:
                 job_text = workflow.partition("  e2e-gate:\n")[2]
             else:
                 job_text = job_block(workflow, job, next_job)
-            if job == "e2e":
-                expected = "runs-on: ${{ matrix.runner == 'external'"
-            else:
-                expected = (
-                    f"runs-on: ${{{{ needs.runner_plan.outputs.{output_name} == 'external' && "
-                    f"vars.{tier_variable} || 'ubuntu-latest' }}}}"
-                )
+            expected = (
+                "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan)."
+                f"{output_name} }}}}"
+            )
             self.assertIn(
                 expected,
                 job_text,
                 f"{job} must select its configured tier",
             )
         e2e_job = job_block(workflow, "e2e", "playwright_image")
+        self.assertIn("runs-on: ${{ matrix.runner }}", e2e_job)
         self.assertIn(
-            "matrix: ${{ fromJSON(needs.runner_plan.outputs.e2e_matrix) }}",
+            "matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}",
             e2e_job,
         )
 
@@ -249,7 +241,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
         for job, next_job in protected_jobs.items():
             protected_text = job_block(workflow, job, next_job)
             self.assertIn("runs-on: ubuntu-latest", protected_text)
-            self.assertNotIn("needs.runner_plan.outputs", protected_text)
+            self.assertNotIn("runner_plan", protected_text)
             self.assertNotIn("KANDEV_CI_EXTERNAL", protected_text)
             self.assertNotIn("KANDEV_CI_RUNNER_", protected_text)
 

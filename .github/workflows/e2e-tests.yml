@@ -43,11 +43,7 @@ jobs:
     name: Plan external runner allocation
     runs-on: ubuntu-latest
     outputs:
-      changes_runner: ${{ steps.plan.outputs.changes_runner }}
-      build_runner: ${{ steps.plan.outputs.build_runner }}
-      e2e_matrix: ${{ steps.plan.outputs.e2e_matrix }}
-      e2e_report_runner: ${{ steps.plan.outputs.e2e_report_runner }}
-      e2e_gate_runner: ${{ steps.plan.outputs.e2e_gate_runner }}
+      plan: ${{ steps.plan.outputs.plan }}
 
     steps:
       - name: Checkout code
@@ -61,6 +57,17 @@ jobs:
         with:
           workflow: e2e
           run-id: ${{ github.run_id }}
+          families: >-
+            [
+              {"name":"changes","tier":"light"},
+              {"name":"e2e","tier":"standard","instances":[
+                {"shard":1},{"shard":2},{"shard":3},{"shard":4},
+                {"shard":5},{"shard":6},{"shard":7},{"shard":8},
+                {"shard":9},{"shard":10},{"shard":11},{"shard":12},
+                {"shard":13},{"shard":14}
+              ]},
+              {"name":"e2e_gate","tier":"light"}
+            ]
           burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
           percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
           light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
@@ -72,7 +79,7 @@ jobs:
   changes:
     name: Detect relevant changes
     needs: runner_plan
-    runs-on: ${{ needs.runner_plan.outputs.changes_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}
     timeout-minutes: 10
     outputs:
       run: ${{ steps.detect.outputs.run }}
@@ -139,7 +146,7 @@ jobs:
 
   build:
     name: Build
-    needs: [changes, runner_plan]
+    needs: changes
     if: needs.changes.outputs.run == 'true'
     # Build reads the GitHub API and downloads a timing artifact with the job token.
     # Keep this credential-bearing path on the GitHub-hosted boundary.
@@ -399,7 +406,7 @@ jobs:
     name: E2E Shard ${{ matrix.shard }}/14
     needs: [changes, build, runner_plan]
     if: needs.changes.outputs.run == 'true'
-    runs-on: ${{ matrix.runner == 'external' && vars.KANDEV_CI_RUNNER_STANDARD || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.runner }}
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright browser
     # binaries (Chromium etc.) — see .github/docker/ci-base/Dockerfile. This is
     # the biggest speedup since `npx playwright install chromium --with-deps`
@@ -428,7 +435,7 @@ jobs:
       NODE_OPTIONS: --dns-result-order=ipv4first
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.runner_plan.outputs.e2e_matrix) }}
+      matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}
 
     steps:
       - name: Checkout code
@@ -1128,7 +1135,7 @@ jobs:
 
   e2e-report:
     name: Merge E2E Reports
-    needs: [changes, e2e, e2e-containers, desktop-e2e, runner_plan]
+    needs: [changes, e2e, e2e-containers, desktop-e2e]
     # `always()` so a failed shard still gets its report merged, but not when
     # change detection skipped the shards outright: there would be no blob
     # reports to download, and the artifact step would fail on an empty run.
@@ -1505,7 +1512,7 @@ jobs:
   # count changes.
   e2e-gate:
     name: E2E Tests Passed
-    runs-on: ${{ needs.runner_plan.outputs.e2e_gate_runner == 'external' && vars.KANDEV_CI_RUNNER_LIGHT || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_gate_runner }}
     needs:
       [
         changes,
