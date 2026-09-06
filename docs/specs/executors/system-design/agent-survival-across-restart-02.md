@@ -319,10 +319,22 @@ service that executes commands in a user's worktree, so it lives in the secret
 store with rotation on every spawn and every adoption, never in the database and
 never in a configuration file. The durable record holds a reference only.
 
-Adoption is an authentication boundary. A process answering on the control port
-is untrusted until it proves both the shared credential and a matching home
-directory. Neither alone is sufficient: the credential could be replayed from a
-copied database, and the home path is not a secret.
+Adoption is a *mutual* authentication boundary, and the direction that is easy to
+miss is the server's. Presenting the credential proves only that the backend holds
+it. The identity endpoint sits below authentication because it decides whether to
+authenticate at all, so anything that can reach it can read the identity and repeat
+it; a comparison of echoed values proves nothing about a counterparty that supplies
+both sides of it. A process that takes the recorded endpoint after the real server
+releases it -- a crash, a reboot, or an unowned shutdown -- would then be handed the
+credential and have the replacement it invents persisted. Because an adopted endpoint
+becomes the control server for the rest of the backend's life, that is not one
+session but every later agent launch, shell execution and workspace file operation.
+So `AC-EXECUTORS-CONTROL-OWNERSHIP-001.10` requires the server to prove possession
+first, by a per-attempt challenge whose response is derivable only from the
+credential, before the credential is sent or any replacement is stored; and
+`AC-EXECUTORS-CONTROL-OWNERSHIP-001.11` keeps filesystem paths off the
+unauthenticated endpoint, which needs only the opaque identity, the capability set
+and the server's resolved unowned period.
 
 Enumeration returns the agent process environment, which carries provider
 credentials. The adoption path consumes the fields it needs and must not log or

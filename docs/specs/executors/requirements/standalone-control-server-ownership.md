@@ -136,6 +136,30 @@ each other's agents.
   backend just started would be the unlocatable one. Preserving the secret and rewriting
   the record is therefore the only combination consistent with a single
   installation-scoped record.
+- **AC-EXECUTORS-CONTROL-OWNERSHIP-001.10:** Proof of ownership shall run in both
+  directions. Before the system transmits the stored credential to a control server, and
+  before it accepts or durably stores any credential replacement that server returns, it
+  shall require that server to demonstrate that it already holds the stored credential.
+  The demonstration shall be a challenge the adopting backend generates freshly for each
+  adoption attempt and a response derivable only from possession of that credential; the
+  credential itself shall not be sent as the demonstration, and a response shall never be
+  accepted for a challenge the backend did not generate for that attempt. A
+  recorded-identity match shall not by itself authorize transmitting the credential.
+  Without this, adoption proves only that the *backend* holds the credential, which is the
+  wrong direction: the values compared by
+  AC-EXECUTORS-CONTROL-OWNERSHIP-001.2 are retrieved from the counterparty over an
+  interface that AC-EXECUTORS-CONTROL-OWNERSHIP-004.6 places below authentication, so any
+  process that can read that interface can replay them, and a process that has taken the
+  recorded endpoint would then be handed the credential and have the replacement it
+  invents persisted in the secret store. That process becomes the control server this
+  backend drives for the remainder of its life, which is precisely the outcome
+  REQ-EXECUTORS-CONTROL-OWNERSHIP-001 exists to prevent.
+- **AC-EXECUTORS-CONTROL-OWNERSHIP-001.11:** The identity and capability retrieval of
+  AC-EXECUTORS-CONTROL-OWNERSHIP-004.6, being available without authentication, shall
+  disclose only what the identity comparison and the capability negotiation require: the
+  opaque per-launch identity value, the advertised capability set, and the server's own
+  resolved unowned period. It shall not disclose any filesystem path. Any further value an
+  adopting backend needs shall be retrieved only after authentication has succeeded.
 - **AC-EXECUTORS-CONTROL-OWNERSHIP-001.7:** When the system decides whether a
   control port is occupied, it shall use the probe contract defined by
   [port collision and backend ownership safety](port-collision-safety.md), so an
@@ -164,7 +188,14 @@ session.
 - **AC-EXECUTORS-CONTROL-OWNERSHIP-004.1:** When a backend evaluates a control
   server for adoption, the system shall compare that server's advertised
   capability set against its own required set before issuing any operation
-  other than identity and capability retrieval.
+  other than identity and capability retrieval, the mutual proof of ownership of
+  AC-EXECUTORS-CONTROL-OWNERSHIP-001.10, and the credential replacement that carries it.
+  Those three are excepted because AC-EXECUTORS-CONTROL-OWNERSHIP-001.3 requires identity
+  and authentication to be evaluated *before* compatibility, and authenticating is itself
+  an operation: without this exception the two criteria could not both be satisfied. The
+  exception is safe because none of the three drives an instance or observes a
+  transcript, and an incompatible server discovered immediately afterwards is stopped by
+  AC-EXECUTORS-CONTROL-OWNERSHIP-004.3.
 - **AC-EXECUTORS-CONTROL-OWNERSHIP-004.2:** Compatibility shall be decided by
   whether the required capabilities are all advertised, and shall not be
   decided by comparing version ordering.
