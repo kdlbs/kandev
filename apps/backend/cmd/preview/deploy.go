@@ -89,7 +89,7 @@ func deployArtifacts(ctx context.Context, tarPath, spritesToken, spriteName stri
 
 	if !exists {
 		binDir := filepath.Join(filepath.Dir(tarPath), "bin")
-		if err := buildPreviewArtifact(ctx, binDir, tarPath, skipWebInstall); err != nil {
+		if err := buildPreviewArtifact(ctx, binDir, tarPath, skipWebInstall, false); err != nil {
 			return "", err
 		}
 	}
@@ -114,15 +114,17 @@ func previewArtifactExists(tarPath string) (bool, error) {
 	return true, nil
 }
 
-func buildPreviewArtifact(ctx context.Context, binDir, tarPath string, skipWebInstall bool) error {
+func buildPreviewArtifact(ctx context.Context, binDir, tarPath string, skipWebInstall, skipWebBuild bool) error {
 	fmt.Fprintln(os.Stderr, "building linux/amd64 binaries...")
 	if err := buildLinuxBinaries(ctx, binDir); err != nil {
 		return fmt.Errorf("build binaries: %w", err)
 	}
 
-	fmt.Fprintln(os.Stderr, "building web frontend...")
-	if err := buildWeb(ctx, skipWebInstall); err != nil {
-		return fmt.Errorf("build web: %w", err)
+	if !skipWebBuild {
+		fmt.Fprintln(os.Stderr, "building web frontend...")
+		if err := buildWeb(ctx, skipWebInstall); err != nil {
+			return fmt.Errorf("build web: %w", err)
+		}
 	}
 
 	fmt.Fprintln(os.Stderr, "packaging bundle...")

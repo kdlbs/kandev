@@ -85,13 +85,14 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
     def test_fork_build_is_tokenless_and_deploy_uses_only_a_validated_artifact(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         build_job = workflow_job(workflow, "build-fork-preview")
+        package_job = workflow_job(workflow, "package-fork-preview")
         deploy_job = workflow_job(workflow, "deploy-fork")
 
         self.assertIn("permissions: {}", build_job)
         self.assertIn('token: ""', build_job)
         self.assertIn("github.event.pull_request.head.repo.full_name", build_job)
         self.assertIn("pnpm -C apps install --frozen-lockfile", build_job)
-        self.assertIn("package --artifact", build_job)
+        self.assertIn("pnpm -C apps --filter @kandev/web build", build_job)
         self.assertIn("actions/upload-artifact", build_job)
         self.assertNotIn("secrets.", build_job)
         for credential in (
@@ -103,7 +104,11 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(f'{credential}: ""', build_job)
 
-        self.assertIn("needs: build-fork-preview", deploy_job)
+        self.assertIn("needs: package-fork-preview", deploy_job)
+        self.assertIn("needs: [build-trusted-preview-cli, build-fork-preview]", package_job)
+        self.assertIn("fork-preview-input-${{ github.run_id }}", package_job)
+        self.assertIn("trusted-preview-cli-${{ github.run_id }}", package_job)
+        self.assertIn("--skip-web-build", package_job)
         self.assertIn("actions/download-artifact", deploy_job)
         self.assertIn("sha256sum --check", deploy_job)
         self.assertRegex(
@@ -121,10 +126,11 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("SPRITES_API_TOKEN", deploy_job)
 
-    def test_trusted_preview_cli_is_built_outside_the_fork_job(self) -> None:
+    def test_trusted_preview_cli_has_a_fresh_runner_boundary_from_fork_lifecycle_scripts(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         trusted_build = workflow_job(workflow, "build-trusted-preview-cli")
         fork_build = workflow_job(workflow, "build-fork-preview")
+        package_job = workflow_job(workflow, "package-fork-preview")
 
         self.assertIn("permissions: {}", trusted_build)
         self.assertRegex(
@@ -143,29 +149,21 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
         self.assertIn("trusted-preview-cli-${{ github.run_id }}", trusted_build)
         self.assertNotIn("github.event.pull_request.head.repo.full_name", trusted_build)
 
-        self.assertIn("needs: build-trusted-preview-cli", fork_build)
-        self.assertIn("actions/download-artifact", fork_build)
-        self.assertIn("trusted-preview-cli-${{ github.run_id }}", fork_build)
-        self.assertNotIn(".preview-cli", fork_build)
-        self.assertLess(
-            fork_build.index("Record trusted tool paths"),
-            fork_build.index("repository: ${{ github.event.pull_request.head.repo.full_name }}"),
-        )
-        self.assertLess(
-            fork_build.index("repository: ${{ github.event.pull_request.head.repo.full_name }}"),
-            fork_build.index("pnpm -C apps install --frozen-lockfile"),
-        )
-        self.assertLess(
-            fork_build.index("pnpm -C apps install --frozen-lockfile"),
-            fork_build.index("actions/download-artifact"),
-        )
-        self.assertLess(
-            fork_build.index("actions/download-artifact"),
-            fork_build.index("Package fork preview artifact"),
-        )
-        self.assertIn('BASH_ENV: ""', fork_build)
-        self.assertIn('env -i PATH="$TRUSTED_PATH"', fork_build)
-        self.assertIn('"$RUNNER_TEMP/kandev-preview-deploy" package', fork_build)
+        self.assertNotIn("actions/download-artifact", fork_build)
+        self.assertNotIn("trusted-preview-cli", fork_build)
+        self.assertNotIn("package --artifact", fork_build)
+        self.assertIn("fork-preview-input-${{ github.run_id }}", fork_build)
+
+        self.assertIn("permissions: {}", package_job)
+        self.assertNotIn("github.event.pull_request.head.repo.full_name", package_job)
+        self.assertNotIn("pnpm -C apps install", package_job)
+        self.assertIn("actions/download-artifact", package_job)
+        self.assertIn("trusted-preview-cli-${{ github.run_id }}", package_job)
+        self.assertIn("fork-preview-input-${{ github.run_id }}", package_job)
+        self.assertIn('BASH_ENV: ""', package_job)
+        self.assertIn('env -i PATH="$TRUSTED_PATH"', package_job)
+        self.assertIn('"$RUNNER_TEMP/kandev-preview-deploy" package', package_job)
+        self.assertIn("--skip-web-build", package_job)
 
     def test_fork_build_subprocesses_cannot_inherit_deployment_credentials(self) -> None:
         build_source = PREVIEW_BUILD.read_text(encoding="utf-8")
