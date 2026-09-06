@@ -2,7 +2,6 @@
 
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { IconLoader } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
@@ -157,47 +156,6 @@ function ArchiveConfirmPopover({
   );
 }
 
-function ArchiveClassifyingPopover({
-  anchorRef,
-  focusReturnRef,
-  focusBoundaryRef,
-  onOpenChange,
-  confirmTestId,
-}: {
-  anchorRef: RefObject<HTMLElement | null>;
-  focusReturnRef?: RefObject<HTMLElement | null>;
-  focusBoundaryRef?: RefObject<HTMLElement | null>;
-  onOpenChange: (open: boolean) => void;
-  confirmTestId: string;
-}) {
-  const { t } = useTranslation();
-  return (
-    <ActionConfirmPopover
-      open
-      size="wide"
-      anchorRef={anchorRef}
-      focusReturnRef={focusReturnRef}
-      focusBoundaryRef={focusBoundaryRef ?? anchorRef}
-      title={t("task:archiveTaskTitle")}
-      description={
-        <span className="flex items-center gap-2">
-          <IconLoader className="h-4 w-4 animate-spin" />
-          {t("common:loading")}
-        </span>
-      }
-      cancelLabel={t("common:cancel")}
-      confirmLabel={t(ARCHIVE_LABEL_KEY)}
-      confirmAriaLabel={t(ARCHIVE_LABEL_KEY)}
-      confirmTestId={confirmTestId}
-      confirmDisabled
-      testId="task-archive-confirm-popover"
-      onOpenChange={onOpenChange}
-      onCancel={() => onOpenChange(false)}
-      onConfirm={() => undefined}
-    />
-  );
-}
-
 type ArchiveDialogProps = Pick<
   TaskArchiveConfirmationProps,
   | "onOpenChange"
@@ -270,16 +228,7 @@ function ArchiveConfirmationContent({
         </span>
       );
     }
-    if (!isFinePointer) return null;
-    return (
-      <ArchiveClassifyingPopover
-        anchorRef={anchorRef}
-        focusReturnRef={focusReturnRef}
-        focusBoundaryRef={focusBoundaryRef}
-        onOpenChange={dialogProps.onOpenChange}
-        confirmTestId={dialogProps.confirmTestId ?? DEFAULT_CONFIRM_TEST_ID}
-      />
-    );
+    return null;
   }
 
   const confirm = () => dialogProps.onConfirm({ cascade: false });

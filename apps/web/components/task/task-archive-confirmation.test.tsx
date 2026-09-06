@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useRef } from "react";
 import { StateProvider } from "@/components/state-provider";
@@ -64,6 +64,14 @@ function renderConfirmation(onConfirm = vi.fn(), onOpenChange = vi.fn(), forceDi
   );
 }
 
+function deferredSubtaskCount() {
+  let resolve: (result: { count: number }) => void = () => {};
+  const promise = new Promise<{ count: number }>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("TaskArchiveConfirmation classification", () => {
   beforeEach(() => {
     pointerState.isFinePointer = false;
@@ -79,20 +87,24 @@ describe("TaskArchiveConfirmation classification", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
-  it("shows a disabled anchored loading surface while desktop classification is pending", () => {
+  // @covers AC-TASKS-CONFIRMATION-SURFACE-002.4
+  it("waits for desktop classification before showing only the cascade dialog", async () => {
     pointerState.isFinePointer = true;
-    getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
-    const onOpenChange = vi.fn();
+    const deferredCount = deferredSubtaskCount();
+    getSubtaskCountMock.mockReturnValue(deferredCount.promise);
 
-    renderConfirmation(vi.fn(), onOpenChange);
+    renderConfirmation();
+    await waitFor(() => expect(getSubtaskCountMock).toHaveBeenCalledWith("task-1"));
 
-    expect(screen.getByTestId("task-archive-confirm-popover")).toBeTruthy();
-    expect(screen.getByText("Loading…")).toBeTruthy();
-    expect(screen.getByTestId(CONFIRM_TEST_ID).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByTestId("task-archive-confirm-popover")).toBeNull();
     expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByTestId(CONFIRM_TEST_ID)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    await act(async () => deferredCount.resolve({ count: 2 }));
+
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+    expect(screen.getByTestId("archive-cascade-checkbox")).toBeTruthy();
+    expect(screen.queryByTestId("task-archive-confirm-popover")).toBeNull();
   });
 
   it("uses touch-sized local actions after a resolved zero-descendant result", async () => {

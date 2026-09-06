@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-08-24
+updated: 2026-09-06
 owners:
   - kandev
 ---
@@ -75,6 +76,13 @@ pointer inline confirmation behavior.
   and compact desktop/tablet viewport containment. Coarse-pointer inline
   confirmation may continue to expand its row and shall retain its existing
   44px action geometry and zero-overflow behavior.
+- **AC-TASKS-CONFIRMATION-SURFACE-002.4:** When a fine-pointer archive action
+  needs descendant classification before choosing its confirmation surface, no
+  provisional confirmation popover or archive action shall appear while that
+  classification is pending. After classification, exactly one final surface
+  shall appear: the anchored popover for zero descendants, or the full dialog
+  for one or more descendants. An unavailable classification shall fail safe to
+  the full dialog without first showing the popover.
 
 ### REQ-UI-TASK-CLEANUP-CONFIRMATION-001: Scannable task cleanup confirmation
 
@@ -112,9 +120,9 @@ repository resources, so that I can understand the consequence before acting.
   system's semantic destructive action treatment without a competing primary
   treatment. Archive shall retain its non-destructive action treatment.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.7:** Cancel, dismiss, focus, Escape,
-  Enter default-action behavior, loading state, cascade selection, in-flight
-  warning visibility, and single/bulk archive and delete callbacks shall remain
-  unchanged.
+  Enter default-action behavior, archive/delete mutation loading state, cascade
+  selection, in-flight warning visibility, and single/bulk archive and delete
+  callbacks shall remain unchanged.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.8:** When archive is initiated from a
   phone Kanban card, the card shall use the contained full task-cleanup alert
   dialog even when the task has no descendants. The dialog shall be centered
@@ -138,6 +146,8 @@ repository resources, so that I can understand the consequence before acting.
   dimensions.
 - Replacing the centered task alerts with a drawer, sheet, or new navigation
   flow.
+- Changing the descendant-count API or introducing background prefetching for
+  archive confirmation.
 - Masking sidebar row layout changes with fixed/minimum heights or negative
   offsets.
 - Adding animation or redesigning any confirmation surface beyond the shared

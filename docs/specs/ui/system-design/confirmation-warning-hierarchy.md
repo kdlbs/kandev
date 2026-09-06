@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-CONFIRMATION-WARNING-001
   - REQ-TASKS-CONFIRMATION-SURFACE-002
   - REQ-UI-TASK-CLEANUP-CONFIRMATION-001
+updated: 2026-09-06
 ---
 
 # Task Confirmation Surface System Design
@@ -23,7 +24,7 @@ existing components and runtime contracts.
 | Requirement                            | Design section                                                                                                                                                                                                                                                                                                    |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-TASKS-CONFIRMATION-WARNING-001`   | [Components and responsibilities](#components-and-responsibilities) and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                                                                                                                         |
-| `REQ-TASKS-CONFIRMATION-SURFACE-002`   | [Popover width contract](#popover-width-contract), [Fine-pointer mounting](#fine-pointer-mounting), and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                                                                                         |
+| `REQ-TASKS-CONFIRMATION-SURFACE-002`   | [Classification-gated surface selection](#classification-gated-surface-selection), [Popover width contract](#popover-width-contract), [Fine-pointer mounting](#fine-pointer-mounting), and [Mobile and desktop containment](#mobile-and-desktop-containment)                                                                 |
 | `REQ-UI-TASK-CLEANUP-CONFIRMATION-001` | [Task cleanup content model](#task-cleanup-content-model), [Full-dialog composition](#full-dialog-composition), [Compact archive surfaces](#compact-archive-surfaces), [Source-specific archive routing](#source-specific-archive-routing), and [Mobile and desktop containment](#mobile-and-desktop-containment) |
 
 ## Components and responsibilities
@@ -112,6 +113,27 @@ existing row-owned surface. These callers keep their established focus,
 containment, and action contracts; only the mobile Kanban card changes its
 surface selection.
 
+### Classification-gated surface selection
+
+`TaskArchiveConfirmation` keeps descendant classification as the authoritative
+input for choosing between the compact confirmation and the cascade dialog. A
+standard fine-pointer caller does not mount a provisional popover while the
+classification is idle or loading. A resolved zero count mounts the anchored
+popover; a positive count mounts the full cascade dialog; and an error mounts
+the same full dialog as the fail-safe path. No archive action is exposed before
+that choice is known.
+
+The controlled archive request remains open while classification is pending, so
+the final surface can mount without another user action. This avoids moving
+focus and assistive-technology context from a temporary popover into a dialog.
+It also preserves the existing final surfaces and their callbacks instead of
+adding cascade controls to the compact popover.
+
+Callers whose final presentation is already known keep their current behavior.
+Forced mobile Kanban and bulk operations may mount the full dialog immediately
+with its action disabled until classification settles. Explicit inline and
+coarse-pointer row confirmations retain their established loading treatment.
+
 ### Popover width contract
 
 `ActionConfirmPopover` gains a small width/size contract whose default remains
@@ -169,18 +191,21 @@ dialog computes the localized task outcome and cleanup model during render,
 then passes the model to the shared task-local renderer. Archive/delete
 callbacks and dialog state remain untouched. The source adapter supplies the
 existing `presentation` value and, for mobile Kanban only, maps it to
-`forceDialog`; pointer classification continues to select the fine-pointer
-popover or the explicitly inline row surface. This changes rendering only,
-not archive commands, descendant classification, preference state, or
-callbacks.
+`forceDialog`. For a standard fine-pointer request, descendant classification
+settles before the selected popover or dialog mounts. Pointer classification
+continues to select the fine-pointer popover or the explicitly inline row
+surface after that gate. This changes presentation timing only, not archive
+commands, descendant classification, preference state, or callbacks.
 
 ## Failure and recovery
 
-No new runtime failure path exists. If localized text is longer than the
-available width, the shared surface-text contract wraps it inside the body. If
-content becomes taller than the dynamic viewport, the body scrolls without
-moving the title or actions. Unknown executor types retain the generic running
-session effect. If no task activity is present, no warning mounts, as before.
+No new runtime failure path exists. A failed descendant classification selects
+the full dialog without first mounting a compact confirmation. If localized
+text is longer than the available width, the shared surface-text contract wraps
+it inside the body. If content becomes taller than the dynamic viewport, the
+body scrolls without moving the title or actions. Unknown executor types retain
+the generic running session effect. If no task activity is present, no warning
+mounts, as before.
 
 ## Persistence
 
@@ -192,9 +217,12 @@ Existing component tests continue to assert warning presence and absence for
 generating, background, and idle activity. Cleanup-summary tests cover every
 executor, bulk grouping, ordering, effects, and supporting notes. Dialog and
 compact-surface tests assert equivalent structured content, semantic action
-variants, and unchanged callbacks. Rendered desktop and phone checks inspect
-computed text wrapping, viewport bounds, scroll ownership, action reachability,
-and document overflow.
+variants, unchanged callbacks, and that a deferred positive descendant result
+does not expose a provisional fine-pointer popover. Rendered desktop and phone
+checks inspect computed text wrapping, viewport bounds, scroll ownership,
+action reachability, and document overflow. The desktop cascade E2E holds the
+descendant-count response, proves no temporary confirmation is visible, then
+releases it and observes only the cascade dialog.
 
 ## Mobile and desktop containment
 
@@ -203,6 +231,9 @@ records the row `getBoundingClientRect().height` before opening Archive, while
 the archive popover is visible, and after Cancel; all three values must remain
 stable within subpixel precision. It also verifies the archive popover is
 strictly wider than 256px and remains inside the viewport at compact widths.
+For a parent task, a delayed descendant-count response leaves the confirmation
+shell absent until classification settles; after release, only the full cascade
+dialog is rendered and the anchored popover never becomes visible.
 
 The phone Kanban check enters through a card overflow menu and expects the
 mobile presentation to use the full alert dialog even for a zero-descendant

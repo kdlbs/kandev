@@ -1,3 +1,4 @@
+import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
@@ -8,6 +9,79 @@ const VISIBLE_TIMEOUT = 10_000;
 // has live subtasks, default to unchecked (subtasks preserved), and
 // propagate the choice to the backend.
 test.describe("Kanban card archive — cascade subtasks toggle", () => {
+  // @covers AC-TASKS-CONFIRMATION-SURFACE-002.4
+  test("waits for classification before showing only the cascade dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const parent = await apiClient.createTask(seedData.workspaceId, "Stable Archive Parent", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Stable Archive Child", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      parent_id: parent.id,
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCard(parent.id)).toBeVisible({ timeout: VISIBLE_TIMEOUT });
+
+    let releaseResponse: () => void = () => {};
+    const responseHeld = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    let markRequestObserved: () => void = () => {};
+    const requestObserved = new Promise<void>((resolve) => {
+      markRequestObserved = resolve;
+    });
+    let requestStarted = false;
+    let markHandlerSettled: () => void = () => {};
+    const handlerSettled = new Promise<void>((resolve) => {
+      markHandlerSettled = resolve;
+    });
+    const routePattern = `**/api/v1/tasks/${parent.id}/subtask-count`;
+    const holdSubtaskCount = async (route: Route) => {
+      requestStarted = true;
+      markRequestObserved();
+      await responseHeld;
+      try {
+        await route.continue();
+      } finally {
+        markHandlerSettled();
+      }
+    };
+
+    await testPage.route(routePattern, holdSubtaskCount);
+    try {
+      await kanban.openTaskActionsMenu(parent.id);
+      await testPage.getByRole("menuitem", { name: "Archive" }).click();
+      await requestObserved;
+
+      const popover = testPage.getByTestId("task-archive-confirm-popover");
+      await expect(popover).toHaveCount(0);
+      await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+
+      releaseResponse();
+      await handlerSettled;
+
+      const dialog = testPage.getByRole("alertdialog", { name: "Archive task" });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("archive-cascade-checkbox")).toBeVisible();
+      await expect(popover).toHaveCount(0);
+      await prCapture.screenshot("stable-archive-cascade-dialog", {
+        caption: "A parent task opens only the final cascade archive dialog.",
+      });
+    } finally {
+      releaseResponse();
+      if (requestStarted) await handlerSettled;
+      await testPage.unroute(routePattern, holdSubtaskCount);
+    }
+  });
+
   test("renders the cascade checkbox only when the task has subtasks", async ({
     testPage,
     apiClient,
