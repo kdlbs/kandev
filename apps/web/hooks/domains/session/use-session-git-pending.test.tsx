@@ -6,7 +6,6 @@ import { buildPendingFileStateIndex } from "./use-session-git-pending";
 
 const mocks = vi.hoisted(() => ({
   statuses: [] as Array<{ repository_name: string; status: GitStatusEntry }>,
-  scopeGeneration: 0,
   checkoutGenerations: {} as Record<string, number>,
   gitOps: {
     isLoading: false,
@@ -32,7 +31,7 @@ vi.mock("./use-session-git-status", () => ({
   useSessionGitStatusByRepo: () => mocks.statuses,
   useSessionGitPendingCheckoutGenerations: () => mocks.checkoutGenerations,
   useSessionGitPendingScope: (sessionId: string | null) =>
-    sessionId ? `${sessionId}:environment:${mocks.scopeGeneration}` : "",
+    sessionId ? `${sessionId}:environment` : "",
 }));
 
 vi.mock("./use-session-commits", () => ({
@@ -87,7 +86,6 @@ function deferredResult() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.statuses = [];
-  mocks.scopeGeneration = 0;
   mocks.checkoutGenerations = {};
 });
 
@@ -393,7 +391,7 @@ describe("useSessionGit pending scope ownership", () => {
       expect(hook.result.current.pendingStageFiles).toContain(pendingKey("", path));
     });
 
-    mocks.scopeGeneration += 1;
+    mocks.checkoutGenerations = { "": 1 };
     mocks.statuses = [{ repository_name: "", status: status(path, false, "feature/new") }];
     hook.rerender();
 
