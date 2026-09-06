@@ -230,6 +230,22 @@ export function hasOnEnterAction(step: WorkflowStep, type: string): boolean {
   return step.events?.on_enter?.some((a) => a.type === type) ?? false;
 }
 
+export function inferPromptAutoStartEvents(
+  step: WorkflowStep,
+  previousPrompt: string,
+  nextPrompt: string,
+): WorkflowStep["events"] | undefined {
+  if (previousPrompt !== "" || nextPrompt === "" || hasOnEnterAction(step, "auto_start_agent")) {
+    return undefined;
+  }
+
+  const events = step.events ?? {};
+  return {
+    ...events,
+    on_enter: [...(events.on_enter ?? []), { type: "auto_start_agent" }],
+  };
+}
+
 export function getTransitionType(step: WorkflowStep): string {
   const action = step.events?.on_turn_complete?.find((a) =>
     ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),

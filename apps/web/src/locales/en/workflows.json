@@ -215,7 +215,7 @@
   "stepPromptHelp": "Custom instructions for the agent on this step. Use {{taskPrompt}} to include the task description.",
   "stepPromptPlaceholderExample": "Implement user authentication with OAuth2",
   "stepPromptPlaceholderTaskPrompt": "The original task description provided by the user",
-  "stepPromptUsageHint": "Type {{open}} for placeholders ({{taskPrompt}} inserts the task description) or @ to reference a saved prompt by name; its content is attached as hidden context, and editing the saved prompt updates every step that references it. Note: {{taskPrompt}} only expands in the step prompt itself, not inside a referenced saved prompt.",
+  "stepPromptUsageHint": "A step prompt replaces the task description unless it contains {{taskPrompt}}. Saved prompts are attached as hidden context; editing a saved prompt updates every step that references it. Note: {{taskPrompt}} only expands in the step prompt itself, not inside a referenced saved prompt.",
   "switchProviderWarning": "Switching the source replaces every synced workflow with what's in the new repository; workflows missing there will be removed.",
   "syncCompletedWithWarnings": "Sync completed with warnings",
   "syncConfigSaved": "Workflow sync configuration saved",

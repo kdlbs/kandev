@@ -1,6 +1,10 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { promptEditorText } from "../../helpers/settings-prompt-editor";
+import {
+  focusPromptEditor,
+  promptEditorText,
+  replacePromptEditor,
+} from "../../helpers/settings-prompt-editor";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { dwell } from "../../helpers/causal-waits";
 
@@ -13,6 +17,56 @@ async function maxRingSpread(locator: Locator): Promise<number> {
 }
 
 test.describe("Workflow settings", () => {
+  // @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1 through .6
+  test("enables automatic start for a new step prompt", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Prompt Defaults");
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
+      is_start_step: true,
+    });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Prompt Defaults");
+    const panel = await page.selectStep(card, "Review");
+    const promptEditor = panel.getByTestId(`workflow-step-prompt-${reviewStep.id}`);
+    const autoStart = panel.getByRole("checkbox", { name: "Auto-start agent" });
+
+    await expect(autoStart).not.toBeChecked();
+    await replacePromptEditor(testPage, promptEditor, "Review the changes");
+    await expect(autoStart).toBeChecked();
+    await expect(panel.getByTestId("workflow-step-prompt-auto-start-warning")).toHaveCount(0);
+    await expect(
+      panel.getByText(
+        "A step prompt replaces the task description unless it contains {{task_prompt}}. Saved prompts are attached as hidden context; editing a saved prompt updates every step that references it. Note: {{task_prompt}} only expands in the step prompt itself, not inside a referenced saved prompt.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    if (prCapture.capturing) {
+      await promptEditor.scrollIntoViewIfNeeded();
+    }
+    await prCapture.screenshot("desktop-step-prompt-auto-start-default", {
+      caption: "Adding a step prompt enables automatic start by default.",
+    });
+
+    await page.saveChanges();
+    const savedStep = (await apiClient.listWorkflowSteps(workflow.id)).steps.find(
+      (step) => step.id === reviewStep.id,
+    );
+    expect(savedStep?.prompt).toBe("Review the changes");
+    expect(savedStep?.events?.on_enter).toContainEqual({ type: "auto_start_agent" });
+
+    await page.setAutoStart(card, "Review", false);
+    await focusPromptEditor(promptEditor);
+    await testPage.keyboard.press("End");
+    await testPage.keyboard.type(" carefully");
+    await expect(autoStart).not.toBeChecked();
+  });
+
   test("hides system-only templates from the add workflow dialog", async ({
     testPage,
     seedData,
