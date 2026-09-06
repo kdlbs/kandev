@@ -53,13 +53,19 @@ func (r *Repository) SetTaskWorkspaceMetadataIfUnchanged(
 		b.WriteString(` AND parent_id = ?`)
 		args = append(args, guard.RequireParentID)
 	}
+	// Both EXISTS clauses below correlate on workspace_id against the row
+	// being written (taskID), not just against p.id: orphaned_parent_id is
+	// user-writable through the generic metadata PATCH surface, so without
+	// this correlation a caller could name any task ID in any workspace and
+	// read its existence/archived-state back off their own task's derived
+	// workspace_orphaned boolean.
 	if guard.RequireParentArchivedID != "" {
-		b.WriteString(` AND EXISTS (SELECT 1 FROM tasks p WHERE p.id = ? AND p.archived_at IS NOT NULL)`)
-		args = append(args, guard.RequireParentArchivedID)
+		b.WriteString(` AND EXISTS (SELECT 1 FROM tasks p WHERE p.id = ? AND p.archived_at IS NOT NULL AND p.workspace_id = (SELECT workspace_id FROM tasks t WHERE t.id = ?))`)
+		args = append(args, guard.RequireParentArchivedID, taskID)
 	}
 	if guard.RequireParentUnarchivedID != "" {
-		b.WriteString(` AND EXISTS (SELECT 1 FROM tasks p WHERE p.id = ? AND p.archived_at IS NULL)`)
-		args = append(args, guard.RequireParentUnarchivedID)
+		b.WriteString(` AND EXISTS (SELECT 1 FROM tasks p WHERE p.id = ? AND p.archived_at IS NULL AND p.workspace_id = (SELECT workspace_id FROM tasks t WHERE t.id = ?))`)
+		args = append(args, guard.RequireParentUnarchivedID, taskID)
 	}
 	if guard.RequireNoOwnEnvironment {
 		b.WriteString(` AND NOT EXISTS (SELECT 1 FROM task_environments e WHERE e.task_id = ?)`)

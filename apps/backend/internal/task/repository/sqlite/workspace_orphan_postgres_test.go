@@ -190,6 +190,52 @@ func TestPostgresSetTaskWorkspaceMetadataIfUnchanged_GuardLossesHold(t *testing.
 	}
 }
 
+// Mirrors TestSetTaskWorkspaceMetadataIfUnchanged_RequireParentUnarchivedID_DoesNotMatchAcrossWorkspaces
+// against the Postgres jsonb statement.
+func TestPostgresSetTaskWorkspaceMetadataIfUnchanged_RequireParentUnarchivedID_DoesNotMatchAcrossWorkspaces(t *testing.T) {
+	repo := newRepoForOrphanPostgresTests(t)
+	ctx := context.Background()
+	const childID, otherTaskID = "pg-owg-crossws-child", "pg-owg-crossws-other-ws-task"
+
+	seedWorkspace(t, repo, "pg-ws-owg-crossws-child")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "pg-wf-owg-crossws-child", WorkspaceID: "pg-ws-owg-crossws-child", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: childID, WorkspaceID: "pg-ws-owg-crossws-child", WorkflowID: "pg-wf-owg-crossws-child", WorkflowStepID: "step",
+		Title: "Child", Priority: "medium",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{
+			"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": otherTaskID,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTask(child): %v", err)
+	}
+
+	seedWorkspace(t, repo, "pg-ws-owg-crossws-other")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "pg-wf-owg-crossws-other", WorkspaceID: "pg-ws-owg-crossws-other", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: otherTaskID, WorkspaceID: "pg-ws-owg-crossws-other", WorkflowID: "pg-wf-owg-crossws-other", WorkflowStepID: "step",
+		Title: "Unrelated task in another workspace", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask(other-workspace task): %v", err)
+	}
+
+	guard := models.ObservedWorkspaceGuard(map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": otherTaskID,
+	})
+	guard.RequireParentUnarchivedID = otherTaskID
+
+	landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, guard, map[string]interface{}{"mode": "inherit_parent"})
+	if err != nil {
+		t.Fatalf("SetTaskWorkspaceMetadataIfUnchanged: %v", err)
+	}
+	if landed {
+		t.Fatal("clear landed against a task that exists only in a different workspace, want zero rows matched")
+	}
+}
+
 func TestPostgresListOrphanRepairCandidates_FindsUnmarkedInheritParentChildOfArchivedParent(t *testing.T) {
 	repo := newRepoForOrphanPostgresTests(t)
 	ctx := context.Background()
@@ -213,6 +259,31 @@ func TestPostgresListOrphanRepairCandidates_FindsUnmarkedInheritParentChildOfArc
 	}
 	if candidates[0].Workspace["mode"] != "inherit_parent" {
 		t.Fatalf("candidate workspace = %+v", candidates[0].Workspace)
+	}
+}
+
+// Mirrors TestListOrphanRepairCandidates_ExcludesAlreadyMarked: an
+// already-marked child must not be re-selected, or the stamping pass would
+// re-stamp orphaned_at and republish task.updated on every boot.
+func TestPostgresListOrphanRepairCandidates_ExcludesAlreadyMarked(t *testing.T) {
+	repo := newRepoForOrphanPostgresTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "pg-ws-repair-3")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "pg-wf-repair-3", WorkspaceID: "pg-ws-repair-3", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedRepairTask(t, repo, "pg-repair3-parent", "", "pg-ws-repair-3", nil, false, "")
+	archiveTaskDirect(t, repo, ctx, "pg-repair3-parent")
+	seedRepairTask(t, repo, "pg-repair3-child", "pg-repair3-parent", "pg-ws-repair-3", map[string]interface{}{
+		"workspace": map[string]interface{}{"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": "pg-repair3-parent"},
+	}, false, "")
+
+	candidates, err := repo.ListOrphanRepairCandidates(ctx)
+	if err != nil {
+		t.Fatalf("ListOrphanRepairCandidates: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %d, want 0 (already marked): %+v", len(candidates), candidates)
 	}
 }
 

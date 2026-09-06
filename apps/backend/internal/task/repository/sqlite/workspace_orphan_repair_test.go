@@ -229,6 +229,37 @@ func TestListStaleOrphanMarkers_IncludesArchivedChild(t *testing.T) {
 // A malformed metadata row ANYWHERE in tasks must not abort the clearing
 // selection's much wider blast radius (rule 2: join key and workspace
 // projection both wrapped).
+// orphaned_parent_id is user-writable through the generic metadata PATCH
+// surface, so a claim naming a task that exists and is unarchived only in a
+// DIFFERENT workspace must not be treated as a stale marker to clear — doing
+// so would let a caller read that task's existence/archived-state back off
+// their own task's workspace_orphaned boolean.
+func TestListStaleOrphanMarkers_LeavesMarkerNamingUnarchivedTaskInDifferentWorkspace(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-stale-crossws-child")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-ws-stale-crossws-child", WorkspaceID: "ws-stale-crossws-child", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedRepairTask(t, repo, "stale-crossws-child", "", "ws-stale-crossws-child", map[string]interface{}{
+		"workspace": map[string]interface{}{"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": "stale-crossws-other-ws-task"},
+	}, false, "")
+
+	seedWorkspace(t, repo, "ws-stale-crossws-other")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-ws-stale-crossws-other", WorkspaceID: "ws-stale-crossws-other", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedRepairTask(t, repo, "stale-crossws-other-ws-task", "", "ws-stale-crossws-other", nil, false, "")
+
+	markers, err := repo.ListStaleOrphanMarkers(ctx)
+	if err != nil {
+		t.Fatalf("ListStaleOrphanMarkers: %v", err)
+	}
+	if len(markers) != 0 {
+		t.Fatalf("markers = %+v, want none (named task exists only in a different workspace)", markers)
+	}
+}
+
 func TestListStaleOrphanMarkers_SkipsMalformedMetadataRowAnywhere(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

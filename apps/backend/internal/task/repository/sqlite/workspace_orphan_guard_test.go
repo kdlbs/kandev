@@ -208,6 +208,58 @@ func TestSetTaskWorkspaceMetadataIfUnchanged_RequireParentUnarchivedID_LosesGuar
 	}
 }
 
+// RequireParentUnarchivedID must not match a task that exists and is
+// unarchived, but lives in a DIFFERENT workspace: orphaned_parent_id is
+// user-writable through the generic metadata PATCH surface, so an unscoped
+// EXISTS here turns the guard into a cross-workspace existence/archived-state
+// oracle (a user can point their own task's claim at any task ID and read the
+// answer back off their own task's workspace_orphaned boolean).
+func TestSetTaskWorkspaceMetadataIfUnchanged_RequireParentUnarchivedID_DoesNotMatchAcrossWorkspaces(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const childID, otherTaskID = "owg-crossws-child", "owg-crossws-other-ws-task"
+
+	seedWorkspace(t, repo, "ws-owg-crossws-child")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-owg-crossws-child", WorkspaceID: "ws-owg-crossws-child", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: childID, WorkspaceID: "ws-owg-crossws-child", WorkflowID: "wf-owg-crossws-child", WorkflowStepID: "step",
+		Title: "Child", Priority: "medium",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{
+			"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": otherTaskID,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTask(child): %v", err)
+	}
+
+	// Exists, unarchived, and unrelated — the shape a user could name via the
+	// generic metadata PATCH surface without ever having access to it.
+	seedWorkspace(t, repo, "ws-owg-crossws-other")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-owg-crossws-other", WorkspaceID: "ws-owg-crossws-other", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: otherTaskID, WorkspaceID: "ws-owg-crossws-other", WorkflowID: "wf-owg-crossws-other", WorkflowStepID: "step",
+		Title: "Unrelated task in another workspace", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask(other-workspace task): %v", err)
+	}
+
+	guard := models.ObservedWorkspaceGuard(map[string]interface{}{
+		"mode": "inherit_parent", "orphaned": true, "orphaned_parent_id": otherTaskID,
+	})
+	guard.RequireParentUnarchivedID = otherTaskID
+
+	landed, err := repo.SetTaskWorkspaceMetadataIfUnchanged(ctx, childID, guard, map[string]interface{}{"mode": "inherit_parent"})
+	if err != nil {
+		t.Fatalf("SetTaskWorkspaceMetadataIfUnchanged: %v", err)
+	}
+	if landed {
+		t.Fatal("clear landed against a task that exists only in a different workspace, want zero rows matched")
+	}
+}
+
 // RequireNoOwnEnvironment protects mark site 2 (and the repair): a child
 // that acquires its own task_environments row between the Go lookup and the
 // write must not be stamped.

@@ -25,7 +25,7 @@ func (r *Repository) ListOrphanRepairCandidates(ctx context.Context) ([]models.O
 			  AND c.is_ephemeral = 0
 			  AND COALESCE(c.origin,'') != '` + models.TaskOriginAutomationRun + `'
 			  AND (CASE WHEN c.metadata IS NULL OR c.metadata = '' THEN '{}'::jsonb ELSE c.metadata::jsonb END) #>> '{workspace,mode}' = 'inherit_parent'
-			  AND jsonb_typeof((CASE WHEN c.metadata IS NULL OR c.metadata = '' THEN '{}'::jsonb ELSE c.metadata::jsonb END) #> '{workspace,orphaned}') IS DISTINCT FROM 'true'
+			  AND (CASE WHEN c.metadata IS NULL OR c.metadata = '' THEN '{}'::jsonb ELSE c.metadata::jsonb END) #> '{workspace,orphaned}' IS DISTINCT FROM 'true'::jsonb
 			  AND NOT EXISTS (SELECT 1 FROM task_environments e WHERE e.task_id = c.id)
 			ORDER BY c.created_at, c.id
 		`
@@ -78,7 +78,7 @@ func (r *Repository) ListStaleOrphanMarkers(ctx context.Context) ([]models.Stale
 	if isPostgres {
 		query = `
 			WITH claims AS (
-				SELECT id, created_at,
+				SELECT id, created_at, workspace_id,
 				       (CASE WHEN metadata IS NULL OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END) -> 'workspace' AS workspace,
 				       (CASE WHEN metadata IS NULL OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END) #>> '{workspace,orphaned_parent_id}' AS claim_id
 				FROM tasks
@@ -86,14 +86,14 @@ func (r *Repository) ListStaleOrphanMarkers(ctx context.Context) ([]models.Stale
 				  AND (CASE WHEN metadata IS NULL OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END) #> '{workspace,orphaned}' = 'true'::jsonb
 			)
 			SELECT c.id, c.workspace
-			FROM claims c JOIN tasks p ON c.claim_id = p.id
+			FROM claims c JOIN tasks p ON c.claim_id = p.id AND p.workspace_id = c.workspace_id
 			WHERE p.archived_at IS NULL
 			ORDER BY c.created_at, c.id
 		`
 	} else {
 		query = `
 			WITH claims AS (
-			  SELECT id, created_at,
+			  SELECT id, created_at, workspace_id,
 			         CASE WHEN json_valid(metadata)
 			              THEN json_extract(metadata,'$.workspace') END AS workspace,
 			         CASE WHEN json_valid(metadata)
@@ -104,7 +104,7 @@ func (r *Repository) ListStaleOrphanMarkers(ctx context.Context) ([]models.Stale
 			    AND json_type(metadata,'$.workspace.orphaned') IS 'true'
 			)
 			SELECT c.id, c.workspace
-			FROM claims c JOIN tasks p ON c.claim_id = p.id
+			FROM claims c JOIN tasks p ON c.claim_id = p.id AND p.workspace_id = c.workspace_id
 			WHERE p.archived_at IS NULL
 			ORDER BY c.created_at, c.id
 		`
