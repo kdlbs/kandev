@@ -1,7 +1,7 @@
 ---
 id: 08-build-mobile-workflow-editing
 title: Build mobile workflow editing
-status: done
+status: superseded
 wave: 7
 depends_on:
   - 07-build-lifecycle-action-recipes
@@ -97,4 +97,5 @@ and mobile workflow E2E; Task 09 owns task chat rendering.
 
 Implemented the mobile vertical journey, full-height step and action states,
 temporary action picker drawer, safe-area layout, touch-sized controls, and
-shared draft mutations. The `mobile-chrome` editor E2E passes.
+shared draft mutations. The `mobile-chrome` editor E2E passes. Task 12
+supersedes this navigation model with the existing inline workflow card.

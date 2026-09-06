@@ -243,5 +243,6 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |
 | 2026-09-04-use-repository-token-for-runtime-pin-prs | [Use the built-in Actions token for runtime pin PRs](2026-09-04-use-repository-token-for-runtime-pin-prs.md) | accepted | workflow, security | 2026-09-04 |
 | 2026-09-05-workflow-script-session-binding | [Bind workflow scripts to the trigger-owning agent session](2026-09-05-workflow-script-session-binding.md) | accepted | backend, agentctl, frontend, protocol, security, workflow | 2026-09-05 |
-| 2026-09-05-workflow-editor-pipeline-inspector | [Use a constrained pipeline and focused workflow inspector](2026-09-05-workflow-editor-pipeline-inspector.md) | accepted | frontend, workflow | 2026-09-05 |
+| 2026-09-05-workflow-editor-pipeline-inspector | [Use a constrained pipeline and focused workflow inspector](2026-09-05-workflow-editor-pipeline-inspector.md) | superseded by 2026-09-06-inline-workflow-step-tabs | frontend, workflow | 2026-09-05 |
+| 2026-09-06-inline-workflow-step-tabs | [Keep workflow step tabs inside the existing editor](2026-09-06-inline-workflow-step-tabs.md) | accepted | frontend, workflow | 2026-09-06 |
 | 2026-09-05-agent-owned-credential-file-conflicts | [Agent-owned credential file conflicts](2026-09-05-agent-owned-credential-file-conflicts.md) | accepted | backend | 2026-09-05 |
