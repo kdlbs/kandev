@@ -171,11 +171,12 @@ function useRuntimeFlagsDraft(initialFlags: RuntimeFlagState[]) {
 }
 
 function BrowserDemoAction() {
+  const { t } = useTranslation();
   return (
     <Button variant="outline" size="sm" asChild>
       <a href="/demo" target="_blank" rel="noopener noreferrer">
         <IconExternalLink className="mr-1 h-3.5 w-3.5" />
-        Open browser demo
+        {t("system:browserDemoOpen")}
       </a>
     </Button>
   );

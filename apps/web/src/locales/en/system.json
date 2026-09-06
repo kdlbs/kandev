@@ -120,6 +120,7 @@
   "featureTogglesSaved": "Feature toggles saved",
   "featureToggleSwitchLabel": "Toggle {{label}}",
   "featureToggleUseDefault": "Use default",
+  "browserDemoOpen": "Open browser demo",
   "healthAllPass": "All system checks pass.",
   "healthHealthy": "Healthy",
   "healthIssue": "Issue",

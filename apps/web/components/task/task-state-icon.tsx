@@ -123,6 +123,17 @@ function TaskReviewIcon({
   );
 }
 
+function TaskReadyIcon({ accessibleLabel }: Pick<TaskStateIconProps, "accessibleLabel">) {
+  return withAccessibleLabel(
+    <IconCircleCheck
+      aria-hidden="true"
+      data-testid="task-state-ready"
+      className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
+    />,
+    accessibleLabel,
+  );
+}
+
 export function TaskStateIcon({
   sessionState,
   state,
@@ -177,14 +188,7 @@ export function TaskStateIcon({
     );
   }
   if (sessionState === "IDLE") {
-    return withAccessibleLabel(
-      <IconCircleCheck
-        aria-hidden="true"
-        data-testid="task-state-ready"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
-      />,
-      accessibleLabel,
-    );
+    return <TaskReadyIcon accessibleLabel={accessibleLabel} />;
   }
   if (computeIsPreparing(state, sessionState)) {
     return withAccessibleLabel(

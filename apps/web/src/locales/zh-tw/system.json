@@ -120,6 +120,7 @@
   "featureTogglesSaved": "功能開關已儲存",
   "featureToggleSwitchLabel": "切換 {{label}}",
   "featureToggleUseDefault": "使用預設值",
+  "browserDemoOpen": "開啟瀏覽器示範",
   "healthAllPass": "所有系統檢查通過。",
   "healthHealthy": "健康",
   "healthIssue": "問題",
