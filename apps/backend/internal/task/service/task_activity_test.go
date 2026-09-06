@@ -376,3 +376,54 @@ func TestPublishTaskActivityIfChanged_NoProviderIsNoOp(t *testing.T) {
 		t.Fatalf("no provider wired must not emit, got %d events", len(events))
 	}
 }
+
+// fakeTaskParkedProvider is a test double for TaskParkedProvider.
+type fakeTaskParkedProvider struct {
+	byTask map[string]bool
+}
+
+func (f *fakeTaskParkedProvider) TaskParkedProjectionSnapshot(taskID string) bool {
+	return f.byTask[taskID]
+}
+
+// TestPublishTaskActivityIfChanged_EmitsOnParkedOnlyChange verifies that a
+// parked-only transition (foreground activity and subagent count unchanged)
+// still passes PublishTaskActivityIfChanged's dedup and emits task.updated
+// carrying parked_on_background_work — otherwise the existing
+// activity/count-only dedup would silently swallow every parked transition
+// that doesn't also change the aggregate (docs/specs/parked-board-mvp/spec.md §7.6).
+func TestPublishTaskActivityIfChanged_EmitsOnParkedOnlyChange(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	createRunningSession(t, ctx, repo, "s1", "task-1", models.TaskSessionStateWaitingForInput)
+
+	svc.SetForegroundActivityProvider(&fakeActivityProvider{byID: map[string]v1.ForegroundActivity{}})
+	parked := &fakeTaskParkedProvider{byTask: map[string]bool{}}
+	svc.SetTaskParkedProvider(parked)
+
+	// First observation establishes the dedup baseline (parked=false).
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+
+	// Only the parked bit changes; activity/count stay the same.
+	parked.byTask["task-1"] = true
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+
+	data := singlePublishedEventData(t, eventBus)
+	got, ok := data["parked_on_background_work"]
+	if !ok {
+		t.Fatalf("parked_on_background_work missing from payload: %#v", data)
+	}
+	if got != true {
+		t.Fatalf("parked_on_background_work = %#v, want true", got)
+	}
+
+	// Idempotent: calling again with no change does not re-emit.
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("no change must not re-emit, got %d events", len(events))
+	}
+}

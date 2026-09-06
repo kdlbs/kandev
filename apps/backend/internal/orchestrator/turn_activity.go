@@ -1290,11 +1290,12 @@ func (s *Service) publishForegroundActivityNow(
 		return
 	}
 	eventData := map[string]interface{}{
-		metaKeyTaskID:           taskID,
-		metaKeySessionID:        sessionID,
-		"foreground_activity":   s.publicForegroundActivityValue(ctx, sessionID, value),
-		"active_subagent_count": activeSubagentCount,
-		"supports_steering":     s.steerEligibleForSession(ctx, sessionID),
+		metaKeyTaskID:               taskID,
+		metaKeySessionID:            sessionID,
+		"foreground_activity":       s.publicForegroundActivityValue(ctx, sessionID, value),
+		"active_subagent_count":     activeSubagentCount,
+		"supports_steering":         s.steerEligibleForSession(ctx, sessionID),
+		"parked_on_background_work": s.ParkedProjectionSnapshot(sessionID),
 	}
 	if err := s.eventBus.Publish(ctx, events.TaskSessionActivityChanged,
 		bus.NewEvent(events.TaskSessionActivityChanged, "task-session", eventData)); err != nil {

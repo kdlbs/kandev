@@ -77,6 +77,13 @@ export interface Task {
    * affordance on the card status icon.
    */
   foregroundActivity?: ForegroundActivity | null;
+  /**
+   * True when the task's session settled to WAITING_FOR_INPUT while a
+   * detached background shell it launched is still alive
+   * (docs/specs/parked-board-mvp/spec.md). Drives the board card's parked
+   * affordance.
+   */
+  parkedOnBackgroundWork?: boolean;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
   /** True when a workflow step's auto_start_agent on_enter action failed to
